@@ -1,0 +1,272 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to re-release (e.g. v0.2.0)"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: mahjuro.exe
+            archive_suffix: windows-x86_64
+            archive_ext: zip
+          - name: Linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: mahjuro
+            archive_suffix: linux-x86_64
+            archive_ext: tar.gz
+          - name: macOS
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            binary: mahjuro
+            archive_suffix: macos-universal
+            archive_ext: zip
+
+    name: Release ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Add macOS x86_64 target
+        if: matrix.name == 'macOS'
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Install Linux dependencies
+        if: matrix.name == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libasound2-dev \
+            libudev-dev \
+            pkg-config \
+            libx11-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libvulkan-dev
+
+      - name: Install relic (Windows code signing)
+        if: matrix.name == 'Windows'
+        shell: bash
+        run: |
+          go install github.com/sassoftware/relic/v8@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Azure Key Vault signing cert (Windows)
+        if: matrix.name == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          az login --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none
+          az keyvault certificate show \
+            --vault-name mahjuro \
+            --name Mahjuro \
+            --query '{enabled:attributes.enabled,expires:attributes.expires}' \
+            --output table
+
+      - name: Verify relic can authenticate with Azure Key Vault
+        if: matrix.name == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          relic --version
+          RELIC_BIN="$(which relic)"
+          cp "$RELIC_BIN" test_sign.exe
+          relic sign --file test_sign.exe --key azure --config relic.conf 2>&1 || {
+            echo "--- relic sign failed, dumping debug info ---"
+            relic sign --file test_sign.exe --key azure --config relic.conf -d 9 2>&1 || true
+            exit 1
+          }
+          rm test_sign.exe
+
+      - name: Import Apple signing certificate and notarization key
+        if: matrix.name == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security list-keychains -d user -s build.keychain login.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
+          mkdir -p ~/.private_keys
+          echo "$APPLE_API_KEY_CONTENT" > ~/.private_keys/AuthKey_${APPLE_API_KEY}.p8
+          echo "APPLE_API_KEY_PATH=$HOME/.private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-${{ matrix.target }}-cargo-
+
+      - name: Build release (non-macOS)
+        if: matrix.name != 'macOS'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build macOS universal release
+        if: matrix.name == 'macOS'
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p target/release-universal
+          lipo -create \
+            target/aarch64-apple-darwin/release/mahjuro \
+            target/x86_64-apple-darwin/release/mahjuro \
+            -output target/release-universal/mahjuro
+
+      - name: Sign binary (macOS)
+        if: matrix.name == 'macOS'
+        run: |
+          codesign --sign "$APPLE_SIGNING_IDENTITY" \
+            --entitlements Entitlements.plist \
+            --options runtime \
+            --force \
+            --timestamp \
+            target/release-universal/mahjuro
+
+      - name: Notarize binary (macOS)
+        if: matrix.name == 'macOS'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          zip -j mahjuro-notarize.zip target/release-universal/mahjuro
+          xcrun notarytool submit mahjuro-notarize.zip \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          rm mahjuro-notarize.zip
+
+      - name: Sign binary (Windows)
+        if: matrix.name == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          relic sign \
+            --file "target/${{ matrix.target }}/release/${{ matrix.binary }}" \
+            --key azure \
+            --config relic.conf
+
+      - name: Set archive name
+        id: archive
+        shell: bash
+        run: |
+          TAG="${RELEASE_TAG}"
+          NAME="mahjuro-${TAG}-${{ matrix.archive_suffix }}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "filename=${NAME}.${{ matrix.archive_ext }}" >> "$GITHUB_OUTPUT"
+
+      - name: Package archive (Linux)
+        if: matrix.name == 'Linux'
+        run: |
+          mkdir -p "${{ steps.archive.outputs.name }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "${{ steps.archive.outputs.name }}/"
+          rsync -a --exclude='*.blend' --exclude='*.blend1' assets/ "${{ steps.archive.outputs.name }}/assets/"
+          tar czf "${{ steps.archive.outputs.filename }}" "${{ steps.archive.outputs.name }}"
+
+      - name: Package archive (macOS)
+        if: matrix.name == 'macOS'
+        run: |
+          mkdir -p "${{ steps.archive.outputs.name }}"
+          cp target/release-universal/mahjuro "${{ steps.archive.outputs.name }}/"
+          rsync -a --exclude='*.blend' --exclude='*.blend1' assets/ "${{ steps.archive.outputs.name }}/assets/"
+          zip -r "${{ steps.archive.outputs.filename }}" "${{ steps.archive.outputs.name }}"
+
+      - name: Package archive (Windows)
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "${{ steps.archive.outputs.name }}"
+          New-Item -ItemType Directory -Force $dir
+          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" "$dir\"
+          Copy-Item -Recurse assets "$dir\assets"
+          Remove-Item "$dir\assets\*.blend", "$dir\assets\*.blend1" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$dir\*" -DestinationPath "${{ steps.archive.outputs.filename }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.filename }}
+          path: ${{ steps.archive.outputs.filename }}
+
+  create-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Mahjuro ${{ env.RELEASE_TAG }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/*
