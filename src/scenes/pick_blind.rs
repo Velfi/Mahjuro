@@ -6,10 +6,14 @@ use crate::ui::input::UiAction;
 
 use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
 use super::gameplay::GameplayScene;
+use super::pause_menu::{PauseMenu, PauseUpdate};
 use super::shop::ShopScene;
 
 pub struct PickBlindScene {
     pub cursor: usize,
+    /// Whether the skip button at the bottom is focused.
+    skip_focused: bool,
+    pause_menu: PauseMenu,
 }
 
 const BLINDS: [BlindKind; 3] = [BlindKind::Small, BlindKind::Big, BlindKind::Boss];
@@ -25,7 +29,7 @@ fn skip_reward(blind: BlindKind) -> u32 {
 
 impl PickBlindScene {
     pub fn new() -> Self {
-        Self { cursor: 0 }
+        Self { cursor: 0, skip_focused: false, pause_menu: PauseMenu::new() }
     }
 
     fn can_skip(&self) -> bool {
@@ -33,10 +37,48 @@ impl PickBlindScene {
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Pause menu handling.
+        if self.pause_menu.paused {
+            match self.pause_menu.update(ctx.actions, ctx.run) {
+                PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
+                PauseUpdate::Transition(t) => return t,
+                PauseUpdate::Quit => {
+                    *ctx.quit_requested = true;
+                    return None;
+                }
+            }
+        }
+
         for a in ctx.actions {
             match a {
-                UiAction::FocusNext => self.cursor = (self.cursor + 1).min(2),
-                UiAction::FocusPrev => self.cursor = self.cursor.saturating_sub(1),
+                UiAction::FocusNext if !self.skip_focused => {
+                    self.cursor = (self.cursor + 1).min(2);
+                }
+                UiAction::FocusPrev if !self.skip_focused => {
+                    self.cursor = self.cursor.saturating_sub(1);
+                }
+                UiAction::FocusDown => {
+                    if self.can_skip() {
+                        self.skip_focused = true;
+                    }
+                }
+                UiAction::FocusUp => {
+                    self.skip_focused = false;
+                }
+                UiAction::Confirm if self.skip_focused => {
+                    // Confirm on the skip button.
+                    if self.can_skip() {
+                        let blind = BLINDS[self.cursor];
+                        let reward = skip_reward(blind);
+                        ctx.run.gold = ctx.run.gold.saturating_add(reward);
+                        ctx.run.base_target = (ctx.run.base_target as f32 * 1.2) as u32;
+                        ctx.run.run_number += 1;
+                        return Some(Scene::Shop(ShopScene::new(
+                            ctx.run.run_number,
+                            &ctx.run.relics,
+                        )));
+                    }
+                }
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     let blind = BLINDS[self.cursor];
                     ctx.run.apply_blind(blind);
@@ -55,6 +97,10 @@ impl PickBlindScene {
                         )));
                     }
                 }
+                UiAction::Pause => {
+                    self.pause_menu.open();
+                    return None;
+                }
                 _ => {}
             }
         }
@@ -71,9 +117,8 @@ impl PickBlindScene {
             color: [0.05, 0.08, 0.06, 1.0],
         }];
 
-        // Relic row below score panel.
-        let sp = ctx.layout.score_panel;
-        let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &sp, w);
+        // Relic row in its own strip.
+        let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
         instances.extend(relic_insts);
 
         // Evenly-spaced card rects for the 3 blinds.
@@ -120,6 +165,13 @@ impl PickBlindScene {
 
         let can_skip = self.can_skip();
         if can_skip {
+            if self.skip_focused {
+                let pad = 3.0;
+                instances.push(GpuInstance {
+                    rect: [btn_x - pad, btn_y - pad, btn_w + pad * 2.0, btn_h + pad * 2.0],
+                    color: [0.9, 0.8, 0.2, 0.95],
+                });
+            }
             instances.push(GpuInstance {
                 rect: [btn_x, btn_y, btn_w, btn_h],
                 color: [0.5, 0.3, 0.1, 0.9],
@@ -135,7 +187,7 @@ impl PickBlindScene {
 
         let mut text_labels = vec![
             TextLabel {
-                rect: [sp.x, sp.y, sp.w, sp.h],
+                rect: [ctx.layout.score_panel.x, ctx.layout.score_panel.y, ctx.layout.score_panel.w, ctx.layout.score_panel.h],
                 text: format!(
                     "CHOOSE YOUR BLIND   Gold: {}   Target: {}",
                     gold, effective_target
@@ -165,12 +217,22 @@ impl PickBlindScene {
             });
             let mult = BLINDS[i].target_multiplier();
             let desc_h = ch * 0.15;
-            let desc_y = cy + ch * 0.65;
+            let desc_y = cy + ch * 0.55;
             text_labels.push(TextLabel {
                 rect: [cx, desc_y, cw, desc_h],
                 text: format!("x{:.1} target", mult),
                 color: [0.8, 0.8, 0.8, 0.9],
             });
+            // Show forced modifier on Boss card.
+            if let Some(modifier) = BLINDS[i].forced_modifier(ctx.run.run_number) {
+                let mod_h = ch * 0.12;
+                let mod_y = cy + ch * 0.72;
+                text_labels.push(TextLabel {
+                    rect: [cx, mod_y, cw, mod_h],
+                    text: format!("{}: {}", modifier.name(), modifier.description()),
+                    color: [0.9, 0.5, 0.3, 1.0],
+                });
+            }
         }
 
         let mut buttons = vec![];
@@ -186,6 +248,9 @@ impl PickBlindScene {
                 action: UiAction::Cancel,
             });
         }
+
+        // Pause overlay.
+        self.pause_menu.draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
 
         let fmt = |i: usize| -> String {
             let blind = BLINDS[i];

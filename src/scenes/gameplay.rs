@@ -2,20 +2,37 @@
 
 use std::time::Instant;
 
-use crate::core::hand::describe_hand;
+use crate::core::hand::{describe_hand, suggest_completions};
 use crate::game::cascade::{CascadeColor, ScoringCascade};
 use crate::game::run::{STARTING_DISCARDS, STARTING_PLAYS};
 use crate::render::animation::ENTITY_SCORE_PANEL;
+use crate::render::particles::ParticleSystem;
 use crate::render::wgpu_renderer::{GpuInstance, build_instances_from_layout, TextLabel};
 use crate::ui::input::{UiAction, apply_ui_actions};
 
 use super::{ButtonDef, DrawCtx, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::pause_menu::{PauseMenu, PauseUpdate};
+
+/// Bottom button indices in gameplay.
+const BTN_SORT_SUIT: usize = 0;
+const BTN_SORT_RANK: usize = 1;
+const BTN_PLAY: usize = 2;
+const BTN_DISCARD: usize = 3;
+const BTN_COUNT: usize = 4;
 
 pub struct GameplayScene {
     /// Active scoring cascade animation (None when idle).
     cascade: Option<ScoringCascade>,
     /// Displayed score — ticked by the cascade, snaps to real score when idle.
     displayed_score: u32,
+    /// Particle effects for scoring.
+    particles: ParticleSystem,
+    /// Timestamp of last frame for dt calculation.
+    last_frame: Instant,
+    /// Shared pause menu overlay.
+    pause_menu: PauseMenu,
+    /// Which bottom button is focused (None = hand tiles have focus).
+    button_focus: Option<usize>,
 }
 
 impl GameplayScene {
@@ -23,11 +40,38 @@ impl GameplayScene {
         Self {
             cascade: None,
             displayed_score: 0,
+            particles: ParticleSystem::new(),
+            last_frame: Instant::now(),
+            pause_menu: PauseMenu::new(),
+            button_focus: None,
         }
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        self.particles.update(dt);
+
+        // Pause menu handling.
+        if self.pause_menu.paused {
+            match self.pause_menu.update(ctx.actions, ctx.run) {
+                PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
+                PauseUpdate::Transition(t) => return t,
+                PauseUpdate::Quit => {
+                    *ctx.quit_requested = true;
+                    return None;
+                }
+            }
+        }
+
+        // Check for pause trigger.
+        for a in ctx.actions {
+            if matches!(a, UiAction::Pause) {
+                self.pause_menu.open();
+                return None;
+            }
+        }
 
         // If a cascade is running, advance it and block most input.
         if let Some(ref mut cascade) = self.cascade {
@@ -55,13 +99,63 @@ impl GameplayScene {
             }
         }
 
+        // Handle button-bar focus navigation.
+        let mut actions_for_scene: Vec<UiAction> = Vec::new();
+        for &a in ctx.actions.iter() {
+            match a {
+                UiAction::FocusDown => {
+                    if self.button_focus.is_none() {
+                        self.button_focus = Some(BTN_PLAY); // default to Play button
+                    }
+                    continue;
+                }
+                UiAction::FocusUp => {
+                    if self.button_focus.is_some() {
+                        self.button_focus = None;
+                        continue;
+                    }
+                }
+                UiAction::FocusNext if self.button_focus.is_some() => {
+                    let cur = self.button_focus.unwrap();
+                    self.button_focus = Some((cur + 1).min(BTN_COUNT - 1));
+                    continue;
+                }
+                UiAction::FocusPrev if self.button_focus.is_some() => {
+                    let cur = self.button_focus.unwrap();
+                    self.button_focus = Some(cur.saturating_sub(1));
+                    continue;
+                }
+                UiAction::Confirm if self.button_focus.is_some() => {
+                    // Translate button press into the corresponding action.
+                    let mapped = match self.button_focus.unwrap() {
+                        BTN_SORT_SUIT => UiAction::SortBySuit,
+                        BTN_SORT_RANK => UiAction::SortByRank,
+                        BTN_PLAY => UiAction::ScoreHand,
+                        BTN_DISCARD => UiAction::CommitDiscard,
+                        _ => continue,
+                    };
+                    actions_for_scene.push(mapped);
+                    continue;
+                }
+                _ => {}
+            }
+            actions_for_scene.push(a);
+        }
+
         // Normal input handling when no cascade is active.
-        for a in ctx.actions {
+        for a in &actions_for_scene {
             match a {
                 UiAction::ScoreHand => {
+                    let had_selection = ctx.run.selected_count() > 0;
                     let score_before = ctx.run.round_score;
                     let pts = ctx.run.score_selected_tiles(ctx.bus);
-                    ctx.anim.pulse(ENTITY_SCORE_PANEL);
+
+                    if pts == 0 && had_selection {
+                        // Invalid hand — shake feedback.
+                        ctx.anim.shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
+                    } else {
+                        ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                    }
 
                     if let Some(breakdown) = ctx.run.last_breakdown.clone() {
                         if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
@@ -70,6 +164,12 @@ impl GameplayScene {
                                 score_before,
                                 pts,
                             ));
+                            // Emit particles on successful score.
+                            let sp = ctx.layout.score_panel;
+                            let px = sp.x + sp.w * 0.5;
+                            let py = sp.y + sp.h * 0.5;
+                            let count = (pts as usize / 20).clamp(5, 40);
+                            self.particles.emit(px, py, count, [1.0, 0.85, 0.3, 1.0], 0.8);
                             // displayed_score will be driven by cascade
                         } else {
                             self.displayed_score = ctx.run.round_score;
@@ -92,7 +192,7 @@ impl GameplayScene {
             }
         }
         // Let apply_ui_actions handle toggle-select, commit discard, cancel, and focus movement.
-        let non_score: Vec<_> = ctx.actions.iter()
+        let non_score: Vec<_> = actions_for_scene.iter()
             .filter(|a| !matches!(a, UiAction::ScoreHand | UiAction::SortBySuit | UiAction::SortByRank))
             .copied()
             .collect();
@@ -102,8 +202,9 @@ impl GameplayScene {
 
     /// Whether the cascade is actively animating (for redraw requests).
     pub fn is_animating(&self) -> bool {
-        self.cascade.is_some()
+        self.cascade.is_some() || self.particles.is_active()
     }
+
 
     pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let layout = ctx.layout;
@@ -139,9 +240,32 @@ impl GameplayScene {
 
         // Score panel text.
         let tiles_left = run.wall.remaining();
+        let dora_section = if ctx.progress.dora_enabled() {
+            let indicator_text: String = run
+                .wall
+                .dora_indicator_tiles()
+                .iter()
+                .map(|t| t.label())
+                .collect::<Vec<_>>()
+                .join(",");
+            let face_text: String = run
+                .wall
+                .dora_faces()
+                .iter()
+                .map(|(suit, rank)| {
+                    use crate::core::tile::Tile;
+                    Tile::new(*suit, *rank, 0).label()
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("   Dora: {} (ind: {})", face_text, indicator_text)
+        } else {
+            String::new()
+        };
         let score_text = format!(
-            "{}  Round {}   {} / {}   Gold: {}   Wall: {}",
-            run.blind.name(), run.run_number, shown_score, run.target_score, run.gold, tiles_left
+            "{}  Round {}   {} / {}   Gold: {}   Wall: {}{}",
+            run.blind.name(), run.run_number, shown_score, run.target_score, run.gold,
+            tiles_left, dora_section
         );
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
@@ -154,6 +278,13 @@ impl GameplayScene {
             for line in &frame.lines {
                 let marker = if line.is_current { "▸ " } else { "  " };
                 parts.push(format!("{}{}", marker, line.text));
+            }
+            // Append yaku names if any were detected.
+            if let Some(ref bd) = run.last_breakdown {
+                if !bd.detected_yaku.is_empty() {
+                    let yaku_names: Vec<_> = bd.detected_yaku.iter().map(|y| y.name()).collect();
+                    parts.push(format!("[{}]", yaku_names.join(", ")));
+                }
             }
             let color = if frame.lines.last().map(|l| l.color) == Some(CascadeColor::Total) {
                 [1.0, 0.9, 0.3, 1.0] // gold for total
@@ -191,8 +322,8 @@ impl GameplayScene {
             }
         };
 
-        // Relic row below score panel.
-        let (relic_insts, relic_labels, relic_icons) = relic_row(&run.relics, &layout.score_panel, layout.window_w);
+        // Relic row in its own strip below the modifier strip.
+        let (relic_insts, relic_labels, relic_icons) = relic_row(&run.relics, &layout.relic_strip, layout.window_w);
 
         // Bottom button bar.
         let scale = (layout.window_w.min(layout.window_h)) / 600.0;
@@ -212,32 +343,36 @@ impl GameplayScene {
 
         let mut instances = instances;
         instances.extend(relic_insts);
-        instances.push(GpuInstance {
-            rect: [suit_btn_rect.0, suit_btn_rect.1, suit_btn_rect.2, suit_btn_rect.3],
-            color: [0.22, 0.38, 0.55, 0.92],
-        });
-        instances.push(GpuInstance {
-            rect: [rank_btn_rect.0, rank_btn_rect.1, rank_btn_rect.2, rank_btn_rect.3],
-            color: [0.22, 0.38, 0.55, 0.92],
-        });
-        let play_color = if selection_valid && run.plays_remaining > 0 {
-            [0.18, 0.55, 0.25, 0.92] // green when valid
-        } else {
-            [0.35, 0.35, 0.35, 0.60] // gray when invalid/disabled
-        };
-        instances.push(GpuInstance {
-            rect: [play_btn_rect.0, play_btn_rect.1, play_btn_rect.2, play_btn_rect.3],
-            color: play_color,
-        });
-        let discard_color = if selected_count > 0 && run.discards_remaining > 0 {
-            [0.65, 0.18, 0.18, 0.92]
-        } else {
-            [0.35, 0.35, 0.35, 0.60]
-        };
-        instances.push(GpuInstance {
-            rect: [discard_btn_rect.0, discard_btn_rect.1, discard_btn_rect.2, discard_btn_rect.3],
-            color: discard_color,
-        });
+
+        let btn_rects = [suit_btn_rect, rank_btn_rect, play_btn_rect, discard_btn_rect];
+        let base_colors: [[f32; 4]; BTN_COUNT] = [
+            [0.22, 0.38, 0.55, 0.92], // sort suit
+            [0.22, 0.38, 0.55, 0.92], // sort rank
+            if selection_valid && run.plays_remaining > 0 {
+                [0.18, 0.55, 0.25, 0.92]
+            } else {
+                [0.35, 0.35, 0.35, 0.60]
+            },
+            if selected_count > 0 && run.discards_remaining > 0 {
+                [0.65, 0.18, 0.18, 0.92]
+            } else {
+                [0.35, 0.35, 0.35, 0.60]
+            },
+        ];
+        for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
+            // Draw a highlight border if this button is focused.
+            if self.button_focus == Some(i) {
+                let pad = 3.0;
+                instances.push(GpuInstance {
+                    rect: [bx - pad, by - pad, bw + pad * 2.0, bh + pad * 2.0],
+                    color: [0.9, 0.8, 0.2, 0.95],
+                });
+            }
+            instances.push(GpuInstance {
+                rect: [bx, by, bw, bh],
+                color: base_colors[i],
+            });
+        }
 
         let mut text_labels = vec![
             // Score panel
@@ -285,12 +420,50 @@ impl GameplayScene {
             color: [1.0, 1.0, 1.0, 1.0],
         });
 
-        let buttons = vec![
+        let mut buttons = vec![
             ButtonDef { rect: suit_btn_rect, action: UiAction::SortBySuit },
             ButtonDef { rect: rank_btn_rect, action: UiAction::SortByRank },
             ButtonDef { rect: play_btn_rect, action: UiAction::ScoreHand },
             ButtonDef { rect: discard_btn_rect, action: UiAction::CommitDiscard },
         ];
+
+        // Particle instances.
+        for (rect, color) in self.particles.instances() {
+            instances.push(GpuInstance { rect, color });
+        }
+
+        // Hint: highlight tiles that would complete a meld with current selection.
+        let selected_indices: Vec<usize> = run
+            .selected
+            .iter()
+            .enumerate()
+            .filter(|&(_, &sel)| sel)
+            .map(|(i, _)| i)
+            .collect();
+        if !selected_indices.is_empty() && self.cascade.is_none() {
+            let hints = suggest_completions(&run.hand, &selected_indices);
+            for &hint_idx in &hints {
+                if let Some(&(hx, hy, hw, hh)) = hand_slots.get(hint_idx) {
+                    // Green hint border around suggested tiles.
+                    let pad = hw * 0.06;
+                    let pulse = (now.elapsed().as_secs_f32() * 3.0).sin() * 0.15 + 0.55;
+                    instances.push(GpuInstance {
+                        rect: [hx - pad, hy - pad, hw + pad * 2.0, hh + pad * 2.0],
+                        color: [0.2, 0.9, 0.3, pulse],
+                    });
+                }
+            }
+        }
+
+        // Pause overlay.
+        self.pause_menu.draw(
+            layout.window_w,
+            layout.window_h,
+            scale,
+            &mut instances,
+            &mut text_labels,
+            &mut buttons,
+        );
 
         SceneDrawOutput {
             instances,

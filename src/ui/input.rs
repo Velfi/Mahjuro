@@ -19,6 +19,10 @@ pub enum InputMode {
 pub enum UiAction {
     FocusNext,
     FocusPrev,
+    /// Vertical menu navigation (down).
+    FocusDown,
+    /// Vertical menu navigation (up).
+    FocusUp,
     /// Toggle-select the focused tile for discard.
     Confirm,
     Cancel,
@@ -29,6 +33,16 @@ pub enum UiAction {
     NavigateHudPrev,
     SortBySuit,
     SortByRank,
+    /// Pause the game (Escape / Start button).
+    Pause,
+}
+
+/// Active drag state for tile reordering.
+#[derive(Clone, Debug)]
+pub struct DragState {
+    pub from_slot: usize,
+    pub start_pos: (f32, f32),
+    pub current_pos: (f32, f32),
 }
 
 pub struct InputState {
@@ -37,6 +51,7 @@ pub struct InputState {
     pub pointer_slot: Option<usize>,
     pub last_cursor: (f32, f32),
     pub mode: InputMode,
+    pub drag: Option<DragState>,
 }
 
 impl InputState {
@@ -47,6 +62,7 @@ impl InputState {
             pointer_slot: None,
             last_cursor: (0.0, 0.0),
             mode: InputMode::Cursor,
+            drag: None,
         })
     }
 
@@ -76,6 +92,9 @@ impl InputState {
                 }
                 ButtonPressed(Button::DPadRight, _) => actions.push(UiAction::FocusNext),
                 ButtonPressed(Button::DPadLeft, _) => actions.push(UiAction::FocusPrev),
+                ButtonPressed(Button::DPadDown, _) => actions.push(UiAction::FocusDown),
+                ButtonPressed(Button::DPadUp, _) => actions.push(UiAction::FocusUp),
+                ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
                 ButtonPressed(Button::LeftTrigger, _) => actions.push(UiAction::NavigateHudPrev),
                 ButtonPressed(Button::RightTrigger, _) => actions.push(UiAction::NavigateHudNext),
                 _ => {}
@@ -98,12 +117,16 @@ impl InputState {
         match code {
             KeyCode::ArrowRight | KeyCode::KeyD => actions.push(UiAction::FocusNext),
             KeyCode::ArrowLeft | KeyCode::KeyA => actions.push(UiAction::FocusPrev),
+            KeyCode::ArrowDown => actions.push(UiAction::FocusDown),
+            KeyCode::ArrowUp | KeyCode::KeyW => actions.push(UiAction::FocusUp),
             KeyCode::Space => actions.push(UiAction::Confirm),
-            KeyCode::Escape => actions.push(UiAction::Cancel),
+            KeyCode::Escape => actions.push(UiAction::Pause),
+            KeyCode::Backspace => actions.push(UiAction::Cancel),
             KeyCode::KeyS => actions.push(UiAction::ScoreHand),
             KeyCode::Enter => actions.push(UiAction::CommitDiscard),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
+            KeyCode::Backspace => actions.push(UiAction::Cancel),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {
@@ -161,9 +184,11 @@ pub fn apply_ui_actions(
             UiAction::Cancel => {
                 run.clear_selection();
             }
-            UiAction::SortBySuit | UiAction::SortByRank => {}
+            UiAction::SortBySuit | UiAction::SortByRank | UiAction::Pause => {}
             UiAction::FocusNext
             | UiAction::FocusPrev
+            | UiAction::FocusDown
+            | UiAction::FocusUp
             | UiAction::NavigateHudNext
             | UiAction::NavigateHudPrev => {}
         }

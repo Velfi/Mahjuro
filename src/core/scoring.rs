@@ -7,6 +7,7 @@ use crate::core::relic::{
 };
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
+use crate::core::yaku::{YakuKind, detect_yaku};
 
 /// One step in the scoring cascade — each relic/rule contribution is a separate step.
 #[derive(Clone, Debug)]
@@ -26,6 +27,8 @@ pub struct ScoreBreakdown {
     pub base_points: i32,
     /// Each relic/rule that fired, in order.
     pub steps: Vec<ScoreStep>,
+    /// Yaku patterns detected in this hand.
+    pub detected_yaku: Vec<YakuKind>,
     /// Final total.
     pub total: i32,
 }
@@ -51,6 +54,8 @@ pub fn score_sets(
 ) -> ScoreBreakdown {
     let mut steps = Vec::new();
     let pair_double = rules.contains(&RuleModifier::PairDoubleScore);
+    let honor_triple = rules.contains(&RuleModifier::HonorTripleScore);
+    let no_seq_bonus = rules.contains(&RuleModifier::NoSequenceBonus);
 
     // Accumulate base points for all sets first.
     let mut base_points = 0i32;
@@ -81,6 +86,17 @@ pub fn score_sets(
                     running_total: total,
                 });
                 set_pts += bonus;
+            }
+            // LuckyPair: pairs score ×1.5.
+            if ctx.relics.has(RelicId::LuckyPair) {
+                let extra = (set_pts as f64 * 0.5).round() as i32;
+                total += extra;
+                steps.push(ScoreStep {
+                    source: "Lucky Pair".to_string(),
+                    effect: format!("×1.5 (+{extra})"),
+                    running_total: total,
+                });
+                set_pts += extra;
             }
             if pair_double {
                 // Double the pair's contribution (set_pts is what we had, we add another set_pts).
@@ -140,6 +156,16 @@ pub fn score_sets(
                         running_total: total,
                     });
                 }
+                // HonorTripleScore rule: honor triplets score ×3.
+                if matches!(first.suit, Suit::Wind | Suit::Dragon) && honor_triple {
+                    let extra = set_pts * 2; // ×3 total = +2× more
+                    total += extra;
+                    steps.push(ScoreStep {
+                        source: "Honor Triple (rule)".to_string(),
+                        effect: format!("×3 (+{extra})"),
+                        running_total: total,
+                    });
+                }
                 let suit_bonus = suit_tile_bonus(first.suit, ctx) * s.tile_ids.len() as i32;
                 if suit_bonus > 0 {
                     total += suit_bonus;
@@ -186,9 +212,100 @@ pub fn score_sets(
         }
     }
 
+    // DragonEcho: dragon triplets add 50% of adjacent sets' base points.
+    if ctx.relics.has(RelicId::DragonEcho) {
+        for (i, s) in sets.iter().enumerate() {
+            if s.kind != SetKind::Triplet {
+                continue;
+            }
+            let is_dragon = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| t.suit == Suit::Dragon);
+            if !is_dragon {
+                continue;
+            }
+            let mut echo_bonus = 0i32;
+            if i > 0 {
+                echo_bonus += set_base_points(sets[i - 1].kind) / 2;
+            }
+            if i + 1 < sets.len() {
+                echo_bonus += set_base_points(sets[i + 1].kind) / 2;
+            }
+            if echo_bonus > 0 {
+                total += echo_bonus;
+                steps.push(ScoreStep {
+                    source: "Dragon Echo".to_string(),
+                    effect: format!("+{echo_bonus}"),
+                    running_total: total,
+                });
+            }
+        }
+    }
+
+    // ChainReaction: +25% if scored last turn.
+    if ctx.relics.has(RelicId::ChainReaction) && ctx.scored_last_turn {
+        let bonus = (total as f64 * 0.25).round() as i32;
+        total += bonus;
+        steps.push(ScoreStep {
+            source: "Chain Reaction".to_string(),
+            effect: format!("+25% (+{bonus})"),
+            running_total: total,
+        });
+    }
+
+    // Dora bonus: +30 per tile matching a dora face.
+    if !ctx.dora_faces.is_empty() {
+        let dora_count = tiles
+            .iter()
+            .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
+            .count() as i32;
+        if dora_count > 0 {
+            let bonus = dora_count * 30;
+            total += bonus;
+            steps.push(ScoreStep {
+                source: format!("Dora ×{dora_count}"),
+                effect: format!("+{bonus}"),
+                running_total: total,
+            });
+        }
+    }
+
+    // NoSequenceBonus rule: if no sequences in the hand, +80 bonus.
+    if no_seq_bonus && !sets.iter().any(|s| s.kind == SetKind::Sequence) {
+        total += 80;
+        steps.push(ScoreStep {
+            source: "No-Seq Bonus (rule)".to_string(),
+            effect: "+80".to_string(),
+            running_total: total,
+        });
+    }
+
+    // Yaku bonus phase — detect hand patterns and award bonuses (filtered by progression).
+    let all_yaku = detect_yaku(tiles, sets);
+    let detected_yaku: Vec<YakuKind> = if ctx.available_yaku.is_empty() {
+        all_yaku
+    } else {
+        all_yaku
+            .into_iter()
+            .filter(|y| ctx.available_yaku.contains(y))
+            .collect()
+    };
+    for yaku in &detected_yaku {
+        let bonus = yaku.bonus_points();
+        total += bonus;
+        steps.push(ScoreStep {
+            source: yaku.name().to_string(),
+            effect: format!("+{bonus}"),
+            running_total: total,
+        });
+    }
+
     ScoreBreakdown {
         base_points,
         steps,
+        detected_yaku,
         total,
     }
 }
@@ -221,12 +338,16 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let relics = RelicState {
             active: vec![RelicId::TripletBoost],
+            ..Default::default()
         };
-        let ctx = ScoreContext { relics: &relics };
+        let ctx = ScoreContext { relics: &relics, scored_last_turn: false, dora_faces: vec![], available_yaku: vec![] };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-        assert_eq!(breakdown.total, 80);
+        // base 40 + TripletBoost(+40) + AllTriplets(+100) + AllSimples(+60) + Flush(+120) = 360
         assert_eq!(breakdown.base_points, 40);
+        assert_eq!(breakdown.total, 360);
         assert!(!breakdown.steps.is_empty(), "should have relic steps");
+        assert!(breakdown.detected_yaku.contains(&YakuKind::AllTriplets));
+        assert!(breakdown.detected_yaku.contains(&YakuKind::Flush));
     }
 
     #[test]
@@ -238,9 +359,14 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let ctx = ScoreContext {
             relics: &RelicState::default(),
+            scored_last_turn: false,
+            dora_faces: vec![],
+            available_yaku: vec![],
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[RuleModifier::PairDoubleScore]);
-        assert_eq!(breakdown.total, 20);
+        // base 10 + PairDouble(+10) + AllSimples(+60) + Flush(+120) = 200
+        assert_eq!(breakdown.total, 200);
         assert!(breakdown.steps.iter().any(|s| s.source.contains("Pair Double")));
+        assert!(breakdown.detected_yaku.contains(&YakuKind::Flush));
     }
 }

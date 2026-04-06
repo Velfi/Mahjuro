@@ -3,13 +3,15 @@
 use rand::seq::SliceRandom;
 
 use crate::core::deck::Wall;
-use crate::core::hand::{detect_all_sets, validate_selection};
+use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, score_sets};
-use crate::core::tile::Tile;
+use crate::core::tile::{Suit, Tile};
+use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent};
+use crate::game::game_mode::GameMode;
 
 pub const HAND_SIZE: usize = 14;
 pub const STARTING_PLAYS: u32 = 4;
@@ -32,47 +34,86 @@ pub struct RunState {
     pub blind: BlindKind,
     /// Last scoring breakdown for UI cascade display.
     pub last_breakdown: Option<ScoreBreakdown>,
+    /// Yaku available at the player's progression level.
+    pub available_yaku: Vec<crate::core::yaku::YakuKind>,
+    /// Rules available at the player's progression level.
+    pub available_rules: Vec<RuleModifier>,
+    /// Whether the player scored on their last play (for ChainReaction relic).
+    pub scored_last_turn: bool,
+    /// Whether QuickDraw extra tile was used this round.
+    pub quickdraw_used: bool,
+    /// Whether JokerTile was used this round.
+    pub joker_used: bool,
+    /// Game mode preset used for this run (drives advance_round resets).
+    pub mode: GameMode,
 }
 
 impl RunState {
-    pub fn new_demo() -> Self {
+    pub fn new(mode: GameMode) -> Self {
+        let hand_size = mode.hand_size;
         let mut wall = Wall::from_standard_shuffled();
-        let mut hand = Vec::with_capacity(HAND_SIZE);
-        for _ in 0..HAND_SIZE {
+        let mut hand = Vec::with_capacity(hand_size);
+        for _ in 0..hand_size {
             if let Some(t) = wall.draw() {
                 hand.push(t);
             }
         }
         hand.sort();
         let selected = vec![false; hand.len()];
+
+        let mut relics = RelicState::default();
+        for &r in &mode.starting_relics {
+            if !relics.is_full() {
+                relics.active.push(r);
+            }
+        }
+
         Self {
             wall,
             hand,
             selected,
             round_score: 0,
-            target_score: 500,
-            base_target: 500,
-            relics: RelicState {
-                active: vec![RelicId::TripletBoost, RelicId::BambooCharm],
-            },
-            round_rules: vec![RuleModifier::PairDoubleScore],
+            target_score: mode.base_target,
+            base_target: mode.base_target,
+            relics,
+            round_rules: mode.starting_rules.clone(),
             run_number: 1,
-            plays_remaining: STARTING_PLAYS,
-            discards_remaining: STARTING_DISCARDS,
-            gold: 0,
+            plays_remaining: mode.starting_plays,
+            discards_remaining: mode.starting_discards,
+            gold: mode.starting_gold,
             blind: BlindKind::Small,
             last_breakdown: None,
+            available_yaku: mode.starting_yaku.clone(),
+            available_rules: mode.starting_rules.clone(),
+            scored_last_turn: false,
+            quickdraw_used: false,
+            joker_used: false,
+            mode,
         }
+    }
+
+    /// Convenience constructor using the standard game mode.
+    pub fn new_demo() -> Self {
+        Self::new(GameMode::standard())
+    }
+
+    /// Whether a run is in progress (not a fresh/default state).
+    pub fn is_in_progress(&self) -> bool {
+        self.round_score > 0 || self.run_number > 1 || self.gold != self.mode.starting_gold
     }
 
     /// Apply a blind choice: sets target score and any forced modifiers.
     pub fn apply_blind(&mut self, blind: BlindKind) {
         self.blind = blind;
         self.target_score = (self.base_target as f32 * blind.target_multiplier()) as u32;
-        if let Some(modifier) = blind.forced_modifier() {
+        if let Some(modifier) = blind.forced_modifier(self.run_number) {
             if !self.round_rules.contains(&modifier) {
                 self.round_rules.push(modifier);
             }
+        }
+        // ReducedPlays modifier reduces plays from 4 to 3.
+        if self.round_rules.contains(&RuleModifier::ReducedPlays) {
+            self.plays_remaining = self.plays_remaining.min(3);
         }
     }
 
@@ -94,21 +135,48 @@ impl RunState {
             .map(|(t, _)| *t)
             .collect();
 
-        // Validate: must decompose into melds with no leftovers.
-        let sets = match validate_selection(&selected_tiles) {
-            Some(sets) => sets,
+        // Validate: must decompose into melds with no leftovers (respecting rules).
+        // Try wildcard substitution if JokerTile or WildWinds relics are active.
+        let (sets, scoring_tiles) = match self.try_validate_with_wildcards(&selected_tiles) {
+            Some(result) => result,
             None => return 0,
         };
+        // If tiles were modified by JokerTile substitution, mark it used.
+        if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
+            self.joker_used = true;
+        }
 
-        // Score the selected tiles.
+        // Score the tiles (using substituted tiles if wildcards were applied).
         let ctx = ScoreContext {
             relics: &self.relics,
+            scored_last_turn: self.scored_last_turn,
+            dora_faces: self.wall.dora_faces(),
+            available_yaku: self.available_yaku.clone(),
         };
-        let breakdown = score_sets(&selected_tiles, &sets, &ctx, &self.round_rules);
+        let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
         self.last_breakdown = Some(breakdown);
         self.plays_remaining -= 1;
+        self.scored_last_turn = earned > 0;
+
+        // GreenLuck: hands without honors earn +2 gold.
+        if self.relics.has(RelicId::GreenLuck)
+            && !selected_tiles
+                .iter()
+                .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+        {
+            self.gold = self.gold.saturating_add(2);
+        }
+
+        // Check if any triplet was scored (for SetMagnet).
+        let scored_triplet = sets.iter().find(|s| s.kind == SetKind::Triplet);
+        let triplet_tile = scored_triplet.and_then(|s| {
+            s.tile_ids
+                .first()
+                .and_then(|id| selected_tiles.iter().find(|t| t.id == *id))
+                .copied()
+        });
 
         // Remove scored tiles from hand (reverse order to keep indices valid).
         let indices: Vec<usize> = self
@@ -124,11 +192,28 @@ impl RunState {
         }
 
         // Auto-draw back to full hand.
-        while self.hand.len() < HAND_SIZE {
+        let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
+            self.quickdraw_used = true;
+            HAND_SIZE + 1
+        } else {
+            HAND_SIZE
+        };
+        while self.hand.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
         }
+
+        // SetMagnet: scoring a triplet draws a matching tile from the wall.
+        if self.relics.has(RelicId::SetMagnet) {
+            if let Some(ref tt) = triplet_tile {
+                if let Some(matching) = self.wall.draw_matching(tt.suit, tt.rank) {
+                    self.hand.push(matching);
+                    bus.push(GameEvent::TileDrawn(matching));
+                }
+            }
+        }
+
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
 
@@ -160,7 +245,35 @@ impl RunState {
             .filter(|&(_, &sel)| sel)
             .map(|(t, _)| *t)
             .collect();
-        validate_selection(&selected_tiles).is_some()
+        self.try_validate_with_wildcards(&selected_tiles).is_some()
+    }
+
+    /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
+    /// Returns the decomposition and the (possibly modified) tiles used for scoring.
+    fn try_validate_with_wildcards(
+        &self,
+        tiles: &[Tile],
+    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+        // Try standard validation first.
+        if let Some(sets) = validate_selection_with_rules(tiles, &self.round_rules) {
+            return Some((sets, tiles.to_vec()));
+        }
+
+        // JokerTile: try substituting one tile with each possible face.
+        if self.relics.has(RelicId::JokerTile) && !self.joker_used {
+            if let Some(result) = try_joker_substitution(tiles, &self.round_rules) {
+                return Some(result);
+            }
+        }
+
+        // WildWinds: try substituting wind tiles.
+        if self.relics.has(RelicId::WildWinds) {
+            if let Some(result) = try_wind_substitution(tiles, &self.round_rules) {
+                return Some(result);
+            }
+        }
+
+        None
     }
 
     /// Toggle whether a hand tile is marked for discard.
@@ -219,6 +332,14 @@ impl RunState {
         count
     }
 
+    /// Swap two tiles in the hand by index. Clears selection afterward.
+    pub fn swap_tiles(&mut self, from: usize, to: usize) {
+        if from < self.hand.len() && to < self.hand.len() && from != to {
+            self.hand.swap(from, to);
+            self.selected = vec![false; self.hand.len()];
+        }
+    }
+
     /// Sort hand by suit then rank (Characters → Bamboos → Circles → Wind → Dragon).
     pub fn sort_hand_by_suit(&mut self) {
         self.hand.sort();
@@ -243,19 +364,24 @@ impl RunState {
     /// Add the chosen relic, scale up the base target, and reset for the next round.
     /// The actual target_score is set later by `apply_blind`.
     pub fn advance_round(&mut self, chosen_relic: RelicId) {
-        self.relics.active.push(chosen_relic);
+        if !self.relics.is_full() {
+            self.relics.active.push(chosen_relic);
+        }
         self.run_number += 1;
         self.round_score = 0;
-        self.base_target = (self.base_target as f32 * 1.5) as u32;
+        self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
         self.target_score = self.base_target; // will be overridden by apply_blind
         self.round_rules.clear();
-        self.plays_remaining = STARTING_PLAYS;
-        self.discards_remaining = STARTING_DISCARDS;
+        self.plays_remaining = self.mode.starting_plays;
+        self.discards_remaining = self.mode.starting_discards;
         self.last_breakdown = None;
+        self.scored_last_turn = false;
+        self.quickdraw_used = false;
+        self.joker_used = false;
         self.blind = BlindKind::Small;
         self.wall = Wall::from_standard_shuffled();
         self.hand.clear();
-        for _ in 0..HAND_SIZE {
+        for _ in 0..self.mode.hand_size {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
             }
@@ -269,7 +395,6 @@ impl RunState {
 mod tests {
     use super::*;
     use crate::core::deck::build_wall;
-    use crate::core::tile::Suit;
 
     /// Create a RunState with a deterministic (unshuffled) wall for predictable tests.
     fn test_run() -> RunState {
@@ -282,21 +407,33 @@ mod tests {
             }
         }
         let selected = vec![false; hand.len()];
+        let mode = GameMode {
+            starting_gold: 0,
+            starting_rules: vec![],
+            starting_yaku: vec![],
+            ..GameMode::standard()
+        };
         RunState {
             wall,
             hand,
             selected,
             round_score: 0,
-            target_score: 500,
-            base_target: 500,
-            relics: RelicState { active: vec![] },
+            target_score: mode.base_target,
+            base_target: mode.base_target,
+            relics: RelicState::default(),
             round_rules: vec![],
             run_number: 1,
-            plays_remaining: STARTING_PLAYS,
-            discards_remaining: STARTING_DISCARDS,
-            gold: 0,
+            plays_remaining: mode.starting_plays,
+            discards_remaining: mode.starting_discards,
+            gold: mode.starting_gold,
             blind: BlindKind::Small,
             last_breakdown: None,
+            available_yaku: vec![],
+            available_rules: vec![],
+            scored_last_turn: false,
+            quickdraw_used: false,
+            joker_used: false,
+            mode,
         }
     }
 
@@ -695,18 +832,126 @@ mod tests {
     }
 }
 
-/// Pick `count` relics the player doesn't already own, randomly.
-/// Returns up to `count` choices (may be fewer if pool is exhausted).
-pub fn pick_relic_choices(relics: &RelicState, count: usize) -> Vec<RelicId> {
-    let mut rng = rand::rng();
-    let mut pool: Vec<RelicId> = all_relic_defs()
+/// All tile faces for substitution attempts.
+const ALL_FACES: [(Suit, u8); 34] = {
+    let mut faces = [(Suit::Characters, 0u8); 34];
+    let mut i = 0;
+    let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let mut si = 0;
+    while si < 3 {
+        let mut r = 1u8;
+        while r <= 9 {
+            faces[i] = (suits[si], r);
+            i += 1;
+            r += 1;
+        }
+        si += 1;
+    }
+    let mut r = 1u8;
+    while r <= 4 {
+        faces[i] = (Suit::Wind, r);
+        i += 1;
+        r += 1;
+    }
+    r = 1;
+    while r <= 3 {
+        faces[i] = (Suit::Dragon, r);
+        i += 1;
+        r += 1;
+    }
+    faces
+};
+
+/// Try substituting one tile with every possible face (JokerTile).
+fn try_joker_substitution(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    for (idx, _) in tiles.iter().enumerate() {
+        for &(suit, rank) in &ALL_FACES {
+            let mut modified = tiles.to_vec();
+            modified[idx] = Tile::new(suit, rank, modified[idx].id);
+            if let Some(sets) = validate_selection_with_rules(&modified, rules) {
+                return Some((sets, modified));
+            }
+        }
+    }
+    None
+}
+
+/// Try substituting wind tiles with other faces (WildWinds).
+fn try_wind_substitution(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    let wind_indices: Vec<usize> = tiles
         .iter()
-        .map(|d| d.id)
-        .filter(|id| !relics.has(*id))
+        .enumerate()
+        .filter(|(_, t)| t.suit == Suit::Wind)
+        .map(|(i, _)| i)
         .collect();
-    pool.shuffle(&mut rng);
-    let fallbacks = [RelicId::TripletBoost, RelicId::SequenceSurge, RelicId::PairPower];
-    (0..count)
-        .map(|i| pool.get(i).copied().unwrap_or(fallbacks[i % fallbacks.len()]))
-        .collect()
+    if wind_indices.is_empty() {
+        return None;
+    }
+    for &idx in &wind_indices {
+        for &(suit, rank) in &ALL_FACES {
+            let mut modified = tiles.to_vec();
+            modified[idx] = Tile::new(suit, rank, modified[idx].id);
+            if let Some(sets) = validate_selection_with_rules(&modified, rules) {
+                return Some((sets, modified));
+            }
+        }
+    }
+    None
+}
+
+/// Pick `count` relics the player doesn't already own, randomly.
+/// Filters by `available` relics from progression, weighted by rarity.
+pub fn pick_relic_choices(
+    relics: &RelicState,
+    count: usize,
+    available: &[RelicId],
+) -> Vec<RelicId> {
+    let mut rng = rand::rng();
+    let defs = all_relic_defs();
+
+    // Build a weighted pool: each relic appears N times based on rarity weight.
+    let mut weighted_pool: Vec<RelicId> = Vec::new();
+    for &id in available {
+        if relics.has(id) {
+            continue;
+        }
+        let weight = defs
+            .iter()
+            .find(|d| d.id == id)
+            .map(|d| d.rarity.weight())
+            .unwrap_or(1);
+        for _ in 0..weight {
+            weighted_pool.push(id);
+        }
+    }
+    weighted_pool.shuffle(&mut rng);
+
+    // Deduplicate while preserving weighted-random order.
+    let mut selected = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for id in weighted_pool {
+        if seen.insert(id) {
+            selected.push(id);
+            if selected.len() >= count {
+                break;
+            }
+        }
+    }
+
+    // Fill remaining slots with fallbacks if pool is exhausted.
+    let fallbacks = [
+        RelicId::TripletBoost,
+        RelicId::SequenceSurge,
+        RelicId::PairPower,
+    ];
+    while selected.len() < count {
+        selected.push(fallbacks[selected.len() % fallbacks.len()]);
+    }
+    selected
 }

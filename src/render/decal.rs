@@ -172,30 +172,51 @@ fn rasterize_text(font: &fontdue::Font, text: &str, size: u32) -> Vec<u8> {
 }
 
 /// Load Noto Emoji for tile decals (covers U+1F000–U+1F02B as outline glyphs).
+/// Cached; uses the compile-time embedded asset.
 fn load_noto_emoji_bytes() -> Option<Vec<u8>> {
-    let assets = crate::asset_path::assets_dir();
-    let variable = assets.join("Noto_Emoji/NotoEmoji-VariableFont_wght.ttf");
-    let regular = assets.join("Noto_Emoji/static/NotoEmoji-Regular.ttf");
-    let candidates: Vec<String> = vec![
-        variable.to_string_lossy().into_owned(),
-        regular.to_string_lossy().into_owned(),
-    ];
-    let refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
-    load_first(&refs, "Noto Emoji")
+    static CACHE: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let candidates = [
+                "Noto_Emoji/NotoEmoji-VariableFont_wght.ttf",
+                "Noto_Emoji/static/NotoEmoji-Regular.ttf",
+            ];
+            for path in candidates {
+                if let Some(file) = crate::asset_path::get(path) {
+                    log::debug!("decal: loaded Noto Emoji from embedded {path}");
+                    return Some(file.data.to_vec());
+                }
+            }
+            log::warn!("decal: Noto Emoji not found in embedded assets.");
+            None
+        })
+        .clone()
 }
 
 /// Load Noto Emoji as a ready-to-use `fontdue::Font` (for tile symbols).
+/// Cached so the font is only parsed once.
 pub fn load_noto_emoji_font() -> Option<fontdue::Font> {
-    load_noto_emoji_bytes()
-        .as_ref()
-        .and_then(|b| fontdue::Font::from_bytes(b.as_slice(), fontdue::FontSettings::default()).ok())
+    static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            load_noto_emoji_bytes().and_then(|b| {
+                fontdue::Font::from_bytes(b.as_slice(), fontdue::FontSettings::default()).ok()
+            })
+        })
+        .clone()
 }
 
 /// Load the UI font and return a ready-to-use `fontdue::Font`.
+/// Cached so the font is only parsed once.
 pub fn load_ui_font() -> Option<fontdue::Font> {
-    load_ui_font_bytes()
-        .as_ref()
-        .and_then(|b| fontdue::Font::from_bytes(b.as_slice(), fontdue::FontSettings::default()).ok())
+    static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            load_ui_font_bytes().and_then(|b| {
+                fontdue::Font::from_bytes(b.as_slice(), fontdue::FontSettings::default()).ok()
+            })
+        })
+        .clone()
 }
 
 /// Rasterise `text` into a `width × height` RGBA8 bitmap, centred on the baseline.
@@ -281,35 +302,40 @@ pub fn rasterize_label(font: &fontdue::Font, text: &str, width: u32, height: u32
 }
 
 /// Load Cormorant Garamond for game UI text.
+/// Cached; uses the compile-time embedded asset with system font fallbacks.
 pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
-    let assets = crate::asset_path::assets_dir();
-    let variable = assets.join("Cormorant_Garamond/CormorantGaramond-VariableFont_wght.ttf");
-    let regular = assets.join("Cormorant_Garamond/static/CormorantGaramond-Regular.ttf");
-    let mut candidates: Vec<String> = vec![
-        variable.to_string_lossy().into_owned(),
-        regular.to_string_lossy().into_owned(),
-    ];
-    // System fallbacks for non-bundled environments.
-    candidates.extend([
-        "/System/Library/Fonts/Helvetica.ttc".to_owned(),
-        "/System/Library/Fonts/Supplemental/Arial.ttf".to_owned(),
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_owned(),
-        "/usr/share/fonts/TTF/DejaVuSans.ttf".to_owned(),
-        "C:\\Windows\\Fonts\\segoeui.ttf".to_owned(),
-        "C:\\Windows\\Fonts\\arial.ttf".to_owned(),
-    ]);
-    let refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
-    load_first(&refs, "UI font")
-}
-
-fn load_first(candidates: &[&str], label: &str) -> Option<Vec<u8>> {
-    for path in candidates {
-        if let Ok(bytes) = std::fs::read(path) {
-            log::debug!("decal: loaded {label} from {path}");
-            return Some(bytes);
-        }
-    }
-    log::warn!("decal: {label} not found.");
-    None
+    static CACHE: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            // Try embedded assets first.
+            let embedded = [
+                "Cormorant_Garamond/CormorantGaramond-VariableFont_wght.ttf",
+                "Cormorant_Garamond/static/CormorantGaramond-Regular.ttf",
+            ];
+            for path in embedded {
+                if let Some(file) = crate::asset_path::get(path) {
+                    log::debug!("decal: loaded UI font from embedded {path}");
+                    return Some(file.data.to_vec());
+                }
+            }
+            // System fallbacks for non-bundled environments.
+            let system = [
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "C:\\Windows\\Fonts\\segoeui.ttf",
+                "C:\\Windows\\Fonts\\arial.ttf",
+            ];
+            for path in system {
+                if let Ok(bytes) = std::fs::read(path) {
+                    log::debug!("decal: loaded UI font from system {path}");
+                    return Some(bytes);
+                }
+            }
+            log::warn!("decal: UI font not found.");
+            None
+        })
+        .clone()
 }
 

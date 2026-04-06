@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 
 /// Human-readable summary of detected sets in the hand, e.g. "3m×2  1-3s  East×3".
@@ -137,6 +138,28 @@ pub fn find_sequences(tiles: &[Tile]) -> Vec<DetectedSet> {
     out
 }
 
+/// For each unselected tile in the hand, check if adding it to the current selection
+/// would form a valid meld. Returns hand indices of tiles that would complete a meld.
+pub fn suggest_completions(hand: &[Tile], selected_indices: &[usize]) -> Vec<usize> {
+    let selected_tiles: Vec<Tile> = selected_indices
+        .iter()
+        .map(|&i| hand[i])
+        .collect();
+
+    let mut hints = Vec::new();
+    for (i, tile) in hand.iter().enumerate() {
+        if selected_indices.contains(&i) {
+            continue;
+        }
+        let mut candidate = selected_tiles.clone();
+        candidate.push(*tile);
+        if validate_selection(&candidate).is_some() {
+            hints.push(i);
+        }
+    }
+    hints
+}
+
 /// Non-overlapping greedy merge is complex; MVP returns all detected patterns (may overlap).
 #[allow(dead_code)]
 pub fn detect_all_sets(tiles: &[Tile]) -> Vec<DetectedSet> {
@@ -151,13 +174,28 @@ pub fn detect_all_sets(tiles: &[Tile]) -> Vec<DetectedSet> {
 /// Uses recursive backtracking: at each step, tries to extract a pair, triplet, or sequence
 /// starting from the first remaining tile, then recurses on the rest.
 pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
+    validate_selection_with_rules(tiles, &[])
+}
+
+/// Like `validate_selection`, but respects active rule modifiers:
+/// - `SequenceWrap`: allows wrapping sequences (8-9-1, 9-1-2)
+/// - `NoSequences`: rejects any decomposition containing sequences
+pub fn validate_selection_with_rules(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+) -> Option<Vec<DetectedSet>> {
     if tiles.is_empty() {
-        return None; // must select at least something
+        return None;
     }
     let mut sorted: Vec<Tile> = tiles.to_vec();
     sorted.sort();
+    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
+    let no_sequences = rules.contains(&RuleModifier::NoSequences);
     let mut result = Vec::new();
-    if backtrack_decompose(&sorted, &mut result) {
+    if backtrack_decompose(&sorted, &mut result, allow_wrap) {
+        if no_sequences && result.iter().any(|s| s.kind == SetKind::Sequence) {
+            return None;
+        }
         Some(result)
     } else {
         None
@@ -165,7 +203,11 @@ pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
 }
 
 /// Recursive helper: try to decompose `remaining` (sorted) into melds.
-fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>) -> bool {
+fn backtrack_decompose(
+    remaining: &[Tile],
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+) -> bool {
     if remaining.is_empty() {
         return true;
     }
@@ -184,7 +226,7 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>) -> bool
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        if backtrack_decompose(&rest, found) {
+        if backtrack_decompose(&rest, found, allow_wrap) {
             return true;
         }
         found.pop();
@@ -196,7 +238,7 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>) -> bool
             .iter()
             .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
         if let Some(mid_offset) = mid {
-            let mid_idx = mid_offset + 1; // index in `remaining`
+            let mid_idx = mid_offset + 1;
             let search_start = mid_idx + 1;
             let hi = remaining[search_start..]
                 .iter()
@@ -214,10 +256,69 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>) -> bool
                         rest.push(*t);
                     }
                 }
-                if backtrack_decompose(&rest, found) {
+                if backtrack_decompose(&rest, found, allow_wrap) {
                     return true;
                 }
                 found.pop();
+            }
+        }
+
+        // Wrapping sequences: 8-9-1 and 9-1-2 (only numbered suits, ranks 1-9).
+        // After sorting, rank 1 comes first, so we try wrap from low ranks too.
+        if allow_wrap {
+            let wrap_patterns: &[[u8; 3]] = match first.rank {
+                1 => &[[9, 1, 2], [8, 9, 1]],
+                2 => &[[9, 1, 2]],
+                8 => &[[8, 9, 1]],
+                9 => &[[8, 9, 1], [9, 1, 2]],
+                _ => &[],
+            };
+            for pattern in wrap_patterns {
+                // Find the other two ranks in remaining (excluding first).
+                let other_ranks: Vec<u8> = pattern
+                    .iter()
+                    .copied()
+                    .filter(|&r| r != first.rank)
+                    .collect();
+                if other_ranks.len() != 2 {
+                    continue;
+                }
+                let mid = remaining[1..]
+                    .iter()
+                    .position(|t| t.suit == first.suit && t.rank == other_ranks[0]);
+                if let Some(mid_offset) = mid {
+                    let mid_idx = mid_offset + 1;
+                    let hi = remaining
+                        .iter()
+                        .enumerate()
+                        .position(|(i, t)| {
+                            i != 0
+                                && i != mid_idx
+                                && t.suit == first.suit
+                                && t.rank == other_ranks[1]
+                        });
+                    if let Some(hi_idx) = hi {
+                        let set = DetectedSet {
+                            kind: SetKind::Sequence,
+                            tile_ids: vec![
+                                remaining[0].id,
+                                remaining[mid_idx].id,
+                                remaining[hi_idx].id,
+                            ],
+                        };
+                        found.push(set);
+                        let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 3);
+                        for (i, t) in remaining.iter().enumerate() {
+                            if i != 0 && i != mid_idx && i != hi_idx {
+                                rest.push(*t);
+                            }
+                        }
+                        if backtrack_decompose(&rest, found, allow_wrap) {
+                            return true;
+                        }
+                        found.pop();
+                    }
+                }
             }
         }
     }
@@ -233,7 +334,7 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>) -> bool
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[2..].to_vec();
-        if backtrack_decompose(&rest, found) {
+        if backtrack_decompose(&rest, found, allow_wrap) {
             return true;
         }
         found.pop();
@@ -378,6 +479,82 @@ mod tests {
         ];
         let sets = validate_selection(&tiles).unwrap();
         assert_eq!(sets.len(), 2);
+    }
+
+    // ── suggest_completions ─────────────────────────────────────────
+
+    #[test]
+    fn suggest_completions_finds_pair_partner() {
+        // Hand has one selected tile; another copy exists in hand.
+        let hand = vec![
+            t(Suit::Bamboos, 3, 0),
+            t(Suit::Bamboos, 3, 1),
+            t(Suit::Circles, 5, 2),
+        ];
+        let selected = vec![0]; // selected tile id 0 (Bamboos 3)
+        let hints = suggest_completions(&hand, &selected);
+        // Index 1 (Bamboos 3, id=1) should be suggested since adding it forms a pair.
+        assert!(hints.contains(&1));
+    }
+
+    // ── validate_selection_with_rules ──────────────────────────────
+
+    #[test]
+    fn sequence_wrap_891() {
+        let tiles = vec![
+            t(Suit::Characters, 8, 0),
+            t(Suit::Characters, 9, 1),
+            t(Suit::Characters, 1, 2),
+        ];
+        // Without wrap: invalid
+        assert!(validate_selection(&tiles).is_none());
+        // With wrap: valid sequence
+        let sets =
+            validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn sequence_wrap_912() {
+        let tiles = vec![
+            t(Suit::Bamboos, 9, 0),
+            t(Suit::Bamboos, 1, 1),
+            t(Suit::Bamboos, 2, 2),
+        ];
+        assert!(validate_selection(&tiles).is_none());
+        let sets =
+            validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn no_sequences_rejects_sequence() {
+        let tiles = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 2, 1),
+            t(Suit::Characters, 3, 2),
+        ];
+        // Normal: valid sequence
+        assert!(validate_selection(&tiles).is_some());
+        // NoSequences: rejected
+        assert!(
+            validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).is_none()
+        );
+    }
+
+    #[test]
+    fn no_sequences_allows_triplets() {
+        let tiles = vec![
+            t(Suit::Bamboos, 5, 0),
+            t(Suit::Bamboos, 5, 1),
+            t(Suit::Bamboos, 5, 2),
+        ];
+        let sets =
+            validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
     }
 }
 
