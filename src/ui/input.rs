@@ -1,0 +1,171 @@
+//! Unified input: mouse, keyboard, gamepad → semantic actions.
+
+use gilrs::{Axis, Button, Event as GilEvent, Gilrs};
+use winit::keyboard::{KeyCode, PhysicalKey};
+
+use crate::game::run::{HAND_SIZE, RunState};
+use crate::render::animation::AnimationController;
+
+/// Which input device was used most recently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputMode {
+    Cursor,
+    Keyboard,
+    Controller,
+}
+
+/// Logical UI actions (device-agnostic).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiAction {
+    FocusNext,
+    FocusPrev,
+    /// Toggle-select the focused tile for discard.
+    Confirm,
+    Cancel,
+    ScoreHand,
+    /// Commit: discard all selected tiles and auto-draw back to full hand.
+    CommitDiscard,
+    NavigateHudNext,
+    NavigateHudPrev,
+    SortBySuit,
+    SortByRank,
+}
+
+pub struct InputState {
+    pub gilrs: Option<Gilrs>,
+    pub focus_slot: usize,
+    pub pointer_slot: Option<usize>,
+    pub last_cursor: (f32, f32),
+    pub mode: InputMode,
+}
+
+impl InputState {
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            gilrs: Gilrs::new().ok(),
+            focus_slot: 0,
+            pointer_slot: None,
+            last_cursor: (0.0, 0.0),
+            mode: InputMode::Cursor,
+        })
+    }
+
+    pub fn focused_index(&self) -> usize {
+        self.focus_slot.min(HAND_SIZE.saturating_sub(1))
+    }
+
+    /// Poll gilrs; returns emitted actions.  Sets mode to Controller if any
+    /// action is produced.  Returns true if the mode changed.
+    pub fn poll_gamepads(&mut self, actions: &mut Vec<UiAction>) -> bool {
+        let Some(ref mut gilrs) = self.gilrs else {
+            return false;
+        };
+        let before = actions.len();
+        while let Some(GilEvent { event, .. }) = gilrs.next_event() {
+            use gilrs::EventType::*;
+            match event {
+                ButtonPressed(Button::South, _) => actions.push(UiAction::Confirm),
+                ButtonPressed(Button::East, _) => actions.push(UiAction::Cancel),
+                ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::ScoreHand),
+                ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::CommitDiscard),
+                ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),
+                ButtonPressed(Button::North, _) => actions.push(UiAction::CommitDiscard),
+                AxisChanged(Axis::LeftStickX, v, _) if v > 0.5 => actions.push(UiAction::FocusNext),
+                AxisChanged(Axis::LeftStickX, v, _) if v < -0.5 => {
+                    actions.push(UiAction::FocusPrev)
+                }
+                ButtonPressed(Button::DPadRight, _) => actions.push(UiAction::FocusNext),
+                ButtonPressed(Button::DPadLeft, _) => actions.push(UiAction::FocusPrev),
+                ButtonPressed(Button::LeftTrigger, _) => actions.push(UiAction::NavigateHudPrev),
+                ButtonPressed(Button::RightTrigger, _) => actions.push(UiAction::NavigateHudNext),
+                _ => {}
+            }
+        }
+        if actions.len() > before && self.mode != InputMode::Controller {
+            self.mode = InputMode::Controller;
+            return true;
+        }
+        false
+    }
+
+    /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
+    /// Returns true if the mode changed.
+    pub fn on_key(&mut self, key: PhysicalKey, actions: &mut Vec<UiAction>) -> bool {
+        let PhysicalKey::Code(code) = key else {
+            return false;
+        };
+        let before = actions.len();
+        match code {
+            KeyCode::ArrowRight | KeyCode::KeyD => actions.push(UiAction::FocusNext),
+            KeyCode::ArrowLeft | KeyCode::KeyA => actions.push(UiAction::FocusPrev),
+            KeyCode::Space => actions.push(UiAction::Confirm),
+            KeyCode::Escape => actions.push(UiAction::Cancel),
+            KeyCode::KeyS => actions.push(UiAction::ScoreHand),
+            KeyCode::Enter => actions.push(UiAction::CommitDiscard),
+            KeyCode::Tab => actions.push(UiAction::SortBySuit),
+            KeyCode::Backquote => actions.push(UiAction::SortByRank),
+            _ => {}
+        }
+        if actions.len() > before && self.mode != InputMode::Keyboard {
+            self.mode = InputMode::Keyboard;
+            return true;
+        }
+        false
+    }
+
+    /// Hit-test hand slots; `slots` are world rects in same space as cursor.
+    pub fn update_pointer_hover(
+        &mut self,
+        cursor: (f32, f32),
+        hand_slots: &[(f32, f32, f32, f32)],
+    ) {
+        self.last_cursor = cursor;
+        self.pointer_slot = hand_slots.iter().position(|(x, y, w, h)| {
+            cursor.0 >= *x && cursor.0 <= *x + *w && cursor.1 >= *y && cursor.1 <= *y + *h
+        });
+        if self.mode == InputMode::Cursor {
+            if let Some(i) = self.pointer_slot {
+                self.focus_slot = i;
+            }
+        }
+    }
+}
+
+/// Apply actions to run + animations (stub hooks).
+pub fn apply_ui_actions(
+    actions: &[UiAction],
+    run: &mut RunState,
+    bus: &mut crate::game::event_bus::EventBus,
+    anim: &mut AnimationController,
+    focus_tile_index: usize,
+) {
+    for a in actions {
+        match a {
+            UiAction::ScoreHand => {
+                run.score_selected_tiles(bus);
+                anim.pulse(crate::render::animation::ENTITY_SCORE_PANEL);
+            }
+            UiAction::Confirm => {
+                // Toggle-select the focused tile for discard.
+                if !run.hand.is_empty() {
+                    let idx = focus_tile_index.min(run.hand.len() - 1);
+                    run.toggle_select(idx);
+                }
+            }
+            UiAction::CommitDiscard => {
+                let discarded = run.discard_selected(bus);
+                if discarded > 0 {
+                    anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
+                }
+            }
+            UiAction::Cancel => {
+                run.clear_selection();
+            }
+            UiAction::SortBySuit | UiAction::SortByRank => {}
+            UiAction::FocusNext
+            | UiAction::FocusPrev
+            | UiAction::NavigateHudNext
+            | UiAction::NavigateHudPrev => {}
+        }
+    }
+}
