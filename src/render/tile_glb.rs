@@ -1,7 +1,5 @@
 //! Load mesh + PBR base color from a GLB (all primitives of the first mesh).
 
-use std::path::Path;
-
 use anyhow::Context;
 use glam::Mat4;
 use gltf::image::Format;
@@ -139,9 +137,9 @@ fn find_node_transform(document: &gltf::Document, mesh_index: usize) -> Option<M
     None
 }
 
-pub fn load_glb_tile(path: &Path) -> anyhow::Result<LoadedTile> {
+pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
     let (document, buffers, images) =
-        gltf::import(path).with_context(|| format!("gltf::import({})", path.display()))?;
+        gltf::import_slice(data).context("gltf::import_slice(Tile.glb)")?;
 
     let mesh = document.meshes().next().context("GLB has no meshes")?;
 

@@ -2,11 +2,12 @@
 
 use rand::seq::SliceRandom;
 
-use crate::core::relic::{RelicId, RelicState, all_relic_defs};
+use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
 use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::pause_menu::{PauseMenu, PauseUpdate};
 use super::pick_blind::PickBlindScene;
 
 /// A purchasable item in the shop.
@@ -14,6 +15,7 @@ struct ShopItem {
     relic: RelicId,
     name: &'static str,
     description: &'static str,
+    rarity: Rarity,
     price: u32,
     sold: bool,
 }
@@ -22,6 +24,7 @@ pub struct ShopScene {
     pub came_from_round: u32,
     items: Vec<ShopItem>,
     cursor: usize,
+    pause_menu: PauseMenu,
 }
 
 /// Gold cost for a relic (simple formula based on position in the defs list).
@@ -44,6 +47,7 @@ impl ShopScene {
                 relic: d.id,
                 name: d.name,
                 description: d.description,
+                rarity: d.rarity,
                 price: relic_price(d.id),
                 sold: false,
             })
@@ -53,10 +57,23 @@ impl ShopScene {
             came_from_round,
             items,
             cursor: 0,
+            pause_menu: PauseMenu::new(),
         }
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Pause menu handling.
+        if self.pause_menu.paused {
+            match self.pause_menu.update(ctx.actions, ctx.run) {
+                PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
+                PauseUpdate::Transition(t) => return t,
+                PauseUpdate::Quit => {
+                    *ctx.quit_requested = true;
+                    return None;
+                }
+            }
+        }
+
         for a in ctx.actions {
             match a {
                 UiAction::FocusNext => {
@@ -64,6 +81,16 @@ impl ShopScene {
                 }
                 UiAction::FocusPrev => {
                     self.cursor = self.cursor.saturating_sub(1);
+                }
+                UiAction::FocusDown => {
+                    // Jump to the "Next Round" button.
+                    self.cursor = self.items.len();
+                }
+                UiAction::FocusUp => {
+                    // Jump back to items from the button.
+                    if self.cursor >= self.items.len() && !self.items.is_empty() {
+                        self.cursor = self.items.len() - 1;
+                    }
                 }
                 UiAction::CommitDiscard => {
                     // "Next Round" button (mouse click or Enter key).
@@ -80,11 +107,15 @@ impl ShopScene {
                         return Some(Scene::PickBlind(PickBlindScene::new()));
                     }
                     let item = &mut self.items[self.cursor];
-                    if !item.sold && ctx.run.gold >= item.price {
+                    if !item.sold && ctx.run.gold >= item.price && !ctx.run.relics.is_full() {
                         ctx.run.gold -= item.price;
                         ctx.run.relics.active.push(item.relic);
                         item.sold = true;
                     }
+                }
+                UiAction::Pause => {
+                    self.pause_menu.open();
+                    return None;
                 }
                 _ => {}
             }
@@ -104,8 +135,8 @@ impl ShopScene {
             color: [0.08, 0.06, 0.12, 1.0],
         }];
 
-        // Relic row below score panel.
-        let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &sp, w);
+        // Relic row in its own strip.
+        let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
         instances.extend(relic_insts);
 
         // Evenly-spaced card rects within the hand strip area.
@@ -150,11 +181,19 @@ impl ShopScene {
         let btn_h = (36.0 * scale).max(22.0);
         let btn_x = (w - btn_w) * 0.5;
         let btn_y = h - btn_h - (16.0 * scale);
-        let next_color = if self.cursor >= self.items.len() {
+        let next_focused = self.cursor >= self.items.len();
+        let next_color = if next_focused {
             [0.2, 0.6, 0.3, 0.95]
         } else {
             [0.22, 0.38, 0.55, 0.92]
         };
+        if next_focused {
+            let pad = 3.0;
+            instances.push(GpuInstance {
+                rect: [btn_x - pad, btn_y - pad, btn_w + pad * 2.0, btn_h + pad * 2.0],
+                color: [0.9, 0.8, 0.2, 0.95],
+            });
+        }
         instances.push(GpuInstance {
             rect: [btn_x, btn_y, btn_w, btn_h],
             color: next_color,
@@ -215,6 +254,20 @@ impl ShopScene {
                     [1.0, 0.85, 0.3, 1.0]
                 },
             });
+            // Rarity label below price.
+            let rarity_h = ch * 0.12;
+            let rarity_y = cy + ch * 0.82;
+            let (rarity_text, rarity_color) = match item.rarity {
+                Rarity::Common => ("Common", [0.7, 0.7, 0.7, 0.9]),
+                Rarity::Uncommon => ("Uncommon", [0.3, 0.8, 0.3, 0.9]),
+                Rarity::Rare => ("Rare", [0.3, 0.5, 1.0, 0.9]),
+                Rarity::Legendary => ("Legendary", [1.0, 0.8, 0.2, 0.9]),
+            };
+            text_labels.push(TextLabel {
+                rect: [cx, rarity_y, cw, rarity_h],
+                text: rarity_text.to_string(),
+                color: rarity_color,
+            });
         }
 
         text_labels.push(TextLabel {
@@ -223,12 +276,15 @@ impl ShopScene {
             color: [1.0, 1.0, 1.0, 1.0],
         });
 
-        let buttons = vec![
+        let mut buttons = vec![
             ButtonDef {
                 rect: (btn_x, btn_y, btn_w, btn_h),
                 action: UiAction::CommitDiscard,
             },
         ];
+
+        // Pause overlay.
+        self.pause_menu.draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
 
         SceneDrawOutput {
             instances,

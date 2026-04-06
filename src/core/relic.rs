@@ -57,12 +57,32 @@ impl RelicId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Rarity {
+    Common,
+    Uncommon,
+    Rare,
+    Legendary,
+}
+
+impl Rarity {
+    /// Weight for random selection (higher = more likely).
+    pub fn weight(self) -> u32 {
+        match self {
+            Rarity::Common => 4,
+            Rarity::Uncommon => 3,
+            Rarity::Rare => 2,
+            Rarity::Legendary => 1,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RelicDef {
     pub id: RelicId,
     pub name: &'static str,
-    #[allow(dead_code)]
     pub description: &'static str,
+    pub rarity: Rarity,
 }
 
 pub fn all_relic_defs() -> &'static [RelicDef] {
@@ -71,120 +91,160 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             id: RelicId::TripletBoost,
             name: "Triplet Boost",
             description: "Triplets score ×2",
+            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::SequenceSurge,
             name: "Sequence Surge",
-            description: "Sequences score +50%",
+            description: "Sequences score ×1.5",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::PairPower,
             name: "Pair Power",
             description: "Pairs score +10",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::HonorFury,
             name: "Honor Fury",
-            description: "Honor tiles +3 base points each in sets",
+            description: "Honor tiles +3 each in sets",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::BambooCharm,
             name: "Bamboo Charm",
-            description: "Bamboo tiles +2 points in any set",
+            description: "Bamboo tiles +2 in any set",
+            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::RedDragonRage,
             name: "Red Dragon Rage",
             description: "Red dragon triplets ×5",
+            rarity: Rarity::Legendary,
         },
         RelicDef {
             id: RelicId::GreenLuck,
             name: "Green Luck",
-            description: "Hands with no honors heal meta (stub)",
+            description: "Hands without honors earn +2 gold",
+            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::WhiteSilence,
             name: "White Silence",
-            description: "White dragon pairs worth double",
+            description: "White dragon pairs +5",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::JokerTile,
             name: "Joker Tile",
-            description: "Once per round: treat one tile as wild (stub)",
+            description: "Once per round: one tile acts as wild",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::Overflow,
             name: "Overflow",
-            description: "Duplicate tiles allowed in scoring (stub)",
+            description: "Wall contains 6 copies per tile instead of 4",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::QuickDraw,
             name: "Quick Draw",
-            description: "First draw each round is +1 tile (stub)",
+            description: "Draw +1 tile after your first play each round",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::ChainReaction,
             name: "Chain Reaction",
-            description: "+25% if you scored last turn (stub)",
+            description: "+25% score if you scored last turn",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::MultiplierMaster,
             name: "Multiplier Master",
             description: "+10% score per relic owned",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::SetMagnet,
             name: "Set Magnet",
-            description: "Completing a triplet draws attention (stub)",
+            description: "Scoring a triplet draws a matching tile",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::WildWinds,
             name: "Wild Winds",
-            description: "Winds count as same rank for triplets (stub)",
+            description: "Wind tiles can substitute in sequences",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::DragonEcho,
             name: "Dragon Echo",
-            description: "Dragon sets score twice (stub)",
+            description: "Dragon triplets add 50% of adjacent sets",
+            rarity: Rarity::Legendary,
         },
         RelicDef {
             id: RelicId::ReverseTile,
             name: "Reverse Tile",
-            description: "Once per round: swap two tiles in hand (stub)",
+            description: "Once per round: swap suit/rank of 2 tiles",
+            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::StealthTile,
             name: "Stealth Tile",
-            description: "One random tile is hidden from opponents (stub)",
+            description: "First discard ignores negative rule effects",
+            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::LockedSet,
             name: "Locked Set",
-            description: "Lock a completed set to protect it (stub)",
+            description: "Scored triplets lock for 3 turns (can't discard)",
+            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::LuckyPair,
             name: "Lucky Pair",
-            description: "Pairs have a chance to score triple (stub)",
+            description: "Pairs score ×1.5",
+            rarity: Rarity::Common,
         },
     ]
 }
 
 /// Active relics during a run (by id).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct RelicState {
     pub active: Vec<RelicId>,
+    pub max_slots: usize,
+}
+
+impl Default for RelicState {
+    fn default() -> Self {
+        Self {
+            active: Vec::new(),
+            max_slots: 5,
+        }
+    }
 }
 
 impl RelicState {
     pub fn has(&self, id: RelicId) -> bool {
         self.active.contains(&id)
     }
+
+    pub fn is_full(&self) -> bool {
+        self.active.len() >= self.max_slots
+    }
 }
 
 /// Scoring context for relic hooks.
 pub struct ScoreContext<'a> {
     pub relics: &'a RelicState,
+    /// Whether the player scored on their previous play (for ChainReaction).
+    pub scored_last_turn: bool,
+    /// Dora tile faces (suit, rank) that grant bonus points.
+    pub dora_faces: Vec<(Suit, u8)>,
+    /// Yaku patterns available at the player's progression level.
+    pub available_yaku: Vec<crate::core::yaku::YakuKind>,
 }
 
 pub fn triplet_multiplier(ctx: &ScoreContext) -> f64 {

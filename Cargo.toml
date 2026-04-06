@@ -22,6 +22,11 @@ thiserror = "2.0.18"
 tokio = "1.51.0"
 wgpu = "29.0.1"
 winit = "0.30.12"
+muda = "0.17.2"
+chrono = "0.4.44"
+arboard = "3.6.1"
+rodio = "0.19"
+rust-embed = { version = "8", features = ["include-exclude"] }
 
 [dev-dependencies]
 proptest = "1.6"

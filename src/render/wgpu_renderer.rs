@@ -1,8 +1,9 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
 use std::collections::HashMap;
-use std::path::Path;
+
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::Instant;
 
 use glam::Mat4;
@@ -16,7 +17,7 @@ use crate::render::decal::{
     load_noto_emoji_font, load_ui_font, rasterize_label, rasterize_tile_decal, tile_short_label,
     tile_suit_emoji,
 };
-use crate::render::tile_glb::{Vertex3dTex, load_glb_tile, normalize_mesh};
+use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -122,6 +123,8 @@ pub struct WgpuRenderer {
     // --- Text overlay pipeline ---
     text_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    // --- Image quad pipeline (full-colour textures for relic icons) ---
+    image_pipeline: wgpu::RenderPipeline,
     ui_font: Option<fontdue::Font>,
     emoji_font: Option<fontdue::Font>,
     pub size: winit::dpi::PhysicalSize<u32>,
@@ -139,15 +142,26 @@ pub struct WgpuRenderer {
     last_frame: Instant,
     /// Creation time — used as a stable reference for cyclic animations.
     creation_time: Instant,
-    /// Cached relic icon textures: loaded once at init, drawn via the text pipeline.
+    /// Cached relic icon textures, populated asynchronously from the loader thread.
     relic_textures: HashMap<RelicId, RelicTextureGpu>,
+    /// Receives decoded relic RGBA data from the background loader thread.
+    relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
 }
 
-/// Pre-loaded relic icon texture + bind group for the text pipeline.
+/// Pre-loaded relic icon texture + bind group for the image pipeline.
 struct RelicTextureGpu {
     #[allow(dead_code)]
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+}
+
+/// Decoded relic image data sent from the background loader thread.
+struct DecodedRelicImage {
+    id: RelicId,
+    name: &'static str,
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +222,60 @@ fn white_albedo(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::Texture, w
         1,
         1,
     )
+}
+
+/// Spawn a background thread that decodes all relic PNGs and sends the RGBA
+/// data back over a channel.  The main thread uploads to the GPU as results
+/// arrive (see `poll_relic_textures`).
+fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
+    use crate::core::relic::all_relic_defs;
+
+    let (tx, rx) = mpsc::channel();
+
+    // Collect the static data we need before moving into the thread.
+    let defs: Vec<(RelicId, &'static str, String)> = all_relic_defs()
+        .iter()
+        .map(|d| {
+            let asset_path = format!("relics/{}", d.id.asset_filename());
+            (d.id, d.name, asset_path)
+        })
+        .collect();
+
+    std::thread::Builder::new()
+        .name("relic-loader".into())
+        .spawn(move || {
+            for (id, name, asset_path) in defs {
+                let bytes = match crate::asset_path::get(&asset_path) {
+                    Some(file) => file.data.to_vec(),
+                    None => {
+                        log::warn!("relic icon not found in embedded assets: {asset_path}");
+                        continue;
+                    }
+                };
+                let img = match image::load_from_memory(&bytes) {
+                    Ok(img) => img.into_rgba8(),
+                    Err(e) => {
+                        log::warn!("failed to decode relic icon {asset_path}: {e}");
+                        continue;
+                    }
+                };
+                let (w, h) = img.dimensions();
+                let msg = DecodedRelicImage {
+                    id,
+                    name,
+                    rgba: img.into_raw(),
+                    width: w,
+                    height: h,
+                };
+                if tx.send(msg).is_err() {
+                    break; // receiver dropped, renderer shut down
+                }
+            }
+            log::info!("relic-loader thread finished");
+        })
+        .expect("failed to spawn relic-loader thread");
+
+    rx
 }
 
 fn create_depth(
@@ -443,8 +511,10 @@ impl WgpuRenderer {
                 ],
             });
 
-        let glb_path = crate::asset_path::assets_dir().join("Tile.glb");
-        let loaded_glb = load_glb_tile(&glb_path);
+        let loaded_glb = match crate::asset_path::get("Tile.glb") {
+            Some(file) => load_glb_tile_from_bytes(&file.data),
+            None => Err(anyhow::anyhow!("Tile.glb not found in embedded assets")),
+        };
 
         let tile_base_color_factor = loaded_glb
             .as_ref()
@@ -687,10 +757,44 @@ impl WgpuRenderer {
                 module: &text_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[vertex_layout, instance_layout],
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // ---- Image pipeline (full-colour textured quads for relic icons, etc.) ----
+        let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("image-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/image_quad.wgsl").into()),
+        });
+        let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("image-pipeline"),
+            layout: Some(&text_layout),
+            vertex: wgpu::VertexState {
+                module: &image_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout, instance_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &image_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -768,13 +872,8 @@ impl WgpuRenderer {
             }
         };
 
-        // Load relic icon PNGs into GPU textures.
-        let relic_textures = load_relic_textures(
-            &device,
-            &queue,
-            &text_bind_group_layout,
-            &tile_sampler,
-        );
+        // Kick off background relic image loading (non-blocking).
+        let relic_rx = Some(spawn_relic_loader());
 
         Ok(Self {
             surface,
@@ -799,6 +898,7 @@ impl WgpuRenderer {
             tile_mesh,
             text_pipeline,
             text_bind_group_layout,
+            image_pipeline,
             ui_font,
             emoji_font,
             size,
@@ -809,12 +909,60 @@ impl WgpuRenderer {
             tile_uids: Vec::new(),
             last_frame: Instant::now(),
             creation_time: Instant::now(),
+            relic_textures: HashMap::new(),
+            relic_rx,
         })
     }
 
     #[allow(dead_code)]
     pub fn has_tile_mesh(&self) -> bool {
         self.tile_mesh.is_some()
+    }
+
+    /// Drain any decoded relic images from the background loader and upload them
+    /// to the GPU.  Called once per frame; a no-op once all images are loaded.
+    fn poll_relic_textures(&mut self) {
+        let Some(ref rx) = self.relic_rx else { return };
+        let mut finished = false;
+        // Non-blocking drain: upload every image that's ready this frame.
+        loop {
+            match rx.try_recv() {
+                Ok(img) => {
+                    let (tex, view) = upload_rgba_texture(
+                        &self.device,
+                        &self.queue,
+                        img.name,
+                        &img.rgba,
+                        img.width,
+                        img.height,
+                    );
+                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(img.name),
+                        layout: &self.text_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                            },
+                        ],
+                    });
+                    self.relic_textures.insert(img.id, RelicTextureGpu { texture: tex, bind_group });
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            log::info!("all {} relic textures uploaded to GPU", self.relic_textures.len());
+            self.relic_rx = None; // drop the channel
+        }
     }
 
     /// Returns true while any tile animation (spin or lift lerp) is still running.
@@ -915,6 +1063,7 @@ impl WgpuRenderer {
     ///                    must match the length passed to `update_hand_tiles`.
     /// * `focus`        — index of the focused hand tile (gets a scale + lift boost).
     /// * `text_labels`  — text overlaid on top of UI quads (score, relics, etc.).
+    /// * `relic_icons`  — relic image quads drawn via pre-loaded textures.
     pub fn render(
         &mut self,
         instances: &[GpuInstance],
@@ -922,7 +1071,11 @@ impl WgpuRenderer {
         focus: usize,
         selected: &[bool],
         text_labels: &[TextLabel],
+        relic_icons: &[RelicIcon],
     ) -> anyhow::Result<()> {
+        // Upload any relic textures that finished decoding on the background thread.
+        self.poll_relic_textures();
+
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -1128,6 +1281,33 @@ impl WgpuRenderer {
             text_draws.extend(emoji_labels.iter().map(|lbl| make_text_draw(lbl, font)));
         }
 
+        // Relic icon instance buffers (use pre-loaded textures, not rasterized text).
+        struct RelicDraw {
+            inst_buf: wgpu::Buffer,
+            relic_id: RelicId,
+        }
+        let relic_draws: Vec<RelicDraw> = relic_icons
+            .iter()
+            .filter(|icon| self.relic_textures.contains_key(&icon.relic_id))
+            .map(|icon| {
+                let inst = GpuInstance {
+                    rect: icon.rect,
+                    color: [1.0, 1.0, 1.0, 1.0], // tint: white = no tint
+                };
+                let inst_buf = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("relic-icon-inst"),
+                        contents: bytemuck::cast_slice(&[inst]),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                RelicDraw {
+                    inst_buf,
+                    relic_id: icon.relic_id,
+                }
+            })
+            .collect();
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1194,6 +1374,19 @@ impl WgpuRenderer {
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..1);
             }
+
+            // 3. Draw relic icon images (pre-loaded textures, alpha-blended).
+            for rd in &relic_draws {
+                if let Some(rtex) = self.relic_textures.get(&rd.relic_id) {
+                    pass.set_pipeline(&self.image_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &rtex.bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, rd.inst_buf.slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1228,6 +1421,7 @@ pub fn build_instances_from_layout(
             offset_x: 0.0,
             offset_y: 0.0,
             scale: anim_scale_score,
+            opacity: 1.0,
         },
     );
     let mut v = vec![

@@ -5,6 +5,7 @@ use rand::seq::SliceRandom;
 
 use crate::core::tile::{Suit, Tile};
 
+
 /// Standard 136-tile wall (4× each tile, no flowers).
 pub fn build_wall() -> Vec<Tile> {
     let mut id = 0u32;
@@ -43,22 +44,63 @@ pub fn shuffle_wall(wall: &mut [Tile]) {
 pub struct Wall {
     tiles: Vec<Tile>,
     cursor: usize,
+    /// Dora indicator tiles (face determines which tiles are dora).
+    dora_indicators: Vec<Tile>,
 }
 
 impl Wall {
     pub fn new(mut tiles: Vec<Tile>) -> Self {
         shuffle_wall(&mut tiles);
-        Self { tiles, cursor: 0 }
+        // Last tile becomes the dora indicator.
+        let indicator = tiles.last().copied();
+        let dora_indicators = indicator.into_iter().collect();
+        Self {
+            tiles,
+            cursor: 0,
+            dora_indicators,
+        }
     }
 
     /// Create a wall from tiles without shuffling (for deterministic tests).
     #[allow(dead_code)]
     pub fn from_unshuffled(tiles: Vec<Tile>) -> Self {
-        Self { tiles, cursor: 0 }
+        let indicator = tiles.last().copied();
+        let dora_indicators = indicator.into_iter().collect();
+        Self {
+            tiles,
+            cursor: 0,
+            dora_indicators,
+        }
     }
 
     pub fn from_standard_shuffled() -> Self {
         Self::new(build_wall())
+    }
+
+    /// The tile faces that count as dora (one rank above each indicator, wrapping).
+    pub fn dora_faces(&self) -> Vec<(Suit, u8)> {
+        self.dora_indicators
+            .iter()
+            .map(|t| {
+                let next_rank = match t.suit {
+                    Suit::Characters | Suit::Bamboos | Suit::Circles => {
+                        if t.rank >= 9 { 1 } else { t.rank + 1 }
+                    }
+                    Suit::Wind => {
+                        if t.rank >= 4 { 1 } else { t.rank + 1 }
+                    }
+                    Suit::Dragon => {
+                        if t.rank >= 3 { 1 } else { t.rank + 1 }
+                    }
+                };
+                (t.suit, next_rank)
+            })
+            .collect()
+    }
+
+    /// The dora indicator tiles themselves (for UI display).
+    pub fn dora_indicator_tiles(&self) -> &[Tile] {
+        &self.dora_indicators
     }
 
     /// How many tiles remain in the wall.
@@ -73,6 +115,17 @@ impl Wall {
         let t = self.tiles[self.cursor];
         self.cursor += 1;
         Some(t)
+    }
+
+    /// Draw the first remaining tile matching the given suit and rank.
+    /// If found, swaps it to the cursor position and advances the cursor.
+    pub fn draw_matching(&mut self, suit: Suit, rank: u8) -> Option<Tile> {
+        let pos = self.tiles[self.cursor..]
+            .iter()
+            .position(|t| t.suit == suit && t.rank == rank)?;
+        let idx = self.cursor + pos;
+        self.tiles.swap(self.cursor, idx);
+        self.draw()
     }
 }
 
