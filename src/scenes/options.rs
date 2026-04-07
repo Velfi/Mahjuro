@@ -1,10 +1,11 @@
 //! Options scene — volume sliders and audio settings.
 
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 const OPT_MASTER: usize = 0;
 const OPT_MUSIC: usize = 1;
@@ -91,8 +92,10 @@ impl OptionsScene {
     fn hover_row(&self, cursor: (f32, f32)) -> Option<usize> {
         for (i, &(rx, ry, rw, rh)) in self.row_rects.iter().enumerate() {
             if rw > 0.0
-                && cursor.0 >= rx && cursor.0 <= rx + rw
-                && cursor.1 >= ry && cursor.1 <= ry + rh
+                && cursor.0 >= rx
+                && cursor.0 <= rx + rw
+                && cursor.1 >= ry
+                && cursor.1 <= ry + rh
             {
                 return Some(i);
             }
@@ -211,7 +214,7 @@ impl OptionsScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.06, 0.06, 0.10, 1.0],
+            color: color::OBSIDIAN,
         }];
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
@@ -222,7 +225,7 @@ impl OptionsScene {
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "Options".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         let row_w = (360.0 * scale).min(w * 0.75);
@@ -276,16 +279,12 @@ impl OptionsScene {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [slider_x, track_y, slider_w, track_h],
-                color: [0.08, 0.08, 0.14, 1.0],
+                color: color::OBSIDIAN,
             });
 
             // Slider fill.
             let fill_w = slider_w * value;
-            let fill_color = if is_focused {
-                [0.35, 0.65, 0.90, 1.0]
-            } else {
-                [0.22, 0.42, 0.62, 0.85]
-            };
+            let fill_color = if is_focused { color::GOLD } else { color::BRASS };
             instances.push(GpuInstance {
                 rect: [slider_x, track_y, fill_w, track_h],
                 color: fill_color,
@@ -295,11 +294,7 @@ impl OptionsScene {
             let knob_size = track_h * 2.5;
             let knob_x = slider_x + fill_w - knob_size * 0.5;
             let knob_y = track_y + (track_h - knob_size) * 0.5;
-            let knob_color = if is_focused {
-                [0.9, 0.9, 1.0, 1.0]
-            } else {
-                [0.6, 0.6, 0.7, 0.9]
-            };
+            let knob_color = if is_focused { color::CHAMPAGNE } else { color::PARCHMENT };
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: knob_color,
@@ -323,20 +318,12 @@ impl OptionsScene {
         // SFX toggle row.
         let toggle_y = menu_start_y + OPT_TOGGLE_SFX as f32 * (row_h + row_gap);
         let is_focused = self.cursor == OPT_TOGGLE_SFX;
-        let bg_color = if is_focused {
-            [0.20, 0.32, 0.50, 0.90]
-        } else {
-            [0.12, 0.15, 0.24, 0.75]
-        };
+        let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
         instances.push(GpuInstance {
             rect: [row_x, toggle_y, row_w, row_h],
             color: bg_color,
         });
-        let text_color = if is_focused {
-            [1.0, 1.0, 1.0, 1.0]
-        } else {
-            [0.6, 0.6, 0.7, 0.9]
-        };
+        let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
         text_labels.push(TextLabel {
             rect: [row_x, toggle_y, row_w, row_h],
             text: format!(
@@ -353,20 +340,12 @@ impl OptionsScene {
         // Smoke intensity row.
         let smoke_y = menu_start_y + OPT_SMOKE as f32 * (row_h + row_gap);
         let is_focused = self.cursor == OPT_SMOKE;
-        let bg_color = if is_focused {
-            [0.20, 0.32, 0.50, 0.90]
-        } else {
-            [0.12, 0.15, 0.24, 0.75]
-        };
+        let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
         instances.push(GpuInstance {
             rect: [row_x, smoke_y, row_w, row_h],
             color: bg_color,
         });
-        let text_color = if is_focused {
-            [1.0, 1.0, 1.0, 1.0]
-        } else {
-            [0.6, 0.6, 0.7, 0.9]
-        };
+        let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
         text_labels.push(TextLabel {
             rect: [row_x, smoke_y, row_w, row_h],
             text: format!("Smoke: {}", self.smoke_intensity.label()),
@@ -380,20 +359,12 @@ impl OptionsScene {
         // Back row.
         let back_y = menu_start_y + OPT_BACK as f32 * (row_h + row_gap);
         let is_focused = self.cursor == OPT_BACK;
-        let bg_color = if is_focused {
-            [0.25, 0.4, 0.6, 0.95]
-        } else {
-            [0.15, 0.18, 0.28, 0.85]
-        };
+        let bg_color = if is_focused { color::TWILIGHT } else { color::INDIGO };
         instances.push(GpuInstance {
             rect: [row_x, back_y, row_w, row_h],
             color: bg_color,
         });
-        let text_color = if is_focused {
-            [1.0, 1.0, 1.0, 1.0]
-        } else {
-            [0.6, 0.6, 0.7, 0.9]
-        };
+        let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
         text_labels.push(TextLabel {
             rect: [row_x, back_y, row_w, row_h],
             text: "Back".into(),
@@ -410,11 +381,12 @@ impl OptionsScene {
         text_labels.push(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Up/Down: navigate   Left/Right: adjust slider   Space: toggle/select".into(),
-            color: [0.4, 0.4, 0.5, 0.7],
+            color: color::SLATE,
         });
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -426,6 +398,10 @@ impl OptionsScene {
             window_title: "Mahjuro — Options".into(),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

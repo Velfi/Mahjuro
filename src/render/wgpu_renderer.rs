@@ -11,15 +11,22 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::core::relic::RelicId;
-use crate::scenes::BackgroundId;
 use crate::core::tile::{Suit, Tile};
 use crate::render::animation::apply_transform_rect;
+use crate::render::candle_mesh::{
+    CandlePlacement, WICK_TIP_Y, build_candle_wax_mesh, build_candle_wick_mesh,
+};
 use crate::render::decal::{
-    load_noto_emoji_font, load_ui_font, rasterize_label, rasterize_tile_decal, tile_short_label,
-    tile_suit_emoji,
+    load_noto_emoji_font, load_ui_font, rasterize_label, rasterize_tile_face_decal,
+    tile_short_label, tile_suit_emoji,
 };
 use crate::render::draw_cmd::{DrawCmd, UiFrame};
+use crate::render::lit_mesh::{
+    LitMeshGpu, LitMeshInstance, MaterialParams, create_lit_mesh_material_layout,
+};
+use crate::render::table_mesh::build_table_mesh;
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
+use crate::scenes::BackgroundId;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -44,11 +51,84 @@ pub struct GpuInstance {
     pub color: [f32; 4],
 }
 
+/// Maximum number of point lights uploaded each frame. Must match the array
+/// length in tile_3d.wgsl.
+pub const MAX_POINT_LIGHTS: usize = 8;
+
+/// CPU-side description of a point light. Scenes push these into
+/// [`crate::render::draw_cmd::UiFrame::point_lights`]; the renderer translates
+/// them into [`PointLightGpu`] each frame.
+#[derive(Clone, Copy, Debug)]
+pub struct PointLight {
+    /// World-space position of the light. The first two components match the
+    /// pixel-space coordinate system used for tile model matrices (with the
+    /// usual `y → -y` flip the renderer applies); `z` lets candle wicks sit in
+    /// front of the table plane so 3D meshes catch the light correctly.
+    pub pos: [f32; 3],
+    /// Falloff radius in pixels. Outside this distance the light contributes
+    /// nothing.
+    pub radius: f32,
+    /// Linear-space RGB tint.
+    pub color: [f32; 3],
+    /// Brightness multiplier. >1.0 is fine — the tile shader is unclamped.
+    pub intensity: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PointLightGpu {
+    /// xyz = world-space position, w = radius.
+    pos: [f32; 4],
+    /// rgb = colour, a = intensity.
+    color: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PointLightsBuf {
+    /// `count.x` = number of active lights; rest is std140 padding.
+    count: [u32; 4],
+    lights: [PointLightGpu; MAX_POINT_LIGHTS],
+}
+
+impl PointLightsBuf {
+    /// Build the std140 light buffer, mapping each light's pixel-space
+    /// `(x, y)` onto the table-plane world (`world_x = x - w/2`,
+    /// `world_z = y - h/2`). The third position component is treated as the
+    /// height above the table plane (`world_y`).
+    fn from_lights(src: &[PointLight], screen_w: f32, screen_h: f32) -> Self {
+        let mut lights = [PointLightGpu {
+            pos: [0.0; 4],
+            color: [0.0; 4],
+        }; MAX_POINT_LIGHTS];
+        let n = src.len().min(MAX_POINT_LIGHTS);
+        for (i, l) in src.iter().take(n).enumerate() {
+            let wx = l.pos[0] - screen_w * 0.5;
+            let wz = l.pos[1] - screen_h * 0.5;
+            let wy = l.pos[2];
+            lights[i] = PointLightGpu {
+                pos: [wx, wy, wz, l.radius],
+                color: [l.color[0], l.color[1], l.color[2], l.intensity],
+            };
+        }
+        Self {
+            count: [n as u32, 0, 0, 0],
+            lights,
+        }
+    }
+}
+
+/// One material slot of the tile mesh — vertex/index buffers + the primitive's
+/// own albedo texture.  A tile may consist of several of these (e.g. an ivory
+/// face primitive and a bamboo back primitive).
 #[allow(dead_code)]
-struct TileMeshGpu {
+struct TilePrimitiveGpu {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    albedo_texture: wgpu::Texture,
+    albedo_view: wgpu::TextureView,
+    base_color_factor: [f32; 4],
 }
 
 /// A relic icon to draw as a textured quad at a screen-space rect.
@@ -80,8 +160,9 @@ pub struct TextLabel {
 struct HandTileGpu {
     /// Written every frame with view_proj + model + base_color_factor.
     uniform_buffer: wgpu::Buffer,
-    /// Binds: uniform buffer · shared albedo · shared sampler · per-tile decal.
-    bind_group: wgpu::BindGroup,
+    /// One bind group per tile-mesh primitive.  Each binds the per-tile uniform
+    /// + per-tile decal + that primitive's own albedo texture.
+    bind_groups: Vec<wgpu::BindGroup>,
     /// Cached to skip re-rasterisation when the tile hasn't changed.
     tile_id: (Suit, u8),
     /// Main label (number or name) for the tile face.
@@ -105,8 +186,6 @@ struct DepartingTile {
     start_rect: [f32; 4],
     /// Velocity: (vx, vy) in pixels/sec. Positive Y = downward.
     velocity: (f32, f32),
-    /// Angular velocity for the "skip" rotation (radians/sec).
-    spin_speed: f32,
     /// Seconds elapsed since departure started.
     elapsed: f32,
     /// Total lifetime before the tile disappears.
@@ -123,16 +202,20 @@ pub struct WgpuRenderer {
     quad_pipeline: wgpu::RenderPipeline,
     tile_quad_pipeline: wgpu::RenderPipeline,
     light_beam_pipeline: wgpu::RenderPipeline,
+    flame_pipeline: wgpu::RenderPipeline,
     #[allow(dead_code)]
     tile_pipeline: wgpu::RenderPipeline,
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     tile_material_layout: wgpu::BindGroupLayout,
+    /// Per-frame point-light array uploaded to the tile pipeline (group 1).
+    point_lights_buffer: wgpu::Buffer,
+    point_lights_bind_group: wgpu::BindGroup,
     tile_sampler: wgpu::Sampler,
-    /// Shared albedo texture (from the GLB, or 1×1 white fallback).
-    #[allow(dead_code)]
-    tile_albedo_texture: wgpu::Texture,
-    tile_albedo_view: wgpu::TextureView,
+    /// Per-primitive GPU resources for the tile mesh (one entry per glTF
+    /// primitive, e.g. ivory face + bamboo body).
+    tile_primitives: Vec<TilePrimitiveGpu>,
+    /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
     hand_tiles: Vec<HandTileGpu>,
@@ -140,8 +223,6 @@ pub struct WgpuRenderer {
     vertex_buffer: wgpu::Buffer,
     #[allow(dead_code)]
     index_buffer: wgpu::Buffer,
-    #[allow(dead_code)]
-    tile_mesh: Option<TileMeshGpu>,
     // --- Text overlay pipeline ---
     text_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
@@ -166,6 +247,12 @@ pub struct WgpuRenderer {
     departing_tiles: Vec<DepartingTile>,
     /// Hand slots from the previous frame, used for departure animation positioning.
     prev_hand_slots: Vec<(f32, f32, f32, f32)>,
+    /// Per-tile screen-space rects after the perspective projection, captured
+    /// at the end of the previous frame. Indexed by hand position. Used by
+    /// the scene layer (one frame stale) so hover tooltips and other 2D HUD
+    /// overlays can anchor to the actual visible tile rather than its flat
+    /// layout slot.
+    last_projected_hand_rects: Vec<(usize, [f32; 4])>,
     /// Timestamp of the previous frame — used to compute delta time for lerping.
     last_frame: Instant,
     /// Creation time — used as a stable reference for cyclic animations.
@@ -180,6 +267,27 @@ pub struct WgpuRenderer {
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// GPU fluid simulation for atmospheric smoke effects (None if compute unsupported).
     pub fluid: Option<super::fluid::FluidSim>,
+
+    // ── Procedural lit meshes (candles + wood table) ────────────────────
+    /// Bind-group layout shared by every lit-mesh instance.
+    lit_mesh_material_layout: wgpu::BindGroupLayout,
+    /// Pipeline for procedural scene props (candles, table). Shares the
+    /// `point_lights_layout` (group 1) with the tile pipeline.
+    lit_mesh_pipeline: wgpu::RenderPipeline,
+    /// 1×1 white texture used as a placeholder albedo for procedural meshes
+    /// that don't sample from a texture.
+    #[allow(dead_code)]
+    lit_mesh_white_tex: wgpu::Texture,
+    lit_mesh_white_view: wgpu::TextureView,
+    /// Shared procedural meshes.
+    candle_wax_mesh: LitMeshGpu,
+    candle_wick_mesh: LitMeshGpu,
+    table_mesh: LitMeshGpu,
+    /// Pre-allocated per-candle uniform buffers + bind groups (one per
+    /// primitive). Indexed by candle slot, then 0=wax/1=wick.
+    candle_instances: Vec<[LitMeshInstance; 2]>,
+    /// Single uniform buffer + bind group for the gameplay-scene table.
+    table_instance: LitMeshInstance,
 }
 
 /// Pre-loaded relic icon texture + bind group for the image pipeline.
@@ -408,9 +516,11 @@ fn make_hand_tile_gpu(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-    albedo_view: &wgpu::TextureView,
+    primitives: &[TilePrimitiveGpu],
     sampler: &wgpu::Sampler,
     base_color_factor: [f32; 4],
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
 ) -> HandTileGpu {
     let identity = Mat4::IDENTITY;
@@ -424,46 +534,50 @@ fn make_hand_tile_gpu(
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    const DECAL_SIZE: u32 = 256;
-    let rgba = rasterize_tile_decal(tile, DECAL_SIZE);
-    let (decal_texture, decal_view) = upload_rgba_texture(
-        device,
-        queue,
-        "hand-tile-decal",
-        &rgba,
-        DECAL_SIZE,
-        DECAL_SIZE,
-    );
+    // The tile face is 0.734 wide × 1.0 tall in local coords (see tile_3d.wgsl
+    // — local Z is the short on-screen-horizontal axis, local X is the long
+    // on-screen-vertical axis). Match that aspect in the texture so the GPU
+    // stretching doesn't distort the rasterised glyphs.
+    const DECAL_W: u32 = 192;
+    const DECAL_H: u32 = 256;
+    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H);
+    let (decal_texture, decal_view) =
+        upload_rgba_texture(device, queue, "hand-tile-decal", &rgba, DECAL_W, DECAL_H);
 
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hand-tile-bg"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(albedo_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::TextureView(&decal_view),
-            },
-        ],
-    });
+    let bind_groups: Vec<wgpu::BindGroup> = primitives
+        .iter()
+        .map(|prim| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("hand-tile-bg"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&decal_view),
+                    },
+                ],
+            })
+        })
+        .collect();
 
     let symbol = tile_short_label(tile);
     let suit_emoji = tile_suit_emoji(tile).to_string();
     let suit_color = tile.suit_color();
     HandTileGpu {
         uniform_buffer,
-        bind_group,
+        bind_groups,
         tile_id: (tile.suit, tile.rank),
         symbol,
         suit_emoji,
@@ -588,6 +702,36 @@ impl WgpuRenderer {
             }],
         });
 
+        // Point-light uniform buffer + bind group (group 1 of the tile pipeline).
+        // Initialised empty; populated each frame from `frame.point_lights`.
+        let point_lights_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("point-lights"),
+            contents: bytemuck::bytes_of(&PointLightsBuf::from_lights(&[], 1.0, 1.0)),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let point_lights_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("point-lights-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let point_lights_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("point-lights-bg"),
+            layout: &point_lights_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: point_lights_buffer.as_entire_binding(),
+            }],
+        });
+
         let tile_material_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("tile-material-layout"),
@@ -636,25 +780,7 @@ impl WgpuRenderer {
             None => Err(anyhow::anyhow!("Tile.glb not found in embedded assets")),
         };
 
-        let tile_base_color_factor = loaded_glb
-            .as_ref()
-            .ok()
-            .and_then(|t| t.primitives.first())
-            .map(|p| p.base_color_factor)
-            .unwrap_or([1.0, 1.0, 1.0, 1.0]);
-
-        let (tile_albedo_texture, tile_albedo_view) = match &loaded_glb {
-            Ok(t)
-                if t.primitives
-                    .first()
-                    .map(|p| p.albedo_rgba.is_some())
-                    .unwrap_or(false) =>
-            {
-                let (rgba, w, h) = t.primitives[0].albedo_rgba.as_ref().unwrap();
-                upload_rgba_texture(&device, &queue, "tile-albedo", rgba, *w, *h)
-            }
-            _ => white_albedo(&device, &queue),
-        };
+        let tile_base_color_factor = [1.0_f32, 1.0, 1.0, 1.0];
 
         let tile_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("tile-sampler"),
@@ -671,7 +797,7 @@ impl WgpuRenderer {
 
         let tile_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("tile-pl"),
-            bind_group_layouts: &[Some(&tile_material_layout)],
+            bind_group_layouts: &[Some(&tile_material_layout), Some(&point_lights_layout)],
             immediate_size: 0,
         });
 
@@ -829,6 +955,57 @@ impl WgpuRenderer {
             cache: None,
         });
 
+        // Flame pipeline — additive procedural fire on a quad. Reuses
+        // quad_layout (only needs globals.time) and shares the unit-quad
+        // vertex/instance buffers with quad_pipeline.
+        let flame_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flame.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/flame.wgsl")).into(),
+            ),
+        });
+
+        let flame_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flame-pipeline"),
+            layout: Some(&quad_layout),
+            vertex: wgpu::VertexState {
+                module: &flame_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &flame_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    // Additive blend so flames brighten whatever's behind them.
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         let tile_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -876,7 +1053,69 @@ impl WgpuRenderer {
                 cull_mode: None,
                 ..Default::default()
             },
-            depth_stencil: Some(depth_3d),
+            depth_stencil: Some(depth_3d.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // ---- Lit-mesh pipeline (procedural candles + wood table) ----
+        let lit_mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("lit-mesh-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/lit_mesh.wgsl").into()),
+        });
+        let lit_mesh_material_layout = create_lit_mesh_material_layout(&device);
+        let lit_mesh_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lit-mesh-pl"),
+            bind_group_layouts: &[Some(&lit_mesh_material_layout), Some(&point_lights_layout)],
+            immediate_size: 0,
+        });
+        let lit_mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lit-mesh-pipeline"),
+            layout: Some(&lit_mesh_pl),
+            vertex: wgpu::VertexState {
+                module: &lit_mesh_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 12,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 24,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &lit_mesh_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_3d.clone()),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
@@ -1007,35 +1246,49 @@ impl WgpuRenderer {
         });
 
         let t0 = Instant::now();
-        let tile_mesh = match loaded_glb {
+        let tile_primitives: Vec<TilePrimitiveGpu> = match loaded_glb {
             Ok(mut mesh) => {
                 normalize_mesh(&mut mesh);
-                let prim = &mesh.primitives[0];
-                log::info!(
-                    "Loaded 3D tile: {} vertices, {} indices, base color tex: {}",
-                    prim.vertices.len(),
-                    prim.indices.len(),
-                    prim.albedo_rgba.is_some()
-                );
-                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tile-verts"),
-                    contents: bytemuck::cast_slice(&prim.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tile-idx"),
-                    contents: bytemuck::cast_slice(&prim.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-                Some(TileMeshGpu {
-                    vertex_buffer: vb,
-                    index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
-                })
+                log::info!("Loaded 3D tile: {} primitive(s)", mesh.primitives.len());
+                let mut out = Vec::with_capacity(mesh.primitives.len());
+                for (i, prim) in mesh.primitives.iter().enumerate() {
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tile-verts"),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tile-idx"),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let (albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture(&device, &queue, "tile-prim-albedo", rgba, *w, *h)
+                        }
+                        None => white_albedo(&device, &queue),
+                    };
+                    log::info!(
+                        "  prim {}: {} verts, {} idx, has_tex={}",
+                        i,
+                        prim.vertices.len(),
+                        prim.indices.len(),
+                        prim.albedo_rgba.is_some(),
+                    );
+                    out.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_texture,
+                        albedo_view,
+                        base_color_factor: prim.base_color_factor,
+                    });
+                }
+                out
             }
             Err(e) => {
                 log::warn!("Could not load Tile.glb (3D hand tiles disabled): {e:#}");
-                None
+                Vec::new()
             }
         };
 
@@ -1065,6 +1318,41 @@ impl WgpuRenderer {
             }
         };
 
+        // ---- Lit-mesh procedural geometry (candles + table) ----
+        let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
+        let candle_wick_mesh = LitMeshGpu::new(&device, &build_candle_wick_mesh(), "candle-wick");
+        let table_mesh = LitMeshGpu::new(&device, &build_table_mesh(), "table");
+
+        // Shared 1×1 white texture for procedural meshes that don't sample.
+        let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
+
+        // Pre-allocate four candle slots (matches the gameplay layout's
+        // four ambient candles). Each slot owns two instances: wax + wick.
+        const NUM_CANDLE_SLOTS: usize = 4;
+        let mut candle_instances: Vec<[LitMeshInstance; 2]> = Vec::with_capacity(NUM_CANDLE_SLOTS);
+        for _ in 0..NUM_CANDLE_SLOTS {
+            candle_instances.push([
+                LitMeshInstance::new(
+                    &device,
+                    &lit_mesh_material_layout,
+                    &lit_mesh_white_view,
+                    &tile_sampler,
+                ),
+                LitMeshInstance::new(
+                    &device,
+                    &lit_mesh_material_layout,
+                    &lit_mesh_white_view,
+                    &tile_sampler,
+                ),
+            ]);
+        }
+        let table_instance = LitMeshInstance::new(
+            &device,
+            &lit_mesh_material_layout,
+            &lit_mesh_white_view,
+            &tile_sampler,
+        );
+
         log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
         Ok(Self {
@@ -1077,18 +1365,19 @@ impl WgpuRenderer {
             quad_pipeline,
             tile_quad_pipeline,
             light_beam_pipeline,
+            flame_pipeline,
             tile_pipeline,
             globals_buffer,
             globals_bind_group,
             tile_material_layout,
+            point_lights_buffer,
+            point_lights_bind_group,
             tile_sampler,
-            tile_albedo_texture,
-            tile_albedo_view,
+            tile_primitives,
             tile_base_color_factor,
             hand_tiles: Vec::new(),
             vertex_buffer,
             index_buffer,
-            tile_mesh,
             text_pipeline,
             text_bind_group_layout,
             image_pipeline,
@@ -1103,6 +1392,7 @@ impl WgpuRenderer {
             tile_uids: Vec::new(),
             departing_tiles: Vec::new(),
             prev_hand_slots: Vec::new(),
+            last_projected_hand_rects: Vec::new(),
             last_frame: Instant::now(),
             creation_time: Instant::now(),
             relic_textures: HashMap::new(),
@@ -1110,12 +1400,21 @@ impl WgpuRenderer {
             background_textures: HashMap::new(),
             background_rx,
             fluid,
+            lit_mesh_material_layout,
+            lit_mesh_pipeline,
+            lit_mesh_white_tex,
+            lit_mesh_white_view,
+            candle_wax_mesh,
+            candle_wick_mesh,
+            table_mesh,
+            candle_instances,
+            table_instance,
         })
     }
 
     #[allow(dead_code)]
     pub fn has_tile_mesh(&self) -> bool {
-        self.tile_mesh.is_some()
+        !self.tile_primitives.is_empty()
     }
 
     /// Returns `true` while background asset loading (relic/background textures)
@@ -1155,7 +1454,13 @@ impl WgpuRenderer {
                             },
                         ],
                     });
-                    self.relic_textures.insert(img.id, RelicTextureGpu { texture: tex, bind_group });
+                    self.relic_textures.insert(
+                        img.id,
+                        RelicTextureGpu {
+                            texture: tex,
+                            bind_group,
+                        },
+                    );
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -1165,14 +1470,19 @@ impl WgpuRenderer {
             }
         }
         if finished {
-            log::info!("all {} relic textures uploaded to GPU", self.relic_textures.len());
+            log::info!(
+                "all {} relic textures uploaded to GPU",
+                self.relic_textures.len()
+            );
             self.relic_rx = None; // drop the channel
         }
     }
 
     /// Drain any decoded background images from the loader and upload to GPU.
     fn poll_background_textures(&mut self) {
-        let Some(ref rx) = self.background_rx else { return };
+        let Some(ref rx) = self.background_rx else {
+            return;
+        };
         let mut finished = false;
         loop {
             match rx.try_recv() {
@@ -1200,7 +1510,13 @@ impl WgpuRenderer {
                             },
                         ],
                     });
-                    self.background_textures.insert(img.id, BackgroundTextureGpu { texture: tex, bind_group });
+                    self.background_textures.insert(
+                        img.id,
+                        BackgroundTextureGpu {
+                            texture: tex,
+                            bind_group,
+                        },
+                    );
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -1210,7 +1526,10 @@ impl WgpuRenderer {
             }
         }
         if finished {
-            log::info!("all {} background textures uploaded to GPU", self.background_textures.len());
+            log::info!(
+                "all {} background textures uploaded to GPU",
+                self.background_textures.len()
+            );
             self.background_rx = None;
         }
     }
@@ -1232,7 +1551,19 @@ impl WgpuRenderer {
         let slide_active = self.tile_anim_y.iter().any(|&y| y.abs() > 0.5)
             || self.tile_anim_x.iter().any(|&x| x.abs() > 0.01);
         let departing_active = !self.departing_tiles.is_empty();
-        spin_active || lerp_active || slide_active || departing_active || !self.hand_tiles.is_empty()
+        spin_active
+            || lerp_active
+            || slide_active
+            || departing_active
+            || !self.hand_tiles.is_empty()
+    }
+
+    /// Per-hand-tile screen-space rects after the perspective projection,
+    /// captured at the end of the previous frame. Indexed by hand position.
+    /// Empty before the first frame is drawn — callers should fall back to
+    /// the flat layout slot rects in that case.
+    pub fn projected_hand_rects(&self) -> &[(usize, [f32; 4])] {
+        &self.last_projected_hand_rects
     }
 
     /// Ensure `hand_tiles` matches `tiles`.
@@ -1293,9 +1624,11 @@ impl WgpuRenderer {
                 &self.device,
                 &self.queue,
                 &self.tile_material_layout,
-                &self.tile_albedo_view,
+                &self.tile_primitives,
                 &self.tile_sampler,
                 self.tile_base_color_factor,
+                self.ui_font.as_ref(),
+                self.emoji_font.as_ref(),
                 tile,
             );
             if i < self.hand_tiles.len() {
@@ -1321,8 +1654,12 @@ impl WgpuRenderer {
         };
 
         for (order, &idx) in indices.iter().enumerate() {
-            let Some(htg) = self.hand_tiles.get(idx) else { continue };
-            let Some(&(sx, sy, sw, sh)) = self.prev_hand_slots.get(idx) else { continue };
+            let Some(htg) = self.hand_tiles.get(idx) else {
+                continue;
+            };
+            let Some(&(sx, sy, sw, sh)) = self.prev_hand_slots.get(idx) else {
+                continue;
+            };
 
             // Compute the tile rect (matching render logic).
             let tile_w = sw * 0.85;
@@ -1342,7 +1679,6 @@ impl WgpuRenderer {
                 suit_color: htg.suit_color,
                 start_rect: [tx, ty, tile_w, tile_h],
                 velocity: (vx, vy),
-                spin_speed: (2.0 + cheap_rand(&mut rng_seed) * 4.0) * if cheap_rand(&mut rng_seed) > 0.5 { 1.0 } else { -1.0 },
                 elapsed: -(order as f32) * 0.06, // stagger departures slightly
                 lifetime: depart_lifetime + cheap_rand(&mut rng_seed) * 0.3,
             });
@@ -1427,7 +1763,10 @@ impl WgpuRenderer {
 
         // Lerp per-tile slide animations toward 0 (ease-out).
         let now = Instant::now();
-        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32().min(0.05);
+        let dt = now
+            .saturating_duration_since(self.last_frame)
+            .as_secs_f32()
+            .min(0.05);
         self.last_frame = now;
         let slide_speed = draw_settle_speed; // higher = faster settle
         for y in self.tile_anim_y.iter_mut() {
@@ -1455,6 +1794,21 @@ impl WgpuRenderer {
             }),
         );
 
+        // Upload point lights for the tile shader (group 1). Scenes push
+        // candle/spot lights into `frame.point_lights` in pixel-layout
+        // coordinates; we map them onto the table-plane world for upload.
+        let pl_w = self.size.width.max(1) as f32;
+        let pl_h = self.size.height.max(1) as f32;
+        self.queue.write_buffer(
+            &self.point_lights_buffer,
+            0,
+            bytemuck::bytes_of(&PointLightsBuf::from_lights(
+                &frame.point_lights,
+                pl_w,
+                pl_h,
+            )),
+        );
+
         // Update departing tiles (skip-off-table animation).
         for tile in self.departing_tiles.iter_mut() {
             tile.elapsed += dt;
@@ -1466,57 +1820,238 @@ impl WgpuRenderer {
         // Save hand slots for next frame's departure animations.
         self.prev_hand_slots = hand_slots.to_vec();
 
-        // Build 2D tile quads and text labels for hand tiles.
+        // Build 2D backdrop quads (selection borders, hint pulses) and text
+        // labels (just the focused arrow — the symbol+emoji live in the 3D
+        // tile decal now).  Per-tile model matrices for the 3D mesh draw are
+        // also written here.
         let mut tile_quads: Vec<GpuInstance> = Vec::new();
-        let mut tile_labels: Vec<TextLabel> = Vec::new(); // main labels (UI font)
-        let mut emoji_labels: Vec<TextLabel> = Vec::new(); // suit emoji (Noto Emoji)
+        let mut tile_labels: Vec<TextLabel> = Vec::new();
+        let mut emoji_labels: Vec<TextLabel> = Vec::new();
+        let mut tile_3d_rects: Vec<(usize, [f32; 4])> = Vec::new();
+
+        // ── Person-at-the-table camera ──────────────────────────────────
+        // The 3D world is a horizontal table in the XZ plane (y=0). The
+        // player sits in front of the table (large +Z), eyes above the
+        // table, looking down and slightly forward. We map the layout's
+        // pixel coordinates onto the table's surface so the existing
+        // pixel-space layout still drives where things go:
+        //
+        //   world_x =  pixel_x - w * 0.5
+        //   world_z =  pixel_y - h * 0.5     (pixel y grows downward, so
+        //                                     bottom of screen → +z, near
+        //                                     player; top of screen → -z,
+        //                                     far edge of the table)
+        //   world_y =  height above the table (0 = sitting on the wood)
+        //
+        // The 2D UI overlays (score panel, buttons, text) keep using the
+        // pixel-orthographic quad pipeline and float over the 3D scene as
+        // a HUD.
+        let w = self.size.width.max(1) as f32;
+        let h = self.size.height.max(1) as f32;
+        let eye_height = h * 0.55;
+        let eye_back = h * 0.95;
+        let look_target = glam::Vec3::new(0.0, 0.0, -h * 0.10);
+        let cam_pos = glam::Vec3::new(0.0, eye_height, eye_back);
+        let view_mat = Mat4::look_at_rh(cam_pos, look_target, glam::Vec3::new(0.0, 1.0, 0.0));
+        let fov_y = 55.0_f32.to_radians();
+        let aspect = w / h;
+        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let view_proj = proj * view_mat;
+        let view_proj_arr = view_proj.to_cols_array();
+
+        // Helper: map a layout pixel position onto the table-plane world.
+        let pixel_to_world = |px: f32, py: f32, world_y: f32| -> glam::Vec3 {
+            glam::Vec3::new(px - w * 0.5, world_y, py - h * 0.5)
+        };
+        // Helper: project a world position to integer screen pixels for use
+        // in 2D overlay quads (selection halos, hint pulses, hover arrows).
+        let project_to_screen = |world: glam::Vec3| -> (f32, f32) {
+            let clip = view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
+            let inv_w = 1.0 / clip.w.max(1e-6);
+            let nx = clip.x * inv_w;
+            let ny = clip.y * inv_w;
+            let sx = (nx * 0.5 + 0.5) * w;
+            let sy = (1.0 - (ny * 0.5 + 0.5)) * h;
+            (sx, sy)
+        };
+
+        // ── Flame screen anchors ────────────────────────────────────────
+        // The flame is a 2D additive quad in screen-pixel space, but it
+        // needs to sit on top of a 3D candle wick whose screen position
+        // depends on the gameplay-camera projection. Walk the cmd list,
+        // find the CandleBatch, project each candle's wick tip with the
+        // same view_proj we just built, and produce per-candle flame
+        // rects (x, y, w, h) sized to match the candle's projected
+        // pixel height. The Flame batching loop below consumes these in
+        // order, overriding whatever the scene chose.
+        //
+        // We size the flame as a fraction of the *projected* candle
+        // height so far candles get a smaller flame than near ones — the
+        // perspective foreshortening is non-trivial because the four
+        // votives sit at noticeably different depths on the table.
+        let flame_anchors: Vec<[f32; 4]> = {
+            let mut out: Vec<[f32; 4]> = Vec::new();
+            for cmd in frame.cmds.iter() {
+                if let DrawCmd::CandleBatch(placements) = cmd {
+                    for p in placements.iter() {
+                        let base_world = pixel_to_world(p.world_pos[0], p.world_pos[1], 0.0);
+                        let tip_world = pixel_to_world(
+                            p.world_pos[0],
+                            p.world_pos[1],
+                            crate::render::candle_mesh::WICK_TIP_Y * p.scale,
+                        );
+                        let (bsx, bsy) = project_to_screen(base_world);
+                        let (tsx, tsy) = project_to_screen(tip_world);
+                        // Projected pixel height of the candle from base
+                        // to wick tip — used to scale the flame so it
+                        // matches the candle's perspective foreshortening.
+                        let candle_pix_h = (bsy - tsy).abs().max(1.0);
+                        // Flame proportions relative to the candle's
+                        // total projected height. These constants reproduce
+                        // the original ~46×28 flame on a ~150-tall candle
+                        // and scale gracefully with depth.
+                        let flame_h = candle_pix_h * 0.42;
+                        let flame_w = candle_pix_h * 0.26;
+                        // Anchor: flame *base* sits at the wick tip. The
+                        // shader maps `corner.y=1` to the bottom of the
+                        // rect, so base_y = rect.y + rect.w; solve for
+                        // rect.y = tip_sy - flame_h. Center horizontally
+                        // around the projected wick.
+                        let rect_x = tsx - flame_w * 0.5;
+                        let rect_y = tsy - flame_h;
+                        out.push([rect_x, rect_y, flame_w, flame_h]);
+                    }
+                    break; // assume only one candle batch per frame
+                }
+            }
+            out
+        };
+        let mut next_flame_anchor: usize = 0;
+
+        // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
+        //   local X — long face axis  (extent ~1.000) → table-Z (front-back)
+        //   local Z — short face axis (extent ~0.734) → table-X (left-right)
+        //   local Y — thickness        (extent ~0.424) → world Y (up off table)
+        //
+        // The new basis maps the mesh into a tile lying flat with its
+        // front face (+Y normal) pointing straight up at the camera.
+        const LOCAL_X_EXTENT: f32 = 1.000;
+        const LOCAL_Y_EXTENT: f32 = 0.424;
+        const LOCAL_Z_EXTENT: f32 = 0.734;
+        let tile_basis = Mat4::from_cols(
+            glam::Vec4::new(0.0, 0.0, 1.0, 0.0), // local X → world +Z (front-back)
+            glam::Vec4::new(0.0, 1.0, 0.0, 0.0), // local Y → world +Y (face up)
+            glam::Vec4::new(1.0, 0.0, 0.0, 0.0), // local Z → world +X (left-right)
+            glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
+        );
+
         {
-            for (i, htg) in self.hand_tiles.iter().enumerate() {
+            for (i, _htg) in self.hand_tiles.iter().enumerate() {
                 let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
                     continue;
                 };
                 let is_focused = i == focus;
                 let is_selected = selected.get(i).copied().unwrap_or(false);
-                // Add slide-in animation offsets.
                 let slide_y = self.tile_anim_y.get(i).copied().unwrap_or(0.0);
                 let slide_x_slots = self.tile_anim_x.get(i).copied().unwrap_or(0.0);
-                // Tile aspect ratio roughly 3:4 (width:height).
-                let tile_w = sw * 0.85;
-                let tile_h = tile_w * 1.33;
-                let tx = sx + (sw - tile_w) * 0.5 + slide_x_slots * sw;
-                let ty = sy + (sh - tile_h) * 0.5 + slide_y;
 
-                // Active/selected: golden border behind the tile.
+                // Tile face dimensions in pixel units (pre-projection). The
+                // long axis runs front-back on the table.
+                let tile_short_px = sw * 0.85; // left-right footprint on the table
+                let tile_long_px = tile_short_px * 1.33; // front-back footprint
+                let tile_thickness_px = tile_short_px * 0.34;
+
+                // Tile center in pixel-layout coords.
+                let cx_px = sx + sw * 0.5 + slide_x_slots * sw;
+                // The slide_y residual still pushes the tile back briefly
+                // for new-tile entry; in table-space that becomes a +z push
+                // (further from the player) which reads as the tile sliding
+                // in across the wood toward its final spot.
+                let cy_px = sy + sh * 0.5 + slide_y;
+
+                // World position: laid flat just above the table.
+                let world_y_lift = tile_thickness_px * 0.5 + 4.0;
+                let world = pixel_to_world(cx_px, cy_px, world_y_lift);
+
+                // Tilt rotation, computed once and reused for both the
+                // model matrix below and the overlay-anchor projection.
+                // Pivot is at the tile's bottom-front corner in world
+                // space (after basis * scale): bottom in world Y,
+                // front (toward camera) in world +Z.
+                let tilt_angle = 22.0_f32.to_radians();
+                let tilt_pivot = glam::Vec3::new(
+                    0.0,
+                    -tile_thickness_px * 0.5,
+                    tile_long_px * 0.5,
+                );
+                let tilt = Mat4::from_translation(tilt_pivot)
+                    * Mat4::from_rotation_x(tilt_angle)
+                    * Mat4::from_translation(-tilt_pivot);
+
+                // Helper: take a point expressed *relative to the tile
+                // center* (in world axes — z is front-back, y is up),
+                // tilt it, translate to the world tile position, and
+                // project to screen.
+                let tilted_to_screen = |local: glam::Vec3| -> (f32, f32) {
+                    let tilted = tilt.transform_point3(local);
+                    project_to_screen(world + tilted)
+                };
+
+                // Project the tile center to screen space so 2D overlay
+                // anchors (selection halo, hint pulse, hover arrow) follow
+                // the tile's actual on-screen position under the tilted
+                // camera.
+                let (proj_cx, proj_cy) = tilted_to_screen(glam::Vec3::ZERO);
+                // Project the back-top corner of the tile face so the
+                // overlay can be sized to match the foreshortened (and
+                // now tilted) tile footprint. The face is on the +Y
+                // side of the slab; the back edge is at -Z.
+                let corner_local = glam::Vec3::new(
+                    tile_short_px * 0.5,
+                    tile_thickness_px * 0.5,
+                    -tile_long_px * 0.5,
+                );
+                let (proj_corner_x, proj_corner_y) = tilted_to_screen(corner_local);
+                let proj_half_w = (proj_corner_x - proj_cx).abs().max(8.0);
+                let proj_half_h = (proj_corner_y - proj_cy).abs().max(8.0);
+                let overlay_w = proj_half_w * 2.0;
+                let overlay_h = proj_half_h * 2.0;
+                let overlay_x = proj_cx - proj_half_w;
+                let overlay_y = proj_cy - proj_half_h;
+
+                // Selection halo behind the 3D tile.
                 if is_selected {
-                    let pad = tile_w * 0.08;
+                    let pad = overlay_w * 0.08;
                     tile_quads.push(GpuInstance {
-                        rect: [tx - pad, ty - pad, tile_w + pad * 2.0, tile_h + pad * 2.0],
+                        rect: [
+                            overlay_x - pad,
+                            overlay_y - pad,
+                            overlay_w + pad * 2.0,
+                            overlay_h + pad * 2.0,
+                        ],
                         color: [0.9, 0.75, 0.2, 1.0],
                     });
                 }
 
-                // Tile quad — encode directional light hint via color when active.
-                let tile_color = if hint_indices.contains(&i) {
-                    let t = self.creation_time.elapsed().as_secs_f32();
-                    let pulse = (t * 1.5).sin() * 0.15 + 0.55;
-                    [0.3, 0.9, 0.4, pulse]
-                } else {
-                    [0.0, 0.0, 0.0, 1.0]
-                };
-                tile_quads.push(GpuInstance {
-                    rect: [tx, ty, tile_w, tile_h],
-                    color: tile_color,
-                });
+                // Hint tiles get a vertical light beam (built below) but no
+                // border-style halo — the rectangular halo reads as a
+                // selection indicator and confused which tiles are actually
+                // selected.
 
-                // Hover: bobbing red arrow above focused tile.
+                tile_3d_rects.push((i, [overlay_x, overlay_y, overlay_w, overlay_h]));
+
+                // Hover arrow above the focused tile (in screen space).
                 if is_focused {
-                    let bob_period = 1.5_f32; // seconds per full cycle
-                    let bob_amp = tile_h * 0.08;
-                    let bob_y = (self.creation_time.elapsed().as_secs_f32() / bob_period * std::f32::consts::TAU).sin() * bob_amp;
-                    let arrow_h = tile_h * 0.32;
-                    let arrow_w = tile_w * 0.65;
-                    let arrow_x = tx + (tile_w - arrow_w) * 0.5;
-                    let arrow_y = ty - arrow_h - tile_h * 0.05 + bob_y;
+                    let bob_period = 1.5_f32;
+                    let bob_amp = overlay_h * 0.08;
+                    let bob_y = (self.creation_time.elapsed().as_secs_f32() / bob_period
+                        * std::f32::consts::TAU)
+                        .sin()
+                        * bob_amp;
+                    let arrow_h = overlay_h * 0.32;
+                    let arrow_w = overlay_w * 0.65;
+                    let arrow_x = overlay_x + (overlay_w - arrow_w) * 0.5;
+                    let arrow_y = overlay_y - arrow_h - overlay_h * 0.05 + bob_y;
                     tile_labels.push(TextLabel {
                         rect: [arrow_x, arrow_y, arrow_w, arrow_h],
                         text: "▼".to_string(),
@@ -1524,45 +2059,50 @@ impl WgpuRenderer {
                     });
                 }
 
-                // Main label (number/name) in the upper portion, suit-colored.
-                let inset_x = tile_w * 0.10;
-                let top_h = tile_h * 0.50;
-                tile_labels.push(TextLabel {
-                    rect: [
-                        tx + inset_x,
-                        ty + tile_h * 0.05,
-                        tile_w - inset_x * 2.0,
-                        top_h,
-                    ],
-                    text: htg.symbol.clone(),
-                    color: htg.suit_color,
-                });
-
-                // Emoji suit indicator in the lower portion.
-                let bot_h = tile_h * 0.40;
-                emoji_labels.push(TextLabel {
-                    rect: [
-                        tx + inset_x,
-                        ty + tile_h * 0.55,
-                        tile_w - inset_x * 2.0,
-                        bot_h,
-                    ],
-                    text: htg.suit_emoji.clone(),
-                    color: htg.suit_color,
-                });
+                // Build the per-tile model matrix and write its uniform.
+                if let Some(htg) = self.hand_tiles.get(i) {
+                    let scale = glam::Vec3::new(
+                        tile_long_px / LOCAL_X_EXTENT, // local X (long) → world Z (front-back)
+                        tile_thickness_px / LOCAL_Y_EXTENT, // local Y → world Y (thickness)
+                        tile_short_px / LOCAL_Z_EXTENT, // local Z (short) → world X (left-right)
+                    );
+                    // `tilt` was computed above the projection block so
+                    // both the model matrix and the overlay anchors share
+                    // the same rotation.
+                    let model = Mat4::from_translation(world)
+                        * tilt
+                        * tile_basis
+                        * Mat4::from_scale(scale);
+                    self.queue.write_buffer(
+                        &htg.uniform_buffer,
+                        0,
+                        bytemuck::bytes_of(&CameraUniform {
+                            view_proj: view_proj_arr,
+                            model: model.to_cols_array(),
+                            base_color_factor: self.tile_base_color_factor,
+                        }),
+                    );
+                }
             }
         }
 
-        // Build light beam instances for hinted tiles.
+        // Snapshot the projected tile rects for the next frame's scene draw
+        // (used by hover tooltips and any other 2D HUD that needs to anchor
+        // to the actual visible tile).
+        self.last_projected_hand_rects = tile_3d_rects.clone();
+
+        // Build light beam instances for hinted tiles. Look up the (already
+        // arc-lifted) tile rect from `tile_3d_rects` so the beam stays
+        // anchored to the visible tile position rather than the flat slot.
         let mut light_beams: Vec<GpuInstance> = Vec::new();
         for &idx in hint_indices {
-            let Some(&(sx, sy, sw, sh)) = hand_slots.get(idx) else { continue };
-            let slide_y = self.tile_anim_y.get(idx).copied().unwrap_or(0.0);
-            let slide_x_slots = self.tile_anim_x.get(idx).copied().unwrap_or(0.0);
-            let tile_w = sw * 0.85;
-            let tile_h = tile_w * 1.33;
-            let tx = sx + (sw - tile_w) * 0.5 + slide_x_slots * sw;
-            let ty = sy + (sh - tile_h) * 0.5 + slide_y;
+            let Some(&(_, rect)) = tile_3d_rects.iter().find(|(i, _)| *i == idx) else {
+                continue;
+            };
+            let tx = rect[0];
+            let ty = rect[1];
+            let tile_w = rect[2];
+            let tile_h = rect[3];
             // Light beam quad: narrow cone extending upward from the tile.
             let beam_w = tile_w * 1.4;
             let beam_h = tile_h * 2.8;
@@ -1605,7 +2145,12 @@ impl WgpuRenderer {
             tile_labels.push(TextLabel {
                 rect: [sx + inset_x, sy + sh * 0.05, sw - inset_x * 2.0, top_h],
                 text: dep.symbol.clone(),
-                color: [dep.suit_color[0], dep.suit_color[1], dep.suit_color[2], alpha],
+                color: [
+                    dep.suit_color[0],
+                    dep.suit_color[1],
+                    dep.suit_color[2],
+                    alpha,
+                ],
             });
 
             // Suit emoji.
@@ -1613,7 +2158,12 @@ impl WgpuRenderer {
             emoji_labels.push(TextLabel {
                 rect: [sx + inset_x, sy + sh * 0.55, sw - inset_x * 2.0, bot_h],
                 text: dep.suit_emoji.clone(),
-                color: [dep.suit_color[0], dep.suit_color[1], dep.suit_color[2], alpha],
+                color: [
+                    dep.suit_color[0],
+                    dep.suit_color[1],
+                    dep.suit_color[2],
+                    alpha,
+                ],
             });
         }
 
@@ -1730,7 +2280,10 @@ impl WgpuRenderer {
 
         enum RenderOp {
             Background(BackgroundId),
+            Table,
+            CandleBatch(usize), // index into `candle_batches`
             QuadBatch { buf_idx: usize, count: u32 },
+            FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
             RelicIconDraw(usize),
             HandTileBackdrop,
@@ -1739,8 +2292,10 @@ impl WgpuRenderer {
         }
 
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut relic_draws: Vec<RelicDraw> = Vec::new();
+        let mut candle_batches: Vec<&[CandlePlacement]> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
 
         let mut i = 0;
@@ -1748,6 +2303,16 @@ impl WgpuRenderer {
             match &frame.cmds[i] {
                 DrawCmd::Background(id) => {
                     ops.push(RenderOp::Background(*id));
+                    i += 1;
+                }
+                DrawCmd::Table => {
+                    ops.push(RenderOp::Table);
+                    i += 1;
+                }
+                DrawCmd::CandleBatch(placements) => {
+                    let idx = candle_batches.len();
+                    candle_batches.push(placements.as_slice());
+                    ops.push(RenderOp::CandleBatch(idx));
                     i += 1;
                 }
                 DrawCmd::FluidSmoke => {
@@ -1779,6 +2344,35 @@ impl WgpuRenderer {
                     let buf_idx = quad_buffers.len();
                     quad_buffers.push(buf);
                     ops.push(RenderOp::QuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::Flame(_) => {
+                    // Collect contiguous run of Flame cmds into a single batch.
+                    // Each instance's screen-space rect is overridden with the
+                    // pre-projected wick anchor for the matching candle, so the
+                    // flame stays glued to the wick under camera perspective.
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::Flame(inst)) = frame.cmds.get(i) {
+                        let mut fixed = *inst;
+                        if let Some(anchor) = flame_anchors.get(next_flame_anchor) {
+                            fixed.rect = *anchor;
+                            next_flame_anchor += 1;
+                        }
+                        batch.push(fixed);
+                        i += 1;
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("flame-batch"),
+                            contents: bytemuck::cast_slice(&batch),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = flame_buffers.len();
+                    flame_buffers.push(buf);
+                    ops.push(RenderOp::FlameBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -1824,6 +2418,57 @@ impl WgpuRenderer {
             }
         }
 
+        // ── Update procedural lit-mesh uniforms (table + candles) ───────
+        // Written before the render pass begins, since the pass borrows
+        // `self` immutably.
+        let needs_table = ops.iter().any(|o| matches!(o, RenderOp::Table));
+        if needs_table {
+            // Horizontal table: the mesh is built in XY (normal +Z), so we
+            // rotate -90° around X to lay it flat with normal +Y. Then
+            // scale it big enough to comfortably exceed the visible
+            // foreshortened footprint of the table-plane region.
+            let table_w = w * 3.5;
+            let table_d = h * 3.5;
+            let model = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 0.0))
+                * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+                * Mat4::from_scale(glam::Vec3::new(table_w, table_d, 1.0));
+            self.table_instance.write_uniform(
+                &self.queue,
+                view_proj_arr,
+                model,
+                self.table_mesh.default_material,
+            );
+        }
+        // Candles: scenes pass `world_pos = (pixel_x, pixel_y, world_y_lift)`
+        // — we map pixel x/y onto the table plane and use world_y as the
+        // base height above the wood (usually 0 so the candle sits on it).
+        for batch in &candle_batches {
+            for (slot_i, placement) in batch.iter().enumerate() {
+                let Some(instances) = self.candle_instances.get(slot_i) else {
+                    break;
+                };
+                let base = pixel_to_world(
+                    placement.world_pos[0],
+                    placement.world_pos[1],
+                    placement.world_pos[2],
+                );
+                let model = Mat4::from_translation(base)
+                    * Mat4::from_scale(glam::Vec3::splat(placement.scale));
+                instances[0].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    self.candle_wax_mesh.default_material,
+                );
+                instances[1].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    self.candle_wick_mesh.default_material,
+                );
+            }
+        }
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1838,25 +2483,39 @@ impl WgpuRenderer {
 
         // Pre-create fluid fullscreen quad instance buffer (must outlive render pass).
         let fluid_inst = GpuInstance {
-            rect: [0.0, 0.0, self.size.width.max(1) as f32, self.size.height.max(1) as f32],
+            rect: [
+                0.0,
+                0.0,
+                self.size.width.max(1) as f32,
+                self.size.height.max(1) as f32,
+            ],
             color: [1.0, 1.0, 1.0, 1.0],
         };
-        let fluid_inst_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fluid-inst"),
-            contents: bytemuck::cast_slice(&[fluid_inst]),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let fluid_inst_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("fluid-inst"),
+                contents: bytemuck::cast_slice(&[fluid_inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         // Pre-create background image instance buffer (must outlive render pass).
         let bg_inst = GpuInstance {
-            rect: [0.0, 0.0, self.size.width.max(1) as f32, self.size.height.max(1) as f32],
+            rect: [
+                0.0,
+                0.0,
+                self.size.width.max(1) as f32,
+                self.size.height.max(1) as f32,
+            ],
             color: [1.0, 1.0, 1.0, 1.0],
         };
-        let bg_inst_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bg-inst"),
-            contents: bytemuck::cast_slice(&[bg_inst]),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let bg_inst_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bg-inst"),
+                contents: bytemuck::cast_slice(&[bg_inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1905,6 +2564,46 @@ impl WgpuRenderer {
                             pass.draw_indexed(0..6, 0, 0..1);
                         }
                     }
+                    RenderOp::Table => {
+                        pass.set_pipeline(&self.lit_mesh_pipeline);
+                        pass.set_bind_group(0, &self.table_instance.bind_group, &[]);
+                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.table_mesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            self.table_mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        pass.draw_indexed(0..self.table_mesh.index_count, 0, 0..1);
+                    }
+                    RenderOp::CandleBatch(batch_idx) => {
+                        let batch = candle_batches[*batch_idx];
+                        pass.set_pipeline(&self.lit_mesh_pipeline);
+                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        for (slot_i, _) in batch.iter().enumerate() {
+                            let Some(instances) = self.candle_instances.get(slot_i) else {
+                                break;
+                            };
+                            // Wax body.
+                            pass.set_bind_group(0, &instances[0].bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.candle_wax_mesh.vertex_buffer.slice(..));
+                            pass.set_index_buffer(
+                                self.candle_wax_mesh.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(0..self.candle_wax_mesh.index_count, 0, 0..1);
+                            // Wick.
+                            pass.set_bind_group(0, &instances[1].bind_group, &[]);
+                            pass.set_vertex_buffer(
+                                0,
+                                self.candle_wick_mesh.vertex_buffer.slice(..),
+                            );
+                            pass.set_index_buffer(
+                                self.candle_wick_mesh.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(0..self.candle_wick_mesh.index_count, 0, 0..1);
+                        }
+                    }
                     RenderOp::HandTileBackdrop => {
                         if let Some(ref lbb) = light_beam_buffer {
                             pass.set_pipeline(&self.light_beam_pipeline);
@@ -1918,6 +2617,8 @@ impl WgpuRenderer {
                             pass.draw_indexed(0..6, 0, 0..light_beams.len() as u32);
                         }
                         if let Some(ref tib) = tile_instance_buffer {
+                            // Halo/selection backdrop quads (drawn before the
+                            // 3D tile mesh so the tile sits on top of them).
                             pass.set_pipeline(&self.tile_quad_pipeline);
                             pass.set_bind_group(0, &self.globals_bind_group, &[]);
                             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -1927,6 +2628,32 @@ impl WgpuRenderer {
                                 wgpu::IndexFormat::Uint16,
                             );
                             pass.draw_indexed(0..6, 0, 0..tile_quads.len() as u32);
+                        }
+                        // 3D hand tiles: one draw per (tile, primitive).
+                        // Tiles in the GLB have multiple material slots
+                        // (e.g. ivory face + bamboo body); draw each.
+                        if !self.tile_primitives.is_empty() {
+                            pass.set_pipeline(&self.tile_pipeline);
+                            // Point lights (group 1) are the same for every
+                            // tile this frame — bind once outside the loop.
+                            pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                            for (i, _) in &tile_3d_rects {
+                                let Some(htg) = self.hand_tiles.get(*i) else {
+                                    continue;
+                                };
+                                for (pi, prim) in self.tile_primitives.iter().enumerate() {
+                                    let Some(bg) = htg.bind_groups.get(pi) else {
+                                        continue;
+                                    };
+                                    pass.set_bind_group(0, bg, &[]);
+                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                                    pass.set_index_buffer(
+                                        prim.index_buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                                }
+                            }
                         }
                     }
                     RenderOp::FluidSmoke => {
@@ -1961,6 +2688,17 @@ impl WgpuRenderer {
                         pass.set_bind_group(0, &self.globals_bind_group, &[]);
                         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, quad_buffers[*buf_idx].slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        pass.draw_indexed(0..6, 0, 0..*count);
+                    }
+                    RenderOp::FlameBatch { buf_idx, count } => {
+                        pass.set_pipeline(&self.flame_pipeline);
+                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, flame_buffers[*buf_idx].slice(..));
                         pass.set_index_buffer(
                             self.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
@@ -2015,18 +2753,35 @@ impl WgpuRenderer {
 /// slot quads.
 pub fn build_instances_from_layout(
     score: (f32, f32, f32, f32),
-    modifier: (f32, f32, f32, f32),
+    _modifier: (f32, f32, f32, f32),
     anim_scale_score: f32,
     plays: u32,
     plays_max: u32,
     discards: u32,
     discards_max: u32,
 ) -> Vec<GpuInstance> {
-    let (sx, sy, sw, sh) = apply_transform_rect(
-        score.0,
-        score.1,
-        score.2,
-        score.3,
+    use crate::render::theme::color as themec;
+
+    // The 3D table + candles are the visual centerpiece. The score panel and
+    // modifier strip do NOT draw full-width opaque cartouches that would
+    // obscure the 3D scene — instead the score cartouche is a narrow
+    // centered pill, and the modifier strip skips its background entirely
+    // so the candles + table show through.
+    let (sx, sy, sw, sh) = (score.0, score.1, score.2, score.3);
+    let mut v: Vec<GpuInstance> = Vec::new();
+
+    // Centered score cartouche — ~38% of the strip width with the panel's
+    // animation scale-pop applied. Translucent indigo so the background
+    // bleeds through softly.
+    let cart_w = sw * 0.38;
+    let cart_h = sh * 0.78;
+    let cart_x_base = sx + (sw - cart_w) * 0.5;
+    let cart_y_base = sy + (sh - cart_h) * 0.5;
+    let (cx, cy, cw, ch) = apply_transform_rect(
+        cart_x_base,
+        cart_y_base,
+        cart_w,
+        cart_h,
         crate::render::animation::Transform2D {
             offset_x: 0.0,
             offset_y: 0.0,
@@ -2034,21 +2789,31 @@ pub fn build_instances_from_layout(
             opacity: 1.0,
         },
     );
-    let mut v = vec![
-        GpuInstance {
-            rect: [sx, sy, sw, sh],
-            color: [0.15, 0.35, 0.55, 0.95],
-        },
-        GpuInstance {
-            rect: [modifier.0, modifier.1, modifier.2, modifier.3],
-            color: [0.25, 0.22, 0.35, 0.95],
-        },
-    ];
+    v.push(GpuInstance {
+        rect: [cx, cy, cw, ch],
+        color: themec::alpha(themec::MIDNIGHT, 0.78),
+    });
+    let bt = (ch * 0.025).clamp(1.0, 3.0);
+    v.push(GpuInstance {
+        rect: [cx, cy, cw, bt],
+        color: themec::GOLD,
+    });
+    v.push(GpuInstance {
+        rect: [cx, cy + ch - bt, cw, bt],
+        color: themec::GOLD,
+    });
+    v.push(GpuInstance {
+        rect: [cx, cy + bt, bt, ch - 2.0 * bt],
+        color: themec::GOLD,
+    });
+    v.push(GpuInstance {
+        rect: [cx + cw - bt, cy + bt, bt, ch - 2.0 * bt],
+        color: themec::GOLD,
+    });
 
-    // Pip indicators — two rows on the right side of the score panel.
-    // Row 1: plays (teal squares). Row 2: discards (orange squares).
-    // Sizes scale with the score panel height so proportions stay constant.
-    let pip = (score.3 * 0.22).clamp(8.0, 28.0);
+    // Pip indicators — two stacked rows of jade/amber pills floating at the
+    // right edge of the logical score-panel region (NOT over the cartouche).
+    let pip = (sh * 0.22).clamp(8.0, 28.0);
     let gap = pip * 0.25;
     let margin = pip * 0.9;
     let row_gap = pip * 0.3;
@@ -2057,7 +2822,6 @@ pub fn build_instances_from_layout(
     let row1_y = sy + (sh - total_h) * 0.5;
     let row2_y = row1_y + pip + row_gap;
 
-    // Plays row (right-aligned).
     let plays_row_w = plays_max as f32 * pip + (plays_max.saturating_sub(1)) as f32 * gap;
     let plays_x0 = sx + sw - margin - plays_row_w;
     for i in 0..plays_max {
@@ -2066,14 +2830,13 @@ pub fn build_instances_from_layout(
         v.push(GpuInstance {
             rect: [x, row1_y, pip, pip],
             color: if filled {
-                [0.20, 0.72, 0.58, 1.0]
+                themec::JADE
             } else {
-                [0.10, 0.22, 0.20, 0.55]
+                themec::alpha(themec::JADE, 0.25)
             },
         });
     }
 
-    // Discards row (right-aligned to same right edge).
     let disc_row_w = discards_max as f32 * pip + (discards_max.saturating_sub(1)) as f32 * gap;
     let disc_x0 = sx + sw - margin - disc_row_w;
     for i in 0..discards_max {
@@ -2082,9 +2845,9 @@ pub fn build_instances_from_layout(
         v.push(GpuInstance {
             rect: [x, row2_y, pip, pip],
             color: if filled {
-                [0.92, 0.55, 0.18, 1.0]
+                themec::AMBER
             } else {
-                [0.30, 0.18, 0.08, 0.55]
+                themec::alpha(themec::AMBER, 0.25)
             },
         });
     }
@@ -2099,15 +2862,17 @@ pub fn build_instances_relic_pick(
     hand_slots: &[(f32, f32, f32, f32)],
     cursor: usize,
 ) -> Vec<GpuInstance> {
+    use crate::render::theme::color as themec;
     let mut v = Vec::new();
 
+    // Score panel hero cartouche.
     v.push(GpuInstance {
         rect: [score.0, score.1, score.2, score.3],
-        color: [0.15, 0.35, 0.55, 0.95],
+        color: themec::TWILIGHT,
     });
     v.push(GpuInstance {
         rect: [modifier.0, modifier.1, modifier.2, modifier.3],
-        color: [0.25, 0.22, 0.35, 0.95],
+        color: themec::INDIGO,
     });
 
     // Place the 3 choice quads centred in the hand strip, each ~4 tile-widths wide.
@@ -2117,14 +2882,45 @@ pub fn build_instances_relic_pick(
             .get(slot_idx)
             .or_else(|| hand_slots.get(choice_idx));
         if let Some(&(x, y, w, h)) = slot {
-            let color = if choice_idx == cursor {
-                [0.9, 0.75, 0.2, 1.0]
+            // Faint gold halo around the focused choice.
+            if choice_idx == cursor {
+                let halo = h * 0.04;
+                v.push(GpuInstance {
+                    rect: [x - halo, y - halo, w + halo * 2.0, h + halo * 2.0],
+                    color: themec::alpha(themec::GOLD, 0.5),
+                });
+            }
+            let bg = if choice_idx == cursor {
+                themec::TWILIGHT
             } else {
-                [0.3, 0.3, 0.5, 0.95]
+                themec::DUSK
             };
             v.push(GpuInstance {
                 rect: [x, y, w, h],
-                color,
+                color: bg,
+            });
+            // Gold inset border.
+            let bt = (h * 0.025).clamp(1.0, 3.0);
+            let border = if choice_idx == cursor {
+                themec::GOLD
+            } else {
+                themec::BRASS
+            };
+            v.push(GpuInstance {
+                rect: [x, y, w, bt],
+                color: border,
+            });
+            v.push(GpuInstance {
+                rect: [x, y + h - bt, w, bt],
+                color: border,
+            });
+            v.push(GpuInstance {
+                rect: [x, y + bt, bt, h - 2.0 * bt],
+                color: border,
+            });
+            v.push(GpuInstance {
+                rect: [x + w - bt, y + bt, bt, h - 2.0 * bt],
+                color: border,
             });
         }
     }

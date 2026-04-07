@@ -135,7 +135,12 @@ impl TuningOverlay {
         // Panel border.
         let border = 3.0;
         instances.push(GpuInstance {
-            rect: [panel_x - border, panel_y - border, panel_w + border * 2.0, panel_h + border * 2.0],
+            rect: [
+                panel_x - border,
+                panel_y - border,
+                panel_w + border * 2.0,
+                panel_h + border * 2.0,
+            ],
             color: [0.3, 0.45, 0.7, 0.8],
         });
         // Re-draw panel on top of border.
@@ -156,20 +161,26 @@ impl TuningOverlay {
         // Timing diagram.
         let diag_pad = 12.0 * scale;
         instances.push(GpuInstance {
-            rect: [panel_x + diag_pad, cursor_y, panel_w - diag_pad * 2.0, diagram_h],
+            rect: [
+                panel_x + diag_pad,
+                cursor_y,
+                panel_w - diag_pad * 2.0,
+                diagram_h,
+            ],
             color: [0.06, 0.06, 0.10, 0.9],
         });
         // Draw timeline segments proportional to actual values.
-        let total_ms = self.tuning.base_hold_ms + self.tuning.step_hold_ms * 2 + self.tuning.total_hold_ms;
+        let total_ms =
+            self.tuning.base_hold_ms + self.tuning.step_hold_ms * 2 + self.tuning.total_hold_ms;
         let bar_x = panel_x + diag_pad + 8.0 * scale;
         let bar_w = panel_w - diag_pad * 2.0 - 16.0 * scale;
         let bar_h = (16.0 * scale).max(10.0);
         let bar_y = cursor_y + diagram_h * 0.35;
         let colors: [[f32; 4]; 4] = [
-            [0.35, 0.65, 0.90, 0.9],  // base hold (blue)
-            [0.55, 0.80, 0.45, 0.9],  // step 1 (green)
-            [0.45, 0.70, 0.35, 0.9],  // step 2 (green darker)
-            [0.90, 0.75, 0.30, 0.9],  // total hold (gold)
+            [0.35, 0.65, 0.90, 0.9], // base hold (blue)
+            [0.55, 0.80, 0.45, 0.9], // step 1 (green)
+            [0.45, 0.70, 0.35, 0.9], // step 2 (green darker)
+            [0.90, 0.75, 0.30, 0.9], // total hold (gold)
         ];
         let segments: [u64; 4] = [
             self.tuning.base_hold_ms,
@@ -197,15 +208,28 @@ impl TuningOverlay {
         }
         // Diagram title.
         labels.push(TextLabel {
-            rect: [panel_x + diag_pad, cursor_y + 2.0, panel_w - diag_pad * 2.0, diagram_h * 0.28],
+            rect: [
+                panel_x + diag_pad,
+                cursor_y + 2.0,
+                panel_w - diag_pad * 2.0,
+                diagram_h * 0.28,
+            ],
             text: "Timeline: Base > Steps (x N) > Total".into(),
             color: [0.6, 0.6, 0.7, 0.8],
         });
         // Tick duration annotation.
         let tick_label_y = bar_y + bar_h + 4.0 * scale;
         labels.push(TextLabel {
-            rect: [panel_x + diag_pad, tick_label_y, panel_w - diag_pad * 2.0, diagram_h * 0.25],
-            text: format!("Score counter ticks over {}ms per phase", self.tuning.tick_duration_ms),
+            rect: [
+                panel_x + diag_pad,
+                tick_label_y,
+                panel_w - diag_pad * 2.0,
+                diagram_h * 0.25,
+            ],
+            text: format!(
+                "Score counter ticks over {}ms per phase",
+                self.tuning.tick_duration_ms
+            ),
             color: [0.5, 0.5, 0.6, 0.7],
         });
 
@@ -217,13 +241,41 @@ impl TuningOverlay {
         let value_w = panel_w * 0.18;
 
         let rows: [(&str, &str, u64); 7] = [
-            ("Base Hold", "Pause on base points before steps begin", self.tuning.base_hold_ms),
-            ("Step Hold", "Pause per relic/rule multiplier step", self.tuning.step_hold_ms),
-            ("Total Hold", "Pause on final total before resuming play", self.tuning.total_hold_ms),
-            ("Tick Duration", "Speed of the score counter tick-up animation", self.tuning.tick_duration_ms),
-            ("Discard Speed", "How long discarded tiles float away", self.tuning.depart_lifetime_ms),
-            ("Draw Speed", "How long drawn tiles take to settle in", self.tuning.draw_settle_ms),
-            ("Sort/Drag Speed", "How long sort and drag-reorder animations take", self.tuning.sort_settle_ms),
+            (
+                "Base Hold",
+                "Pause on base points before steps begin",
+                self.tuning.base_hold_ms,
+            ),
+            (
+                "Step Hold",
+                "Pause per relic/rule multiplier step",
+                self.tuning.step_hold_ms,
+            ),
+            (
+                "Total Hold",
+                "Pause on final total before resuming play",
+                self.tuning.total_hold_ms,
+            ),
+            (
+                "Tick Duration",
+                "Speed of the score counter tick-up animation",
+                self.tuning.tick_duration_ms,
+            ),
+            (
+                "Discard Speed",
+                "How long discarded tiles float away",
+                self.tuning.depart_lifetime_ms,
+            ),
+            (
+                "Draw Speed",
+                "How long drawn tiles take to settle in",
+                self.tuning.draw_settle_ms,
+            ),
+            (
+                "Sort/Drag Speed",
+                "How long sort and drag-reorder animations take",
+                self.tuning.sort_settle_ms,
+            ),
         ];
 
         for (i, (name, desc, value)) in rows.iter().enumerate() {
@@ -255,7 +307,12 @@ impl TuningOverlay {
 
             // Description below label.
             labels.push(TextLabel {
-                rect: [panel_x + 12.0 * scale, row_y + row_h * 0.75, label_w + slider_w, desc_h],
+                rect: [
+                    panel_x + 12.0 * scale,
+                    row_y + row_h * 0.75,
+                    label_w + slider_w,
+                    desc_h,
+                ],
                 text: desc.to_string(),
                 color: [0.45, 0.45, 0.55, 0.7],
             });
@@ -288,7 +345,11 @@ impl TuningOverlay {
             let knob_y = track_y + (track_h - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused { [0.9, 0.9, 1.0, 1.0] } else { [0.6, 0.6, 0.7, 0.9] },
+                color: if is_focused {
+                    [0.9, 0.9, 1.0, 1.0]
+                } else {
+                    [0.6, 0.6, 0.7, 0.9]
+                },
             });
 
             // Value text.
@@ -315,7 +376,11 @@ impl TuningOverlay {
         labels.push(TextLabel {
             rect: [panel_x, export_y, panel_w, row_h],
             text: "Export as JSON".into(),
-            color: if is_focused { [1.0, 1.0, 1.0, 1.0] } else { [0.6, 0.6, 0.7, 0.9] },
+            color: if is_focused {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.6, 0.6, 0.7, 0.9]
+            },
         });
 
         // Hint.
@@ -384,6 +449,10 @@ struct App {
     cascade_tuning: CascadeTuning,
     /// Tuning overlay (None = closed).
     tuning_overlay: Option<TuningOverlay>,
+    /// Round-end events held until the active scoring cascade finishes.
+    /// Lets the player watch the winning cascade play out before the
+    /// Results / GameOver scene fades in.
+    deferred_round_end: Option<GameEvent>,
 }
 
 impl App {
@@ -425,6 +494,7 @@ impl App {
             close_saved: false,
             modals: ModalQueue::default(),
             pending_post_game_over_modals: Vec::new(),
+            deferred_round_end: None,
             debug_menu: None,
             smoke_intensity: settings.smoke_intensity,
             prev_cursor: (0.0, 0.0),
@@ -451,6 +521,64 @@ impl App {
         let _ = persistence::save_settings(&settings);
     }
 
+    /// Process a `RoundComplete` or `GameOver` event that was held while the
+    /// scoring cascade was still playing. Pushes celebration modals, plays the
+    /// appropriate sting, and queues the next scene.
+    fn handle_round_end_event(&mut self, ev: GameEvent) {
+        let win_size = self
+            .window
+            .as_ref()
+            .map(|w| w.inner_size())
+            .unwrap_or(PhysicalSize::new(800, 600));
+        let ww = win_size.width as f32;
+        let wh = win_size.height as f32;
+        match ev {
+            GameEvent::RoundComplete { .. } => {
+                self.audio.play_sfx(audio::SfxId::RoundWin);
+                let modal = Modal::new(
+                    "Round Complete!",
+                    format!(
+                        "Score: {} / {}  —  Well played!",
+                        self.run.round_score, self.run.target_score
+                    ),
+                    ModalTheme::Success,
+                )
+                .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
+                self.modals.push(modal);
+                let count = self.run.blind.relic_choices();
+                let available = self.progress.available_relics();
+                let choices = pick_relic_choices(&self.run.relics, count, &available);
+                self.pending_scene = Some(Scene::Results(ResultsScene::new(choices)));
+                self.transition_alpha = 1.0;
+            }
+            GameEvent::GameOver { .. } => {
+                self.progress.runs_completed += 1;
+                self.progress.record_score(self.run.round_score);
+                let level_up = self.progress.check_level_up();
+                let _ = persistence::save_profile(self.active_profile, &self.progress);
+
+                if let Some(level) = level_up {
+                    log::info!("Level up! Now level {}", level);
+                    let modal = Modal::new(
+                        format!("Level Up! — Level {}", level),
+                        "New content unlocked!",
+                        ModalTheme::Success,
+                    )
+                    .with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
+                    self.pending_post_game_over_modals.push(modal);
+                }
+
+                self.audio.play_sfx(audio::SfxId::GameOver);
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
+                    self.run.round_score,
+                    self.run.target_score,
+                )));
+                self.transition_alpha = 1.0;
+            }
+            _ => {}
+        }
+    }
+
     fn draw(&mut self) {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -473,14 +601,19 @@ impl App {
             progress: &self.progress,
             active_profile: self.active_profile,
             game_in_progress: self.run.is_in_progress(),
+            projected_hand_rects: renderer.projected_hand_rects(),
         };
         let output = self.scene.draw(ctx);
 
         win.set_title(&output.window_title);
-        self.active_buttons = output.buttons.iter().map(|b| ButtonDef {
-            rect: b.rect,
-            action: b.action,
-        }).collect();
+        self.active_buttons = output
+            .buttons
+            .iter()
+            .map(|b| ButtonDef {
+                rect: b.rect,
+                action: b.action,
+            })
+            .collect();
 
         // Spawn departure animations before updating hand tiles (old data still in renderer).
         if !output.departing_indices.is_empty() {
@@ -537,8 +670,7 @@ impl App {
 
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.tuning_overlay {
-            let (tuning_insts, tuning_labels) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (tuning_insts, tuning_labels) = overlay.draw(size.width as f32, size.height as f32);
             frame.quads(tuning_insts);
             frame.texts(tuning_labels);
             self.active_buttons.clear(); // Block scene buttons.
@@ -546,8 +678,7 @@ impl App {
 
         // Tooltip overlay — pushed *after* modals/tuning so it sits on top
         // of all scene/modal content. Disabled on overlay screens like Options.
-        let skip_tooltips =
-            self.modals.is_active() || matches!(&self.scene, Scene::Options(_));
+        let skip_tooltips = self.modals.is_active() || matches!(&self.scene, Scene::Options(_));
         if !skip_tooltips {
             let cursor = self
                 .input
@@ -609,9 +740,6 @@ impl App {
     }
 
     fn handle_debug_action(&mut self, action: DebugAction) {
-        use crate::core::tile::Suit;
-        use crate::game::game_mode::CardEntry;
-
         match action {
             DebugAction::SetLevel(level) => {
                 // Set runs_completed to the minimum value for this level.
@@ -655,43 +783,6 @@ impl App {
             DebugAction::ClearRelics => {
                 self.run.relics.active.clear();
                 log::info!("[Debug] Cleared all relics");
-            }
-            DebugAction::SetCardInventoryStandard => {
-                self.run.mode.card_inventory = None;
-                log::info!("[Debug] Card inventory set to Standard (136 tiles)");
-            }
-            DebugAction::SetCardInventoryNumbersOnly => {
-                let mut entries = Vec::new();
-                for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
-                    for rank in 1..=9 {
-                        entries.push(CardEntry {
-                            suit,
-                            rank,
-                            copies: 4,
-                        });
-                    }
-                }
-                self.run.mode.card_inventory = Some(entries);
-                log::info!("[Debug] Card inventory set to Numbers Only");
-            }
-            DebugAction::SetCardInventoryHonorsOnly => {
-                let mut entries = Vec::new();
-                for rank in 1..=4 {
-                    entries.push(CardEntry {
-                        suit: Suit::Wind,
-                        rank,
-                        copies: 4,
-                    });
-                }
-                for rank in 1..=3 {
-                    entries.push(CardEntry {
-                        suit: Suit::Dragon,
-                        rank,
-                        copies: 4,
-                    });
-                }
-                self.run.mode.card_inventory = Some(entries);
-                log::info!("[Debug] Card inventory set to Honors Only");
             }
             DebugAction::ToggleShowFps => {
                 self.show_fps = !self.show_fps;
@@ -784,75 +875,16 @@ impl ApplicationHandler for App {
                         GameEvent::ScoreUpdated(_) => {
                             self.audio.play_sfx(audio::SfxId::ScoreReveal);
                         }
-                        GameEvent::RoundComplete { .. } => {
-                            self.audio.play_sfx(audio::SfxId::RoundWin);
-                            let win_size = self
-                                .window
-                                .as_ref()
-                                .map(|w| w.inner_size())
-                                .unwrap_or(PhysicalSize::new(800, 600));
-                            let ww = win_size.width as f32;
-                            let wh = win_size.height as f32;
-                            let modal = Modal::new(
-                                "Round Complete!",
-                                format!(
-                                    "Score: {} / {}  —  Well played!",
-                                    self.run.round_score, self.run.target_score
-                                ),
-                                ModalTheme::Success,
-                            )
-                            .with_fireworks(
-                                ww * 0.5,
-                                wh * 0.8,
-                                ww * 0.6,
-                                5,
-                            );
-                            self.modals.push(modal);
-                            let count = self.run.blind.relic_choices();
-                            let available = self.progress.available_relics();
-                            let choices = pick_relic_choices(&self.run.relics, count, &available);
-                            self.pending_scene = Some(Scene::Results(ResultsScene::new(choices)));
-                            self.transition_alpha = 1.0;
+                        ev @ GameEvent::RoundComplete { .. } => {
+                            // Hold the win sting + scene transition until the
+                            // scoring cascade has finished playing out — the
+                            // player should get to watch the winning hand pop.
+                            self.deferred_round_end = Some(ev);
                         }
-                        GameEvent::GameOver { .. } => {
-                            // Record run completion and check for level-up.
-                            self.progress.runs_completed += 1;
-                            self.progress.record_score(self.run.round_score);
-                            let level_up = self.progress.check_level_up();
-                            let _ = persistence::save_profile(self.active_profile, &self.progress);
-
-                            let win_size = self
-                                .window
-                                .as_ref()
-                                .map(|w| w.inner_size())
-                                .unwrap_or(PhysicalSize::new(800, 600));
-                            let ww = win_size.width as f32;
-                            let wh = win_size.height as f32;
-
-                            // Defer the level-up modal so it celebrates *after*
-                            // the player dismisses the Game Over screen.
-                            if let Some(level) = level_up {
-                                log::info!("Level up! Now level {}", level);
-                                let modal = Modal::new(
-                                    format!("Level Up! — Level {}", level),
-                                    "New content unlocked!",
-                                    ModalTheme::Success,
-                                )
-                                .with_fireworks(
-                                    ww * 0.5,
-                                    wh * 0.7,
-                                    ww * 0.7,
-                                    8,
-                                );
-                                self.pending_post_game_over_modals.push(modal);
-                            }
-
-                            self.audio.play_sfx(audio::SfxId::GameOver);
-                            self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
-                                self.run.round_score,
-                                self.run.target_score,
-                            )));
-                            self.transition_alpha = 1.0;
+                        ev @ GameEvent::GameOver { .. } => {
+                            // Same as RoundComplete: hold until the final
+                            // cascade has finished animating.
+                            self.deferred_round_end = Some(ev);
                         }
                         other => log::info!("event: {other:?}"),
                     }
@@ -1013,6 +1045,21 @@ impl ApplicationHandler for App {
                     };
                     if new_idx != self.active_profile {
                         self.switch_profile(new_idx);
+                    }
+                }
+
+                // If we deferred a round-end event so the player could watch
+                // the scoring cascade play out, fire it now that the gameplay
+                // scene has gone idle.
+                if self.deferred_round_end.is_some() {
+                    let cascade_done = match &self.scene {
+                        Scene::Gameplay(g) => !g.is_animating(),
+                        _ => true,
+                    };
+                    if cascade_done {
+                        if let Some(ev) = self.deferred_round_end.take() {
+                            self.handle_round_end_event(ev);
+                        }
                     }
                 }
 

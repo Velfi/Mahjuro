@@ -115,29 +115,54 @@ impl SolitaireScene {
         // Layer 0 — body (87 tiles).
         for (r, &(cs, ce)) in BODY_ROWS.iter().enumerate() {
             for col in cs..ce {
-                slots.push(Slot { layer: 0, col, row: r as i32, face: None });
+                slots.push(Slot {
+                    layer: 0,
+                    col,
+                    row: r as i32,
+                    face: None,
+                });
             }
         }
         // Layer 1 — 6×6 (36).
         for row in 1..7 {
             for col in 5..11 {
-                slots.push(Slot { layer: 1, col, row, face: None });
+                slots.push(Slot {
+                    layer: 1,
+                    col,
+                    row,
+                    face: None,
+                });
             }
         }
         // Layer 2 — 4×4 (16).
         for row in 2..6 {
             for col in 6..10 {
-                slots.push(Slot { layer: 2, col, row, face: None });
+                slots.push(Slot {
+                    layer: 2,
+                    col,
+                    row,
+                    face: None,
+                });
             }
         }
         // Layer 3 — 2×2 (4).
         for row in 3..5 {
             for col in 7..9 {
-                slots.push(Slot { layer: 3, col, row, face: None });
+                slots.push(Slot {
+                    layer: 3,
+                    col,
+                    row,
+                    face: None,
+                });
             }
         }
         // Layer 4 — single cap.
-        slots.push(Slot { layer: 4, col: 7, row: 3, face: None });
+        slots.push(Slot {
+            layer: 4,
+            col: 7,
+            row: 3,
+            face: None,
+        });
 
         debug_assert_eq!(slots.len(), 144);
 
@@ -165,12 +190,9 @@ impl SolitaireScene {
     /// rendering for covered tiles.
     fn covered_by_top(&self, idx: usize) -> bool {
         let s = self.slots[idx];
-        self.slots.iter().any(|o| {
-            o.face.is_some()
-                && o.layer > s.layer
-                && o.col == s.col
-                && o.row == s.row
-        })
+        self.slots
+            .iter()
+            .any(|o| o.face.is_some() && o.layer > s.layer && o.col == s.col && o.row == s.row)
     }
 
     fn is_free(&self, idx: usize) -> bool {
@@ -194,7 +216,9 @@ impl SolitaireScene {
         if !self.is_free(idx) {
             return;
         }
-        let Some(picked) = self.slots[idx].face else { return };
+        let Some(picked) = self.slots[idx].face else {
+            return;
+        };
         match self.selected {
             None => self.selected = Some(idx),
             Some(prev) if prev == idx => self.selected = None,
@@ -432,7 +456,10 @@ impl SolitaireScene {
             text: "New Deal".into(),
             color: [1.0, 1.0, 1.0, 1.0],
         });
-        buttons.push(ButtonDef::scene((new_x, btn_y, btn_w, btn_h), CLICK_NEW_GAME));
+        buttons.push(ButtonDef::scene(
+            (new_x, btn_y, btn_w, btn_h),
+            CLICK_NEW_GAME,
+        ));
 
         let hint_h = (14.0 * scale).max(10.0);
         let hint_y = btn_y - hint_h - (4.0 * scale);
@@ -476,6 +503,7 @@ impl SolitaireScene {
 
         SceneDrawOutput {
             background: super::BackgroundId::Menu,
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -487,6 +515,10 @@ impl SolitaireScene {
             window_title: format!("Mahjuro — Solitaire ({} pairs)", self.pairs_matched),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

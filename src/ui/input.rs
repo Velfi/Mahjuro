@@ -126,7 +126,6 @@ impl InputState {
             KeyCode::Enter => actions.push(UiAction::CommitDiscard),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
-            KeyCode::Backspace => actions.push(UiAction::Cancel),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {

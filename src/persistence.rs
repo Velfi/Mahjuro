@@ -9,7 +9,21 @@ use serde::{Deserialize, Serialize};
 use crate::core::progression::PlayerProgress;
 
 const MAX_PROFILES: usize = 3;
-const SETTINGS_NAME: &str = "mahjuro_settings.json";
+const SETTINGS_NAME: &str = "settings.json";
+const APP_DIR: &str = "Mahjuro";
+
+/// Returns the directory where save data lives, creating it if needed.
+/// Falls back to the current directory if the platform config dir is
+/// unavailable or can't be created.
+fn data_dir() -> PathBuf {
+    if let Some(base) = dirs::config_dir() {
+        let dir = base.join(APP_DIR);
+        if fs::create_dir_all(&dir).is_ok() {
+            return dir;
+        }
+    }
+    PathBuf::from(".")
+}
 
 /// Smoke effect intensity levels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,7 +105,7 @@ impl Default for AppSettings {
 }
 
 fn settings_path() -> PathBuf {
-    PathBuf::from(SETTINGS_NAME)
+    data_dir().join(SETTINGS_NAME)
 }
 
 pub fn load_settings() -> AppSettings {
@@ -114,7 +128,7 @@ pub fn save_settings(settings: &AppSettings) -> anyhow::Result<()> {
 }
 
 fn profile_path(index: usize) -> PathBuf {
-    PathBuf::from(format!("mahjuro_profile_{index}.json"))
+    data_dir().join(format!("profile_{index}.json"))
 }
 
 pub fn load_profile(index: usize) -> PlayerProgress {
@@ -151,7 +165,7 @@ pub struct ProfileSummary {
 
 /// Path for a saved in-progress run for a profile.
 fn saved_run_path(index: usize) -> PathBuf {
-    PathBuf::from(format!("mahjuro_run_{index}.json"))
+    data_dir().join(format!("run_{index}.json"))
 }
 
 /// Check if a profile has a saved in-progress run.
@@ -182,4 +196,3 @@ pub fn profile_summary(index: usize) -> ProfileSummary {
 pub fn all_profile_summaries() -> Vec<ProfileSummary> {
     (0..MAX_PROFILES).map(profile_summary).collect()
 }
-

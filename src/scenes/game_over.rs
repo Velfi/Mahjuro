@@ -1,11 +1,12 @@
 //! Game over scene — shown when the player exhausts plays without reaching the target.
 
 use crate::game::run::RunState;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 pub struct GameOverScene {
     pub final_score: u32,
@@ -15,12 +16,20 @@ pub struct GameOverScene {
 
 impl GameOverScene {
     pub fn new(final_score: u32, target_score: u32) -> Self {
-        Self { final_score, target_score, won: false }
+        Self {
+            final_score,
+            target_score,
+            won: false,
+        }
     }
 
     /// Construct a victory screen shown after defeating the final-ante Boss.
     pub fn victory(final_score: u32, target_score: u32) -> Self {
-        Self { final_score, target_score, won: true }
+        Self {
+            final_score,
+            target_score,
+            won: true,
+        }
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -36,17 +45,9 @@ impl GameOverScene {
     pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let bg_color = if self.won {
-            [0.05, 0.10, 0.18, 1.0]
-        } else {
-            [0.10, 0.06, 0.10, 1.0]
-        };
+        let bg_color = color::OBSIDIAN;
         let headline = if self.won { "VICTORY" } else { "DEFEAT" };
-        let headline_color = if self.won {
-            [1.0, 0.85, 0.35, 1.0]
-        } else {
-            [0.95, 0.55, 0.55, 1.0]
-        };
+        let headline_color = if self.won { color::CHAMPAGNE } else { color::RUBY };
         let subtitle = if self.won {
             "Final ante cleared".to_string()
         } else {
@@ -73,6 +74,7 @@ impl GameOverScene {
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances: vec![GpuInstance {
                 rect: [0.0, 0.0, w, h],
                 color: bg_color,
@@ -90,12 +92,12 @@ impl GameOverScene {
                 TextLabel {
                     rect: subtitle_rect,
                     text: subtitle,
-                    color: [0.95, 0.95, 0.95, 1.0],
+                    color: color::PARCHMENT,
                 },
                 TextLabel {
                     rect: hint_rect,
                     text: "Press Enter to continue".to_string(),
-                    color: [0.75, 0.75, 0.80, 1.0],
+                    color: color::MIST,
                 },
             ],
             relic_icons: vec![],
@@ -103,6 +105,10 @@ impl GameOverScene {
             window_title: title,
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

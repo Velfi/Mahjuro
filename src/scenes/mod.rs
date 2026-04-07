@@ -26,15 +26,15 @@ pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
 pub use start_screen::StartScreenScene;
 
+use crate::core::relic::{RelicId, RelicState, all_relic_defs};
 use crate::core::tile::Tile;
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
-use crate::core::relic::{RelicId, RelicState, all_relic_defs};
 use crate::ui::layout::{LayoutResult, Rect};
 
 /// Which background image to display behind the scene.
@@ -99,6 +99,12 @@ pub struct DrawCtx<'a> {
     pub active_profile: usize,
     /// Whether a game run is currently in progress (for resume/restart UI).
     pub game_in_progress: bool,
+    /// Per-hand-tile screen-space rects from the previous frame's perspective
+    /// projection (renderer-side). Empty before the first draw. Scenes that
+    /// want to anchor 2D HUD elements (hover tooltips, etc.) to the actual
+    /// visible 3D tile should look the index up here and fall back to the
+    /// layout slot rect if not found.
+    pub projected_hand_rects: &'a [(usize, [f32; 4])],
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -128,12 +134,18 @@ pub struct ButtonDef {
 impl ButtonDef {
     /// Convenience constructor for the common `Ui(action)` case.
     pub fn ui(rect: (f32, f32, f32, f32), action: UiAction) -> Self {
-        Self { rect, action: ButtonAction::Ui(action) }
+        Self {
+            rect,
+            action: ButtonAction::Ui(action),
+        }
     }
 
     /// Convenience constructor for scene-defined click ids.
     pub fn scene(rect: (f32, f32, f32, f32), id: u32) -> Self {
-        Self { rect, action: ButtonAction::Scene(id) }
+        Self {
+            rect,
+            action: ButtonAction::Scene(id),
+        }
     }
 }
 
@@ -149,6 +161,11 @@ impl ButtonDef {
 pub struct SceneDrawOutput {
     /// Background image to render behind everything else.
     pub background: BackgroundId,
+    /// 2D quads drawn *before* the 3D hand tile backdrop. Used by scenes that
+    /// want a "tray" or "slot pocket" visual to sit underneath the hand tiles
+    /// — pushing these via `instances` would land *after* the tile bodies in
+    /// frame order and overdraw them.
+    pub tray_instances: Vec<GpuInstance>,
     pub instances: Vec<GpuInstance>,
     /// Tiles to render in the hand strip (empty = no hand tiles).
     pub hand_tiles: Vec<Tile>,
@@ -169,6 +186,44 @@ pub struct SceneDrawOutput {
     pub departing_indices: Vec<usize>,
     /// Hand tile indices that should show a directional light hint.
     pub hint_indices: Vec<usize>,
+    /// Procedural flame quads (rendered with the additive flame pipeline).
+    /// Each instance's `color.a` carries a per-flame phase offset in [0,1].
+    /// Most scenes leave this empty; gameplay populates it for candle flames.
+    pub flame_instances: Vec<GpuInstance>,
+    /// Point lights for this frame, fed to the 3D tile shader. Most scenes
+    /// leave this empty; gameplay populates it for candle flames.
+    pub point_lights: Vec<PointLight>,
+    /// 3D candle placements drawn via the lit-mesh pipeline. Most scenes
+    /// leave this empty; gameplay populates it.
+    pub candles: Vec<crate::render::candle_mesh::CandlePlacement>,
+    /// Whether to draw the procedural lacquered-wood table backplane behind
+    /// the 3D scene. Set by gameplay-style scenes that want a physical
+    /// surface under the floating tiles.
+    pub draw_table: bool,
+}
+
+impl Default for SceneDrawOutput {
+    fn default() -> Self {
+        Self {
+            background: BackgroundId::None,
+            tray_instances: Vec::new(),
+            instances: Vec::new(),
+            hand_tiles: Vec::new(),
+            hand_slots: Vec::new(),
+            focus: 0,
+            selected_tiles: Vec::new(),
+            text_labels: Vec::new(),
+            relic_icons: Vec::new(),
+            buttons: Vec::new(),
+            window_title: String::new(),
+            departing_indices: Vec::new(),
+            hint_indices: Vec::new(),
+            flame_instances: Vec::new(),
+            point_lights: Vec::new(),
+            candles: Vec::new(),
+            draw_table: false,
+        }
+    }
 }
 
 impl SceneDrawOutput {
@@ -180,7 +235,25 @@ impl SceneDrawOutput {
     pub fn into_frame(self) -> UiFrame {
         let mut frame = UiFrame::new();
         frame.background(self.background);
+        // Wood-table backplane sits behind everything 3D so the tiles and
+        // candles read as floating just above its surface.
+        if self.draw_table {
+            frame.table();
+        }
+        // Tray quads sit between the table and the hand-tile bodies so the
+        // 3D tiles read as floating *on* a recessed pocket rather than above
+        // the bare table surface.
+        frame.quads(self.tray_instances);
         frame.hand_tile_backdrop();
+        // Candle meshes after the hand tiles so the per-candle point lights
+        // (which are part of the same pass via group 1) still apply.
+        if !self.candles.is_empty() {
+            frame.candles(self.candles);
+        }
+        // Flames belong to the 3D candle scene — push them *before* the
+        // 2D scene quads so any UI panel (score, buttons, tooltips) draws
+        // on top instead of the additive flame bleeding through.
+        frame.flames(self.flame_instances);
         frame.fluid_smoke();
         frame.quads(self.instances);
         frame.hand_tile_faces();
@@ -193,12 +266,12 @@ impl SceneDrawOutput {
         frame.selected_tiles = self.selected_tiles;
         frame.hint_indices = self.hint_indices;
         frame.departing_indices = self.departing_indices;
+        frame.point_lights = self.point_lights;
         frame.buttons = self.buttons;
         frame.window_title = self.window_title;
         frame
     }
 }
-
 
 /// Screen rect of relic badge slot `slot_idx` inside the relic strip.
 /// Single source of truth for badge layout — used by `relic_row` and by
@@ -255,7 +328,7 @@ pub fn relic_row(
             // Filled slot background.
             instances.push(GpuInstance {
                 rect: [bx + inset, row_y, cell_w, row_h],
-                color: [0.18, 0.22, 0.35, 0.85],
+                color: crate::render::theme::color::INDIGO,
             });
             // Icon: square, centered horizontally, in the upper portion.
             let icon_size = row_h * 0.65;
@@ -271,13 +344,16 @@ pub fn relic_row(
             labels.push(TextLabel {
                 rect: [bx + inset, label_y, cell_w, label_h],
                 text: name.to_string(),
-                color: [0.8, 0.75, 0.5, 1.0],
+                color: crate::render::theme::color::CHAMPAGNE,
             });
         } else {
             // Empty slot: dim outline.
             instances.push(GpuInstance {
                 rect: [bx + inset, row_y, cell_w, row_h],
-                color: [0.12, 0.14, 0.22, 0.5],
+                color: crate::render::theme::color::alpha(
+                    crate::render::theme::color::OBSIDIAN,
+                    0.5,
+                ),
             });
         }
     }

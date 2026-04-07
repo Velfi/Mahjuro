@@ -2,12 +2,13 @@
 
 use std::time::Instant;
 
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 
-use super::{DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
+use super::{DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
-const MIN_DISPLAY_SECS: f32 = 3.0;
+const MIN_DISPLAY_SECS: f32 = 0.5;
 
 pub struct SplashScene {
     /// When the splash was first shown.
@@ -18,7 +19,10 @@ pub struct SplashScene {
 
 impl SplashScene {
     pub fn new() -> Self {
-        Self { start: Instant::now(), done: false }
+        Self {
+            start: Instant::now(),
+            done: false,
+        }
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -46,7 +50,7 @@ impl SplashScene {
         // Dark background.
         let instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.04, 0.05, 0.08, 1.0],
+            color: color::OBSIDIAN,
         }];
 
         let mut text_labels = Vec::new();
@@ -57,7 +61,7 @@ impl SplashScene {
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "MAHJURO".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         // Tagline below the title.
@@ -66,11 +70,12 @@ impl SplashScene {
         text_labels.push(TextLabel {
             rect: [w * 0.15, tagline_y, w * 0.7, tagline_h],
             text: "Mahjong, reimagined for chaos.".into(),
-            color: [0.55, 0.55, 0.65, 0.85],
+            color: color::MIST,
         });
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -82,6 +87,10 @@ impl SplashScene {
             window_title: "Mahjuro".into(),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

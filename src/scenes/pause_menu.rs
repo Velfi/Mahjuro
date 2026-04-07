@@ -1,12 +1,14 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
 use crate::game::run::RunState;
+use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::widget;
 
-use super::{ButtonDef, Scene, SceneTransition};
 use super::shop::ShopScene;
 use super::start_screen::StartScreenScene;
+use super::{ButtonDef, Scene, SceneTransition};
 
 /// Pause menu item indices.
 const PAUSE_RESUME: usize = 0;
@@ -63,8 +65,7 @@ impl PauseMenu {
         let btn_w = (200.0 * scale).min(window_w * 0.5);
         let btn_h = (38.0 * scale).max(24.0);
         let btn_gap = (12.0 * scale).max(6.0);
-        let total_menu_h =
-            PAUSE_COUNT as f32 * btn_h + (PAUSE_COUNT as f32 - 1.0) * btn_gap;
+        let total_menu_h = PAUSE_COUNT as f32 * btn_h + (PAUSE_COUNT as f32 - 1.0) * btn_gap;
         let title_h = (48.0 * scale).max(28.0);
         let title_gap = (20.0 * scale).max(10.0);
         let block_h = title_h + title_gap + total_menu_h;
@@ -108,9 +109,9 @@ impl PauseMenu {
                 PauseUpdate::Resume
             }
             PAUSE_RESTART => self.do_restart(run),
-            PAUSE_MAIN_MENU => PauseUpdate::Transition(Some(Scene::StartScreen(
-                StartScreenScene::new(),
-            ))),
+            PAUSE_MAIN_MENU => {
+                PauseUpdate::Transition(Some(Scene::StartScreen(StartScreenScene::new())))
+            }
             PAUSE_EXIT => PauseUpdate::Quit,
             _ => PauseUpdate::StayPaused,
         }
@@ -138,29 +139,28 @@ impl PauseMenu {
             return;
         }
 
-        // Dim background.
+        // Dim background — Midnight Gold theme: cool deep indigo, not pure black.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.6],
+            color: color::alpha(color::OBSIDIAN, 0.78),
         });
 
         let menu_labels = ["Resume", "Restart", "Main Menu", "Exit"];
-        let btn_w = (200.0 * scale).min(window_w * 0.5);
-        let btn_h = (38.0 * scale).max(24.0);
+        let btn_w = (220.0 * scale).min(window_w * 0.55);
+        let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = (12.0 * scale).max(6.0);
-        let total_menu_h =
-            PAUSE_COUNT as f32 * btn_h + (PAUSE_COUNT as f32 - 1.0) * btn_gap;
-        let title_h = (48.0 * scale).max(28.0);
-        let title_gap = (20.0 * scale).max(10.0);
+        let total_menu_h = PAUSE_COUNT as f32 * btn_h + (PAUSE_COUNT as f32 - 1.0) * btn_gap;
+        let title_h = typography::size(typography::TITLE, window_h);
+        let title_gap = (24.0 * scale).max(10.0);
         let block_h = title_h + title_gap + total_menu_h;
         let start_y = (window_h - block_h) * 0.5;
         let btn_x = (window_w - btn_w) * 0.5;
 
-        // Title.
+        // Title — gold serif, centered.
         text_labels.push(TextLabel {
             rect: [0.0, start_y, window_w, title_h],
             text: "PAUSED".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         let menu_start_y = start_y + title_h + title_gap;
@@ -169,38 +169,29 @@ impl PauseMenu {
             let by = menu_start_y + i as f32 * (btn_h + btn_gap);
             let is_focused = i == self.cursor;
 
-            let bg_color = if is_focused {
-                match i {
-                    PAUSE_RESUME => [0.2, 0.55, 0.3, 0.95],
-                    PAUSE_EXIT => [0.55, 0.2, 0.2, 0.95],
-                    _ => [0.25, 0.4, 0.6, 0.95],
-                }
-            } else {
-                [0.15, 0.18, 0.28, 0.85]
+            let variant = match i {
+                PAUSE_RESUME => ButtonVariant::Primary,
+                PAUSE_EXIT => ButtonVariant::Danger,
+                _ => ButtonVariant::Default,
             };
-
-            instances.push(GpuInstance {
-                rect: [btn_x, by, btn_w, btn_h],
-                color: bg_color,
-            });
-
-            let text_color = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+            let state = if is_focused {
+                ButtonState::Hover
             } else {
-                [0.6, 0.6, 0.7, 0.9]
+                ButtonState::Rest
             };
-            text_labels.push(TextLabel {
-                rect: [btn_x, by, btn_w, btn_h],
-                text: label.to_string(),
-                color: text_color,
-            });
 
             // Click → Confirm; hover-focus in update() ensures self.cursor
             // already points at this button by the time the action is read.
-            buttons.push(ButtonDef::ui(
-                (btn_x, by, btn_w, btn_h),
+            widget::push_button(
+                instances,
+                text_labels,
+                buttons,
+                [btn_x, by, btn_w, btn_h],
+                label,
+                variant,
+                state,
                 UiAction::Confirm,
-            ));
+            );
         }
     }
 }

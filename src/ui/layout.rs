@@ -30,8 +30,8 @@ pub struct LayoutResult {
 
 /// Score panel / modifier strip / relic strip are proportional to window height.
 const SCORE_H_RATIO: f64 = 0.12; // 12% of window height (72px at 600px)
-const MOD_H_RATIO: f64 = 0.08;   //  8% of window height (48px at 600px)
-const RELIC_H_RATIO: f64 = 0.12;  // 12% of window height
+const MOD_H_RATIO: f64 = 0.08; //  8% of window height (48px at 600px)
+const RELIC_H_RATIO: f64 = 0.12; // 12% of window height
 
 pub struct UiLayout {
     solver: Solver,
@@ -107,9 +107,13 @@ impl UiLayout {
 
         solver.add_edit_variable(win_w, STRONG).expect("edit win_w");
         solver.add_edit_variable(win_h, STRONG).expect("edit win_h");
-        solver.add_edit_variable(score_h, STRONG).expect("edit score_h");
+        solver
+            .add_edit_variable(score_h, STRONG)
+            .expect("edit score_h");
         solver.add_edit_variable(mod_h, STRONG).expect("edit mod_h");
-        solver.add_edit_variable(relic_h, STRONG).expect("edit relic_h");
+        solver
+            .add_edit_variable(relic_h, STRONG)
+            .expect("edit relic_h");
 
         Self {
             solver,
@@ -140,11 +144,21 @@ impl UiLayout {
         let mh = (height as f64 * MOD_H_RATIO).max(24.0);
         let rh = (height as f64 * RELIC_H_RATIO).max(48.0);
 
-        self.solver.suggest_value(self.win_w, width as f64).expect("suggest w");
-        self.solver.suggest_value(self.win_h, height as f64).expect("suggest h");
-        self.solver.suggest_value(self.score_h, sh).expect("suggest score_h");
-        self.solver.suggest_value(self.mod_h, mh).expect("suggest mod_h");
-        self.solver.suggest_value(self.relic_h, rh).expect("suggest relic_h");
+        self.solver
+            .suggest_value(self.win_w, width as f64)
+            .expect("suggest w");
+        self.solver
+            .suggest_value(self.win_h, height as f64)
+            .expect("suggest h");
+        self.solver
+            .suggest_value(self.score_h, sh)
+            .expect("suggest score_h");
+        self.solver
+            .suggest_value(self.mod_h, mh)
+            .expect("suggest mod_h");
+        self.solver
+            .suggest_value(self.relic_h, rh)
+            .expect("suggest relic_h");
 
         let ww = width;
         let hh = height;

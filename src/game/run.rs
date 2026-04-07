@@ -7,9 +7,8 @@ use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selectio
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown, score_sets};
+use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets};
 use crate::core::tile::{Suit, Tile};
-use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
 
@@ -246,6 +245,24 @@ impl RunState {
         earned
     }
 
+    /// Mystery-preserving score preview for the current selection.
+    /// Returns `None` if the selection is empty or doesn't decompose into melds.
+    /// Honors wildcard relics so the preview matches what an actual play would score.
+    pub fn preview_selection(&self) -> Option<ScorePreview> {
+        if self.selected_count() == 0 {
+            return None;
+        }
+        let selected_tiles: Vec<Tile> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+        let (sets, scoring_tiles) = self.try_validate_with_wildcards(&selected_tiles)?;
+        Some(preview_score(&scoring_tiles, &sets, &self.available_yaku))
+    }
+
     /// Check if the current selection forms a valid playable hand.
     pub fn is_selection_valid(&self) -> bool {
         if self.selected_count() == 0 {
@@ -263,10 +280,7 @@ impl RunState {
 
     /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
     /// Returns the decomposition and the (possibly modified) tiles used for scoring.
-    fn try_validate_with_wildcards(
-        &self,
-        tiles: &[Tile],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    fn try_validate_with_wildcards(&self, tiles: &[Tile]) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &self.round_rules) {
             return Some((sets, tiles.to_vec()));
@@ -309,6 +323,19 @@ impl RunState {
     /// Discard all selected tiles (costs 1 discard), then auto-draw back to HAND_SIZE.
     /// Returns the number of tiles discarded, or 0 if nothing was selected or no discards left.
     pub fn discard_selected(&mut self, bus: &mut EventBus) -> usize {
+        let count = self.discard_selected_no_refill(bus);
+        if count > 0 {
+            self.refill_hand(bus);
+        }
+        count
+    }
+
+    /// Remove all selected tiles and decrement the discard counter, but do NOT
+    /// auto-draw replacements. The caller is responsible for invoking
+    /// `refill_hand` once the discard departure animation has had time to play.
+    /// Returns the number of tiles removed, or 0 if nothing was selected or no
+    /// discards remain.
+    pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {
         if self.discards_remaining == 0 {
             return 0;
         }
@@ -331,18 +358,20 @@ impl RunState {
             bus.push(GameEvent::TileDiscarded { slot_index: i });
         }
         self.discards_remaining -= 1;
+        self.selected = vec![false; self.hand.len()];
+        count
+    }
 
-        // Auto-draw back to full hand.
+    /// Draw tiles from the wall until the hand is full, then sort and reset
+    /// the selection vector to match the new hand size.
+    pub fn refill_hand(&mut self, bus: &mut EventBus) {
         while self.hand.len() < HAND_SIZE {
             let Some(t) = self.wall.draw() else { break };
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
         }
-
-        // Sort and reset selection to match new hand size.
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
-        count
     }
 
     /// Swap two tiles in the hand by index. Clears selection afterward.
@@ -356,6 +385,7 @@ impl RunState {
     /// Sort hand by suit then rank (Characters → Bamboos → Circles → Wind → Dragon).
     pub fn sort_hand_by_suit(&mut self) {
         self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
     }
 
     /// Sort hand by rank then suit (all 1s, all 2s, … then honors).
@@ -366,6 +396,7 @@ impl RunState {
                 .then(a.suit.cmp(&b.suit))
                 .then(a.id.cmp(&b.id))
         });
+        self.selected = vec![false; self.hand.len()];
     }
 
     /// Evaluate meld patterns for UI hints.
@@ -681,7 +712,11 @@ mod tests {
 
         // All originally-kept tiles should still be in hand.
         for id in &kept_ids {
-            assert!(run.hand.iter().any(|t| t.id == *id), "tile id {} was lost", id);
+            assert!(
+                run.hand.iter().any(|t| t.id == *id),
+                "tile id {} was lost",
+                id
+            );
         }
     }
 
@@ -987,8 +1022,7 @@ fn try_wind_substitution(
         rules: &[RuleModifier],
     ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
         if pos == wind_indices.len() {
-            return validate_selection_with_rules(tiles, rules)
-                .map(|sets| (sets, tiles.clone()));
+            return validate_selection_with_rules(tiles, rules).map(|sets| (sets, tiles.clone()));
         }
         let idx = wind_indices[pos];
         let original = tiles[idx];
@@ -1101,10 +1135,7 @@ mod joker_tile_tests {
     #[test]
     fn joker_makes_pair_from_two_tiles() {
         // 1m 5s — joker turns 5s into 1m for a pair
-        let tiles = vec![
-            tile(Suit::Characters, 1, 0),
-            tile(Suit::Bamboos, 5, 1),
-        ];
+        let tiles = vec![tile(Suit::Characters, 1, 0), tile(Suit::Bamboos, 5, 1)];
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
@@ -1167,7 +1198,10 @@ mod wild_wind_tests {
             tile(Suit::Wind, 3, 12), // West, should become 9p (or 6p)
         ];
         let result = try_wind_substitution(&tiles, &[]);
-        assert!(result.is_some(), "two-wind substitution should find a valid hand");
+        assert!(
+            result.is_some(),
+            "two-wind substitution should find a valid hand"
+        );
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 4);
         assert!(sets.iter().all(|s| s.kind == SetKind::Sequence));
@@ -1222,10 +1256,7 @@ mod wild_wind_tests {
 
     #[test]
     fn candidates_include_nearby_ranks() {
-        let tiles = vec![
-            tile(Suit::Characters, 5, 1),
-            tile(Suit::Wind, 3, 2),
-        ];
+        let tiles = vec![tile(Suit::Characters, 5, 1), tile(Suit::Wind, 3, 2)];
         let candidates = wind_candidate_faces(&tiles);
         // Should include 3m-7m (5 ± 2) and 5m itself
         for r in 3..=7 {

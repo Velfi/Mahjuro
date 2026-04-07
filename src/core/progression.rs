@@ -148,30 +148,16 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
             rules: vec![RuleModifier::SequenceWrap],
         },
         4 => LevelUnlocks {
-            relics: vec![
-                RelicId::HonorFury,
-                RelicId::WhiteSilence,
-                RelicId::Overflow,
-            ],
+            relics: vec![RelicId::HonorFury, RelicId::WhiteSilence, RelicId::Overflow],
             rules: vec![RuleModifier::NoSequenceBonus],
         },
         5 => LevelUnlocks {
-            relics: vec![
-                RelicId::JokerTile,
-                RelicId::WildWinds,
-                RelicId::StealthTile,
-            ],
+            relics: vec![RelicId::JokerTile, RelicId::WildWinds, RelicId::StealthTile],
             rules: vec![RuleModifier::HonorTripleScore],
         },
         6 => LevelUnlocks {
-            relics: vec![
-                RelicId::ReverseTile,
-                RelicId::LockedSet,
-            ],
-            rules: vec![
-                RuleModifier::NoSequences,
-                RuleModifier::ReducedPlays,
-            ],
+            relics: vec![RelicId::ReverseTile, RelicId::LockedSet],
+            rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
         },
         7 => LevelUnlocks {
             relics: vec![RelicId::RedDragonRage, RelicId::DragonEcho],

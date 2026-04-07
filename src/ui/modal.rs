@@ -13,42 +13,30 @@ use crate::ui::input::UiAction;
 pub enum ModalTheme {
     /// Gold/warm — level up, round win.
     Success,
-    /// Red/dark — game over, failure.
-    Failure,
-    /// Blue/neutral — informational.
-    Info,
 }
 
 impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.12, 0.14, 0.08, 0.95],
-            ModalTheme::Failure => [0.18, 0.06, 0.06, 0.95],
-            ModalTheme::Info => [0.08, 0.10, 0.18, 0.95],
         }
     }
 
     fn border_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.85, 0.75, 0.2, 0.9],
-            ModalTheme::Failure => [0.7, 0.15, 0.15, 0.9],
-            ModalTheme::Info => [0.3, 0.5, 0.8, 0.9],
         }
     }
 
     fn title_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [1.0, 0.92, 0.4, 1.0],
-            ModalTheme::Failure => [1.0, 0.4, 0.35, 1.0],
-            ModalTheme::Info => [0.6, 0.8, 1.0, 1.0],
         }
     }
 
     fn body_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.9, 0.88, 0.7, 1.0],
-            ModalTheme::Failure => [0.85, 0.75, 0.7, 1.0],
-            ModalTheme::Info => [0.8, 0.85, 0.95, 1.0],
         }
     }
 }
@@ -315,7 +303,9 @@ impl ModalQueue {
     /// Tick firework particles on the active modal.
     pub fn update(&mut self) {
         let now = Instant::now();
-        let dt = now.saturating_duration_since(self.last_update).as_secs_f32();
+        let dt = now
+            .saturating_duration_since(self.last_update)
+            .as_secs_f32();
         self.last_update = now;
         if let Some(modal) = self.queue.first_mut() {
             if let Some(ref mut fw) = modal.fireworks {
@@ -340,7 +330,11 @@ impl ModalQueue {
 
     /// Generate GPU instances, text labels, and a dismiss button for the active modal.
     /// Returns `None` if no modal is active.
-    pub fn draw(&self, window_w: f32, window_h: f32) -> Option<(Vec<GpuInstance>, Vec<TextLabel>, Vec<ButtonDef>)> {
+    pub fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+    ) -> Option<(Vec<GpuInstance>, Vec<TextLabel>, Vec<ButtonDef>)> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
         let scale = (window_w.min(window_h)) / 600.0;
@@ -349,10 +343,11 @@ impl ModalQueue {
         let mut labels = Vec::new();
         let mut buttons = Vec::new();
 
-        // Dim overlay behind the modal.
+        // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
+        let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.55 * alpha],
+            color: [or_, og, ob, 0.65 * alpha],
         });
 
         // Modal card dimensions.
@@ -361,7 +356,8 @@ impl ModalQueue {
         let body_h = (36.0 * scale).max(20.0);
         let dismiss_h = (28.0 * scale).max(18.0);
         let padding = (20.0 * scale).max(10.0);
-        let card_h = padding + title_h + padding * 0.5 + body_h + padding * 0.75 + dismiss_h + padding;
+        let card_h =
+            padding + title_h + padding * 0.5 + body_h + padding * 0.75 + dismiss_h + padding;
 
         let card_x = (window_w - card_w) * 0.5;
         let card_y = (window_h - card_h) * 0.5;
@@ -370,7 +366,12 @@ impl ModalQueue {
         let border = 3.0 * scale;
         let [br, bg, bb, ba] = modal.theme.border_color();
         instances.push(GpuInstance {
-            rect: [card_x - border, card_y - border, card_w + border * 2.0, card_h + border * 2.0],
+            rect: [
+                card_x - border,
+                card_y - border,
+                card_w + border * 2.0,
+                card_h + border * 2.0,
+            ],
             color: [br, bg, bb, ba * alpha],
         });
 
@@ -402,9 +403,17 @@ impl ModalQueue {
         // Dismiss hint.
         let dismiss_y = body_y + body_h + padding * 0.75;
         labels.push(TextLabel {
-            rect: [card_x + padding, dismiss_y, card_w - padding * 2.0, dismiss_h],
+            rect: [
+                card_x + padding,
+                dismiss_y,
+                card_w - padding * 2.0,
+                dismiss_h,
+            ],
             text: "Press Enter to continue".into(),
-            color: [0.5, 0.5, 0.5, 0.7 * alpha],
+            color: {
+                let [r, g, b, a] = crate::render::theme::color::SLATE;
+                [r, g, b, a * 0.8 * alpha]
+            },
         });
 
         // Firework particles (rendered on top of dim overlay but mixed with card).

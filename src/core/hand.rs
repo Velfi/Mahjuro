@@ -164,10 +164,7 @@ pub fn find_sequences(tiles: &[Tile]) -> Vec<DetectedSet> {
 /// For each unselected tile in the hand, check if adding it to the current selection
 /// would form a valid meld. Returns hand indices of tiles that would complete a meld.
 pub fn suggest_completions(hand: &[Tile], selected_indices: &[usize]) -> Vec<usize> {
-    let selected_tiles: Vec<Tile> = selected_indices
-        .iter()
-        .map(|&i| hand[i])
-        .collect();
+    let selected_tiles: Vec<Tile> = selected_indices.iter().map(|&i| hand[i]).collect();
 
     let mut hints = Vec::new();
     for (i, tile) in hand.iter().enumerate() {
@@ -226,11 +223,7 @@ pub fn validate_selection_with_rules(
 }
 
 /// Recursive helper: try to decompose `remaining` (sorted) into melds.
-fn backtrack_decompose(
-    remaining: &[Tile],
-    found: &mut Vec<DetectedSet>,
-    allow_wrap: bool,
-) -> bool {
+fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_wrap: bool) -> bool {
     if remaining.is_empty() {
         return true;
     }
@@ -311,15 +304,9 @@ fn backtrack_decompose(
                     .position(|t| t.suit == first.suit && t.rank == other_ranks[0]);
                 if let Some(mid_offset) = mid {
                     let mid_idx = mid_offset + 1;
-                    let hi = remaining
-                        .iter()
-                        .enumerate()
-                        .position(|(i, t)| {
-                            i != 0
-                                && i != mid_idx
-                                && t.suit == first.suit
-                                && t.rank == other_ranks[1]
-                        });
+                    let hi = remaining.iter().enumerate().position(|(i, t)| {
+                        i != 0 && i != mid_idx && t.suit == first.suit && t.rank == other_ranks[1]
+                    });
                     if let Some(hi_idx) = hi {
                         let set = DetectedSet {
                             kind: SetKind::Sequence,
@@ -347,10 +334,7 @@ fn backtrack_decompose(
     }
 
     // Try pair: 2 tiles with same suit+rank.
-    if remaining.len() >= 2
-        && remaining[1].suit == first.suit
-        && remaining[1].rank == first.rank
-    {
+    if remaining.len() >= 2 && remaining[1].suit == first.suit && remaining[1].rank == first.rank {
         let set = DetectedSet {
             kind: SetKind::Pair,
             tile_ids: vec![remaining[0].id, remaining[1].id],
@@ -501,15 +485,24 @@ mod tests {
         // 4 sets + 1 pair = 14 tiles
         let tiles = vec![
             // triplet
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 1, 1), t(Suit::Bamboos, 1, 2),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 1, 1),
+            t(Suit::Bamboos, 1, 2),
             // sequence
-            t(Suit::Characters, 4, 3), t(Suit::Characters, 5, 4), t(Suit::Characters, 6, 5),
+            t(Suit::Characters, 4, 3),
+            t(Suit::Characters, 5, 4),
+            t(Suit::Characters, 6, 5),
             // triplet
-            t(Suit::Circles, 9, 6), t(Suit::Circles, 9, 7), t(Suit::Circles, 9, 8),
+            t(Suit::Circles, 9, 6),
+            t(Suit::Circles, 9, 7),
+            t(Suit::Circles, 9, 8),
             // sequence
-            t(Suit::Bamboos, 5, 9), t(Suit::Bamboos, 6, 10), t(Suit::Bamboos, 7, 11),
+            t(Suit::Bamboos, 5, 9),
+            t(Suit::Bamboos, 6, 10),
+            t(Suit::Bamboos, 7, 11),
             // pair
-            t(Suit::Wind, 1, 12), t(Suit::Wind, 1, 13),
+            t(Suit::Wind, 1, 12),
+            t(Suit::Wind, 1, 13),
         ];
         let sets = validate_selection(&tiles).unwrap();
         assert_eq!(sets.len(), 5);
@@ -559,8 +552,7 @@ mod tests {
         // Without wrap: invalid
         assert!(validate_selection(&tiles).is_none());
         // With wrap: valid sequence
-        let sets =
-            validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+        let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Sequence);
     }
@@ -573,8 +565,7 @@ mod tests {
             t(Suit::Bamboos, 2, 2),
         ];
         assert!(validate_selection(&tiles).is_none());
-        let sets =
-            validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
+        let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Sequence);
     }
@@ -589,9 +580,7 @@ mod tests {
         // Normal: valid sequence
         assert!(validate_selection(&tiles).is_some());
         // NoSequences: rejected
-        assert!(
-            validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).is_none()
-        );
+        assert!(validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).is_none());
     }
 
     #[test]
@@ -601,8 +590,7 @@ mod tests {
             t(Suit::Bamboos, 5, 1),
             t(Suit::Bamboos, 5, 2),
         ];
-        let sets =
-            validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
+        let sets = validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Triplet);
     }

@@ -14,9 +14,7 @@ use rand::seq::SliceRandom;
 
 use crate::core::deck::Wall;
 use crate::core::hand::{detect_all_sets, validate_selection_with_rules};
-use crate::core::relic::{
-    RelicId, ScoreContext, all_relic_defs, relic_buy_price,
-};
+use crate::core::relic::{RelicId, ScoreContext, all_relic_defs, relic_buy_price};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets;
 use crate::core::tile::Tile;
@@ -114,7 +112,10 @@ impl AggregateStats {
         self.total_gold_spent += s.gold_spent as u64;
         *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
         if !s.victory {
-            *self.deaths_by_blind.entry(s.died_on_blind.name()).or_insert(0) += 1;
+            *self
+                .deaths_by_blind
+                .entry(s.died_on_blind.name())
+                .or_insert(0) += 1;
         }
     }
 
@@ -130,19 +131,30 @@ impl AggregateStats {
         let avg_discards = self.total_discards as f64 / self.runs as f64;
         let avg_strategic = self.total_strategic_discards as f64 / self.runs as f64;
         let win_rate = self.victories as f64 * 100.0 / self.runs as f64;
-        println!("victories:           {} / {} ({:.1}%)", self.victories, self.runs, win_rate);
+        println!(
+            "victories:           {} / {} ({:.1}%)",
+            self.victories, self.runs, win_rate
+        );
         println!("avg blinds cleared:  {:.2}", avg_blinds);
         println!("avg antes cleared:   {:.2}", avg_antes);
         println!("max ante reached:    {}", self.max_ante_reached);
         println!("avg total score:     {:.0}", avg_score);
         println!("avg plays used:      {:.2}", avg_plays);
-        println!("avg discards used:   {:.2} ({:.2} strategic, {:.2} random)",
-            avg_discards, avg_strategic, avg_discards - avg_strategic);
-        println!("avg blinds skipped:  {:.2}",
-            self.total_blinds_skipped as f64 / self.runs as f64);
-        println!("avg relics bought:   {:.2} (avg gold spent: {:.1})",
+        println!(
+            "avg discards used:   {:.2} ({:.2} strategic, {:.2} random)",
+            avg_discards,
+            avg_strategic,
+            avg_discards - avg_strategic
+        );
+        println!(
+            "avg blinds skipped:  {:.2}",
+            self.total_blinds_skipped as f64 / self.runs as f64
+        );
+        println!(
+            "avg relics bought:   {:.2} (avg gold spent: {:.1})",
             self.total_relics_bought as f64 / self.runs as f64,
-            self.total_gold_spent as f64 / self.runs as f64);
+            self.total_gold_spent as f64 / self.runs as f64
+        );
         println!("\ndeaths by ante:");
         for (ante, count) in &self.deaths_by_ante {
             let pct = *count as f64 * 100.0 / self.runs as f64;
@@ -245,7 +257,9 @@ fn discard_candidates(hand: &[Tile], max_k: usize) -> Vec<Vec<usize>> {
     indexed.sort_by_key(|(_, c)| *c);
     let order: Vec<usize> = indexed.into_iter().map(|(i, _)| i).collect();
     let cap = max_k.min(hand.len() - 2);
-    (1..=cap).map(|k| order.iter().take(k).copied().collect()).collect()
+    (1..=cap)
+        .map(|k| order.iter().take(k).copied().collect())
+        .collect()
 }
 
 /// Simulate discarding `discard_indices` from the hand and drawing replacements off the
@@ -305,11 +319,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
             let mut best_after: Option<(i32, Vec<usize>)> = None;
             for cand in candidates {
                 let hyp = rollout_post_discard_score(run, &cand);
-                if best_after
-                    .as_ref()
-                    .map(|(s, _)| hyp > *s)
-                    .unwrap_or(true)
-                {
+                if best_after.as_ref().map(|(s, _)| hyp > *s).unwrap_or(true) {
                     best_after = Some((hyp, cand));
                 }
             }
@@ -455,14 +465,11 @@ fn relic_tiebreak_score(id: RelicId) -> i32 {
 /// Pick the relic from `choices` that most improves the current hand. Falls back
 /// to rarity tie-break when no choice has positive marginal value.
 fn pick_best_relic(run: &RunState, choices: &[RelicId]) -> Option<RelicId> {
-    choices
-        .iter()
-        .copied()
-        .max_by_key(|&c| {
-            let mv = relic_marginal_value(run, c);
-            // Lex sort: marginal value first, rarity tie-break second.
-            (mv, relic_tiebreak_score(c))
-        })
+    choices.iter().copied().max_by_key(|&c| {
+        let mv = relic_marginal_value(run, c);
+        // Lex sort: marginal value first, rarity tie-break second.
+        (mv, relic_tiebreak_score(c))
+    })
 }
 
 /// Headless analogue of `ShopScene::new` + buy loop. Rolls 3 random non-owned relics
@@ -626,11 +633,6 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
     stats
 }
 
-/// Convenience: play a run with all default tuning.
-pub fn play_run() -> RunStats {
-    play_run_with(BotConfig::default())
-}
-
 /// Run the bot `n` times with the given tuning config and return aggregate stats.
 pub fn run_with(n: u32, config: BotConfig) -> AggregateStats {
     let mut agg = AggregateStats::default();
@@ -679,12 +681,7 @@ pub fn run_headless(n: u32, config: BotConfig) {
 /// Sweep `target_scaling` × `base_target` and print a compact win-rate matrix.
 /// Useful for finding tuning sweet spots quickly. Each cell runs `runs_per_cell`
 /// full bot games and reports `(antes_cleared_avg, win_rate_pct)`.
-pub fn run_sweep(
-    runs_per_cell: u32,
-    base_targets: &[u32],
-    scalings: &[f32],
-    plays_values: &[u32],
-) {
+pub fn run_sweep(runs_per_cell: u32, base_targets: &[u32], scalings: &[f32], plays_values: &[u32]) {
     println!(
         "Sweep: {} bases × {} scalings × {} plays-values × {} runs/cell = {} runs total",
         base_targets.len(),
