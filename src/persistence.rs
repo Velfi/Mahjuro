@@ -11,6 +11,48 @@ use crate::core::progression::PlayerProgress;
 const MAX_PROFILES: usize = 3;
 const SETTINGS_NAME: &str = "mahjuro_settings.json";
 
+/// Smoke effect intensity levels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmokeIntensity {
+    Off,
+    Subtle,
+    Strong,
+    OverTheTop,
+}
+
+impl SmokeIntensity {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Subtle,
+            Self::Subtle => Self::Strong,
+            Self::Strong => Self::OverTheTop,
+            Self::OverTheTop => Self::Off,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Off => Self::OverTheTop,
+            Self::Subtle => Self::Off,
+            Self::Strong => Self::Subtle,
+            Self::OverTheTop => Self::Strong,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Subtle => "Subtle",
+            Self::Strong => "Strong",
+            Self::OverTheTop => "Over the Top",
+        }
+    }
+}
+
+fn default_smoke() -> SmokeIntensity {
+    SmokeIntensity::Subtle
+}
+
 /// Persistent settings (which profile is active, audio prefs, etc.).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -24,6 +66,8 @@ pub struct AppSettings {
     pub music_volume: f32,
     #[serde(default = "default_true")]
     pub sfx_enabled: bool,
+    #[serde(default = "default_smoke")]
+    pub smoke_intensity: SmokeIntensity,
 }
 
 fn default_volume() -> f32 {
@@ -41,6 +85,7 @@ impl Default for AppSettings {
             sfx_volume: 0.7,
             music_volume: 0.7,
             sfx_enabled: true,
+            smoke_intensity: SmokeIntensity::Subtle,
         }
     }
 }

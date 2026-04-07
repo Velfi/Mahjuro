@@ -98,22 +98,28 @@ impl AudioManager {
     /// Play a sound effect. No-op if audio is unavailable or the SFX file wasn't loaded.
     pub fn play_sfx(&self, id: SfxId) {
         if !self.enabled {
+            log::debug!("play_sfx({id:?}): disabled");
             return;
         }
         let Some(handle) = &self.handle else {
+            log::debug!("play_sfx({id:?}): no handle");
             return;
         };
         let Some(data) = self.sfx_data.get(&id) else {
+            log::debug!("play_sfx({id:?}): no data");
             return;
         };
         let cursor = Cursor::new(data.clone());
-        let Ok(source) = Decoder::new(cursor) else {
+        let Ok(source) = Decoder::new_vorbis(cursor) else {
+            log::warn!("play_sfx({id:?}): vorbis decoder failed");
             return;
         };
         let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("play_sfx({id:?}): sink creation failed");
             return;
         };
         let effective_vol = self.master_volume * self.sfx_volume;
+        log::debug!("play_sfx({id:?}): vol={effective_vol:.2}");
         let amplified = source.amplify(effective_vol);
         sink.append(amplified);
         sink.detach();

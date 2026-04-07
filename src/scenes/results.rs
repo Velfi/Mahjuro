@@ -96,6 +96,7 @@ impl ResultsScene {
         let choice_text: Vec<String> = (0..self.choices.len()).map(|i| fmt(i)).collect();
 
         SceneDrawOutput {
+            background: super::BackgroundId::Score,
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -108,6 +109,8 @@ impl ResultsScene {
                 "Round complete!  Pick:  {}    ←→ choose  Enter confirm",
                 choice_text.join("  "),
             ),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

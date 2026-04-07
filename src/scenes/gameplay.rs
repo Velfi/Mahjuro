@@ -33,6 +33,8 @@ pub struct GameplayScene {
     pause_menu: PauseMenu,
     /// Which bottom button is focused (None = hand tiles have focus).
     button_focus: Option<usize>,
+    /// Tile indices that should depart this frame (set during update, consumed during draw).
+    pending_departures: Vec<usize>,
 }
 
 impl GameplayScene {
@@ -44,6 +46,7 @@ impl GameplayScene {
             last_frame: Instant::now(),
             pause_menu: PauseMenu::new(),
             button_focus: None,
+            pending_departures: Vec::new(),
         }
     }
 
@@ -142,6 +145,9 @@ impl GameplayScene {
             actions_for_scene.push(a);
         }
 
+        // Clear any previous frame's departures.
+        self.pending_departures.clear();
+
         // Normal input handling when no cascade is active.
         for a in &actions_for_scene {
             match a {
@@ -159,10 +165,11 @@ impl GameplayScene {
 
                     if let Some(breakdown) = ctx.run.last_breakdown.clone() {
                         if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
-                            self.cascade = Some(ScoringCascade::new(
+                            self.cascade = Some(ScoringCascade::with_tuning(
                                 breakdown,
                                 score_before,
                                 pts,
+                                ctx.cascade_tuning.clone(),
                             ));
                             // Emit particles on successful score.
                             let sp = ctx.layout.score_panel;
@@ -188,15 +195,31 @@ impl GameplayScene {
                     ctx.run.clear_selection();
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }
+                UiAction::CommitDiscard => {
+                    // Capture selected indices BEFORE discard so we can animate them departing.
+                    if ctx.run.selected_count() > 0 && ctx.run.discards_remaining > 0 {
+                        let selected_indices: Vec<usize> = ctx.run.selected
+                            .iter()
+                            .enumerate()
+                            .filter(|&(_, &s)| s)
+                            .map(|(i, _)| i)
+                            .collect();
+                        self.pending_departures = selected_indices;
+                    }
+                    let discarded = ctx.run.discard_selected(ctx.bus);
+                    if discarded > 0 {
+                        ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
+                    }
+                }
                 _ => {}
             }
         }
-        // Let apply_ui_actions handle toggle-select, commit discard, cancel, and focus movement.
-        let non_score: Vec<_> = actions_for_scene.iter()
-            .filter(|a| !matches!(a, UiAction::ScoreHand | UiAction::SortBySuit | UiAction::SortByRank))
+        // Let apply_ui_actions handle toggle-select, cancel, and focus movement.
+        let non_handled: Vec<_> = actions_for_scene.iter()
+            .filter(|a| !matches!(a, UiAction::ScoreHand | UiAction::SortBySuit | UiAction::SortByRank | UiAction::CommitDiscard))
             .copied()
             .collect();
-        apply_ui_actions(&non_score, ctx.run, ctx.bus, ctx.anim, ctx.focus_tile_index);
+        apply_ui_actions(&non_handled, ctx.run, ctx.bus, ctx.anim, ctx.focus_tile_index);
         None
     }
 
@@ -432,7 +455,7 @@ impl GameplayScene {
             instances.push(GpuInstance { rect, color });
         }
 
-        // Hint: highlight tiles that would complete a meld with current selection.
+        // Hint: compute tile indices that would complete a meld with current selection.
         let selected_indices: Vec<usize> = run
             .selected
             .iter()
@@ -440,20 +463,11 @@ impl GameplayScene {
             .filter(|&(_, &sel)| sel)
             .map(|(i, _)| i)
             .collect();
-        if !selected_indices.is_empty() && self.cascade.is_none() {
-            let hints = suggest_completions(&run.hand, &selected_indices);
-            for &hint_idx in &hints {
-                if let Some(&(hx, hy, hw, hh)) = hand_slots.get(hint_idx) {
-                    // Green hint border around suggested tiles.
-                    let pad = hw * 0.06;
-                    let pulse = (now.elapsed().as_secs_f32() * 3.0).sin() * 0.15 + 0.55;
-                    instances.push(GpuInstance {
-                        rect: [hx - pad, hy - pad, hw + pad * 2.0, hh + pad * 2.0],
-                        color: [0.2, 0.9, 0.3, pulse],
-                    });
-                }
-            }
-        }
+        let hint_indices = if !selected_indices.is_empty() && self.cascade.is_none() {
+            suggest_completions(&run.hand, &selected_indices)
+        } else {
+            vec![]
+        };
 
         // Pause overlay.
         self.pause_menu.draw(
@@ -466,6 +480,7 @@ impl GameplayScene {
         );
 
         SceneDrawOutput {
+            background: super::BackgroundId::Gameplay,
             instances,
             hand_tiles: run.hand.to_vec(),
             hand_slots,
@@ -479,6 +494,8 @@ impl GameplayScene {
                 run.blind.name(), run.run_number, shown_score, run.target_score,
                 run.gold, run.plays_remaining, run.discards_remaining
             ),
+            departing_indices: self.pending_departures.clone(),
+            hint_indices,
         }
     }
 }

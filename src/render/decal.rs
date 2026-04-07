@@ -301,6 +301,33 @@ pub fn rasterize_label(font: &fontdue::Font, text: &str, width: u32, height: u32
     rgba
 }
 
+/// Compute per-character advance widths for text rendered in a rect.
+///
+/// Returns `(font_px, start_x_offset, per_char_advances)` using the same
+/// font sizing logic as [`rasterize_label`], so positions match the rendered
+/// output exactly.
+pub fn measure_label_advances(
+    font: &fontdue::Font,
+    text: &str,
+    width: u32,
+    height: u32,
+) -> (f32, f32, Vec<f32>) {
+    let char_count = text.chars().count().max(1) as f32;
+    let font_px = (height as f32 * 0.55)
+        .min(width as f32 * 1.5 / char_count)
+        .max(8.0);
+
+    let advances: Vec<f32> = text
+        .chars()
+        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .collect();
+
+    let total: f32 = advances.iter().sum();
+    let start_x = (width as f32 - total) * 0.5;
+
+    (font_px, start_x, advances)
+}
+
 /// Load Cormorant Garamond for game UI text.
 /// Cached; uses the compile-time embedded asset with system font fallbacks.
 pub fn load_ui_font_bytes() -> Option<Vec<u8>> {

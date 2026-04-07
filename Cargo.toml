@@ -25,7 +25,7 @@ winit = "0.30.12"
 muda = "0.17.2"
 chrono = "0.4.44"
 arboard = "3.6.1"
-rodio = "0.19"
+rodio = { version = "0.19", features = ["vorbis"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
 
 [dev-dependencies]

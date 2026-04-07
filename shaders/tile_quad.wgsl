@@ -3,6 +3,8 @@
 
 struct Globals {
     screen: vec2<f32>,
+    time: f32,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -11,13 +13,14 @@ struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) uv: vec2<f32>,          // 0..1 within the tile rect
     @location(1) rect_size: vec2<f32>,    // pixel dimensions of the tile
+    @location(2) light: vec4<f32>,        // rgb = light color, a = intensity (0 = off)
 };
 
 @vertex
 fn vs_main(
     @location(0) corner: vec2<f32>,       // unit quad corner (0..1)
     @location(1) rect: vec4<f32>,         // [x, y, w, h] in pixels
-    @location(2) color: vec4<f32>,        // unused for tile quads
+    @location(2) color: vec4<f32>,        // rgb = hint light color, a = intensity; rgb=0 means no light
 ) -> VsOut {
     let x = rect.x + corner.x * rect.z;
     let y = rect.y + corner.y * rect.w;
@@ -27,6 +30,7 @@ fn vs_main(
     out.clip_pos = vec4<f32>(nx, ny, 0.0, 1.0);
     out.uv = corner;
     out.rect_size = vec2<f32>(rect.z, rect.w);
+    out.light = color;
     return out;
 }
 
@@ -71,7 +75,21 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Blend face vs border.
     let face_t = 1.0 - smoothstep(-aa, aa, inner_d);
-    let rgb = mix(border_color, ivory, face_t);
+    var rgb = mix(border_color, ivory, face_t);
+
+    // Directional light hint: when light.rgb > 0, tint the face with a diagonal wash.
+    let light_sum = in.light.r + in.light.g + in.light.b;
+    if light_sum > 0.01 && face_t > 0.01 {
+        // Light direction: upper-right to lower-left.
+        let dir = normalize(vec2<f32>(0.7, -0.5));
+        let diagonal = dot(in.uv - 0.5, dir);
+        // Soft falloff across the tile face.
+        let falloff = smoothstep(-0.2, 0.5, diagonal);
+        let intensity = falloff * in.light.a * face_t;
+        // Tint toward the light color (mix, not add — ivory is too bright for additive).
+        let tint = vec3<f32>(0.7, 1.0, 0.75); // pale green target
+        rgb = mix(rgb, tint, intensity);
+    }
 
     return vec4<f32>(rgb, outer_alpha);
 }

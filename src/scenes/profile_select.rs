@@ -225,6 +225,7 @@ impl ProfileSelectScene {
         });
 
         SceneDrawOutput {
+            background: Default::default(),
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -234,6 +235,8 @@ impl ProfileSelectScene {
             relic_icons: vec![],
             buttons,
             window_title: "Mahjuro — Select Profile".into(),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

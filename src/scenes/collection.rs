@@ -288,6 +288,7 @@ impl CollectionScene {
         });
 
         SceneDrawOutput {
+            background: Default::default(),
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -300,6 +301,8 @@ impl CollectionScene {
                 "Mahjuro — Collection ({}/{})",
                 unlocked, total
             ),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

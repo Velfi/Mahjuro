@@ -1,16 +1,31 @@
 {
   "unlocked_relics": [
+    "quick_draw",
+    "chain_reaction",
+    "set_magnet",
+    "honor_fury",
     "green_luck",
     "multiplier_master",
-    "quick_draw"
+    "overflow",
+    "white_silence"
   ],
-  "unlocked_rules": [],
+  "unlocked_rules": [
+    "SequenceWrap",
+    "NoSequenceBonus"
+  ],
   "high_scores": [
+    520,
+    480,
+    460,
+    430,
+    370,
     340,
+    330,
+    300,
     290,
     0
   ],
-  "runs_completed": 1,
+  "runs_completed": 8,
   "bonus_plays": 0,
   "starting_relic_slots": 0
 }

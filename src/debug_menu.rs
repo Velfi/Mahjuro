@@ -16,6 +16,8 @@ pub enum DebugAction {
     SetCardInventoryStandard,
     SetCardInventoryNumbersOnly,
     SetCardInventoryHonorsOnly,
+    ToggleShowFps,
+    OpenTuning,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -38,6 +40,16 @@ impl DebugMenuBar {
         let debug_menu = Submenu::new("Debug", true);
 
         let mut mappings = Vec::new();
+
+        // Show FPS toggle.
+        let fps_item = MenuItem::new("Show FPS", true, None);
+        mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
+        let _ = debug_menu.append(&fps_item);
+
+        // Cascade tuning overlay.
+        let tuning_item = MenuItem::new("Cascade Tuning...", true, None);
+        mappings.push((tuning_item.id().clone(), DebugAction::OpenTuning));
+        let _ = debug_menu.append(&tuning_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

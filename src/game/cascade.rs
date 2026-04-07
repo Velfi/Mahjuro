@@ -8,15 +8,64 @@
 
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::scoring::ScoreBreakdown;
 
-/// How long each phase is displayed before auto-advancing.
-const BASE_HOLD: Duration = Duration::from_millis(400);
-const STEP_HOLD: Duration = Duration::from_millis(350);
-const TOTAL_HOLD: Duration = Duration::from_millis(600);
+/// Tunable timing parameters for the scoring cascade animation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CascadeTuning {
+    /// How long the base-points phase is displayed (ms).
+    pub base_hold_ms: u64,
+    /// How long each relic/rule step is displayed (ms).
+    pub step_hold_ms: u64,
+    /// How long the final total is held before unblocking (ms).
+    pub total_hold_ms: u64,
+    /// Duration for the score counter tick-up animation (ms).
+    pub tick_duration_ms: u64,
+    /// Lifetime of the discard departure animation (ms). Higher = slower float-away.
+    #[serde(default = "default_depart_ms")]
+    pub depart_lifetime_ms: u64,
+    /// Duration for drawn tiles to settle into position (ms). Higher = slower slide-in.
+    #[serde(default = "default_draw_ms")]
+    pub draw_settle_ms: u64,
+    /// Duration for sort/drag tile repositioning (ms). Higher = slower shuffle.
+    #[serde(default = "default_sort_ms")]
+    pub sort_settle_ms: u64,
+}
 
-/// Duration for the score counter to tick from old value to new value within a phase.
-const TICK_DURATION: Duration = Duration::from_millis(250);
+fn default_depart_ms() -> u64 { 700 }
+fn default_draw_ms() -> u64 { 500 }
+fn default_sort_ms() -> u64 { 400 }
+
+impl Default for CascadeTuning {
+    fn default() -> Self {
+        Self {
+            base_hold_ms: 600,
+            step_hold_ms: 500,
+            total_hold_ms: 900,
+            tick_duration_ms: 350,
+            depart_lifetime_ms: 700,
+            draw_settle_ms: 500,
+            sort_settle_ms: 400,
+        }
+    }
+}
+
+impl CascadeTuning {
+    pub fn base_hold(&self) -> Duration {
+        Duration::from_millis(self.base_hold_ms)
+    }
+    pub fn step_hold(&self) -> Duration {
+        Duration::from_millis(self.step_hold_ms)
+    }
+    pub fn total_hold(&self) -> Duration {
+        Duration::from_millis(self.total_hold_ms)
+    }
+    pub fn tick_duration(&self) -> Duration {
+        Duration::from_millis(self.tick_duration_ms)
+    }
+}
 
 #[derive(Clone, Debug)]
 enum Phase {
@@ -40,6 +89,8 @@ pub struct ScoringCascade {
     pub score_before: u32,
     /// Points earned this hand.
     pub earned: u32,
+    /// Timing parameters.
+    tuning: CascadeTuning,
 }
 
 /// What the UI should display for the current cascade frame.
@@ -71,12 +122,22 @@ pub enum CascadeColor {
 
 impl ScoringCascade {
     pub fn new(breakdown: ScoreBreakdown, score_before: u32, earned: u32) -> Self {
+        Self::with_tuning(breakdown, score_before, earned, CascadeTuning::default())
+    }
+
+    pub fn with_tuning(
+        breakdown: ScoreBreakdown,
+        score_before: u32,
+        earned: u32,
+        tuning: CascadeTuning,
+    ) -> Self {
         Self {
             breakdown,
             phase: Phase::ShowBase,
             phase_started: Instant::now(),
             score_before,
             earned,
+            tuning,
         }
     }
 
@@ -85,7 +146,7 @@ impl ScoringCascade {
         let elapsed = now.saturating_duration_since(self.phase_started);
         match &self.phase {
             Phase::ShowBase => {
-                if elapsed >= BASE_HOLD {
+                if elapsed >= self.tuning.base_hold() {
                     if self.breakdown.steps.is_empty() {
                         self.phase = Phase::ShowTotal;
                     } else {
@@ -96,7 +157,7 @@ impl ScoringCascade {
             }
             Phase::ShowStep(i) => {
                 let i = *i;
-                if elapsed >= STEP_HOLD {
+                if elapsed >= self.tuning.step_hold() {
                     if i + 1 < self.breakdown.steps.len() {
                         self.phase = Phase::ShowStep(i + 1);
                     } else {
@@ -106,7 +167,7 @@ impl ScoringCascade {
                 }
             }
             Phase::ShowTotal => {
-                if elapsed >= TOTAL_HOLD {
+                if elapsed >= self.tuning.total_hold() {
                     self.phase = Phase::Done;
                     self.phase_started = now;
                 }
@@ -131,7 +192,7 @@ impl ScoringCascade {
         let elapsed = now.saturating_duration_since(self.phase_started);
 
         // How far through the score tick are we?
-        let tick_t = (elapsed.as_secs_f32() / TICK_DURATION.as_secs_f32()).min(1.0);
+        let tick_t = (elapsed.as_secs_f32() / self.tuning.tick_duration().as_secs_f32()).min(1.0);
 
         // Always show base points line.
         let base_current = matches!(self.phase, Phase::ShowBase);
