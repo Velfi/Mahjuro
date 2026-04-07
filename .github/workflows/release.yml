@@ -75,14 +75,15 @@ jobs:
             libxi-dev \
             libxrandr-dev \
             libxcursor-dev \
-            libvulkan-dev
+            libvulkan-dev \
+            libgtk-3-dev \
+            xvfb
 
-      - name: Install relic (Windows code signing)
+      - name: Install AzureSignTool (Windows code signing)
         if: matrix.name == 'Windows'
         shell: bash
         run: |
-          go install github.com/sassoftware/relic/v8@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          dotnet tool install --global AzureSignTool --version 7.0.1
 
       - name: Verify Azure Key Vault signing cert (Windows)
         if: matrix.name == 'Windows'
@@ -103,24 +104,6 @@ jobs:
             --query '{enabled:attributes.enabled,expires:attributes.expires}' \
             --output table
 
-      - name: Verify relic can authenticate with Azure Key Vault
-        if: matrix.name == 'Windows'
-        shell: bash
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        run: |
-          relic --version
-          RELIC_BIN="$(which relic)"
-          cp "$RELIC_BIN" test_sign.exe
-          relic sign --file test_sign.exe --key azure --config relic.conf 2>&1 || {
-            echo "--- relic sign failed, dumping debug info ---"
-            relic sign --file test_sign.exe --key azure --config relic.conf -d 9 2>&1 || true
-            exit 1
-          }
-          rm test_sign.exe
-
       - name: Import Apple signing certificate and notarization key
         if: matrix.name == 'macOS'
         env:
@@ -135,7 +118,7 @@ jobs:
           security unlock-keychain -p "" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
           security list-keychains -d user -s build.keychain login.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -f pkcs12
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
           rm certificate.p12
           mkdir -p ~/.private_keys
@@ -154,6 +137,14 @@ jobs:
           key: release-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             release-${{ matrix.target }}-cargo-
+
+      - name: Run tests
+        if: matrix.name != 'Linux'
+        run: cargo test
+
+      - name: Run tests (Linux)
+        if: matrix.name == 'Linux'
+        run: xvfb-run --auto-servernum cargo test
 
       - name: Build release (non-macOS)
         if: matrix.name != 'macOS'
@@ -202,10 +193,15 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
-          relic sign \
-            --file "target/${{ matrix.target }}/release/${{ matrix.binary }}" \
-            --key azure \
-            --config relic.conf
+          AzureSignTool sign \
+            -kvu https://mahjuro.vault.azure.net \
+            -kvc Mahjuro \
+            -kvi "$AZURE_CLIENT_ID" \
+            -kvt "$AZURE_TENANT_ID" \
+            -kvs "$AZURE_CLIENT_SECRET" \
+            -tr http://timestamp.digicert.com \
+            -td sha256 \
+            "target/${{ matrix.target }}/release/${{ matrix.binary }}"
 
       - name: Set archive name
         id: archive
@@ -240,7 +236,7 @@ jobs:
           New-Item -ItemType Directory -Force $dir
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" "$dir\"
           Copy-Item -Recurse assets "$dir\assets"
-          Remove-Item "$dir\assets\*.blend", "$dir\assets\*.blend1" -ErrorAction SilentlyContinue
+          Get-ChildItem "$dir\assets" -Recurse -Include *.blend,*.blend1 | Remove-Item -Force
           Compress-Archive -Path "$dir\*" -DestinationPath "${{ steps.archive.outputs.filename }}"
 
       - uses: actions/upload-artifact@v4

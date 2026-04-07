@@ -1,5 +1,4 @@
-/// Image quad shader: renders a full-colour RGBA texture as a screen-space quad.
-/// Instance `color` is multiplied with the texture sample (tint).
+/// Fluid render shader: samples the density texture and outputs alpha-blended colored smoke.
 
 struct Globals {
     screen: vec2<f32>,
@@ -7,14 +6,21 @@ struct Globals {
     _pad: f32,
 };
 
+struct FluidRenderParams {
+    max_alpha: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
+
 @group(0) @binding(0) var<uniform> globals: Globals;
-@group(1) @binding(0) var t_img: texture_2d<f32>;
-@group(1) @binding(1) var s_img: sampler;
+@group(1) @binding(0) var t_density: texture_2d<f32>;
+@group(1) @binding(1) var s_density: sampler;
+@group(1) @binding(2) var<uniform> render_params: FluidRenderParams;
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
 };
 
 @vertex
@@ -30,12 +36,15 @@ fn vs_main(
     var out: VsOut;
     out.clip_pos = vec4<f32>(nx, ny, 0.0, 1.0);
     out.uv = corner;
-    out.color = color;
     return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let tex = textureSample(t_img, s_img, in.uv);
-    return vec4<f32>(tex.rgb * in.color.rgb, tex.a * in.color.a);
+    let d = textureSample(t_density, s_density, in.uv);
+    // Perceived luminance for alpha calculation.
+    let lum = d.r * 0.299 + d.g * 0.587 + d.b * 0.114;
+    let alpha = clamp(lum * 2.0, 0.0, 1.0) * render_params.max_alpha;
+    // Output premultiplied alpha.
+    return vec4<f32>(d.rgb * alpha, alpha);
 }

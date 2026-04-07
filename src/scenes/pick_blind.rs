@@ -146,7 +146,7 @@ impl PickBlindScene {
 
         for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
             let color = if i == self.cursor {
-                [0.9, 0.75, 0.2, 1.0]
+                [0.7, 0.55, 0.1, 1.0]
             } else {
                 blind_colors[i]
             };
@@ -206,8 +206,16 @@ impl PickBlindScene {
         ];
         text_labels.extend(relic_labels);
 
-        // Card labels — blind name centered, multiplier below.
+        // Card labels — dark text backdrop for readability, then text.
         for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
+            // Dark overlay behind all text for contrast.
+            let overlay_y = cy + ch * 0.22;
+            let overlay_h = ch * 0.62;
+            instances.push(GpuInstance {
+                rect: [cx, overlay_y, cw, overlay_h],
+                color: [0.0, 0.0, 0.0, 0.45],
+            });
+
             let name_h = ch * 0.20;
             let name_y = cy + ch * 0.30;
             text_labels.push(TextLabel {
@@ -221,7 +229,7 @@ impl PickBlindScene {
             text_labels.push(TextLabel {
                 rect: [cx, desc_y, cw, desc_h],
                 text: format!("x{:.1} target", mult),
-                color: [0.8, 0.8, 0.8, 0.9],
+                color: [1.0, 1.0, 1.0, 0.95],
             });
             // Show forced modifier on Boss card.
             if let Some(modifier) = BLINDS[i].forced_modifier(ctx.run.run_number) {
@@ -230,7 +238,7 @@ impl PickBlindScene {
                 text_labels.push(TextLabel {
                     rect: [cx, mod_y, cw, mod_h],
                     text: format!("{}: {}", modifier.name(), modifier.description()),
-                    color: [0.9, 0.5, 0.3, 1.0],
+                    color: [1.0, 0.75, 0.4, 1.0],
                 });
             }
         }
@@ -262,6 +270,7 @@ impl PickBlindScene {
         };
 
         SceneDrawOutput {
+            background: Default::default(),
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -276,6 +285,8 @@ impl PickBlindScene {
                 fmt(1),
                 fmt(2),
             ),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

@@ -369,4 +369,318 @@ mod tests {
         assert!(breakdown.steps.iter().any(|s| s.source.contains("Pair Double")));
         assert!(breakdown.detected_yaku.contains(&YakuKind::Flush));
     }
+
+    fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
+        ScoreContext {
+            relics,
+            scored_last_turn,
+            dora_faces: vec![],
+            available_yaku: vec![],
+        }
+    }
+
+    fn relics(ids: Vec<RelicId>) -> RelicState {
+        RelicState { active: ids, ..Default::default() }
+    }
+
+    // ── SequenceSurge ──────────────────────────────────────────────
+
+    #[test]
+    fn sequence_surge_multiplies_sequence() {
+        // 1-2-3m sequence
+        let hand = vec![
+            Tile::new(Suit::Characters, 1, 0),
+            Tile::new(Suit::Characters, 2, 1),
+            Tile::new(Suit::Characters, 3, 2),
+        ];
+        let sets = vec![DetectedSet {
+            kind: SetKind::Sequence,
+            tile_ids: vec![0, 1, 2],
+        }];
+        let r = relics(vec![RelicId::SequenceSurge]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 30, ×1.5 = 45, + yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Sequence Surge")));
+        // The base is 30, the multiplier adds 15
+        assert!(breakdown.total >= 45);
+    }
+
+    // ── PairPower ──────────────────────────────────────────────────
+
+    #[test]
+    fn pair_power_adds_bonus() {
+        let hand = vec![
+            Tile::new(Suit::Circles, 7, 0),
+            Tile::new(Suit::Circles, 7, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::PairPower]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 10 + PairPower(+10) = 20, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Pair Power")));
+        assert!(breakdown.total >= 20);
+    }
+
+    // ── LuckyPair ──────────────────────────────────────────────────
+
+    #[test]
+    fn lucky_pair_multiplies_pair() {
+        let hand = vec![
+            Tile::new(Suit::Circles, 7, 0),
+            Tile::new(Suit::Circles, 7, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::LuckyPair]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 10, ×1.5 = 15, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Lucky Pair")));
+        assert!(breakdown.total >= 15);
+    }
+
+    #[test]
+    fn pair_power_and_lucky_pair_stack() {
+        let hand = vec![
+            Tile::new(Suit::Circles, 7, 0),
+            Tile::new(Suit::Circles, 7, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::PairPower, RelicId::LuckyPair]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 10 + PairPower(+10) = 20, then LuckyPair ×1.5 → 20 + 10 = 30
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Pair Power")));
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Lucky Pair")));
+        assert!(breakdown.total >= 30);
+    }
+
+    // ── WhiteSilence ───────────────────────────────────────────────
+
+    #[test]
+    fn white_silence_bonus_on_pair() {
+        let hand = vec![
+            Tile::new(Suit::Dragon, 3, 0), // White dragon
+            Tile::new(Suit::Dragon, 3, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::WhiteSilence]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 10 + WhiteSilence(+5) = 15, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("White Silence")));
+        assert!(breakdown.total >= 15);
+    }
+
+    // ── HonorFury ──────────────────────────────────────────────────
+
+    #[test]
+    fn honor_fury_on_wind_triplet() {
+        let hand = vec![
+            Tile::new(Suit::Wind, 1, 0), // East ×3
+            Tile::new(Suit::Wind, 1, 1),
+            Tile::new(Suit::Wind, 1, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::HonorFury]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 40 + HonorFury(+9) = 49, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Honor Fury")));
+        assert!(breakdown.total >= 49);
+    }
+
+    // ── RedDragonRage ──────────────────────────────────────────────
+
+    #[test]
+    fn red_dragon_rage_on_red_triplet() {
+        let hand = vec![
+            Tile::new(Suit::Dragon, 1, 0), // Red dragon ×3
+            Tile::new(Suit::Dragon, 1, 1),
+            Tile::new(Suit::Dragon, 1, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::RedDragonRage]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 40, ×5 = 200, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Red Dragon Rage")));
+        assert!(breakdown.total >= 200);
+    }
+
+    #[test]
+    fn red_dragon_rage_ignores_green_dragon() {
+        let hand = vec![
+            Tile::new(Suit::Dragon, 2, 0), // Green dragon ×3
+            Tile::new(Suit::Dragon, 2, 1),
+            Tile::new(Suit::Dragon, 2, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::RedDragonRage]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert!(!breakdown.steps.iter().any(|s| s.source.contains("Red Dragon Rage")));
+    }
+
+    // ── BambooCharm ────────────────────────────────────────────────
+
+    #[test]
+    fn bamboo_charm_on_bamboo_triplet() {
+        let hand = vec![
+            Tile::new(Suit::Bamboos, 5, 0),
+            Tile::new(Suit::Bamboos, 5, 1),
+            Tile::new(Suit::Bamboos, 5, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::BambooCharm]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 40 + BambooCharm(+6) = 46, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Bamboo Charm")));
+        assert!(breakdown.total >= 46);
+    }
+
+    #[test]
+    fn bamboo_charm_on_bamboo_sequence() {
+        let hand = vec![
+            Tile::new(Suit::Bamboos, 4, 0),
+            Tile::new(Suit::Bamboos, 5, 1),
+            Tile::new(Suit::Bamboos, 6, 2),
+        ];
+        let sets = vec![DetectedSet {
+            kind: SetKind::Sequence,
+            tile_ids: vec![0, 1, 2],
+        }];
+        let r = relics(vec![RelicId::BambooCharm]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // base 30 + BambooCharm(+6) = 36, plus yaku
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Bamboo Charm")));
+        assert!(breakdown.total >= 36);
+    }
+
+    #[test]
+    fn bamboo_charm_ignores_other_suits() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 5, 0),
+            Tile::new(Suit::Characters, 5, 1),
+            Tile::new(Suit::Characters, 5, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::BambooCharm]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert!(!breakdown.steps.iter().any(|s| s.source.contains("Bamboo Charm")));
+    }
+
+    // ── MultiplierMaster ───────────────────────────────────────────
+
+    #[test]
+    fn multiplier_master_scales_with_relic_count() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 9, 0),
+            Tile::new(Suit::Characters, 9, 1),
+            Tile::new(Suit::Characters, 9, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        // MultiplierMaster + 2 others = 3 relics → ×1.3
+        let r = relics(vec![RelicId::MultiplierMaster, RelicId::PairPower, RelicId::BambooCharm]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Multiplier Master")));
+        // base 40, ×1.3 = 52 → diff of 12
+        assert!(breakdown.total >= 52);
+    }
+
+    // ── DragonEcho ─────────────────────────────────────────────────
+
+    #[test]
+    fn dragon_echo_adds_adjacent_bonus() {
+        // Sequence | Dragon triplet | Sequence
+        let hand = vec![
+            Tile::new(Suit::Characters, 1, 0),
+            Tile::new(Suit::Characters, 2, 1),
+            Tile::new(Suit::Characters, 3, 2),
+            Tile::new(Suit::Dragon, 1, 3), // Red dragon triplet
+            Tile::new(Suit::Dragon, 1, 4),
+            Tile::new(Suit::Dragon, 1, 5),
+            Tile::new(Suit::Bamboos, 7, 6),
+            Tile::new(Suit::Bamboos, 8, 7),
+            Tile::new(Suit::Bamboos, 9, 8),
+        ];
+        let sets = vec![
+            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
+            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![3, 4, 5] },
+            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![6, 7, 8] },
+        ];
+        let r = relics(vec![RelicId::DragonEcho]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        // 50% of adjacent: seq(30)/2 + seq(30)/2 = 30
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Dragon Echo")));
+        let echo_step = breakdown.steps.iter().find(|s| s.source == "Dragon Echo").unwrap();
+        assert_eq!(echo_step.effect, "+30");
+    }
+
+    #[test]
+    fn dragon_echo_ignores_non_dragon_triplet() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 1, 0),
+            Tile::new(Suit::Characters, 2, 1),
+            Tile::new(Suit::Characters, 3, 2),
+            Tile::new(Suit::Wind, 1, 3), // Wind triplet, not dragon
+            Tile::new(Suit::Wind, 1, 4),
+            Tile::new(Suit::Wind, 1, 5),
+        ];
+        let sets = vec![
+            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
+            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![3, 4, 5] },
+        ];
+        let r = relics(vec![RelicId::DragonEcho]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert!(!breakdown.steps.iter().any(|s| s.source.contains("Dragon Echo")));
+    }
+
+    // ── ChainReaction ──────────────────────────────────────────────
+
+    #[test]
+    fn chain_reaction_when_scored_last_turn() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 5, 0),
+            Tile::new(Suit::Characters, 5, 1),
+            Tile::new(Suit::Characters, 5, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::ChainReaction]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, true), &[]);
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Chain Reaction")));
+        // Should add 25% of total-before-chain
+        let chain_step = breakdown.steps.iter().find(|s| s.source == "Chain Reaction").unwrap();
+        assert!(chain_step.effect.contains("+25%"));
+    }
+
+    #[test]
+    fn chain_reaction_inactive_when_not_scored_last_turn() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 5, 0),
+            Tile::new(Suit::Characters, 5, 1),
+            Tile::new(Suit::Characters, 5, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = relics(vec![RelicId::ChainReaction]);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert!(!breakdown.steps.iter().any(|s| s.source.contains("Chain Reaction")));
+    }
+
+    // ── Dora bonus ─────────────────────────────────────────────────
+
+    #[test]
+    fn dora_bonus_per_matching_tile() {
+        let hand = vec![
+            Tile::new(Suit::Characters, 5, 0),
+            Tile::new(Suit::Characters, 5, 1),
+            Tile::new(Suit::Characters, 5, 2),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = RelicState::default();
+        let ctx = ScoreContext {
+            relics: &r,
+            scored_last_turn: false,
+            dora_faces: vec![(Suit::Characters, 5)],
+            available_yaku: vec![],
+        };
+        let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+        // 3 tiles match dora → +90
+        assert!(breakdown.steps.iter().any(|s| s.source.contains("Dora")));
+        let dora_step = breakdown.steps.iter().find(|s| s.source.contains("Dora")).unwrap();
+        assert_eq!(dora_step.effect, "+90");
+    }
 }

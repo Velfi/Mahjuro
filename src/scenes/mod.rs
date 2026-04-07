@@ -10,6 +10,7 @@ pub mod pick_blind;
 pub mod profile_select;
 pub mod results;
 pub mod shop;
+pub mod splash;
 pub mod start_screen;
 
 pub use collection::CollectionScene;
@@ -20,9 +21,11 @@ pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
 pub use results::ResultsScene;
 pub use shop::ShopScene;
+pub use splash::SplashScene;
 pub use start_screen::StartScreenScene;
 
 use crate::core::tile::Tile;
+use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
@@ -30,6 +33,32 @@ use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
 use crate::core::relic::{RelicId, RelicState, all_relic_defs};
 use crate::ui::layout::{LayoutResult, Rect};
+
+/// Which background image to display behind the scene.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum BackgroundId {
+    /// No background image — just the clear color.
+    #[default]
+    None,
+    /// Main menu: scattered tiles on dark wood.
+    Menu,
+    /// Gameplay: dark felt table surface.
+    Gameplay,
+    /// Score/results: golden radiant center burst.
+    Score,
+}
+
+impl BackgroundId {
+    /// Asset path relative to the `assets/` root (embedded via rust-embed).
+    pub fn asset_path(self) -> Option<&'static str> {
+        match self {
+            BackgroundId::None => None,
+            BackgroundId::Menu => Some("backgrounds/menu_bg.png"),
+            BackgroundId::Gameplay => Some("backgrounds/gameplay_bg.png"),
+            BackgroundId::Score => Some("backgrounds/score_bg.png"),
+        }
+    }
+}
 
 /// Everything a scene's `update()` may need.
 pub struct UpdateCtx<'a> {
@@ -46,6 +75,10 @@ pub struct UpdateCtx<'a> {
     pub switch_profile: &'a mut Option<usize>,
     /// Current mouse cursor position in window coordinates.
     pub cursor_pos: (f32, f32),
+    /// `true` once all background asset loading has completed.
+    pub loading_done: bool,
+    /// Cascade animation timing parameters.
+    pub cascade_tuning: &'a CascadeTuning,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -68,6 +101,8 @@ pub struct ButtonDef {
 
 /// What a scene returns from `draw()`.
 pub struct SceneDrawOutput {
+    /// Background image to render behind everything else.
+    pub background: BackgroundId,
     pub instances: Vec<GpuInstance>,
     /// Tiles to render as 3D meshes in the hand strip (empty = no hand tiles).
     pub hand_tiles: Vec<Tile>,
@@ -84,6 +119,11 @@ pub struct SceneDrawOutput {
     /// Clickable buttons overlaid on the scene.
     pub buttons: Vec<ButtonDef>,
     pub window_title: String,
+    /// Hand tile indices that should animate departing this frame (discard/score).
+    /// Consumed by the renderer before `update_hand_tiles` removes them.
+    pub departing_indices: Vec<usize>,
+    /// Hand tile indices that should show a directional light hint (meld completion).
+    pub hint_indices: Vec<usize>,
 }
 
 /// Build GPU elements for a relic display row inside the relic strip.
@@ -157,6 +197,7 @@ pub type SceneTransition = Option<Scene>;
 
 /// The active scene. Enum dispatch — no `Box<dyn Trait>`.
 pub enum Scene {
+    Splash(SplashScene),
     StartScreen(StartScreenScene),
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
@@ -171,6 +212,7 @@ pub enum Scene {
 impl Scene {
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         match self {
+            Scene::Splash(s) => s.update(ctx),
             Scene::StartScreen(s) => s.update(ctx),
             Scene::ProfileSelect(s) => s.update(ctx),
             Scene::Shop(s) => s.update(ctx),
@@ -185,6 +227,7 @@ impl Scene {
 
     pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         match self {
+            Scene::Splash(s) => s.draw(ctx),
             Scene::StartScreen(s) => s.draw(ctx),
             Scene::ProfileSelect(s) => s.draw(ctx),
             Scene::Shop(s) => s.draw(ctx),

@@ -160,18 +160,58 @@ impl ShopScene {
                 .collect()
         };
 
+        // Rarity accent color for card top stripe.
+        fn rarity_accent(rarity: Rarity) -> [f32; 4] {
+            match rarity {
+                Rarity::Common => [0.5, 0.5, 0.5, 0.9],
+                Rarity::Uncommon => [0.2, 0.7, 0.2, 0.9],
+                Rarity::Rare => [0.25, 0.45, 1.0, 0.9],
+                Rarity::Legendary => [1.0, 0.75, 0.15, 0.9],
+            }
+        }
+
         for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
             let item = &self.items[i];
+            let focused = i == self.cursor;
+            let can_afford = ctx.run.gold >= item.price && !ctx.run.relics.is_full();
+
+            // Gold highlight border around focused card.
+            if focused && !item.sold {
+                let pad = 3.0;
+                instances.push(GpuInstance {
+                    rect: [cx - pad, cy - pad, cw + pad * 2.0, ch + pad * 2.0],
+                    color: [0.9, 0.8, 0.2, 0.95],
+                });
+            }
+
+            // Card background — dim if sold or unaffordable.
             let color = if item.sold {
-                [0.2, 0.2, 0.2, 0.5]
-            } else if i == self.cursor {
-                [0.9, 0.75, 0.2, 1.0]
+                [0.15, 0.15, 0.15, 0.5]
+            } else if !can_afford {
+                [0.18, 0.18, 0.25, 0.85]
             } else {
-                [0.25, 0.35, 0.55, 0.92]
+                [0.15, 0.22, 0.38, 0.92]
             };
             instances.push(GpuInstance {
                 rect: [cx, cy, cw, ch],
                 color,
+            });
+
+            // Rarity-colored accent stripe at card top.
+            if !item.sold {
+                let stripe_h = ch * 0.04;
+                instances.push(GpuInstance {
+                    rect: [cx, cy, cw, stripe_h],
+                    color: rarity_accent(item.rarity),
+                });
+            }
+
+            // Dark text backdrop for readability (like pick_blind).
+            let overlay_y = cy + ch * 0.18;
+            let overlay_h = ch * 0.70;
+            instances.push(GpuInstance {
+                rect: [cx, overlay_y, cw, overlay_h],
+                color: [0.0, 0.0, 0.0, 0.4],
             });
         }
 
@@ -215,7 +255,7 @@ impl ShopScene {
             if item.sold {
                 format!("{} — SOLD", item.name)
             } else {
-                format!("{}  —  {}  —  Cost: {} gold", item.name, item.description, item.price)
+                item.description.to_string()
             }
         } else {
             "Leave shop and pick your next blind".into()
@@ -226,37 +266,14 @@ impl ShopScene {
             color: [0.9, 0.85, 0.6, 1.0],
         });
 
-        // Card labels — name centered vertically, price below.
+        // Card labels — name, price, rarity, and affordability.
         for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
             let item = &self.items[i];
-            // Name in upper-center area of card.
-            let name_h = ch * 0.20;
-            let name_y = cy + ch * 0.30;
-            text_labels.push(TextLabel {
-                rect: [cx, name_y, cw, name_h],
-                text: item.name.to_string(),
-                color: [1.0, 1.0, 1.0, 1.0],
-            });
-            // Price in lower area.
-            let price_h = ch * 0.15;
-            let price_y = cy + ch * 0.65;
-            let price_text = if item.sold {
-                "SOLD".to_string()
-            } else {
-                format!("{}g", item.price)
-            };
-            text_labels.push(TextLabel {
-                rect: [cx, price_y, cw, price_h],
-                text: price_text,
-                color: if item.sold {
-                    [0.6, 0.6, 0.6, 1.0]
-                } else {
-                    [1.0, 0.85, 0.3, 1.0]
-                },
-            });
-            // Rarity label below price.
-            let rarity_h = ch * 0.12;
-            let rarity_y = cy + ch * 0.82;
+            let can_afford = ctx.run.gold >= item.price && !ctx.run.relics.is_full();
+
+            // Rarity label near top of card (below the accent stripe).
+            let rarity_h = ch * 0.10;
+            let rarity_y = cy + ch * 0.06;
             let (rarity_text, rarity_color) = match item.rarity {
                 Rarity::Common => ("Common", [0.7, 0.7, 0.7, 0.9]),
                 Rarity::Uncommon => ("Uncommon", [0.3, 0.8, 0.3, 0.9]),
@@ -266,8 +283,70 @@ impl ShopScene {
             text_labels.push(TextLabel {
                 rect: [cx, rarity_y, cw, rarity_h],
                 text: rarity_text.to_string(),
-                color: rarity_color,
+                color: if item.sold { [0.4, 0.4, 0.4, 0.6] } else { rarity_color },
             });
+
+            // Name in upper-center area of card.
+            let name_h = ch * 0.18;
+            let name_y = cy + ch * 0.22;
+            text_labels.push(TextLabel {
+                rect: [cx, name_y, cw, name_h],
+                text: item.name.to_string(),
+                color: if item.sold { [0.5, 0.5, 0.5, 0.7] } else { [1.0, 1.0, 1.0, 1.0] },
+            });
+
+            // Description on the card (sized for readability, not raw card rect).
+            let desc_rect_h = ch * 0.22;
+            let desc_rect_w = cw * 0.88;
+            let desc_x = cx + (cw - desc_rect_w) * 0.5;
+            let desc_y = cy + ch * 0.44;
+            text_labels.push(TextLabel {
+                rect: [desc_x, desc_y, desc_rect_w, desc_rect_h],
+                text: item.description.to_string(),
+                color: if item.sold {
+                    [0.4, 0.4, 0.4, 0.6]
+                } else {
+                    [0.8, 0.78, 0.65, 0.95]
+                },
+            });
+
+            // Price / SOLD label in lower area.
+            let price_h = ch * 0.15;
+            let price_y = cy + ch * 0.72;
+            if item.sold {
+                text_labels.push(TextLabel {
+                    rect: [cx, price_y, cw, price_h],
+                    text: "SOLD".to_string(),
+                    color: [0.6, 0.6, 0.6, 0.7],
+                });
+            } else {
+                let price_color = if can_afford {
+                    [1.0, 0.85, 0.3, 1.0]
+                } else {
+                    [0.9, 0.3, 0.3, 1.0]
+                };
+                text_labels.push(TextLabel {
+                    rect: [cx, price_y, cw, price_h],
+                    text: format!("{}g", item.price),
+                    color: price_color,
+                });
+            }
+
+            // "Can't afford" indicator for unaffordable items.
+            if !item.sold && !can_afford {
+                let warn_h = ch * 0.10;
+                let warn_y = cy + ch * 0.88;
+                let reason = if ctx.run.relics.is_full() {
+                    "Relics full"
+                } else {
+                    "Not enough gold"
+                };
+                text_labels.push(TextLabel {
+                    rect: [cx, warn_y, cw, warn_h],
+                    text: reason.to_string(),
+                    color: [0.8, 0.3, 0.3, 0.85],
+                });
+            }
         }
 
         text_labels.push(TextLabel {
@@ -287,6 +366,7 @@ impl ShopScene {
         self.pause_menu.draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
 
         SceneDrawOutput {
+            background: Default::default(),
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -299,6 +379,8 @@ impl ShopScene {
                 "Mahjuro — Shop (Round {}) — Gold: {} — ←→ browse  Space buy  Enter next round",
                 self.came_from_round, ctx.run.gold
             ),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

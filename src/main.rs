@@ -15,22 +15,325 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use debug_menu::{DebugAction, DebugMenuBar};
+use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
-use game::run::{pick_relic_choices, RunState};
+use game::run::{RunState, pick_relic_choices};
 use render::animation::AnimationController;
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
-use scenes::{ButtonDef, DrawCtx, Scene, UpdateCtx};
 use scenes::game_over::GameOverScene;
 use scenes::results::ResultsScene;
+use scenes::splash::SplashScene;
 use scenes::start_screen::StartScreenScene;
+use scenes::{ButtonDef, DrawCtx, Scene, UpdateCtx};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme};
+use ui::tooltip::TooltipState;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
+
+// ── Tuning overlay (debug) ──────────────────────────────────────────
+
+const TUNING_ROW_COUNT: usize = 8; // 7 sliders + Export button
+const TUNING_MIN_MS: u64 = 50;
+const TUNING_MAX_MS: u64 = 3000;
+const TUNING_STEP_MS: u64 = 50;
+
+struct TuningOverlay {
+    cursor: usize,
+    tuning: CascadeTuning,
+}
+
+impl TuningOverlay {
+    fn new(tuning: &CascadeTuning) -> Self {
+        Self {
+            cursor: 0,
+            tuning: tuning.clone(),
+        }
+    }
+
+    /// Returns `true` if the overlay should close, along with an optional export path.
+    fn update(&mut self, actions: &[UiAction]) -> TuningResult {
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % TUNING_ROW_COUNT;
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + TUNING_ROW_COUNT - 1) % TUNING_ROW_COUNT;
+                }
+                UiAction::FocusNext | UiAction::NavigateHudNext => {
+                    self.adjust(TUNING_STEP_MS as i64);
+                }
+                UiAction::FocusPrev | UiAction::NavigateHudPrev => {
+                    self.adjust(-(TUNING_STEP_MS as i64));
+                }
+                UiAction::Confirm => {
+                    if self.cursor == TUNING_ROW_COUNT - 1 {
+                        return TuningResult::Export;
+                    }
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    return TuningResult::Close;
+                }
+                _ => {}
+            }
+        }
+        TuningResult::Stay
+    }
+
+    fn adjust(&mut self, delta: i64) {
+        let field = match self.cursor {
+            0 => &mut self.tuning.base_hold_ms,
+            1 => &mut self.tuning.step_hold_ms,
+            2 => &mut self.tuning.total_hold_ms,
+            3 => &mut self.tuning.tick_duration_ms,
+            4 => &mut self.tuning.depart_lifetime_ms,
+            5 => &mut self.tuning.draw_settle_ms,
+            6 => &mut self.tuning.sort_settle_ms,
+            _ => return,
+        };
+        *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
+    }
+
+    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0;
+        let mut instances = Vec::new();
+        let mut labels = Vec::new();
+
+        // Dim overlay background.
+        instances.push(GpuInstance {
+            rect: [0.0, 0.0, window_w, window_h],
+            color: [0.0, 0.0, 0.0, 0.7],
+        });
+
+        // Panel dimensions.
+        let panel_w = (520.0 * scale).min(window_w * 0.90);
+        let row_h = (40.0 * scale).max(26.0);
+        let desc_h = (18.0 * scale).max(12.0);
+        let row_gap = (10.0 * scale).max(4.0);
+        let title_h = (48.0 * scale).max(28.0);
+        let diagram_h = (80.0 * scale).max(50.0);
+        let row_total_h = row_h + desc_h + row_gap;
+        let panel_h = title_h + row_gap
+            + diagram_h + row_gap
+            + 7.0 * row_total_h  // 7 slider rows
+            + (row_h + row_gap)  // export button
+            + row_gap * 3.0;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+
+        // Panel background.
+        instances.push(GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: [0.08, 0.08, 0.14, 0.95],
+        });
+        // Panel border.
+        let border = 3.0;
+        instances.push(GpuInstance {
+            rect: [panel_x - border, panel_y - border, panel_w + border * 2.0, panel_h + border * 2.0],
+            color: [0.3, 0.45, 0.7, 0.8],
+        });
+        // Re-draw panel on top of border.
+        instances.push(GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: [0.08, 0.08, 0.14, 0.95],
+        });
+
+        // Title.
+        labels.push(TextLabel {
+            rect: [panel_x, panel_y + row_gap, panel_w, title_h],
+            text: "Cascade Tuning".into(),
+            color: [1.0, 0.95, 0.7, 1.0],
+        });
+
+        let mut cursor_y = panel_y + row_gap + title_h + row_gap;
+
+        // Timing diagram.
+        let diag_pad = 12.0 * scale;
+        instances.push(GpuInstance {
+            rect: [panel_x + diag_pad, cursor_y, panel_w - diag_pad * 2.0, diagram_h],
+            color: [0.06, 0.06, 0.10, 0.9],
+        });
+        // Draw timeline segments proportional to actual values.
+        let total_ms = self.tuning.base_hold_ms + self.tuning.step_hold_ms * 2 + self.tuning.total_hold_ms;
+        let bar_x = panel_x + diag_pad + 8.0 * scale;
+        let bar_w = panel_w - diag_pad * 2.0 - 16.0 * scale;
+        let bar_h = (16.0 * scale).max(10.0);
+        let bar_y = cursor_y + diagram_h * 0.35;
+        let colors: [[f32; 4]; 4] = [
+            [0.35, 0.65, 0.90, 0.9],  // base hold (blue)
+            [0.55, 0.80, 0.45, 0.9],  // step 1 (green)
+            [0.45, 0.70, 0.35, 0.9],  // step 2 (green darker)
+            [0.90, 0.75, 0.30, 0.9],  // total hold (gold)
+        ];
+        let segments: [u64; 4] = [
+            self.tuning.base_hold_ms,
+            self.tuning.step_hold_ms,
+            self.tuning.step_hold_ms,
+            self.tuning.total_hold_ms,
+        ];
+        let seg_labels = ["Base", "Step", "Step", "Total"];
+        let mut seg_x = bar_x;
+        for (i, &ms) in segments.iter().enumerate() {
+            let seg_w = bar_w * (ms as f32 / total_ms as f32);
+            instances.push(GpuInstance {
+                rect: [seg_x, bar_y, seg_w, bar_h],
+                color: colors[i],
+            });
+            // Segment label (centered in segment).
+            if seg_w > 20.0 {
+                labels.push(TextLabel {
+                    rect: [seg_x, bar_y, seg_w, bar_h],
+                    text: seg_labels[i].to_string(),
+                    color: [0.0, 0.0, 0.0, 0.9],
+                });
+            }
+            seg_x += seg_w;
+        }
+        // Diagram title.
+        labels.push(TextLabel {
+            rect: [panel_x + diag_pad, cursor_y + 2.0, panel_w - diag_pad * 2.0, diagram_h * 0.28],
+            text: "Timeline: Base > Steps (x N) > Total".into(),
+            color: [0.6, 0.6, 0.7, 0.8],
+        });
+        // Tick duration annotation.
+        let tick_label_y = bar_y + bar_h + 4.0 * scale;
+        labels.push(TextLabel {
+            rect: [panel_x + diag_pad, tick_label_y, panel_w - diag_pad * 2.0, diagram_h * 0.25],
+            text: format!("Score counter ticks over {}ms per phase", self.tuning.tick_duration_ms),
+            color: [0.5, 0.5, 0.6, 0.7],
+        });
+
+        cursor_y += diagram_h + row_gap;
+
+        // Slider rows with descriptions.
+        let label_w = panel_w * 0.38;
+        let slider_w = panel_w * 0.35;
+        let value_w = panel_w * 0.18;
+
+        let rows: [(&str, &str, u64); 7] = [
+            ("Base Hold", "Pause on base points before steps begin", self.tuning.base_hold_ms),
+            ("Step Hold", "Pause per relic/rule multiplier step", self.tuning.step_hold_ms),
+            ("Total Hold", "Pause on final total before resuming play", self.tuning.total_hold_ms),
+            ("Tick Duration", "Speed of the score counter tick-up animation", self.tuning.tick_duration_ms),
+            ("Discard Speed", "How long discarded tiles float away", self.tuning.depart_lifetime_ms),
+            ("Draw Speed", "How long drawn tiles take to settle in", self.tuning.draw_settle_ms),
+            ("Sort/Drag Speed", "How long sort and drag-reorder animations take", self.tuning.sort_settle_ms),
+        ];
+
+        for (i, (name, desc, value)) in rows.iter().enumerate() {
+            let row_y = cursor_y + i as f32 * row_total_h;
+            let is_focused = self.cursor == i;
+
+            // Row background.
+            let bg = if is_focused {
+                [0.20, 0.32, 0.50, 0.90]
+            } else {
+                [0.12, 0.15, 0.24, 0.75]
+            };
+            instances.push(GpuInstance {
+                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h + desc_h],
+                color: bg,
+            });
+
+            // Label.
+            let tc = if is_focused {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.6, 0.6, 0.7, 0.9]
+            };
+            labels.push(TextLabel {
+                rect: [panel_x + 12.0 * scale, row_y, label_w, row_h],
+                text: name.to_string(),
+                color: tc,
+            });
+
+            // Description below label.
+            labels.push(TextLabel {
+                rect: [panel_x + 12.0 * scale, row_y + row_h * 0.75, label_w + slider_w, desc_h],
+                text: desc.to_string(),
+                color: [0.45, 0.45, 0.55, 0.7],
+            });
+
+            // Slider track.
+            let track_x = panel_x + label_w;
+            let track_h = (8.0 * scale).max(4.0);
+            let track_y = row_y + (row_h - track_h) * 0.5;
+            instances.push(GpuInstance {
+                rect: [track_x, track_y, slider_w, track_h],
+                color: [0.08, 0.08, 0.14, 1.0],
+            });
+
+            // Slider fill.
+            let t = (*value as f32 - TUNING_MIN_MS as f32) / (TUNING_MAX_MS - TUNING_MIN_MS) as f32;
+            let fill_w = slider_w * t.clamp(0.0, 1.0);
+            let fill_color = if is_focused {
+                [0.35, 0.65, 0.90, 1.0]
+            } else {
+                [0.22, 0.42, 0.62, 0.85]
+            };
+            instances.push(GpuInstance {
+                rect: [track_x, track_y, fill_w, track_h],
+                color: fill_color,
+            });
+
+            // Knob.
+            let knob_size = track_h * 2.5;
+            let knob_x = track_x + fill_w - knob_size * 0.5;
+            let knob_y = track_y + (track_h - knob_size) * 0.5;
+            instances.push(GpuInstance {
+                rect: [knob_x, knob_y, knob_size, knob_size],
+                color: if is_focused { [0.9, 0.9, 1.0, 1.0] } else { [0.6, 0.6, 0.7, 0.9] },
+            });
+
+            // Value text.
+            let value_x = panel_x + label_w + slider_w + 4.0;
+            labels.push(TextLabel {
+                rect: [value_x, row_y, value_w, row_h],
+                text: format!("{}ms", value),
+                color: tc,
+            });
+        }
+
+        // Export button row.
+        let export_y = cursor_y + 7.0 * row_total_h;
+        let is_focused = self.cursor == TUNING_ROW_COUNT - 1;
+        let bg = if is_focused {
+            [0.25, 0.45, 0.30, 0.95]
+        } else {
+            [0.15, 0.20, 0.18, 0.85]
+        };
+        instances.push(GpuInstance {
+            rect: [panel_x + 4.0, export_y, panel_w - 8.0, row_h],
+            color: bg,
+        });
+        labels.push(TextLabel {
+            rect: [panel_x, export_y, panel_w, row_h],
+            text: "Export as JSON".into(),
+            color: if is_focused { [1.0, 1.0, 1.0, 1.0] } else { [0.6, 0.6, 0.7, 0.9] },
+        });
+
+        // Hint.
+        let hint_y = export_y + row_h + row_gap;
+        labels.push(TextLabel {
+            rect: [panel_x, hint_y, panel_w, row_h * 0.6],
+            text: "Left/Right: adjust   Esc: close".into(),
+            color: [0.4, 0.4, 0.5, 0.6],
+        });
+
+        (instances, labels)
+    }
+}
+
+enum TuningResult {
+    Stay,
+    Close,
+    Export,
+}
 
 struct App {
     window: Option<Arc<Window>>,
@@ -54,14 +357,31 @@ struct App {
     pending_scene: Option<Scene>,
     /// Set by scenes to request application exit.
     quit_requested: bool,
+    /// Whether the window close button has already been pressed once (save performed).
+    close_saved: bool,
     /// Modal toast queue — overlays any scene.
     modals: ModalQueue,
     /// Native OS debug menu bar.
     debug_menu: Option<DebugMenuBar>,
+    /// Smoke effect intensity (persisted in settings).
+    smoke_intensity: crate::persistence::SmokeIntensity,
+    /// Previous cursor position for computing cursor velocity.
+    prev_cursor: (f32, f32),
+    /// Whether to show the FPS counter (debug toggle).
+    show_fps: bool,
+    /// Smoothed FPS value for display.
+    fps_smoothed: f32,
+    /// Paradox-style nested tooltip system.
+    tooltips: TooltipState,
+    /// Cascade animation timing (tunable from debug menu).
+    cascade_tuning: CascadeTuning,
+    /// Tuning overlay (None = closed).
+    tuning_overlay: Option<TuningOverlay>,
 }
 
 impl App {
     fn new() -> Self {
+        let t0 = Instant::now();
         let settings = persistence::load_settings();
         let active_profile = settings.active_profile;
         let progress = persistence::load_profile(active_profile);
@@ -75,6 +395,7 @@ impl App {
         if !settings.sfx_enabled {
             audio.set_enabled(false);
         }
+        log::info!("App::new() settings + profile loaded in {:?}", t0.elapsed());
         Self {
             window: None,
             renderer: None,
@@ -86,15 +407,23 @@ impl App {
             last_frame: Instant::now(),
             mouse_actions: Vec::new(),
             active_buttons: Vec::new(),
-            scene: Scene::StartScreen(StartScreenScene::new()),
+            scene: Scene::Splash(SplashScene::new()),
             progress,
             active_profile,
             audio,
             transition_alpha: 1.0,
             pending_scene: None,
             quit_requested: false,
+            close_saved: false,
             modals: ModalQueue::default(),
             debug_menu: None,
+            smoke_intensity: settings.smoke_intensity,
+            prev_cursor: (0.0, 0.0),
+            show_fps: false,
+            fps_smoothed: 60.0,
+            tooltips: TooltipState::new(),
+            cascade_tuning: CascadeTuning::default(),
+            tuning_overlay: None,
         }
     }
 
@@ -122,12 +451,10 @@ impl App {
         };
 
         let size = win.inner_size();
-        let layout = self.layout_engine.solve(size.width as f32, size.height as f32);
-        let focus = self
-            .input
-            .as_ref()
-            .map(|i| i.focused_index())
-            .unwrap_or(0);
+        let layout = self
+            .layout_engine
+            .solve(size.width as f32, size.height as f32);
+        let focus = self.input.as_ref().map(|i| i.focused_index()).unwrap_or(0);
 
         let ctx = DrawCtx {
             layout: &layout,
@@ -143,6 +470,11 @@ impl App {
         win.set_title(&output.window_title);
         self.active_buttons = output.buttons;
 
+        // Spawn departure animations before updating hand tiles (old data still in renderer).
+        if !output.departing_indices.is_empty() {
+            let depart_lifetime = self.cascade_tuning.depart_lifetime_ms as f32 / 1000.0;
+            renderer.depart_tiles(&output.departing_indices, depart_lifetime);
+        }
         renderer.update_hand_tiles(&output.hand_tiles);
 
         // Apply transition alpha to all instances and text labels.
@@ -173,6 +505,9 @@ impl App {
             output.text_labels
         };
 
+        // Remember scene-label count before modal/tooltip layers add more.
+        let scene_label_count = text_labels.len();
+
         // Render modal overlay on top of everything.
         let size = win.inner_size();
         self.modals.update();
@@ -185,6 +520,77 @@ impl App {
             self.active_buttons = modal_buttons;
         }
 
+        // Record where overlay content begins so the renderer can draw it
+        // *after* tile text (preventing tile symbols from bleeding through).
+        let overlay_split = if self.tuning_overlay.is_some() {
+            Some((instances.len(), text_labels.len()))
+        } else {
+            None
+        };
+
+        // Tuning overlay — on top of modals.
+        if let Some(ref overlay) = self.tuning_overlay {
+            let (tuning_insts, tuning_labels) =
+                overlay.draw(size.width as f32, size.height as f32);
+            instances.extend(tuning_insts);
+            text_labels.extend(tuning_labels);
+            self.active_buttons.clear(); // Block scene buttons.
+        }
+
+        // Tooltip overlay — rendered as a separate final pass so it draws on
+        // top of all scene/modal content.  Disabled on overlay screens like Options.
+        let skip_tooltips = self.modals.is_active()
+            || matches!(&self.scene, Scene::Options(_));
+        let tooltip_layers = if !skip_tooltips {
+            let cursor = self
+                .input
+                .as_ref()
+                .map(|i| i.last_cursor)
+                .unwrap_or((0.0, 0.0));
+            let ww = size.width as f32;
+            let wh = size.height as f32;
+            let btn_rects: Vec<(f32, f32, f32, f32)> =
+                self.active_buttons.iter().map(|b| b.rect).collect();
+            self.tooltips.update_and_draw(
+                cursor,
+                &text_labels[..scene_label_count],
+                &btn_rects,
+                ww,
+                wh,
+            )
+        } else {
+            self.tooltips.clear();
+            vec![]
+        };
+
+        // FPS counter overlay (debug).
+        if self.show_fps {
+            let dt = self.last_frame.elapsed().as_secs_f32().max(0.001);
+            let instant_fps = 1.0 / dt;
+            // Exponential moving average for smooth display.
+            self.fps_smoothed = self.fps_smoothed * 0.9 + instant_fps * 0.1;
+            let w = size.width as f32;
+            let h = size.height as f32;
+            let label_h = (h * 0.03).max(20.0);
+            let label_w = label_h * 4.0;
+            let margin = label_h * 0.3;
+            // Background pill behind the text.
+            instances.push(GpuInstance {
+                rect: [w - label_w - margin, margin, label_w, label_h],
+                color: [0.0, 0.0, 0.0, 0.55],
+            });
+            text_labels.push(TextLabel {
+                rect: [w - label_w - margin, margin, label_w, label_h],
+                text: format!("{:.0} FPS", self.fps_smoothed),
+                color: [0.9, 0.9, 0.3, 1.0],
+            });
+        }
+
+        // Convert settle ms to exponential decay speed (inversely proportional).
+        // Default: 500ms → speed 8.0, 400ms → speed 10.0.
+        let draw_settle_speed = 8.0 * (500.0 / self.cascade_tuning.draw_settle_ms.max(1) as f32);
+        let sort_settle_speed = 10.0 * (400.0 / self.cascade_tuning.sort_settle_ms.max(1) as f32);
+
         if let Err(e) = renderer.render(
             &instances,
             &output.hand_slots,
@@ -192,6 +598,13 @@ impl App {
             &output.selected_tiles,
             &text_labels,
             &output.relic_icons,
+            &tooltip_layers,
+            output.background,
+            self.smoke_intensity,
+            &output.hint_indices,
+            overlay_split,
+            draw_settle_speed,
+            sort_settle_speed,
         ) {
             log::error!("render: {e:?}");
         }
@@ -219,7 +632,11 @@ impl App {
                 self.run.available_yaku = self.progress.available_yaku();
                 self.run.available_rules = self.progress.available_rules();
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
-                log::info!("[Debug] Set player level to {} (runs_completed={})", level, runs);
+                log::info!(
+                    "[Debug] Set player level to {} (runs_completed={})",
+                    level,
+                    runs
+                );
             }
             DebugAction::SetGold(amount) => {
                 self.run.gold = amount;
@@ -249,7 +666,11 @@ impl App {
                 let mut entries = Vec::new();
                 for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
                     for rank in 1..=9 {
-                        entries.push(CardEntry { suit, rank, copies: 4 });
+                        entries.push(CardEntry {
+                            suit,
+                            rank,
+                            copies: 4,
+                        });
                     }
                 }
                 self.run.mode.card_inventory = Some(entries);
@@ -258,13 +679,31 @@ impl App {
             DebugAction::SetCardInventoryHonorsOnly => {
                 let mut entries = Vec::new();
                 for rank in 1..=4 {
-                    entries.push(CardEntry { suit: Suit::Wind, rank, copies: 4 });
+                    entries.push(CardEntry {
+                        suit: Suit::Wind,
+                        rank,
+                        copies: 4,
+                    });
                 }
                 for rank in 1..=3 {
-                    entries.push(CardEntry { suit: Suit::Dragon, rank, copies: 4 });
+                    entries.push(CardEntry {
+                        suit: Suit::Dragon,
+                        rank,
+                        copies: 4,
+                    });
                 }
                 self.run.mode.card_inventory = Some(entries);
                 log::info!("[Debug] Card inventory set to Honors Only");
+            }
+            DebugAction::ToggleShowFps => {
+                self.show_fps = !self.show_fps;
+                log::info!("[Debug] Show FPS: {}", self.show_fps);
+            }
+            DebugAction::OpenTuning => {
+                if self.tuning_overlay.is_none() {
+                    self.tuning_overlay = Some(TuningOverlay::new(&self.cascade_tuning));
+                    log::info!("[Debug] Opened cascade tuning overlay");
+                }
             }
         }
         // Request redraw to reflect changes immediately.
@@ -280,23 +719,26 @@ impl ApplicationHandler for App {
             return;
         }
 
+        let t_resumed = Instant::now();
+
         let mut attrs = Window::default_attributes();
         attrs.title = "Mahjuro".to_string();
-        attrs.inner_size = Some(PhysicalSize::new(960, 600).into());
+        attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
 
-        let window = Arc::new(
-            event_loop
-                .create_window(attrs)
-                .expect("create window"),
-        );
+        let t0 = Instant::now();
+        let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.window = Some(window.clone());
+        log::info!("window created in {:?}", t0.elapsed());
 
         let renderer = WgpuRenderer::new(window.clone()).expect("wgpu");
         self.renderer = Some(renderer);
 
+        let t0 = Instant::now();
         self.input = Some(InputState::new().expect("input"));
         self.debug_menu = Some(DebugMenuBar::new());
+        log::info!("input + debug menu init in {:?}", t0.elapsed());
 
+        log::info!("App::resumed() total: {:?}", t_resumed.elapsed());
         window.request_redraw();
     }
 
@@ -312,9 +754,16 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                self.progress.record_score(self.run.round_score);
-                let _ = persistence::save_profile(self.active_profile, &self.progress);
-                event_loop.exit();
+                if self.close_saved {
+                    log::info!("CloseRequested received again — exiting immediately");
+                    event_loop.exit();
+                } else {
+                    log::info!("CloseRequested — saving profile and exiting");
+                    self.progress.record_score(self.run.round_score);
+                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.close_saved = true;
+                    event_loop.exit();
+                }
             }
             WindowEvent::Resized(size) => {
                 if let Some(r) = self.renderer.as_mut() {
@@ -339,23 +788,32 @@ impl ApplicationHandler for App {
                         }
                         GameEvent::RoundComplete { .. } => {
                             self.audio.play_sfx(audio::SfxId::RoundWin);
-                            let win_size = self.window.as_ref()
+                            let win_size = self
+                                .window
+                                .as_ref()
                                 .map(|w| w.inner_size())
                                 .unwrap_or(PhysicalSize::new(800, 600));
                             let ww = win_size.width as f32;
                             let wh = win_size.height as f32;
                             let modal = Modal::new(
                                 "Round Complete!",
-                                format!("Score: {} / {}  —  Well played!", self.run.round_score, self.run.target_score),
+                                format!(
+                                    "Score: {} / {}  —  Well played!",
+                                    self.run.round_score, self.run.target_score
+                                ),
                                 ModalTheme::Success,
-                            ).with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
+                            )
+                            .with_fireworks(
+                                ww * 0.5,
+                                wh * 0.8,
+                                ww * 0.6,
+                                5,
+                            );
                             self.modals.push(modal);
                             let count = self.run.blind.relic_choices();
                             let available = self.progress.available_relics();
-                            let choices =
-                                pick_relic_choices(&self.run.relics, count, &available);
-                            self.pending_scene =
-                                Some(Scene::Results(ResultsScene::new(choices)));
+                            let choices = pick_relic_choices(&self.run.relics, count, &available);
+                            self.pending_scene = Some(Scene::Results(ResultsScene::new(choices)));
                             self.transition_alpha = 1.0;
                         }
                         GameEvent::GameOver { .. } => {
@@ -365,7 +823,9 @@ impl ApplicationHandler for App {
                             let level_up = self.progress.check_level_up();
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
 
-                            let win_size = self.window.as_ref()
+                            let win_size = self
+                                .window
+                                .as_ref()
                                 .map(|w| w.inner_size())
                                 .unwrap_or(PhysicalSize::new(800, 600));
                             let ww = win_size.width as f32;
@@ -378,25 +838,32 @@ impl ApplicationHandler for App {
                                     format!("Level Up! — Level {}", level),
                                     "New content unlocked!",
                                     ModalTheme::Success,
-                                ).with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
+                                )
+                                .with_fireworks(
+                                    ww * 0.5,
+                                    wh * 0.7,
+                                    ww * 0.7,
+                                    8,
+                                );
                                 self.modals.push(modal);
                             }
 
                             // Game over modal (no fireworks).
                             let modal = Modal::new(
                                 "Game Over",
-                                format!("Final score: {} / {}", self.run.round_score, self.run.target_score),
+                                format!(
+                                    "Final score: {} / {}",
+                                    self.run.round_score, self.run.target_score
+                                ),
                                 ModalTheme::Failure,
                             );
                             self.modals.push(modal);
 
                             self.audio.play_sfx(audio::SfxId::GameOver);
-                            self.pending_scene = Some(Scene::GameOver(
-                                GameOverScene::new(
-                                    self.run.round_score,
-                                    self.run.target_score,
-                                ),
-                            ));
+                            self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
+                                self.run.round_score,
+                                self.run.target_score,
+                            )));
                             self.transition_alpha = 1.0;
                         }
                         other => log::info!("event: {other:?}"),
@@ -424,7 +891,9 @@ impl ApplicationHandler for App {
                         .as_ref()
                         .map(|w| w.inner_size())
                         .unwrap_or(PhysicalSize::new(800, 600));
-                    let layout = self.layout_engine.solve(size.width as f32, size.height as f32);
+                    let layout = self
+                        .layout_engine
+                        .solve(size.width as f32, size.height as f32);
                     let slots: Vec<(f32, f32, f32, f32)> = layout
                         .hand_slots
                         .iter()
@@ -453,7 +922,33 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // 3b. If a modal is active, intercept input: dismiss on Confirm/Cancel.
+                // 3b. If the tuning overlay is open, intercept input.
+                if let Some(ref mut overlay) = self.tuning_overlay {
+                    match overlay.update(&actions) {
+                        TuningResult::Stay => {
+                            // Apply live tuning changes.
+                            self.cascade_tuning = overlay.tuning.clone();
+                        }
+                        TuningResult::Close => {
+                            // Apply final tuning and close.
+                            self.cascade_tuning = overlay.tuning.clone();
+                            self.tuning_overlay = None;
+                            log::info!("[Debug] Closed cascade tuning overlay");
+                        }
+                        TuningResult::Export => {
+                            let json = serde_json::to_string_pretty(&overlay.tuning)
+                                .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+                            let path = "cascade_tuning.json";
+                            match std::fs::write(path, &json) {
+                                Ok(()) => log::info!("[Debug] Exported tuning to {path}"),
+                                Err(e) => log::error!("[Debug] Failed to export tuning: {e}"),
+                            }
+                        }
+                    }
+                    actions.clear();
+                }
+
+                // 3c. If a modal is active, intercept input: dismiss on Confirm/Cancel.
                 if self.modals.is_active() {
                     for a in &actions {
                         if matches!(a, UiAction::Confirm | UiAction::Cancel) {
@@ -472,14 +967,17 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .map(|w| w.inner_size())
                     .unwrap_or(PhysicalSize::new(800, 600));
-                let update_layout =
-                    self.layout_engine
-                        .solve(win_size.width as f32, win_size.height as f32);
+                let update_layout = self
+                    .layout_engine
+                    .solve(win_size.width as f32, win_size.height as f32);
                 let mut quit_requested = false;
                 let mut switch_profile_req: Option<usize> = None;
-                let cursor_pos = self.input.as_ref()
+                let cursor_pos = self
+                    .input
+                    .as_ref()
                     .map(|i| i.last_cursor)
                     .unwrap_or((0.0, 0.0));
+                let loading_done = self.renderer.as_ref().map_or(true, |r| !r.is_loading());
                 let ctx = UpdateCtx {
                     actions: &actions,
                     run: &mut self.run,
@@ -490,6 +988,8 @@ impl ApplicationHandler for App {
                     quit_requested: &mut quit_requested,
                     switch_profile: &mut switch_profile_req,
                     cursor_pos,
+                    loading_done,
+                    cascade_tuning: &self.cascade_tuning,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -497,12 +997,13 @@ impl ApplicationHandler for App {
                     self.transition_alpha = 1.0;
                 }
 
-                // Sync live audio settings when in Options scene.
+                // Sync live audio/graphics settings when in Options scene.
                 if let Scene::Options(opts) = &self.scene {
                     self.audio.set_master_volume(opts.master_volume);
                     self.audio.set_sfx_volume(opts.sfx_volume);
                     self.audio.set_music_volume(opts.music_volume);
                     self.audio.set_enabled(opts.sfx_enabled);
+                    self.smoke_intensity = opts.smoke_intensity;
                 }
 
                 // Handle profile switch request.
@@ -533,14 +1034,14 @@ impl ApplicationHandler for App {
                                 input.focus_slot = 0;
                             }
                             // Fade score panel in for the new scene.
-                            self.anim.fade(
-                                render::animation::ENTITY_SCORE_PANEL,
-                                0.0, 1.0, 300,
-                            );
+                            self.anim
+                                .fade(render::animation::ENTITY_SCORE_PANEL, 0.0, 1.0, 300);
                             // Slide hand strip up from below.
                             self.anim.slide_to(
                                 render::animation::ENTITY_HAND_STRIP,
-                                0.0, -20.0, 400,
+                                0.0,
+                                -20.0,
+                                400,
                             );
                         }
                     }
@@ -553,11 +1054,48 @@ impl ApplicationHandler for App {
                     self.quit_requested = true;
                 }
 
+                // Inject fluid impulses from cursor movement.
+                if self.smoke_intensity != crate::persistence::SmokeIntensity::Off {
+                    if let Some(ref mut renderer) = self.renderer {
+                        if let Some(ref mut fluid) = renderer.fluid {
+                            let cursor = self
+                                .input
+                                .as_ref()
+                                .map(|i| i.last_cursor)
+                                .unwrap_or((0.0, 0.0));
+                            let now = Instant::now();
+                            let dt = now
+                                .saturating_duration_since(self.last_frame)
+                                .as_secs_f32()
+                                .max(1.0 / 120.0);
+                            let vx = (cursor.0 - self.prev_cursor.0) / dt;
+                            let vy = (cursor.1 - self.prev_cursor.1) / dt;
+                            let speed = (vx * vx + vy * vy).sqrt();
+                            self.prev_cursor = cursor;
+
+                            // Only inject when cursor is moving noticeably.
+                            if speed > 5.0 {
+                                fluid.inject_impulse(
+                                    cursor.0,
+                                    cursor.1,
+                                    4.0,
+                                    vx * 0.3,
+                                    vy * 0.3,
+                                    [0.85, 0.55, 0.3], // amber
+                                    0.5,
+                                );
+                            }
+                        }
+                    }
+                }
+
                 self.draw();
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
-                    let cursor = self.input.as_ref()
+                    let cursor = self
+                        .input
+                        .as_ref()
                         .map(|i| i.last_cursor)
                         .unwrap_or((0.0, 0.0));
 
@@ -566,8 +1104,10 @@ impl ApplicationHandler for App {
                         let mut hit = false;
                         for btn in &self.active_buttons {
                             let (bx, by, bw, bh) = btn.rect;
-                            if cursor.0 >= bx && cursor.0 <= bx + bw
-                                && cursor.1 >= by && cursor.1 <= by + bh
+                            if cursor.0 >= bx
+                                && cursor.0 <= bx + bw
+                                && cursor.1 >= by
+                                && cursor.1 <= by + bh
                             {
                                 self.mouse_actions.push(btn.action);
                                 hit = true;
@@ -617,7 +1157,9 @@ impl ApplicationHandler for App {
                     input.mode = InputMode::Cursor;
                     input.last_cursor = (position.x as f32, position.y as f32);
                     let size = win.inner_size();
-                    let layout = self.layout_engine.solve(size.width as f32, size.height as f32);
+                    let layout = self
+                        .layout_engine
+                        .solve(size.width as f32, size.height as f32);
                     let slots: Vec<(f32, f32, f32, f32)> = layout
                         .hand_slots
                         .iter()
@@ -667,10 +1209,16 @@ impl ApplicationHandler for App {
         let cascade_active = matches!(&self.scene, Scene::Gameplay(g) if g.is_animating());
         let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
         let needs_redraw = !self.anim.is_idle()
-            || self.renderer.as_ref().map(|r| r.is_spinning()).unwrap_or(false)
+            || self
+                .renderer
+                .as_ref()
+                .map(|r| r.is_spinning())
+                .unwrap_or(false)
             || cascade_active
             || transitioning
-            || self.modals.needs_redraw();
+            || self.modals.needs_redraw()
+            || self.smoke_intensity != crate::persistence::SmokeIntensity::Off
+            || self.tooltips.is_active();
         if needs_redraw {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();
@@ -685,14 +1233,15 @@ fn main() -> anyhow::Result<()> {
 
     asset_path::log_all_assets();
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<()> {
-        let event_loop = EventLoop::new()?;
-        event_loop.set_control_flow(ControlFlow::Poll);
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<()> {
+            let event_loop = EventLoop::new()?;
+            event_loop.set_control_flow(ControlFlow::Poll);
 
-        let mut app = App::new();
-        event_loop.run_app(&mut app)?;
-        Ok(())
-    }));
+            let mut app = App::new();
+            event_loop.run_app(&mut app)?;
+            Ok(())
+        }));
 
     match result {
         Ok(inner) => inner,

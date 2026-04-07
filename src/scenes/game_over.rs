@@ -31,6 +31,7 @@ impl GameOverScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         SceneDrawOutput {
+            background: Default::default(),
             instances: vec![GpuInstance {
                 rect: [0.0, 0.0, w, h],
                 color: [0.18, 0.04, 0.04, 1.0],
@@ -53,6 +54,8 @@ impl GameOverScene {
                 "Game Over — {} / {} — Press Enter to restart",
                 self.final_score, self.target_score
             ),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

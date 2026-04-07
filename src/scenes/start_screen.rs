@@ -250,6 +250,7 @@ impl StartScreenScene {
         });
 
         SceneDrawOutput {
+            background: super::BackgroundId::Menu,
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -259,6 +260,8 @@ impl StartScreenScene {
             relic_icons: vec![],
             buttons,
             window_title: "Mahjuro".into(),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }

@@ -879,7 +879,35 @@ fn try_joker_substitution(
     None
 }
 
+/// Build the set of faces a wild wind tile could usefully become:
+/// - Any face already in `tiles` (for pairs/triplets)
+/// - Any numbered face within ±2 rank of a same-suit numbered tile (for sequences)
+fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
+    use std::collections::HashSet;
+    let mut candidates = HashSet::new();
+    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    for t in tiles {
+        // Exact face: could pair/triplet with existing tiles.
+        candidates.insert((t.suit, t.rank));
+        // Nearby ranks in numbered suits: could form a sequence.
+        if number_suits.contains(&t.suit) {
+            for delta in [-2i8, -1, 1, 2] {
+                let r = t.rank as i8 + delta;
+                if (1..=9).contains(&r) {
+                    candidates.insert((t.suit, r as u8));
+                }
+            }
+        }
+    }
+    // Remove wind/dragon faces that don't already appear — honor tiles can only
+    // pair/triplet, so only faces already present are useful.
+    candidates.retain(|&(s, _)| number_suits.contains(&s) || tiles.iter().any(|t| t.suit == s));
+    candidates.into_iter().collect()
+}
+
 /// Try substituting wind tiles with other faces (WildWinds).
+/// Recursively substitutes all wind tiles, pruning to only faces that could
+/// participate in a meld with the other tiles in the hand.
 fn try_wind_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
@@ -893,16 +921,36 @@ fn try_wind_substitution(
     if wind_indices.is_empty() {
         return None;
     }
-    for &idx in &wind_indices {
-        for &(suit, rank) in &ALL_FACES {
-            let mut modified = tiles.to_vec();
-            modified[idx] = Tile::new(suit, rank, modified[idx].id);
-            if let Some(sets) = validate_selection_with_rules(&modified, rules) {
-                return Some((sets, modified));
+    let candidates = wind_candidate_faces(tiles);
+    if candidates.is_empty() {
+        return None;
+    }
+    fn substitute_recursive(
+        tiles: &mut Vec<Tile>,
+        wind_indices: &[usize],
+        pos: usize,
+        candidates: &[(Suit, u8)],
+        rules: &[RuleModifier],
+    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+        if pos == wind_indices.len() {
+            return validate_selection_with_rules(tiles, rules)
+                .map(|sets| (sets, tiles.clone()));
+        }
+        let idx = wind_indices[pos];
+        let original = tiles[idx];
+        for &(suit, rank) in candidates {
+            tiles[idx] = Tile::new(suit, rank, original.id);
+            if let Some(result) =
+                substitute_recursive(tiles, wind_indices, pos + 1, candidates, rules)
+            {
+                return Some(result);
             }
         }
+        tiles[idx] = original;
+        None
     }
-    None
+    let mut modified = tiles.to_vec();
+    substitute_recursive(&mut modified, &wind_indices, 0, &candidates, rules)
 }
 
 /// Pick `count` relics the player doesn't already own, randomly.
@@ -954,4 +1002,186 @@ pub fn pick_relic_choices(
         selected.push(fallbacks[selected.len() % fallbacks.len()]);
     }
     selected
+}
+
+#[cfg(test)]
+mod joker_tile_tests {
+    use super::*;
+
+    fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    #[test]
+    fn joker_completes_sequence() {
+        // 1m 2m 5s — joker should turn 5s into 3m
+        let tiles = vec![
+            tile(Suit::Characters, 1, 0),
+            tile(Suit::Characters, 2, 1),
+            tile(Suit::Bamboos, 5, 2),
+        ];
+        let result = try_joker_substitution(&tiles, &[]);
+        assert!(result.is_some(), "joker should complete the sequence");
+        let (sets, modified) = result.unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+        // The modified tile should now be 3m
+        assert_eq!(modified[2].suit, Suit::Characters);
+        assert_eq!(modified[2].rank, 3);
+    }
+
+    #[test]
+    fn joker_completes_triplet() {
+        // 7p 7p 1s — joker should turn 1s into 7p
+        let tiles = vec![
+            tile(Suit::Circles, 7, 0),
+            tile(Suit::Circles, 7, 1),
+            tile(Suit::Bamboos, 1, 2),
+        ];
+        let result = try_joker_substitution(&tiles, &[]);
+        assert!(result.is_some());
+        let (sets, _) = result.unwrap();
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn joker_makes_pair_from_two_tiles() {
+        // 1m 5s — joker turns 5s into 1m for a pair
+        let tiles = vec![
+            tile(Suit::Characters, 1, 0),
+            tile(Suit::Bamboos, 5, 1),
+        ];
+        let result = try_joker_substitution(&tiles, &[]);
+        assert!(result.is_some());
+        let (sets, _) = result.unwrap();
+        assert_eq!(sets[0].kind, SetKind::Pair);
+    }
+
+    #[test]
+    fn joker_only_substitutes_one_tile() {
+        // 1m 5s 9p — all different, need 2 subs to make a meld, joker can only do 1
+        let tiles = vec![
+            tile(Suit::Characters, 1, 0),
+            tile(Suit::Bamboos, 5, 1),
+            tile(Suit::Circles, 9, 2),
+        ];
+        assert!(try_joker_substitution(&tiles, &[]).is_none());
+    }
+
+    #[test]
+    fn joker_respects_no_sequences_rule() {
+        // 1m 2m 5s — would be a sequence with joker, but NoSequences blocks it
+        let tiles = vec![
+            tile(Suit::Characters, 1, 0),
+            tile(Suit::Characters, 2, 1),
+            tile(Suit::Bamboos, 5, 2),
+        ];
+        let result = try_joker_substitution(&tiles, &[RuleModifier::NoSequences]);
+        // Could still work if joker turns 5s into 1m or 2m for a triplet — but
+        // we only have 2 of those, so a triplet needs the joker tile to match one.
+        // 1m 2m 1m → not a valid decomposition (pair 1m + leftover 2m).
+        // 1m 2m 2m → pair 2m + leftover 1m. Also invalid.
+        // No triplet possible, so should be None.
+        assert!(result.is_none());
+    }
+}
+
+#[cfg(test)]
+mod wild_wind_tests {
+    use super::*;
+
+    fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    #[test]
+    fn two_winds_substitute_into_sequences() {
+        // Hand: 2m W 4m | 7m 8m 9m | 4s 5s 6s | 7p 8p W
+        // With Wild Winds, W->3m and W->9p (or 6p) should yield 4 sequences.
+        let tiles = vec![
+            tile(Suit::Characters, 2, 1),
+            tile(Suit::Wind, 3, 2), // West, should become 3m
+            tile(Suit::Characters, 4, 3),
+            tile(Suit::Characters, 7, 4),
+            tile(Suit::Characters, 8, 5),
+            tile(Suit::Characters, 9, 6),
+            tile(Suit::Bamboos, 4, 7),
+            tile(Suit::Bamboos, 5, 8),
+            tile(Suit::Bamboos, 6, 9),
+            tile(Suit::Circles, 7, 10),
+            tile(Suit::Circles, 8, 11),
+            tile(Suit::Wind, 3, 12), // West, should become 9p (or 6p)
+        ];
+        let result = try_wind_substitution(&tiles, &[]);
+        assert!(result.is_some(), "two-wind substitution should find a valid hand");
+        let (sets, _) = result.unwrap();
+        assert_eq!(sets.len(), 4);
+        assert!(sets.iter().all(|s| s.kind == SetKind::Sequence));
+    }
+
+    #[test]
+    fn single_wind_substitutes_into_sequence() {
+        // 1m 2m W -> W becomes 3m
+        let tiles = vec![
+            tile(Suit::Characters, 1, 1),
+            tile(Suit::Characters, 2, 2),
+            tile(Suit::Wind, 1, 3), // East
+        ];
+        let result = try_wind_substitution(&tiles, &[]);
+        assert!(result.is_some());
+        let (sets, _) = result.unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn wind_substitutes_into_triplet() {
+        // 5s 5s W -> W becomes 5s for a triplet
+        let tiles = vec![
+            tile(Suit::Bamboos, 5, 1),
+            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Wind, 2, 3),
+        ];
+        let result = try_wind_substitution(&tiles, &[]);
+        assert!(result.is_some());
+        let (sets, _) = result.unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn no_winds_returns_none() {
+        let tiles = vec![
+            tile(Suit::Characters, 1, 1),
+            tile(Suit::Characters, 2, 2),
+            tile(Suit::Characters, 3, 3),
+        ];
+        assert!(try_wind_substitution(&tiles, &[]).is_none());
+    }
+
+    #[test]
+    fn impossible_hand_returns_none() {
+        // W alone can't form any meld
+        let tiles = vec![tile(Suit::Wind, 1, 1)];
+        assert!(try_wind_substitution(&tiles, &[]).is_none());
+    }
+
+    #[test]
+    fn candidates_include_nearby_ranks() {
+        let tiles = vec![
+            tile(Suit::Characters, 5, 1),
+            tile(Suit::Wind, 3, 2),
+        ];
+        let candidates = wind_candidate_faces(&tiles);
+        // Should include 3m-7m (5 ± 2) and 5m itself
+        for r in 3..=7 {
+            assert!(
+                candidates.contains(&(Suit::Characters, r)),
+                "candidates should include {}m",
+                r
+            );
+        }
+        // Should NOT include 1m (too far)
+        assert!(!candidates.contains(&(Suit::Characters, 1)));
+    }
 }

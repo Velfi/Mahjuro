@@ -40,7 +40,7 @@ impl GameMode {
             starting_plays: 4,
             starting_discards: 3,
             hand_size: 14,
-            base_target: 500,
+            base_target: 300,
             target_scaling: 1.5,
             starting_relics: vec![],
             starting_rules: vec![RuleModifier::PairDoubleScore],

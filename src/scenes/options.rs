@@ -10,8 +10,9 @@ const OPT_MASTER: usize = 0;
 const OPT_MUSIC: usize = 1;
 const OPT_SFX: usize = 2;
 const OPT_TOGGLE_SFX: usize = 3;
-const OPT_BACK: usize = 4;
-const OPT_COUNT: usize = 5;
+const OPT_SMOKE: usize = 4;
+const OPT_BACK: usize = 5;
+const OPT_COUNT: usize = 6;
 
 /// Volume adjustment step per input press.
 const VOL_STEP: f32 = 0.05;
@@ -23,6 +24,7 @@ pub struct OptionsScene {
     pub sfx_volume: f32,
     pub music_volume: f32,
     pub sfx_enabled: bool,
+    pub smoke_intensity: crate::persistence::SmokeIntensity,
     /// Cached row rects from last draw, for hover hit-testing: (x, y, w, h) per row.
     row_rects: [(f32, f32, f32, f32); OPT_COUNT],
     /// Cached slider track rect per slider row: (x, w) — only valid for first 3 rows.
@@ -38,6 +40,7 @@ impl OptionsScene {
             sfx_volume: settings.sfx_volume,
             music_volume: settings.music_volume,
             sfx_enabled: settings.sfx_enabled,
+            smoke_intensity: settings.smoke_intensity,
             row_rects: [(0.0, 0.0, 0.0, 0.0); OPT_COUNT],
             slider_tracks: [(0.0, 0.0); 3],
         }
@@ -49,6 +52,7 @@ impl OptionsScene {
         settings.sfx_volume = self.sfx_volume;
         settings.music_volume = self.music_volume;
         settings.sfx_enabled = self.sfx_enabled;
+        settings.smoke_intensity = self.smoke_intensity;
         let _ = crate::persistence::save_settings(&settings);
     }
 
@@ -141,17 +145,23 @@ impl OptionsScene {
                     self.cursor = (self.cursor + OPT_COUNT - 1) % OPT_COUNT;
                 }
                 UiAction::FocusNext | UiAction::CommitDiscard | UiAction::NavigateHudNext => {
-                    // Right / increase on slider rows; move down on non-slider rows.
+                    // Right / increase on slider rows; cycle on smoke; move down otherwise.
                     if self.current_volume_mut().is_some() {
                         self.adjust_volume(VOL_STEP);
+                    } else if self.cursor == OPT_SMOKE {
+                        self.smoke_intensity = self.smoke_intensity.next();
+                        self.save_settings();
                     } else {
                         self.cursor = (self.cursor + 1) % OPT_COUNT;
                     }
                 }
                 UiAction::FocusPrev | UiAction::ScoreHand | UiAction::NavigateHudPrev => {
-                    // Left / decrease on slider rows; move up on non-slider rows.
+                    // Left / decrease on slider rows; cycle on smoke; move up otherwise.
                     if self.current_volume_mut().is_some() {
                         self.adjust_volume(-VOL_STEP);
+                    } else if self.cursor == OPT_SMOKE {
+                        self.smoke_intensity = self.smoke_intensity.prev();
+                        self.save_settings();
                     } else {
                         self.cursor = (self.cursor + OPT_COUNT - 1) % OPT_COUNT;
                     }
@@ -172,6 +182,10 @@ impl OptionsScene {
                     }
                     OPT_TOGGLE_SFX => {
                         self.sfx_enabled = !self.sfx_enabled;
+                        self.save_settings();
+                    }
+                    OPT_SMOKE => {
+                        self.smoke_intensity = self.smoke_intensity.next();
                         self.save_settings();
                     }
                     OPT_BACK => {
@@ -336,6 +350,33 @@ impl OptionsScene {
             action: UiAction::Confirm,
         });
 
+        // Smoke intensity row.
+        let smoke_y = menu_start_y + OPT_SMOKE as f32 * (row_h + row_gap);
+        let is_focused = self.cursor == OPT_SMOKE;
+        let bg_color = if is_focused {
+            [0.20, 0.32, 0.50, 0.90]
+        } else {
+            [0.12, 0.15, 0.24, 0.75]
+        };
+        instances.push(GpuInstance {
+            rect: [row_x, smoke_y, row_w, row_h],
+            color: bg_color,
+        });
+        let text_color = if is_focused {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            [0.6, 0.6, 0.7, 0.9]
+        };
+        text_labels.push(TextLabel {
+            rect: [row_x, smoke_y, row_w, row_h],
+            text: format!("Smoke: {}", self.smoke_intensity.label()),
+            color: text_color,
+        });
+        buttons.push(ButtonDef {
+            rect: (row_x, smoke_y, row_w, row_h),
+            action: UiAction::Confirm,
+        });
+
         // Back row.
         let back_y = menu_start_y + OPT_BACK as f32 * (row_h + row_gap);
         let is_focused = self.cursor == OPT_BACK;
@@ -373,6 +414,7 @@ impl OptionsScene {
         });
 
         SceneDrawOutput {
+            background: Default::default(),
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -382,6 +424,8 @@ impl OptionsScene {
             relic_icons: vec![],
             buttons,
             window_title: "Mahjuro — Options".into(),
+            departing_indices: vec![],
+            hint_indices: vec![],
         }
     }
 }
