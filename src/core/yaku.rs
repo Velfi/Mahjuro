@@ -18,13 +18,17 @@ pub enum YakuKind {
 }
 
 impl YakuKind {
-    pub fn bonus_points(self) -> i32 {
+    /// Mult bonus added (additively, on the chips×mult scoring axis) when
+    /// this yaku fires. These are tuned so that stacking 2-3 yaku on a real
+    /// hand pushes mult into the ×8-15 range — that's where the chip pile
+    /// turns into "explosive" final scores.
+    pub fn mult_bonus(self) -> f64 {
         match self {
-            YakuKind::AllTriplets => 100,
-            YakuKind::AllSimples => 60,
-            YakuKind::Flush => 120,
-            YakuKind::MixedSets => 80,
-            YakuKind::FullHand => 200,
+            YakuKind::AllTriplets => 4.0,
+            YakuKind::AllSimples => 2.0,
+            YakuKind::Flush => 4.0,
+            YakuKind::MixedSets => 2.0,
+            YakuKind::FullHand => 5.0,
         }
     }
 
@@ -101,10 +105,8 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                         let n = tiles
                             .iter()
                             .filter(|t| {
-                                matches!(
-                                    t.suit,
-                                    Suit::Characters | Suit::Bamboos | Suit::Circles
-                                ) && t.rank >= 2
+                                matches!(t.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+                                    && t.rank >= 2
                                     && t.rank <= 8
                             })
                             .count();
@@ -118,10 +120,8 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                 }
                 YakuKind::AllTriplets => match &sets_opt {
                     Some(s) => {
-                        let trips =
-                            s.iter().filter(|x| x.kind == SetKind::Triplet).count();
-                        let seqs =
-                            s.iter().filter(|x| x.kind == SetKind::Sequence).count();
+                        let trips = s.iter().filter(|x| x.kind == SetKind::Triplet).count();
+                        let seqs = s.iter().filter(|x| x.kind == SetKind::Sequence).count();
                         // Need ≥2 triplets and zero sequences. Any sequence
                         // disqualifies, so progress collapses to 0 there.
                         if seqs > 0 {
@@ -438,11 +438,11 @@ mod tests {
     }
 
     #[test]
-    fn bonus_points_values() {
-        assert_eq!(YakuKind::AllTriplets.bonus_points(), 100);
-        assert_eq!(YakuKind::AllSimples.bonus_points(), 60);
-        assert_eq!(YakuKind::Flush.bonus_points(), 120);
-        assert_eq!(YakuKind::MixedSets.bonus_points(), 80);
-        assert_eq!(YakuKind::FullHand.bonus_points(), 200);
+    fn mult_bonus_values() {
+        assert_eq!(YakuKind::AllTriplets.mult_bonus(), 4.0);
+        assert_eq!(YakuKind::AllSimples.mult_bonus(), 2.0);
+        assert_eq!(YakuKind::Flush.mult_bonus(), 4.0);
+        assert_eq!(YakuKind::MixedSets.mult_bonus(), 2.0);
+        assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
     }
 }

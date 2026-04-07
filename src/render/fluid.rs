@@ -76,14 +76,10 @@ pub struct FluidSim {
     density_r: [wgpu::Buffer; 2],
     density_g: [wgpu::Buffer; 2],
     density_b: [wgpu::Buffer; 2],
-    pressure: [wgpu::Buffer; 2],
-    divergence: wgpu::Buffer,
 
     // Uniform buffers.
     fluid_uniforms_buf: wgpu::Buffer,
     injection_buf: wgpu::Buffer,
-    /// One buffer per mode: [0]=divergence, [1]=jacobi, [2]=projection.
-    pressure_params_bufs: [wgpu::Buffer; 3],
     render_params_buf: wgpu::Buffer,
 
     // Density texture for rendering.
@@ -114,9 +110,6 @@ pub struct FluidSim {
     // Render pipeline.
     render_pipeline: wgpu::RenderPipeline,
     render_bind_group: wgpu::BindGroup,
-
-    // Which ping-pong buffer set is current (0 or 1).
-    current: usize,
 
     // Pending impulses for this frame.
     impulses: Vec<Impulse>,
@@ -195,10 +188,7 @@ impl FluidSim {
                     1 => "fluid-pp-jacobi",
                     _ => "fluid-pp-projection",
                 }),
-                contents: bytemuck::bytes_of(&PressureParamsGpu {
-                    mode,
-                    _pad: [0; 3],
-                }),
+                contents: bytemuck::bytes_of(&PressureParamsGpu { mode, _pad: [0; 3] }),
                 usage: wgpu::BufferUsages::UNIFORM,
             })
         });
@@ -235,15 +225,21 @@ impl FluidSim {
         let inject_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fluid-inject"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid_inject.wgsl"))
-                    .into(),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/shaders/fluid_inject.wgsl"
+                ))
+                .into(),
             ),
         });
         let advect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fluid-advect"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid_advect.wgsl"))
-                    .into(),
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/shaders/fluid_advect.wgsl"
+                ))
+                .into(),
             ),
         });
         let pressure_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -362,59 +358,58 @@ impl FluidSim {
         });
 
         // Advection bind groups: [0] reads set 0, writes set 1. [1] reads set 1, writes set 0.
-        let make_advect_bg =
-            |label: &str, src: usize, dst: usize| -> wgpu::BindGroup {
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(label),
-                    layout: &advect_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: fluid_uniforms_buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: velocity_x[src].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: velocity_y[src].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: density_r[src].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: density_g[src].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: density_b[src].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: velocity_x[dst].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: velocity_y[dst].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 8,
-                            resource: density_r[dst].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 9,
-                            resource: density_g[dst].as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 10,
-                            resource: density_b[dst].as_entire_binding(),
-                        },
-                    ],
-                })
-            };
+        let make_advect_bg = |label: &str, src: usize, dst: usize| -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &advect_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: fluid_uniforms_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: velocity_x[src].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: velocity_y[src].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: density_r[src].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: density_g[src].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: density_b[src].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: velocity_x[dst].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: velocity_y[dst].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: density_r[dst].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: density_g[dst].as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: density_b[dst].as_entire_binding(),
+                    },
+                ],
+            })
+        };
         let advect_bind_groups = [
             make_advect_bg("fluid-advect-bg-0", 0, 1),
             make_advect_bg("fluid-advect-bg-1", 1, 0),
@@ -457,7 +452,12 @@ impl FluidSim {
         // Pressure bind groups: [0] reads pressure[0] writes pressure[1], [1] vice versa.
         // After advection, the result is in the buffer set indicated by `1 - current`.
         // We use velocity from that destination set for divergence/projection.
-        let make_pressure_bg = |label: &str, mode: usize, vel_set: usize, p_src: usize, p_dst: usize| -> wgpu::BindGroup {
+        let make_pressure_bg = |label: &str,
+                                mode: usize,
+                                vel_set: usize,
+                                p_src: usize,
+                                p_dst: usize|
+         -> wgpu::BindGroup {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label),
                 layout: &pressure_layout,
@@ -499,10 +499,10 @@ impl FluidSim {
         // [2] jacobi B→A: mode 1, reads pressure[1] writes pressure[0]
         // [3] projection: mode 2, reads final pressure (determined at dispatch time)
         let pressure_bind_groups = [
-            make_pressure_bg("fluid-p-div", 0, 1, 1, 0),      // divergence (p_src=1 to avoid aliasing p_dst=0)
-            make_pressure_bg("fluid-p-jac-0", 1, 1, 0, 1),    // jacobi: read p[0], write p[1]
-            make_pressure_bg("fluid-p-jac-1", 1, 1, 1, 0),    // jacobi: read p[1], write p[0]
-            make_pressure_bg("fluid-p-proj", 2, 1, 0, 1),     // projection (p_src doesn't matter much)
+            make_pressure_bg("fluid-p-div", 0, 1, 1, 0), // divergence (p_src=1 to avoid aliasing p_dst=0)
+            make_pressure_bg("fluid-p-jac-0", 1, 1, 0, 1), // jacobi: read p[0], write p[1]
+            make_pressure_bg("fluid-p-jac-1", 1, 1, 1, 0), // jacobi: read p[1], write p[0]
+            make_pressure_bg("fluid-p-proj", 2, 1, 0, 1), // projection (p_src doesn't matter much)
         ];
 
         // --- Density-to-texture compute pipeline ---
@@ -648,7 +648,8 @@ impl FluidSim {
         };
 
         let instance_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<super::wgpu_renderer::GpuInstance>() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<super::wgpu_renderer::GpuInstance>()
+                as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute {
@@ -728,11 +729,8 @@ impl FluidSim {
             density_r,
             density_g,
             density_b,
-            pressure,
-            divergence,
             fluid_uniforms_buf,
             injection_buf,
-            pressure_params_bufs,
             render_params_buf,
             density_texture,
             density_view,
@@ -746,7 +744,6 @@ impl FluidSim {
             density_to_tex_bind_group,
             render_pipeline,
             render_bind_group,
-            current: 0,
             impulses: Vec::new(),
             screen_w,
             screen_h,
@@ -959,11 +956,6 @@ impl FluidSim {
     pub fn update_screen_size(&mut self, w: f32, h: f32) {
         self.screen_w = w;
         self.screen_h = h;
-    }
-
-    pub fn needs_redraw(&self) -> bool {
-        // Always needs redraw while smoke is dissipating.
-        true
     }
 }
 

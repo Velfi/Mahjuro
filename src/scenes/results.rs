@@ -1,13 +1,14 @@
 //! Results scene — shown after a round ends; player picks a relic reward.
 
-use crate::core::relic::{all_relic_defs, RelicId};
-use crate::render::wgpu_renderer::{build_instances_relic_pick, TextLabel};
+use crate::core::relic::{RelicId, all_relic_defs};
+use crate::render::theme::color;
+use crate::render::wgpu_renderer::{TextLabel, build_instances_relic_pick};
 use crate::ui::input::UiAction;
 use crate::ui::layout::LayoutResult;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::game_over::GameOverScene;
 use super::shop::ShopScene;
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 /// Slot indices in `layout.hand_slots` used by the 3 relic-choice quads.
 /// Must match `build_instances_relic_pick` in `wgpu_renderer.rs`.
@@ -65,12 +66,12 @@ impl ResultsScene {
                     let target = ctx.run.target_score;
                     ctx.run.advance_round(chosen);
                     if ctx.run.is_run_complete() {
-                        return Some(Scene::GameOver(GameOverScene::victory(
-                            final_score,
-                            target,
-                        )));
+                        return Some(Scene::GameOver(GameOverScene::victory(final_score, target)));
                     }
-                    return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, &ctx.run.relics)));
+                    return Some(Scene::Shop(ShopScene::new(
+                        ctx.run.run_number,
+                        &ctx.run.relics,
+                    )));
                 }
                 _ => {}
             }
@@ -87,8 +88,18 @@ impl ResultsScene {
             .collect();
 
         let defs = all_relic_defs();
-        let name = |id: RelicId| defs.iter().find(|d| d.id == id).map(|d| d.name).unwrap_or("?");
-        let desc = |id: RelicId| defs.iter().find(|d| d.id == id).map(|d| d.description).unwrap_or("");
+        let name = |id: RelicId| {
+            defs.iter()
+                .find(|d| d.id == id)
+                .map(|d| d.name)
+                .unwrap_or("?")
+        };
+        let desc = |id: RelicId| {
+            defs.iter()
+                .find(|d| d.id == id)
+                .map(|d| d.description)
+                .unwrap_or("")
+        };
 
         let labels: Vec<&str> = self.choices.iter().map(|id| name(*id)).collect();
         let fmt = |i: usize| -> String {
@@ -100,8 +111,18 @@ impl ResultsScene {
         };
 
         let instances = build_instances_relic_pick(
-            (layout.score_panel.x, layout.score_panel.y, layout.score_panel.w, layout.score_panel.h),
-            (layout.modifier_strip.x, layout.modifier_strip.y, layout.modifier_strip.w, layout.modifier_strip.h),
+            (
+                layout.score_panel.x,
+                layout.score_panel.y,
+                layout.score_panel.w,
+                layout.score_panel.h,
+            ),
+            (
+                layout.modifier_strip.x,
+                layout.modifier_strip.y,
+                layout.modifier_strip.w,
+                layout.modifier_strip.h,
+            ),
             &slots,
             self.cursor,
         );
@@ -114,14 +135,24 @@ impl ResultsScene {
         let pick_indices = [1usize, 6, 11];
         let mut text_labels = vec![
             TextLabel {
-                rect: [layout.score_panel.x, layout.score_panel.y, layout.score_panel.w, layout.score_panel.h],
-                text: format!("Round complete!   Gold: {}   ←→ choose  Enter pick", gold),
-                color: [1.0, 1.0, 1.0, 1.0],
+                rect: [
+                    layout.score_panel.x,
+                    layout.score_panel.y,
+                    layout.score_panel.w,
+                    layout.score_panel.h,
+                ],
+                text: format!("Round complete!   ·   Gold {}   ·   ←→ choose  Enter pick", gold),
+                color: color::CHAMPAGNE,
             },
             TextLabel {
-                rect: [layout.modifier_strip.x, layout.modifier_strip.y, layout.modifier_strip.w, layout.modifier_strip.h],
+                rect: [
+                    layout.modifier_strip.x,
+                    layout.modifier_strip.y,
+                    layout.modifier_strip.w,
+                    layout.modifier_strip.h,
+                ],
                 text: selected_desc.to_string(),
-                color: [0.9, 0.85, 0.6, 1.0],
+                color: color::PARCHMENT,
             },
         ];
         for (ci, &si) in pick_indices.iter().enumerate() {
@@ -132,7 +163,11 @@ impl ResultsScene {
                 text_labels.push(TextLabel {
                     rect: [s.0, s.1, s.2, s.3],
                     text: labels[ci].to_string(),
-                    color: [1.0, 1.0, 1.0, 1.0],
+                    color: if ci == self.cursor {
+                        color::CHAMPAGNE
+                    } else {
+                        color::PARCHMENT
+                    },
                 });
             }
         }
@@ -150,6 +185,7 @@ impl ResultsScene {
 
         SceneDrawOutput {
             background: super::BackgroundId::Score,
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -164,6 +200,10 @@ impl ResultsScene {
             ),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

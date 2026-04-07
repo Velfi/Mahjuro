@@ -142,6 +142,26 @@ impl AnimationController {
         );
     }
 
+    /// Strong score-pop (220ms, peak 1.18). Used when the displayed score
+    /// value itself changes — bigger and snappier than `pulse` so it reads
+    /// as "the number just got bigger" rather than a generic acknowledgement.
+    pub fn score_pop(&mut self, entity: u32) {
+        self.tweens.insert(
+            (entity, TweenKind::Scale),
+            Tween {
+                started: self.now,
+                duration: Duration::from_millis(220),
+                easing: EasingFn::EaseOutCubic,
+                peak: 1.18,
+                target_x: 0.0,
+                target_y: 0.0,
+                amplitude: 0.0,
+                opacity_start: 1.0,
+                opacity_end: 1.0,
+            },
+        );
+    }
+
     /// Horizontal shake (decaying oscillation).
     pub fn shake(&mut self, entity: u32, amplitude: f32, duration_ms: u64) {
         self.tweens.insert(
@@ -161,13 +181,7 @@ impl AnimationController {
     }
 
     /// Slide to a target offset over duration.
-    pub fn slide_to(
-        &mut self,
-        entity: u32,
-        target_x: f32,
-        target_y: f32,
-        duration_ms: u64,
-    ) {
+    pub fn slide_to(&mut self, entity: u32, target_x: f32, target_y: f32, duration_ms: u64) {
         self.tweens.insert(
             (entity, TweenKind::OffsetXY),
             Tween {

@@ -3,16 +3,20 @@
 use rand::seq::SliceRandom;
 
 use crate::core::relic::{
-    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price,
-    relic_sell_price,
+    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price, relic_sell_price,
 };
+use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::layout::LayoutResult;
+use crate::ui::widget::{self, PanelVariant, TextStyle};
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_badge_rect, relic_row};
 use super::pause_menu::{PauseMenu, PauseUpdate};
 use super::pick_blind::PickBlindScene;
+use super::{
+    ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_badge_rect,
+    relic_row,
+};
 
 /// A purchasable item in the shop.
 struct ShopItem {
@@ -125,9 +129,8 @@ impl ShopScene {
         // badges, and the Next Round button so the keyboard cursor follows the
         // mouse and clicks act on whatever's under the pointer.
         let (cx, cy) = ctx.cursor_pos;
-        let hit = |r: (f32, f32, f32, f32)| {
-            cx >= r.0 && cx <= r.0 + r.2 && cy >= r.1 && cy <= r.1 + r.3
-        };
+        let hit =
+            |r: (f32, f32, f32, f32)| cx >= r.0 && cx <= r.0 + r.2 && cy >= r.1 && cy <= r.1 + r.3;
         let cards = self.card_rects(ctx.layout);
         let mut hovered: Option<usize> = None;
         for (i, r) in cards.iter().enumerate() {
@@ -221,9 +224,10 @@ impl ShopScene {
         let sp = ctx.layout.score_panel;
         let ms = ctx.layout.modifier_strip;
 
+        // Background — Midnight Gold deep base.
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.08, 0.06, 0.12, 1.0],
+            color: color::OBSIDIAN,
         }];
 
         // Cursor space (must match update()):
@@ -234,110 +238,196 @@ impl ShopScene {
         let n_owned = ctx.run.relics.active.len();
         let total = n_items + n_owned;
 
-        // Gold border under the focused owned relic (drawn before relic_row
-        // so the badge background sits on top of it like a card border).
+        // Gold border under the focused owned relic.
         if self.cursor >= n_items && self.cursor < total {
             let owned_idx = self.cursor - n_items;
-            let (rx, ry, rw, rh) =
-                relic_badge_rect(&ctx.layout.relic_strip, w, ctx.run.relics.max_slots, owned_idx);
+            let (rx, ry, rw, rh) = relic_badge_rect(
+                &ctx.layout.relic_strip,
+                w,
+                ctx.run.relics.max_slots,
+                owned_idx,
+            );
             let pad = 3.0;
             instances.push(GpuInstance {
                 rect: [rx - pad, ry - pad, rw + pad * 2.0, rh + pad * 2.0],
-                color: [0.9, 0.8, 0.2, 0.95],
+                color: color::GOLD,
             });
         }
 
         // Relic row in its own strip.
-        let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
+        let (relic_insts, relic_labels, relic_icons) =
+            relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
         instances.extend(relic_insts);
 
         // Evenly-spaced card rects within the hand strip area (shared with update()).
         let card_rects = self.card_rects(ctx.layout);
 
-        // Rarity accent color for card top stripe.
+        // Rarity accent color for card top stripe — pulled from the central
+        // theme so the shop and collection scenes don't drift apart.
         fn rarity_accent(rarity: Rarity) -> [f32; 4] {
             match rarity {
-                Rarity::Common => [0.5, 0.5, 0.5, 0.9],
-                Rarity::Uncommon => [0.2, 0.7, 0.2, 0.9],
-                Rarity::Rare => [0.25, 0.45, 1.0, 0.9],
-                Rarity::Legendary => [1.0, 0.75, 0.15, 0.9],
+                Rarity::Common => color::rarity(0),
+                Rarity::Uncommon => color::rarity(1),
+                Rarity::Rare => color::rarity(2),
+                Rarity::Legendary => color::rarity(3),
             }
         }
+
+        let mut text_labels: Vec<TextLabel> = Vec::new();
 
         for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
             let item = &self.items[i];
             let focused = i == self.cursor;
             let can_afford = ctx.run.gold >= item.price && !ctx.run.relics.is_full();
 
-            // Gold highlight border around focused card.
+            // Hover-lift: focused card sits ~12px higher (or 2% of card height,
+            // whichever is larger). Static lift for now — no tween — so the
+            // movement reads instantly when the cursor moves between cards.
+            let lift = if focused && !item.sold {
+                (ch * 0.04).max(8.0)
+            } else {
+                0.0
+            };
+            let card_rect = [cx, cy - lift, cw, ch];
+
+            // Faint gold glow halo behind the focused card.
             if focused && !item.sold {
-                let pad = 3.0;
+                let halo = ch * 0.05;
                 instances.push(GpuInstance {
-                    rect: [cx - pad, cy - pad, cw + pad * 2.0, ch + pad * 2.0],
-                    color: [0.9, 0.8, 0.2, 0.95],
+                    rect: [
+                        card_rect[0] - halo,
+                        card_rect[1] - halo,
+                        card_rect[2] + halo * 2.0,
+                        card_rect[3] + halo * 2.0,
+                    ],
+                    color: color::alpha(color::GOLD, 0.45),
                 });
             }
 
-            // Card background — dim if sold or unaffordable.
-            let color = if item.sold {
-                [0.15, 0.15, 0.15, 0.5]
+            // Card panel — Hero variant for affordable, Default for affordable
+            // but not focused, sunken-ish for sold/unaffordable.
+            let variant = if item.sold {
+                PanelVariant::Sunken
             } else if !can_afford {
-                [0.18, 0.18, 0.25, 0.85]
+                PanelVariant::Default
+            } else if focused {
+                PanelVariant::Hero
             } else {
-                [0.15, 0.22, 0.38, 0.92]
+                PanelVariant::Default
             };
-            instances.push(GpuInstance {
-                rect: [cx, cy, cw, ch],
-                color,
-            });
+            widget::push_panel(&mut instances, card_rect, variant);
 
-            // Rarity-colored accent stripe at card top.
+            // Rarity-colored accent stripe at card top, just inside the border.
             if !item.sold {
+                let bt = (ch * 0.025).clamp(1.0, 3.0);
                 let stripe_h = ch * 0.04;
                 instances.push(GpuInstance {
-                    rect: [cx, cy, cw, stripe_h],
+                    rect: [card_rect[0] + bt, card_rect[1] + bt, card_rect[2] - bt * 2.0, stripe_h],
                     color: rarity_accent(item.rarity),
                 });
             }
 
-            // Dark text backdrop for readability (like pick_blind).
-            let overlay_y = cy + ch * 0.18;
-            let overlay_h = ch * 0.70;
-            instances.push(GpuInstance {
-                rect: [cx, overlay_y, cw, overlay_h],
-                color: [0.0, 0.0, 0.0, 0.4],
+            // ── Text on the card ────────────────────────────────────────
+            let lifted_y = card_rect[1];
+            let rarity_h = typography::size(typography::CAPTION, h);
+            let rarity_y = lifted_y + ch * 0.07;
+            let (rarity_text, rarity_color) = match item.rarity {
+                Rarity::Common => ("Common", color::rarity(0)),
+                Rarity::Uncommon => ("Uncommon", color::rarity(1)),
+                Rarity::Rare => ("Rare", color::rarity(2)),
+                Rarity::Legendary => ("Legendary", color::rarity(3)),
+            };
+            text_labels.push(TextLabel {
+                rect: [cx, rarity_y, cw, rarity_h],
+                text: rarity_text.to_string(),
+                color: if item.sold { color::SLATE } else { rarity_color },
             });
+
+            // Name — heading-sized gold serif.
+            let name_h = typography::size(typography::HEADING, h);
+            let name_y = lifted_y + ch * 0.18;
+            text_labels.push(TextLabel {
+                rect: [cx, name_y, cw, name_h],
+                text: item.name.to_string(),
+                color: if item.sold {
+                    color::SLATE
+                } else {
+                    color::CHAMPAGNE
+                },
+            });
+
+            // Description — wrapped via push_text_block so long descriptions
+            // don't get crammed into a raw rect (per art-director feedback).
+            let desc_y = lifted_y + ch * 0.36;
+            let desc_h = ch * 0.36;
+            let desc_w = cw * 0.92;
+            let desc_x = cx + (cw - desc_w) * 0.5;
+            let style = TextStyle {
+                tier: typography::BODY,
+                color: if item.sold {
+                    color::SLATE
+                } else {
+                    color::PARCHMENT
+                },
+                padding: h * 0.008,
+            };
+            widget::push_text_block(
+                &mut text_labels,
+                [desc_x, desc_y, desc_w, desc_h],
+                item.description,
+                style,
+                h,
+            );
+
+            // Price tag at the bottom of the card.
+            let tag_h = ch * 0.16;
+            let tag_w = cw * 0.5;
+            let tag_x = cx + (cw - tag_w) * 0.5;
+            let tag_y = lifted_y + ch - tag_h - ch * 0.06;
+            if item.sold {
+                text_labels.push(TextLabel {
+                    rect: [tag_x, tag_y, tag_w, tag_h],
+                    text: "SOLD".to_string(),
+                    color: color::SLATE,
+                });
+            } else {
+                widget::push_price_tag(
+                    &mut instances,
+                    &mut text_labels,
+                    [tag_x, tag_y, tag_w, tag_h],
+                    item.price,
+                    can_afford,
+                );
+            }
+
+            // "Can't afford" indicator for unaffordable items.
+            if !item.sold && !can_afford {
+                let warn_h = typography::size(typography::CAPTION, h);
+                let warn_y = lifted_y + ch + ch * 0.02;
+                let reason = if ctx.run.relics.is_full() {
+                    "Relics full"
+                } else {
+                    "Not enough gold"
+                };
+                text_labels.push(TextLabel {
+                    rect: [cx, warn_y, cw, warn_h],
+                    text: reason.to_string(),
+                    color: color::RUBY,
+                });
+            }
         }
 
-        // "Next Round" button (rect shared with update() hit-testing).
-        let scale = (w.min(h)) / 600.0;
-        let (btn_x, btn_y, btn_w, btn_h) = Self::next_round_rect(ctx.layout);
-        let next_focused = self.cursor >= total;
-        let next_color = if next_focused {
-            [0.2, 0.6, 0.3, 0.95]
-        } else {
-            [0.22, 0.38, 0.55, 0.92]
-        };
-        if next_focused {
-            let pad = 3.0;
-            instances.push(GpuInstance {
-                rect: [btn_x - pad, btn_y - pad, btn_w + pad * 2.0, btn_h + pad * 2.0],
-                color: [0.9, 0.8, 0.2, 0.95],
-            });
-        }
-        instances.push(GpuInstance {
-            rect: [btn_x, btn_y, btn_w, btn_h],
-            color: next_color,
+        // ── Score panel header (SHOP) ───────────────────────────────────
+        widget::push_panel(
+            &mut instances,
+            [sp.x, sp.y, sp.w, sp.h],
+            PanelVariant::Hero,
+        );
+        text_labels.push(TextLabel {
+            rect: [sp.x, sp.y, sp.w, sp.h],
+            text: format!("SHOP  ·  Round {}  ·  Gold {}", self.came_from_round, ctx.run.gold),
+            color: color::CHAMPAGNE,
         });
-
-        // Text labels.
-        let mut text_labels = vec![
-            TextLabel {
-                rect: [sp.x, sp.y, sp.w, sp.h],
-                text: format!("SHOP  —  Round {}   Gold: {}", self.came_from_round, ctx.run.gold),
-                color: [1.0, 1.0, 1.0, 1.0],
-            },
-        ];
         text_labels.extend(relic_labels);
 
         // Description of selected item in modifier strip.
@@ -368,102 +458,28 @@ impl ShopScene {
         text_labels.push(TextLabel {
             rect: [ms.x, ms.y, ms.w, ms.h],
             text: desc_text,
-            color: [0.9, 0.85, 0.6, 1.0],
+            color: color::PARCHMENT,
         });
 
-        // Card labels — name, price, rarity, and affordability.
-        for (i, &(cx, cy, cw, ch)) in card_rects.iter().enumerate() {
-            let item = &self.items[i];
-            let can_afford = ctx.run.gold >= item.price && !ctx.run.relics.is_full();
-
-            // Rarity label near top of card (below the accent stripe).
-            let rarity_h = ch * 0.10;
-            let rarity_y = cy + ch * 0.06;
-            let (rarity_text, rarity_color) = match item.rarity {
-                Rarity::Common => ("Common", [0.7, 0.7, 0.7, 0.9]),
-                Rarity::Uncommon => ("Uncommon", [0.3, 0.8, 0.3, 0.9]),
-                Rarity::Rare => ("Rare", [0.3, 0.5, 1.0, 0.9]),
-                Rarity::Legendary => ("Legendary", [1.0, 0.8, 0.2, 0.9]),
-            };
-            text_labels.push(TextLabel {
-                rect: [cx, rarity_y, cw, rarity_h],
-                text: rarity_text.to_string(),
-                color: if item.sold { [0.4, 0.4, 0.4, 0.6] } else { rarity_color },
-            });
-
-            // Name in upper-center area of card.
-            let name_h = ch * 0.18;
-            let name_y = cy + ch * 0.22;
-            text_labels.push(TextLabel {
-                rect: [cx, name_y, cw, name_h],
-                text: item.name.to_string(),
-                color: if item.sold { [0.5, 0.5, 0.5, 0.7] } else { [1.0, 1.0, 1.0, 1.0] },
-            });
-
-            // Description on the card (sized for readability, not raw card rect).
-            let desc_rect_h = ch * 0.22;
-            let desc_rect_w = cw * 0.88;
-            let desc_x = cx + (cw - desc_rect_w) * 0.5;
-            let desc_y = cy + ch * 0.44;
-            text_labels.push(TextLabel {
-                rect: [desc_x, desc_y, desc_rect_w, desc_rect_h],
-                text: item.description.to_string(),
-                color: if item.sold {
-                    [0.4, 0.4, 0.4, 0.6]
-                } else {
-                    [0.8, 0.78, 0.65, 0.95]
-                },
-            });
-
-            // Price / SOLD label in lower area.
-            let price_h = ch * 0.15;
-            let price_y = cy + ch * 0.72;
-            if item.sold {
-                text_labels.push(TextLabel {
-                    rect: [cx, price_y, cw, price_h],
-                    text: "SOLD".to_string(),
-                    color: [0.6, 0.6, 0.6, 0.7],
-                });
+        // ── Next Round button ───────────────────────────────────────────
+        let scale = (w.min(h)) / 600.0;
+        let (btn_x, btn_y, btn_w, btn_h) = Self::next_round_rect(ctx.layout);
+        let next_focused = self.cursor >= total;
+        let mut buttons: Vec<ButtonDef> = Vec::new();
+        widget::push_button(
+            &mut instances,
+            &mut text_labels,
+            &mut buttons,
+            [btn_x, btn_y, btn_w, btn_h],
+            "Next Round",
+            ButtonVariant::Primary,
+            if next_focused {
+                ButtonState::Hover
             } else {
-                let price_color = if can_afford {
-                    [1.0, 0.85, 0.3, 1.0]
-                } else {
-                    [0.9, 0.3, 0.3, 1.0]
-                };
-                text_labels.push(TextLabel {
-                    rect: [cx, price_y, cw, price_h],
-                    text: format!("{}g", item.price),
-                    color: price_color,
-                });
-            }
-
-            // "Can't afford" indicator for unaffordable items.
-            if !item.sold && !can_afford {
-                let warn_h = ch * 0.10;
-                let warn_y = cy + ch * 0.88;
-                let reason = if ctx.run.relics.is_full() {
-                    "Relics full"
-                } else {
-                    "Not enough gold"
-                };
-                text_labels.push(TextLabel {
-                    rect: [cx, warn_y, cw, warn_h],
-                    text: reason.to_string(),
-                    color: [0.8, 0.3, 0.3, 0.85],
-                });
-            }
-        }
-
-        text_labels.push(TextLabel {
-            rect: [btn_x, btn_y, btn_w, btn_h],
-            text: "Next Round".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
-        });
-
-        let mut buttons = vec![ButtonDef::ui(
-            (btn_x, btn_y, btn_w, btn_h),
+                ButtonState::Rest
+            },
             UiAction::CommitDiscard,
-        )];
+        );
 
         // Make each shop card clickable. Hover-focus in update() ensures
         // self.cursor already points at the hovered card by the time the
@@ -481,36 +497,29 @@ impl ShopScene {
         }
 
         // Sell pill on the focused owned relic — visible button + clickable.
-        // Uses UiAction::Confirm so the button click takes the same code path
-        // as pressing Space while the relic is focused.
         if self.cursor >= n_items && self.cursor < total {
             let owned_idx = self.cursor - n_items;
             let rid = ctx.run.relics.active[owned_idx];
-            let (rx, ry, rw, rh) =
-                relic_badge_rect(&ctx.layout.relic_strip, w, ctx.run.relics.max_slots, owned_idx);
+            let (rx, ry, rw, rh) = relic_badge_rect(
+                &ctx.layout.relic_strip,
+                w,
+                ctx.run.relics.max_slots,
+                owned_idx,
+            );
             let pill_h = rh * 0.30;
             let pill_w = rw * 0.88;
             let pill_x = rx + (rw - pill_w) * 0.5;
             let pill_y = ry + rh - pill_h - rh * 0.04;
-            // Pill border (dark) for contrast against the gold fill.
-            let border = 1.5;
-            instances.push(GpuInstance {
-                rect: [
-                    pill_x - border,
-                    pill_y - border,
-                    pill_w + border * 2.0,
-                    pill_h + border * 2.0,
-                ],
-                color: [0.05, 0.05, 0.1, 0.95],
-            });
-            instances.push(GpuInstance {
-                rect: [pill_x, pill_y, pill_w, pill_h],
-                color: [0.95, 0.78, 0.22, 0.98],
-            });
+            widget::push_panel_colored(
+                &mut instances,
+                [pill_x, pill_y, pill_w, pill_h],
+                color::BRASS,
+                color::GOLD,
+            );
             text_labels.push(TextLabel {
                 rect: [pill_x, pill_y, pill_w, pill_h],
                 text: format!("Sell {}g", relic_sell_price(rid)),
-                color: [0.08, 0.06, 0.12, 1.0],
+                color: color::OBSIDIAN,
             });
             buttons.push(ButtonDef::ui(
                 (pill_x, pill_y, pill_w, pill_h),
@@ -519,10 +528,12 @@ impl ShopScene {
         }
 
         // Pause overlay.
-        self.pause_menu.draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
+        self.pause_menu
+            .draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -537,6 +548,10 @@ impl ShopScene {
             ),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

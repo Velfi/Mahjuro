@@ -13,9 +13,6 @@ pub enum DebugAction {
     SetGold(u32),
     AddRelic(RelicId),
     ClearRelics,
-    SetCardInventoryStandard,
-    SetCardInventoryNumbersOnly,
-    SetCardInventoryHonorsOnly,
     ToggleShowFps,
     OpenTuning,
 }
@@ -83,22 +80,6 @@ impl DebugMenuBar {
         }
         let _ = relic_sub.append(&add_sub);
         let _ = debug_menu.append(&relic_sub);
-
-        // Card Inventory submenu.
-        let card_sub = Submenu::new("Card Inventory", true);
-        let std_item = MenuItem::new("Standard (136 tiles)", true, None);
-        mappings.push((std_item.id().clone(), DebugAction::SetCardInventoryStandard));
-        let _ = card_sub.append(&std_item);
-
-        let num_item = MenuItem::new("Numbers Only (no honors)", true, None);
-        mappings.push((num_item.id().clone(), DebugAction::SetCardInventoryNumbersOnly));
-        let _ = card_sub.append(&num_item);
-
-        let hon_item = MenuItem::new("Honors Only (winds + dragons)", true, None);
-        mappings.push((hon_item.id().clone(), DebugAction::SetCardInventoryHonorsOnly));
-        let _ = card_sub.append(&hon_item);
-
-        let _ = debug_menu.append(&card_sub);
 
         let _ = menu.append(&debug_menu);
 

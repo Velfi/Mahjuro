@@ -3,12 +3,14 @@
 //! (Small/Big only) to jump straight to the next blind.
 
 use crate::core::rules::BlindKind;
+use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::widget::{self, PanelVariant};
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
 use super::gameplay::GameplayScene;
 use super::pause_menu::{PauseMenu, PauseUpdate};
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
 
 pub struct PickBlindScene {
     /// Whether the skip button at the bottom is focused.
@@ -18,7 +20,10 @@ pub struct PickBlindScene {
 
 impl PickBlindScene {
     pub fn new() -> Self {
-        Self { skip_focused: false, pause_menu: PauseMenu::new() }
+        Self {
+            skip_focused: false,
+            pause_menu: PauseMenu::new(),
+        }
     }
 
     fn can_skip(blind: BlindKind) -> bool {
@@ -64,11 +69,8 @@ impl PickBlindScene {
         let (cx, cy) = ctx.cursor_pos;
         let in_card =
             cx >= card_x && cx <= card_x + card_w && cy >= card_y && cy <= card_y + card_h;
-        let in_skip = can_skip
-            && cx >= btn_x
-            && cx <= btn_x + btn_w
-            && cy >= btn_y
-            && cy <= btn_y + btn_h;
+        let in_skip =
+            can_skip && cx >= btn_x && cx <= btn_x + btn_w && cy >= btn_y && cy <= btn_y + btn_h;
         if in_skip {
             self.skip_focused = true;
         } else if in_card {
@@ -122,7 +124,7 @@ impl PickBlindScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.05, 0.08, 0.06, 1.0],
+            color: color::OBSIDIAN,
         }];
 
         // Relic row in its own strip.
@@ -140,44 +142,32 @@ impl PickBlindScene {
         let card_x = hs.x + (hs.w - card_w) * 0.5;
         let card_y = hs.y + pad_y;
 
-        let blind_color: [f32; 4] = match upcoming {
-            BlindKind::Small => [0.2, 0.4, 0.6, 0.95],
-            BlindKind::Big => [0.5, 0.35, 0.1, 0.95],
-            BlindKind::Boss => [0.6, 0.15, 0.15, 0.95],
-        };
-        // Highlight ring around the card (always focused — it's the only choice).
+        // Faint gold halo when the card is the focused choice.
         if !self.skip_focused {
-            let pad = 4.0;
+            let halo = card_h * 0.04;
             instances.push(GpuInstance {
-                rect: [card_x - pad, card_y - pad, card_w + pad * 2.0, card_h + pad * 2.0],
-                color: [0.7, 0.55, 0.1, 1.0],
+                rect: [
+                    card_x - halo,
+                    card_y - halo,
+                    card_w + halo * 2.0,
+                    card_h + halo * 2.0,
+                ],
+                color: color::alpha(color::GOLD, 0.45),
             });
         }
-        instances.push(GpuInstance {
-            rect: [card_x, card_y, card_w, card_h],
-            color: blind_color,
-        });
+        // Card background — Hero panel for boss, Default otherwise.
+        let variant = match upcoming {
+            BlindKind::Boss => PanelVariant::Hero,
+            _ => PanelVariant::Default,
+        };
+        widget::push_panel(&mut instances, [card_x, card_y, card_w, card_h], variant);
 
         // Skip button at bottom (Small/Big only).
         let scale = (w.min(h)) / 600.0;
-        let btn_w = (140.0 * scale).max(70.0);
-        let btn_h = (32.0 * scale).max(20.0);
+        let btn_w = (160.0 * scale).max(80.0);
+        let btn_h = (38.0 * scale).max(24.0);
         let btn_x = (w - btn_w) * 0.5;
         let btn_y = h - btn_h - (12.0 * scale);
-
-        if can_skip {
-            if self.skip_focused {
-                let pad = 3.0;
-                instances.push(GpuInstance {
-                    rect: [btn_x - pad, btn_y - pad, btn_w + pad * 2.0, btn_h + pad * 2.0],
-                    color: [0.9, 0.8, 0.2, 0.95],
-                });
-            }
-            instances.push(GpuInstance {
-                rect: [btn_x, btn_y, btn_w, btn_h],
-                color: [0.5, 0.3, 0.1, 0.9],
-            });
-        }
 
         // Text labels.
         let ms = ctx.layout.modifier_strip;
@@ -185,6 +175,17 @@ impl PickBlindScene {
         let gold = ctx.run.gold;
         let effective_target = (base as f32 * upcoming.target_multiplier()) as u32;
 
+        // Score header — Hero panel.
+        widget::push_panel(
+            &mut instances,
+            [
+                ctx.layout.score_panel.x,
+                ctx.layout.score_panel.y,
+                ctx.layout.score_panel.w,
+                ctx.layout.score_panel.h,
+            ],
+            PanelVariant::Hero,
+        );
         let mut text_labels = vec![
             TextLabel {
                 rect: [
@@ -194,13 +195,13 @@ impl PickBlindScene {
                     ctx.layout.score_panel.h,
                 ],
                 text: format!(
-                    "ANTE {}/{}   Gold: {}   Target: {}",
+                    "ANTE {}/{}   ·   Gold {}   ·   Target {}",
                     ctx.run.ante,
                     crate::game::run::FINAL_ANTE,
                     gold,
                     effective_target
                 ),
-                color: [1.0, 1.0, 1.0, 1.0],
+                color: color::CHAMPAGNE,
             },
             TextLabel {
                 rect: [ms.x, ms.y, ms.w, ms.h],
@@ -209,60 +210,57 @@ impl PickBlindScene {
                     upcoming.description(),
                     if can_skip { "Esc/↓ skip" } else { "" }
                 ),
-                color: [1.0, 1.0, 1.0, 1.0],
+                color: color::PARCHMENT,
             },
         ];
         text_labels.extend(relic_labels);
 
-        // Card labels — dark text backdrop for readability, then text.
-        let overlay_y = card_y + card_h * 0.22;
-        let overlay_h = card_h * 0.62;
-        instances.push(GpuInstance {
-            rect: [card_x, overlay_y, card_w, overlay_h],
-            color: [0.0, 0.0, 0.0, 0.45],
-        });
-
-        let name_h = card_h * 0.20;
-        let name_y = card_y + card_h * 0.30;
+        let name_h = typography::size(typography::TITLE, h);
+        let name_y = card_y + card_h * 0.18;
         text_labels.push(TextLabel {
             rect: [card_x, name_y, card_w, name_h],
             text: upcoming.name().to_string(),
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: color::CHAMPAGNE,
         });
         let mult = upcoming.target_multiplier();
-        let desc_h = card_h * 0.15;
-        let desc_y = card_y + card_h * 0.55;
+        let desc_h = typography::size(typography::HEADING, h);
+        let desc_y = card_y + card_h * 0.45;
         text_labels.push(TextLabel {
             rect: [card_x, desc_y, card_w, desc_h],
-            text: format!("x{:.1} target", mult),
-            color: [1.0, 1.0, 1.0, 0.95],
+            text: format!("×{:.1} target", mult),
+            color: color::PARCHMENT,
         });
         // Show forced modifier on Boss card.
         if let Some(modifier) = upcoming.forced_modifier(ctx.run.run_number) {
-            let mod_h = card_h * 0.12;
-            let mod_y = card_y + card_h * 0.72;
+            let mod_h = typography::size(typography::CAPTION, h);
+            let mod_y = card_y + card_h * 0.70;
             text_labels.push(TextLabel {
                 rect: [card_x, mod_y, card_w, mod_h],
                 text: format!("{}: {}", modifier.name(), modifier.description()),
-                color: [1.0, 0.75, 0.4, 1.0],
+                color: color::AMBER,
             });
         }
 
-        let mut buttons = vec![ButtonDef::ui(
+        let mut buttons: Vec<ButtonDef> = vec![ButtonDef::ui(
             (card_x, card_y, card_w, card_h),
             UiAction::Confirm,
         )];
         if can_skip {
             let reward = upcoming.skip_reward();
-            text_labels.push(TextLabel {
-                rect: [btn_x, btn_y, btn_w, btn_h],
-                text: format!("Skip (+{}g)", reward),
-                color: [1.0, 1.0, 1.0, 1.0],
-            });
-            buttons.push(ButtonDef::ui(
-                (btn_x, btn_y, btn_w, btn_h),
+            widget::push_button(
+                &mut instances,
+                &mut text_labels,
+                &mut buttons,
+                [btn_x, btn_y, btn_w, btn_h],
+                &format!("Skip (+{}g)", reward),
+                ButtonVariant::Subtle,
+                if self.skip_focused {
+                    ButtonState::Hover
+                } else {
+                    ButtonState::Rest
+                },
                 UiAction::Cancel,
-            ));
+            );
         }
 
         // Pause overlay.
@@ -271,6 +269,7 @@ impl PickBlindScene {
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -286,6 +285,10 @@ impl PickBlindScene {
             ),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

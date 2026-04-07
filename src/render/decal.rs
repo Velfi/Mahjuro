@@ -10,55 +10,6 @@
 
 use crate::core::tile::{Suit, Tile};
 
-/// Unicode codepoint for a tile's Mahjong Tile block character.
-///
-/// Block layout:
-///   Winds  East–North : U+1F000–U+1F003  (rank 1–4)
-///   Dragons Chun/Hatsu/Haku: U+1F004–U+1F006 (rank 1–3)
-///   Man 1–9           : U+1F007–U+1F00F  (rank 1–9)
-///   Sou 1–9           : U+1F010–U+1F018  (rank 1–9)
-///   Pin 1–9           : U+1F019–U+1F021  (rank 1–9)
-/// Public so the renderer can access it for 2D tile labels.
-pub fn tile_codepoint(tile: &Tile) -> u32 {
-    match tile.suit {
-        Suit::Wind => 0x1F000 + (tile.rank as u32 - 1),
-        Suit::Dragon => 0x1F004 + (tile.rank as u32 - 1),
-        Suit::Characters => 0x1F006 + tile.rank as u32,
-        Suit::Bamboos => 0x1F00F + tile.rank as u32,
-        Suit::Circles => 0x1F018 + tile.rank as u32,
-    }
-}
-
-/// Rasterise a `size×size` RGBA8 decal for `tile`.
-///
-/// Prefers the full Unicode tile glyph if the loaded font supports it,
-/// then falls back to a short ASCII label.
-pub fn rasterize_tile_decal(tile: &Tile, size: u32) -> Vec<u8> {
-    let font_bytes = load_noto_emoji_bytes();
-    let font = font_bytes
-        .as_deref()
-        .and_then(|b| fontdue::Font::from_bytes(b, fontdue::FontSettings::default()).ok());
-
-    if let Some(ref f) = font {
-        // Try the actual Unicode Mahjong codepoint first.
-        let cp = tile_codepoint(tile);
-        if let Some(ch) = char::from_u32(cp) {
-            let (metrics, bitmap) = f.rasterize(ch, size as f32 * 0.82);
-            if !bitmap.is_empty() && metrics.width > 0 {
-                return bitmap_to_rgba_centered(&bitmap, metrics.width, metrics.height, size);
-            }
-        }
-    }
-
-    // Fallback: ASCII short-name using the UI font (Noto Emoji has no ASCII outlines).
-    let label = tile_short_label(tile);
-    if let Some(ref f) = load_ui_font() {
-        return rasterize_text(f, &label, size);
-    }
-    // No font found at all: transparent placeholder.
-    vec![0u8; (size * size * 4) as usize]
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -93,82 +44,93 @@ pub fn tile_short_label(tile: &Tile) -> String {
 /// Emoji indicator for each suit, rendered below the main label.
 pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
-        Suit::Characters => "\u{1F3B4}",  // 🎴 flower card
-        Suit::Bamboos => "\u{1F38B}",     // 🎋 tanabata tree / bamboo
-        Suit::Circles => "\u{1F534}",     // 🔴 red circle / disc
-        Suit::Wind => "\u{1F32C}",        // 🌬 wind face
-        Suit::Dragon => "\u{1F409}",      // 🐉 dragon
+        Suit::Characters => "\u{1F3B4}", // 🎴 flower card
+        Suit::Bamboos => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
+        Suit::Circles => "\u{1F534}",    // 🔴 red circle / disc
+        Suit::Wind => "\u{1F32C}",       // 🌬 wind face
+        Suit::Dragon => "\u{1F409}",     // 🐉 dragon
     }
 }
 
-/// Convert a fontdue greyscale alpha bitmap to a centred white RGBA8 image.
-fn bitmap_to_rgba_centered(bitmap: &[u8], gw: usize, gh: usize, size: u32) -> Vec<u8> {
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let ox = ((size as i32 - gw as i32) / 2).max(0) as u32;
-    let oy = ((size as i32 - gh as i32) / 2).max(0) as u32;
-    for y in 0..gh as u32 {
-        for x in 0..gw as u32 {
-            let px = ox + x;
-            let py = oy + y;
-            if px < size && py < size {
-                let src = (y as usize * gw + x as usize) as usize;
-                let dst = ((py * size + px) * 4) as usize;
-                let a = bitmap[src];
-                rgba[dst] = 0;
-                rgba[dst + 1] = 0;
-                rgba[dst + 2] = 0;
-                rgba[dst + 3] = a;
-            }
-        }
+/// Rasterise a `width × height` RGBA8 face decal that mirrors the 2D tile layout:
+///   * suit-coloured short label (number / wind / dragon) on the upper portion
+///   * suit-coloured emoji indicator on the lower portion
+///   * transparent background — the 3D tile shader composites this over the
+///     wood albedo from the GLB.
+///
+/// `width` and `height` should match the tile face's world aspect ratio
+/// (long axis vertical, short axis horizontal) so glyph pixels stay square
+/// after the shader stretches the texture across the face.
+pub fn rasterize_tile_face_decal(
+    tile: &Tile,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let color = tile.suit_color();
+    let label = tile_short_label(tile);
+    let emoji = tile_suit_emoji(tile);
+
+    // Top half: suit-coloured short label.
+    if let Some(font) = ui_font {
+        let top_h = (height as f32 * 0.50) as u32;
+        let band_top = (height as f32 * 0.05) as u32;
+        let band = rasterize_label(font, &label, width, top_h);
+        blit_tinted(&band, width, top_h, &mut rgba, width, 0, band_top, color);
     }
+
+    // Bottom half: suit-coloured emoji.
+    if let Some(font) = emoji_font {
+        let bot_h = (height as f32 * 0.40) as u32;
+        let band_top = (height as f32 * 0.55) as u32;
+        let band = rasterize_label(font, emoji, width, bot_h);
+        blit_tinted(&band, width, bot_h, &mut rgba, width, 0, band_top, color);
+    }
+
     rgba
 }
 
-/// Render `text` (left-to-right) centred in a `size×size` white RGBA8 image.
-fn rasterize_text(font: &fontdue::Font, text: &str, size: u32) -> Vec<u8> {
-    let font_px = size as f32 * 0.45;
-    let chars: Vec<char> = text.chars().collect();
-
-    // Measure total advance width.
-    let advances: Vec<f32> = chars
-        .iter()
-        .map(|&ch| {
-            let (m, _) = font.rasterize(ch, font_px);
-            m.advance_width
-        })
-        .collect();
-    let total_w: f32 = advances.iter().sum();
-
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let mut cx = (size as f32 - total_w) * 0.5;
-    let base_y = size as f32 * 0.5;
-
-    for (&ch, &adv) in chars.iter().zip(advances.iter()) {
-        let (metrics, bitmap) = font.rasterize(ch, font_px);
-        if bitmap.is_empty() {
-            cx += adv;
-            continue;
-        }
-        let glyph_top = base_y - metrics.height as f32 * 0.5;
-        for y in 0..metrics.height as u32 {
-            for x in 0..metrics.width as u32 {
-                let px = (cx + x as f32) as i32;
-                let py = (glyph_top + y as f32) as i32;
-                if px >= 0 && px < size as i32 && py >= 0 && py < size as i32 {
-                    let src = y as usize * metrics.width + x as usize;
-                    let dst = ((py as u32 * size + px as u32) * 4) as usize;
-                    let v = bitmap[src];
-                    rgba[dst] = 0;
-                    rgba[dst + 1] = 0;
-                    rgba[dst + 2] = 0;
-                    // Accumulate so overlapping glyphs blend nicely.
-                    rgba[dst + 3] = rgba[dst + 3].saturating_add(v);
-                }
+/// Blit a single-channel-in-alpha RGBA source onto an RGBA destination at
+/// `(dst_x, dst_y)`, replacing every pixel's RGB with `tint` weighted by source
+/// alpha. Used to recolour `rasterize_label`'s white-on-transparent output.
+fn blit_tinted(
+    src: &[u8],
+    sw: u32,
+    sh: u32,
+    dst: &mut [u8],
+    dw: u32,
+    dst_x: u32,
+    dst_y: u32,
+    tint: [f32; 4],
+) {
+    let r = (tint[0] * 255.0) as u8;
+    let g = (tint[1] * 255.0) as u8;
+    let b = (tint[2] * 255.0) as u8;
+    for y in 0..sh {
+        for x in 0..sw {
+            let dx = dst_x + x;
+            let dy = dst_y + y;
+            if dx >= dw {
+                continue;
             }
+            let si = ((y * sw + x) * 4) as usize;
+            let di = ((dy * dw + dx) * 4) as usize;
+            if di + 3 >= dst.len() {
+                continue;
+            }
+            let a = src[si + 3];
+            if a == 0 {
+                continue;
+            }
+            // Source-over with the new pixel's tint.
+            dst[di] = r;
+            dst[di + 1] = g;
+            dst[di + 2] = b;
+            dst[di + 3] = dst[di + 3].saturating_add(a);
         }
-        cx += adv;
     }
-    rgba
 }
 
 /// Load Noto Emoji for tile decals (covers U+1F000–U+1F02B as outline glyphs).
@@ -329,19 +291,40 @@ pub fn measure_label_advances(
 }
 
 /// Load Cormorant Garamond for game UI text.
-/// Cached; uses the compile-time embedded asset with system font fallbacks.
+///
+/// Resolution order:
+/// 1. Embedded Cormorant Garamond (the primary serif used everywhere).
+/// 2. Embedded Noto Sans (a fallback for missing Garamond glyphs — only used
+///    if the user has dropped a Noto Sans TTF into `assets/Noto_Sans/`).
+/// 3. System fonts (last-ditch fallback for unbundled dev builds).
+///
+/// Cached so the bytes are only resolved once.
 pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
     static CACHE: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            // Try embedded assets first.
-            let embedded = [
+            // Primary: Cormorant Garamond.
+            let primary = [
                 "Cormorant_Garamond/CormorantGaramond-VariableFont_wght.ttf",
                 "Cormorant_Garamond/static/CormorantGaramond-Regular.ttf",
             ];
-            for path in embedded {
+            for path in primary {
                 if let Some(file) = crate::asset_path::get(path) {
                     log::debug!("decal: loaded UI font from embedded {path}");
+                    return Some(file.data.to_vec());
+                }
+            }
+            // Embedded Noto Sans fallback — only present if a TTF has been
+            // dropped into assets/Noto_Sans/. Tries the variable-font name
+            // first, then a static Regular.
+            let noto_sans = [
+                "Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf",
+                "Noto_Sans/NotoSans-Regular.ttf",
+                "Noto_Sans/static/NotoSans-Regular.ttf",
+            ];
+            for path in noto_sans {
+                if let Some(file) = crate::asset_path::get(path) {
+                    log::debug!("decal: loaded UI font from embedded {path} (Noto Sans fallback)");
                     return Some(file.data.to_vec());
                 }
             }
@@ -365,4 +348,3 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
         })
         .clone()
 }
-

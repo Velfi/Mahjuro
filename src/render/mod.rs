@@ -1,7 +1,11 @@
 pub mod animation;
+pub mod candle_mesh;
 pub mod decal;
 pub mod draw_cmd;
 pub mod fluid;
+pub mod lit_mesh;
 pub mod particles;
+pub mod table_mesh;
+pub mod theme;
 pub mod tile_glb;
 pub mod wgpu_renderer;

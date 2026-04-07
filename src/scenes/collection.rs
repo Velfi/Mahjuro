@@ -4,11 +4,12 @@
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
 use crate::core::yaku::YakuKind;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 // Scene-defined button click ids — see `ButtonAction::Scene` in scenes/mod.rs.
 const CLICK_TAB_RELICS: u32 = 0;
@@ -53,7 +54,9 @@ impl CollectionScene {
     }
 
     fn page_count(&self, entries: usize, per_page: usize) -> usize {
-        if per_page == 0 { return 1; }
+        if per_page == 0 {
+            return 1;
+        }
         (entries + per_page - 1) / per_page
     }
 
@@ -116,7 +119,7 @@ impl CollectionScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.05, 0.05, 0.09, 1.0],
+            color: color::OBSIDIAN,
         }];
         let mut text_labels = Vec::new();
         let mut relic_icons = Vec::new();
@@ -129,7 +132,7 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "Collection".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         // ── Tab bar ─────────────────────────────────────────────────
@@ -189,8 +192,8 @@ impl CollectionScene {
             Tab::Rules => 3,
         };
         let card_gap = (8.0 * scale).max(4.0);
-        let card_w = ((grid_w - card_gap * (target_cols as f32 - 1.0)) / target_cols as f32)
-            .max(80.0);
+        let card_w =
+            ((grid_w - card_gap * (target_cols as f32 - 1.0)) / target_cols as f32).max(80.0);
         let cols = ((grid_w + card_gap) / (card_w + card_gap)).floor().max(1.0) as usize;
         let card_aspect = match self.tab {
             Tab::Relics => 1.35,
@@ -227,13 +230,28 @@ impl CollectionScene {
 
             if card.unlocked {
                 draw_unlocked_card(
-                    cx, cy, card_w, card_h, scale, card, w,
-                    &mut instances, &mut text_labels, &mut relic_icons,
+                    cx,
+                    cy,
+                    card_w,
+                    card_h,
+                    scale,
+                    card,
+                    w,
+                    &mut instances,
+                    &mut text_labels,
+                    &mut relic_icons,
                 );
             } else {
                 draw_locked_card(
-                    cx, cy, card_w, card_h, scale, card, w,
-                    &mut instances, &mut text_labels,
+                    cx,
+                    cy,
+                    card_w,
+                    card_h,
+                    scale,
+                    card,
+                    w,
+                    &mut instances,
+                    &mut text_labels,
                 );
             }
         }
@@ -333,6 +351,7 @@ impl CollectionScene {
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -341,12 +360,13 @@ impl CollectionScene {
             text_labels,
             relic_icons,
             buttons,
-            window_title: format!(
-                "Mahjuro — Collection ({}/{})",
-                unlocked, total
-            ),
+            window_title: format!("Mahjuro — Collection ({}/{})", unlocked, total),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }
@@ -366,7 +386,11 @@ fn text_rect_h(target_font_px: f32) -> f32 {
 }
 
 fn draw_unlocked_card(
-    x: f32, y: f32, w: f32, h: f32, scale: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
     card: &GridCard,
     win_w: f32,
     instances: &mut Vec<GpuInstance>,
@@ -443,7 +467,11 @@ fn draw_unlocked_card(
 }
 
 fn draw_locked_card(
-    x: f32, y: f32, w: f32, h: f32, scale: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
     card: &GridCard,
     win_w: f32,
     instances: &mut Vec<GpuInstance>,
@@ -492,8 +520,12 @@ fn draw_locked_card(
 /// Otherwise, widens the rect (centered on the card) up to `win_w`, so that
 /// the font doesn't shrink below the intended size.
 fn readable_text_rect(
-    card_x: f32, card_w: f32, pad: f32,
-    text: &str, target_font: f32, win_w: f32,
+    card_x: f32,
+    card_w: f32,
+    pad: f32,
+    text: &str,
+    target_font: f32,
+    win_w: f32,
 ) -> (f32, f32) {
     let inner_x = card_x + pad;
     let inner_w = card_w - pad * 2.0;
@@ -519,26 +551,37 @@ fn readable_text_rect(
 // ── Card builders ───────────────────────────────────────────────────
 
 fn rarity_to_color(r: Rarity) -> [f32; 4] {
+    // Centralized in `theme::color::rarity` so the shop and collection don't drift.
     match r {
-        Rarity::Common => [0.55, 0.55, 0.55, 0.9],
-        Rarity::Uncommon => [0.3, 0.75, 0.3, 0.9],
-        Rarity::Rare => [0.3, 0.5, 1.0, 0.9],
-        Rarity::Legendary => [1.0, 0.78, 0.15, 0.9],
+        Rarity::Common => color::rarity(0),
+        Rarity::Uncommon => color::rarity(1),
+        Rarity::Rare => color::rarity(2),
+        Rarity::Legendary => color::rarity(3),
     }
 }
 
-fn build_relic_cards(
-    progress: &crate::core::progression::PlayerProgress,
-) -> Vec<GridCard> {
+fn build_relic_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
     let defs = all_relic_defs();
     let available = progress.available_relics();
     defs.iter()
         .map(|d| {
             let unlocked = available.contains(&d.id);
             GridCard {
-                name: if unlocked { d.name.to_string() } else { "???".into() },
-                subtitle: if unlocked { d.description.to_string() } else { String::new() },
-                clue: if unlocked { String::new() } else { relic_clue(d.id) },
+                name: if unlocked {
+                    d.name.to_string()
+                } else {
+                    "???".into()
+                },
+                subtitle: if unlocked {
+                    d.description.to_string()
+                } else {
+                    String::new()
+                },
+                clue: if unlocked {
+                    String::new()
+                } else {
+                    relic_clue(d.id)
+                },
                 unlocked,
                 relic_id: if unlocked { Some(d.id) } else { None },
                 rarity_color: rarity_to_color(d.rarity),
@@ -547,9 +590,7 @@ fn build_relic_cards(
         .collect()
 }
 
-fn build_yaku_cards(
-    progress: &crate::core::progression::PlayerProgress,
-) -> Vec<GridCard> {
+fn build_yaku_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
     let all = [
         YakuKind::FullHand,
         YakuKind::AllTriplets,
@@ -562,24 +603,30 @@ fn build_yaku_cards(
         .map(|&yk| {
             let unlocked = available.contains(&yk);
             GridCard {
-                name: if unlocked { yk.name().to_string() } else { "???".into() },
+                name: if unlocked {
+                    yk.name().to_string()
+                } else {
+                    "???".into()
+                },
                 subtitle: if unlocked {
-                    format!("{} (+{} pts)", yaku_description(yk), yk.bonus_points())
+                    format!("{} (+{} mult)", yaku_description(yk), yk.mult_bonus())
                 } else {
                     String::new()
                 },
-                clue: if unlocked { String::new() } else { yaku_clue(yk) },
+                clue: if unlocked {
+                    String::new()
+                } else {
+                    yaku_clue(yk)
+                },
                 unlocked,
                 relic_id: None,
-                rarity_color: [0.6, 0.5, 0.8, 0.9], // purple accent for yaku
+                rarity_color: color::TWILIGHT, // indigo accent for yaku
             }
         })
         .collect()
 }
 
-fn build_rule_cards(
-    progress: &crate::core::progression::PlayerProgress,
-) -> Vec<GridCard> {
+fn build_rule_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
     let all = [
         RuleModifier::PairDoubleScore,
         RuleModifier::SequenceWrap,
@@ -593,12 +640,24 @@ fn build_rule_cards(
         .map(|&rm| {
             let unlocked = available.contains(&rm);
             GridCard {
-                name: if unlocked { rm.name().to_string() } else { "???".into() },
-                subtitle: if unlocked { rm.description().to_string() } else { String::new() },
-                clue: if unlocked { String::new() } else { rule_clue(rm) },
+                name: if unlocked {
+                    rm.name().to_string()
+                } else {
+                    "???".into()
+                },
+                subtitle: if unlocked {
+                    rm.description().to_string()
+                } else {
+                    String::new()
+                },
+                clue: if unlocked {
+                    String::new()
+                } else {
+                    rule_clue(rm)
+                },
                 unlocked,
                 relic_id: None,
-                rarity_color: [0.7, 0.45, 0.3, 0.9], // orange accent for rules
+                rarity_color: color::AMBER, // amber accent for rules
             }
         })
         .collect()

@@ -1,20 +1,20 @@
 {
   "unlocked_relics": [
-    "chain_reaction",
-    "set_magnet",
-    "honor_fury",
-    "joker_tile",
-    "stealth_tile",
-    "multiplier_master",
-    "wild_winds",
-    "white_silence",
     "green_luck",
+    "stealth_tile",
+    "joker_tile",
+    "wild_winds",
+    "honor_fury",
     "overflow",
-    "quick_draw"
+    "set_magnet",
+    "chain_reaction",
+    "white_silence",
+    "quick_draw",
+    "multiplier_master"
   ],
   "unlocked_rules": [
-    "SequenceWrap",
     "HonorTripleScore",
+    "SequenceWrap",
     "NoSequenceBonus"
   ],
   "high_scores": [
@@ -29,7 +29,7 @@
     340,
     330
   ],
-  "runs_completed": 11,
+  "runs_completed": 12,
   "bonus_plays": 0,
   "starting_relic_slots": 0
 }

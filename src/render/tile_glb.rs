@@ -115,7 +115,9 @@ pub fn normalize_mesh(tile: &mut LoadedTile) {
 /// Z-up → Y-up coordinate conversion as a node transform (typically a −90° X
 /// rotation) rather than baking it into vertex data, so we must apply it here.
 fn find_node_transform(document: &gltf::Document, mesh_index: usize) -> Option<Mat4> {
-    let scene = document.default_scene().or_else(|| document.scenes().next())?;
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())?;
     fn walk(node: gltf::Node<'_>, parent: Mat4, target: usize) -> Option<Mat4> {
         let local = Mat4::from_cols_array_2d(&node.transform().matrix());
         let world = parent * local;
@@ -189,7 +191,11 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
         );
 
         // Apply KHR_texture_transform if present on the base color texture.
-        if let Some(tex_info) = primitive.material().pbr_metallic_roughness().base_color_texture() {
+        if let Some(tex_info) = primitive
+            .material()
+            .pbr_metallic_roughness()
+            .base_color_texture()
+        {
             if let Some(xform) = tex_info.texture_transform() {
                 let [ox, oy] = xform.offset();
                 let [sx, sy] = xform.scale();

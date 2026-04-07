@@ -5,7 +5,6 @@ use rand::seq::SliceRandom;
 
 use crate::core::tile::{Suit, Tile};
 
-
 /// Standard 136-tile wall (4× each tile, no flowers).
 pub fn build_wall() -> Vec<Tile> {
     let mut id = 0u32;
@@ -84,13 +83,25 @@ impl Wall {
             .map(|t| {
                 let next_rank = match t.suit {
                     Suit::Characters | Suit::Bamboos | Suit::Circles => {
-                        if t.rank >= 9 { 1 } else { t.rank + 1 }
+                        if t.rank >= 9 {
+                            1
+                        } else {
+                            t.rank + 1
+                        }
                     }
                     Suit::Wind => {
-                        if t.rank >= 4 { 1 } else { t.rank + 1 }
+                        if t.rank >= 4 {
+                            1
+                        } else {
+                            t.rank + 1
+                        }
                     }
                     Suit::Dragon => {
-                        if t.rank >= 3 { 1 } else { t.rank + 1 }
+                        if t.rank >= 3 {
+                            1
+                        } else {
+                            t.rank + 1
+                        }
                     }
                 };
                 (t.suit, next_rank)

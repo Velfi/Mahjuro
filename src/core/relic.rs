@@ -103,37 +103,37 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::TripletBoost,
             name: "Triplet Boost",
-            description: "Triplets score ×3",
+            description: "Triplets +40 chips",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::SequenceSurge,
             name: "Sequence Surge",
-            description: "Sequences score ×2",
+            description: "Sequences +25 chips",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::PairPower,
             name: "Pair Power",
-            description: "Pairs score +40",
+            description: "Pairs +30 chips",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::HonorFury,
             name: "Honor Fury",
-            description: "Honor tiles +12 each in sets",
+            description: "+15 chips per honor tile in sets",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::BambooCharm,
             name: "Bamboo Charm",
-            description: "Bamboo tiles +5 in any set",
+            description: "+4 chips per bamboo tile in sets",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::RedDragonRage,
             name: "Red Dragon Rage",
-            description: "Red dragon triplets ×5",
+            description: "Red dragon triplet: +10 mult",
             rarity: Rarity::Legendary,
         },
         RelicDef {
@@ -145,7 +145,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::WhiteSilence,
             name: "White Silence",
-            description: "White dragon pairs +50",
+            description: "White dragon pair: +4 mult",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -169,13 +169,13 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::ChainReaction,
             name: "Chain Reaction",
-            description: "+50% score if you scored last turn",
+            description: "+4 mult if you scored last turn",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::MultiplierMaster,
             name: "Multiplier Master",
-            description: "+15% score per relic owned",
+            description: "+0.5 mult per relic owned",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -193,7 +193,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::DragonEcho,
             name: "Dragon Echo",
-            description: "Dragon triplets add 100% of adjacent sets",
+            description: "Dragon triplets copy adjacent sets' chips",
             rarity: Rarity::Legendary,
         },
         RelicDef {
@@ -217,7 +217,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::LuckyPair,
             name: "Lucky Pair",
-            description: "Pairs score ×3",
+            description: "Hand has a pair: +3 mult",
             rarity: Rarity::Common,
         },
     ]
@@ -260,39 +260,8 @@ pub struct ScoreContext<'a> {
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
 }
 
-pub fn triplet_multiplier(ctx: &ScoreContext) -> f64 {
-    let mut m = 1.0;
-    if ctx.relics.has(RelicId::TripletBoost) {
-        m *= 3.0;
-    }
-    if ctx.relics.has(RelicId::MultiplierMaster) {
-        m *= 1.0 + 0.15 * ctx.relics.active.len() as f64;
-    }
-    m
-}
-
-pub fn sequence_multiplier(ctx: &ScoreContext) -> f64 {
-    let mut m = 1.0;
-    if ctx.relics.has(RelicId::SequenceSurge) {
-        m *= 2.0;
-    }
-    if ctx.relics.has(RelicId::MultiplierMaster) {
-        m *= 1.0 + 0.15 * ctx.relics.active.len() as f64;
-    }
-    m
-}
-
-pub fn pair_bonus_points(ctx: &ScoreContext) -> i32 {
-    let mut b = 0;
-    if ctx.relics.has(RelicId::PairPower) {
-        b += 40;
-    }
-    b
-}
-
-pub fn suit_tile_bonus(suit: Suit, ctx: &ScoreContext) -> i32 {
-    if ctx.relics.has(RelicId::BambooCharm) && suit == Suit::Bamboos {
-        return 5;
-    }
-    0
-}
+// All scoring effects now live in `core::scoring::score_sets` directly,
+// reading relic ids off the `ScoreContext`. The chip/mult model made the
+// per-relic helper layer redundant — each relic is one match arm in
+// `score_sets`, which is easier to read end-to-end than a chain of
+// `*_multiplier` accessors.

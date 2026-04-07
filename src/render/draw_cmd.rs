@@ -20,7 +20,8 @@
 //! place them in declarative order alongside ordinary cmds.
 
 use crate::core::tile::Tile;
-use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
+use crate::render::candle_mesh::CandlePlacement;
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 
 /// One drawable element in a `UiFrame`.
@@ -32,6 +33,13 @@ use crate::scenes::{BackgroundId, ButtonDef};
 pub enum DrawCmd {
     /// Full-screen background image.
     Background(BackgroundId),
+    /// Procedural lacquered-wood table mesh (one per scene, drawn via
+    /// `lit_mesh_pipeline`). Sized by the renderer from the current window.
+    Table,
+    /// 3D candle meshes for the gameplay scene. Each placement becomes one
+    /// wax-body draw + one wick draw via the `lit_mesh_pipeline`. Limited to
+    /// the renderer's pre-allocated candle slot pool (currently 4).
+    CandleBatch(Vec<CandlePlacement>),
     /// Light beams + hand tile body quads (drawn via `light_beam_pipeline` +
     /// `tile_quad_pipeline`). Renderer pulls hand state from `UiFrame`.
     HandTileBackdrop,
@@ -44,6 +52,9 @@ pub enum DrawCmd {
     HandTileFaces,
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
+    /// Procedural candle flame (additive blend, animated by globals.time).
+    /// Instance `color.a` carries a per-flame phase offset in [0,1].
+    Flame(GpuInstance),
     /// Rasterized text label.
     Text(TextLabel),
     /// Pre-loaded relic icon texture.
@@ -70,6 +81,9 @@ pub struct UiFrame {
     /// Tile indices that started departing this frame; consumed by
     /// `WgpuRenderer::depart_tiles` before `update_hand_tiles` removes them.
     pub departing_indices: Vec<usize>,
+    /// Active point lights this frame. Uploaded to the tile pipeline so the
+    /// 3D hand-tile shader can apply candle / spot illumination.
+    pub point_lights: Vec<PointLight>,
 
     // ── Non-draw scene metadata ─────────────────────────────────────────
     /// Hit-test rects for clickable buttons (not drawn).
@@ -88,6 +102,7 @@ impl UiFrame {
             selected_tiles: Vec::new(),
             hint_indices: Vec::new(),
             departing_indices: Vec::new(),
+            point_lights: Vec::new(),
             buttons: Vec::new(),
             window_title: String::new(),
         }
@@ -106,11 +121,20 @@ impl UiFrame {
     pub fn fluid_smoke(&mut self) {
         self.cmds.push(DrawCmd::FluidSmoke);
     }
+    pub fn table(&mut self) {
+        self.cmds.push(DrawCmd::Table);
+    }
+    pub fn candles(&mut self, placements: Vec<CandlePlacement>) {
+        self.cmds.push(DrawCmd::CandleBatch(placements));
+    }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
     }
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
+    }
+    pub fn flames<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::Flame));
     }
     pub fn text(&mut self, label: TextLabel) {
         self.cmds.push(DrawCmd::Text(label));
@@ -131,16 +155,21 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                // Flame `color.a` is a phase offset, not a transparency.
+                // Don't scale it on transitions — the flame fades naturally
+                // because the underlying scene quads behind it fade.
+                DrawCmd::Flame(_) => {}
                 DrawCmd::Text(lbl) => lbl.color[3] *= alpha,
                 DrawCmd::Background(_)
                 | DrawCmd::HandTileBackdrop
                 | DrawCmd::HandTileFaces
                 | DrawCmd::FluidSmoke
+                | DrawCmd::Table
+                | DrawCmd::CandleBatch(_)
                 | DrawCmd::RelicIcon(_) => {}
             }
         }
     }
-
 }
 
 impl Default for UiFrame {

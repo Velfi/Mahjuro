@@ -2,16 +2,18 @@
 
 use crate::game::run::RunState;
 use crate::persistence;
+use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::widget;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
 use super::solitaire::SolitaireScene;
+use super::{DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 /// Menu items when a game is in progress.
 const IP_CONTINUE: usize = 0;
@@ -103,7 +105,7 @@ impl StartScreenScene {
                 IP_NEW_GAME => return self.start_game(run),
                 IP_SOLITAIRE => return Some(Scene::Solitaire(SolitaireScene::new())),
                 IP_PROFILE => {
-                    return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
+                    return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()));
                 }
                 IP_COLLECTION => return Some(Scene::Collection(CollectionScene::new())),
                 IP_OPTIONS => return Some(Scene::Options(OptionsScene::new())),
@@ -115,7 +117,7 @@ impl StartScreenScene {
                 NP_PLAY => return self.start_game(run),
                 NP_SOLITAIRE => return Some(Scene::Solitaire(SolitaireScene::new())),
                 NP_PROFILE => {
-                    return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
+                    return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()));
                 }
                 NP_COLLECTION => return Some(Scene::Collection(CollectionScene::new())),
                 NP_OPTIONS => return Some(Scene::Options(OptionsScene::new())),
@@ -139,23 +141,23 @@ impl StartScreenScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.04, 0.05, 0.08, 1.0],
+            color: color::OBSIDIAN,
         }];
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 
-        // Title.
-        let title_h = (64.0 * scale).max(32.0);
+        // Title — gold serif display.
+        let title_h = typography::size(typography::DISPLAY, h);
         let title_y = h * 0.08;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "M A H J U R O".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         // Active profile summary below title.
         let prof_y = title_y + title_h + h * 0.04;
-        let prof_h = (24.0 * scale).max(16.0);
+        let prof_h = typography::size(typography::CAPTION, h);
         let summaries = persistence::all_profile_summaries();
         let active = ctx.active_profile;
         let summary = &summaries[active];
@@ -172,22 +174,37 @@ impl StartScreenScene {
         text_labels.push(TextLabel {
             rect: [0.0, prof_y, w, prof_h],
             text: prof_text,
-            color: [0.5, 0.55, 0.65, 0.8],
+            color: color::MIST,
         });
 
         // Build menu items depending on whether a game is in progress.
         let menu_labels: Vec<&str> = if in_progress {
-            vec!["Continue", "New Game", "Solitaire", "Profile", "Collection", "Options", "Quit"]
+            vec![
+                "Continue",
+                "New Game",
+                "Solitaire",
+                "Profile",
+                "Collection",
+                "Options",
+                "Quit",
+            ]
         } else {
-            vec!["Play", "Solitaire", "Profile", "Collection", "Options", "Quit"]
+            vec![
+                "Play",
+                "Solitaire",
+                "Profile",
+                "Collection",
+                "Options",
+                "Quit",
+            ]
         };
         let count = menu_labels.len();
 
         let quit_idx = count - 1;
         let continue_idx = 0;
 
-        let btn_w = (200.0 * scale).min(w * 0.5);
-        let btn_h = (38.0 * scale).max(24.0);
+        let btn_w = (220.0 * scale).min(w * 0.55);
+        let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = (12.0 * scale).max(6.0);
         let menu_start_y = prof_y + prof_h + h * 0.06;
         let btn_x = (w - btn_w) * 0.5;
@@ -196,53 +213,45 @@ impl StartScreenScene {
             let btn_y = menu_start_y + i as f32 * (btn_h + btn_gap);
             let is_focused = i == self.cursor;
 
-            let bg_color = if is_focused {
-                if i == continue_idx {
-                    [0.2, 0.55, 0.3, 0.95] // green for continue/play
-                } else if i == quit_idx {
-                    [0.55, 0.2, 0.2, 0.95] // red for quit
-                } else {
-                    [0.25, 0.4, 0.6, 0.95]
-                }
+            let variant = if i == continue_idx {
+                ButtonVariant::Primary
+            } else if i == quit_idx {
+                ButtonVariant::Danger
             } else {
-                [0.15, 0.18, 0.28, 0.85]
+                ButtonVariant::Default
             };
-
-            instances.push(GpuInstance {
-                rect: [btn_x, btn_y, btn_w, btn_h],
-                color: bg_color,
-            });
-
-            let text_color = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+            let state = if is_focused {
+                ButtonState::Hover
             } else {
-                [0.6, 0.6, 0.7, 0.9]
+                ButtonState::Rest
             };
-            text_labels.push(TextLabel {
-                rect: [btn_x, btn_y, btn_w, btn_h],
-                text: label.to_string(),
-                color: text_color,
-            });
 
             // Click → Confirm; hover-focus in update() ensures self.cursor
             // already points at this button by the time the action is read.
-            buttons.push(ButtonDef::ui(
-                (btn_x, btn_y, btn_w, btn_h),
+            widget::push_button(
+                &mut instances,
+                &mut text_labels,
+                &mut buttons,
+                [btn_x, btn_y, btn_w, btn_h],
+                label,
+                variant,
+                state,
                 UiAction::Confirm,
-            ));
+            );
         }
 
         // Hint text at bottom.
-        let hint_h = (18.0 * scale).max(12.0);
+        let hint_h = typography::size(typography::MICRO, h);
         let hint_y = h - hint_h - (12.0 * scale);
         text_labels.push(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Arrow keys to navigate  |  Enter/Space to select".into(),
-            color: [0.4, 0.4, 0.5, 0.8],
+            color: color::SLATE,
         });
 
         SceneDrawOutput {
             background: super::BackgroundId::Menu,
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -254,6 +263,10 @@ impl StartScreenScene {
             window_title: "Mahjuro".into(),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

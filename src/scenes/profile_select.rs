@@ -1,11 +1,12 @@
 //! Profile selection screen — pick one of three profile slots.
 
 use crate::persistence;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 const PROFILE_COUNT: usize = 3;
 
@@ -79,7 +80,7 @@ impl ProfileSelectScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.04, 0.05, 0.08, 1.0],
+            color: color::OBSIDIAN,
         }];
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
@@ -90,7 +91,7 @@ impl ProfileSelectScene {
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "Select Profile".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::CHAMPAGNE,
         });
 
         // Profile cards.
@@ -108,11 +109,7 @@ impl ProfileSelectScene {
             let is_active = i == ctx.active_profile;
 
             // Card background.
-            let bg_color = if is_focused {
-                [0.18, 0.28, 0.42, 0.95]
-            } else {
-                [0.10, 0.12, 0.20, 0.85]
-            };
+            let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
             instances.push(GpuInstance {
                 rect: [card_x, card_y, card_w, card_h],
                 color: bg_color,
@@ -123,20 +120,20 @@ impl ProfileSelectScene {
                 let stripe_w = 4.0 * scale;
                 instances.push(GpuInstance {
                     rect: [card_x, card_y, stripe_w, card_h],
-                    color: [0.4, 0.8, 0.5, 1.0],
+                    color: color::JADE,
                 });
             }
 
-            // Selection highlight border (top and bottom lines).
+            // Selection highlight border (top and bottom gold lines).
             if is_focused {
                 let border = 2.0 * scale;
                 instances.push(GpuInstance {
                     rect: [card_x, card_y, card_w, border],
-                    color: [0.5, 0.7, 1.0, 0.8],
+                    color: color::GOLD,
                 });
                 instances.push(GpuInstance {
                     rect: [card_x, card_y + card_h - border, card_w, border],
-                    color: [0.5, 0.7, 1.0, 0.8],
+                    color: color::GOLD,
                 });
             }
 
@@ -155,18 +152,14 @@ impl ProfileSelectScene {
             text_labels.push(TextLabel {
                 rect: header_rect,
                 text: header_text,
-                color: if is_focused {
-                    [1.0, 1.0, 1.0, 1.0]
-                } else {
-                    [0.8, 0.8, 0.9, 1.0]
-                },
+                color: if is_focused { color::CHAMPAGNE } else { color::PARCHMENT },
             });
 
             if summary.exists {
                 let stat_x = card_x + pad_x;
                 let stat_w = card_w - pad_x * 2.0;
                 let line1_y = card_y + pad_y + line_h + pad_y * 0.5;
-                let stat_color = [0.6, 0.65, 0.75, 1.0];
+                let stat_color = color::MIST;
 
                 // Level.
                 text_labels.push(TextLabel {
@@ -201,7 +194,7 @@ impl ProfileSelectScene {
                     text_labels.push(TextLabel {
                         rect: [stat_x, line4_y, stat_w, small_h],
                         text: "Saved game in progress".into(),
-                        color: [0.5, 0.9, 0.6, 1.0],
+                        color: color::JADE,
                     });
                 }
             } else {
@@ -210,7 +203,7 @@ impl ProfileSelectScene {
                 text_labels.push(TextLabel {
                     rect: [card_x + pad_x, empty_y, card_w - pad_x * 2.0, small_h],
                     text: "Empty — start a new adventure".into(),
-                    color: [0.4, 0.4, 0.5, 0.7],
+                    color: color::SLATE,
                 });
             }
 
@@ -228,11 +221,12 @@ impl ProfileSelectScene {
         text_labels.push(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Up/Down to browse  |  Enter to select  |  Esc to go back".into(),
-            color: [0.4, 0.4, 0.5, 0.8],
+            color: color::SLATE,
         });
 
         SceneDrawOutput {
             background: Default::default(),
+            tray_instances: vec![],
             instances,
             hand_tiles: vec![],
             hand_slots: vec![],
@@ -244,6 +238,10 @@ impl ProfileSelectScene {
             window_title: "Mahjuro — Select Profile".into(),
             departing_indices: vec![],
             hint_indices: vec![],
+            flame_instances: vec![],
+            point_lights: vec![],
+            candles: vec![],
+            draw_table: false,
         }
     }
 }

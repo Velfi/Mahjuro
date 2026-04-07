@@ -59,6 +59,46 @@ impl Tile {
         }
     }
 
+    /// Long, human-readable name suitable for tooltips, e.g.
+    /// "5 of Bamboo", "East Wind", "Red Dragon (Chun)".
+    pub fn full_name(&self) -> String {
+        match self.suit {
+            Suit::Characters => format!("{} of Characters", self.rank),
+            Suit::Bamboos => format!("{} of Bamboo", self.rank),
+            Suit::Circles => format!("{} of Circles", self.rank),
+            Suit::Wind => match self.rank {
+                1 => "East Wind".into(),
+                2 => "South Wind".into(),
+                3 => "West Wind".into(),
+                4 => "North Wind".into(),
+                _ => format!("Wind {}", self.rank),
+            },
+            Suit::Dragon => match self.rank {
+                1 => "Red Dragon (Chun)".into(),
+                2 => "Green Dragon (Hatsu)".into(),
+                3 => "White Dragon (Haku)".into(),
+                _ => format!("Dragon {}", self.rank),
+            },
+        }
+    }
+
+    /// Classification used in scoring and tooltips:
+    /// - "terminal" for 1 or 9 of a numbered suit
+    /// - "simple"   for 2–8 of a numbered suit
+    /// - "honor"    for any wind or dragon
+    pub fn category(&self) -> &'static str {
+        match self.suit {
+            Suit::Wind | Suit::Dragon => "honor",
+            Suit::Characters | Suit::Bamboos | Suit::Circles => {
+                if self.rank == 1 || self.rank == 9 {
+                    "terminal"
+                } else {
+                    "simple"
+                }
+            }
+        }
+    }
+
     /// Base point value of a single tile face: numbered tiles are worth their
     /// rank (1–9), honors (winds & dragons) are flat 10.
     pub fn point_value(&self) -> u32 {
@@ -75,7 +115,16 @@ impl Tile {
             Suit::Bamboos => [0.20, 0.65, 0.30, 1.0],    // green
             Suit::Circles => [0.20, 0.40, 0.80, 1.0],    // blue
             Suit::Wind => [0.70, 0.60, 0.20, 1.0],       // gold
-            Suit::Dragon => [0.60, 0.20, 0.70, 1.0],     // purple
+            // Dragons are coloured per rank in the traditional set:
+            //   1 = Chun  (中) → red
+            //   2 = Hatsu (發) → green
+            //   3 = Haku  (白) → ivory/white
+            Suit::Dragon => match self.rank {
+                1 => [0.85, 0.20, 0.18, 1.0], // red
+                2 => [0.20, 0.65, 0.30, 1.0], // green
+                3 => [0.90, 0.88, 0.82, 1.0], // ivory white
+                _ => [0.60, 0.20, 0.70, 1.0], // fallback (shouldn't happen)
+            },
         }
     }
 }
