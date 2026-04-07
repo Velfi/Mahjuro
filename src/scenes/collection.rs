@@ -10,6 +10,11 @@ use crate::ui::input::UiAction;
 use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
 use super::start_screen::StartScreenScene;
 
+// Scene-defined button click ids — see `ButtonAction::Scene` in scenes/mod.rs.
+const CLICK_TAB_RELICS: u32 = 0;
+const CLICK_TAB_YAKU: u32 = 1;
+const CLICK_TAB_RULES: u32 = 2;
+
 // ── Tab enum ────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,9 +58,29 @@ impl CollectionScene {
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Mouse-click tab targets — each tab fires its own scene click id so
+        // clicking jumps directly to that tab instead of cycling.
+        for &id in ctx.button_clicks {
+            match id {
+                CLICK_TAB_RELICS => {
+                    self.tab = Tab::Relics;
+                    self.page = 0;
+                }
+                CLICK_TAB_YAKU => {
+                    self.tab = Tab::Yaku;
+                    self.page = 0;
+                }
+                CLICK_TAB_RULES => {
+                    self.tab = Tab::Rules;
+                    self.page = 0;
+                }
+                _ => {}
+            }
+        }
+
         for a in ctx.actions {
             match a {
-                // Tab switching.
+                // Tab switching (keyboard cycle).
                 UiAction::NavigateHudNext => {
                     let idx = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
                     self.tab = TABS[(idx + 1) % TABS.len()];
@@ -137,15 +162,14 @@ impl CollectionScene {
                     [0.45, 0.45, 0.55, 0.9]
                 },
             });
-            // Clicking a tab always goes to that specific tab.
-            let action = match i {
-                0 => UiAction::NavigateHudPrev,
-                _ => UiAction::NavigateHudNext,
+            // Clicking a tab fires the matching scene click id so update()
+            // can jump directly to that tab.
+            let click_id = match i {
+                0 => CLICK_TAB_RELICS,
+                1 => CLICK_TAB_YAKU,
+                _ => CLICK_TAB_RULES,
             };
-            buttons.push(ButtonDef {
-                rect: (tx, tab_y, tab_w, tab_h),
-                action,
-            });
+            buttons.push(ButtonDef::scene((tx, tab_y, tab_w, tab_h), click_id));
         }
 
         // ── Grid area ───────────────────────────────────────────────
@@ -234,10 +258,10 @@ impl CollectionScene {
                 text: "<".into(),
                 color: [1.0, 1.0, 1.0, 0.9],
             });
-            buttons.push(ButtonDef {
-                rect: (left_x, footer_y, arrow_w, footer_h),
-                action: UiAction::FocusPrev,
-            });
+            buttons.push(ButtonDef::ui(
+                (left_x, footer_y, arrow_w, footer_h),
+                UiAction::FocusPrev,
+            ));
 
             // Page number.
             let page_text = format!("{} / {}", page + 1, total_pages);
@@ -263,10 +287,10 @@ impl CollectionScene {
                 text: ">".into(),
                 color: [1.0, 1.0, 1.0, 0.9],
             });
-            buttons.push(ButtonDef {
-                rect: (right_x, footer_y, arrow_w, footer_h),
-                action: UiAction::FocusNext,
-            });
+            buttons.push(ButtonDef::ui(
+                (right_x, footer_y, arrow_w, footer_h),
+                UiAction::FocusNext,
+            ));
         }
 
         // ── Unlock counter ──────────────────────────────────────────
@@ -286,6 +310,26 @@ impl CollectionScene {
             text: "L/R tabs  |  Arrows page  |  Esc back".into(),
             color: [0.35, 0.35, 0.45, 0.7],
         });
+
+        // ── Back button ─────────────────────────────────────────────
+        // Top-left corner so it doesn't collide with the centered tab bar.
+        let back_w = (70.0 * scale).max(48.0);
+        let back_h = (24.0 * scale).max(18.0);
+        let back_x = margin_x;
+        let back_y = title_y;
+        instances.push(GpuInstance {
+            rect: [back_x, back_y, back_w, back_h],
+            color: [0.18, 0.20, 0.30, 0.92],
+        });
+        text_labels.push(TextLabel {
+            rect: [back_x, back_y, back_w, back_h],
+            text: "< Back".into(),
+            color: [0.85, 0.85, 0.95, 1.0],
+        });
+        buttons.push(ButtonDef::ui(
+            (back_x, back_y, back_w, back_h),
+            UiAction::Cancel,
+        ));
 
         SceneDrawOutput {
             background: Default::default(),

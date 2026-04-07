@@ -72,28 +72,38 @@ pub fn score_sets(
         if matches!(s.kind, SetKind::Pair) {
             let bonus = pair_bonus_points(ctx);
             if bonus > 0 {
-                let source = if ctx.relics.has(RelicId::PairPower) && ctx.relics.has(RelicId::WhiteSilence) {
-                    "Pair Power + White Silence"
-                } else if ctx.relics.has(RelicId::PairPower) {
-                    "Pair Power"
-                } else {
-                    "White Silence"
-                };
                 total += bonus;
                 steps.push(ScoreStep {
-                    source: source.to_string(),
+                    source: "Pair Power".to_string(),
                     effect: format!("+{bonus}"),
                     running_total: total,
                 });
                 set_pts += bonus;
             }
-            // LuckyPair: pairs score ×1.5.
+            // WhiteSilence: white dragon pairs (Dragon rank 3) get a big bonus.
+            if ctx.relics.has(RelicId::WhiteSilence) {
+                let is_white_dragon = s
+                    .tile_ids
+                    .first()
+                    .and_then(|id| tile_by_id(tiles, *id))
+                    .is_some_and(|t| t.suit == Suit::Dragon && t.rank == 3);
+                if is_white_dragon {
+                    total += 50;
+                    steps.push(ScoreStep {
+                        source: "White Silence".to_string(),
+                        effect: "+50".to_string(),
+                        running_total: total,
+                    });
+                    set_pts += 50;
+                }
+            }
+            // LuckyPair: pairs score ×3.
             if ctx.relics.has(RelicId::LuckyPair) {
-                let extra = (set_pts as f64 * 0.5).round() as i32;
+                let extra = set_pts * 2;
                 total += extra;
                 steps.push(ScoreStep {
                     source: "Lucky Pair".to_string(),
-                    effect: format!("×1.5 (+{extra})"),
+                    effect: format!("×3 (+{extra})"),
                     running_total: total,
                 });
                 set_pts += extra;
@@ -148,7 +158,7 @@ pub fn score_sets(
                 if matches!(first.suit, Suit::Wind | Suit::Dragon)
                     && ctx.relics.has(RelicId::HonorFury)
                 {
-                    let bonus = 3 * s.tile_ids.len() as i32;
+                    let bonus = 12 * s.tile_ids.len() as i32;
                     total += bonus;
                     steps.push(ScoreStep {
                         source: "Honor Fury".to_string(),
@@ -212,7 +222,7 @@ pub fn score_sets(
         }
     }
 
-    // DragonEcho: dragon triplets add 50% of adjacent sets' base points.
+    // DragonEcho: dragon triplets add 100% of adjacent sets' base points.
     if ctx.relics.has(RelicId::DragonEcho) {
         for (i, s) in sets.iter().enumerate() {
             if s.kind != SetKind::Triplet {
@@ -228,10 +238,10 @@ pub fn score_sets(
             }
             let mut echo_bonus = 0i32;
             if i > 0 {
-                echo_bonus += set_base_points(sets[i - 1].kind) / 2;
+                echo_bonus += set_base_points(sets[i - 1].kind);
             }
             if i + 1 < sets.len() {
-                echo_bonus += set_base_points(sets[i + 1].kind) / 2;
+                echo_bonus += set_base_points(sets[i + 1].kind);
             }
             if echo_bonus > 0 {
                 total += echo_bonus;
@@ -244,13 +254,13 @@ pub fn score_sets(
         }
     }
 
-    // ChainReaction: +25% if scored last turn.
+    // ChainReaction: +50% if scored last turn.
     if ctx.relics.has(RelicId::ChainReaction) && ctx.scored_last_turn {
-        let bonus = (total as f64 * 0.25).round() as i32;
+        let bonus = (total as f64 * 0.50).round() as i32;
         total += bonus;
         steps.push(ScoreStep {
             source: "Chain Reaction".to_string(),
-            effect: format!("+25% (+{bonus})"),
+            effect: format!("+50% (+{bonus})"),
             running_total: total,
         });
     }
@@ -342,12 +352,10 @@ mod tests {
         };
         let ctx = ScoreContext { relics: &relics, scored_last_turn: false, dora_faces: vec![], available_yaku: vec![] };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-        // base 40 + TripletBoost(+40) + AllTriplets(+100) + AllSimples(+60) + Flush(+120) = 360
+        // base 40 + TripletBoost(×3 → +80) = 120. Yaku require ≥5 tiles / ≥2 triplets, so none fire here.
         assert_eq!(breakdown.base_points, 40);
-        assert_eq!(breakdown.total, 360);
+        assert_eq!(breakdown.total, 120);
         assert!(!breakdown.steps.is_empty(), "should have relic steps");
-        assert!(breakdown.detected_yaku.contains(&YakuKind::AllTriplets));
-        assert!(breakdown.detected_yaku.contains(&YakuKind::Flush));
     }
 
     #[test]
@@ -364,10 +372,9 @@ mod tests {
             available_yaku: vec![],
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[RuleModifier::PairDoubleScore]);
-        // base 10 + PairDouble(+10) + AllSimples(+60) + Flush(+120) = 200
-        assert_eq!(breakdown.total, 200);
+        // base 10 + PairDouble(+10) = 20. Yaku need ≥5 tiles, none fire on a bare pair.
+        assert_eq!(breakdown.total, 20);
         assert!(breakdown.steps.iter().any(|s| s.source.contains("Pair Double")));
-        assert!(breakdown.detected_yaku.contains(&YakuKind::Flush));
     }
 
     fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
@@ -607,7 +614,8 @@ mod tests {
         // 50% of adjacent: seq(30)/2 + seq(30)/2 = 30
         assert!(breakdown.steps.iter().any(|s| s.source.contains("Dragon Echo")));
         let echo_step = breakdown.steps.iter().find(|s| s.source == "Dragon Echo").unwrap();
-        assert_eq!(echo_step.effect, "+30");
+        // 100% of adjacent: seq(30) + seq(30) = 60
+        assert_eq!(echo_step.effect, "+60");
     }
 
     #[test]
@@ -642,9 +650,9 @@ mod tests {
         let r = relics(vec![RelicId::ChainReaction]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, true), &[]);
         assert!(breakdown.steps.iter().any(|s| s.source.contains("Chain Reaction")));
-        // Should add 25% of total-before-chain
+        // Should add 50% of total-before-chain
         let chain_step = breakdown.steps.iter().find(|s| s.source == "Chain Reaction").unwrap();
-        assert!(chain_step.effect.contains("+25%"));
+        assert!(chain_step.effect.contains("+50%"));
     }
 
     #[test]

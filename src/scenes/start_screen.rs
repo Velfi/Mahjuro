@@ -11,23 +11,26 @@ use super::gameplay::GameplayScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
+use super::solitaire::SolitaireScene;
 
 /// Menu items when a game is in progress.
 const IP_CONTINUE: usize = 0;
 const IP_NEW_GAME: usize = 1;
-const IP_PROFILE: usize = 2;
-const IP_COLLECTION: usize = 3;
-const IP_OPTIONS: usize = 4;
-const IP_QUIT: usize = 5;
-const IP_COUNT: usize = 6;
+const IP_SOLITAIRE: usize = 2;
+const IP_PROFILE: usize = 3;
+const IP_COLLECTION: usize = 4;
+const IP_OPTIONS: usize = 5;
+const IP_QUIT: usize = 6;
+const IP_COUNT: usize = 7;
 
 /// Menu items when no game is in progress.
 const NP_PLAY: usize = 0;
-const NP_PROFILE: usize = 1;
-const NP_COLLECTION: usize = 2;
-const NP_OPTIONS: usize = 3;
-const NP_QUIT: usize = 4;
-const NP_COUNT: usize = 5;
+const NP_SOLITAIRE: usize = 1;
+const NP_PROFILE: usize = 2;
+const NP_COLLECTION: usize = 3;
+const NP_OPTIONS: usize = 4;
+const NP_QUIT: usize = 5;
+const NP_COUNT: usize = 6;
 
 pub struct StartScreenScene {
     cursor: usize,
@@ -42,6 +45,29 @@ impl StartScreenScene {
         let in_progress = ctx.run.is_in_progress();
         let count = if in_progress { IP_COUNT } else { NP_COUNT };
 
+        // Mouse hover → focus the menu item under the pointer so the gold
+        // highlight follows the cursor. Layout must match draw().
+        let w = ctx.layout.window_w;
+        let h = ctx.layout.window_h;
+        let scale = (w.min(h)) / 600.0;
+        let title_h = (64.0 * scale).max(32.0);
+        let title_y = h * 0.08;
+        let prof_y = title_y + title_h + h * 0.04;
+        let prof_h = (24.0 * scale).max(16.0);
+        let btn_w = (200.0 * scale).min(w * 0.5);
+        let btn_h = (38.0 * scale).max(24.0);
+        let btn_gap = (12.0 * scale).max(6.0);
+        let menu_start_y = prof_y + prof_h + h * 0.06;
+        let btn_x = (w - btn_w) * 0.5;
+        let (cx, cy) = ctx.cursor_pos;
+        for i in 0..count {
+            let by = menu_start_y + i as f32 * (btn_h + btn_gap);
+            if cx >= btn_x && cx <= btn_x + btn_w && cy >= by && cy <= by + btn_h {
+                self.cursor = i;
+                break;
+            }
+        }
+
         for a in ctx.actions {
             match a {
                 UiAction::FocusDown | UiAction::FocusNext => {
@@ -50,28 +76,10 @@ impl StartScreenScene {
                 UiAction::FocusUp | UiAction::FocusPrev => {
                     self.cursor = (self.cursor + count - 1) % count;
                 }
-                UiAction::Confirm => {
+                // Confirm — mouse clicks land here too because hover-focus
+                // above already pointed self.cursor at the hovered button.
+                UiAction::Confirm | UiAction::CommitDiscard => {
                     return self.activate(self.cursor, in_progress, ctx.run, ctx.quit_requested);
-                }
-                // Mouse-click mapped actions (direct button clicks).
-                // Each button index maps to a unique action for identification.
-                UiAction::CommitDiscard => {
-                    return self.activate(0, in_progress, ctx.run, ctx.quit_requested);
-                }
-                UiAction::ScoreHand => {
-                    return self.activate(1, in_progress, ctx.run, ctx.quit_requested);
-                }
-                UiAction::NavigateHudNext => {
-                    let idx = if in_progress { IP_PROFILE } else { NP_PROFILE };
-                    return self.activate(idx, in_progress, ctx.run, ctx.quit_requested);
-                }
-                UiAction::SortBySuit => {
-                    let idx = if in_progress { IP_COLLECTION } else { NP_COLLECTION };
-                    return self.activate(idx, in_progress, ctx.run, ctx.quit_requested);
-                }
-                UiAction::SortByRank => {
-                    let idx = if in_progress { IP_OPTIONS } else { NP_OPTIONS };
-                    return self.activate(idx, in_progress, ctx.run, ctx.quit_requested);
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     *ctx.quit_requested = true;
@@ -93,6 +101,7 @@ impl StartScreenScene {
             match idx {
                 IP_CONTINUE => return Some(Scene::Gameplay(GameplayScene::new())),
                 IP_NEW_GAME => return self.start_game(run),
+                IP_SOLITAIRE => return Some(Scene::Solitaire(SolitaireScene::new())),
                 IP_PROFILE => {
                     return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
                 }
@@ -104,6 +113,7 @@ impl StartScreenScene {
         } else {
             match idx {
                 NP_PLAY => return self.start_game(run),
+                NP_SOLITAIRE => return Some(Scene::Solitaire(SolitaireScene::new())),
                 NP_PROFILE => {
                     return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
                 }
@@ -167,31 +177,11 @@ impl StartScreenScene {
 
         // Build menu items depending on whether a game is in progress.
         let menu_labels: Vec<&str> = if in_progress {
-            vec!["Continue", "New Game", "Profile", "Collection", "Options", "Quit"]
+            vec!["Continue", "New Game", "Solitaire", "Profile", "Collection", "Options", "Quit"]
         } else {
-            vec!["Play", "Profile", "Collection", "Options", "Quit"]
+            vec!["Play", "Solitaire", "Profile", "Collection", "Options", "Quit"]
         };
         let count = menu_labels.len();
-
-        // Map each button index to a unique UiAction for mouse-click identification.
-        let button_actions: Vec<UiAction> = if in_progress {
-            vec![
-                UiAction::CommitDiscard,   // Continue
-                UiAction::ScoreHand,       // New Game
-                UiAction::NavigateHudNext, // Profile
-                UiAction::SortBySuit,      // Collection
-                UiAction::SortByRank,      // Options
-                UiAction::Cancel,          // Quit
-            ]
-        } else {
-            vec![
-                UiAction::CommitDiscard,   // Play
-                UiAction::NavigateHudNext, // Profile
-                UiAction::SortBySuit,      // Collection
-                UiAction::SortByRank,      // Options
-                UiAction::Cancel,          // Quit
-            ]
-        };
 
         let quit_idx = count - 1;
         let continue_idx = 0;
@@ -234,10 +224,12 @@ impl StartScreenScene {
                 color: text_color,
             });
 
-            buttons.push(ButtonDef {
-                rect: (btn_x, btn_y, btn_w, btn_h),
-                action: button_actions[i],
-            });
+            // Click → Confirm; hover-focus in update() ensures self.cursor
+            // already points at this button by the time the action is read.
+            buttons.push(ButtonDef::ui(
+                (btn_x, btn_y, btn_w, btn_h),
+                UiAction::Confirm,
+            ));
         }
 
         // Hint text at bottom.

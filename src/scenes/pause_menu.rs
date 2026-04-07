@@ -48,7 +48,38 @@ impl PauseMenu {
     }
 
     /// Process actions while paused. Returns what the caller should do.
-    pub fn update(&mut self, actions: &[UiAction], run: &mut RunState) -> PauseUpdate {
+    /// `cursor_pos` and `(window_w, window_h)` enable mouse hover-to-focus.
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        run: &mut RunState,
+        cursor_pos: (f32, f32),
+        window_w: f32,
+        window_h: f32,
+    ) -> PauseUpdate {
+        // Mouse hover → focus the pause-menu button under the pointer.
+        // Layout must mirror draw().
+        let scale = (window_w.min(window_h)) / 600.0;
+        let btn_w = (200.0 * scale).min(window_w * 0.5);
+        let btn_h = (38.0 * scale).max(24.0);
+        let btn_gap = (12.0 * scale).max(6.0);
+        let total_menu_h =
+            PAUSE_COUNT as f32 * btn_h + (PAUSE_COUNT as f32 - 1.0) * btn_gap;
+        let title_h = (48.0 * scale).max(28.0);
+        let title_gap = (20.0 * scale).max(10.0);
+        let block_h = title_h + title_gap + total_menu_h;
+        let start_y = (window_h - block_h) * 0.5;
+        let menu_start_y = start_y + title_h + title_gap;
+        let btn_x = (window_w - btn_w) * 0.5;
+        let (cx, cy) = cursor_pos;
+        for i in 0..PAUSE_COUNT {
+            let by = menu_start_y + i as f32 * (btn_h + btn_gap);
+            if cx >= btn_x && cx <= btn_x + btn_w && cy >= by && cy <= by + btn_h {
+                self.cursor = i;
+                break;
+            }
+        }
+
         for a in actions {
             match a {
                 UiAction::Pause | UiAction::Cancel => {
@@ -61,19 +92,9 @@ impl PauseMenu {
                 UiAction::FocusUp | UiAction::FocusPrev => {
                     self.cursor = (self.cursor + PAUSE_COUNT - 1) % PAUSE_COUNT;
                 }
-                UiAction::Confirm => return self.activate(run),
-                // Mouse-click mapped actions for pause buttons.
-                UiAction::CommitDiscard => {
-                    self.paused = false;
-                    return PauseUpdate::Resume;
-                }
-                UiAction::ScoreHand => return self.do_restart(run),
-                UiAction::SortBySuit => {
-                    return PauseUpdate::Transition(Some(Scene::StartScreen(
-                        StartScreenScene::new(),
-                    )));
-                }
-                UiAction::SortByRank => return PauseUpdate::Quit,
+                // Mouse clicks land here too — hover-focus above already
+                // pointed self.cursor at the hovered button.
+                UiAction::Confirm | UiAction::CommitDiscard => return self.activate(run),
                 _ => {}
             }
         }
@@ -124,12 +145,6 @@ impl PauseMenu {
         });
 
         let menu_labels = ["Resume", "Restart", "Main Menu", "Exit"];
-        let pause_button_actions = [
-            UiAction::CommitDiscard, // Resume
-            UiAction::ScoreHand,     // Restart
-            UiAction::SortBySuit,    // Main Menu
-            UiAction::SortByRank,    // Exit
-        ];
         let btn_w = (200.0 * scale).min(window_w * 0.5);
         let btn_h = (38.0 * scale).max(24.0);
         let btn_gap = (12.0 * scale).max(6.0);
@@ -180,10 +195,12 @@ impl PauseMenu {
                 color: text_color,
             });
 
-            buttons.push(ButtonDef {
-                rect: (btn_x, by, btn_w, btn_h),
-                action: pause_button_actions[i],
-            });
+            // Click → Confirm; hover-focus in update() ensures self.cursor
+            // already points at this button by the time the action is read.
+            buttons.push(ButtonDef::ui(
+                (btn_x, by, btn_w, btn_h),
+                UiAction::Confirm,
+            ));
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Yaku (hand pattern) detection and bonus scoring.
 
-use crate::core::hand::{DetectedSet, SetKind};
-use crate::core::tile::Tile;
+use crate::core::hand::{DetectedSet, SetKind, validate_selection};
+use crate::core::tile::{Suit, Tile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum YakuKind {
@@ -23,7 +23,7 @@ impl YakuKind {
             YakuKind::AllTriplets => 100,
             YakuKind::AllSimples => 60,
             YakuKind::Flush => 120,
-            YakuKind::MixedSets => 50,
+            YakuKind::MixedSets => 80,
             YakuKind::FullHand => 200,
         }
     }
@@ -39,6 +39,128 @@ impl YakuKind {
     }
 }
 
+/// Live preview of a yaku for the current selection: how close the player is
+/// to qualifying, with a short human-readable hint.
+#[derive(Clone, Debug)]
+pub struct YakuPreview {
+    pub kind: YakuKind,
+    /// True if the current selection (when valid) actually awards this yaku.
+    pub active: bool,
+    /// Progress toward qualifying, in `0.0..=1.0`.
+    pub progress: f32,
+    /// Short hint text, e.g. "4/5 same suit" or "P·S" (mixed-set checklist).
+    pub hint: String,
+}
+
+/// Compute a `YakuPreview` for each yaku in the player's available pool, based
+/// on the currently-selected tiles. Yaku that need a valid decomposition fall
+/// back to a "needs valid hand" hint when the selection doesn't decompose.
+pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> {
+    let sets_opt = validate_selection(tiles);
+    let active_yaku: Vec<YakuKind> = match &sets_opt {
+        Some(s) => detect_yaku(tiles, s),
+        None => Vec::new(),
+    };
+
+    let kinds: Vec<YakuKind> = if available.is_empty() {
+        vec![
+            YakuKind::AllTriplets,
+            YakuKind::AllSimples,
+            YakuKind::Flush,
+            YakuKind::MixedSets,
+            YakuKind::FullHand,
+        ]
+    } else {
+        available.to_vec()
+    };
+
+    kinds
+        .into_iter()
+        .map(|k| {
+            let active = active_yaku.contains(&k);
+            let (progress, hint) = match k {
+                YakuKind::Flush => {
+                    if tiles.is_empty() {
+                        (0.0, "0/5 same suit".to_string())
+                    } else {
+                        let mut counts = [0usize; 5];
+                        for t in tiles {
+                            counts[t.suit as usize] += 1;
+                        }
+                        let max = counts.iter().copied().max().unwrap_or(0);
+                        // Need 5+ tiles all of one suit. Progress is the
+                        // single-suit count toward that threshold.
+                        let progress = (max as f32 / 5.0).min(1.0);
+                        (progress, format!("{max}/5 same suit"))
+                    }
+                }
+                YakuKind::AllSimples => {
+                    if tiles.is_empty() {
+                        (0.0, "0/0 simples".to_string())
+                    } else {
+                        let n = tiles
+                            .iter()
+                            .filter(|t| {
+                                matches!(
+                                    t.suit,
+                                    Suit::Characters | Suit::Bamboos | Suit::Circles
+                                ) && t.rank >= 2
+                                    && t.rank <= 8
+                            })
+                            .count();
+                        let total = tiles.len();
+                        (n as f32 / total as f32, format!("{n}/{total} simples"))
+                    }
+                }
+                YakuKind::FullHand => {
+                    let n = tiles.len().min(14);
+                    (n as f32 / 14.0, format!("{n}/14 tiles"))
+                }
+                YakuKind::AllTriplets => match &sets_opt {
+                    Some(s) => {
+                        let trips =
+                            s.iter().filter(|x| x.kind == SetKind::Triplet).count();
+                        let seqs =
+                            s.iter().filter(|x| x.kind == SetKind::Sequence).count();
+                        // Need ≥2 triplets and zero sequences. Any sequence
+                        // disqualifies, so progress collapses to 0 there.
+                        if seqs > 0 {
+                            (0.0, format!("{seqs} sequence(s)"))
+                        } else {
+                            let progress = (trips as f32 / 2.0).min(1.0);
+                            (progress, format!("{trips}/2+ triplets"))
+                        }
+                    }
+                    None => (0.0, "needs valid hand".to_string()),
+                },
+                YakuKind::MixedSets => match &sets_opt {
+                    Some(s) => {
+                        let has_p = s.iter().any(|x| x.kind == SetKind::Pair);
+                        let has_t = s.iter().any(|x| x.kind == SetKind::Triplet);
+                        let has_q = s.iter().any(|x| x.kind == SetKind::Sequence);
+                        let n = (has_p as u32) + (has_t as u32) + (has_q as u32);
+                        let mark = |b: bool, c: char| if b { c } else { '·' };
+                        let hint = format!(
+                            "{}{}{}",
+                            mark(has_p, 'P'),
+                            mark(has_t, 'T'),
+                            mark(has_q, 'S')
+                        );
+                        (n as f32 / 3.0, hint)
+                    }
+                    None => (0.0, "···".to_string()),
+                },
+            };
+            YakuPreview {
+                kind: k,
+                active,
+                progress: progress.clamp(0.0, 1.0),
+                hint,
+            }
+        })
+        .collect()
+}
+
 /// Detect all yaku patterns present in a scored hand.
 pub fn detect_yaku(tiles: &[Tile], sets: &[DetectedSet]) -> Vec<YakuKind> {
     let mut found = Vec::new();
@@ -52,33 +174,41 @@ pub fn detect_yaku(tiles: &[Tile], sets: &[DetectedSet]) -> Vec<YakuKind> {
     if is_flush(tiles) {
         found.push(YakuKind::Flush);
     }
-    if is_mixed_sets(sets) {
+    let full = is_full_hand(tiles, sets);
+    // FullHand strictly contains MixedSets (4 melds + pair always has P+T+S
+    // unless all melds are the same kind). Suppress MixedSets when FullHand
+    // fires so the 80-point bonus doesn't double-dip on top of FullHand's 200.
+    if !full && is_mixed_sets(sets) {
         found.push(YakuKind::MixedSets);
     }
-    if is_full_hand(tiles, sets) {
+    if full {
         found.push(YakuKind::FullHand);
     }
 
     found
 }
 
-/// All non-pair sets are triplets.
+/// All non-pair sets are triplets, and there are at least 2 triplets so a
+/// lone meld doesn't trivially earn the bonus.
 fn is_all_triplets(sets: &[DetectedSet]) -> bool {
-    let non_pair: Vec<_> = sets.iter().filter(|s| s.kind != SetKind::Pair).collect();
-    !non_pair.is_empty() && non_pair.iter().all(|s| s.kind == SetKind::Triplet)
+    let triplets = sets.iter().filter(|s| s.kind == SetKind::Triplet).count();
+    let sequences = sets.iter().filter(|s| s.kind == SetKind::Sequence).count();
+    triplets >= 2 && sequences == 0
 }
 
 /// Every tile is a numbered suit (Characters/Bamboos/Circles) with rank 2–8.
+/// Requires at least 5 tiles so a single tile or pair doesn't trivially qualify.
 fn is_all_simples(tiles: &[Tile]) -> bool {
-    !tiles.is_empty()
+    tiles.len() >= 5
         && tiles
             .iter()
             .all(|t| t.is_number_tile() && t.rank >= 2 && t.rank <= 8)
 }
 
-/// All tiles share the same suit.
+/// All tiles share the same suit. Requires at least 5 tiles (one meld + a pair)
+/// so a bare pair or single meld doesn't trivially qualify.
 fn is_flush(tiles: &[Tile]) -> bool {
-    if tiles.is_empty() {
+    if tiles.len() < 5 {
         return false;
     }
     let suit = tiles[0].suit;
@@ -287,7 +417,8 @@ mod tests {
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::FullHand));
-        assert!(yaku.contains(&YakuKind::MixedSets));
+        // FullHand suppresses MixedSets to avoid double-dipping the bonus.
+        assert!(!yaku.contains(&YakuKind::MixedSets));
     }
 
     #[test]
@@ -298,8 +429,10 @@ mod tests {
             tile_ids: vec![0, 1],
         }];
         let yaku = detect_yaku(&tiles, &sets);
-        // Flush is detected (single suit), but not AllTriplets, AllSimples needs 2-8, etc.
+        // A bare pair must not award any yaku — they all gate on a real hand.
+        assert!(!yaku.contains(&YakuKind::Flush));
         assert!(!yaku.contains(&YakuKind::AllTriplets));
+        assert!(!yaku.contains(&YakuKind::AllSimples));
         assert!(!yaku.contains(&YakuKind::MixedSets));
         assert!(!yaku.contains(&YakuKind::FullHand));
     }
@@ -309,7 +442,7 @@ mod tests {
         assert_eq!(YakuKind::AllTriplets.bonus_points(), 100);
         assert_eq!(YakuKind::AllSimples.bonus_points(), 60);
         assert_eq!(YakuKind::Flush.bonus_points(), 120);
-        assert_eq!(YakuKind::MixedSets.bonus_points(), 50);
+        assert_eq!(YakuKind::MixedSets.bonus_points(), 80);
         assert_eq!(YakuKind::FullHand.bonus_points(), 200);
     }
 }

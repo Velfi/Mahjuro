@@ -60,6 +60,15 @@ impl BlindKind {
         }
     }
 
+    /// Gold reward granted for skipping this blind. Boss can't be skipped.
+    pub fn skip_reward(self) -> u32 {
+        match self {
+            BlindKind::Small => 3,
+            BlindKind::Big => 5,
+            BlindKind::Boss => 0,
+        }
+    }
+
     /// Number of relic choices offered after clearing this blind.
     pub fn relic_choices(self) -> usize {
         match self {
@@ -106,6 +115,15 @@ impl BlindKind {
             BlindKind::Small => "×1 target · 2 relic picks · ×1 gold",
             BlindKind::Big => "×1.5 target · 3 relic picks · ×1.5 gold",
             BlindKind::Boss => "×2 target + modifier · 3 relic picks · ×2.5 gold",
+        }
+    }
+
+    /// The next blind in the Small → Big → Boss → Small cycle.
+    pub fn next(self) -> BlindKind {
+        match self {
+            BlindKind::Small => BlindKind::Big,
+            BlindKind::Big => BlindKind::Boss,
+            BlindKind::Boss => BlindKind::Small,
         }
     }
 }

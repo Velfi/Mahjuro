@@ -27,6 +27,28 @@ impl ProfileSelectScene {
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Mouse hover → focus the profile card under the pointer. Layout
+        // must mirror draw().
+        let w = ctx.layout.window_w;
+        let h = ctx.layout.window_h;
+        let scale = (w.min(h)) / 600.0;
+        let title_h = (48.0 * scale).max(28.0);
+        let title_y = h * 0.06;
+        let card_w = (260.0 * scale).min(w * 0.8);
+        let card_h = (160.0 * scale).max(100.0);
+        let card_gap = (16.0 * scale).max(8.0);
+        let total_h = PROFILE_COUNT as f32 * card_h + (PROFILE_COUNT - 1) as f32 * card_gap;
+        let start_y = title_y + title_h + (h - title_y - title_h - total_h) * 0.35;
+        let card_x = (w - card_w) * 0.5;
+        let (cx, cy) = ctx.cursor_pos;
+        for i in 0..PROFILE_COUNT {
+            let card_y = start_y + i as f32 * (card_h + card_gap);
+            if cx >= card_x && cx <= card_x + card_w && cy >= card_y && cy <= card_y + card_h {
+                self.cursor = i;
+                break;
+            }
+        }
+
         for a in ctx.actions {
             match a {
                 UiAction::FocusNext | UiAction::FocusDown => {
@@ -35,27 +57,13 @@ impl ProfileSelectScene {
                 UiAction::FocusPrev | UiAction::FocusUp => {
                     self.cursor = (self.cursor + PROFILE_COUNT - 1) % PROFILE_COUNT;
                 }
+                // Mouse clicks land here too — hover-focus above already
+                // pointed self.cursor at the hovered card.
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     *ctx.switch_profile = Some(self.cursor);
                     return Some(Scene::StartScreen(StartScreenScene::new()));
                 }
                 UiAction::Cancel | UiAction::Pause => {
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
-                }
-                // Mouse clicks on profile cards.
-                UiAction::SortBySuit => {
-                    self.cursor = 0;
-                    *ctx.switch_profile = Some(0);
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
-                }
-                UiAction::SortByRank => {
-                    self.cursor = 1;
-                    *ctx.switch_profile = Some(1);
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
-                }
-                UiAction::ScoreHand => {
-                    self.cursor = 2;
-                    *ctx.switch_profile = Some(2);
                     return Some(Scene::StartScreen(StartScreenScene::new()));
                 }
                 _ => {}
@@ -93,9 +101,6 @@ impl ProfileSelectScene {
         let total_h = PROFILE_COUNT as f32 * card_h + (PROFILE_COUNT - 1) as f32 * card_gap;
         let start_y = title_y + title_h + (h - title_y - title_h - total_h) * 0.35;
         let card_x = (w - card_w) * 0.5;
-
-        // Actions for each card's mouse click.
-        let card_actions = [UiAction::SortBySuit, UiAction::SortByRank, UiAction::ScoreHand];
 
         for (i, summary) in summaries.iter().enumerate() {
             let card_y = start_y + i as f32 * (card_h + card_gap);
@@ -209,10 +214,12 @@ impl ProfileSelectScene {
                 });
             }
 
-            buttons.push(ButtonDef {
-                rect: (card_x, card_y, card_w, card_h),
-                action: card_actions[i],
-            });
+            // Click → Confirm; hover-focus in update() ensures self.cursor
+            // already points at this card by the time the action is read.
+            buttons.push(ButtonDef::ui(
+                (card_x, card_y, card_w, card_h),
+                UiAction::Confirm,
+            ));
         }
 
         // Hint text at bottom.

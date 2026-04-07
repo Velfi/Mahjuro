@@ -59,6 +59,15 @@ impl Tile {
         }
     }
 
+    /// Base point value of a single tile face: numbered tiles are worth their
+    /// rank (1–9), honors (winds & dragons) are flat 10.
+    pub fn point_value(&self) -> u32 {
+        match self.suit {
+            Suit::Characters | Suit::Bamboos | Suit::Circles => self.rank as u32,
+            Suit::Wind | Suit::Dragon => 10,
+        }
+    }
+
     /// RGBA color hint for the tile's suit, for UI rendering.
     pub fn suit_color(&self) -> [f32; 4] {
         match self.suit {

@@ -26,15 +26,15 @@ impl SfxId {
     fn filename(self) -> &'static str {
         match self {
             SfxId::TileClick => "tile_click.ogg",
-            SfxId::TilePlace => "tile_place.ogg",
-            SfxId::TileDiscard => "tile_discard.ogg",
+            SfxId::TilePlace => "nomagician-ui-button-sound-cancel-back-exit-continue-467877.mp3",
+            SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
             SfxId::ScoreReveal => "score_reveal.ogg",
             SfxId::ScoreStep => "score_step.ogg",
             SfxId::ScoreFinal => "score_final.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
             SfxId::InvalidAction => "invalid_action.ogg",
             SfxId::RoundWin => "round_win.ogg",
-            SfxId::GameOver => "game_over.ogg",
+            SfxId::GameOver => "alphix-game-over-417465.mp3",
         }
     }
 }
@@ -110,8 +110,8 @@ impl AudioManager {
             return;
         };
         let cursor = Cursor::new(data.clone());
-        let Ok(source) = Decoder::new_vorbis(cursor) else {
-            log::warn!("play_sfx({id:?}): vorbis decoder failed");
+        let Ok(source) = Decoder::new(cursor) else {
+            log::warn!("play_sfx({id:?}): decoder failed");
             return;
         };
         let Ok(sink) = Sink::try_new(handle) else {
