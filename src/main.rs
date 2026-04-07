@@ -2,6 +2,7 @@
 
 pub mod asset_path;
 mod audio;
+mod bot;
 mod core;
 pub mod crash_guard;
 mod debug_menu;
@@ -19,12 +20,12 @@ use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::{RunState, pick_relic_choices};
 use render::animation::AnimationController;
+use render::draw_cmd::UiFrame;
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::results::ResultsScene;
 use scenes::splash::SplashScene;
-use scenes::start_screen::StartScreenScene;
-use scenes::{ButtonDef, DrawCtx, Scene, UpdateCtx};
+use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, UpdateCtx};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme};
@@ -345,6 +346,9 @@ struct App {
     anim: AnimationController,
     last_frame: Instant,
     mouse_actions: Vec<UiAction>,
+    /// Scene-defined button click ids fired by mouse clicks since the last
+    /// frame; drained into `UpdateCtx::button_clicks` each frame.
+    mouse_button_clicks: Vec<u32>,
     /// Button rects from the last draw, for click hit-testing.
     active_buttons: Vec<ButtonDef>,
     scene: Scene,
@@ -361,6 +365,9 @@ struct App {
     close_saved: bool,
     /// Modal toast queue — overlays any scene.
     modals: ModalQueue,
+    /// Modals deferred until the player dismisses the GameOver scene
+    /// (e.g. level-up celebrations shown after defeat/victory).
+    pending_post_game_over_modals: Vec<Modal>,
     /// Native OS debug menu bar.
     debug_menu: Option<DebugMenuBar>,
     /// Smoke effect intensity (persisted in settings).
@@ -406,6 +413,7 @@ impl App {
             anim: AnimationController::new(),
             last_frame: Instant::now(),
             mouse_actions: Vec::new(),
+            mouse_button_clicks: Vec::new(),
             active_buttons: Vec::new(),
             scene: Scene::Splash(SplashScene::new()),
             progress,
@@ -416,6 +424,7 @@ impl App {
             quit_requested: false,
             close_saved: false,
             modals: ModalQueue::default(),
+            pending_post_game_over_modals: Vec::new(),
             debug_menu: None,
             smoke_intensity: settings.smoke_intensity,
             prev_cursor: (0.0, 0.0),
@@ -468,7 +477,10 @@ impl App {
         let output = self.scene.draw(ctx);
 
         win.set_title(&output.window_title);
-        self.active_buttons = output.buttons;
+        self.active_buttons = output.buttons.iter().map(|b| ButtonDef {
+            rect: b.rect,
+            action: b.action,
+        }).collect();
 
         // Spawn departure animations before updating hand tiles (old data still in renderer).
         if !output.departing_indices.is_empty() {
@@ -477,71 +489,66 @@ impl App {
         }
         renderer.update_hand_tiles(&output.hand_tiles);
 
-        // Apply transition alpha to all instances and text labels.
+        // Snapshot the scene's text labels and relic icons for tooltip
+        // hover-region scanning. We capture them before any modal/overlay
+        // cmds get pushed onto the frame so glossary detection only fires
+        // on scene content.
+        let scene_text_labels: Vec<TextLabel> = output
+            .text_labels
+            .iter()
+            .map(|l| TextLabel {
+                rect: l.rect,
+                text: l.text.clone(),
+                color: l.color,
+            })
+            .collect();
+        let scene_relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = output
+            .relic_icons
+            .iter()
+            .map(|i| crate::render::wgpu_renderer::RelicIcon {
+                rect: i.rect,
+                relic_id: i.relic_id,
+            })
+            .collect();
+
+        // Convert SceneDrawOutput → UiFrame in the canonical scene order
+        // (background → hand backdrop → smoke → scene quads → hand faces →
+        // scene text → relic icons). Modal/tuning/fps/tooltip cmds are
+        // appended to the end of `frame.cmds` below — pushed earlier =
+        // renders under, pushed later = renders on top.
+        let mut frame: UiFrame = output.into_frame();
+
+        // Apply transition alpha to everything that's part of the scene
+        // (after into_frame so all scene cmds exist; before overlays are
+        // appended so they fade in cleanly).
         let alpha = self.transition_alpha;
-        let mut instances: Vec<GpuInstance> = if alpha < 1.0 {
-            output
-                .instances
-                .iter()
-                .map(|i| GpuInstance {
-                    rect: i.rect,
-                    color: [i.color[0], i.color[1], i.color[2], i.color[3] * alpha],
-                })
-                .collect()
-        } else {
-            output.instances
-        };
-        let mut text_labels: Vec<TextLabel> = if alpha < 1.0 {
-            output
-                .text_labels
-                .iter()
-                .map(|l| TextLabel {
-                    rect: l.rect,
-                    text: l.text.clone(),
-                    color: [l.color[0], l.color[1], l.color[2], l.color[3] * alpha],
-                })
-                .collect()
-        } else {
-            output.text_labels
-        };
+        frame.apply_alpha(alpha);
 
-        // Remember scene-label count before modal/tooltip layers add more.
-        let scene_label_count = text_labels.len();
-
-        // Render modal overlay on top of everything.
         let size = win.inner_size();
         self.modals.update();
         if let Some((modal_insts, modal_labels, modal_buttons)) =
             self.modals.draw(size.width as f32, size.height as f32)
         {
-            instances.extend(modal_insts);
-            text_labels.extend(modal_labels);
+            frame.quads(modal_insts);
+            frame.texts(modal_labels);
             // Replace scene buttons with modal buttons so only dismiss works.
             self.active_buttons = modal_buttons;
         }
-
-        // Record where overlay content begins so the renderer can draw it
-        // *after* tile text (preventing tile symbols from bleeding through).
-        let overlay_split = if self.tuning_overlay.is_some() {
-            Some((instances.len(), text_labels.len()))
-        } else {
-            None
-        };
 
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.tuning_overlay {
             let (tuning_insts, tuning_labels) =
                 overlay.draw(size.width as f32, size.height as f32);
-            instances.extend(tuning_insts);
-            text_labels.extend(tuning_labels);
+            frame.quads(tuning_insts);
+            frame.texts(tuning_labels);
             self.active_buttons.clear(); // Block scene buttons.
         }
 
-        // Tooltip overlay — rendered as a separate final pass so it draws on
-        // top of all scene/modal content.  Disabled on overlay screens like Options.
-        let skip_tooltips = self.modals.is_active()
-            || matches!(&self.scene, Scene::Options(_));
-        let tooltip_layers = if !skip_tooltips {
+        // Tooltip overlay — pushed *after* modals/tuning so it sits on top
+        // of all scene/modal content. Disabled on overlay screens like Options.
+        let skip_tooltips =
+            self.modals.is_active() || matches!(&self.scene, Scene::Options(_));
+        if !skip_tooltips {
             let cursor = self
                 .input
                 .as_ref()
@@ -551,19 +558,20 @@ impl App {
             let wh = size.height as f32;
             let btn_rects: Vec<(f32, f32, f32, f32)> =
                 self.active_buttons.iter().map(|b| b.rect).collect();
-            self.tooltips.update_and_draw(
+            self.tooltips.update_and_draw_into(
+                &mut frame,
                 cursor,
-                &text_labels[..scene_label_count],
+                &scene_text_labels,
                 &btn_rects,
+                &scene_relic_icons,
                 ww,
                 wh,
-            )
+            );
         } else {
             self.tooltips.clear();
-            vec![]
-        };
+        }
 
-        // FPS counter overlay (debug).
+        // FPS counter overlay (debug) — pushed last so it's always on top.
         if self.show_fps {
             let dt = self.last_frame.elapsed().as_secs_f32().max(0.001);
             let instant_fps = 1.0 / dt;
@@ -574,12 +582,11 @@ impl App {
             let label_h = (h * 0.03).max(20.0);
             let label_w = label_h * 4.0;
             let margin = label_h * 0.3;
-            // Background pill behind the text.
-            instances.push(GpuInstance {
+            frame.quad(GpuInstance {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 color: [0.0, 0.0, 0.0, 0.55],
             });
-            text_labels.push(TextLabel {
+            frame.text(TextLabel {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.fps_smoothed),
                 color: [0.9, 0.9, 0.3, 1.0],
@@ -592,17 +599,8 @@ impl App {
         let sort_settle_speed = 10.0 * (400.0 / self.cascade_tuning.sort_settle_ms.max(1) as f32);
 
         if let Err(e) = renderer.render(
-            &instances,
-            &output.hand_slots,
-            output.focus,
-            &output.selected_tiles,
-            &text_labels,
-            &output.relic_icons,
-            &tooltip_layers,
-            output.background,
+            &frame,
             self.smoke_intensity,
-            &output.hint_indices,
-            overlay_split,
             draw_settle_speed,
             sort_settle_speed,
         ) {
@@ -831,7 +829,8 @@ impl ApplicationHandler for App {
                             let ww = win_size.width as f32;
                             let wh = win_size.height as f32;
 
-                            // Show level-up modal with fireworks if the player leveled up.
+                            // Defer the level-up modal so it celebrates *after*
+                            // the player dismisses the Game Over screen.
                             if let Some(level) = level_up {
                                 log::info!("Level up! Now level {}", level);
                                 let modal = Modal::new(
@@ -845,19 +844,8 @@ impl ApplicationHandler for App {
                                     ww * 0.7,
                                     8,
                                 );
-                                self.modals.push(modal);
+                                self.pending_post_game_over_modals.push(modal);
                             }
-
-                            // Game over modal (no fireworks).
-                            let modal = Modal::new(
-                                "Game Over",
-                                format!(
-                                    "Final score: {} / {}",
-                                    self.run.round_score, self.run.target_score
-                                ),
-                                ModalTheme::Failure,
-                            );
-                            self.modals.push(modal);
 
                             self.audio.play_sfx(audio::SfxId::GameOver);
                             self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
@@ -879,6 +867,8 @@ impl ApplicationHandler for App {
 
                 // 2. Collect input actions.
                 let mut actions = Vec::new();
+                let mut button_clicks: Vec<u32> = Vec::new();
+                button_clicks.append(&mut self.mouse_button_clicks);
                 let mut hide_cursor = false;
                 if let Some(input) = self.input.as_mut() {
                     if input.poll_gamepads(&mut actions) {
@@ -946,6 +936,7 @@ impl ApplicationHandler for App {
                         }
                     }
                     actions.clear();
+                    button_clicks.clear();
                 }
 
                 // 3c. If a modal is active, intercept input: dismiss on Confirm/Cancel.
@@ -958,6 +949,7 @@ impl ApplicationHandler for App {
                     }
                     // Block all actions from reaching the scene.
                     actions.clear();
+                    button_clicks.clear();
                 }
 
                 // 4. Delegate actions to the active scene.
@@ -980,6 +972,7 @@ impl ApplicationHandler for App {
                 let loading_done = self.renderer.as_ref().map_or(true, |r| !r.is_loading());
                 let ctx = UpdateCtx {
                     actions: &actions,
+                    button_clicks: &button_clicks,
                     run: &mut self.run,
                     bus: &mut self.bus,
                     anim: &mut self.anim,
@@ -1029,6 +1022,15 @@ impl ApplicationHandler for App {
                     if self.transition_alpha <= 0.0 {
                         self.transition_alpha = 0.0;
                         if let Some(next) = self.pending_scene.take() {
+                            // If we're transitioning out of the GameOver scene,
+                            // surface any deferred celebration modals now.
+                            if matches!(self.scene, Scene::GameOver(_))
+                                && !self.pending_post_game_over_modals.is_empty()
+                            {
+                                for modal in self.pending_post_game_over_modals.drain(..) {
+                                    self.modals.push(modal);
+                                }
+                            }
                             self.scene = next;
                             if let Some(input) = self.input.as_mut() {
                                 input.focus_slot = 0;
@@ -1109,7 +1111,10 @@ impl ApplicationHandler for App {
                                 && cursor.1 >= by
                                 && cursor.1 <= by + bh
                             {
-                                self.mouse_actions.push(btn.action);
+                                match btn.action {
+                                    ButtonAction::Ui(a) => self.mouse_actions.push(a),
+                                    ButtonAction::Scene(id) => self.mouse_button_clicks.push(id),
+                                }
                                 hit = true;
                                 break;
                             }
@@ -1230,6 +1235,46 @@ impl ApplicationHandler for App {
 fn main() -> anyhow::Result<()> {
     crash_guard::install();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    // Headless bot mode for tuning. Examples:
+    //   mahjuro --bot 200
+    //   mahjuro --bot 200 --base-target 250 --target-scale 1.3 --plays 5
+    //   mahjuro --sweep                              (default sweep grid)
+    //   mahjuro --sweep --runs 50
+    let args: Vec<String> = std::env::args().collect();
+    let arg_value = |name: &str| -> Option<String> {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1).cloned())
+    };
+    let parse_f32 = |name: &str| arg_value(name).and_then(|s| s.parse::<f32>().ok());
+    let parse_u32 = |name: &str| arg_value(name).and_then(|s| s.parse::<u32>().ok());
+
+    let bot_config = bot::BotConfig {
+        base_target: parse_u32("--base-target"),
+        target_scaling: parse_f32("--target-scale"),
+        starting_plays: parse_u32("--plays"),
+        starting_discards: parse_u32("--discards"),
+        starting_gold: parse_u32("--gold"),
+    };
+
+    if args.iter().any(|a| a == "--sweep") {
+        let runs = parse_u32("--runs").unwrap_or(40);
+        // Default sweep grid — covers ranges most likely useful for tuning.
+        let bases: &[u32] = &[200, 250, 300, 350];
+        let scales: &[f32] = &[1.20, 1.30, 1.40, 1.50];
+        let plays: &[u32] = &[4, 5];
+        bot::run_sweep(runs, bases, scales, plays);
+        return Ok(());
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--bot") {
+        let n: u32 = args
+            .get(pos + 1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(100);
+        bot::run_headless(n, bot_config);
+        return Ok(());
+    }
 
     asset_path::log_all_assets();
 

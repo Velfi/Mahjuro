@@ -7,12 +7,19 @@ use crate::core::tile::{Suit, Tile};
 
 /// Human-readable summary of detected sets in the hand, e.g. "3m×2  1-3s  East×3".
 /// Returns an empty string if no sets found.
+///
+/// When the selection forms a fully valid decomposition (no leftover tiles), the
+/// description reflects that exact decomposition. Otherwise it falls back to
+/// listing standalone pair/triplet faces (skipping sequences, since unconstrained
+/// sequence search would report overlapping melds).
 pub fn describe_hand(tiles: &[Tile]) -> String {
+    if let Some(sets) = validate_selection(tiles) {
+        return describe_sets(tiles, &sets);
+    }
+
+    // Fallback: invalid selection — show only pair/triplet faces, which can't overlap.
     let pairs_trips = find_pairs_and_triplets(tiles);
-    let seqs = find_sequences(tiles);
-
     let mut parts: Vec<String> = Vec::new();
-
     for s in &pairs_trips {
         if let Some(&id) = s.tile_ids.first() {
             if let Some(t) = tiles.iter().find(|t| t.id == id) {
@@ -25,28 +32,44 @@ pub fn describe_hand(tiles: &[Tile]) -> String {
             }
         }
     }
+    parts.join("  ")
+}
 
-    for s in &seqs {
+/// Render a known decomposition as "4m×2  1-2-3m  7-8-9m".
+fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for s in sets {
         let tile_refs: Vec<&Tile> = s
             .tile_ids
             .iter()
             .filter_map(|id| tiles.iter().find(|t| t.id == *id))
             .collect();
-        if tile_refs.len() == 3 {
-            // e.g. "1-2-3s" — show ranks joined with dashes + suit suffix of last tile
-            let suffix = match tile_refs[0].suit {
-                Suit::Characters => "m",
-                Suit::Bamboos => "s",
-                Suit::Circles => "p",
-                _ => "",
-            };
-            parts.push(format!(
-                "{}-{}-{}{}",
-                tile_refs[0].rank, tile_refs[1].rank, tile_refs[2].rank, suffix
-            ));
+        match s.kind {
+            SetKind::Pair => {
+                if let Some(t) = tile_refs.first() {
+                    parts.push(format!("{}×2", t.label()));
+                }
+            }
+            SetKind::Triplet => {
+                if let Some(t) = tile_refs.first() {
+                    parts.push(format!("{}×3", t.label()));
+                }
+            }
+            SetKind::Sequence if tile_refs.len() == 3 => {
+                let suffix = match tile_refs[0].suit {
+                    Suit::Characters => "m",
+                    Suit::Bamboos => "s",
+                    Suit::Circles => "p",
+                    _ => "",
+                };
+                parts.push(format!(
+                    "{}-{}-{}{}",
+                    tile_refs[0].rank, tile_refs[1].rank, tile_refs[2].rank, suffix
+                ));
+            }
+            SetKind::Sequence => {}
         }
     }
-
     parts.join("  ")
 }
 
@@ -361,6 +384,33 @@ mod tests {
         ];
         let sets = find_pairs_and_triplets(&hand);
         assert!(sets.iter().any(|s| s.kind == SetKind::Triplet));
+    }
+
+    #[test]
+    fn describe_hand_no_overlapping_sequences() {
+        // Regression: 1m,2m,3m,4m,4m,7m,8m,9m must decompose as
+        // (1-2-3m) + (4m pair) + (7-8-9m) — NOT also reporting a phantom 2-3-4m
+        // sequence by reusing the 2m and 3m.
+        let tiles = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 2, 1),
+            t(Suit::Characters, 3, 2),
+            t(Suit::Characters, 4, 3),
+            t(Suit::Characters, 4, 4),
+            t(Suit::Characters, 7, 5),
+            t(Suit::Characters, 8, 6),
+            t(Suit::Characters, 9, 7),
+        ];
+        let desc = describe_hand(&tiles);
+        // Must contain the real melds...
+        assert!(desc.contains("4m×2"), "missing pair: {desc}");
+        assert!(desc.contains("1-2-3m"), "missing low run: {desc}");
+        assert!(desc.contains("7-8-9m"), "missing high run: {desc}");
+        // ...and must NOT report the overlapping phantom sequence.
+        assert!(
+            !desc.contains("2-3-4m"),
+            "phantom overlapping sequence in: {desc}"
+        );
     }
 
     #[test]

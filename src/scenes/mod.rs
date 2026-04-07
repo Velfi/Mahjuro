@@ -10,6 +10,7 @@ pub mod pick_blind;
 pub mod profile_select;
 pub mod results;
 pub mod shop;
+pub mod solitaire;
 pub mod splash;
 pub mod start_screen;
 
@@ -21,6 +22,7 @@ pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
 pub use results::ResultsScene;
 pub use shop::ShopScene;
+pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
 pub use start_screen::StartScreenScene;
 
@@ -29,6 +31,7 @@ use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
+use crate::render::draw_cmd::UiFrame;
 use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
 use crate::core::relic::{RelicId, RelicState, all_relic_defs};
@@ -63,6 +66,11 @@ impl BackgroundId {
 /// Everything a scene's `update()` may need.
 pub struct UpdateCtx<'a> {
     pub actions: &'a [UiAction],
+    /// Scene-defined button click ids fired this frame.
+    /// Each entry is the `id` of a `ButtonAction::Scene(id)` whose rect was
+    /// clicked. Scenes interpret these ids however they like — typically by
+    /// matching against named const values local to the scene.
+    pub button_clicks: &'a [u32],
     pub run: &'a mut RunState,
     pub bus: &'a mut EventBus,
     pub anim: &'a mut AnimationController,
@@ -93,18 +101,56 @@ pub struct DrawCtx<'a> {
     pub game_in_progress: bool,
 }
 
+/// What happens when a `ButtonDef` is clicked.
+///
+/// `Ui(action)` enqueues `action` into the next frame's action queue, just
+/// like a key/gamepad press — use this when the click is semantically the
+/// same as some keyboard input the scene already handles (e.g. a "Next"
+/// button that does the same thing as Enter).
+///
+/// `Scene(id)` enqueues `id` into `UpdateCtx::button_clicks`, where the
+/// scene's `update()` can match against its own named const values. Use this
+/// when N buttons each need to do something different and there is no
+/// natural keyboard equivalent — it avoids hijacking unrelated `UiAction`
+/// variants. See AGENTS.md "Mouse Input in Scenes".
+#[derive(Clone, Copy, Debug)]
+pub enum ButtonAction {
+    Ui(UiAction),
+    Scene(u32),
+}
+
 /// A clickable UI button: screen rect + the action it triggers.
 pub struct ButtonDef {
     pub rect: (f32, f32, f32, f32),
-    pub action: UiAction,
+    pub action: ButtonAction,
+}
+
+impl ButtonDef {
+    /// Convenience constructor for the common `Ui(action)` case.
+    pub fn ui(rect: (f32, f32, f32, f32), action: UiAction) -> Self {
+        Self { rect, action: ButtonAction::Ui(action) }
+    }
+
+    /// Convenience constructor for scene-defined click ids.
+    pub fn scene(rect: (f32, f32, f32, f32), id: u32) -> Self {
+        Self { rect, action: ButtonAction::Scene(id) }
+    }
 }
 
 /// What a scene returns from `draw()`.
+///
+/// This is a *transitional* shape: scenes still hand the main loop separate
+/// `instances` / `text_labels` / `relic_icons` vecs, plus hand tile state.
+/// The main loop converts this into a `UiFrame` (a single ordered command
+/// list) before calling the renderer. Over time, scenes can migrate to
+/// pushing into a `UiFrame` directly via [`SceneDrawOutput::into_frame_with`]
+/// — the resulting frame's command order *is* the z-order, with no hidden
+/// stages.
 pub struct SceneDrawOutput {
     /// Background image to render behind everything else.
     pub background: BackgroundId,
     pub instances: Vec<GpuInstance>,
-    /// Tiles to render as 3D meshes in the hand strip (empty = no hand tiles).
+    /// Tiles to render in the hand strip (empty = no hand tiles).
     pub hand_tiles: Vec<Tile>,
     /// Screen-space `(x, y, w, h)` rects for each hand tile; parallel with `hand_tiles`.
     pub hand_slots: Vec<(f32, f32, f32, f32)>,
@@ -112,7 +158,7 @@ pub struct SceneDrawOutput {
     pub focus: usize,
     /// Which hand tiles are selected for discard (parallel with `hand_tiles`).
     pub selected_tiles: Vec<bool>,
-    /// Text labels drawn on top of UI panels (score, relics, relic choice names, etc.).
+    /// Text labels drawn on top of UI panels.
     pub text_labels: Vec<TextLabel>,
     /// Relic icons drawn as textured quads.
     pub relic_icons: Vec<RelicIcon>,
@@ -120,10 +166,56 @@ pub struct SceneDrawOutput {
     pub buttons: Vec<ButtonDef>,
     pub window_title: String,
     /// Hand tile indices that should animate departing this frame (discard/score).
-    /// Consumed by the renderer before `update_hand_tiles` removes them.
     pub departing_indices: Vec<usize>,
-    /// Hand tile indices that should show a directional light hint (meld completion).
+    /// Hand tile indices that should show a directional light hint.
     pub hint_indices: Vec<usize>,
+}
+
+impl SceneDrawOutput {
+    /// Build the bones of a `UiFrame` from this scene output, in the canonical
+    /// order: background → hand-tile backdrop → fluid smoke → scene quads →
+    /// hand-tile faces → scene text → relic icons. The caller is expected to
+    /// then push any modal / tooltip / debug overlay cmds at the end of the
+    /// returned frame's `cmds` (so they render on top of everything).
+    pub fn into_frame(self) -> UiFrame {
+        let mut frame = UiFrame::new();
+        frame.background(self.background);
+        frame.hand_tile_backdrop();
+        frame.fluid_smoke();
+        frame.quads(self.instances);
+        frame.hand_tile_faces();
+        frame.texts(self.text_labels);
+        frame.relic_icons(self.relic_icons);
+
+        frame.hand_tiles = self.hand_tiles;
+        frame.hand_slots = self.hand_slots;
+        frame.focus = self.focus;
+        frame.selected_tiles = self.selected_tiles;
+        frame.hint_indices = self.hint_indices;
+        frame.departing_indices = self.departing_indices;
+        frame.buttons = self.buttons;
+        frame.window_title = self.window_title;
+        frame
+    }
+}
+
+
+/// Screen rect of relic badge slot `slot_idx` inside the relic strip.
+/// Single source of truth for badge layout — used by `relic_row` and by
+/// scenes that need to hit-test or highlight a specific badge.
+pub fn relic_badge_rect(
+    strip: &Rect,
+    window_w: f32,
+    max_slots: usize,
+    slot_idx: usize,
+) -> (f32, f32, f32, f32) {
+    let scale = window_w / 600.0;
+    let badge_w = (window_w / max_slots.max(1) as f32).min(160.0 * scale);
+    let total_w = badge_w * max_slots as f32;
+    let start_x = (window_w - total_w) * 0.5;
+    let inset = 2.0 * scale;
+    let bx = start_x + slot_idx as f32 * badge_w;
+    (bx + inset, strip.y, badge_w - inset * 2.0, strip.h)
 }
 
 /// Build GPU elements for a relic display row inside the relic strip.
@@ -207,6 +299,7 @@ pub enum Scene {
     GameOver(GameOverScene),
     Options(OptionsScene),
     Collection(CollectionScene),
+    Solitaire(SolitaireScene),
 }
 
 impl Scene {
@@ -222,6 +315,7 @@ impl Scene {
             Scene::GameOver(s) => s.update(ctx),
             Scene::Options(s) => s.update(ctx),
             Scene::Collection(s) => s.update(ctx),
+            Scene::Solitaire(s) => s.update(ctx),
         }
     }
 
@@ -237,6 +331,7 @@ impl Scene {
             Scene::GameOver(s) => s.draw(ctx),
             Scene::Options(s) => s.draw(ctx),
             Scene::Collection(s) => s.draw(ctx),
+            Scene::Solitaire(s) => s.draw(ctx),
         }
     }
 }

@@ -314,10 +314,10 @@ impl OptionsScene {
             });
 
             // Clickable button for the whole row.
-            buttons.push(ButtonDef {
-                rect: (row_x, row_y, row_w, row_h),
-                action: UiAction::Confirm,
-            });
+            buttons.push(ButtonDef::ui(
+                (row_x, row_y, row_w, row_h),
+                UiAction::Confirm,
+            ));
         }
 
         // SFX toggle row.
@@ -345,10 +345,10 @@ impl OptionsScene {
             ),
             color: text_color,
         });
-        buttons.push(ButtonDef {
-            rect: (row_x, toggle_y, row_w, row_h),
-            action: UiAction::Confirm,
-        });
+        buttons.push(ButtonDef::ui(
+            (row_x, toggle_y, row_w, row_h),
+            UiAction::Confirm,
+        ));
 
         // Smoke intensity row.
         let smoke_y = menu_start_y + OPT_SMOKE as f32 * (row_h + row_gap);
@@ -372,10 +372,10 @@ impl OptionsScene {
             text: format!("Smoke: {}", self.smoke_intensity.label()),
             color: text_color,
         });
-        buttons.push(ButtonDef {
-            rect: (row_x, smoke_y, row_w, row_h),
-            action: UiAction::Confirm,
-        });
+        buttons.push(ButtonDef::ui(
+            (row_x, smoke_y, row_w, row_h),
+            UiAction::Confirm,
+        ));
 
         // Back row.
         let back_y = menu_start_y + OPT_BACK as f32 * (row_h + row_gap);
@@ -399,10 +399,10 @@ impl OptionsScene {
             text: "Back".into(),
             color: text_color,
         });
-        buttons.push(ButtonDef {
-            rect: (row_x, back_y, row_w, row_h),
-            action: UiAction::Confirm,
-        });
+        buttons.push(ButtonDef::ui(
+            (row_x, back_y, row_w, row_h),
+            UiAction::Confirm,
+        ));
 
         // Hint text at the bottom.
         let hint_h = (20.0 * scale).max(14.0);

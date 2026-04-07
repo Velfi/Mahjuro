@@ -108,6 +108,13 @@ impl Wall {
         self.tiles.len().saturating_sub(self.cursor)
     }
 
+    /// Peek at the next `n` tiles that would be drawn, without consuming them.
+    /// Returns fewer than `n` tiles if the wall is nearly empty.
+    pub fn peek_next(&self, n: usize) -> &[Tile] {
+        let end = (self.cursor + n).min(self.tiles.len());
+        &self.tiles[self.cursor..end]
+    }
+
     pub fn draw(&mut self) -> Option<Tile> {
         if self.cursor >= self.tiles.len() {
             return None;

@@ -16,6 +16,8 @@ use crate::game::game_mode::GameMode;
 pub const HAND_SIZE: usize = 14;
 pub const STARTING_PLAYS: u32 = 4;
 pub const STARTING_DISCARDS: u32 = 3;
+/// Defeating the Boss of this ante completes the run (Balatro-style).
+pub const FINAL_ANTE: u32 = 8;
 
 pub struct RunState {
     pub wall: Wall,
@@ -28,10 +30,14 @@ pub struct RunState {
     pub relics: RelicState,
     pub round_rules: Vec<RuleModifier>,
     pub run_number: u32,
+    /// Current ante (1-indexed). Increments after defeating each Boss blind.
+    pub ante: u32,
     pub plays_remaining: u32,
     pub discards_remaining: u32,
     pub gold: u32,
     pub blind: BlindKind,
+    /// Next blind the player will face in the Small→Big→Boss cycle.
+    pub upcoming_blind: BlindKind,
     /// Last scoring breakdown for UI cascade display.
     pub last_breakdown: Option<ScoreBreakdown>,
     /// Yaku available at the player's progression level.
@@ -78,10 +84,12 @@ impl RunState {
             relics,
             round_rules: mode.starting_rules.clone(),
             run_number: 1,
+            ante: 1,
             plays_remaining: mode.starting_plays,
             discards_remaining: mode.starting_discards,
             gold: mode.starting_gold,
             blind: BlindKind::Small,
+            upcoming_blind: BlindKind::Small,
             last_breakdown: None,
             available_yaku: mode.starting_yaku.clone(),
             available_rules: mode.starting_rules.clone(),
@@ -100,6 +108,11 @@ impl RunState {
     /// Whether a run is in progress (not a fresh/default state).
     pub fn is_in_progress(&self) -> bool {
         self.round_score > 0 || self.run_number > 1 || self.gold != self.mode.starting_gold
+    }
+
+    /// True once the player has defeated the Boss of the final ante.
+    pub fn is_run_complete(&self) -> bool {
+        self.ante > FINAL_ANTE
     }
 
     /// Apply a blind choice: sets target score and any forced modifiers.
@@ -160,13 +173,13 @@ impl RunState {
         self.plays_remaining -= 1;
         self.scored_last_turn = earned > 0;
 
-        // GreenLuck: hands without honors earn +2 gold.
+        // GreenLuck: hands without honors earn +4 gold.
         if self.relics.has(RelicId::GreenLuck)
             && !selected_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
         {
-            self.gold = self.gold.saturating_add(2);
+            self.gold = self.gold.saturating_add(4);
         }
 
         // Check if any triplet was scored (for SetMagnet).
@@ -220,7 +233,7 @@ impl RunState {
         bus.push(GameEvent::ScoreUpdated(self.round_score));
         if self.round_score >= self.target_score {
             let excess_gold = (self.round_score.saturating_sub(self.target_score)) / 50;
-            let gold_earned = ((3 + excess_gold) as f32 * self.blind.gold_multiplier()) as u32;
+            let gold_earned = ((5 + excess_gold) as f32 * self.blind.gold_multiplier()) as u32;
             self.gold = self.gold.saturating_add(gold_earned);
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
@@ -363,13 +376,22 @@ impl RunState {
 
     /// Add the chosen relic, scale up the base target, and reset for the next round.
     /// The actual target_score is set later by `apply_blind`.
+    ///
+    /// Balatro-style ante progression: `base_target` is the *ante's* base, and the
+    /// Small/Big/Boss multipliers in `apply_blind` derive each blind's actual target.
+    /// We only grow `base_target` when the player defeats the Boss and rolls into the
+    /// next ante; within an ante, the base stays put.
     pub fn advance_round(&mut self, chosen_relic: RelicId) {
         if !self.relics.is_full() {
             self.relics.active.push(chosen_relic);
         }
+        // Defeating the Boss completes an ante and scales the base for the next one.
+        if self.blind == BlindKind::Boss {
+            self.ante += 1;
+            self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
+        }
         self.run_number += 1;
         self.round_score = 0;
-        self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
         self.target_score = self.base_target; // will be overridden by apply_blind
         self.round_rules.clear();
         self.plays_remaining = self.mode.starting_plays;
@@ -378,7 +400,37 @@ impl RunState {
         self.scored_last_turn = false;
         self.quickdraw_used = false;
         self.joker_used = false;
-        self.blind = BlindKind::Small;
+        self.upcoming_blind = self.upcoming_blind.next();
+        self.blind = self.upcoming_blind;
+        self.wall = Wall::from_standard_shuffled();
+        self.hand.clear();
+        for _ in 0..self.mode.hand_size {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+            }
+        }
+        self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
+    }
+
+    /// Skip the upcoming blind: advance to the next in the cycle without
+    /// playing or visiting the shop. Resets per-round state. Skipping is
+    /// not allowed for the Boss blind — callers should check first.
+    pub fn skip_to_next_blind(&mut self) {
+        self.upcoming_blind = self.upcoming_blind.next();
+        self.run_number += 1;
+        self.round_score = 0;
+        // Skipping stays inside the same ante (Boss can't be skipped), so the
+        // ante's base target is unchanged — only the blind multiplier shifts.
+        self.target_score = self.base_target;
+        self.round_rules.clear();
+        self.plays_remaining = self.mode.starting_plays;
+        self.discards_remaining = self.mode.starting_discards;
+        self.last_breakdown = None;
+        self.scored_last_turn = false;
+        self.quickdraw_used = false;
+        self.joker_used = false;
+        self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
         self.hand.clear();
         for _ in 0..self.mode.hand_size {
@@ -423,10 +475,12 @@ mod tests {
             relics: RelicState::default(),
             round_rules: vec![],
             run_number: 1,
+            ante: 1,
             plays_remaining: mode.starting_plays,
             discards_remaining: mode.starting_discards,
             gold: mode.starting_gold,
             blind: BlindKind::Small,
+            upcoming_blind: BlindKind::Small,
             last_breakdown: None,
             available_yaku: vec![],
             available_rules: vec![],

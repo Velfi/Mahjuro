@@ -2,11 +2,15 @@
 
 use rand::seq::SliceRandom;
 
-use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs};
+use crate::core::relic::{
+    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price,
+    relic_sell_price,
+};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::layout::LayoutResult;
 
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_badge_rect, relic_row};
 use super::pause_menu::{PauseMenu, PauseUpdate};
 use super::pick_blind::PickBlindScene;
 
@@ -25,13 +29,6 @@ pub struct ShopScene {
     items: Vec<ShopItem>,
     cursor: usize,
     pause_menu: PauseMenu,
-}
-
-/// Gold cost for a relic (simple formula based on position in the defs list).
-fn relic_price(id: RelicId) -> u32 {
-    let defs = all_relic_defs();
-    let idx = defs.iter().position(|d| d.id == id).unwrap_or(0);
-    4 + (idx as u32 % 5)
 }
 
 impl ShopScene {
@@ -61,10 +58,52 @@ impl ShopScene {
         }
     }
 
+    /// Evenly-spaced card rects within the hand strip area.
+    /// Same layout used by both update() (hit-testing) and draw() (rendering).
+    fn card_rects(&self, layout: &LayoutResult) -> Vec<(f32, f32, f32, f32)> {
+        let hs = layout.hand_strip;
+        let n = self.items.len();
+        if n == 0 {
+            return vec![];
+        }
+        let gap_frac = 0.04;
+        let outer_pad = hs.w * gap_frac;
+        let inner_gap = hs.w * gap_frac;
+        let total_gaps = outer_pad * 2.0 + inner_gap * (n as f32 - 1.0).max(0.0);
+        let card_w = (hs.w - total_gaps) / n as f32;
+        let pad_y = hs.h * 0.08;
+        let card_h = hs.h - pad_y * 2.0;
+        let card_y = hs.y + pad_y;
+        (0..n)
+            .map(|i| {
+                let card_x = hs.x + outer_pad + i as f32 * (card_w + inner_gap);
+                (card_x, card_y, card_w, card_h)
+            })
+            .collect()
+    }
+
+    /// Screen rect of the "Next Round" button.
+    fn next_round_rect(layout: &LayoutResult) -> (f32, f32, f32, f32) {
+        let w = layout.window_w;
+        let h = layout.window_h;
+        let scale = (w.min(h)) / 600.0;
+        let btn_w = (160.0 * scale).max(80.0);
+        let btn_h = (36.0 * scale).max(22.0);
+        let btn_x = (w - btn_w) * 0.5;
+        let btn_y = h - btn_h - (16.0 * scale);
+        (btn_x, btn_y, btn_w, btn_h)
+    }
+
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         // Pause menu handling.
         if self.pause_menu.paused {
-            match self.pause_menu.update(ctx.actions, ctx.run) {
+            match self.pause_menu.update(
+                ctx.actions,
+                ctx.run,
+                ctx.cursor_pos,
+                ctx.layout.window_w,
+                ctx.layout.window_h,
+            ) {
                 PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
                 PauseUpdate::Transition(t) => return t,
                 PauseUpdate::Quit => {
@@ -74,43 +113,96 @@ impl ShopScene {
             }
         }
 
+        // Cursor space layout:
+        //   0..n_items                          → buyable shop items
+        //   n_items..n_items+n_owned            → owned relics (sell)
+        //   n_items+n_owned                     → "Next Round" button
+        let n_items = self.items.len();
+        let n_owned = ctx.run.relics.active.len();
+        let total = n_items + n_owned;
+
+        // Mouse hover → focus. Hit-test cursor against shop cards, owned relic
+        // badges, and the Next Round button so the keyboard cursor follows the
+        // mouse and clicks act on whatever's under the pointer.
+        let (cx, cy) = ctx.cursor_pos;
+        let hit = |r: (f32, f32, f32, f32)| {
+            cx >= r.0 && cx <= r.0 + r.2 && cy >= r.1 && cy <= r.1 + r.3
+        };
+        let cards = self.card_rects(ctx.layout);
+        let mut hovered: Option<usize> = None;
+        for (i, r) in cards.iter().enumerate() {
+            if hit(*r) {
+                hovered = Some(i);
+                break;
+            }
+        }
+        if hovered.is_none() {
+            for i in 0..n_owned {
+                let r = relic_badge_rect(
+                    &ctx.layout.relic_strip,
+                    ctx.layout.window_w,
+                    ctx.run.relics.max_slots,
+                    i,
+                );
+                if hit(r) {
+                    hovered = Some(n_items + i);
+                    break;
+                }
+            }
+        }
+        if hovered.is_none() && hit(Self::next_round_rect(ctx.layout)) {
+            hovered = Some(total);
+        }
+        if let Some(h) = hovered {
+            self.cursor = h;
+        }
+
         for a in ctx.actions {
             match a {
                 UiAction::FocusNext => {
-                    self.cursor = (self.cursor + 1).min(self.items.len());
+                    self.cursor = (self.cursor + 1).min(total);
                 }
                 UiAction::FocusPrev => {
                     self.cursor = self.cursor.saturating_sub(1);
                 }
                 UiAction::FocusDown => {
                     // Jump to the "Next Round" button.
-                    self.cursor = self.items.len();
+                    self.cursor = total;
                 }
                 UiAction::FocusUp => {
-                    // Jump back to items from the button.
-                    if self.cursor >= self.items.len() && !self.items.is_empty() {
-                        self.cursor = self.items.len() - 1;
+                    // Jump back from the button onto the last selectable thing.
+                    if self.cursor >= total && total > 0 {
+                        self.cursor = total - 1;
                     }
                 }
                 UiAction::CommitDiscard => {
-                    // "Next Round" button (mouse click or Enter key).
-                    if self.cursor >= self.items.len() {
-                        return Some(Scene::PickBlind(PickBlindScene::new()));
-                    }
-                    // Keyboard Enter when cursor is on an item — move cursor
-                    // to the "Next Round" position and confirm on next press,
-                    // unless this was a direct button click (always proceed).
+                    // "Next Round" button (mouse click or Enter key) — always proceed.
                     return Some(Scene::PickBlind(PickBlindScene::new()));
                 }
                 UiAction::Confirm => {
-                    if self.cursor >= self.items.len() {
+                    if self.cursor >= total {
                         return Some(Scene::PickBlind(PickBlindScene::new()));
                     }
-                    let item = &mut self.items[self.cursor];
-                    if !item.sold && ctx.run.gold >= item.price && !ctx.run.relics.is_full() {
-                        ctx.run.gold -= item.price;
-                        ctx.run.relics.active.push(item.relic);
-                        item.sold = true;
+                    if self.cursor >= n_items {
+                        // Sell the focused owned relic.
+                        let idx = self.cursor - n_items;
+                        if idx < ctx.run.relics.active.len() {
+                            let rid = ctx.run.relics.active[idx];
+                            let refund = relic_sell_price(rid);
+                            ctx.run.relics.active.remove(idx);
+                            ctx.run.gold = ctx.run.gold.saturating_add(refund);
+                            // Re-clamp cursor: total shrank by 1.
+                            let new_total = n_items + ctx.run.relics.active.len();
+                            self.cursor = self.cursor.min(new_total);
+                        }
+                    } else {
+                        // Buy the focused shop item.
+                        let item = &mut self.items[self.cursor];
+                        if !item.sold && ctx.run.gold >= item.price && !ctx.run.relics.is_full() {
+                            ctx.run.gold -= item.price;
+                            ctx.run.relics.active.push(item.relic);
+                            item.sold = true;
+                        }
                     }
                 }
                 UiAction::Pause => {
@@ -128,37 +220,39 @@ impl ShopScene {
         let h = ctx.layout.window_h;
         let sp = ctx.layout.score_panel;
         let ms = ctx.layout.modifier_strip;
-        let hs = ctx.layout.hand_strip;
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
             color: [0.08, 0.06, 0.12, 1.0],
         }];
 
+        // Cursor space (must match update()):
+        //   0..n_items                          → shop items
+        //   n_items..n_items+n_owned            → owned relics
+        //   n_items+n_owned                     → "Next Round" button
+        let n_items = self.items.len();
+        let n_owned = ctx.run.relics.active.len();
+        let total = n_items + n_owned;
+
+        // Gold border under the focused owned relic (drawn before relic_row
+        // so the badge background sits on top of it like a card border).
+        if self.cursor >= n_items && self.cursor < total {
+            let owned_idx = self.cursor - n_items;
+            let (rx, ry, rw, rh) =
+                relic_badge_rect(&ctx.layout.relic_strip, w, ctx.run.relics.max_slots, owned_idx);
+            let pad = 3.0;
+            instances.push(GpuInstance {
+                rect: [rx - pad, ry - pad, rw + pad * 2.0, rh + pad * 2.0],
+                color: [0.9, 0.8, 0.2, 0.95],
+            });
+        }
+
         // Relic row in its own strip.
         let (relic_insts, relic_labels, relic_icons) = relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
         instances.extend(relic_insts);
 
-        // Evenly-spaced card rects within the hand strip area.
-        let n = self.items.len();
-        let card_rects: Vec<(f32, f32, f32, f32)> = if n == 0 {
-            vec![]
-        } else {
-            let gap_frac = 0.04; // 4% of strip width per gap
-            let outer_pad = hs.w * gap_frac;
-            let inner_gap = hs.w * gap_frac;
-            let total_gaps = outer_pad * 2.0 + inner_gap * (n as f32 - 1.0).max(0.0);
-            let card_w = (hs.w - total_gaps) / n as f32;
-            let pad_y = hs.h * 0.08;
-            let card_h = hs.h - pad_y * 2.0;
-            let card_y = hs.y + pad_y;
-            (0..n)
-                .map(|i| {
-                    let card_x = hs.x + outer_pad + i as f32 * (card_w + inner_gap);
-                    (card_x, card_y, card_w, card_h)
-                })
-                .collect()
-        };
+        // Evenly-spaced card rects within the hand strip area (shared with update()).
+        let card_rects = self.card_rects(ctx.layout);
 
         // Rarity accent color for card top stripe.
         fn rarity_accent(rarity: Rarity) -> [f32; 4] {
@@ -215,13 +309,10 @@ impl ShopScene {
             });
         }
 
-        // "Next Round" button.
+        // "Next Round" button (rect shared with update() hit-testing).
         let scale = (w.min(h)) / 600.0;
-        let btn_w = (160.0 * scale).max(80.0);
-        let btn_h = (36.0 * scale).max(22.0);
-        let btn_x = (w - btn_w) * 0.5;
-        let btn_y = h - btn_h - (16.0 * scale);
-        let next_focused = self.cursor >= self.items.len();
+        let (btn_x, btn_y, btn_w, btn_h) = Self::next_round_rect(ctx.layout);
+        let next_focused = self.cursor >= total;
         let next_color = if next_focused {
             [0.2, 0.6, 0.3, 0.95]
         } else {
@@ -250,13 +341,27 @@ impl ShopScene {
         text_labels.extend(relic_labels);
 
         // Description of selected item in modifier strip.
-        let desc_text = if self.cursor < self.items.len() {
+        let desc_text = if self.cursor < n_items {
             let item = &self.items[self.cursor];
             if item.sold {
                 format!("{} — SOLD", item.name)
             } else {
                 item.description.to_string()
             }
+        } else if self.cursor < total {
+            let owned_idx = self.cursor - n_items;
+            let rid = ctx.run.relics.active[owned_idx];
+            let defs = all_relic_defs();
+            let def = defs.iter().find(|d| d.id == rid);
+            let (name, desc) = def
+                .map(|d| (d.name, d.description))
+                .unwrap_or(("Relic", ""));
+            format!(
+                "{}: {}  —  Sell for {}g (Space)",
+                name,
+                desc,
+                relic_sell_price(rid)
+            )
         } else {
             "Leave shop and pick your next blind".into()
         };
@@ -355,12 +460,63 @@ impl ShopScene {
             color: [1.0, 1.0, 1.0, 1.0],
         });
 
-        let mut buttons = vec![
-            ButtonDef {
-                rect: (btn_x, btn_y, btn_w, btn_h),
-                action: UiAction::CommitDiscard,
-            },
-        ];
+        let mut buttons = vec![ButtonDef::ui(
+            (btn_x, btn_y, btn_w, btn_h),
+            UiAction::CommitDiscard,
+        )];
+
+        // Make each shop card clickable. Hover-focus in update() ensures
+        // self.cursor already points at the hovered card by the time the
+        // Confirm action is processed.
+        for &(cx, cy, cw, ch) in &card_rects {
+            buttons.push(ButtonDef::ui((cx, cy, cw, ch), UiAction::Confirm));
+        }
+
+        // Make each owned relic badge clickable for sale.
+        for i in 0..n_owned {
+            buttons.push(ButtonDef::ui(
+                relic_badge_rect(&ctx.layout.relic_strip, w, ctx.run.relics.max_slots, i),
+                UiAction::Confirm,
+            ));
+        }
+
+        // Sell pill on the focused owned relic — visible button + clickable.
+        // Uses UiAction::Confirm so the button click takes the same code path
+        // as pressing Space while the relic is focused.
+        if self.cursor >= n_items && self.cursor < total {
+            let owned_idx = self.cursor - n_items;
+            let rid = ctx.run.relics.active[owned_idx];
+            let (rx, ry, rw, rh) =
+                relic_badge_rect(&ctx.layout.relic_strip, w, ctx.run.relics.max_slots, owned_idx);
+            let pill_h = rh * 0.30;
+            let pill_w = rw * 0.88;
+            let pill_x = rx + (rw - pill_w) * 0.5;
+            let pill_y = ry + rh - pill_h - rh * 0.04;
+            // Pill border (dark) for contrast against the gold fill.
+            let border = 1.5;
+            instances.push(GpuInstance {
+                rect: [
+                    pill_x - border,
+                    pill_y - border,
+                    pill_w + border * 2.0,
+                    pill_h + border * 2.0,
+                ],
+                color: [0.05, 0.05, 0.1, 0.95],
+            });
+            instances.push(GpuInstance {
+                rect: [pill_x, pill_y, pill_w, pill_h],
+                color: [0.95, 0.78, 0.22, 0.98],
+            });
+            text_labels.push(TextLabel {
+                rect: [pill_x, pill_y, pill_w, pill_h],
+                text: format!("Sell {}g", relic_sell_price(rid)),
+                color: [0.08, 0.06, 0.12, 1.0],
+            });
+            buttons.push(ButtonDef::ui(
+                (pill_x, pill_y, pill_w, pill_h),
+                UiAction::Confirm,
+            ));
+        }
 
         // Pause overlay.
         self.pause_menu.draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
@@ -376,7 +532,7 @@ impl ShopScene {
             relic_icons,
             buttons,
             window_title: format!(
-                "Mahjuro — Shop (Round {}) — Gold: {} — ←→ browse  Space buy  Enter next round",
+                "Mahjuro — Shop (Round {}) — Gold: {} — ←→ browse  Space buy/sell  Enter next round",
                 self.came_from_round, ctx.run.gold
             ),
             departing_indices: vec![],

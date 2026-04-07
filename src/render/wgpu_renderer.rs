@@ -18,6 +18,7 @@ use crate::render::decal::{
     load_noto_emoji_font, load_ui_font, rasterize_label, rasterize_tile_decal, tile_short_label,
     tile_suit_emoji,
 };
+use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 
 #[repr(C)]
@@ -56,13 +57,6 @@ pub struct RelicIcon {
     pub rect: [f32; 4],
     /// Which relic image to display.
     pub relic_id: crate::core::relic::RelicId,
-}
-
-/// One tooltip's rendering data — quads and text drawn as a unit so that
-/// child tooltips fully occlude their parents (like DOM z-ordering).
-pub struct TooltipLayer {
-    pub instances: Vec<GpuInstance>,
-    pub labels: Vec<TextLabel>,
 }
 
 /// A rasterized text label to draw over a screen-space rect.
@@ -1386,39 +1380,25 @@ impl WgpuRenderer {
 
     /// Render one frame.
     ///
-    /// * `instances`    — 2D UI quads (score panel, modifier strip, relic choices …).
-    /// * `hand_slots`   — screen-space `(x, y, w, h)` rects for each hand tile;
-    ///                    must match the length passed to `update_hand_tiles`.
-    /// * `focus`        — index of the focused hand tile (gets a scale + lift boost).
-    /// * `text_labels`  — text overlaid on top of UI quads (score, relics, etc.).
-    /// * `relic_icons`  — relic image quads drawn via pre-loaded textures.
-    /// * `tooltip_layers`  — per-tooltip rendering data; each layer's quads and
-    ///                       text are drawn before the next so children occlude parents.
-    /// * `overlay_split` — if `Some((inst_start, label_start))`, instances and
-    ///   text_labels are split into scene content (before the index) and overlay
-    ///   content (from the index onward). Overlay quads and text are drawn *after*
-    ///   tile symbols so they correctly occlude hand tiles.
+    /// `frame.cmds` is walked in order — earlier cmds render under later ones.
+    /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
+    /// draw, which is invisible to scenes and preserves ordering.
     pub fn render(
         &mut self,
-        instances: &[GpuInstance],
-        hand_slots: &[(f32, f32, f32, f32)],
-        focus: usize,
-        selected: &[bool],
-        text_labels: &[TextLabel],
-        relic_icons: &[RelicIcon],
-        tooltip_layers: &[TooltipLayer],
-        background: BackgroundId,
+        frame: &UiFrame,
         smoke_intensity: crate::persistence::SmokeIntensity,
-        hint_indices: &[usize],
-        overlay_split: Option<(usize, usize)>,
         draw_settle_speed: f32,
         sort_settle_speed: f32,
     ) -> anyhow::Result<()> {
+        let hand_slots: &[(f32, f32, f32, f32)] = &frame.hand_slots;
+        let focus = frame.focus;
+        let selected: &[bool] = &frame.selected_tiles;
+        let hint_indices: &[usize] = &frame.hint_indices;
         // Upload any relic/background textures that finished decoding.
         self.poll_relic_textures();
         self.poll_background_textures();
 
-        let frame = match self.surface.get_current_texture() {
+        let surface_frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -1432,7 +1412,7 @@ impl WgpuRenderer {
                 return Ok(());
             }
         };
-        let view = frame
+        let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -1665,60 +1645,27 @@ impl WgpuRenderer {
             )
         };
 
-        // Split instances into scene quads and overlay quads.
-        let (scene_instances, overlay_instances) = match overlay_split {
-            Some((inst_split, _)) => {
-                let split = inst_split.min(instances.len());
-                (&instances[..split], &instances[split..])
-            }
-            None => (instances, &[][..]),
-        };
-
-        // Instance buffer for 2D UI quads (scene panels, etc.).
-        let instance_buffer = if scene_instances.is_empty() {
-            None
-        } else {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("instances"),
-                        contents: bytemuck::cast_slice(scene_instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
-        };
-
-        // Overlay instance buffer (drawn after tile text to occlude hand tiles).
-        let overlay_instance_buffer = if overlay_instances.is_empty() {
-            None
-        } else {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("overlay-instances"),
-                        contents: bytemuck::cast_slice(overlay_instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
-        };
-
-        // Pre-rasterize text labels → GPU textures + bind groups.
+        // ── Pre-rasterize text labels → GPU textures + bind groups ──────
         struct TextDraw {
             inst_buf: wgpu::Buffer,
             bind_group: wgpu::BindGroup,
             #[allow(dead_code)]
             _tex: wgpu::Texture,
         }
-        // Rasterize tile labels with emoji font, scene labels with UI font.
-        let make_text_draw = |lbl: &TextLabel, font: &fontdue::Font| -> TextDraw {
+        let make_text_draw = |device: &wgpu::Device,
+                              queue: &wgpu::Queue,
+                              text_bgl: &wgpu::BindGroupLayout,
+                              sampler: &wgpu::Sampler,
+                              lbl: &TextLabel,
+                              font: &fontdue::Font|
+         -> TextDraw {
             let tw = (lbl.rect[2] as u32).max(1);
             let th = (lbl.rect[3] as u32).max(1);
             let rgba = rasterize_label(font, &lbl.text, tw, th);
-            let (tex, view) =
-                upload_rgba_texture(&self.device, &self.queue, "text-lbl", &rgba, tw, th);
-            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("text-lbl-bg"),
-                layout: &self.text_bind_group_layout,
+                layout: text_bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -1726,7 +1673,7 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                        resource: wgpu::BindingResource::Sampler(sampler),
                     },
                 ],
             });
@@ -1734,13 +1681,11 @@ impl WgpuRenderer {
                 rect: lbl.rect,
                 color: lbl.color,
             };
-            let inst_buf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("text-inst"),
-                    contents: bytemuck::cast_slice(&[inst]),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("text-inst"),
+                contents: bytemuck::cast_slice(&[inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
             TextDraw {
                 inst_buf,
                 bind_group,
@@ -1748,90 +1693,136 @@ impl WgpuRenderer {
             }
         };
 
-        // Split text labels into scene and overlay groups.
-        let (scene_text_labels, overlay_text_labels) = match overlay_split {
-            Some((_, label_split)) => {
-                let split = label_split.min(text_labels.len());
-                (&text_labels[..split], &text_labels[split..])
-            }
-            None => (text_labels, &[][..]),
-        };
-
-        let mut text_draws: Vec<TextDraw> = Vec::new();
-        let mut overlay_text_draws: Vec<TextDraw> = Vec::new();
-
-        // Main tile labels + scene labels: UI font.
+        // ── Hand tile face/emoji label GPU draws (consumed by HandTileFaces) ──
+        let mut hand_face_draws: Vec<TextDraw> = Vec::new();
         if let Some(ref font) = self.ui_font {
-            text_draws.extend(tile_labels.iter().map(|lbl| make_text_draw(lbl, font)));
-            text_draws.extend(scene_text_labels.iter().map(|lbl| make_text_draw(lbl, font)));
-            overlay_text_draws.extend(overlay_text_labels.iter().map(|lbl| make_text_draw(lbl, font)));
+            for lbl in &tile_labels {
+                hand_face_draws.push(make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    lbl,
+                    font,
+                ));
+            }
         }
-
-        // Emoji suit indicators: Noto Emoji font.
         if let Some(ref font) = self.emoji_font {
-            text_draws.extend(emoji_labels.iter().map(|lbl| make_text_draw(lbl, font)));
+            for lbl in &emoji_labels {
+                hand_face_draws.push(make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    lbl,
+                    font,
+                ));
+            }
         }
 
-        // Per-tooltip-layer GPU resources (quads + text for each tooltip,
-        // drawn in order so children fully occlude parents).
-        struct TooltipLayerGpu {
-            inst_buf: Option<wgpu::Buffer>,
-            inst_count: u32,
-            text_draws: Vec<TextDraw>,
-        }
-        let tooltip_layer_gpus: Vec<TooltipLayerGpu> = tooltip_layers
-            .iter()
-            .map(|layer| {
-                let inst_buf = if layer.instances.is_empty() {
-                    None
-                } else {
-                    Some(self.device.create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some("tooltip-layer-inst"),
-                            contents: bytemuck::cast_slice(&layer.instances),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        },
-                    ))
-                };
-                let text_draws: Vec<TextDraw> = if let Some(ref font) = self.ui_font {
-                    layer.labels.iter().map(|lbl| make_text_draw(lbl, font)).collect()
-                } else {
-                    vec![]
-                };
-                TooltipLayerGpu {
-                    inst_buf,
-                    inst_count: layer.instances.len() as u32,
-                    text_draws,
-                }
-            })
-            .collect();
-
-        // Relic icon instance buffers (use pre-loaded textures, not rasterized text).
+        // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
+        // ── ordered op list, batching contiguous Quad runs into a single ──
+        // ── instanced draw. ────────────────────────────────────────────────
         struct RelicDraw {
             inst_buf: wgpu::Buffer,
             relic_id: RelicId,
         }
-        let relic_draws: Vec<RelicDraw> = relic_icons
-            .iter()
-            .filter(|icon| self.relic_textures.contains_key(&icon.relic_id))
-            .map(|icon| {
-                let inst = GpuInstance {
-                    rect: icon.rect,
-                    color: [1.0, 1.0, 1.0, 1.0], // tint: white = no tint
-                };
-                let inst_buf = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("relic-icon-inst"),
-                        contents: bytemuck::cast_slice(&[inst]),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                RelicDraw {
-                    inst_buf,
-                    relic_id: icon.relic_id,
+
+        enum RenderOp {
+            Background(BackgroundId),
+            QuadBatch { buf_idx: usize, count: u32 },
+            TextDraw(usize),
+            RelicIconDraw(usize),
+            HandTileBackdrop,
+            HandTileFaces,
+            FluidSmoke,
+        }
+
+        let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut text_draws: Vec<TextDraw> = Vec::new();
+        let mut relic_draws: Vec<RelicDraw> = Vec::new();
+        let mut ops: Vec<RenderOp> = Vec::new();
+
+        let mut i = 0;
+        while i < frame.cmds.len() {
+            match &frame.cmds[i] {
+                DrawCmd::Background(id) => {
+                    ops.push(RenderOp::Background(*id));
+                    i += 1;
                 }
-            })
-            .collect();
+                DrawCmd::FluidSmoke => {
+                    ops.push(RenderOp::FluidSmoke);
+                    i += 1;
+                }
+                DrawCmd::HandTileBackdrop => {
+                    ops.push(RenderOp::HandTileBackdrop);
+                    i += 1;
+                }
+                DrawCmd::HandTileFaces => {
+                    ops.push(RenderOp::HandTileFaces);
+                    i += 1;
+                }
+                DrawCmd::Quad(_) => {
+                    // Collect contiguous run of Quad cmds into a single batch.
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::Quad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quad-batch"),
+                            contents: bytemuck::cast_slice(&batch),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = quad_buffers.len();
+                    quad_buffers.push(buf);
+                    ops.push(RenderOp::QuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::Text(lbl) => {
+                    if let Some(ref font) = self.ui_font {
+                        let td = make_text_draw(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            lbl,
+                            font,
+                        );
+                        let idx = text_draws.len();
+                        text_draws.push(td);
+                        ops.push(RenderOp::TextDraw(idx));
+                    }
+                    i += 1;
+                }
+                DrawCmd::RelicIcon(icon) => {
+                    if self.relic_textures.contains_key(&icon.relic_id) {
+                        let inst = GpuInstance {
+                            rect: icon.rect,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        };
+                        let inst_buf =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("relic-icon-inst"),
+                                    contents: bytemuck::cast_slice(&[inst]),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                        let idx = relic_draws.len();
+                        relic_draws.push(RelicDraw {
+                            inst_buf,
+                            relic_id: icon.relic_id,
+                        });
+                        ops.push(RenderOp::RelicIconDraw(idx));
+                    }
+                    i += 1;
+                }
+            }
+        }
 
         let mut encoder = self
             .device
@@ -1853,6 +1844,17 @@ impl WgpuRenderer {
         let fluid_inst_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fluid-inst"),
             contents: bytemuck::cast_slice(&[fluid_inst]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // Pre-create background image instance buffer (must outlive render pass).
+        let bg_inst = GpuInstance {
+            rect: [0.0, 0.0, self.size.width.max(1) as f32, self.size.height.max(1) as f32],
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        let bg_inst_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bg-inst"),
+            contents: bytemuck::cast_slice(&[bg_inst]),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -1886,143 +1888,119 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
 
-            // 0. Draw background image (full-screen quad, if available).
-            if let Some(bg_tex) = self.background_textures.get(&background) {
-                let w = self.size.width.max(1) as f32;
-                let h = self.size.height.max(1) as f32;
-                let bg_inst = GpuInstance {
-                    rect: [0.0, 0.0, w, h],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                };
-                let bg_inst_buf =
-                    self.device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("bg-inst"),
-                            contents: bytemuck::cast_slice(&[bg_inst]),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                pass.set_pipeline(&self.image_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &bg_tex.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, bg_inst_buf.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..1);
-            }
-
-            // 0b. Draw light beams behind hinted tiles.
-            if let Some(ref lbb) = light_beam_buffer {
-                pass.set_pipeline(&self.light_beam_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, lbb.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..light_beams.len() as u32);
-            }
-
-            // 1a. Draw tile quads (SDF rounded rectangles).
-            if let Some(ref tib) = tile_instance_buffer {
-                pass.set_pipeline(&self.tile_quad_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, tib.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..tile_quads.len() as u32);
-            }
-
-            // 1b. Draw fluid smoke overlay (between tiles and UI).
-            if smoke_intensity != crate::persistence::SmokeIntensity::Off {
-                if let Some(ref fluid) = self.fluid {
-                    fluid.draw(
-                        &mut pass,
-                        &self.globals_bind_group,
-                        &self.vertex_buffer,
-                        &self.index_buffer,
-                        &fluid_inst_buf,
-                    );
-                }
-            }
-
-            // 1c. Draw 2D UI quads (scene panels, etc.).
-            if let Some(ref ib) = instance_buffer {
-                pass.set_pipeline(&self.quad_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, ib.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..scene_instances.len() as u32);
-            }
-
-            // 2. Draw text labels (tile symbols + scene text, alpha-blended).
-            for td in &text_draws {
-                pass.set_pipeline(&self.text_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &td.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, td.inst_buf.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..1);
-            }
-
-            // 3. Draw relic icon images (pre-loaded textures, alpha-blended).
-            for rd in &relic_draws {
-                if let Some(rtex) = self.relic_textures.get(&rd.relic_id) {
-                    pass.set_pipeline(&self.image_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &rtex.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, rd.inst_buf.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
-                }
-            }
-
-            // 3b. Draw overlay quads (dimmer + panel — on top of tile text).
-            if let Some(ref oib) = overlay_instance_buffer {
-                pass.set_pipeline(&self.quad_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, oib.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..overlay_instances.len() as u32);
-            }
-
-            // 3c. Draw overlay text labels (on top of overlay quads).
-            for td in &overlay_text_draws {
-                pass.set_pipeline(&self.text_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &td.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, td.inst_buf.slice(..));
-                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..6, 0, 0..1);
-            }
-
-            // 4. Draw tooltip layers — each layer's quads then text, so child
-            //    tooltips fully occlude their parents (DOM-like z-ordering).
-            for layer in &tooltip_layer_gpus {
-                if let Some(ref tib) = layer.inst_buf {
-                    pass.set_pipeline(&self.quad_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, tib.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..layer.inst_count);
-                }
-                for td in &layer.text_draws {
-                    pass.set_pipeline(&self.text_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &td.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, td.inst_buf.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
+            // Walk the ordered op list. Earlier ops render under later ones.
+            for op in &ops {
+                match op {
+                    RenderOp::Background(id) => {
+                        if let Some(bg_tex) = self.background_textures.get(id) {
+                            pass.set_pipeline(&self.image_pipeline);
+                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                            pass.set_bind_group(1, &bg_tex.bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, bg_inst_buf.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
+                    RenderOp::HandTileBackdrop => {
+                        if let Some(ref lbb) = light_beam_buffer {
+                            pass.set_pipeline(&self.light_beam_pipeline);
+                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, lbb.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            pass.draw_indexed(0..6, 0, 0..light_beams.len() as u32);
+                        }
+                        if let Some(ref tib) = tile_instance_buffer {
+                            pass.set_pipeline(&self.tile_quad_pipeline);
+                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, tib.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            pass.draw_indexed(0..6, 0, 0..tile_quads.len() as u32);
+                        }
+                    }
+                    RenderOp::FluidSmoke => {
+                        if smoke_intensity != crate::persistence::SmokeIntensity::Off {
+                            if let Some(ref fluid) = self.fluid {
+                                fluid.draw(
+                                    &mut pass,
+                                    &self.globals_bind_group,
+                                    &self.vertex_buffer,
+                                    &self.index_buffer,
+                                    &fluid_inst_buf,
+                                );
+                            }
+                        }
+                    }
+                    RenderOp::HandTileFaces => {
+                        for td in &hand_face_draws {
+                            pass.set_pipeline(&self.text_pipeline);
+                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                            pass.set_bind_group(1, &td.bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, td.inst_buf.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
+                    RenderOp::QuadBatch { buf_idx, count } => {
+                        pass.set_pipeline(&self.quad_pipeline);
+                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, quad_buffers[*buf_idx].slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        pass.draw_indexed(0..6, 0, 0..*count);
+                    }
+                    RenderOp::TextDraw(idx) => {
+                        let td = &text_draws[*idx];
+                        pass.set_pipeline(&self.text_pipeline);
+                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_bind_group(1, &td.bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, td.inst_buf.slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        pass.draw_indexed(0..6, 0, 0..1);
+                    }
+                    RenderOp::RelicIconDraw(idx) => {
+                        let rd = &relic_draws[*idx];
+                        if let Some(rtex) = self.relic_textures.get(&rd.relic_id) {
+                            pass.set_pipeline(&self.image_pipeline);
+                            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                            pass.set_bind_group(1, &rtex.bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, rd.inst_buf.slice(..));
+                            pass.set_index_buffer(
+                                self.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            pass.draw_indexed(0..6, 0, 0..1);
+                        }
+                    }
                 }
             }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        surface_frame.present();
         Ok(())
     }
 }

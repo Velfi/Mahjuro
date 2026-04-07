@@ -85,36 +85,49 @@ pub struct RelicDef {
     pub rarity: Rarity,
 }
 
+/// Gold cost to buy a relic in the shop. Stable (deterministic) per relic id so
+/// the shop, bot, and any future tooling agree on prices.
+pub fn relic_buy_price(id: RelicId) -> u32 {
+    let defs = all_relic_defs();
+    let idx = defs.iter().position(|d| d.id == id).unwrap_or(0);
+    3 + (idx as u32 % 4)
+}
+
+/// Refund when selling a relic — half buy price, minimum 1 gold.
+pub fn relic_sell_price(id: RelicId) -> u32 {
+    (relic_buy_price(id) / 2).max(1)
+}
+
 pub fn all_relic_defs() -> &'static [RelicDef] {
     &[
         RelicDef {
             id: RelicId::TripletBoost,
             name: "Triplet Boost",
-            description: "Triplets score ×2",
+            description: "Triplets score ×3",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::SequenceSurge,
             name: "Sequence Surge",
-            description: "Sequences score ×1.5",
+            description: "Sequences score ×2",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::PairPower,
             name: "Pair Power",
-            description: "Pairs score +10",
+            description: "Pairs score +40",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::HonorFury,
             name: "Honor Fury",
-            description: "Honor tiles +3 each in sets",
+            description: "Honor tiles +12 each in sets",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::BambooCharm,
             name: "Bamboo Charm",
-            description: "Bamboo tiles +2 in any set",
+            description: "Bamboo tiles +5 in any set",
             rarity: Rarity::Common,
         },
         RelicDef {
@@ -126,13 +139,13 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::GreenLuck,
             name: "Green Luck",
-            description: "Hands without honors earn +2 gold",
+            description: "Hands without honors earn +4 gold",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::WhiteSilence,
             name: "White Silence",
-            description: "White dragon pairs +5",
+            description: "White dragon pairs +50",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -156,13 +169,13 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::ChainReaction,
             name: "Chain Reaction",
-            description: "+25% score if you scored last turn",
+            description: "+50% score if you scored last turn",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::MultiplierMaster,
             name: "Multiplier Master",
-            description: "+10% score per relic owned",
+            description: "+15% score per relic owned",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -180,7 +193,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::DragonEcho,
             name: "Dragon Echo",
-            description: "Dragon triplets add 50% of adjacent sets",
+            description: "Dragon triplets add 100% of adjacent sets",
             rarity: Rarity::Legendary,
         },
         RelicDef {
@@ -204,7 +217,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::LuckyPair,
             name: "Lucky Pair",
-            description: "Pairs score ×1.5",
+            description: "Pairs score ×3",
             rarity: Rarity::Common,
         },
     ]
@@ -250,10 +263,10 @@ pub struct ScoreContext<'a> {
 pub fn triplet_multiplier(ctx: &ScoreContext) -> f64 {
     let mut m = 1.0;
     if ctx.relics.has(RelicId::TripletBoost) {
-        m *= 2.0;
+        m *= 3.0;
     }
     if ctx.relics.has(RelicId::MultiplierMaster) {
-        m *= 1.0 + 0.1 * ctx.relics.active.len() as f64;
+        m *= 1.0 + 0.15 * ctx.relics.active.len() as f64;
     }
     m
 }
@@ -261,10 +274,10 @@ pub fn triplet_multiplier(ctx: &ScoreContext) -> f64 {
 pub fn sequence_multiplier(ctx: &ScoreContext) -> f64 {
     let mut m = 1.0;
     if ctx.relics.has(RelicId::SequenceSurge) {
-        m *= 1.5;
+        m *= 2.0;
     }
     if ctx.relics.has(RelicId::MultiplierMaster) {
-        m *= 1.0 + 0.1 * ctx.relics.active.len() as f64;
+        m *= 1.0 + 0.15 * ctx.relics.active.len() as f64;
     }
     m
 }
@@ -272,17 +285,14 @@ pub fn sequence_multiplier(ctx: &ScoreContext) -> f64 {
 pub fn pair_bonus_points(ctx: &ScoreContext) -> i32 {
     let mut b = 0;
     if ctx.relics.has(RelicId::PairPower) {
-        b += 10;
-    }
-    if ctx.relics.has(RelicId::WhiteSilence) {
-        b += 5;
+        b += 40;
     }
     b
 }
 
 pub fn suit_tile_bonus(suit: Suit, ctx: &ScoreContext) -> i32 {
     if ctx.relics.has(RelicId::BambooCharm) && suit == Suit::Bamboos {
-        return 2;
+        return 5;
     }
     0
 }

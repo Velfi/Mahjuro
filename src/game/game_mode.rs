@@ -36,7 +36,7 @@ impl GameMode {
     pub fn standard() -> Self {
         Self {
             name: "Standard",
-            starting_gold: 4,
+            starting_gold: 6,
             starting_plays: 4,
             starting_discards: 3,
             hand_size: 14,

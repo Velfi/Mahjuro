@@ -415,10 +415,10 @@ impl ModalQueue {
         }
 
         // Full-screen dismiss button so clicking anywhere also works.
-        buttons.push(ButtonDef {
-            rect: (0.0, 0.0, window_w, window_h),
-            action: UiAction::Confirm,
-        });
+        buttons.push(ButtonDef::ui(
+            (0.0, 0.0, window_w, window_h),
+            UiAction::Confirm,
+        ));
 
         Some((instances, labels, buttons))
     }

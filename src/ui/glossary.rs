@@ -169,12 +169,6 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
     },
 ];
 
-/// Look up a glossary entry by exact term name (case-insensitive).
-pub fn lookup(term: &str) -> Option<&'static GlossaryEntry> {
-    let lower = term.to_lowercase();
-    GLOSSARY.iter().find(|e| e.term.to_lowercase() == lower)
-}
-
 // ── Term matching ────────────────────────────────────────────────────────
 
 /// A matched glossary term within a text string.
