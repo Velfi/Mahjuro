@@ -223,5 +223,6 @@ pub struct CandlePlacement {
     /// use this for any future per-instance shading. Currently unused on the
     /// mesh side — the lighting flicker is driven entirely by the candle's
     /// matching `PointLight`.
+    #[allow(dead_code)]
     pub flicker: f32,
 }

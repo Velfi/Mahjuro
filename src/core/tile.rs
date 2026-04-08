@@ -12,7 +12,7 @@ pub enum Suit {
     Dragon,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tile {
     pub suit: Suit,
     /// Number tiles: 1–9. Winds: 1–4. Dragons: 1–3.
@@ -100,11 +100,13 @@ impl Tile {
     }
 
     /// Base point value of a single tile face: numbered tiles are worth their
-    /// rank (1–9), honors (winds & dragons) are flat 10.
+    /// rank (1–9), honors (winds & dragons) are flat 12. The honor pump (was 10)
+    /// gives Yakuhai/Honitsu/Honroutou builds enough early-game traction to be
+    /// playable from ante 1, when leveled-yaku mults haven't kicked in yet.
     pub fn point_value(&self) -> u32 {
         match self.suit {
             Suit::Characters | Suit::Bamboos | Suit::Circles => self.rank as u32,
-            Suit::Wind | Suit::Dragon => 10,
+            Suit::Wind | Suit::Dragon => 12,
         }
     }
 

@@ -15,6 +15,7 @@ pub enum DebugAction {
     ClearRelics,
     ToggleShowFps,
     OpenTuning,
+    OpenSfxTest,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -47,6 +48,11 @@ impl DebugMenuBar {
         let tuning_item = MenuItem::new("Cascade Tuning...", true, None);
         mappings.push((tuning_item.id().clone(), DebugAction::OpenTuning));
         let _ = debug_menu.append(&tuning_item);
+
+        // Sound effects test overlay.
+        let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
+        mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
+        let _ = debug_menu.append(&sfx_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

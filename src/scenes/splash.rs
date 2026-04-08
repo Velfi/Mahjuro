@@ -6,7 +6,7 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 
 use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 const MIN_DISPLAY_SECS: f32 = 0.5;
 
@@ -25,7 +25,10 @@ impl SplashScene {
         }
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+}
+
+impl SceneBehavior for SplashScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         if self.done {
             return None;
         }
@@ -42,7 +45,7 @@ impl SplashScene {
         None
     }
 
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = (w.min(h)) / 600.0;
@@ -62,6 +65,7 @@ impl SplashScene {
             rect: [0.0, title_y, w, title_h],
             text: "MAHJURO".into(),
             color: color::CHAMPAGNE,
+            ..Default::default()
         });
 
         // Tagline below the title.
@@ -71,6 +75,7 @@ impl SplashScene {
             rect: [w * 0.15, tagline_y, w * 0.7, tagline_h],
             text: "Mahjong, reimagined for chaos.".into(),
             color: color::MIST,
+            ..Default::default()
         });
 
         SceneDrawOutput {
@@ -90,7 +95,9 @@ impl SplashScene {
             flame_instances: vec![],
             point_lights: vec![],
             candles: vec![],
+            relic_placements: vec![],
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }

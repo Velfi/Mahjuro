@@ -1,11 +1,11 @@
 //! Single-run state: wall, hand, score target, round modifiers.
 
-use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
 
-use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs};
+use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets};
 use crate::core::tile::{Suit, Tile};
@@ -14,10 +14,11 @@ use crate::game::game_mode::GameMode;
 
 pub const HAND_SIZE: usize = 14;
 pub const STARTING_PLAYS: u32 = 4;
-pub const STARTING_DISCARDS: u32 = 3;
+pub const STARTING_DISCARDS: u32 = 4;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
 pub const FINAL_ANTE: u32 = 8;
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RunState {
     pub wall: Wall,
     pub hand: Vec<Tile>,
@@ -37,7 +38,9 @@ pub struct RunState {
     pub blind: BlindKind,
     /// Next blind the player will face in the Small→Big→Boss cycle.
     pub upcoming_blind: BlindKind,
-    /// Last scoring breakdown for UI cascade display.
+    /// Last scoring breakdown for UI cascade display. Not persisted across
+    /// quit/resume — the cascade is a transient UI artifact, not run state.
+    #[serde(skip)]
     pub last_breakdown: Option<ScoreBreakdown>,
     /// Yaku available at the player's progression level.
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
@@ -49,6 +52,20 @@ pub struct RunState {
     pub quickdraw_used: bool,
     /// Whether JokerTile was used this round.
     pub joker_used: bool,
+    /// Whether the player has scored a FullHand yaku this round. The Tenpai
+    /// Bonus (`scoring.rs` Phase 4.5) fires only on the *first* such play.
+    pub full_hand_played_this_round: bool,
+    /// Per-yaku level (default 1). Incremented by Zodiac card use.
+    pub yaku_levels: crate::core::zodiac::YakuLevels,
+    /// Player's current Zodiac card inventory.
+    pub zodiac_inventory: crate::core::zodiac::ZodiacInventory,
+    /// Active yaku loadout — these score at full strength. Yaku not in the
+    /// loadout still detect but at 50% chip/mult per Patch B finishing's
+    /// "amplification, not gating" rule. `FullHand` and `Yakuhai` are always
+    /// implicitly full-strength regardless of loadout membership.
+    pub yaku_loadout: Vec<crate::core::yaku::YakuKind>,
+    /// Maximum loadout size (default 3, +1 from Yaku Scholar relic).
+    pub yaku_loadout_capacity: usize,
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
 }
@@ -95,6 +112,15 @@ impl RunState {
             scored_last_turn: false,
             quickdraw_used: false,
             joker_used: false,
+            full_hand_played_this_round: false,
+            yaku_levels: crate::core::zodiac::YakuLevels::default(),
+            zodiac_inventory: crate::core::zodiac::ZodiacInventory::default(),
+            yaku_loadout: vec![
+                crate::core::yaku::YakuKind::Tanyao,
+                crate::core::yaku::YakuKind::Toitoi,
+                crate::core::yaku::YakuKind::Chinitsu,
+            ],
+            yaku_loadout_capacity: 3,
             mode,
         }
     }
@@ -102,6 +128,64 @@ impl RunState {
     /// Convenience constructor using the standard game mode.
     pub fn new_demo() -> Self {
         Self::new(GameMode::standard())
+    }
+
+    /// Use a Zodiac card from the inventory: removes it and levels its yaku.
+    /// Returns the yaku and its new level on success.
+    #[allow(dead_code)]
+    pub fn use_zodiac(
+        &mut self,
+        index: usize,
+    ) -> Option<(crate::core::yaku::YakuKind, u32)> {
+        let z = self.zodiac_inventory.take(index)?;
+        let yaku = z.yaku();
+        let new_level = self.yaku_levels.level_up(yaku);
+        Some((yaku, new_level))
+    }
+
+    /// Try to add a Zodiac card to the inventory; returns `true` on success.
+    #[allow(dead_code)]
+    pub fn grant_zodiac(&mut self, z: crate::core::zodiac::ZodiacKind) -> bool {
+        self.zodiac_inventory.try_push(z)
+    }
+
+    /// Replace one yaku in the loadout with another. The new yaku must not
+    /// already be in the loadout. Returns `true` on success.
+    #[allow(dead_code)]
+    pub fn swap_loadout(
+        &mut self,
+        index: usize,
+        replacement: crate::core::yaku::YakuKind,
+    ) -> bool {
+        if index >= self.yaku_loadout.len() {
+            return false;
+        }
+        if self.yaku_loadout.contains(&replacement) {
+            return false;
+        }
+        self.yaku_loadout[index] = replacement;
+        true
+    }
+
+    /// Recompute Zodiac inventory capacity and yaku-loadout capacity from
+    /// currently-owned relics. Idempotent — call after any relic add/remove.
+    /// (Patch C: ZodiacPouch +1, LunarAlmanac +1, YakuScholar loadout +1.)
+    pub fn recompute_capacities(&mut self) {
+        let mut zodiac_cap = 2usize;
+        if self.relics.has(RelicId::ZodiacPouch) {
+            zodiac_cap += 1;
+        }
+        if self.relics.has(RelicId::LunarAlmanac) {
+            zodiac_cap += 1;
+        }
+        self.zodiac_inventory.capacity = zodiac_cap;
+
+        let loadout_cap = if self.relics.has(RelicId::YakuScholar) {
+            4
+        } else {
+            3
+        };
+        self.yaku_loadout_capacity = loadout_cap;
     }
 
     /// Whether a run is in progress (not a fresh/default state).
@@ -164,25 +248,61 @@ impl RunState {
             scored_last_turn: self.scored_last_turn,
             dora_faces: self.wall.dora_faces(),
             available_yaku: self.available_yaku.clone(),
+            round_wind: Some(BlindKind::round_wind_for_ante(self.ante)),
+            first_full_hand_of_round: !self.full_hand_played_this_round,
+            plays_used: self.mode.starting_plays.saturating_sub(self.plays_remaining),
+            riichi_active: false,
+            yaku_levels: Some(self.yaku_levels.clone()),
+            yaku_loadout: self.yaku_loadout.clone(),
         };
         let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
+        // Latch the first-FullHand-of-round flag so the Tenpai Bonus only
+        // fires once per round.
+        let scored_full_hand = breakdown
+            .detected_yaku
+            .contains(&crate::core::yaku::YakuKind::FullHand);
+        if scored_full_hand {
+            self.full_hand_played_this_round = true;
+        }
+        // KanDrum (Patch C): every Kong scored grants +1 play this round.
+        if self.relics.has(RelicId::KanDrum) {
+            let kong_count = sets
+                .iter()
+                .filter(|s| s.kind == SetKind::Kong)
+                .count() as u32;
+            if kong_count > 0 {
+                self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
+            }
+        }
         self.last_breakdown = Some(breakdown);
-        self.plays_remaining -= 1;
+        self.plays_remaining = self.plays_remaining.saturating_sub(1);
         self.scored_last_turn = earned > 0;
 
-        // GreenLuck: hands without honors earn +4 gold.
+        // GreenLuck (Patch C retune): hands without honors earn +6 gold.
         if self.relics.has(RelicId::GreenLuck)
             && !selected_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
         {
-            self.gold = self.gold.saturating_add(4);
+            self.gold = self.gold.saturating_add(6);
         }
 
-        // Check if any triplet was scored (for SetMagnet).
-        let scored_triplet = sets.iter().find(|s| s.kind == SetKind::Triplet);
+        // EightTreasures (Patch C): scoring a FullHand grants a random Zodiac
+        // (ignores inventory cap so the relic always feels good).
+        if scored_full_hand && self.relics.has(RelicId::EightTreasures) {
+            use rand::seq::IndexedRandom;
+            let mut rng = rand::rng();
+            if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
+                self.zodiac_inventory.items.push(z);
+            }
+        }
+
+        // Check if any triplet (or kong) was scored (for SetMagnet).
+        let scored_triplet = sets
+            .iter()
+            .find(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong));
         let triplet_tile = scored_triplet.and_then(|s| {
             s.tile_ids
                 .first()
@@ -412,10 +532,7 @@ impl RunState {
     /// Small/Big/Boss multipliers in `apply_blind` derive each blind's actual target.
     /// We only grow `base_target` when the player defeats the Boss and rolls into the
     /// next ante; within an ante, the base stays put.
-    pub fn advance_round(&mut self, chosen_relic: RelicId) {
-        if !self.relics.is_full() {
-            self.relics.active.push(chosen_relic);
-        }
+    pub fn advance_round(&mut self) {
         // Defeating the Boss completes an ante and scales the base for the next one.
         if self.blind == BlindKind::Boss {
             self.ante += 1;
@@ -431,6 +548,7 @@ impl RunState {
         self.scored_last_turn = false;
         self.quickdraw_used = false;
         self.joker_used = false;
+        self.full_hand_played_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
@@ -518,6 +636,15 @@ mod tests {
             scored_last_turn: false,
             quickdraw_used: false,
             joker_used: false,
+            full_hand_played_this_round: false,
+            yaku_levels: crate::core::zodiac::YakuLevels::default(),
+            zodiac_inventory: crate::core::zodiac::ZodiacInventory::default(),
+            yaku_loadout: vec![
+                crate::core::yaku::YakuKind::Tanyao,
+                crate::core::yaku::YakuKind::Toitoi,
+                crate::core::yaku::YakuKind::Chinitsu,
+            ],
+            yaku_loadout_capacity: 3,
             mode,
         }
     }
@@ -745,9 +872,14 @@ mod tests {
         }
         run.discard_selected(&mut bus);
         assert_eq!(run.hand.len(), HAND_SIZE);
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS - 3);
+
+        // Fourth discard: removes the last allowance.
+        run.toggle_select(0);
+        run.discard_selected(&mut bus);
         assert_eq!(run.discards_remaining, 0);
 
-        // Fourth attempt: should fail (no discards left).
+        // Fifth attempt: should fail (no discards left).
         run.toggle_select(0);
         let result = run.discard_selected(&mut bus);
         assert_eq!(result, 0);
@@ -821,7 +953,7 @@ mod tests {
         run.toggle_select(5);
         assert_eq!(run.selected_count(), 2);
 
-        run.advance_round(RelicId::TripletBoost);
+        run.advance_round();
 
         assert_eq!(run.selected_count(), 0);
         assert_eq!(run.selected.len(), run.hand.len());
@@ -1039,57 +1171,6 @@ fn try_wind_substitution(
     }
     let mut modified = tiles.to_vec();
     substitute_recursive(&mut modified, &wind_indices, 0, &candidates, rules)
-}
-
-/// Pick `count` relics the player doesn't already own, randomly.
-/// Filters by `available` relics from progression, weighted by rarity.
-pub fn pick_relic_choices(
-    relics: &RelicState,
-    count: usize,
-    available: &[RelicId],
-) -> Vec<RelicId> {
-    let mut rng = rand::rng();
-    let defs = all_relic_defs();
-
-    // Build a weighted pool: each relic appears N times based on rarity weight.
-    let mut weighted_pool: Vec<RelicId> = Vec::new();
-    for &id in available {
-        if relics.has(id) {
-            continue;
-        }
-        let weight = defs
-            .iter()
-            .find(|d| d.id == id)
-            .map(|d| d.rarity.weight())
-            .unwrap_or(1);
-        for _ in 0..weight {
-            weighted_pool.push(id);
-        }
-    }
-    weighted_pool.shuffle(&mut rng);
-
-    // Deduplicate while preserving weighted-random order.
-    let mut selected = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for id in weighted_pool {
-        if seen.insert(id) {
-            selected.push(id);
-            if selected.len() >= count {
-                break;
-            }
-        }
-    }
-
-    // Fill remaining slots with fallbacks if pool is exhausted.
-    let fallbacks = [
-        RelicId::TripletBoost,
-        RelicId::SequenceSurge,
-        RelicId::PairPower,
-    ];
-    while selected.len() < count {
-        selected.push(fallbacks[selected.len() % fallbacks.len()]);
-    }
-    selected
 }
 
 #[cfg(test)]

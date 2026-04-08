@@ -43,7 +43,7 @@ impl RuleModifier {
 }
 
 /// Blind difficulty chosen before each round.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlindKind {
     Small,
     Big,
@@ -51,12 +51,33 @@ pub enum BlindKind {
 }
 
 impl BlindKind {
-    /// Multiplier applied to the base target score.
+    /// Multiplier applied to the base target score. Small/Big trimmed from
+    /// 1.0/1.5 to 0.85/1.35 — most "stuck" runs die early to draw variance, not
+    /// skill, so the early curve is softer while Boss tension stays intact.
     pub fn target_multiplier(self) -> f32 {
         match self {
-            BlindKind::Small => 1.0,
-            BlindKind::Big => 1.5,
+            BlindKind::Small => 0.85,
+            BlindKind::Big => 1.35,
             BlindKind::Boss => 2.0,
+        }
+    }
+
+    /// Round wind for the given ante (1-indexed): East → South → West → North,
+    /// cycling. The round wind tile becomes Yakuhai (a triplet/kong of it grants
+    /// the Yakuhai yaku) and is shown on the blind card.
+    pub fn round_wind_for_ante(ante: u32) -> u8 {
+        ((ante.saturating_sub(1)) % 4) as u8 + 1
+    }
+
+    /// Display name for a wind rank (1=East, 2=South, 3=West, 4=North).
+    #[allow(dead_code)]
+    pub fn wind_name(rank: u8) -> &'static str {
+        match rank {
+            1 => "East",
+            2 => "South",
+            3 => "West",
+            4 => "North",
+            _ => "?",
         }
     }
 
@@ -66,15 +87,6 @@ impl BlindKind {
             BlindKind::Small => 3,
             BlindKind::Big => 5,
             BlindKind::Boss => 0,
-        }
-    }
-
-    /// Number of relic choices offered after clearing this blind.
-    pub fn relic_choices(self) -> usize {
-        match self {
-            BlindKind::Small => 2,
-            BlindKind::Big => 3,
-            BlindKind::Boss => 3,
         }
     }
 
@@ -112,8 +124,8 @@ impl BlindKind {
 
     pub fn description(self) -> &'static str {
         match self {
-            BlindKind::Small => "×1 target · 2 relic picks · ×1 gold",
-            BlindKind::Big => "×1.5 target · 3 relic picks · ×1.5 gold",
+            BlindKind::Small => "×0.85 target · 2 relic picks · ×1 gold",
+            BlindKind::Big => "×1.35 target · 3 relic picks · ×1.5 gold",
             BlindKind::Boss => "×2 target + modifier · 3 relic picks · ×2.5 gold",
         }
     }

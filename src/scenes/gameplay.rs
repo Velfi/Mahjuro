@@ -11,12 +11,14 @@ use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::particles::ParticleSystem;
 use crate::render::wgpu_renderer::{
-    GpuInstance, PointLight, TextLabel, build_instances_from_layout,
+    GpuInstance, PointLight, TextAlign, TextLabel, build_instances_from_layout,
 };
+use crate::render::theme::typography;
 use crate::ui::input::{UiAction, apply_ui_actions};
+use crate::ui::widget::{self, TextStyle};
 
-use super::pause_menu::{PauseMenu, PauseUpdate};
-use super::{ButtonDef, DrawCtx, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::pause_menu::PauseMenu;
+use super::{ButtonDef, DrawCtx, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 /// One candle's animated state. The renderer's flame shader does the heavy
 /// lifting (procedural fbm noise + flicker), but each candle still needs a
@@ -42,12 +44,32 @@ impl CandleState {
     }
 }
 
-/// Bottom button indices in gameplay.
-const BTN_SORT_SUIT: usize = 0;
-const BTN_SORT_RANK: usize = 1;
-const BTN_PLAY: usize = 2;
-const BTN_DISCARD: usize = 3;
-const BTN_COUNT: usize = 4;
+/// Bottom-row gameplay buttons. Order in `ALL_BUTTONS` is the keyboard nav order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GameplayButton {
+    SortSuit,
+    SortRank,
+    Play,
+    Discard,
+}
+
+const ALL_BUTTONS: [GameplayButton; 4] = [
+    GameplayButton::SortSuit,
+    GameplayButton::SortRank,
+    GameplayButton::Play,
+    GameplayButton::Discard,
+];
+
+impl GameplayButton {
+    fn ui_action(self) -> UiAction {
+        match self {
+            GameplayButton::SortSuit => UiAction::SortBySuit,
+            GameplayButton::SortRank => UiAction::SortByRank,
+            GameplayButton::Play => UiAction::ScoreHand,
+            GameplayButton::Discard => UiAction::CommitDiscard,
+        }
+    }
+}
 
 pub struct GameplayScene {
     /// Active scoring cascade animation (None when idle).
@@ -64,7 +86,7 @@ pub struct GameplayScene {
     /// Shared pause menu overlay.
     pause_menu: PauseMenu,
     /// Which bottom button is focused (None = hand tiles have focus).
-    button_focus: Option<usize>,
+    button_focus: Option<GameplayButton>,
     /// Tile indices that should depart this frame (set during update, consumed during draw).
     pending_departures: Vec<usize>,
     /// When set, the hand has been discarded-from but not yet refilled. The
@@ -80,9 +102,67 @@ pub struct GameplayScene {
     /// game's `Instant::now()` references so the candles keep moving even if
     /// the game logic is paused).
     candle_time: f32,
+    /// Per-relic glow start times. Populated as the cascade reveals each step
+    /// whose source matches a relic display name. The glow fades over
+    /// `RELIC_GLOW_LIFETIME` and the entry is evicted afterward.
+    relic_glow_starts: std::collections::HashMap<crate::core::relic::RelicId, Instant>,
+    /// Tracks the most recent step index whose reveal edge we've already
+    /// processed (relic glow + ScoreStepRevealed bus event). Prevents
+    /// re-firing reveal-edge effects every frame while the cascade holds
+    /// on the same step.
+    last_revealed_step: Option<usize>,
+    /// Whether the current cascade has already emitted its `ScoreCascadeFinal`
+    /// event. Reset when a new cascade starts.
+    cascade_final_emitted: bool,
+    /// Cross-input glossary overlay (`?` / F1 / H to toggle).
+    glossary: super::glossary::GlossaryOverlay,
+    /// Hand size observed last frame. Used to detect deal events: any time
+    /// the hand grows (initial round deal, post-discard refill) we stamp
+    /// `last_deal_at` so the post-deal smoke breath can fire.
+    prev_hand_len: usize,
+    /// When the most recent deal landed. The post-deal smoke gust starts
+    /// `POST_DEAL_GUST_DELAY` after this and tapers off over
+    /// `POST_DEAL_GUST_DURATION`. `None` between rounds and after the gust
+    /// has finished playing.
+    last_deal_at: Option<Instant>,
 }
 
+/// How long after a deal to wait before exhaling on the smoke.
+const POST_DEAL_GUST_DELAY: f32 = 3.0;
+/// Duration of the post-deal exhale once it begins.
+const POST_DEAL_GUST_DURATION: f32 = 1.4;
+
+/// How long a relic glow lingers after activation.
+const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
+
+/// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
+/// is the click id for using the Zodiac in slot `slot_idx`.
+const ZODIAC_USE_BASE: u32 = 0x9000;
+
+/// Click id for the `?` glossary badge in the gameplay HUD.
+const HELP_BADGE_ID: u32 = 0x9100;
+
 impl GameplayScene {
+    /// Whether the cascade is actively animating (for redraw requests).
+    pub fn is_animating(&self) -> bool {
+        self.cascade.is_some()
+            || self.particles.is_active()
+            || self.pending_refill.is_some()
+            || !self.relic_glow_starts.is_empty()
+            || self.post_deal_gust_active()
+    }
+
+    /// True while the post-deal smoke breath is either pending or actively
+    /// blowing. Keeps the main loop ticking through the delay so the gust
+    /// actually fires on idle frames.
+    fn post_deal_gust_active(&self) -> bool {
+        let Some(t) = self.last_deal_at else {
+            return false;
+        };
+        let elapsed = Instant::now().saturating_duration_since(t).as_secs_f32();
+        elapsed < POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
+    }
+
     pub fn new() -> Self {
         Self {
             cascade: None,
@@ -104,53 +184,116 @@ impl GameplayScene {
                 CandleState::new(5.2),
             ],
             candle_time: 0.0,
+            relic_glow_starts: std::collections::HashMap::new(),
+            last_revealed_step: None,
+            cascade_final_emitted: false,
+            glossary: super::glossary::GlossaryOverlay::new(),
+            prev_hand_len: 0,
+            last_deal_at: None,
         }
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+}
+
+impl SceneBehavior for GameplayScene {
+    /// Borrow the in-pause-menu options overlay, if the player has opened it.
+    /// Used by the main loop to sync settings (volume, smoke, tile preset)
+    /// the same way it does for the standalone `OptionsScene`.
+    fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
+        self.pause_menu.options_overlay()
+    }
+
+    /// See [`crate::scenes::SceneBehavior::has_blocking_overlay`]. Reports
+    /// `true` when any in-scene modal-like overlay is up: pause menu,
+    /// glossary screen, or the scoring cascade animation. The cascade is
+    /// included because it already blocks input internally — declaring it
+    /// here also kills hover tooltips on hand tiles and relics during the
+    /// score reveal.
+    fn has_blocking_overlay(&self) -> bool {
+        self.pause_menu.paused || self.glossary.open || self.cascade.is_some()
+    }
+
+    fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.particles.update(dt);
         self.cursor_pos = ctx.cursor_pos;
 
+        // Detect deal events: any time the hand grows (initial round deal,
+        // post-discard refill) we stamp `last_deal_at` so the post-deal smoke
+        // gust can fire `POST_DEAL_GUST_DELAY` later.
+        let cur_hand_len = ctx.run.hand.len();
+        if cur_hand_len > self.prev_hand_len {
+            self.last_deal_at = Some(now);
+        }
+        self.prev_hand_len = cur_hand_len;
+
         // Advance candle flicker. Each candle's `flicker` is a smoothed
         // approach toward a target wave (sum of two sines per candle), so
         // intensity wanders organically in roughly [0.7, 1.1].
+        //
+        // The post-deal wind gust also nearly snuffs the candles for its
+        // duration: we compute the same 4t(1-t) bell envelope used by the
+        // gust and multiply the flicker target down to ~12% at the peak,
+        // so the candles dim sharply as the breath hits them and recover
+        // as it tapers off.
+        let candle_dim = self
+            .last_deal_at
+            .map(|d| {
+                let elapsed = now.saturating_duration_since(d).as_secs_f32();
+                if elapsed < POST_DEAL_GUST_DELAY
+                    || elapsed >= POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
+                {
+                    1.0
+                } else {
+                    let t = (elapsed - POST_DEAL_GUST_DELAY) / POST_DEAL_GUST_DURATION;
+                    let env = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
+                    1.0 - 0.88 * env
+                }
+            })
+            .unwrap_or(1.0);
         self.candle_time += dt;
         for c in self.candles.iter_mut() {
             let t = self.candle_time;
-            let target =
-                0.9 + 0.18 * (t * 7.3 + c.phase).sin() + 0.08 * (t * 13.1 + c.phase * 1.7).sin();
-            // Exponential smoothing — keeps the light from snapping.
-            let k = (1.0 - (-dt * 12.0).exp()).clamp(0.0, 1.0);
+            let target = (0.9
+                + 0.18 * (t * 7.3 + c.phase).sin()
+                + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
+                * candle_dim;
+            // Exponential smoothing — keeps the light from snapping. Bump
+            // the rate during a gust so the dim/recover edge reads as a
+            // wind hit instead of a slow fade.
+            let smooth_rate = if candle_dim < 0.95 { 22.0 } else { 12.0 };
+            let k = (1.0 - (-dt * smooth_rate).exp()).clamp(0.0, 1.0);
             c.flicker += (target - c.flicker) * k;
         }
 
-        // Pause menu handling.
-        if self.pause_menu.paused {
-            match self.pause_menu.update(
-                ctx.actions,
-                ctx.run,
-                ctx.cursor_pos,
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-            ) {
-                PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
-                PauseUpdate::Transition(t) => return t,
-                PauseUpdate::Quit => {
-                    *ctx.quit_requested = true;
+        // Glossary overlay (Patch UX): cross-input help. The Help action
+        // toggles it; while open, the overlay swallows all other input. The
+        // `?` badge in the HUD also routes here via HELP_BADGE_ID.
+        for &cid in ctx.button_clicks {
+            if cid == HELP_BADGE_ID {
+                self.glossary.toggle();
+                return None;
+            }
+        }
+        if !self.glossary.open {
+            for a in ctx.actions {
+                if matches!(a, UiAction::Help) {
+                    self.glossary.toggle();
                     return None;
                 }
             }
+        } else {
+            // Overlay is open — let it process input and then bail out.
+            self.glossary.handle_input(ctx.actions, ctx.button_clicks);
+            return None;
         }
 
-        // Check for pause trigger.
-        for a in ctx.actions {
-            if matches!(a, UiAction::Pause) {
-                self.pause_menu.open();
-                return None;
-            }
+        // Pause menu handling — drives the menu while paused and intercepts
+        // the open-on-Pause shortcut. Returns immediately if either applies.
+        if let Some(t) = self.pause_menu.handle(&mut ctx) {
+            return t;
         }
 
         // If a cascade is running, advance it and block most input.
@@ -162,6 +305,31 @@ impl GameplayScene {
             // Pulse the score panel on each new step reveal.
             if frame.new_step_index.is_some() {
                 ctx.anim.pulse(ENTITY_SCORE_PANEL);
+            }
+
+            // Reveal-edge effects: fire once per step on the frame the
+            // cascade transitions onto a new step. Drives both the relic
+            // glow overlay and the per-step audio beat.
+            if let Some(idx) = frame.new_step_index {
+                if self.last_revealed_step != Some(idx) {
+                    self.last_revealed_step = Some(idx);
+                    ctx.bus
+                        .push(crate::game::event_bus::GameEvent::ScoreStepRevealed { index: idx });
+                    if let Some(step) = cascade.breakdown.steps.get(idx) {
+                        if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
+                            self.relic_glow_starts.insert(rid, now);
+                        }
+                    }
+                }
+            }
+
+            // Final-beat edge: fire once when the cascade transitions into
+            // its ShowTotal phase. Used by the audio dispatcher to play the
+            // closing sting on the final number landing.
+            if cascade.is_in_total() && !self.cascade_final_emitted {
+                self.cascade_final_emitted = true;
+                ctx.bus
+                    .push(crate::game::event_bus::GameEvent::ScoreCascadeFinal);
             }
             // Stronger score-pop whenever the displayed value actually
             // advances — this is what makes scoring *feel* like the number
@@ -175,14 +343,36 @@ impl GameplayScene {
                 // Cascade finished — snap to real score and clear.
                 self.displayed_score = ctx.run.round_score;
                 self.cascade = None;
+                self.last_revealed_step = None;
+                self.cascade_final_emitted = false;
             } else {
                 // Allow skip on any key press during cascade.
                 if !ctx.actions.is_empty() {
                     cascade.skip();
                     self.displayed_score = ctx.run.round_score;
                     self.cascade = None;
+                    self.last_revealed_step = None;
+                    self.cascade_final_emitted = false;
                 }
                 return None;
+            }
+        }
+
+        // Evict expired relic glow entries so the map doesn't grow.
+        self.relic_glow_starts
+            .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
+
+        // Zodiac inventory clicks (Patch B finishing): the player can use a
+        // Zodiac card between plays to permanently level its yaku for the
+        // run. Click ids are `ZODIAC_USE_BASE + slot_idx`. Only allowed when
+        // no cascade is mid-flight, which the early return above already
+        // guarantees.
+        for &cid in ctx.button_clicks {
+            if cid >= ZODIAC_USE_BASE && cid < ZODIAC_USE_BASE + 16 {
+                let idx = (cid - ZODIAC_USE_BASE) as usize;
+                if let Some((yaku, level)) = ctx.run.use_zodiac(idx) {
+                    log::info!("Used Zodiac → {} now level {}", yaku.name(), level);
+                }
             }
         }
 
@@ -211,7 +401,7 @@ impl GameplayScene {
             match a {
                 UiAction::FocusDown => {
                     if self.button_focus.is_none() {
-                        self.button_focus = Some(BTN_PLAY); // default to Play button
+                        self.button_focus = Some(GameplayButton::Play);
                     }
                     continue;
                 }
@@ -223,24 +413,19 @@ impl GameplayScene {
                 }
                 UiAction::FocusNext if self.button_focus.is_some() => {
                     let cur = self.button_focus.unwrap();
-                    self.button_focus = Some((cur + 1).min(BTN_COUNT - 1));
+                    let idx = ALL_BUTTONS.iter().position(|b| *b == cur).unwrap_or(0);
+                    self.button_focus = Some(ALL_BUTTONS[(idx + 1).min(ALL_BUTTONS.len() - 1)]);
                     continue;
                 }
                 UiAction::FocusPrev if self.button_focus.is_some() => {
                     let cur = self.button_focus.unwrap();
-                    self.button_focus = Some(cur.saturating_sub(1));
+                    let idx = ALL_BUTTONS.iter().position(|b| *b == cur).unwrap_or(0);
+                    self.button_focus = Some(ALL_BUTTONS[idx.saturating_sub(1)]);
                     continue;
                 }
                 UiAction::Confirm if self.button_focus.is_some() => {
                     // Translate button press into the corresponding action.
-                    let mapped = match self.button_focus.unwrap() {
-                        BTN_SORT_SUIT => UiAction::SortBySuit,
-                        BTN_SORT_RANK => UiAction::SortByRank,
-                        BTN_PLAY => UiAction::ScoreHand,
-                        BTN_DISCARD => UiAction::CommitDiscard,
-                        _ => continue,
-                    };
-                    actions_for_scene.push(mapped);
+                    actions_for_scene.push(self.button_focus.unwrap().ui_action());
                     continue;
                 }
                 _ => {}
@@ -275,6 +460,8 @@ impl GameplayScene {
                                 pts,
                                 ctx.cascade_tuning.clone(),
                             ));
+                            self.last_revealed_step = None;
+                            self.cascade_final_emitted = false;
                             // Emit particles on successful score.
                             let sp = ctx.layout.score_panel;
                             let px = sp.x + sp.w * 0.5;
@@ -350,12 +537,7 @@ impl GameplayScene {
         None
     }
 
-    /// Whether the cascade is actively animating (for redraw requests).
-    pub fn is_animating(&self) -> bool {
-        self.cascade.is_some() || self.particles.is_active() || self.pending_refill.is_some()
-    }
-
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let layout = ctx.layout;
         let run = ctx.run;
         let focus = ctx.focus_tile_index.min(run.hand.len().saturating_sub(1));
@@ -383,11 +565,20 @@ impl GameplayScene {
             STARTING_DISCARDS,
         );
 
+        // Center the hand horizontally when fewer tiles than full slots are present.
+        let max_slots = layout.hand_slots.len();
+        let visible_count = run.hand.len().min(max_slots);
+        let slot_w = layout.hand_slots.first().map(|r| r.w).unwrap_or(0.0);
+        let center_offset = if visible_count < max_slots {
+            ((max_slots - visible_count) as f32 * slot_w) * 0.5
+        } else {
+            0.0
+        };
         let hand_slots: Vec<(f32, f32, f32, f32)> = layout
             .hand_slots
             .iter()
             .take(run.hand.len())
-            .map(|r| (r.x, r.y, r.w, r.h))
+            .map(|r| (r.x + center_offset, r.y, r.w, r.h))
             .collect();
 
         // Use cascade's displayed score if active, otherwise real score.
@@ -421,15 +612,33 @@ impl GameplayScene {
         } else {
             String::new()
         };
-        let score_text = format!(
-            "{}  ·  R{}  ·  {} / {}  ·  ${}  ·  W{}{}",
+        // Shanten meter (Patch A.5): "tiles away from a complete hand" for the
+        // best decomposition the player could form by swapping tiles. Shown
+        // unconditionally — the design plan calls for it as a baseline UI
+        // affordance, with the Shanten Lens relic providing the chip side.
+        let shanten = crate::core::shanten::shanten_estimate(&run.hand);
+        let shanten_text = match shanten {
+            -1 => "Won".to_string(),
+            0 => "Tenpai".to_string(),
+            n => format!("Shanten {}", n),
+        };
+        // Round wind for the current ante (East/South/West/North).
+        let round_wind = crate::core::rules::BlindKind::round_wind_for_ante(run.ante);
+        let wind_label = crate::core::rules::BlindKind::wind_name(round_wind);
+        // Score header is split into two lines so it doesn't get auto-shrunk
+        // into the cartouche. The cartouche is only ~38% of the score panel
+        // width and the rasterizer's width-based fallback would otherwise
+        // squeeze a 100-char single-line string to the 8px floor.
+        let score_text_top = format!(
+            "{}  ·  R{}  ·  {} / {}",
             run.blind.name(),
             run.run_number,
             shown_score,
             run.target_score,
-            run.gold,
-            tiles_left,
-            dora_section
+        );
+        let score_text_bot = format!(
+            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}",
+            run.gold, tiles_left, wind_label, shanten_text, dora_section
         );
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
@@ -486,6 +695,7 @@ impl GameplayScene {
                     rect,
                     text: format!("{}", frame.displayed_chips),
                     color: [1.0, 0.93, 0.55, 1.0],
+                    ..Default::default()
                 });
             }
 
@@ -511,6 +721,7 @@ impl GameplayScene {
                     rect,
                     text: mult_str,
                     color: [1.0, 0.85, 0.85, 1.0],
+                    ..Default::default()
                 });
             }
 
@@ -519,6 +730,7 @@ impl GameplayScene {
                 rect: [inner_x + pill_w, pill_y, cross_w, pill_h],
                 text: "×".into(),
                 color: [0.85, 0.85, 0.95, 1.0],
+                ..Default::default()
             });
 
             // "= score-this-hand" tail on the right edge of the strip.
@@ -530,6 +742,7 @@ impl GameplayScene {
                     rect: [total_x, pill_y, total_w, pill_h],
                     text: format!("= {}", earned_so_far),
                     color: [1.0, 0.92, 0.45, 1.0],
+                    ..Default::default()
                 });
             }
 
@@ -546,6 +759,7 @@ impl GameplayScene {
                     rect: [ms.x, ms.y + 2.0, ms.w, src_h - 4.0],
                     text: source.clone(),
                     color: label_color,
+                    ..Default::default()
                 });
             }
 
@@ -559,6 +773,7 @@ impl GameplayScene {
                             rect: [ms.x + 4.0, pill_y, gutter_w, pill_h],
                             text: format!("[{}]", yaku_names.join(", ")),
                             color: [0.85, 0.78, 1.0, 0.9],
+                            ..Default::default()
                         });
                     }
                 }
@@ -602,9 +817,10 @@ impl GameplayScene {
             }
         };
 
-        // Relic row in its own strip below the modifier strip.
-        let (relic_insts, relic_labels, relic_icons) =
-            relic_row(&run.relics, &layout.relic_strip, layout.window_w);
+        // The 2D relic strip is replaced by physical 3D relic boxes sitting
+        // on a dish on the table (built later in this function). No 2D
+        // relic row is rendered in the gameplay scene anymore.
+        let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
         // Bottom button bar.
         let scale = (layout.window_w.min(layout.window_h)) / 600.0;
@@ -623,7 +839,6 @@ impl GameplayScene {
         let discard_btn_rect = (container_x + (btn_w + btn_gap) * 3.0, btn_y, btn_w, btn_h);
 
         let mut instances = instances;
-        instances.extend(relic_insts);
 
         // ── Yaku progress panel (above the bottom button bar) ────────────
         // Builds one card per available yaku showing how close the current
@@ -638,16 +853,45 @@ impl GameplayScene {
             .collect();
         let previews = yaku_preview(&selected_tiles_for_yaku, &run.available_yaku);
         let mut yaku_text_labels: Vec<TextLabel> = Vec::new();
-        if !previews.is_empty() {
-            let panel_h = (54.0 * scale).max(36.0);
+        // Captured during the loop below — `(yaku_kind, anchor_x, anchor_y)`
+        // for the card the cursor is currently hovering, if any. The tooltip
+        // is pushed after the loop completes so it draws on top of all cards.
+        let mut hovered_yaku: Option<(crate::core::yaku::YakuKind, f32, f32)> = None;
+
+        // Filter previews so the panel only shows the *meaningful* cards:
+        // (1) every yaku in the active loadout (build identity),
+        // (2) FullHand and Yakuhai (always full strength),
+        // (3) any yaku currently *firing* on the selection (surprise hits).
+        // This caps the visible card count at ~6 instead of cramming all 14
+        // unlocked yaku into the same width as the 4-button bar — which would
+        // force the rasterizer to auto-shrink card text to the 8px floor.
+        let visible_previews: Vec<&crate::core::yaku::YakuPreview> = previews
+            .iter()
+            .filter(|p| {
+                run.yaku_loadout.contains(&p.kind)
+                    || matches!(
+                        p.kind,
+                        crate::core::yaku::YakuKind::FullHand
+                            | crate::core::yaku::YakuKind::Yakuhai
+                    )
+                    || p.active
+            })
+            .collect();
+
+        if !visible_previews.is_empty() {
+            let panel_h = (66.0 * scale).max(48.0);
             let panel_gap = 8.0 * scale;
             let panel_y = btn_y - panel_h - panel_gap;
             let panel_w = container_w;
             let panel_x = container_x;
-            let n = previews.len() as f32;
-            let card_gap = 4.0 * scale;
+            let n = visible_previews.len() as f32;
+            let card_gap = 6.0 * scale;
             let card_w = (panel_w - card_gap * (n - 1.0)) / n;
-            for (i, p) in previews.iter().enumerate() {
+            // Pinned font sizes — never let the rasterizer auto-shrink card
+            // text into illegibility, regardless of how narrow the cards get.
+            let name_font = (panel_h * 0.30).clamp(13.0, 20.0);
+            let hint_font = (panel_h * 0.24).clamp(11.0, 16.0);
+            for (i, p) in visible_previews.iter().enumerate() {
                 let cx = panel_x + i as f32 * (card_w + card_gap);
                 let cy = panel_y;
                 // Card background — dim slate, brighter when active.
@@ -663,12 +907,10 @@ impl GameplayScene {
                 // Progress fill — bottom strip of the card.
                 let fill_h = (8.0 * scale).max(5.0);
                 let fill_y = cy + panel_h - fill_h - 2.0;
-                // Track behind the fill.
                 instances.push(GpuInstance {
                     rect: [cx + 4.0, fill_y, card_w - 8.0, fill_h],
                     color: [0.06, 0.07, 0.12, 0.9],
                 });
-                // Filled portion — gold when active, indigo-blue otherwise.
                 let fill_w = (card_w - 8.0) * p.progress;
                 if fill_w > 0.5 {
                     let fill_color = if p.active {
@@ -681,7 +923,7 @@ impl GameplayScene {
                         color: fill_color,
                     });
                 }
-                // Top text: yaku name + bonus value.
+                // Top text: yaku name + bonus value, pinned font_px.
                 let name_h = panel_h * 0.42;
                 let name_color = if p.active {
                     [1.0, 0.92, 0.55, 1.0]
@@ -690,10 +932,11 @@ impl GameplayScene {
                 };
                 yaku_text_labels.push(TextLabel {
                     rect: [cx + 4.0, cy + 2.0, card_w - 8.0, name_h],
-                    text: format!("{} +{} mult", p.kind.name(), p.kind.mult_bonus()),
+                    text: format!("{} +{}", p.kind.name(), p.kind.mult_bonus()),
                     color: name_color,
+                    font_px: Some(name_font),
+                    ..Default::default()
                 });
-                // Hint text below the name, above the progress bar.
                 let hint_h = panel_h - name_h - fill_h - 6.0;
                 let hint_y = cy + name_h + 2.0;
                 let hint_color = if p.active {
@@ -705,8 +948,55 @@ impl GameplayScene {
                     rect: [cx + 4.0, hint_y, card_w - 8.0, hint_h.max(8.0)],
                     text: p.hint.clone(),
                     color: hint_color,
+                    font_px: Some(hint_font),
+                    ..Default::default()
                 });
+
+                // Hover tracking for the tooltip pass below the loop.
+                let (cur_x, cur_y) = self.cursor_pos;
+                if cur_x >= cx
+                    && cur_x <= cx + card_w
+                    && cur_y >= cy
+                    && cur_y <= cy + panel_h
+                {
+                    hovered_yaku = Some((p.kind, cx + card_w * 0.5, cy));
+                }
             }
+        }
+        // Yaku card hover tooltip — pushed into `instances` (which exists)
+        // and into `yaku_text_labels`, which gets merged into `text_labels`
+        // later in this function.
+        if let Some((yk, ax, ay)) = hovered_yaku {
+            let title = format!(
+                "{}  (+{} mult, +{} chips)",
+                yk.name(),
+                yk.mult_bonus(),
+                yk.chip_bonus()
+            );
+            let body = format!(
+                "{}.  Loadout: {}",
+                yaku_card_shape_text(yk),
+                if run.yaku_loadout.contains(&yk)
+                    || matches!(
+                        yk,
+                        crate::core::yaku::YakuKind::FullHand | crate::core::yaku::YakuKind::Yakuhai
+                    )
+                {
+                    "yes (full strength)"
+                } else {
+                    "no (scores at 50%)"
+                },
+            );
+            push_tooltip(
+                &mut instances,
+                &mut yaku_text_labels,
+                ax,
+                ay,
+                layout.window_w,
+                layout.window_h,
+                &title,
+                &body,
+            );
         }
 
         let paused = self.pause_menu.paused;
@@ -716,7 +1006,7 @@ impl GameplayScene {
             play_btn_rect,
             discard_btn_rect,
         ];
-        let base_colors: [[f32; 4]; BTN_COUNT] = [
+        let base_colors: [[f32; 4]; 4] = [
             [0.22, 0.38, 0.55, 0.92], // sort suit
             [0.22, 0.38, 0.55, 0.92], // sort rank
             if selection_valid && run.plays_remaining > 0 {
@@ -732,7 +1022,7 @@ impl GameplayScene {
         ];
         for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
             // Draw a highlight border if this button is focused.
-            if self.button_focus == Some(i) {
+            if self.button_focus == Some(ALL_BUTTONS[i]) {
                 let pad = 3.0;
                 instances.push(GpuInstance {
                     rect: [bx - pad, by - pad, bw + pad * 2.0, bh + pad * 2.0],
@@ -760,12 +1050,28 @@ impl GameplayScene {
         let cart_y = sp.y + (sp.h - cart_h) * 0.5;
         let (ctx_x, ctx_y, ctx_w, ctx_h) =
             crate::render::animation::apply_transform_rect(cart_x, cart_y, cart_w, cart_h, ts);
+        // Two-line stack inside the cartouche: top = blind/round/score, bot =
+        // status row (gold/wall/wind/shanten). Each line gets its own pinned
+        // font_px so they render at the same readable size regardless of how
+        // long the strings are.
+        let header_top_font = (ctx_h * 0.42).clamp(14.0, 28.0);
+        let header_bot_font = (ctx_h * 0.30).clamp(12.0, 22.0);
+        let line_top_h = ctx_h * 0.55;
+        let line_bot_h = ctx_h * 0.45;
         let mut text_labels = vec![
-            // Score panel — single line of gold serif inside the cartouche.
             TextLabel {
-                rect: [ctx_x, ctx_y, ctx_w, ctx_h],
-                text: score_text,
+                rect: [ctx_x, ctx_y, ctx_w, line_top_h],
+                text: score_text_top,
                 color: crate::render::theme::color::CHAMPAGNE,
+                font_px: Some(header_top_font),
+                ..Default::default()
+            },
+            TextLabel {
+                rect: [ctx_x, ctx_y + line_top_h, ctx_w, line_bot_h],
+                text: score_text_bot,
+                color: crate::render::theme::color::PARCHMENT,
+                font_px: Some(header_bot_font),
+                ..Default::default()
             },
         ];
         // Modifier strip: dynamic cascade widgets (when active) or status text (idle).
@@ -774,11 +1080,11 @@ impl GameplayScene {
                 rect: [ms.x, ms.y, ms.w, ms.h],
                 text: cascade_text,
                 color: cascade_color,
+                ..Default::default()
             });
         } else {
             text_labels.extend(cascade_labels);
         }
-        text_labels.extend(relic_labels);
         text_labels.extend(yaku_text_labels);
         text_labels.push(TextLabel {
             rect: [
@@ -789,6 +1095,7 @@ impl GameplayScene {
             ],
             text: "Sort by Suit".into(),
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
         text_labels.push(TextLabel {
             rect: [
@@ -799,6 +1106,7 @@ impl GameplayScene {
             ],
             text: "Sort by Rank".into(),
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
         let play_label = "Play Hand".into();
         text_labels.push(TextLabel {
@@ -810,6 +1118,7 @@ impl GameplayScene {
             ],
             text: play_label,
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
         let discard_label = "Discard".into();
         text_labels.push(TextLabel {
@@ -821,6 +1130,7 @@ impl GameplayScene {
             ],
             text: discard_label,
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
 
         // While paused, don't expose gameplay buttons as clickable — the
@@ -838,6 +1148,129 @@ impl GameplayScene {
                 ButtonDef::ui(discard_btn_rect, UiAction::CommitDiscard),
             ]
         };
+
+        // ── Zodiac inventory bar (Patch B finishing) ─────────────────────
+        //
+        // Sits in the top-right corner of the screen, away from the score
+        // cartouche and relic dish. Each slot is a clickable badge showing
+        // the Zodiac's name and the yaku it levels; clicking it consumes the
+        // card and bumps the yaku level for the rest of the run.
+        //
+        // Slot dimensions are sized to comfortably fit two pinned-font lines
+        // plus the longest yaku name + level suffix (e.g. "→ Sanshoku L9").
+        let zodiac_inv = &run.zodiac_inventory;
+        if zodiac_inv.capacity > 0 {
+            let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
+            let slot_w = (140.0 * zscale).max(120.0);
+            let slot_h = (56.0 * zscale).max(48.0);
+            let gap = (6.0 * zscale).max(3.0);
+            let total_w = slot_w * zodiac_inv.capacity as f32
+                + gap * (zodiac_inv.capacity as f32 - 1.0);
+            let strip_x = layout.window_w - total_w - (16.0 * zscale);
+            let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
+            for slot_idx in 0..zodiac_inv.capacity {
+                let zx = strip_x + slot_idx as f32 * (slot_w + gap);
+                let zy = strip_y;
+                if let Some(&z) = zodiac_inv.items.get(slot_idx) {
+                    // Filled slot — gold background, click registers the use.
+                    instances.push(GpuInstance {
+                        rect: [zx, zy, slot_w, slot_h],
+                        color: [0.42, 0.32, 0.10, 0.92],
+                    });
+                    // Gold rim.
+                    let rim = 1.5 * zscale;
+                    let gold = crate::render::theme::color::GOLD;
+                    instances.push(GpuInstance {
+                        rect: [zx, zy, slot_w, rim],
+                        color: gold,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [zx, zy + slot_h - rim, slot_w, rim],
+                        color: gold,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [zx, zy, rim, slot_h],
+                        color: gold,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [zx + slot_w - rim, zy, rim, slot_h],
+                        color: gold,
+                    });
+                    // Two pinned-font rows: zodiac name (gold) over the
+                    // target yaku + level (parchment). Pinning prevents the
+                    // rasterizer from auto-shrinking long yaku names like
+                    // "Sanshoku" to the 8px floor when the slot is narrow.
+                    let name_font = (slot_h * 0.34).clamp(14.0, 22.0);
+                    let yaku_font = (slot_h * 0.28).clamp(12.0, 18.0);
+                    let name_h = slot_h * 0.46;
+                    text_labels.push(TextLabel {
+                        rect: [zx, zy + 2.0, slot_w, name_h],
+                        text: z.name().to_string(),
+                        color: crate::render::theme::color::CHAMPAGNE,
+                        font_px: Some(name_font),
+                        ..Default::default()
+                    });
+                    let level = run.yaku_levels.level_of(z.yaku());
+                    let yaku_h = slot_h * 0.40;
+                    text_labels.push(TextLabel {
+                        rect: [zx, zy + name_h + 2.0, slot_w, yaku_h],
+                        text: format!("{} L{}", z.yaku().name(), level),
+                        color: crate::render::theme::color::PARCHMENT,
+                        font_px: Some(yaku_font),
+                        ..Default::default()
+                    });
+                    if !paused {
+                        buttons.push(ButtonDef::scene(
+                            (zx, zy, slot_w, slot_h),
+                            ZODIAC_USE_BASE + slot_idx as u32,
+                        ));
+                    }
+                    // Hover tooltip — mirrors the relic tooltip pattern.
+                    let (cx, cy) = self.cursor_pos;
+                    if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
+                        let level = run.yaku_levels.level_of(z.yaku());
+                        let title = format!("{} (Zodiac)", z.name());
+                        let body = format!(
+                            "Click or press to use. Permanently raises {} from level {} to {} for the rest of the run (+0.5 mult, +20 chips per level).",
+                            z.yaku().name(),
+                            level,
+                            level + 1,
+                        );
+                        push_tooltip(
+                            &mut instances,
+                            &mut text_labels,
+                            zx + slot_w * 0.5,
+                            zy,
+                            layout.window_w,
+                            layout.window_h,
+                            &title,
+                            &body,
+                        );
+                    }
+                } else {
+                    // Empty slot — dim outline.
+                    instances.push(GpuInstance {
+                        rect: [zx, zy, slot_w, slot_h],
+                        color: [0.06, 0.07, 0.12, 0.55],
+                    });
+                    // Hover tooltip even on empty slots: tells the player what
+                    // the strip is for.
+                    let (cx, cy) = self.cursor_pos;
+                    if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
+                        push_tooltip(
+                            &mut instances,
+                            &mut text_labels,
+                            zx + slot_w * 0.5,
+                            zy,
+                            layout.window_w,
+                            layout.window_h,
+                            "Zodiac Slot",
+                            "Empty. Earn Zodiac cards by clearing blinds or buying them in the shop. Using one permanently levels its yaku.",
+                        );
+                    }
+                }
+            }
+        }
 
         // Particle instances.
         for (rect, color) in self.particles.instances() {
@@ -869,14 +1302,10 @@ impl GameplayScene {
             // Hit-test against the projected rects when available, since
             // those reflect what the user actually sees. Fall back to the
             // flat slots if the renderer hasn't projected yet.
-            let hovered_idx: Option<usize> = if !ctx.projected_hand_rects.is_empty() {
-                ctx.projected_hand_rects
-                    .iter()
-                    .find(|(_, r)| {
-                        cx >= r[0] && cx <= r[0] + r[2] && cy >= r[1] && cy <= r[1] + r[3]
-                    })
-                    .map(|(i, _)| *i)
-            } else {
+            // Prefer the renderer's raycast pick (camera ray vs tile OBB);
+            // fall back to a flat slot test on the very first frame before
+            // any pick data exists.
+            let hovered_idx: Option<usize> = ctx.picked_hand_tile.or_else(|| {
                 hand_slots
                     .iter()
                     .enumerate()
@@ -884,7 +1313,7 @@ impl GameplayScene {
                         cx >= sx && cx <= sx + sw && cy >= sy && cy <= sy + sh
                     })
                     .map(|(i, _)| i)
-            };
+            });
 
             if let Some(idx) = hovered_idx {
                 if let Some(tile) = run.hand.get(idx) {
@@ -986,10 +1415,59 @@ impl GameplayScene {
                             ],
                             text: line,
                             color,
+                            ..Default::default()
                         });
                     }
                 }
             }
+        }
+
+        // ── Help (`?`) badge — top-left corner ───────────────────────────
+        //
+        // A small clickable badge that opens the glossary overlay. Sized to
+        // match the existing top HUD chrome, positioned outside the score
+        // panel so it doesn't crowd the cartouche.
+        let help_w = (38.0 * scale).max(24.0);
+        let help_h = help_w;
+        let help_x = (12.0 * scale).max(8.0);
+        let help_y = layout.score_panel.y + (layout.score_panel.h - help_h) * 0.5;
+        instances.push(GpuInstance {
+            rect: [help_x, help_y, help_w, help_h],
+            color: crate::render::theme::color::alpha(
+                crate::render::theme::color::INDIGO,
+                0.92,
+            ),
+        });
+        // Gold rim so the badge reads as interactive.
+        let rim = (1.5 * scale).max(1.0);
+        let gold = crate::render::theme::color::GOLD;
+        instances.push(GpuInstance {
+            rect: [help_x, help_y, help_w, rim],
+            color: gold,
+        });
+        instances.push(GpuInstance {
+            rect: [help_x, help_y + help_h - rim, help_w, rim],
+            color: gold,
+        });
+        instances.push(GpuInstance {
+            rect: [help_x, help_y, rim, help_h],
+            color: gold,
+        });
+        instances.push(GpuInstance {
+            rect: [help_x + help_w - rim, help_y, rim, help_h],
+            color: gold,
+        });
+        text_labels.push(TextLabel {
+            rect: [help_x, help_y, help_w, help_h],
+            text: "?".into(),
+            color: crate::render::theme::color::CHAMPAGNE,
+            ..Default::default()
+        });
+        if !paused {
+            buttons.push(ButtonDef::scene(
+                (help_x, help_y, help_w, help_h),
+                HELP_BADGE_ID,
+            ));
         }
 
         // Pause overlay.
@@ -1015,6 +1493,24 @@ impl GameplayScene {
             ));
         }
 
+        // Glossary overlay — drawn last so it sits on top of everything,
+        // including the pause menu (closing the glossary returns the player
+        // to whatever they were doing underneath).
+        self.glossary.draw(
+            layout.window_w,
+            layout.window_h,
+            &mut instances,
+            &mut text_labels,
+            &mut buttons,
+        );
+        if self.glossary.open {
+            // Click-blocker behind the glossary's own buttons.
+            buttons.push(ButtonDef::scene(
+                (0.0, 0.0, layout.window_w, layout.window_h),
+                u32::MAX,
+            ));
+        }
+
         // ── Candles ─────────────────────────────────────────────────────
         // Four ambient candles flank the play area: one on each side of the
         // score panel up top, one on each side of the hand strip down below.
@@ -1024,6 +1520,7 @@ impl GameplayScene {
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
+        let _relic_placements: Vec<crate::scenes::RelicPlacement> = Vec::new();
         let scale_c = (layout.window_w / 600.0).max(0.5);
         // The wax mesh is now ~0.555 tall and ~0.36 wide in local units
         // (votive proportions), so `candle_scale` (= the uniform mesh
@@ -1165,69 +1662,304 @@ impl GameplayScene {
             let _ = candle_w;
         }
 
-        // The 3D table + tiles + candles ARE the UI. We don't paint a 2D
-        // "tray" or per-slot pockets here — those would overdraw the 3D
-        // scene. The only 2D add-on is a thin gold rim around each
-        // *selected* tile, drawn as a screen-space overlay above the tile.
-        // We use the renderer-provided `projected_hand_rects` (the actual
-        // visible rect of the 3D tile this frame) so the rim hugs the tile
-        // wherever the perspective camera puts it.
-        let mut selection_overlay: Vec<GpuInstance> = Vec::new();
-        for (i, &is_sel) in run.selected.iter().enumerate() {
-            if !is_sel {
-                continue;
+        // The 3D table + tiles + candles ARE the UI. Selection feedback is
+        // now a true 3D gold-metal outline shell drawn by the renderer's
+        // tile_outline_pipeline (which catches candlelight), so no 2D
+        // selection overlay is added here.
+
+        // ── Physical relic placeholders sitting in a dish on the table ──
+        // Each active relic becomes a small colored box in a row toward the
+        // back of the table. Sizes are deterministic-but-varied so the row
+        // reads as a collection of distinct objects rather than a uniform
+        // line of cubes. The renderer draws a brass dish under them.
+        let mut relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
+        let active_ids = &run.relics.active;
+        if !active_ids.is_empty() {
+            use crate::core::relic::all_relic_defs;
+            let defs = all_relic_defs();
+            // Lay the row out in pixel coordinates so the renderer's
+            // pixel_to_world helper places them on the table plane. We sit
+            // them just above the score-panel band, in front of the
+            // back-edge candles.
+            let row_center_x = layout.window_w * 0.5;
+            let row_y = layout.score_panel.y + layout.score_panel.h + layout.window_h * 0.08;
+            let n = active_ids.len() as f32;
+            // Each cell ~160px wide so the relics read as substantial
+            // physical objects rather than dice.
+            let cell_w = 160.0_f32;
+            let total_w = cell_w * n;
+            let start_x = row_center_x - total_w * 0.5 + cell_w * 0.5;
+            for (i, &rid) in active_ids.iter().enumerate() {
+                // Pseudo-random per-relic size variation, deterministic on id.
+                let seed = (rid as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
+                let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
+                let r1 = ((seed >> 16) & 0xFF) as f32 / 255.0;
+                let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
+                let half_x = 55.0 + r0 * 18.0;
+                let half_y = 40.0 + r1 * 22.0;
+                let half_z = 38.0 + r2 * 16.0;
+
+                // Color tracks the relic's rarity tier so similar-rarity
+                // relics share a visual family.
+                let rarity = defs
+                    .iter()
+                    .find(|d| d.id == rid)
+                    .map(|d| d.rarity)
+                    .unwrap_or(crate::core::relic::Rarity::Common);
+                let tier: u8 = match rarity {
+                    crate::core::relic::Rarity::Common => 0,
+                    crate::core::relic::Rarity::Uncommon => 1,
+                    crate::core::relic::Rarity::Rare => 2,
+                    crate::core::relic::Rarity::Legendary => 3,
+                };
+                let color = crate::render::theme::color::rarity(tier);
+
+                // Activation glow: if this relic is in the cascade glow map,
+                // compute a fast-attack / smooth-decay envelope and stash it
+                // on the placement so the renderer can brighten the box and
+                // emit a real additive halo around it. Attack is the first
+                // ~12% of the lifetime; the rest is a quadratic decay so the
+                // glow flares quickly and lingers in a soft afterglow.
+                let glow = if let Some(start) = self.relic_glow_starts.get(&rid) {
+                    let now_for_glow = Instant::now();
+                    let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
+                    let life = RELIC_GLOW_LIFETIME.as_secs_f32();
+                    if age >= life {
+                        0.0
+                    } else {
+                        let t = (age / life).clamp(0.0, 1.0);
+                        let attack_end = 0.12_f32;
+                        if t < attack_end {
+                            (t / attack_end).clamp(0.0, 1.0)
+                        } else {
+                            let decay_t = (t - attack_end) / (1.0 - attack_end);
+                            (1.0 - decay_t).max(0.0).powi(2)
+                        }
+                    }
+                } else {
+                    0.0
+                };
+
+                let px = start_x + i as f32 * cell_w;
+                relic_placements.push(crate::render::draw_cmd::RelicPlacement {
+                    world_pos: [px, row_y, 0.0],
+                    half_extents: [half_x, half_y, half_z],
+                    color,
+                    relic_id: rid,
+                    glow,
+                });
             }
-            // Prefer the projected 3D rect; fall back to the layout slot if
-            // the renderer hasn't projected it yet (first frame).
-            let rect = ctx
-                .projected_hand_rects
-                .iter()
-                .find_map(|(idx, r)| if *idx == i { Some(*r) } else { None })
-                .or_else(|| layout.hand_slots.get(i).map(|s| [s.x, s.y, s.w, s.h]));
-            let Some([rx, ry, rw, rh]) = rect else {
-                continue;
-            };
-            let rt = (rh * 0.020).clamp(2.0, 4.0);
-            let rim = crate::render::theme::color::CHAMPAGNE;
-            // Top
-            selection_overlay.push(GpuInstance {
-                rect: [rx, ry, rw, rt],
-                color: rim,
-            });
-            // Bottom
-            selection_overlay.push(GpuInstance {
-                rect: [rx, ry + rh - rt, rw, rt],
-                color: rim,
-            });
-            // Left
-            selection_overlay.push(GpuInstance {
-                rect: [rx, ry + rt, rt, rh - 2.0 * rt],
-                color: rim,
-            });
-            // Right
-            selection_overlay.push(GpuInstance {
-                rect: [rx + rw - rt, ry + rt, rt, rh - 2.0 * rt],
-                color: rim,
-            });
         }
-        // The selection rim should appear *over* the 3D tile, so it goes
-        // into the regular `instances` vec (which is drawn after the hand
-        // tile backdrop in `into_frame`). Splice it in front of the
-        // existing 2D HUD quads so it sits below the score panel etc.
-        let mut combined_instances = selection_overlay;
-        combined_instances.append(&mut instances);
-        let instances = combined_instances;
+
+        // Hover detection + outline + tooltip overlay. Uses the
+        // renderer-provided projected screen rect from the *previous* frame
+        // (one-frame-stale, like hand tile hover) to hit-test the cursor.
+        let (cur_x, cur_y) = self.cursor_pos;
+        let mut hovered_relic_idx: Option<usize> = None;
+        for (i, rect) in ctx.projected_relic_rects.iter().enumerate() {
+            let [rx, ry, rw, rh] = *rect;
+            if cur_x >= rx && cur_x <= rx + rw && cur_y >= ry && cur_y <= ry + rh {
+                hovered_relic_idx = Some(i);
+                break;
+            }
+        }
+        if let Some(hi) = hovered_relic_idx {
+            if let (Some(rect), Some(rid)) = (
+                ctx.projected_relic_rects.get(hi),
+                relic_placements.get(hi).map(|p| p.relic_id),
+            ) {
+                // Gold rim drawn around the projected screen rect — cheap
+                // 2D outline that hugs the visible 3D box.
+                let [rx, ry, rw, rh] = *rect;
+                let t = (rh * 0.04).clamp(2.0, 4.0);
+                let rim = crate::render::theme::color::CHAMPAGNE;
+                instances.push(GpuInstance {
+                    rect: [rx - t, ry - t, rw + t * 2.0, t],
+                    color: rim,
+                });
+                instances.push(GpuInstance {
+                    rect: [rx - t, ry + rh, rw + t * 2.0, t],
+                    color: rim,
+                });
+                instances.push(GpuInstance {
+                    rect: [rx - t, ry, t, rh],
+                    color: rim,
+                });
+                instances.push(GpuInstance {
+                    rect: [rx + rw, ry, t, rh],
+                    color: rim,
+                });
+
+                // Tooltip: name + description in a small dark panel anchored
+                // above the hovered relic.
+                use crate::core::relic::all_relic_defs;
+                let defs = all_relic_defs();
+                if let Some(def) = defs.iter().find(|d| d.id == rid) {
+                    let pad = 18.0_f32;
+                    let tip_w = 440.0_f32;
+                    let title_h = 38.0_f32;
+                    // Pre-wrap the description so the tooltip box can grow
+                    // tall enough to fit every line.
+                    let body_style = TextStyle {
+                        tier: typography::BODY,
+                        color: crate::render::theme::color::PARCHMENT,
+                        padding: 0.0,
+                        align: TextAlign::Left,
+                    };
+                    let body_line_h = typography::size(body_style.tier, layout.window_h);
+                    let body_step = body_line_h * 1.6;
+                    let body_box = body_line_h * 1.8;
+                    let body_inner_w = tip_w - pad * 2.0;
+                    let wrapped_lines = widget::wrap_text(def.description, body_inner_w, body_line_h);
+                    let body_h = (wrapped_lines.len() as f32 * body_step).max(body_box);
+                    let tip_h = pad * 2.0 + title_h + body_h;
+                    let mut tip_x = rx + rw * 0.5 - tip_w * 0.5;
+                    let mut tip_y = ry - tip_h - 8.0;
+                    // Clamp to window so the tooltip stays visible.
+                    tip_x = tip_x.clamp(8.0, layout.window_w - tip_w - 8.0);
+                    if tip_y < 8.0 {
+                        tip_y = ry + rh + 8.0;
+                    }
+                    let bg = crate::render::theme::color::alpha(
+                        crate::render::theme::color::MIDNIGHT,
+                        0.96,
+                    );
+                    instances.push(GpuInstance {
+                        rect: [tip_x, tip_y, tip_w, tip_h],
+                        color: bg,
+                    });
+                    // Gold border (4 thin quads).
+                    let bt = 1.5_f32;
+                    let border = crate::render::theme::color::BRASS;
+                    instances.push(GpuInstance {
+                        rect: [tip_x, tip_y, tip_w, bt],
+                        color: border,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [tip_x, tip_y + tip_h - bt, tip_w, bt],
+                        color: border,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [tip_x, tip_y + bt, bt, tip_h - bt * 2.0],
+                        color: border,
+                    });
+                    instances.push(GpuInstance {
+                        rect: [tip_x + tip_w - bt, tip_y + bt, bt, tip_h - bt * 2.0],
+                        color: border,
+                    });
+                    text_labels.push(TextLabel {
+                        rect: [tip_x + pad, tip_y + pad, tip_w - pad * 2.0, title_h],
+                        text: def.name.to_string(),
+                        color: crate::render::theme::color::CHAMPAGNE,
+                        ..Default::default()
+                    });
+                    widget::push_text_block(
+                        &mut text_labels,
+                        [
+                            tip_x + pad,
+                            tip_y + pad + title_h,
+                            tip_w - pad * 2.0,
+                            body_h,
+                        ],
+                        def.description,
+                        body_style,
+                        layout.window_h,
+                    );
+                }
+            }
+        }
+
+        // When the glossary is open we suppress every 3D-pass element so the
+        // overlay reads as a clean help screen instead of a transparent panel
+        // floating over the table. The quad pass is already self-contained
+        // (the glossary cleared `instances`/`text_labels`/`buttons` itself),
+        // but the 3D mesh / tile / candle / particle passes use these other
+        // SceneDrawOutput fields and need explicit suppression here.
+        let glossary_open = self.glossary.open;
+        let final_hand_tiles = if glossary_open { Vec::new() } else { run.hand.to_vec() };
+        let final_hand_slots = if glossary_open { Vec::new() } else { hand_slots };
+        let final_selected_tiles = if glossary_open {
+            Vec::new()
+        } else {
+            run.selected.clone()
+        };
+        let final_relic_icons = if glossary_open { Vec::new() } else { relic_icons };
+        let final_flame_instances = if glossary_open {
+            Vec::new()
+        } else {
+            flame_instances
+        };
+        let final_point_lights = if glossary_open { Vec::new() } else { point_lights };
+        let final_candles = if glossary_open { Vec::new() } else { candle_placements };
+        let final_relic_placements = if glossary_open {
+            Vec::new()
+        } else {
+            relic_placements
+        };
+
+        // Post-deal smoke breath. `POST_DEAL_GUST_DELAY` after the most
+        // recent deal we exhale a soft sweep of impulses across the hand
+        // strip — a few evenly spaced points pushed back-and-up — so the
+        // smoke that built up while the tiles were sliding in drifts off
+        // toward the back of the table. The strength follows a 4t(1-t)
+        // bell so the breath fades in and out instead of snapping on.
+        let mut wind_gusts: Vec<crate::render::draw_cmd::WindGust> = Vec::new();
+        if !glossary_open {
+            if let Some(deal_at) = self.last_deal_at {
+                let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
+                if elapsed >= POST_DEAL_GUST_DELAY
+                    && elapsed < POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
+                {
+                    let t = (elapsed - POST_DEAL_GUST_DELAY) / POST_DEAL_GUST_DURATION;
+                    let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
+                    if !final_hand_slots.is_empty() {
+                        // Sample anchor: y from the hand strip, but x is
+                        // swept across the FULL window width (with a little
+                        // overshoot past the edges) so the gusts also push
+                        // smoke off the corners of the table — not just the
+                        // smoke directly above the hand. Each impulse uses
+                        // a generous radius so neighbouring gusts overlap
+                        // into one continuous sheet of wind.
+                        let sw = final_hand_slots[0].2;
+                        let sy = final_hand_slots[0].1;
+                        let cy = sy - sw * 0.25;
+                        const SAMPLES: usize = 9;
+                        let win_w = layout.window_w;
+                        let pad = win_w * 0.12;
+                        let span_min = -pad;
+                        let span_max = win_w + pad;
+                        for i in 0..SAMPLES {
+                            let f = (i as f32 + 0.5) / SAMPLES as f32;
+                            let cx = span_min + (span_max - span_min) * f;
+                            // Slightly tilt the velocity outward at the
+                            // edges so smoke at the sides gets pushed both
+                            // back AND laterally off-stage instead of just
+                            // straight back.
+                            let edge_bias = (f - 0.5) * 2.0; // -1..1
+                            let lateral = 28.0 * edge_bias * envelope;
+                            wind_gusts.push(crate::render::draw_cmd::WindGust {
+                                center_px: (cx, cy),
+                                lift: 18.0,
+                                velocity: [lateral, 6.0 * envelope, -55.0 * envelope],
+                                radius: (win_w / SAMPLES as f32) * 1.6,
+                                density: -0.04 * envelope,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         SceneDrawOutput {
             background: super::BackgroundId::Gameplay,
             tray_instances: Vec::new(),
             instances,
-            hand_tiles: run.hand.to_vec(),
-            hand_slots,
+            hand_tiles: final_hand_tiles,
+            hand_slots: final_hand_slots,
             focus,
-            selected_tiles: run.selected.clone(),
+            selected_tiles: final_selected_tiles,
             text_labels,
-            relic_icons,
+            relic_icons: final_relic_icons,
             buttons,
             window_title: format!(
                 "Mahjuro — {} Round {}  {} / {}  Gold: {}  Hands: {}  Discards: {}",
@@ -1239,12 +1971,127 @@ impl GameplayScene {
                 run.plays_remaining,
                 run.discards_remaining
             ),
-            departing_indices: self.pending_departures.clone(),
-            hint_indices,
-            flame_instances,
-            point_lights,
-            candles: candle_placements,
-            draw_table: true,
+            departing_indices: if glossary_open {
+                Vec::new()
+            } else {
+                self.pending_departures.clone()
+            },
+            hint_indices: if glossary_open { Vec::new() } else { hint_indices },
+            flame_instances: final_flame_instances,
+            point_lights: final_point_lights,
+            candles: final_candles,
+            relic_placements: final_relic_placements,
+            draw_table: !glossary_open,
+            wind_gusts,
         }
     }
+}
+
+/// Plain-language hand-shape description for a yaku, mirrored from the
+/// glossary so the gameplay tooltip and the help overlay agree.
+fn yaku_card_shape_text(yk: crate::core::yaku::YakuKind) -> &'static str {
+    use crate::core::yaku::YakuKind;
+    match yk {
+        YakuKind::Tanyao => "All tiles 2–8, no honors or terminals",
+        YakuKind::Toitoi => "All triplets and kongs (no sequences)",
+        YakuKind::FullHand => "Complete 14-tile hand: 4 melds + 1 pair",
+        YakuKind::Yakuhai => "Triplet of any dragon or the round wind",
+        YakuKind::Iipeikou => "Two identical sequences in one suit",
+        YakuKind::SanshokuDoujun => "Same sequence in m / s / p suits",
+        YakuKind::Ittsu => "1-2-3, 4-5-6, 7-8-9 in one suit",
+        YakuKind::Honitsu => "One number suit + honors only",
+        YakuKind::Chinitsu => "All one number suit, no honors",
+        YakuKind::Junchan => "Every meld contains a terminal (1/9)",
+        YakuKind::Honroutou => "Only terminals (1/9) and honors",
+        YakuKind::Chiitoitsu => "Seven distinct pairs",
+    }
+}
+
+/// Render a small tooltip panel anchored above-left of `(anchor_x, anchor_y)`.
+/// Used by the gameplay HUD's hover-tooltip pass for zodiac slots and yaku
+/// progress cards. Mirrors the styling of the existing relic tooltip block
+/// (dark midnight panel + brass border + champagne title + parchment body).
+///
+/// Title pins its font_px so even long names like "Sanshoku Doujun (+4 mult,
+/// +50 chips)" don't get auto-shrunk into illegibility, and the body uses
+/// `push_text_block` with a pinned CAPTION-tier font so multi-line wrapping
+/// renders at a single readable size instead of squeezing to the 8px floor.
+fn push_tooltip(
+    instances: &mut Vec<GpuInstance>,
+    text_labels: &mut Vec<TextLabel>,
+    anchor_x: f32,
+    anchor_y: f32,
+    window_w: f32,
+    window_h: f32,
+    title: &str,
+    body: &str,
+) {
+    use crate::render::theme::{color, typography};
+    use crate::ui::widget::{self, TextStyle};
+
+    let pad = 14.0_f32;
+    let tip_w = (window_w * 0.34).clamp(300.0, 500.0);
+
+    // Pin font sizes — never let the rasterizer auto-shrink below readable.
+    let title_font = typography::size(typography::BODY, window_h).max(15.0);
+    let body_font = typography::size(typography::CAPTION, window_h).max(13.0);
+    let title_h = title_font * 1.6;
+    let body_line_step = body_font * 1.4;
+
+    // Estimate body line count from text length / approx chars per line at the
+    // pinned body font size. Each glyph ~ body_font * 0.55 wide on average.
+    let inner_w = tip_w - pad * 2.0;
+    let chars_per_line = (inner_w / (body_font * 0.55)).max(10.0) as usize;
+    let est_lines = (body.len() / chars_per_line + 1).max(2) as f32;
+    let body_h = (est_lines * body_line_step).min(window_h * 0.5);
+
+    let tip_h = pad * 2.0 + title_h + 4.0 + body_h;
+    let mut tip_x = anchor_x - tip_w * 0.5;
+    let mut tip_y = anchor_y - tip_h - 8.0;
+    tip_x = tip_x.clamp(8.0, window_w - tip_w - 8.0);
+    if tip_y < 8.0 {
+        tip_y = anchor_y + 8.0;
+    }
+    let bg = color::alpha(color::MIDNIGHT, 0.96);
+    instances.push(GpuInstance {
+        rect: [tip_x, tip_y, tip_w, tip_h],
+        color: bg,
+    });
+    let bt = 1.5_f32;
+    let border = color::BRASS;
+    instances.push(GpuInstance {
+        rect: [tip_x, tip_y, tip_w, bt],
+        color: border,
+    });
+    instances.push(GpuInstance {
+        rect: [tip_x, tip_y + tip_h - bt, tip_w, bt],
+        color: border,
+    });
+    instances.push(GpuInstance {
+        rect: [tip_x, tip_y + bt, bt, tip_h - bt * 2.0],
+        color: border,
+    });
+    instances.push(GpuInstance {
+        rect: [tip_x + tip_w - bt, tip_y + bt, bt, tip_h - bt * 2.0],
+        color: border,
+    });
+    text_labels.push(TextLabel {
+        rect: [tip_x + pad, tip_y + pad, inner_w, title_h],
+        text: title.into(),
+        color: color::CHAMPAGNE,
+        font_px: Some(title_font),
+        ..Default::default()
+    });
+    widget::push_text_block(
+        text_labels,
+        [tip_x + pad, tip_y + pad + title_h + 4.0, inner_w, body_h],
+        body,
+        TextStyle {
+            tier: typography::CAPTION,
+            color: color::PARCHMENT,
+            padding: 0.0,
+            align: TextAlign::Left,
+        },
+        window_h,
+    );
 }

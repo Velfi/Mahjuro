@@ -3,15 +3,19 @@
 use crate::game::run::RunState;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
-use crate::ui::input::UiAction;
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::start_screen::StartScreenScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DismissAction;
 
 pub struct GameOverScene {
     pub final_score: u32,
     pub target_score: u32,
     pub won: bool,
+    tree: TreeState,
 }
 
 impl GameOverScene {
@@ -20,6 +24,7 @@ impl GameOverScene {
             final_score,
             target_score,
             won: false,
+            tree: TreeState::new(),
         }
     }
 
@@ -29,20 +34,36 @@ impl GameOverScene {
             final_score,
             target_score,
             won: true,
+            tree: TreeState::new(),
         }
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        for a in ctx.actions {
-            if matches!(a, UiAction::Confirm | UiAction::CommitDiscard) {
-                *ctx.run = RunState::new_demo();
-                return Some(Scene::StartScreen(StartScreenScene::new()));
-            }
+    fn flat_items(&self, w: f32, h: f32) -> [FlatItem<DismissAction>; 1] {
+        [FlatItem::new(FocusId(0), [0.0, 0.0, w, h], DismissAction)]
+    }
+
+}
+
+impl SceneBehavior for GameOverScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        let action = self.tree.update_flat(
+            &items,
+            TreeInput {
+                actions: ctx.actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+            },
+        );
+        if action.is_some() {
+            *ctx.run = RunState::new_demo();
+            return Some(Scene::StartScreen(StartScreenScene::new()));
         }
         None
     }
 
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let bg_color = color::OBSIDIAN;
@@ -59,9 +80,11 @@ impl GameOverScene {
         let subtitle_rect = [w * 0.1, h * 0.50, w * 0.8, h * 0.10];
         let hint_rect = [w * 0.1, h * 0.62, w * 0.8, h * 0.06];
 
-        // Whole-screen click target — there's only one action, so any click
-        // dismisses. Routes through Confirm in update().
-        let dismiss_button = ButtonDef::ui((0.0, 0.0, w, h), UiAction::Confirm);
+        // Whole-screen click target — registered via the tree so click ids
+        // route back through update().
+        let items = self.flat_items(w, h);
+        let mut buttons = Vec::new();
+        self.tree.register_flat_buttons(&items, &mut buttons);
 
         let title = if self.won {
             "Victory! — Final ante cleared — Press Enter to continue".to_string()
@@ -88,27 +111,32 @@ impl GameOverScene {
                     rect: headline_rect,
                     text: headline.to_string(),
                     color: headline_color,
+                    ..Default::default()
                 },
                 TextLabel {
                     rect: subtitle_rect,
                     text: subtitle,
                     color: color::PARCHMENT,
+                    ..Default::default()
                 },
                 TextLabel {
                     rect: hint_rect,
                     text: "Press Enter to continue".to_string(),
                     color: color::MIST,
+                    ..Default::default()
                 },
             ],
             relic_icons: vec![],
-            buttons: vec![dismiss_button],
+            buttons,
             window_title: title,
             departing_indices: vec![],
             hint_indices: vec![],
             flame_instances: vec![],
             point_lights: vec![],
             candles: vec![],
+            relic_placements: vec![],
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }

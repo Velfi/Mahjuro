@@ -12,7 +12,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
 use super::start_screen::StartScreenScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 // ── Layout definition ──────────────────────────────────────────────
 
@@ -261,7 +261,10 @@ impl SolitaireScene {
         self.finished = Some(Finished::Stuck);
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+}
+
+impl SceneBehavior for SolitaireScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         for &id in ctx.button_clicks {
             if id == CLICK_NEW_GAME {
                 self.deal();
@@ -282,7 +285,7 @@ impl SolitaireScene {
         None
     }
 
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = (w.min(h)) / 600.0;
@@ -301,6 +304,7 @@ impl SolitaireScene {
             rect: [0.0, title_y, w, title_h],
             text: "Mahjong Solitaire".into(),
             color: [1.0, 0.95, 0.7, 1.0],
+            ..Default::default()
         });
         let score_h = (18.0 * scale).max(12.0);
         let score_y = title_y + title_h + h * 0.005;
@@ -312,6 +316,7 @@ impl SolitaireScene {
                 self.pairs_matched, remaining
             ),
             color: [0.6, 0.6, 0.7, 0.9],
+            ..Default::default()
         });
 
         // ── Board area ────────────────────────────────────────────
@@ -329,10 +334,14 @@ impl SolitaireScene {
         let extra_w = max_layer * layer_dx.abs();
         let extra_h = max_layer * layer_dy.abs();
 
-        // Tile size — fit grid into board with target tile aspect 1.30.
+        // Tile size — fit grid into board using the canonical Chinese
+        // mahjong face aspect (30 mm × 20 mm = 1.50 long/short, per
+        // Wikipedia). The 3D hand tiles in the main game can be reshaped
+        // via the Tile Style option; the 2D solitaire board sticks with
+        // the standard so the grid stays compact and readable.
         let cell_w_by_w = (board_w - extra_w) / GRID_COLS as f32;
         let cell_h_by_h = (board_h - extra_h) / GRID_ROWS as f32;
-        let target_aspect = 1.30;
+        let target_aspect = 1.50;
         let (tile_w, tile_h) = {
             let by_w = (cell_w_by_w, cell_w_by_w * target_aspect);
             let by_h = (cell_h_by_h / target_aspect, cell_h_by_h);
@@ -421,6 +430,7 @@ impl SolitaireScene {
                     rect: [x, label_y, tile_w, label_h],
                     text: face.label(),
                     color: label_color,
+                    ..Default::default()
                 });
             }
 
@@ -443,6 +453,7 @@ impl SolitaireScene {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "< Back".into(),
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
         buttons.push(ButtonDef::scene((back_x, btn_y, btn_w, btn_h), CLICK_BACK));
 
@@ -455,6 +466,7 @@ impl SolitaireScene {
             rect: [new_x, btn_y, btn_w, btn_h],
             text: "New Deal".into(),
             color: [1.0, 1.0, 1.0, 1.0],
+            ..Default::default()
         });
         buttons.push(ButtonDef::scene(
             (new_x, btn_y, btn_w, btn_h),
@@ -467,6 +479,7 @@ impl SolitaireScene {
             rect: [0.0, hint_y, w, hint_h],
             text: "Match pairs of identical free tiles.   Esc: back".into(),
             color: [0.4, 0.4, 0.5, 0.8],
+            ..Default::default()
         });
 
         // ── End-state banner ──────────────────────────────────────
@@ -492,12 +505,14 @@ impl SolitaireScene {
                 rect: [bx, by + banner_h * 0.18, banner_w, title_font],
                 text: title.into(),
                 color: [1.0, 0.95, 0.7, 1.0],
+                ..Default::default()
             });
             let sub_font = (14.0 * scale).max(10.0);
             text_labels.push(TextLabel {
                 rect: [bx, by + banner_h * 0.55, banner_w, sub_font],
                 text: subtitle.into(),
                 color: [0.85, 0.85, 0.95, 1.0],
+                ..Default::default()
             });
         }
 
@@ -518,7 +533,9 @@ impl SolitaireScene {
             flame_instances: vec![],
             point_lights: vec![],
             candles: vec![],
+            relic_placements: vec![],
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }

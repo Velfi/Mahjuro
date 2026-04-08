@@ -20,7 +20,7 @@ use crate::core::scoring::score_sets;
 use crate::core::tile::Tile;
 use crate::game::event_bus::EventBus;
 use crate::game::game_mode::GameMode;
-use crate::game::run::{RunState, pick_relic_choices};
+use crate::game::run::RunState;
 
 /// Per-run telemetry collected during a single bot playthrough.
 #[derive(Debug, Clone)]
@@ -176,6 +176,12 @@ fn ctx_for(run: &RunState) -> ScoreContext<'_> {
         scored_last_turn: run.scored_last_turn,
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
+        round_wind: Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante)),
+        first_full_hand_of_round: !run.full_hand_played_this_round,
+        plays_used: run.mode.starting_plays.saturating_sub(run.plays_remaining),
+        riichi_active: false,
+        yaku_levels: Some(run.yaku_levels.clone()),
+        yaku_loadout: run.yaku_loadout.clone(),
     }
 }
 
@@ -418,17 +424,34 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     let mut hypothetical = run.relics.clone();
     hypothetical.active.push(candidate);
 
+    let round_wind = Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante));
+    let first_full = !run.full_hand_played_this_round;
+    let plays_used = run.mode.starting_plays.saturating_sub(run.plays_remaining);
+    let yaku_levels = Some(run.yaku_levels.clone());
+    let yaku_loadout = run.yaku_loadout.clone();
     let baseline_ctx = ScoreContext {
         relics: &run.relics,
         scored_last_turn: run.scored_last_turn,
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
+        round_wind,
+        first_full_hand_of_round: first_full,
+        plays_used,
+        riichi_active: false,
+        yaku_levels: yaku_levels.clone(),
+        yaku_loadout: yaku_loadout.clone(),
     };
     let hypo_ctx = ScoreContext {
         relics: &hypothetical,
         scored_last_turn: run.scored_last_turn,
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
+        round_wind,
+        first_full_hand_of_round: first_full,
+        plays_used,
+        riichi_active: false,
+        yaku_levels,
+        yaku_loadout,
     };
 
     let score = |hand: &[Tile], ctx: &ScoreContext| -> i32 {
@@ -449,27 +472,6 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     }
 
     delta_sum / sample_count
-}
-
-/// Tie-breaker score for relics whose marginal value is zero (or negative).
-/// Higher rarity tiles get more weight so the bot at least picks rare relics
-/// when no choice immediately improves the current hand.
-fn relic_tiebreak_score(id: RelicId) -> i32 {
-    all_relic_defs()
-        .iter()
-        .find(|d| d.id == id)
-        .map(|d| d.rarity.weight() as i32)
-        .unwrap_or(0)
-}
-
-/// Pick the relic from `choices` that most improves the current hand. Falls back
-/// to rarity tie-break when no choice has positive marginal value.
-fn pick_best_relic(run: &RunState, choices: &[RelicId]) -> Option<RelicId> {
-    choices.iter().copied().max_by_key(|&c| {
-        let mv = relic_marginal_value(run, c);
-        // Lex sort: marginal value first, rarity tie-break second.
-        (mv, relic_tiebreak_score(c))
-    })
 }
 
 /// Headless analogue of `ShopScene::new` + buy loop. Rolls 3 random non-owned relics
@@ -511,6 +513,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         let price = relic_buy_price(id);
         run.gold -= price;
         run.relics.active.push(id);
+        run.recompute_capacities();
         stats.relics_bought += 1;
         stats.gold_spent += price;
     }
@@ -582,8 +585,6 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
     let mut run = RunState::new(mode);
     let mut stats = RunStats::default();
 
-    let all_relics: Vec<RelicId> = all_relic_defs().iter().map(|d| d.id).collect();
-
     loop {
         if run.is_run_complete() {
             stats.victory = true;
@@ -616,16 +617,10 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
             stats.antes_cleared += 1;
         }
 
-        // Smart relic pick: choose the offered relic with the largest marginal value
-        // against the current hand (with rarity tie-break). This evaluates relics
-        // BEFORE advance_round resets the wall, so the bot judges against the hand
-        // it just played the boss with — a reasonable proxy for "typical" hand value.
-        let choices = pick_relic_choices(&run.relics, blind.relic_choices(), &all_relics);
-        let chosen = pick_best_relic(&run, &choices).unwrap_or(RelicId::TripletBoost);
-        run.advance_round(chosen);
+        run.advance_round();
 
-        // Shop visit happens after advance_round (matching Results → Shop → PickBlind
-        // scene flow), so we evaluate purchases against the freshly-drawn next hand.
+        // Shop visit happens after advance_round (matching Shop → PickBlind scene
+        // flow), so we evaluate purchases against the freshly-drawn next hand.
         visit_shop(&mut run, &mut stats);
     }
 

@@ -2,6 +2,7 @@
 
 use rand::rng;
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 
 use crate::core::tile::{Suit, Tile};
 
@@ -40,6 +41,7 @@ pub fn shuffle_wall(wall: &mut [Tile]) {
     wall.shuffle(&mut rng());
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Wall {
     tiles: Vec<Tile>,
     cursor: usize,

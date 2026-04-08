@@ -30,10 +30,152 @@ struct PointLight {
 
 struct PointLights {
     count: vec4<u32>,
+    // extras.x = display gamma exponent; rest reserved.
+    extras: vec4<f32>,
     lights: array<PointLight, 8>,
 };
 
 @group(1) @binding(0) var<uniform> lights: PointLights;
+
+// ── Tile occluders (analytic AABB shadows for the candle pools) ──────
+// Each entry is one hand tile's world-space AABB. The fragment shader
+// casts a ray from each candle to the shaded fragment and discards a
+// light's contribution if the ray pierces any occluder before reaching
+// the surface. This is what gives the table its tile-shaped shadow
+// pools — the directional shadow map only handles the (near-vertical)
+// key light.
+struct TileOccluder {
+    center: vec4<f32>,       // xyz = AABB center, w unused
+    half_extents: vec4<f32>, // xyz = AABB half-extents, w unused
+};
+struct TileOccluders {
+    count: vec4<u32>, // count.x = number of active occluders
+    boxes: array<TileOccluder, 16>,
+};
+@group(1) @binding(1) var<uniform> occluders: TileOccluders;
+
+// Jorge Jimenez's interleaved gradient noise. Cheap, low-discrepancy,
+// stable in screen space — perfect for jittering shadow taps without
+// the swimming you'd get from white noise. Returns a value in [0, 1).
+fn ign(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
+// Slab test: returns true if the segment from light_pos along `dir` (with
+// `dir = frag_pos - light_pos`) is interrupted by the AABB strictly between
+// the candle (t≈0) and the fragment (t≈1). The bias keeps tiles from
+// self-shadowing on the lit side and candles from blocking their own bases.
+fn segment_hits_aabb(
+    light_pos: vec3<f32>,
+    inv_dir: vec3<f32>,
+    c: vec3<f32>,
+    h: vec3<f32>,
+) -> bool {
+    let t1 = (c - h - light_pos) * inv_dir;
+    let t2 = (c + h - light_pos) * inv_dir;
+    let tmin = min(t1, t2);
+    let tmax = max(t1, t2);
+    let near_t = max(max(tmin.x, tmin.y), tmin.z);
+    let far_t  = min(min(tmax.x, tmax.y), tmax.z);
+    return far_t > near_t && near_t > 0.02 && near_t < 0.985;
+}
+
+// Soft analytic shadow from a candle modeled as a small disc area light.
+// Casts `TAPS` rays from jittered points on the disc to `frag_pos`; each
+// ray is tested against every tile AABB. Returns visibility in [0,1].
+//
+// The IGN seed is the framebuffer pixel coord — adjacent pixels get
+// decorrelated rotations, which produces a stable, gradient-friendly
+// penumbra without temporal animation.
+fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32>) -> f32 {
+    let n = occluders.count.x;
+    if (n == 0u) {
+        return 1.0;
+    }
+    // Disc radius in world units. The candles in this scene are about
+    // 30–40 units across; treating the flame as a ~3-unit disc gives a
+    // believable soft penumbra without making the shadow vanish entirely.
+    let disc_radius = 3.0;
+    // Per-fragment IGN-derived rotation so each pixel sees a different
+    // tap orientation. Two octaves of IGN — one rotates the rosette,
+    // the other phase-shifts the radii — keeps the pattern incoherent
+    // across both axes for any tile alignment.
+    let rot = ign(frag_xy) * 6.2831853;
+    let rad_phase = ign(frag_xy + vec2<f32>(37.0, 91.0));
+    let cos_r = cos(rot);
+    let sin_r = sin(rot);
+
+    // Four taps in a rotated rosette around the candle center, in the
+    // table plane (XZ — world Y is the vertical axis here). The base
+    // pattern is a 4-vertex square scaled by `rad_phase` so adjacent
+    // pixels also vary in disc coverage, not just orientation.
+    let r0 = disc_radius * mix(0.55, 1.0, rad_phase);
+    var visible = 0.0;
+    let taps = array<vec2<f32>, 4>(
+        vec2<f32>( 1.0,  0.0),
+        vec2<f32>( 0.0,  1.0),
+        vec2<f32>(-1.0,  0.0),
+        vec2<f32>( 0.0, -1.0),
+    );
+    for (var ti: i32 = 0; ti < 4; ti = ti + 1) {
+        let base = taps[ti] * r0;
+        let off = vec2<f32>(
+            base.x * cos_r - base.y * sin_r,
+            base.x * sin_r + base.y * cos_r,
+        );
+        let lp = light_pos + vec3<f32>(off.x, 0.0, off.y);
+        let dir = frag_pos - lp;
+        let safe = dir + vec3<f32>(1e-6, 1e-6, 1e-6);
+        let inv = vec3<f32>(1.0) / safe;
+        var blocked = false;
+        for (var k: u32 = 0u; k < n; k = k + 1u) {
+            let c = occluders.boxes[k].center.xyz;
+            let h = occluders.boxes[k].half_extents.xyz;
+            if (segment_hits_aabb(lp, inv, c, h)) {
+                blocked = true;
+            }
+        }
+        if (!blocked) {
+            visible = visible + 1.0;
+        }
+    }
+    return visible * 0.25;
+}
+
+// ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
+struct ShadowGlobals {
+    light_view_proj: mat4x4<f32>,
+    // x = enabled (0/1), y = depth bias, z = texel size, w = unused
+    params: vec4<f32>,
+};
+@group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
+@group(2) @binding(1) var shadow_map: texture_depth_2d;
+@group(2) @binding(2) var shadow_samp: sampler_comparison;
+
+// Returns visibility in [0,1]: 1 = fully lit by the key direction,
+// 0 = fully occluded. Uses 3×3 PCF on the hardware comparison sampler.
+fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
+    if (shadow_globals.params.x < 0.5) {
+        return 1.0;
+    }
+    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
+    let proj = lp.xyz / lp.w;
+    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
+        return 1.0;
+    }
+    let bias = shadow_globals.params.y;
+    let depth_ref = proj.z - bias;
+    let texel = shadow_globals.params.z;
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let off = vec2<f32>(f32(dx), f32(dy)) * texel;
+            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, depth_ref);
+        }
+    }
+    return sum / 9.0;
+}
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -217,21 +359,28 @@ fn wood_height(local_xy: vec2<f32>) -> f32 {
 
 fn wood_sample_basis(b: WoodBasis) -> WoodSample {
     // True walnut palette — deep, low-value, narrow dynamic range. Real
-    // walnut linear-space albedo barely exceeds ~0.10 even on the
+    // walnut linear-space albedo barely exceeds ~0.06 even on the
     // brightest fibers; the brown reads dark in any reasonable lighting.
+    // We keep the dynamic range tight so that the candle pools lifting
+    // the diffuse band don't push the table into a milky tan — the
+    // brightness on the surface should come from the clearcoat lobe
+    // (the glossy lacquer) rather than from raw albedo + light.
+    // Strongly red-skewed to keep the surface reading as "brown" rather
+    // than "tan" once the candle pools lift the values. The G/B channels
+    // are pushed down so even at peak diffuse the chroma stays warm.
     let dark = mix(
-        vec3<f32>(0.018, 0.0085, 0.0040),
-        vec3<f32>(0.030, 0.0140, 0.0065),
+        vec3<f32>(0.0120, 0.0034, 0.0010),
+        vec3<f32>(0.0190, 0.0058, 0.0018),
         b.tone,
     );
     let mid = mix(
-        vec3<f32>(0.055, 0.028, 0.013),
-        vec3<f32>(0.075, 0.038, 0.018),
+        vec3<f32>(0.0320, 0.0105, 0.0035),
+        vec3<f32>(0.0440, 0.0150, 0.0055),
         b.tone,
     );
     let light = mix(
-        vec3<f32>(0.090, 0.050, 0.025),
-        vec3<f32>(0.110, 0.062, 0.030),
+        vec3<f32>(0.0540, 0.0200, 0.0078),
+        vec3<f32>(0.0680, 0.0260, 0.0100),
         b.tone,
     );
 
@@ -255,7 +404,10 @@ fn wood_sample(local_pos: vec3<f32>) -> WoodSample {
 }
 
 @fragment
-fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+fn fs_main(
+    in: VsOut,
+    @builtin(front_facing) front_facing: bool,
+) -> @location(0) vec4<f32> {
     let kind = mesh.material_params.x;
     let spec_strength = mesh.material_params.y;
     let spec_power = max(mesh.material_params.z, 1.0);
@@ -275,34 +427,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         wood_pore = w.pore;
     }
 
-    // Key-light ambient + soft top diffuse (matches the tile shader's mood).
+    // Candle-only lighting: there is no ambient floor and no directional
+    // key light. Every photon on the table comes from a wick PointLight
+    // accumulated in the per-light loop below. `rgb` therefore starts at
+    // pure black; fragments outside any candle pool stay dark.
     var n = normalize(in.world_n);
     if (!front_facing) {
         n = -n;
     }
-    let key_dir = normalize(vec3<f32>(0.25, 1.0, 0.35));
-    let nk = max(dot(n, key_dir), 0.0);
-    var ambient = 0.55;
-    var diffuse_strength = 0.35;
-    if (kind > 0.5 && kind < 1.5) {
-        // Wax: moderate ambient — the per-light back-transmission term
-        // below now does the heavy lifting that the old high ambient
-        // floor (0.78) was faking. Lower ambient lets the wax react
-        // dynamically to the candle pools instead of looking flat.
-        ambient = 0.42;
-        diffuse_strength = 0.28;
-    } else if (kind > 1.5 && kind < 2.5) {
-        // Wick: dark, very low ambient.
-        ambient = 0.25;
-        diffuse_strength = 0.20;
-    } else if (kind > 2.5) {
-        // Lacquered wood: very low ambient — walnut is dark, and we
-        // want the candle pools to be the dominant light source.
-        ambient = 0.14;
-        diffuse_strength = 0.20;
-    }
-    let key_shade = ambient + diffuse_strength * nk;
-    var rgb = albedo * key_shade;
+    var rgb = vec3<f32>(0.0);
 
     // ── Point-light pass ─────────────────────────────────────────────────
     // Distance attenuation + Lambertian, with optional Blinn-Phong specular,
@@ -367,9 +500,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // Clearcoat tunables. F0 = 0.04 (dielectric ~IOR 1.5). The coat is
     // narrower than the wood's grain specular so it reads as a separate
-    // glassy layer rather than just "more highlight".
+    // glassy layer rather than just "more highlight". The deep walnut
+    // base is dark on its own — the lacquer coat is what makes the
+    // table read as polished rather than matte chocolate.
     let coat_strength = select(0.0, 0.55, is_wood);
-    let coat_power = 320.0;
+    let coat_power = 380.0;
     let coat_f0 = 0.04;
 
     let count = lights.count.x;
@@ -386,7 +521,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
         let lambert = 0.35 + 0.65 * nl;
-        lit = lit + lc * intensity * atten * lambert;
+        // Analytic AABB occlusion: tiles between the candle and this
+        // fragment block the light's diffuse + specular contribution.
+        // Floor at 0.18 so shadowed regions still pick up a soft bounce
+        // term — fully black shadows look painted on.
+        let cand_vis = mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy));
+        lit = lit + lc * intensity * atten * lambert * cand_vis;
 
         // Wrap-diffuse SSS: pushes the terminator past 90° so the
         // shaded side of the surface picks up a soft tinted bleed,
@@ -399,7 +539,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             // we don't double-count light on the lit hemisphere.
             let sss_band = max(wrapped - nl, 0.0);
             let sss_mask = select(1.0, 1.0 - wood_pore * 0.7, is_wood);
-            sss_acc = sss_acc + lc * intensity * atten * sss_band * sss_strength * sss_mask;
+            sss_acc = sss_acc + lc * intensity * atten * sss_band * sss_strength * sss_mask * cand_vis;
         }
 
         // Wax back-transmission (Penner SSS). Bend the light direction
@@ -412,7 +552,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             let lt = normalize(l_dir + n * wax_distortion);
             let back = pow(max(dot(view_dir, -lt), 0.0), wax_back_power);
             wax_back_acc = wax_back_acc
-                + lc * intensity * atten * back * wax_thinness * wax_back_scale;
+                + lc * intensity * atten * back * wax_thinness * wax_back_scale * cand_vis;
         }
 
         if (spec_strength > 0.001) {
@@ -422,12 +562,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             // softer underlying sheen. Pores knock both lobes down so
             // open-grain voids stay matte.
             let sharp = pow(nh, spec_power);
-            let soft  = pow(nh, max(spec_power * 0.25, 1.0)) * 0.35;
+            let soft  = pow(nh, max(spec_power * 0.5, 1.0)) * 0.10;
             var s = (sharp + soft) * spec_strength;
             if (is_wood) {
                 s = s * mix(0.55, 1.15, wood_grain) * (1.0 - wood_pore * 0.85);
             }
-            spec_acc = spec_acc + lc * intensity * atten * s;
+            spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
         }
 
         // Clearcoat lobe — Schlick Fresnel against the half-vector,
@@ -441,7 +581,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             let f_schlick = coat_f0 + (1.0 - coat_f0) * pow(1.0 - vdh, 5.0);
             let d = pow(nh, coat_power) * (coat_power + 2.0) / 8.0;
             let coat = d * f_schlick * coat_strength * (1.0 - wood_pore * 0.6);
-            coat_acc = coat_acc + lc * intensity * atten * coat;
+            coat_acc = coat_acc + lc * intensity * atten * coat * cand_vis;
         }
     }
 
@@ -452,21 +592,38 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
         diffuse_scale = 1.0 - f_view * 0.6;
+        // Soft-cap the wood's diffuse light gather. Without this, a
+        // fragment near several candle pools accumulates `lit` past 5–6
+        // and the resulting `albedo * lit` lifts the brown into milky
+        // tan after sRGB encoding. Real lacquered walnut returns very
+        // little diffuse — most of the candlelight bounces off the
+        // glossy coat instead. Reinhard-style soft knee preserves the
+        // ratio between channels so the chroma stays warm.
+        lit = lit / (vec3<f32>(1.0) + lit * 0.55);
+    }
+    // No directional shadow gating now that there's no directional light;
+    // analytic candle AABB occlusion (`cand_vis` above) already darkens
+    // fragments shadowed from the wicks themselves.
+    let lit_shadowed = lit;
+    // Reinhard-knee the coat accumulator on wood: with many candles
+    // contributing additive white highlights, the lacquer lobe was
+    // piling up past 1.0 and milkifying the deep walnut. The knee
+    // preserves the *shape* of the highlight (sharpest bits still
+    // dominate) while clamping the broad lift that comes from many
+    // distant pools all hitting the same fragment.
+    var coat_final = coat_acc;
+    var spec_final = spec_acc;
+    if (is_wood) {
+        coat_final = coat_final / (vec3<f32>(1.0) + coat_final * 0.7);
     }
     rgb = rgb
-        + albedo * lit * diffuse_scale
+        + albedo * lit_shadowed * diffuse_scale
         + sss_acc * sss_tint
         + wax_back_acc * wax_tint
-        + spec_acc
-        + coat_acc;
+        + spec_final
+        + coat_final;
 
-    if (is_wood) {
-        // Ambient Fresnel rim: a *very* subtle cool kiss only at the
-        // most glancing angles. The previous value blew out the whole
-        // far edge of the table into a milky band.
-        let fres = pow(1.0 - ndv_view, 6.0);
-        rgb = rgb + vec3<f32>(0.025, 0.030, 0.045) * fres * (1.0 - wood_pore);
-    }
-
-    return vec4<f32>(rgb, mesh.base_color.a);
+    let inv_g = 1.0 / max(lights.extras.x, 0.01);
+    let out_rgb = pow(rgb, vec3<f32>(inv_g));
+    return vec4<f32>(out_rgb, mesh.base_color.a);
 }

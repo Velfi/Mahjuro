@@ -22,18 +22,37 @@ pub enum SfxId {
     GameOver,
 }
 
+/// All SFX variants in display order. Single source of truth shared by the
+/// startup loader and the debug "Sound Effects Test" overlay so they can't drift.
+pub fn all_sfx_ids() -> &'static [SfxId] {
+    &[
+        SfxId::TileClick,
+        SfxId::TilePlace,
+        SfxId::TileDiscard,
+        SfxId::ScoreReveal,
+        SfxId::ScoreStep,
+        SfxId::ScoreFinal,
+        SfxId::RelicPickup,
+        SfxId::InvalidAction,
+        SfxId::RoundWin,
+        SfxId::GameOver,
+    ]
+}
+
 impl SfxId {
-    fn filename(self) -> &'static str {
+    pub(crate) fn filename(self) -> &'static str {
         match self {
-            SfxId::TileClick => "tile_click.ogg",
+            SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
             SfxId::TilePlace => "nomagician-ui-button-sound-cancel-back-exit-continue-467877.mp3",
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
-            SfxId::ScoreReveal => "score_reveal.ogg",
-            SfxId::ScoreStep => "score_step.ogg",
-            SfxId::ScoreFinal => "score_final.ogg",
+            SfxId::ScoreReveal => {
+                "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI10.ogg"
+            }
+            SfxId::ScoreStep => "kenney_ui-audio/Audio/rollover1.ogg",
+            SfxId::ScoreFinal => "kenney_interface-sounds/Audio/confirmation_002.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
-            SfxId::InvalidAction => "invalid_action.ogg",
-            SfxId::RoundWin => "round_win.ogg",
+            SfxId::InvalidAction => "kenney_interface-sounds/Audio/drop_003.ogg",
+            SfxId::RoundWin => "kenney_music-jingles/Audio/Sax jingles/jingles_SAX16.ogg",
             SfxId::GameOver => "alphix-game-over-417465.mp3",
         }
     }
@@ -60,18 +79,7 @@ impl AudioManager {
         };
 
         let mut sfx_data = HashMap::new();
-        for sfx_id in [
-            SfxId::TileClick,
-            SfxId::TilePlace,
-            SfxId::TileDiscard,
-            SfxId::ScoreReveal,
-            SfxId::ScoreStep,
-            SfxId::ScoreFinal,
-            SfxId::RelicPickup,
-            SfxId::InvalidAction,
-            SfxId::RoundWin,
-            SfxId::GameOver,
-        ] {
+        for &sfx_id in all_sfx_ids() {
             let asset_path = format!("audio/{}", sfx_id.filename());
             if let Some(file) = crate::asset_path::get(&asset_path) {
                 sfx_data.insert(sfx_id, file.data.to_vec());

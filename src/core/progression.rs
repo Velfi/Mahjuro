@@ -96,18 +96,32 @@ impl PlayerProgress {
     }
 
     /// Yaku patterns available for this player's progression level.
+    /// FullHand and Yakuhai are always available; remaining yaku gate on
+    /// progression level. (The Patch B Codex loadout system in run state
+    /// further restricts which of these contribute at full value during a
+    /// given run — see `RunState::yaku_loadout`.)
     pub fn available_yaku(&self) -> Vec<YakuKind> {
         let level = self.current_level();
-        let mut available = vec![YakuKind::FullHand]; // always available
+        let mut available = vec![YakuKind::FullHand, YakuKind::Yakuhai];
         if level >= 2 {
-            available.push(YakuKind::AllTriplets);
-            available.push(YakuKind::AllSimples);
+            available.push(YakuKind::Toitoi);
+            available.push(YakuKind::Tanyao);
         }
         if level >= 3 {
-            available.push(YakuKind::MixedSets);
+            available.push(YakuKind::Iipeikou);
+            available.push(YakuKind::Honitsu);
         }
         if level >= 4 {
-            available.push(YakuKind::Flush);
+            available.push(YakuKind::Chinitsu);
+            available.push(YakuKind::Chiitoitsu);
+        }
+        if level >= 5 {
+            available.push(YakuKind::SanshokuDoujun);
+            available.push(YakuKind::Honroutou);
+        }
+        if level >= 6 {
+            available.push(YakuKind::Junchan);
+            available.push(YakuKind::Ittsu);
         }
         available
     }
@@ -130,8 +144,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TripletBoost,
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
-                RelicId::BambooCharm,
-                RelicId::LuckyPair,
+                RelicId::WallPeek,
+                RelicId::ZodiacPouch,
             ],
             rules: vec![RuleModifier::PairDoubleScore],
         },
@@ -140,27 +154,54 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::MultiplierMaster,
                 RelicId::GreenLuck,
                 RelicId::QuickDraw,
+                RelicId::ShantenLens,
             ],
             rules: vec![],
         },
         3 => LevelUnlocks {
-            relics: vec![RelicId::ChainReaction, RelicId::SetMagnet],
+            relics: vec![
+                RelicId::ChainReaction,
+                RelicId::SetMagnet,
+                RelicId::RoundCompass,
+                RelicId::YakuScholar,
+            ],
             rules: vec![RuleModifier::SequenceWrap],
         },
         4 => LevelUnlocks {
-            relics: vec![RelicId::HonorFury, RelicId::WhiteSilence, RelicId::Overflow],
+            relics: vec![
+                RelicId::HonorFury,
+                RelicId::WhiteSilence,
+                RelicId::Overflow,
+                RelicId::CodexCompass,
+            ],
             rules: vec![RuleModifier::NoSequenceBonus],
         },
         5 => LevelUnlocks {
-            relics: vec![RelicId::JokerTile, RelicId::WildWinds, RelicId::StealthTile],
+            relics: vec![
+                RelicId::JokerTile,
+                RelicId::WildWinds,
+                RelicId::KanDrum,
+                RelicId::DoraCrown,
+                RelicId::TenpaiTalisman,
+            ],
             rules: vec![RuleModifier::HonorTripleScore],
         },
         6 => LevelUnlocks {
-            relics: vec![RelicId::ReverseTile, RelicId::LockedSet],
+            relics: vec![
+                RelicId::RiichiStick,
+                RelicId::RiverEraser,
+                RelicId::FuritenWard,
+                RelicId::LunarAlmanac,
+            ],
             rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
         },
         7 => LevelUnlocks {
-            relics: vec![RelicId::RedDragonRage, RelicId::DragonEcho],
+            relics: vec![
+                RelicId::RedDragonRage,
+                RelicId::DragonEcho,
+                RelicId::EightTreasures,
+                RelicId::KongsBlessing,
+            ],
             rules: vec![],
         },
         _ => LevelUnlocks {

@@ -389,6 +389,7 @@ impl ModalQueue {
             rect: [card_x + padding, title_y, card_w - padding * 2.0, title_h],
             text: modal.title.clone(),
             color: [tr, tg, tb, ta * alpha],
+            ..Default::default()
         });
 
         // Body text.
@@ -398,6 +399,7 @@ impl ModalQueue {
             rect: [card_x + padding, body_y, card_w - padding * 2.0, body_h],
             text: modal.body.clone(),
             color: [dr, dg, db, da * alpha],
+            ..Default::default()
         });
 
         // Dismiss hint.
@@ -414,6 +416,7 @@ impl ModalQueue {
                 let [r, g, b, a] = crate::render::theme::color::SLATE;
                 [r, g, b, a * 0.8 * alpha]
             },
+            ..Default::default()
         });
 
         // Firework particles (rendered on top of dim overlay but mixed with card).

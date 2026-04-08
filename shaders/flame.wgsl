@@ -15,7 +15,7 @@
 struct Globals {
     screen: vec2<f32>,
     time: f32,
-    _pad: f32,
+    gamma: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -161,5 +161,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Premultiplied output for additive blending. Boost slightly so
     // saturated cores still pop on the bright wood table; the alpha
     // term keeps the silhouette soft.
-    return vec4<f32>(rgb * alpha * 1.6, alpha);
+    let inv_g = 1.0 / max(globals.gamma, 0.01);
+    let out_rgb = pow(rgb * alpha * 1.6, vec3<f32>(inv_g));
+    return vec4<f32>(out_rgb, alpha);
 }

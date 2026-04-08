@@ -21,55 +21,102 @@ Hand slots are each 1/14th of the window width — far too narrow for menu cards
 
 Use `relic_row(relics, score_panel, window_w)` from `scenes/mod.rs` to render a horizontal row of relic badges below the score panel. Returns `(Vec<GpuInstance>, Vec<TextLabel>)` to extend into the scene output. Used in gameplay, shop, and pick-blind scenes.
 
-## Mouse Input in Scenes
+## Mouse / Keyboard Input in Scenes — Widget Tree
 
-Scene mouse input is wired through `ButtonDef`s returned from `Scene::draw()`. The main loop hit-tests the cursor against these rects and routes the click to the next `update()` call. There are two routing modes, controlled by the `ButtonAction` variant on each `ButtonDef`:
+Scene UI input is driven by **`src/ui/widget_tree.rs`** — a generic, immediate-mode widget system parameterized over a scene-defined `Action` enum. Each frame the scene builds a tiny `Tree<A>` (or list of `FlatItem<A>`) from current state, hands it to a persistent `TreeState`, and gets back `Option<A>` describing what (if anything) the user activated.
 
-- **`ButtonAction::Ui(action)`** (use `ButtonDef::ui(rect, action)`) — enqueues `action` into `UpdateCtx::actions`, indistinguishable from a key/gamepad press. Use this when the click is semantically the same as some keyboard input the scene already handles. This is the common case.
-- **`ButtonAction::Scene(id)`** (use `ButtonDef::scene(rect, id)`) — enqueues `id` into `UpdateCtx::button_clicks`, where the scene's `update()` matches against its own named const values. Use this when N buttons each need a different effect that has no natural keyboard equivalent (e.g. tab clicks in `collection.rs`, where each tab jumps to a specific tab rather than cycling).
+`TreeState` owns layout, hit-testing, hover-follow, keyboard navigation, slider/toggle/cycle adjustment, and click-id registration. Scenes never duplicate layout math between `update()` and `draw()`, never juggle named `usize` const indices, and never lose sync between hover hit-tests and rendered rects.
 
-There is no separate "click event" channel beyond these two. Every interactive scene must handle three things:
+### Two flavors
 
-### 1. Every clickable element needs a `ButtonDef`
+There are two entry points depending on how a scene's geometry is computed:
 
-If you draw a card/button/tab and don't push a `ButtonDef` for it, it will be invisible to the mouse. Pure keyboard nav is *not* enough — even single-action screens (game over, results) need at least one whole-screen `ButtonDef` so the mouse can dismiss them. The bug pattern to watch for is `buttons: vec![]` in a scene that has visible interactive elements.
+1. **`Tree<A>` — declarative layout** (`Tree::vertical_menu`, `Tree::anchored`, with `wt::button_id`, `wt::slider`, `wt::toggle`, `wt::cycle`, `wt::tab` builders). Use when you want the tree to *compute* the rects: vertical menus, anchored modals, generic Column/Row/Grid containers. See [`start_screen.rs`](src/scenes/start_screen.rs), [`pause_menu.rs`](src/scenes/pause_menu.rs).
 
-### 2. Mouse hover must update the focus index *before* the action loop
+2. **`FlatItem<A>` — bring-your-own rects** (`TreeState::update_flat`, `TreeState::register_flat_buttons`). Use when the rects come from external geometry — `LayoutResult::hand_slots`, custom card grids, hand-laid tab bars. The scene supplies `Vec<FlatItem { id, rect, action }>`; the tree handles hover, focus, click routing, and keyboard linear nav. See [`shop.rs`](src/scenes/shop.rs), [`options.rs`](src/scenes/options.rs), [`collection.rs`](src/scenes/collection.rs), [`results.rs`](src/scenes/results.rs), [`pick_blind.rs`](src/scenes/pick_blind.rs), [`profile_select.rs`](src/scenes/profile_select.rs), [`game_over.rs`](src/scenes/game_over.rs).
 
-Most scenes track a `cursor`/`focused_idx`/`skip_focused` field that determines what `UiAction::Confirm` acts on. When the player clicks a card, the click is enqueued as `Confirm` — but `Confirm` reads `self.cursor`, which by default still points at whatever the *keyboard* last selected. So clicking card 3 might buy card 1.
-
-The fix is for `update()` to hit-test `ctx.cursor_pos` against the same rects `draw()` uses, and update the focus index *before* processing the action queue. Pattern (see `shop.rs`, `results.rs`, `options.rs`):
+### The contract
 
 ```rust
-let (cx, cy) = ctx.cursor_pos;
-for (i, &(rx, ry, rw, rh)) in self.item_rects(ctx.layout).iter().enumerate() {
-    if cx >= rx && cx <= rx + rw && cy >= ry && cy <= ry + rh {
-        self.cursor = i;
-        break;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MainAction { Play, Options, Quit }
+
+impl MainAction { fn id(self) -> FocusId { FocusId(self as u32 + 1) } }
+
+pub struct MyScene { tree: TreeState, /* … */ }
+
+impl MyScene {
+    /// Single source of truth — used by both update() and draw().
+    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<MainAction>> {
+        vec![
+            FlatItem::new(MainAction::Play.id(),    [/*rect*/], MainAction::Play),
+            FlatItem::new(MainAction::Options.id(), [/*rect*/], MainAction::Options),
+            FlatItem::new(MainAction::Quit.id(),    [/*rect*/], MainAction::Quit),
+        ]
+    }
+
+    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        let action = self.tree.update_flat(&items, TreeInput {
+            actions: ctx.actions,
+            button_clicks: ctx.button_clicks,
+            cursor_pos: ctx.cursor_pos,
+            window: (ctx.layout.window_w, ctx.layout.window_h),
+        });
+        match action {
+            Some(MainAction::Play)    => Some(/*…*/),
+            Some(MainAction::Options) => Some(/*…*/),
+            Some(MainAction::Quit)    => { *ctx.quit_requested = true; None }
+            None => None,
+        }
+    }
+
+    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+        let mut buttons = Vec::new();
+        // … render visuals using the SAME rects from flat_items() …
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        self.tree.register_flat_buttons(&items, &mut buttons);
+        SceneDrawOutput { buttons, /* … */ }
     }
 }
-for a in ctx.actions { /* ... */ }
 ```
 
-This also makes the gold focus highlight follow the mouse, which is the expected feel. **Extract a `fn item_rects(&self, &LayoutResult) -> Vec<(f32,f32,f32,f32)>` helper** so the same layout math is used in `update()` (hit-test), `draw()` (rendering), and `draw()` again (button registration). Three copies of the math will drift.
+### Rules
 
-With hover-focus in place, almost every clickable button can be a plain `ButtonDef::ui(rect, UiAction::Confirm)` — the cursor index already disambiguates *which* button is being clicked.
+1. **Every interactive element must appear in the flat-item list / tree.** The tree is what registers `ButtonDef::scene` hit targets with the main loop — anything not in the list is invisible to the mouse. Even single-action screens (game over) need at least one whole-screen item.
 
-### 3. When to use `ButtonAction::Scene(id)`
+2. **Build the item list from a single helper** (`flat_items` / `build_tree`). Both `update()` and `draw()` call it. This is the *whole point* of the system — there should be exactly one place that knows the rects.
 
-Reach for scene click ids only when the cursor-index pattern doesn't fit — typically when clicking a button must take an action *without first focusing it*, so hover-focus isn't a viable disambiguator. The canonical example is `collection.rs` tab clicks: hovering a tab shouldn't switch tabs (that would be jarring), but clicking it should jump directly to that tab regardless of which tab is "focused".
+3. **Each item's `FocusId` must be stable across rebuilds.** Derive it from the action discriminant (`Action::Foo as u32 + 1`) so the focused item survives a rebuild that reorders the list. The tree resolves the focused id against the latest layout each frame; if the id no longer exists it falls back to the first item.
 
-In that case:
+4. **Hover-follow is automatic.** The tree updates its focused id from `cursor_pos` *before* processing actions, so a keyboard `Confirm` always acts on whatever the mouse is over.
 
-1. Define `const CLICK_FOO: u32 = 0; const CLICK_BAR: u32 = 1;` at the top of the scene file. Numbering is local to the scene — collisions across scenes are fine.
-2. Register buttons with `ButtonDef::scene(rect, CLICK_FOO)`.
-3. In `update()`, iterate `for &id in ctx.button_clicks { match id { CLICK_FOO => ..., _ => {} } }`.
+5. **Keyboard nav is automatic.** `FocusUp/Down/Prev/Next` move linearly through the layout-cache order. `Confirm`/`CommitDiscard` activate the focused item.
 
-Do **not** revive the old pattern of hijacking unrelated `UiAction` variants (`ScoreHand` for "Restart", `SortBySuit` for "Main Menu", etc.). It exists nowhere in the codebase anymore and shouldn't come back — `UiAction`s are global, so any scene that hijacks one becomes vulnerable to that key/gamepad binding firing the wrong action from another context.
+6. **`Esc`/`Pause` shortcuts stay in the scene.** The tree only handles activation. Scenes still loop over `ctx.actions` themselves to handle `Cancel`/`Pause`/scene-specific shortcuts.
+
+7. **Heterogeneous rows (sliders/toggles/cycles) — handle adjustment in the scene.** `update_flat` only fires `Click(Row)` actions. For arrow-key slider adjustment or cycle stepping, read `self.tree.focused()` and apply the change in the scene's own action loop. See [`options.rs`](src/scenes/options.rs) `update_input` for the canonical pattern.
+
+### Adding or reordering an item
+
+1. Add an enum variant.
+2. Add one line to the items list (or move an existing line — order is whatever you want).
+3. Add one match arm in `update()` for the new action.
+
+That's it. No const-index renumber, no `_COUNT` sibling, no parallel-array bookkeeping, no hover-rect duplication. The compiler enforces exhaustive action matching.
+
+### Anti-patterns to avoid
+
+- **Manual `cursor: usize` index across heterogeneous items.** Use the action enum + `FocusId` instead. The pre-migration shop scene had a unified `cursor` ranging across cards / owned-relics / next-button — fragile and replaced by `ShopFocus` derived from `tree.focused()`.
+- **Duplicating layout math in `update()` and `draw()`.** AGENTS.md used to recommend a `fn item_rects()` helper as a workaround. The widget tree replaces that workaround entirely.
+- **Direct `ButtonDef::ui` / `ButtonDef::scene` pushes from scene draw code.** Always go through `register_flat_buttons` (or `TreeState::draw` for full-tree scenes) so the click-id registration matches the action enum exactly. The only remaining direct callers should be `widget::push_button` for visuals — pop the synthetic `ButtonDef` it creates and let the tree register the real one.
+- **Hijacking unrelated `UiAction` variants** (`ScoreHand` for "Restart", `SortBySuit` for "Main Menu", etc.). Doesn't exist anywhere now and shouldn't come back — `UiAction`s are global, so hijacking one makes the scene vulnerable to misfires from any other context.
 
 ### Where to look for examples
 
-- `options.rs` — best-in-class hover-to-focus via `hover_row(ctx.cursor_pos)`.
-- `shop.rs` / `results.rs` — cursor-index pattern with hover hit-test and shared rect helper.
-- `start_screen.rs` / `profile_select.rs` / `pause_menu.rs` — hover-focus + plain `Confirm` clicks.
-- `collection.rs` — `ButtonAction::Scene(id)` for tab clicks where hover-focus doesn't apply.
+- [`start_screen.rs`](src/scenes/start_screen.rs) / [`pause_menu.rs`](src/scenes/pause_menu.rs) — vertical menu via `Tree::vertical_menu` with declarative `wt::button_id`.
+- [`options.rs`](src/scenes/options.rs) — heterogeneous rows (sliders + toggles + cycles + back button) via `FlatItem` + scene-side adjustment loop. Best example of killing const-index bookkeeping.
+- [`shop.rs`](src/scenes/shop.rs) — mixed flat list (buy cards + sell badges + next-round button) with `ShopFocus` for visual highlighting derived from `tree.focused()`.
+- [`collection.rs`](src/scenes/collection.rs) — tabs + footer arrows + back button as flat items, with scene-owned grid card rendering (cards aren't interactive).
+- [`results.rs`](src/scenes/results.rs) / [`profile_select.rs`](src/scenes/profile_select.rs) / [`game_over.rs`](src/scenes/game_over.rs) — small scenes, `FlatItem` from layout slots or window-sized dismiss targets.
+- [`gameplay.rs`](src/scenes/gameplay.rs) — `GameplayButton` enum for the bottom button bar; uses `ButtonDef::ui` directly because each button maps to a unique semantic `UiAction` already.

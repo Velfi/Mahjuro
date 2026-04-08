@@ -1,120 +1,151 @@
-//! GPU-accelerated 2D Eulerian fluid simulation for atmospheric smoke effects.
+//! GPU-accelerated 3D Eulerian fluid simulation for volumetric smoke.
 //!
-//! Runs a Navier-Stokes simulation on a 240x150 grid via compute shaders.
-//! Mouse/tile interactions inject colored velocity+density. The density field
-//! renders as an alpha-blended overlay between tiles and UI elements.
+//! Runs a Navier-Stokes step on a 3D grid via compute shaders, then renders
+//! the smoke as a ray-marched, depth-occluded fullscreen pass that lights
+//! from the same point lights as the rest of the 3D scene.
+//!
+//! Pipeline per frame:
+//!   1. inject       — splat impulses (gaussian) into ping[0] → ping[1]
+//!   2. advect       — backtrace+filter+buoyancy+dissipation, ping[1] → ping[0]
+//!   3. divergence   — compute ∇·v from ping[0], clear pressure[0]
+//!   4. jacobi N×    — pressure_a ↔ pressure_b (forced even so result lands in [0])
+//!   5. project      — subtract ∇p from ping[0] → ping[1]
+//!   6. copy         — ping[1] → ping[0] so next frame's inject reads "current"
+//!
+//! Velocity + density share an `Rgba16Float` 3D texture (xyz=velocity, w=density).
+//! Pressure and divergence use `R32Float`.
 
+use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
 use crate::persistence::SmokeIntensity;
 
-const GRID_W: u32 = 240;
-const GRID_H: u32 = 150;
-const GRID_CELLS: u32 = GRID_W * GRID_H;
+// ──────────────────────────────────────────────────────────────────────
+// Grid configuration
+// ──────────────────────────────────────────────────────────────────────
 
-/// A single injection impulse queued for the current frame.
+const GRID_X: u32 = 96;
+const GRID_Y: u32 = 48;
+const GRID_Z: u32 = 96;
+const WG: u32 = 4;
+
+const MAX_INJECTIONS: usize = 32;
+
+// ──────────────────────────────────────────────────────────────────────
+// Uniform structs (std140-friendly: vec4 alignment everywhere)
+// ──────────────────────────────────────────────────────────────────────
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FluidUniformsGpu {
+    grid_size: [f32; 4],
+    grid_min: [f32; 4],
+    grid_max: [f32; 4],
+    inv_extent: [f32; 4],
+    /// x = dt, y = density_dissipation, z = velocity_dissipation, w = buoyancy
+    params: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct InjectionPointGpu {
-    pos_radius: [f32; 4],  // (grid_x, grid_y, radius, strength)
-    vel_density: [f32; 4], // (vel_x, vel_y, _, _)
-    color_pad: [f32; 4],   // (density_r, density_g, density_b, _)
+    pos_radius: [f32; 4],
+    vel_density: [f32; 4],
 }
-
-const MAX_INJECTIONS: usize = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct InjectionParamsGpu {
     points: [InjectionPointGpu; MAX_INJECTIONS],
-    active_count: u32,
-    _pad: [u32; 3],
+    active_count: [u32; 4],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct FluidUniformsGpu {
-    grid_w: f32,
-    grid_h: f32,
-    inv_grid_w: f32,
-    inv_grid_h: f32,
-    dt: f32,
-    density_dissipation: f32,
-    velocity_dissipation: f32,
-    _pad: f32,
+struct VolumeCameraGpu {
+    inv_view_proj: [f32; 16],
+    view_proj: [f32; 16],
+    cam_pos: [f32; 4],
+    grid_min: [f32; 4],
+    grid_max: [f32; 4],
+    /// x=max_alpha, y=step_count (as f32), z=light_strength, w=ambient
+    params: [f32; 4],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct PressureParamsGpu {
-    mode: u32,
-    _pad: [u32; 3],
-}
+// ──────────────────────────────────────────────────────────────────────
+// Public impulse type
+// ──────────────────────────────────────────────────────────────────────
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct FluidRenderParamsGpu {
-    max_alpha: f32,
-    _pad: [f32; 3],
-}
-
-/// Queued injection impulse (screen-space coordinates).
+/// One world-space impulse queued for the current frame.
+#[derive(Clone, Copy)]
 pub struct Impulse {
-    pub screen_x: f32,
-    pub screen_y: f32,
+    pub world_pos: Vec3,
+    pub world_vel: Vec3,
     pub radius: f32,
-    pub vel_x: f32,
-    pub vel_y: f32,
-    pub color: [f32; 3],
-    pub strength: f32,
+    pub density: f32,
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// FluidSim
+// ──────────────────────────────────────────────────────────────────────
 
 pub struct FluidSim {
-    // Simulation storage buffers (ping-pong pairs).
-    velocity_x: [wgpu::Buffer; 2],
-    velocity_y: [wgpu::Buffer; 2],
-    density_r: [wgpu::Buffer; 2],
-    density_g: [wgpu::Buffer; 2],
-    density_b: [wgpu::Buffer; 2],
+    // Storage textures (ping-pong vd; ping-pong pressure; single divergence).
+    // The Texture handles are kept alive so the underlying GPU memory backing
+    // the bound views isn't freed; we read/write through the views below.
+    #[allow(dead_code)]
+    vd: [wgpu::Texture; 2],
+    vd_view: [wgpu::TextureView; 2],
+    #[allow(dead_code)]
+    pressure: [wgpu::Texture; 2],
+    #[allow(dead_code)]
+    pressure_view: [wgpu::TextureView; 2],
+    #[allow(dead_code)]
+    divergence: wgpu::Texture,
+    #[allow(dead_code)]
+    divergence_view: wgpu::TextureView,
+
+    // Filtered sampler used by advect & volume render.
+    linear_sampler: wgpu::Sampler,
 
     // Uniform buffers.
     fluid_uniforms_buf: wgpu::Buffer,
     injection_buf: wgpu::Buffer,
-    render_params_buf: wgpu::Buffer,
-
-    // Density texture for rendering.
-    #[allow(dead_code)]
-    density_texture: wgpu::Texture,
-    #[allow(dead_code)]
-    density_view: wgpu::TextureView,
+    cam_buf: wgpu::Buffer,
 
     // Compute pipelines.
     inject_pipeline: wgpu::ComputePipeline,
     advect_pipeline: wgpu::ComputePipeline,
-    pressure_pipeline: wgpu::ComputePipeline,
-    density_to_tex_pipeline: wgpu::ComputePipeline,
+    divergence_pipeline: wgpu::ComputePipeline,
+    jacobi_pipeline: wgpu::ComputePipeline,
+    project_pipeline: wgpu::ComputePipeline,
 
-    // Bind groups for compute passes.
-    inject_bind_group: wgpu::BindGroup,
-    // Advection bind groups: [0] reads A writes B, [1] reads B writes A.
-    advect_bind_groups: [wgpu::BindGroup; 2],
-    // Pressure bind groups:
-    // [0] = divergence (mode 0), vel set 1, writes pressure[0] + divergence
-    // [1] = jacobi (mode 1), reads pressure[0] writes pressure[1]
-    // [2] = jacobi (mode 1), reads pressure[1] writes pressure[0]
-    // [3] = projection (mode 2), reads final pressure, vel set 1
-    pressure_bind_groups: [wgpu::BindGroup; 4],
-    // Density-to-texture bind group — reads density set 0, writes texture.
-    density_to_tex_bind_group: wgpu::BindGroup,
+    // Compute bind groups.
+    /// inject_bg: src=vd[0], dst=vd[1]
+    inject_bg: wgpu::BindGroup,
+    /// advect_bg: src=vd[1], dst=vd[0]
+    advect_bg: wgpu::BindGroup,
+    /// divergence_bg: src=vd[0]
+    divergence_bg: wgpu::BindGroup,
+    /// jacobi_bgs[0]: read p[0] write p[1]
+    /// jacobi_bgs[1]: read p[1] write p[0]
+    jacobi_bgs: [wgpu::BindGroup; 2],
+    /// project_bg: read vd[0]+pressure[0], write vd[1]
+    project_bg: wgpu::BindGroup,
 
-    // Render pipeline.
+    // Volume render pipeline (fullscreen triangle, alpha-blended).
     render_pipeline: wgpu::RenderPipeline,
-    render_bind_group: wgpu::BindGroup,
+    render_layout: wgpu::BindGroupLayout,
+    render_bg: Option<wgpu::BindGroup>,
 
     // Pending impulses for this frame.
     impulses: Vec<Impulse>,
 
-    // Screen dimensions for coordinate conversion.
+    // Last camera/bounds set for this frame.
+    grid_min: Vec3,
+    grid_max: Vec3,
+
+    // Current frame size (for the depth read in the render pass).
     screen_w: f32,
     screen_h: f32,
 }
@@ -122,504 +153,322 @@ pub struct FluidSim {
 impl FluidSim {
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         globals_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         screen_w: f32,
         screen_h: f32,
     ) -> Self {
-        // --- Storage buffers ---
-        let zeros = vec![0.0f32; GRID_CELLS as usize];
-        let zero_bytes = bytemuck::cast_slice(&zeros);
-
-        let make_buf = |label: &str| -> wgpu::Buffer {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        // ── 3D textures ────────────────────────────────────────────────
+        let extent3d = wgpu::Extent3d {
+            width: GRID_X,
+            height: GRID_Y,
+            depth_or_array_layers: GRID_Z,
+        };
+        let make_3d = |label: &str, format: wgpu::TextureFormat| -> wgpu::Texture {
+            device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                contents: zero_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
+                size: extent3d,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             })
         };
+        let vd = [
+            make_3d("fluid3-vd-a", wgpu::TextureFormat::Rgba16Float),
+            make_3d("fluid3-vd-b", wgpu::TextureFormat::Rgba16Float),
+        ];
+        let pressure = [
+            make_3d("fluid3-p-a", wgpu::TextureFormat::R32Float),
+            make_3d("fluid3-p-b", wgpu::TextureFormat::R32Float),
+        ];
+        let divergence = make_3d("fluid3-div", wgpu::TextureFormat::R32Float);
 
-        let velocity_x = [make_buf("fluid-vx-a"), make_buf("fluid-vx-b")];
-        let velocity_y = [make_buf("fluid-vy-a"), make_buf("fluid-vy-b")];
-        let density_r = [make_buf("fluid-dr-a"), make_buf("fluid-dr-b")];
-        let density_g = [make_buf("fluid-dg-a"), make_buf("fluid-dg-b")];
-        let density_b = [make_buf("fluid-db-a"), make_buf("fluid-db-b")];
-        let pressure = [make_buf("fluid-p-a"), make_buf("fluid-p-b")];
-        let divergence = make_buf("fluid-div");
-
-        // --- Uniform buffers ---
-        let fluid_uniforms = FluidUniformsGpu {
-            grid_w: GRID_W as f32,
-            grid_h: GRID_H as f32,
-            inv_grid_w: 1.0 / GRID_W as f32,
-            inv_grid_h: 1.0 / GRID_H as f32,
-            dt: 1.0 / 60.0,
-            density_dissipation: 0.996,
-            velocity_dissipation: 0.99,
-            _pad: 0.0,
+        let view_desc = wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D3),
+            ..Default::default()
         };
-        let fluid_uniforms_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fluid-uniforms"),
-            contents: bytemuck::bytes_of(&fluid_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        let vd_view = [
+            vd[0].create_view(&view_desc),
+            vd[1].create_view(&view_desc),
+        ];
+        let pressure_view = [
+            pressure[0].create_view(&view_desc),
+            pressure[1].create_view(&view_desc),
+        ];
+        let divergence_view = divergence.create_view(&view_desc);
+
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fluid3-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
         });
 
+        // ── Uniform buffers ────────────────────────────────────────────
+        let fluid_uniforms_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("fluid3-uniforms"),
+            contents: bytemuck::bytes_of(&FluidUniformsGpu {
+                grid_size: [GRID_X as f32, GRID_Y as f32, GRID_Z as f32, 0.0],
+                grid_min: [-100.0, 0.0, -100.0, 0.0],
+                grid_max: [100.0, 60.0, 100.0, 0.0],
+                inv_extent: [1.0 / 200.0, 1.0 / 60.0, 1.0 / 200.0, 0.0],
+                params: [1.0 / 60.0, 0.998, 0.99, 14.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let injection_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fluid-injection"),
+            label: Some("fluid3-injection"),
             contents: bytemuck::bytes_of(&InjectionParamsGpu {
                 points: [InjectionPointGpu {
                     pos_radius: [0.0; 4],
                     vel_density: [0.0; 4],
-                    color_pad: [0.0; 4],
                 }; MAX_INJECTIONS],
-                active_count: 0,
-                _pad: [0; 3],
+                active_count: [0; 4],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let cam_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("fluid3-cam"),
+            contents: bytemuck::bytes_of(&VolumeCameraGpu {
+                inv_view_proj: Mat4::IDENTITY.to_cols_array(),
+                view_proj: Mat4::IDENTITY.to_cols_array(),
+                cam_pos: [0.0; 4],
+                grid_min: [-100.0, 0.0, -100.0, 0.0],
+                grid_max: [100.0, 60.0, 100.0, 0.0],
+                params: [0.5, 36.0, 1.5, 0.1],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let pressure_params_bufs = [0u32, 1, 2].map(|mode| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(match mode {
-                    0 => "fluid-pp-divergence",
-                    1 => "fluid-pp-jacobi",
-                    _ => "fluid-pp-projection",
-                }),
-                contents: bytemuck::bytes_of(&PressureParamsGpu { mode, _pad: [0; 3] }),
-                usage: wgpu::BufferUsages::UNIFORM,
+        // ── Shader modules ─────────────────────────────────────────────
+        let make_shader = |label: &str, src: &str| -> wgpu::ShaderModule {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(src.into()),
             })
-        });
+        };
+        let inject_shader = make_shader(
+            "fluid3-inject",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_inject.wgsl")),
+        );
+        let advect_shader = make_shader(
+            "fluid3-advect",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_advect.wgsl")),
+        );
+        let divergence_shader = make_shader(
+            "fluid3-divergence",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_divergence.wgsl")),
+        );
+        let jacobi_shader = make_shader(
+            "fluid3-jacobi",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_jacobi.wgsl")),
+        );
+        let project_shader = make_shader(
+            "fluid3-project",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_project.wgsl")),
+        );
+        let volume_shader = make_shader(
+            "fluid3-volume",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_volume.wgsl")),
+        );
 
-        let render_params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("fluid-render-params"),
-            contents: bytemuck::bytes_of(&FluidRenderParamsGpu {
-                max_alpha: 0.5,
-                _pad: [0.0; 3],
-            }),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // --- Density texture for rendering ---
-        let density_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("fluid-density-tex"),
-            size: wgpu::Extent3d {
-                width: GRID_W,
-                height: GRID_H,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        });
-        let density_view = density_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        // No staging buffer needed — density-to-texture is done via compute shader.
-
-        // --- Compute shader modules ---
-        let inject_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fluid-inject"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/fluid_inject.wgsl"
-                ))
-                .into(),
-            ),
-        });
-        let advect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fluid-advect"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/fluid_advect.wgsl"
-                ))
-                .into(),
-            ),
-        });
-        let pressure_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fluid-pressure"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/fluid_pressure.wgsl"
-                ))
-                .into(),
-            ),
-        });
-
-        // --- Inject bind group layout ---
+        // ── Bind group layouts ─────────────────────────────────────────
         let inject_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid-inject-layout"),
+            label: Some("fluid3-inject-bgl"),
             entries: &[
-                // 0: fluid uniforms
-                bgl_uniform(0, wgpu::ShaderStages::COMPUTE),
-                // 1: injection params
-                bgl_uniform(1, wgpu::ShaderStages::COMPUTE),
-                // 2-6: velocity_x, velocity_y, density_r, density_g, density_b (read_write)
-                bgl_storage_rw(2, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(3, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(4, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(5, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(6, wgpu::ShaderStages::COMPUTE),
+                bgl_uniform(0),
+                bgl_uniform(1),
+                bgl_tex3d_float(2),
+                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
             ],
         });
-
-        let inject_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fluid-inject-pl"),
-            bind_group_layouts: &[Some(&inject_layout)],
-            immediate_size: 0,
-        });
-        let inject_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("fluid-inject-pipeline"),
-            layout: Some(&inject_pl),
-            module: &inject_shader,
-            entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-
-        // Inject bind group always operates on buffer set A (current=0 start).
-        // We re-create bind groups when we need to swap, OR we always inject into
-        // the "current" set. For simplicity, we create two inject bind groups.
-        let inject_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid-inject-bg"),
-            layout: &inject_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: fluid_uniforms_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: injection_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: velocity_x[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: velocity_y[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: density_r[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: density_g[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: density_b[0].as_entire_binding(),
-                },
-            ],
-        });
-
-        // --- Advection bind group layout ---
         let advect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid-advect-layout"),
+            label: Some("fluid3-advect-bgl"),
             entries: &[
-                // 0: fluid uniforms
-                bgl_uniform(0, wgpu::ShaderStages::COMPUTE),
-                // 1-5: source (read-only)
-                bgl_storage_ro(1, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(2, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(3, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(4, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(5, wgpu::ShaderStages::COMPUTE),
-                // 6-10: destination (read_write)
-                bgl_storage_rw(6, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(7, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(8, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(9, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(10, wgpu::ShaderStages::COMPUTE),
+                bgl_uniform(0),
+                bgl_tex3d_float(1),
+                bgl_sampler(2),
+                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
+            ],
+        });
+        let divergence_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-div-bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_tex3d_float(1),
+                bgl_storage3d(2, wgpu::TextureFormat::R32Float),
+                bgl_storage3d(3, wgpu::TextureFormat::R32Float),
+            ],
+        });
+        let jacobi_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-jacobi-bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_tex3d_unfiltered(1),
+                bgl_tex3d_unfiltered(2),
+                bgl_storage3d(3, wgpu::TextureFormat::R32Float),
+            ],
+        });
+        let project_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-project-bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_tex3d_float(1),
+                bgl_tex3d_unfiltered(2),
+                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
             ],
         });
 
-        let advect_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fluid-advect-pl"),
-            bind_group_layouts: &[Some(&advect_layout)],
-            immediate_size: 0,
-        });
-        let advect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("fluid-advect-pipeline"),
-            layout: Some(&advect_pl),
-            module: &advect_shader,
-            entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-
-        // Advection bind groups: [0] reads set 0, writes set 1. [1] reads set 1, writes set 0.
-        let make_advect_bg = |label: &str, src: usize, dst: usize| -> wgpu::BindGroup {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+        // ── Compute pipelines ──────────────────────────────────────────
+        let make_compute = |label: &str,
+                            shader: &wgpu::ShaderModule,
+                            layout: &wgpu::BindGroupLayout|
+         -> wgpu::ComputePipeline {
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                layout: &advect_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: fluid_uniforms_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: velocity_x[src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: velocity_y[src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: density_r[src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: density_g[src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: density_b[src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: velocity_x[dst].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: velocity_y[dst].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: density_r[dst].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: density_g[dst].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: density_b[dst].as_entire_binding(),
-                    },
-                ],
-            })
-        };
-        let advect_bind_groups = [
-            make_advect_bg("fluid-advect-bg-0", 0, 1),
-            make_advect_bg("fluid-advect-bg-1", 1, 0),
-        ];
-
-        // --- Pressure bind group layout ---
-        let pressure_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid-pressure-layout"),
-            entries: &[
-                // 0: fluid uniforms
-                bgl_uniform(0, wgpu::ShaderStages::COMPUTE),
-                // 1: pressure params
-                bgl_uniform(1, wgpu::ShaderStages::COMPUTE),
-                // 2-3: velocity_x, velocity_y (read_write for projection)
-                bgl_storage_rw(2, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_rw(3, wgpu::ShaderStages::COMPUTE),
-                // 4: pressure source (read)
-                bgl_storage_ro(4, wgpu::ShaderStages::COMPUTE),
-                // 5: pressure dest (write)
-                bgl_storage_rw(5, wgpu::ShaderStages::COMPUTE),
-                // 6: divergence (read_write)
-                bgl_storage_rw(6, wgpu::ShaderStages::COMPUTE),
-            ],
-        });
-
-        let pressure_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fluid-pressure-pl"),
-            bind_group_layouts: &[Some(&pressure_layout)],
-            immediate_size: 0,
-        });
-        let pressure_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("fluid-pressure-pipeline"),
-            layout: Some(&pressure_pl),
-            module: &pressure_shader,
-            entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-
-        // Pressure bind groups: [0] reads pressure[0] writes pressure[1], [1] vice versa.
-        // After advection, the result is in the buffer set indicated by `1 - current`.
-        // We use velocity from that destination set for divergence/projection.
-        let make_pressure_bg = |label: &str,
-                                mode: usize,
-                                vel_set: usize,
-                                p_src: usize,
-                                p_dst: usize|
-         -> wgpu::BindGroup {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &pressure_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: fluid_uniforms_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: pressure_params_bufs[mode].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: velocity_x[vel_set].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: velocity_y[vel_set].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: pressure[p_src].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: pressure[p_dst].as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: divergence.as_entire_binding(),
-                    },
-                ],
-            })
-        };
-        // Pressure bind groups for each mode:
-        // [0] divergence: mode 0, vel set 1, writes pressure[0] + divergence
-        // [1] jacobi A→B: mode 1, reads pressure[0] writes pressure[1]
-        // [2] jacobi B→A: mode 1, reads pressure[1] writes pressure[0]
-        // [3] projection: mode 2, reads final pressure (determined at dispatch time)
-        let pressure_bind_groups = [
-            make_pressure_bg("fluid-p-div", 0, 1, 1, 0), // divergence (p_src=1 to avoid aliasing p_dst=0)
-            make_pressure_bg("fluid-p-jac-0", 1, 1, 0, 1), // jacobi: read p[0], write p[1]
-            make_pressure_bg("fluid-p-jac-1", 1, 1, 1, 0), // jacobi: read p[1], write p[0]
-            make_pressure_bg("fluid-p-proj", 2, 1, 0, 1), // projection (p_src doesn't matter much)
-        ];
-
-        // --- Density-to-texture compute pipeline ---
-        let d2t_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fluid-d2t"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/fluid_density_to_tex.wgsl"
-                ))
-                .into(),
-            ),
-        });
-
-        let d2t_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid-d2t-layout"),
-            entries: &[
-                bgl_uniform(0, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(1, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(2, wgpu::ShaderStages::COMPUTE),
-                bgl_storage_ro(3, wgpu::ShaderStages::COMPUTE),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let d2t_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fluid-d2t-pl"),
-            bind_group_layouts: &[Some(&d2t_layout)],
-            immediate_size: 0,
-        });
-
-        let density_to_tex_pipeline =
+                bind_group_layouts: &[Some(layout)],
+                immediate_size: 0,
+            });
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("fluid-d2t-pipeline"),
-                layout: Some(&d2t_pl),
-                module: &d2t_shader,
+                label: Some(label),
+                layout: Some(&pl),
+                module: shader,
                 entry_point: Some("main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 cache: None,
-            });
+            })
+        };
+        let inject_pipeline = make_compute("fluid3-inject-pl", &inject_shader, &inject_layout);
+        let advect_pipeline = make_compute("fluid3-advect-pl", &advect_shader, &advect_layout);
+        let divergence_pipeline =
+            make_compute("fluid3-div-pl", &divergence_shader, &divergence_layout);
+        let jacobi_pipeline = make_compute("fluid3-jacobi-pl", &jacobi_shader, &jacobi_layout);
+        let project_pipeline = make_compute("fluid3-project-pl", &project_shader, &project_layout);
 
-        let density_to_tex_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid-d2t-bg"),
-            layout: &d2t_layout,
+        // ── Compute bind groups (fixed src/dst orientations) ───────────
+        let inject_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-inject-bg"),
+            layout: &inject_layout,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: fluid_uniforms_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: density_r[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: density_g[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: density_b[0].as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&density_view),
-                },
+                bge(0, fluid_uniforms_buf.as_entire_binding()),
+                bge(1, injection_buf.as_entire_binding()),
+                bge(2, wgpu::BindingResource::TextureView(&vd_view[0])),
+                bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
+            ],
+        });
+        let advect_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-advect-bg"),
+            layout: &advect_layout,
+            entries: &[
+                bge(0, fluid_uniforms_buf.as_entire_binding()),
+                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
+                bge(2, wgpu::BindingResource::Sampler(&linear_sampler)),
+                bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
+            ],
+        });
+        let divergence_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-div-bg"),
+            layout: &divergence_layout,
+            entries: &[
+                bge(0, fluid_uniforms_buf.as_entire_binding()),
+                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
+                bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
+                bge(3, wgpu::BindingResource::TextureView(&pressure_view[0])),
+            ],
+        });
+        let jacobi_bgs = [
+            // read p[0], write p[1]
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fluid3-jacobi-bg-0"),
+                layout: &jacobi_layout,
+                entries: &[
+                    bge(0, fluid_uniforms_buf.as_entire_binding()),
+                    bge(1, wgpu::BindingResource::TextureView(&pressure_view[0])),
+                    bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
+                    bge(3, wgpu::BindingResource::TextureView(&pressure_view[1])),
+                ],
+            }),
+            // read p[1], write p[0]
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fluid3-jacobi-bg-1"),
+                layout: &jacobi_layout,
+                entries: &[
+                    bge(0, fluid_uniforms_buf.as_entire_binding()),
+                    bge(1, wgpu::BindingResource::TextureView(&pressure_view[1])),
+                    bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
+                    bge(3, wgpu::BindingResource::TextureView(&pressure_view[0])),
+                ],
+            }),
+        ];
+        let project_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-project-bg"),
+            layout: &project_layout,
+            entries: &[
+                bge(0, fluid_uniforms_buf.as_entire_binding()),
+                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
+                bge(2, wgpu::BindingResource::TextureView(&pressure_view[0])),
+                bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
             ],
         });
 
-        // --- Render pipeline ---
-        let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fluid-render-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/fluid_render.wgsl"
-                ))
-                .into(),
-            ),
-        });
-
-        let density_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("fluid-density-sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
-        let render_bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid-render-bg-layout"),
+        // ── Render (volumetric raymarch) pipeline ──────────────────────
+        let render_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-render-bgl"),
             entries: &[
+                // 0: VolumeCamera uniform
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 1: density 3D texture (filterable)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D3,
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                     },
                     count: None,
                 },
+                // 2: filtering sampler
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // 3: depth texture (non-filterable depth)
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
+                // 4: point lights uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -631,59 +480,23 @@ impl FluidSim {
             ],
         });
 
-        let render_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("fluid-render-pl"),
-            bind_group_layouts: &[Some(globals_layout), Some(&render_bg_layout)],
-            immediate_size: 0,
-        });
-
-        let vertex_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[wgpu::VertexAttribute {
-                offset: 0,
-                shader_location: 0,
-                format: wgpu::VertexFormat::Float32x2,
-            }],
-        };
-
-        let instance_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<super::wgpu_renderer::GpuInstance>()
-                as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: 16,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        };
-
-        let depth_ui = wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::Always),
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("fluid3-render-pl"),
+                bind_group_layouts: &[Some(globals_layout), Some(&render_layout)],
+                immediate_size: 0,
+            });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("fluid-render-pipeline"),
-            layout: Some(&render_layout),
+            label: Some("fluid3-render-pipeline"),
+            layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &render_shader,
+                module: &volume_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[vertex_layout, instance_layout],
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &render_shader,
+                module: &volume_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -696,80 +509,75 @@ impl FluidSim {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
-            depth_stencil: Some(depth_ui),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
         });
 
-        let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid-render-bg"),
-            layout: &render_bg_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&density_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&density_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: render_params_buf.as_entire_binding(),
-                },
-            ],
-        });
-
-        let _ = queue; // used implicitly for initial uploads via create_buffer_init
-
         Self {
-            velocity_x,
-            velocity_y,
-            density_r,
-            density_g,
-            density_b,
+            vd,
+            vd_view,
+            pressure,
+            pressure_view,
+            divergence,
+            divergence_view,
+            linear_sampler,
             fluid_uniforms_buf,
             injection_buf,
-            render_params_buf,
-            density_texture,
-            density_view,
+            cam_buf,
             inject_pipeline,
             advect_pipeline,
-            pressure_pipeline,
-            density_to_tex_pipeline,
-            inject_bind_group,
-            advect_bind_groups,
-            pressure_bind_groups,
-            density_to_tex_bind_group,
+            divergence_pipeline,
+            jacobi_pipeline,
+            project_pipeline,
+            inject_bg,
+            advect_bg,
+            divergence_bg,
+            jacobi_bgs,
+            project_bg,
             render_pipeline,
-            render_bind_group,
+            render_layout,
+            render_bg: None,
             impulses: Vec::new(),
+            grid_min: Vec3::new(-100.0, 0.0, -100.0),
+            grid_max: Vec3::new(100.0, 60.0, 100.0),
             screen_w,
             screen_h,
         }
     }
 
-    /// Queue an impulse for the current frame (screen-space coordinates).
+    pub fn update_screen_size(&mut self, w: f32, h: f32) {
+        self.screen_w = w;
+        self.screen_h = h;
+    }
+
+    /// Set the smoke volume bounds for the current frame.
+    pub fn set_grid_bounds(&mut self, grid_min: Vec3, grid_max: Vec3) {
+        self.grid_min = grid_min;
+        self.grid_max = grid_max;
+    }
+
+    /// Queue a world-space impulse for the current frame.
     pub fn inject_impulse(
         &mut self,
-        screen_x: f32,
-        screen_y: f32,
+        world_pos: Vec3,
+        world_vel: Vec3,
         radius: f32,
-        vel_x: f32,
-        vel_y: f32,
-        color: [f32; 3],
-        strength: f32,
+        density: f32,
     ) {
         if self.impulses.len() < MAX_INJECTIONS {
             self.impulses.push(Impulse {
-                screen_x,
-                screen_y,
+                world_pos,
+                world_vel,
                 radius,
-                vel_x,
-                vel_y,
-                color,
-                strength,
+                density,
             });
         }
     }
@@ -782,191 +590,217 @@ impl FluidSim {
         dt: f32,
         intensity: SmokeIntensity,
     ) {
-        let (density_dissipation, velocity_dissipation, inject_mult, max_alpha, jacobi_iters) =
-            match intensity {
-                SmokeIntensity::Off => return,
-                SmokeIntensity::Subtle => (0.992, 0.99, 0.5, 0.25, 14u32),
-                SmokeIntensity::Strong => (0.996, 0.99, 1.0, 0.5, 20),
-                SmokeIntensity::OverTheTop => (0.999, 0.995, 2.0, 0.8, 26),
-            };
-
-        // Update fluid uniforms.
-        let uniforms = FluidUniformsGpu {
-            grid_w: GRID_W as f32,
-            grid_h: GRID_H as f32,
-            inv_grid_w: 1.0 / GRID_W as f32,
-            inv_grid_h: 1.0 / GRID_H as f32,
-            dt: dt.min(0.05),
-            density_dissipation,
-            velocity_dissipation,
-            _pad: 0.0,
+        let (density_dis, vel_dis, buoyancy, mut jacobi_iters) = match intensity {
+            SmokeIntensity::Off => return,
+            SmokeIntensity::Subtle => (0.992, 0.985, 8.0, 12u32),
+            SmokeIntensity::Strong => (0.996, 0.99, 14.0, 18),
+            SmokeIntensity::OverTheTop => (0.998, 0.993, 22.0, 24),
         };
-        queue.write_buffer(&self.fluid_uniforms_buf, 0, bytemuck::bytes_of(&uniforms));
+        // Force even iteration count so the final result lands in pressure[0].
+        if jacobi_iters % 2 != 0 {
+            jacobi_iters += 1;
+        }
 
-        // Update render params.
+        // ── Upload uniforms ────────────────────────────────────────────
+        let extent = self.grid_max - self.grid_min;
+        let inv_extent = Vec3::new(
+            1.0 / extent.x.max(1e-3),
+            1.0 / extent.y.max(1e-3),
+            1.0 / extent.z.max(1e-3),
+        );
+        let dt_clamped = dt.min(0.05);
         queue.write_buffer(
-            &self.render_params_buf,
+            &self.fluid_uniforms_buf,
             0,
-            bytemuck::bytes_of(&FluidRenderParamsGpu {
-                max_alpha,
-                _pad: [0.0; 3],
+            bytemuck::bytes_of(&FluidUniformsGpu {
+                grid_size: [GRID_X as f32, GRID_Y as f32, GRID_Z as f32, 0.0],
+                grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
+                grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
+                inv_extent: [inv_extent.x, inv_extent.y, inv_extent.z, 0.0],
+                params: [dt_clamped, density_dis, vel_dis, buoyancy],
             }),
         );
 
-        // Build injection data.
+        // ── Pack impulses ──────────────────────────────────────────────
         let mut injection = InjectionParamsGpu {
             points: [InjectionPointGpu {
                 pos_radius: [0.0; 4],
                 vel_density: [0.0; 4],
-                color_pad: [0.0; 4],
             }; MAX_INJECTIONS],
-            active_count: self.impulses.len().min(MAX_INJECTIONS) as u32,
-            _pad: [0; 3],
+            active_count: [self.impulses.len().min(MAX_INJECTIONS) as u32, 0, 0, 0],
         };
-
         for (i, imp) in self.impulses.iter().take(MAX_INJECTIONS).enumerate() {
-            let gx = imp.screen_x / self.screen_w * GRID_W as f32;
-            let gy = imp.screen_y / self.screen_h * GRID_H as f32;
-            // Scale velocity from screen-space to grid-space.
-            let vx = imp.vel_x / self.screen_w * GRID_W as f32 * inject_mult;
-            let vy = imp.vel_y / self.screen_h * GRID_H as f32 * inject_mult;
             injection.points[i] = InjectionPointGpu {
-                pos_radius: [gx, gy, imp.radius, imp.strength * inject_mult],
-                vel_density: [vx, vy, 0.0, 0.0],
-                color_pad: [
-                    imp.color[0] * imp.strength * inject_mult,
-                    imp.color[1] * imp.strength * inject_mult,
-                    imp.color[2] * imp.strength * inject_mult,
-                    0.0,
-                ],
+                pos_radius: [imp.world_pos.x, imp.world_pos.y, imp.world_pos.z, imp.radius],
+                vel_density: [imp.world_vel.x, imp.world_vel.y, imp.world_vel.z, imp.density],
             };
         }
         self.impulses.clear();
-
         queue.write_buffer(&self.injection_buf, 0, bytemuck::bytes_of(&injection));
 
-        let wg_x = (GRID_W + 7) / 8;
-        let wg_y = (GRID_H + 7) / 8;
+        let wg_x = (GRID_X + WG - 1) / WG;
+        let wg_y = (GRID_Y + WG - 1) / WG;
+        let wg_z = (GRID_Z + WG - 1) / WG;
 
-        // 1. Injection pass — inject into current buffer set (always set 0 since we
-        //    rebuild bind groups referencing set 0, and we copy results as needed).
-        //    For simplicity, injection always targets set 0, and advection reads set 0
-        //    writes set 1. After advection, the "live" data is in set 1.
+        // 1. Inject: vd[0] → vd[1]
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-inject"),
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-inject"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.inject_pipeline);
-            pass.set_bind_group(0, &self.inject_bind_group, &[]);
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
+            p.set_pipeline(&self.inject_pipeline);
+            p.set_bind_group(0, &self.inject_bg, &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 2. Advection pass — reads set 0, writes set 1.
+        // 2. Advect: vd[1] → vd[0]
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-advect"),
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-advect"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.advect_pipeline);
-            pass.set_bind_group(0, &self.advect_bind_groups[0], &[]);
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
+            p.set_pipeline(&self.advect_pipeline);
+            p.set_bind_group(0, &self.advect_bg, &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 3. Divergence pass — mode 0, operates on velocity set 1.
+        // 3. Divergence (reads vd[0], writes div + clears pressure[0]).
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-divergence"),
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-divergence"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pressure_pipeline);
-            pass.set_bind_group(0, &self.pressure_bind_groups[0], &[]); // divergence bg
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
+            p.set_pipeline(&self.divergence_pipeline);
+            p.set_bind_group(0, &self.divergence_bg, &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 4. Jacobi iterations — ping-pong pressure buffers.
-        // bind_groups[1] reads p[0] writes p[1], bind_groups[2] reads p[1] writes p[0].
+        // 4. Jacobi N iterations (even count → result lands in pressure[0]).
         for j in 0..jacobi_iters {
-            let bg_idx = if j % 2 == 0 { 1 } else { 2 }; // jacobi bind groups
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-jacobi"),
+            let bg_idx = (j % 2) as usize; // 0: read p[0]→p[1]; 1: read p[1]→p[0]
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-jacobi"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pressure_pipeline);
-            pass.set_bind_group(0, &self.pressure_bind_groups[bg_idx], &[]);
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
+            p.set_pipeline(&self.jacobi_pipeline);
+            p.set_bind_group(0, &self.jacobi_bgs[bg_idx], &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 5. Projection pass — mode 2, subtract pressure gradient from velocity (set 1).
-        // After jacobi_iters iterations starting with bg[1] (reads p[0]),
-        // the final result is in p[jacobi_iters % 2] when even, p[1-jacobi_iters%2] when odd.
-        // But our projection bg[3] has a fixed pressure_src. We need to pick the right one.
-        // For now, bg[3] uses pressure_src = pressure[0]. After even iterations, result is in p[1].
-        // After odd iterations, result is in p[0]. We need to handle this.
-        // Simplest: always do an even number of Jacobi iterations.
-        // Or: create two projection bind groups. Let's just ensure even iterations.
+        // 5. Projection: vd[0] - ∇p → vd[1]
         {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-projection"),
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-project"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pressure_pipeline);
-            pass.set_bind_group(0, &self.pressure_bind_groups[3], &[]); // projection bg
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
+            p.set_pipeline(&self.project_pipeline);
+            p.set_bind_group(0, &self.project_bg, &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 6. Copy density from set 1 back to set 0 so injection works next frame.
-        let buf_size = (GRID_CELLS as u64) * 4; // f32 = 4 bytes
-        encoder.copy_buffer_to_buffer(&self.velocity_x[1], 0, &self.velocity_x[0], 0, buf_size);
-        encoder.copy_buffer_to_buffer(&self.velocity_y[1], 0, &self.velocity_y[0], 0, buf_size);
-        encoder.copy_buffer_to_buffer(&self.density_r[1], 0, &self.density_r[0], 0, buf_size);
-        encoder.copy_buffer_to_buffer(&self.density_g[1], 0, &self.density_g[0], 0, buf_size);
-        encoder.copy_buffer_to_buffer(&self.density_b[1], 0, &self.density_b[0], 0, buf_size);
-
-        // 7. Convert density buffers → RGBA texture for rendering.
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("fluid-d2t"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.density_to_tex_pipeline);
-            pass.set_bind_group(0, &self.density_to_tex_bind_group, &[]);
-            pass.dispatch_workgroups(wg_x, wg_y, 1);
-        }
+        // 6. Copy vd[1] → vd[0] so the next frame's inject reads the latest state.
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.vd[1],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.vd[0],
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: GRID_X,
+                height: GRID_Y,
+                depth_or_array_layers: GRID_Z,
+            },
+        );
     }
 
-    /// Draw the smoke overlay. Call during the render pass, between tiles and UI.
-    pub fn draw<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        globals_bind_group: &'a wgpu::BindGroup,
-        vertex_buffer: &'a wgpu::Buffer,
-        index_buffer: &'a wgpu::Buffer,
-        instance_buffer: &'a wgpu::Buffer,
+    /// Build (or rebuild) the render bind group for the current depth view.
+    /// The depth texture is recreated on resize, so call this whenever the
+    /// depth view changes.
+    pub fn rebuild_render_bind_group(
+        &mut self,
+        device: &wgpu::Device,
+        depth_view: &wgpu::TextureView,
+        point_lights_buffer: &wgpu::Buffer,
     ) {
+        self.render_bg = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-render-bg"),
+            layout: &self.render_layout,
+            entries: &[
+                bge(0, self.cam_buf.as_entire_binding()),
+                bge(1, wgpu::BindingResource::TextureView(&self.vd_view[0])),
+                bge(2, wgpu::BindingResource::Sampler(&self.linear_sampler)),
+                bge(3, wgpu::BindingResource::TextureView(depth_view)),
+                bge(4, point_lights_buffer.as_entire_binding()),
+            ],
+        }));
+    }
+
+    /// Upload the per-frame volume camera uniform. Call after `set_camera` and
+    /// before issuing the render pass.
+    pub fn upload_camera_uniform(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: Mat4,
+        cam_pos: Vec3,
+        intensity: SmokeIntensity,
+    ) {
+        let inv_vp = view_proj.inverse();
+        let (max_alpha, step_count, light_strength, ambient) = match intensity {
+            SmokeIntensity::Off => (0.0, 8.0, 0.0, 0.0),
+            SmokeIntensity::Subtle => (0.45, 28.0, 1.4, 0.10),
+            SmokeIntensity::Strong => (0.65, 40.0, 1.8, 0.14),
+            SmokeIntensity::OverTheTop => (0.85, 56.0, 2.2, 0.18),
+        };
+        queue.write_buffer(
+            &self.cam_buf,
+            0,
+            bytemuck::bytes_of(&VolumeCameraGpu {
+                inv_view_proj: inv_vp.to_cols_array(),
+                view_proj: view_proj.to_cols_array(),
+                cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 1.0],
+                grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
+                grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
+                params: [max_alpha, step_count, light_strength, ambient],
+            }),
+        );
+    }
+
+    /// Draw the volumetric smoke. The render bind group must have been built
+    /// for the current frame's depth view.
+    pub fn draw(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        globals_bind_group: &wgpu::BindGroup,
+    ) {
+        let Some(ref bg) = self.render_bg else {
+            return;
+        };
         pass.set_pipeline(&self.render_pipeline);
         pass.set_bind_group(0, globals_bind_group, &[]);
-        pass.set_bind_group(1, &self.render_bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_vertex_buffer(1, instance_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..6, 0, 0..1);
-    }
-
-    pub fn update_screen_size(&mut self, w: f32, h: f32) {
-        self.screen_w = w;
-        self.screen_h = h;
+        pass.set_bind_group(1, bg, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 
-// ---------------------------------------------------------------------------
+// ──────────────────────────────────────────────────────────────────────
 // Bind group layout helpers
-// ---------------------------------------------------------------------------
+// ──────────────────────────────────────────────────────────────────────
 
-fn bgl_uniform(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+fn bge(binding: u32, resource: wgpu::BindingResource<'_>) -> wgpu::BindGroupEntry<'_> {
+    wgpu::BindGroupEntry { binding, resource }
+}
+
+fn bgl_uniform(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility,
+        visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
@@ -976,28 +810,50 @@ fn bgl_uniform(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupL
     }
 }
 
-fn bgl_storage_rw(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+fn bgl_storage3d(binding: u32, format: wgpu::TextureFormat) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::StorageTexture {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            format,
+            view_dimension: wgpu::TextureViewDimension::D3,
         },
         count: None,
     }
 }
 
-fn bgl_storage_ro(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+fn bgl_tex3d_float(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: true },
-            has_dynamic_offset: false,
-            min_binding_size: None,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D3,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
         },
+        count: None,
+    }
+}
+
+fn bgl_tex3d_unfiltered(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Texture {
+            multisampled: false,
+            view_dimension: wgpu::TextureViewDimension::D3,
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+        },
+        count: None,
+    }
+}
+
+fn bgl_sampler(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
     }
 }

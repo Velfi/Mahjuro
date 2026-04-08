@@ -6,22 +6,37 @@ use crate::core::rules::BlindKind;
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::layout::LayoutResult;
 use crate::ui::widget::{self, PanelVariant};
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::gameplay::GameplayScene;
-use super::pause_menu::{PauseMenu, PauseUpdate};
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::pause_menu::PauseMenu;
+use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlindAction {
+    PlayBlind,
+    SkipBlind,
+}
+
+impl BlindAction {
+    fn id(self) -> FocusId {
+        FocusId(self as u32 + 1)
+    }
+}
 
 pub struct PickBlindScene {
-    /// Whether the skip button at the bottom is focused.
-    skip_focused: bool,
+    tree: TreeState,
     pause_menu: PauseMenu,
 }
 
 impl PickBlindScene {
     pub fn new() -> Self {
+        let mut tree = TreeState::new();
+        tree.set_focus(BlindAction::PlayBlind.id());
         Self {
-            skip_focused: false,
+            tree,
             pause_menu: PauseMenu::new(),
         }
     }
@@ -30,94 +45,101 @@ impl PickBlindScene {
         !matches!(blind, BlindKind::Boss)
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        // Pause menu handling.
-        if self.pause_menu.paused {
-            match self.pause_menu.update(
-                ctx.actions,
-                ctx.run,
-                ctx.cursor_pos,
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-            ) {
-                PauseUpdate::StayPaused | PauseUpdate::Resume => return None,
-                PauseUpdate::Transition(t) => return t,
-                PauseUpdate::Quit => {
-                    *ctx.quit_requested = true;
-                    return None;
-                }
-            }
-        }
-
-        let upcoming = ctx.run.upcoming_blind;
-        let can_skip = Self::can_skip(upcoming);
-
-        // Mouse hover → focus. Layout must mirror draw().
-        let w = ctx.layout.window_w;
-        let h = ctx.layout.window_h;
-        let hs = ctx.layout.hand_strip;
+    /// Single source of truth: card rect + skip button rect, registered as
+    /// flat hit-targets shared between update() and draw().
+    fn flat_items(layout: &LayoutResult, can_skip: bool) -> Vec<FlatItem<BlindAction>> {
+        let w = layout.window_w;
+        let h = layout.window_h;
+        let hs = layout.hand_strip;
         let card_w = hs.w * 0.42;
         let pad_y = hs.h * 0.08;
         let card_h = hs.h - pad_y * 2.0;
         let card_x = hs.x + (hs.w - card_w) * 0.5;
         let card_y = hs.y + pad_y;
         let scale = (w.min(h)) / 600.0;
-        let btn_w = (140.0 * scale).max(70.0);
-        let btn_h = (32.0 * scale).max(20.0);
+        let btn_w = (160.0 * scale).max(80.0);
+        let btn_h = (38.0 * scale).max(24.0);
         let btn_x = (w - btn_w) * 0.5;
         let btn_y = h - btn_h - (12.0 * scale);
-        let (cx, cy) = ctx.cursor_pos;
-        let in_card =
-            cx >= card_x && cx <= card_x + card_w && cy >= card_y && cy <= card_y + card_h;
-        let in_skip =
-            can_skip && cx >= btn_x && cx <= btn_x + btn_w && cy >= btn_y && cy <= btn_y + btn_h;
-        if in_skip {
-            self.skip_focused = true;
-        } else if in_card {
-            self.skip_focused = false;
-        }
 
-        for a in ctx.actions {
-            match a {
-                UiAction::FocusDown | UiAction::FocusNext => {
-                    if can_skip {
-                        self.skip_focused = true;
-                    }
-                }
-                UiAction::FocusUp | UiAction::FocusPrev => {
-                    self.skip_focused = false;
-                }
-                UiAction::Confirm | UiAction::CommitDiscard if self.skip_focused => {
-                    if can_skip {
-                        let reward = upcoming.skip_reward();
-                        ctx.run.gold = ctx.run.gold.saturating_add(reward);
-                        ctx.run.skip_to_next_blind();
-                        return Some(Scene::PickBlind(PickBlindScene::new()));
-                    }
-                }
-                UiAction::Confirm | UiAction::CommitDiscard => {
-                    ctx.run.apply_blind(upcoming);
-                    return Some(Scene::Gameplay(GameplayScene::new()));
-                }
-                UiAction::Cancel => {
-                    if can_skip {
-                        let reward = upcoming.skip_reward();
-                        ctx.run.gold = ctx.run.gold.saturating_add(reward);
-                        ctx.run.skip_to_next_blind();
-                        return Some(Scene::PickBlind(PickBlindScene::new()));
-                    }
-                }
-                UiAction::Pause => {
-                    self.pause_menu.open();
-                    return None;
-                }
-                _ => {}
-            }
+        let mut items = vec![FlatItem::new(
+            BlindAction::PlayBlind.id(),
+            [card_x, card_y, card_w, card_h],
+            BlindAction::PlayBlind,
+        )];
+        if can_skip {
+            items.push(FlatItem::new(
+                BlindAction::SkipBlind.id(),
+                [btn_x, btn_y, btn_w, btn_h],
+                BlindAction::SkipBlind,
+            ));
         }
-        None
+        items
     }
 
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn skip_focused(&self) -> bool {
+        self.tree.focused() == Some(BlindAction::SkipBlind.id())
+    }
+
+}
+
+impl SceneBehavior for PickBlindScene {
+    fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
+        self.pause_menu.options_overlay()
+    }
+
+    fn has_blocking_overlay(&self) -> bool {
+        self.pause_menu.paused
+    }
+
+    fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Pause menu handling — drives the menu while paused and intercepts
+        // the open-on-Pause shortcut. Returns immediately if either applies.
+        if let Some(t) = self.pause_menu.handle(&mut ctx) {
+            return t;
+        }
+
+        let upcoming = ctx.run.upcoming_blind;
+        let can_skip = Self::can_skip(upcoming);
+
+        let items = Self::flat_items(ctx.layout, can_skip);
+        let action = self.tree.update_flat(
+            &items,
+            TreeInput {
+                actions: ctx.actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+            },
+        );
+
+        // Cancel-to-skip shortcut. (The pause shortcut is already handled
+        // by `pause_menu.handle()` above.)
+        for a in ctx.actions {
+            if matches!(a, UiAction::Cancel) && can_skip {
+                let reward = upcoming.skip_reward();
+                ctx.run.gold = ctx.run.gold.saturating_add(reward);
+                ctx.run.skip_to_next_blind();
+                return Some(Scene::PickBlind(PickBlindScene::new()));
+            }
+        }
+
+        match action {
+            Some(BlindAction::SkipBlind) if can_skip => {
+                let reward = upcoming.skip_reward();
+                ctx.run.gold = ctx.run.gold.saturating_add(reward);
+                ctx.run.skip_to_next_blind();
+                Some(Scene::PickBlind(PickBlindScene::new()))
+            }
+            Some(BlindAction::PlayBlind) | Some(BlindAction::SkipBlind) => {
+                ctx.run.apply_blind(upcoming);
+                Some(Scene::Gameplay(GameplayScene::new()))
+            }
+            None => None,
+        }
+    }
+
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let hs = ctx.layout.hand_strip;
@@ -143,7 +165,8 @@ impl PickBlindScene {
         let card_y = hs.y + pad_y;
 
         // Faint gold halo when the card is the focused choice.
-        if !self.skip_focused {
+        let skip_focused = self.skip_focused();
+        if !skip_focused {
             let halo = card_h * 0.04;
             instances.push(GpuInstance {
                 rect: [
@@ -202,6 +225,7 @@ impl PickBlindScene {
                     effective_target
                 ),
                 color: color::CHAMPAGNE,
+                ..Default::default()
             },
             TextLabel {
                 rect: [ms.x, ms.y, ms.w, ms.h],
@@ -211,40 +235,56 @@ impl PickBlindScene {
                     if can_skip { "Esc/↓ skip" } else { "" }
                 ),
                 color: color::PARCHMENT,
+                ..Default::default()
             },
         ];
         text_labels.extend(relic_labels);
 
-        let name_h = typography::size(typography::TITLE, h);
-        let name_y = card_y + card_h * 0.18;
+        // rasterize_label renders glyphs at ~0.55 of rect.h, so rect heights
+        // need a 1.8× bump for the rendered text to match the typography tier.
+        let name_h = typography::size(typography::TITLE, h) * 1.8;
+        let name_y = card_y + card_h * 0.16;
         text_labels.push(TextLabel {
             rect: [card_x, name_y, card_w, name_h],
             text: upcoming.name().to_string(),
             color: color::CHAMPAGNE,
+            ..Default::default()
         });
         let mult = upcoming.target_multiplier();
-        let desc_h = typography::size(typography::HEADING, h);
-        let desc_y = card_y + card_h * 0.45;
+        let desc_h = typography::size(typography::HEADING, h) * 1.8;
+        let desc_y = card_y + card_h * 0.42;
         text_labels.push(TextLabel {
             rect: [card_x, desc_y, card_w, desc_h],
             text: format!("×{:.1} target", mult),
             color: color::PARCHMENT,
+            ..Default::default()
         });
         // Show forced modifier on Boss card.
         if let Some(modifier) = upcoming.forced_modifier(ctx.run.run_number) {
-            let mod_h = typography::size(typography::CAPTION, h);
-            let mod_y = card_y + card_h * 0.70;
+            let mod_h = typography::size(typography::CAPTION, h) * 1.8;
+            let mod_y = card_y + card_h * 0.68;
             text_labels.push(TextLabel {
                 rect: [card_x, mod_y, card_w, mod_h],
                 text: format!("{}: {}", modifier.name(), modifier.description()),
                 color: color::AMBER,
+                ..Default::default()
             });
         }
 
-        let mut buttons: Vec<ButtonDef> = vec![ButtonDef::ui(
-            (card_x, card_y, card_w, card_h),
-            UiAction::Confirm,
-        )];
+        // Round wind for the upcoming ante (Patch B). Triplets/kongs of this
+        // wind fire the Yakuhai yaku, so showing it here lets the player plan
+        // their hand before sitting down.
+        let wind_rank = BlindKind::round_wind_for_ante(ctx.run.ante);
+        let wind_h = typography::size(typography::CAPTION, h) * 1.8;
+        let wind_y = card_y + card_h * 0.83;
+        text_labels.push(TextLabel {
+            rect: [card_x, wind_y, card_w, wind_h],
+            text: format!("Round Wind: {}", BlindKind::wind_name(wind_rank)),
+            color: color::GOLD,
+            ..Default::default()
+        });
+
+        let mut buttons = Vec::new();
         if can_skip {
             let reward = upcoming.skip_reward();
             widget::push_button(
@@ -254,14 +294,20 @@ impl PickBlindScene {
                 [btn_x, btn_y, btn_w, btn_h],
                 &format!("Skip (+{}g)", reward),
                 ButtonVariant::Subtle,
-                if self.skip_focused {
+                if skip_focused {
                     ButtonState::Hover
                 } else {
                     ButtonState::Rest
                 },
                 UiAction::Cancel,
             );
+            // Drop the synthetic ButtonDef::ui from push_button — flat_items
+            // re-registers with stable click ids below.
+            buttons.pop();
         }
+        // Single hit-target list shared with update() — single source of truth.
+        let items = Self::flat_items(ctx.layout, can_skip);
+        self.tree.register_flat_buttons(&items, &mut buttons);
 
         // Pause overlay.
         self.pause_menu
@@ -288,7 +334,9 @@ impl PickBlindScene {
             flame_instances: vec![],
             point_lights: vec![],
             candles: vec![],
+            relic_placements: vec![],
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }
