@@ -5,7 +5,7 @@
 //! with a slight top bevel that catches candlelight. Local space spans
 //! `-0.5..+0.5` on each axis; per-instance scale supplies the actual size.
 
-use crate::render::lit_mesh::{push_box, MaterialKind, MaterialParams, MeshCpu};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Build the bone tablet mesh: a single rectangular block.
@@ -21,16 +21,7 @@ pub fn build_bone_tablet_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    push_box(
-        &mut vertices,
-        &mut indices,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-    );
+    push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
 
     // The +Y face is the third face emitted by `push_box` (index 2). Each
     // face writes 4 vertices, so the top face occupies vertices 8..12. The

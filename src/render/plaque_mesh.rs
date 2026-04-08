@@ -8,7 +8,7 @@
 //! Local space spans `-0.5..+0.5` on each axis so a per-instance scale matrix
 //! sizes it via the `PlaquePlacement.extents`.
 
-use crate::render::lit_mesh::{push_box, MaterialKind, MaterialParams, MeshCpu};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Half-thickness of the plaque slab in local units.

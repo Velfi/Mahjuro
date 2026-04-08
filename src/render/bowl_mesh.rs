@@ -111,10 +111,26 @@ pub fn build_bowl_mesh() -> MeshCpu {
         let n0 = outer_normals[i];
         let n1 = outer_normals[i1];
         let base = vertices.len() as u32;
-        vertices.push(Vertex3dTex { position: [xt0, TOP_Y, zt0], normal: n0, uv: [0.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [xt1, TOP_Y, zt1], normal: n1, uv: [1.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [xb1, FOOT_Y, zb1], normal: n1, uv: [1.0, 1.0] });
-        vertices.push(Vertex3dTex { position: [xb0, FOOT_Y, zb0], normal: n0, uv: [0.0, 1.0] });
+        vertices.push(Vertex3dTex {
+            position: [xt0, TOP_Y, zt0],
+            normal: n0,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xt1, TOP_Y, zt1],
+            normal: n1,
+            uv: [1.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xb1, FOOT_Y, zb1],
+            normal: n1,
+            uv: [1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xb0, FOOT_Y, zb0],
+            normal: n0,
+            uv: [0.0, 1.0],
+        });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
@@ -128,10 +144,26 @@ pub fn build_bowl_mesh() -> MeshCpu {
         let n0 = inner_normals[i];
         let n1 = inner_normals[i1];
         let base = vertices.len() as u32;
-        vertices.push(Vertex3dTex { position: [xt1, TOP_Y, zt1], normal: n1, uv: [0.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [xt0, TOP_Y, zt0], normal: n0, uv: [1.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [xb0, WELL_Y, zb0], normal: n0, uv: [1.0, 1.0] });
-        vertices.push(Vertex3dTex { position: [xb1, WELL_Y, zb1], normal: n1, uv: [0.0, 1.0] });
+        vertices.push(Vertex3dTex {
+            position: [xt1, TOP_Y, zt1],
+            normal: n1,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xt0, TOP_Y, zt0],
+            normal: n0,
+            uv: [1.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xb0, WELL_Y, zb0],
+            normal: n0,
+            uv: [1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [xb1, WELL_Y, zb1],
+            normal: n1,
+            uv: [0.0, 1.0],
+        });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
@@ -145,10 +177,26 @@ pub fn build_bowl_mesh() -> MeshCpu {
         let (ix0, iz0) = inner_top[i];
         let (ix1, iz1) = inner_top[(i + 1) % SIDES];
         let base = vertices.len() as u32;
-        vertices.push(Vertex3dTex { position: [ox0, TOP_Y, oz0], normal: rim_normal, uv: [0.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [ox1, TOP_Y, oz1], normal: rim_normal, uv: [1.0, 0.0] });
-        vertices.push(Vertex3dTex { position: [ix1, TOP_Y, iz1], normal: rim_normal, uv: [1.0, 1.0] });
-        vertices.push(Vertex3dTex { position: [ix0, TOP_Y, iz0], normal: rim_normal, uv: [0.0, 1.0] });
+        vertices.push(Vertex3dTex {
+            position: [ox0, TOP_Y, oz0],
+            normal: rim_normal,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [ox1, TOP_Y, oz1],
+            normal: rim_normal,
+            uv: [1.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [ix1, TOP_Y, iz1],
+            normal: rim_normal,
+            uv: [1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [ix0, TOP_Y, iz0],
+            normal: rim_normal,
+            uv: [0.0, 1.0],
+        });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 

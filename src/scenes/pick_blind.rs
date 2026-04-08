@@ -93,15 +93,13 @@ impl PickBlindScene {
         cached_play: Option<[f32; 4]>,
         cached_skip: Option<[f32; 4]>,
     ) -> Vec<FlatItem<BlindAction>> {
-        let play_rect = cached_play
-            .map(inflate_hit_rect)
-            .unwrap_or_else(|| {
-                let (px, py) = layout.play_dish_anchor_px;
-                let pext = layout.play_dish_extents;
-                let pw = (pext[0] * 2.20).max(220.0);
-                let ph = (pext[2] * 4.20).max(160.0);
-                [px - pw * 0.5, py - ph * 0.55, pw, ph]
-            });
+        let play_rect = cached_play.map(inflate_hit_rect).unwrap_or_else(|| {
+            let (px, py) = layout.play_dish_anchor_px;
+            let pext = layout.play_dish_extents;
+            let pw = (pext[0] * 2.20).max(220.0);
+            let ph = (pext[2] * 4.20).max(160.0);
+            [px - pw * 0.5, py - ph * 0.55, pw, ph]
+        });
 
         let mut items = vec![FlatItem::new(
             BlindAction::PlayBlind.id(),
@@ -109,15 +107,13 @@ impl PickBlindScene {
             BlindAction::PlayBlind,
         )];
         if can_skip {
-            let skip_rect = cached_skip
-                .map(inflate_hit_rect)
-                .unwrap_or_else(|| {
-                    let (sx, sy) = layout.skip_dish_anchor_px;
-                    let sext = layout.skip_dish_extents;
-                    let sw = (sext[0] * 2.20).max(220.0);
-                    let sh = (sext[2] * 4.20).max(160.0);
-                    [sx - sw * 0.5, sy - sh * 0.55, sw, sh]
-                });
+            let skip_rect = cached_skip.map(inflate_hit_rect).unwrap_or_else(|| {
+                let (sx, sy) = layout.skip_dish_anchor_px;
+                let sext = layout.skip_dish_extents;
+                let sw = (sext[0] * 2.20).max(220.0);
+                let sh = (sext[2] * 4.20).max(160.0);
+                [sx - sw * 0.5, sy - sh * 0.55, sw, sh]
+            });
             items.push(FlatItem::new(
                 BlindAction::SkipBlind.id(),
                 skip_rect,
@@ -467,7 +463,11 @@ impl SceneBehavior for PickBlindScene {
             // own brightening alone — most of the warmth should come
             // from the spotlight tinting the stone, not from the
             // shrine self-illuminating.
-            let glow = if state == ShrineState::Upcoming { 0.30 } else { 0.0 };
+            let glow = if state == ShrineState::Upcoming {
+                0.30
+            } else {
+                0.0
+            };
 
             shrine_placements.push(ShrinePlacement {
                 world_pos: [px, py, 0.0],
@@ -692,18 +692,11 @@ impl SceneBehavior for PickBlindScene {
             let anchor_rect = projected.unwrap_or_else(|| {
                 let (px, py) = layout.shrine_pixel_anchor(i);
                 let ext = layout.shrine_extents(i);
-                [
-                    px - ext[0] * 0.5,
-                    py - ext[1] * 0.5,
-                    ext[0],
-                    ext[1],
-                ]
+                [px - ext[0] * 0.5, py - ext[1] * 0.5, ext[0], ext[1]]
             });
 
             let cx = anchor_rect[0] + anchor_rect[2] * 0.5;
-            let label_x = (cx - label_w * 0.5)
-                .max(8.0)
-                .min(w - label_w - 8.0);
+            let label_x = (cx - label_w * 0.5).max(8.0).min(w - label_w - 8.0);
 
             // Boss shrine: stack name + description + tier above.
             // Other shrines: just the name.
@@ -747,23 +740,13 @@ impl SceneBehavior for PickBlindScene {
                         .and_then(|e| e.description_override.as_deref())
                         .unwrap_or(def.description);
                     texts.push(TextLabel {
-                        rect: [
-                            label_x,
-                            title_y + title_h + 2.0,
-                            label_w,
-                            desc_h,
-                        ],
+                        rect: [label_x, title_y + title_h + 2.0, label_w, desc_h],
                         text: description.to_string(),
                         color: color::AMBER,
                         ..Default::default()
                     });
                     texts.push(TextLabel {
-                        rect: [
-                            label_x,
-                            title_y + title_h + desc_h + 4.0,
-                            label_w,
-                            desc_h,
-                        ],
+                        rect: [label_x, title_y + title_h + desc_h + 4.0, label_w, desc_h],
                         text: format!("[{}]", def.tier.label()),
                         color: color::AMBER,
                         ..Default::default()
@@ -882,39 +865,38 @@ impl SceneBehavior for PickBlindScene {
 
         // Helper: stack a two-line label (title + caption) above a
         // projected screen rect, clamped to the window bounds.
-        let push_altar_caption =
-            |rect: [f32; 4], title: &str, caption: &str, focused: bool, no_glossary: bool, texts: &mut Vec<TextLabel>| {
-                let cx = rect[0] + rect[2] * 0.5;
-                let lx = (cx - altar_label_w * 0.5)
-                    .max(8.0)
-                    .min(w - altar_label_w - 8.0);
-                // Stack the two lines just above the projected dish top.
-                let stack_h = altar_label_h + altar_caption_h + 2.0;
-                let ly = (rect[1] - stack_h - 6.0).max(8.0);
-                texts.push(TextLabel {
-                    rect: [lx, ly, altar_label_w, altar_label_h],
-                    text: title.to_string(),
-                    color: if focused {
-                        color::CHAMPAGNE
-                    } else {
-                        color::PARCHMENT
-                    },
-                    no_glossary,
-                    ..Default::default()
-                });
-                texts.push(TextLabel {
-                    rect: [
-                        lx,
-                        ly + altar_label_h + 2.0,
-                        altar_label_w,
-                        altar_caption_h,
-                    ],
-                    text: caption.to_string(),
-                    color: if focused { color::GOLD } else { color::MIST },
-                    no_glossary,
-                    ..Default::default()
-                });
-            };
+        let push_altar_caption = |rect: [f32; 4],
+                                  title: &str,
+                                  caption: &str,
+                                  focused: bool,
+                                  no_glossary: bool,
+                                  texts: &mut Vec<TextLabel>| {
+            let cx = rect[0] + rect[2] * 0.5;
+            let lx = (cx - altar_label_w * 0.5)
+                .max(8.0)
+                .min(w - altar_label_w - 8.0);
+            // Stack the two lines just above the projected dish top.
+            let stack_h = altar_label_h + altar_caption_h + 2.0;
+            let ly = (rect[1] - stack_h - 6.0).max(8.0);
+            texts.push(TextLabel {
+                rect: [lx, ly, altar_label_w, altar_label_h],
+                text: title.to_string(),
+                color: if focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::PARCHMENT
+                },
+                no_glossary,
+                ..Default::default()
+            });
+            texts.push(TextLabel {
+                rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
+                text: caption.to_string(),
+                color: if focused { color::GOLD } else { color::MIST },
+                no_glossary,
+                ..Default::default()
+            });
+        };
 
         // Play altar caption — projected rect from this frame, or
         // (first-frame fallback) a small estimate around the pixel anchor.

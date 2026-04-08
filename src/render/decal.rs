@@ -132,12 +132,7 @@ pub fn rasterize_tablet_label_decal(
 
     // Soft carved-shadow pass: a slightly darker tint, offset 1px down/right,
     // so the engraving keeps shape under directional lighting.
-    let shadow = [
-        ink[0] * 0.25,
-        ink[1] * 0.22,
-        ink[2] * 0.20,
-        ink[3] * 0.85,
-    ];
+    let shadow = [ink[0] * 0.25, ink[1] * 0.22, ink[2] * 0.20, ink[3] * 0.85];
     blit_tinted(
         &band,
         inner_w,
@@ -213,18 +208,40 @@ pub fn rasterize_plaque_decal(top: &str, bot: &str, ui_font: Option<&fontdue::Fo
     let parchment = [0.96_f32, 0.93, 0.78, 1.0];
     // Carved shadow: darker tint, offset 2 px down/right so the engraving
     // reads after bilinear stretch onto the plaque face.
-    let shadow_for = |ink: [f32; 4]| {
-        [
-            ink[0] * 0.22,
-            ink[1] * 0.20,
-            ink[2] * 0.16,
-            ink[3] * 0.85,
-        ]
-    };
-    blit_tinted(&top_band, inner_w, top_h, &mut rgba, w, pad_x + 2, pad_y + 2, shadow_for(champagne));
-    blit_tinted(&top_band, inner_w, top_h, &mut rgba, w, pad_x, pad_y, champagne);
-    blit_tinted(&bot_band, inner_w, bot_h, &mut rgba, w, pad_x + 2, pad_y + top_h + 2, shadow_for(parchment));
-    blit_tinted(&bot_band, inner_w, bot_h, &mut rgba, w, pad_x, pad_y + top_h, parchment);
+    let shadow_for = |ink: [f32; 4]| [ink[0] * 0.22, ink[1] * 0.20, ink[2] * 0.16, ink[3] * 0.85];
+    blit_tinted(
+        &top_band,
+        inner_w,
+        top_h,
+        &mut rgba,
+        w,
+        pad_x + 2,
+        pad_y + 2,
+        shadow_for(champagne),
+    );
+    blit_tinted(
+        &top_band, inner_w, top_h, &mut rgba, w, pad_x, pad_y, champagne,
+    );
+    blit_tinted(
+        &bot_band,
+        inner_w,
+        bot_h,
+        &mut rgba,
+        w,
+        pad_x + 2,
+        pad_y + top_h + 2,
+        shadow_for(parchment),
+    );
+    blit_tinted(
+        &bot_band,
+        inner_w,
+        bot_h,
+        &mut rgba,
+        w,
+        pad_x,
+        pad_y + top_h,
+        parchment,
+    );
     rgba
 }
 

@@ -194,11 +194,9 @@ impl GpuProfiler {
         let map_result: Arc<Mutex<Option<Result<(), wgpu::BufferAsyncError>>>> =
             Arc::new(Mutex::new(None));
         let map_result_cb = Arc::clone(&map_result);
-        readback
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |r| {
-                *map_result_cb.lock().unwrap() = Some(r);
-            });
+        readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            *map_result_cb.lock().unwrap() = Some(r);
+        });
         // Block until the GPU has finished and the map callback has fired.
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
 
@@ -260,10 +258,11 @@ impl GpuProfiler {
             }
             let avg = self.accum_ms[i] / frames as f64;
             total += avg;
-            log::info!(
-                "[GpuProfiler]   {label:<12} {avg:>7.3} ms  ({frames} frames)"
-            );
+            log::info!("[GpuProfiler]   {label:<12} {avg:>7.3} ms  ({frames} frames)");
         }
-        log::info!("[GpuProfiler]   {:<12} {total:>7.3} ms (sum of averages)", "TOTAL");
+        log::info!(
+            "[GpuProfiler]   {:<12} {total:>7.3} ms (sum of averages)",
+            "TOTAL"
+        );
     }
 }

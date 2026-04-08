@@ -152,10 +152,10 @@ impl BossTier {
     /// gold → amber → ruby so the player can read tier at a glance.
     pub fn halo_color(self) -> [f32; 4] {
         match self {
-            BossTier::Soft => [0.55, 0.65, 0.85, 1.0],   // muted indigo
+            BossTier::Soft => [0.55, 0.65, 0.85, 1.0], // muted indigo
             BossTier::Medium => [0.91, 0.69, 0.29, 1.0], // GOLD
-            BossTier::Hard => [0.94, 0.66, 0.28, 1.0],   // AMBER
-            BossTier::Final => [0.91, 0.35, 0.42, 1.0],  // RUBY
+            BossTier::Hard => [0.94, 0.66, 0.28, 1.0], // AMBER
+            BossTier::Final => [0.91, 0.35, 0.42, 1.0], // RUBY
         }
     }
 
@@ -280,9 +280,7 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
         rule_pushes: vec![],
         on_apply: Some(tax_collector_apply),
         on_play: Some(tribute_play),
-        description_override: Some(format!(
-            "Pay {cost} gold each play (locked at reveal)"
-        )),
+        description_override: Some(format!("Pay {cost} gold each play (locked at reveal)")),
     }
 }
 
@@ -507,7 +505,11 @@ pub fn regular_pool() -> Vec<BossKind> {
 /// boss in the remaining pool qualifies (player got unlucky on draws), we
 /// widen by ignoring `min_ante` rather than crashing — soft bosses on a late
 /// ante are still better than no boss at all.
-pub fn pick_for_ante(pool: &mut Vec<BossKind>, ante: u32, rng: &mut impl rand::Rng) -> Option<BossKind> {
+pub fn pick_for_ante(
+    pool: &mut Vec<BossKind>,
+    ante: u32,
+    rng: &mut impl rand::Rng,
+) -> Option<BossKind> {
     if pool.is_empty() {
         return None;
     }

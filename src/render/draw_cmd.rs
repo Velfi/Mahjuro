@@ -487,10 +487,7 @@ pub enum DrawCmd {
     /// to a glossary term. Lets scenes attach a tooltip to a 3D object
     /// (e.g. the coin pile, the wall stack) by giving its approximate
     /// 2D screen footprint and the glossary term to look up.
-    GlossaryAnchor {
-        rect: [f32; 4],
-        term: &'static str,
-    },
+    GlossaryAnchor { rect: [f32; 4], term: &'static str },
 }
 
 /// Everything a frame's draw needs: an ordered command list plus per-frame

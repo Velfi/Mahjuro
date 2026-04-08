@@ -1078,7 +1078,10 @@ impl FluidSim {
             layout: &self.render_layout,
             entries: &[
                 bge(0, self.cam_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&self.lit_density_view)),
+                bge(
+                    1,
+                    wgpu::BindingResource::TextureView(&self.lit_density_view),
+                ),
                 bge(2, wgpu::BindingResource::Sampler(&self.linear_sampler)),
                 bge(3, wgpu::BindingResource::TextureView(depth_view)),
             ],
@@ -1092,7 +1095,10 @@ impl FluidSim {
             entries: &[
                 bge(0, self.fluid_uniforms_buf.as_entire_binding()),
                 bge(1, wgpu::BindingResource::TextureView(&self.vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&self.lit_density_view)),
+                bge(
+                    2,
+                    wgpu::BindingResource::TextureView(&self.lit_density_view),
+                ),
                 bge(3, self.cam_buf.as_entire_binding()),
                 bge(4, point_lights_buffer.as_entire_binding()),
             ],
