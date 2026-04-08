@@ -91,17 +91,35 @@ impl TooltipState {
 
         let scale = (window_w.min(window_h) / 600.0).max(0.5);
 
-        // Filter out button labels.
+        // Filter out button labels and labels that opt out of glossary
+        // detection (e.g. yaku cards with their own hover tooltip).
         let non_button_labels: Vec<&TextLabel> = base_labels
             .iter()
             .filter(|l| {
-                !button_rects
-                    .iter()
-                    .any(|&(bx, by, bw, bh)| rects_overlap(l.rect, [bx, by, bw, bh]))
+                !l.no_glossary
+                    && !button_rects
+                        .iter()
+                        .any(|&(bx, by, bw, bh)| rects_overlap(l.rect, [bx, by, bw, bh]))
             })
             .collect();
 
-        let mut base_regions = regions_for_label_refs(&font, &non_button_labels, &[]);
+        let text_regions = regions_for_label_refs(&font, &non_button_labels, &[]);
+
+        // Draw underlines under glossary terms in base UI text so the player
+        // can see at a glance which words are hoverable.
+        for region in &text_regions {
+            frame.quad(GpuInstance {
+                rect: [
+                    region.rect[0],
+                    region.rect[1] + region.rect[3] * 0.85,
+                    region.rect[2],
+                    (1.5 * scale).max(1.0),
+                ],
+                color: themec::alpha(themec::CHAMPAGNE, 0.7),
+            });
+        }
+
+        let mut base_regions = text_regions;
         // Relic icons are first-class hover regions: hovering an icon shows
         // its name + description like any glossary term.
         base_regions.extend(relic_hover_regions(relic_icons));
@@ -217,6 +235,10 @@ fn regions_for_label_refs(
             rect: l.rect,
             text: l.text.clone(),
             color: l.color,
+            // Preserve the pinned font size — `regions_for_labels` needs it
+            // to compute glyph advances at the same size the label is
+            // actually rendered at, otherwise the underlines drift.
+            font_px: l.font_px,
             ..Default::default()
         })
         .collect();
@@ -240,7 +262,8 @@ fn regions_for_labels(
         if w == 0 || h == 0 {
             continue;
         }
-        let (_fp, start_x, advances) = measure_label_advances(font, &label.text, w, h);
+        let (_fp, start_x, advances) =
+            measure_label_advances(font, &label.text, w, h, label.font_px);
 
         let mut cum = Vec::with_capacity(advances.len() + 1);
         cum.push(0.0f32);

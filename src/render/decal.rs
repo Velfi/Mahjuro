@@ -8,7 +8,7 @@
 //! To get the real Unicode tile glyphs, drop any TTF/OTF that covers the
 //! Mahjong block (e.g. Noto Emoji) at `assets/font.ttf` in the project root.
 
-use crate::core::tile::{Suit, Tile};
+use crate::core::tile::{Suit, Tile, TileEnhancement};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -73,6 +73,15 @@ pub fn rasterize_tile_face_decal(
     let label = tile_short_label(tile);
     let emoji = tile_suit_emoji(tile);
 
+    // Talisman accent border. Drawn first so the symbol/emoji blits sit on
+    // top of it. Each enhancement gets a distinct hue (see
+    // `TileEnhancement::accent_color`) so the player can read the talisman
+    // identity at a glance even from across the table. Polychrome takes a
+    // special rainbow path inside `draw_enhancement_border`.
+    if let Some(enh) = tile.enhancement {
+        draw_enhancement_border(&mut rgba, width, height, enh);
+    }
+
     // Top half: suit-coloured short label.
     if let Some(font) = ui_font {
         let top_h = (height as f32 * 0.50) as u32;
@@ -90,6 +99,242 @@ pub fn rasterize_tile_face_decal(
     }
 
     rgba
+}
+
+/// Paint a soft inner border + corner gem onto an RGBA8 decal to mark a tile
+/// that has been enhanced by a talisman. The border is a 4-px-thick frame
+/// with a softer outer glow that fades to transparent, and a small inlay
+/// "gem" in the upper-right corner.
+///
+/// Each enhancement gets its own visual treatment:
+/// - **Jade** — two-tone imperial green, lighter on top edges, deeper on
+///   bottom (suggests carved stone catching light from above).
+/// - **Pearl** — soft, low-saturation iridescence cycling around the frame
+///   in cool/warm pastels.
+/// - **Gilded** — polished gold with a sine-wave brightness highlight that
+///   runs around the perimeter so the frame reads as a reflective metal rim.
+/// - **Polychrome** — full-saturation rainbow flowing clockwise around the
+///   frame; gem is a polar rainbow.
+fn draw_enhancement_border(rgba: &mut [u8], width: u32, height: u32, enh: TileEnhancement) {
+    let w = width as i32;
+    let h = height as i32;
+
+    // Frame parameters in pixels. Tuned for the 192×256 face decal — chunky
+    // enough to read across the table without crowding the rank/emoji glyphs.
+    let inset: i32 = 6;
+    let thickness: i32 = 9;
+    let glow: i32 = 11;
+
+    // Perimeter parameter t∈[0,1). We walk the inset rect clockwise from
+    // the top-left so styling flows naturally around the tile.
+    let inner_w = (w - 2 * inset).max(1) as f32;
+    let inner_h = (h - 2 * inset).max(1) as f32;
+    let perimeter = 2.0 * (inner_w + inner_h);
+    let perimeter_t = |x: i32, y: i32| -> f32 {
+        let xc = (x as f32).clamp(inset as f32, (w - 1 - inset) as f32);
+        let yc = (y as f32).clamp(inset as f32, (h - 1 - inset) as f32);
+        let lx = xc - inset as f32;
+        let ly = yc - inset as f32;
+        let d_top = ly;
+        let d_bot = inner_h - ly;
+        let d_lft = lx;
+        let d_rgt = inner_w - lx;
+        let m = d_top.min(d_bot).min(d_lft).min(d_rgt);
+        let s = if m == d_top {
+            lx
+        } else if m == d_rgt {
+            inner_w + ly
+        } else if m == d_bot {
+            inner_w + inner_h + (inner_w - lx)
+        } else {
+            2.0 * inner_w + inner_h + (inner_h - ly)
+        };
+        (s / perimeter).rem_euclid(1.0)
+    };
+
+    let put = |rgba: &mut [u8], x: i32, y: i32, rgb: (u8, u8, u8), alpha: f32| {
+        if x < 0 || y < 0 || x >= w || y >= h {
+            return;
+        }
+        let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+        if a == 0 {
+            return;
+        }
+        let di = ((y as u32 * width + x as u32) * 4) as usize;
+        rgba[di] = rgb.0;
+        rgba[di + 1] = rgb.1;
+        rgba[di + 2] = rgb.2;
+        rgba[di + 3] = rgba[di + 3].saturating_add(a);
+    };
+
+    // Distance from a point to the inner-frame outline (axis-aligned ring).
+    let frame_dist = |x: i32, y: i32| -> i32 {
+        let dx = (inset - x).max(x - (w - 1 - inset)).max(0);
+        let dy = (inset - y).max(y - (h - 1 - inset)).max(0);
+        if dx == 0 && dy == 0 {
+            let inner_dx = (x - inset).min(w - 1 - inset - x);
+            let inner_dy = (y - inset).min(h - 1 - inset - y);
+            -inner_dx.min(inner_dy)
+        } else {
+            dx.max(dy)
+        }
+    };
+
+    for y in 0..h {
+        for x in 0..w {
+            let d = frame_dist(x, y);
+            let in_band = d <= 0 && d >= -thickness;
+            let in_glow = d > 0 && d <= glow;
+            if !in_band && !in_glow {
+                continue;
+            }
+            let t = perimeter_t(x, y);
+            let rgb = enhancement_border_color(enh, t);
+            if in_band {
+                put(rgba, x, y, rgb, 0.85);
+            } else {
+                let g = 1.0 - (d as f32 / (glow as f32 + 1.0));
+                put(rgba, x, y, rgb, 0.55 * g * g);
+            }
+        }
+    }
+
+    // Corner gem in the upper-right: a small filled disc, brighter than the
+    // border so it reads as an inlay. The gem styling matches the border
+    // (polar coords drive the per-pixel colour for directional materials).
+    let cx = w - inset - thickness - 10;
+    let cy = inset + thickness + 10;
+    let radius: i32 = 10;
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            let r2 = (dx * dx + dy * dy) as f32;
+            let edge = (radius * radius) as f32;
+            if r2 > edge {
+                continue;
+            }
+            // Normalised radius [0,1] from centre and angle [0,1) clockwise
+            // from the top — same convention as the border perimeter so the
+            // gem feels visually consistent with the frame.
+            let r_norm = (r2 / edge).sqrt();
+            let theta = (dx as f32).atan2(-dy as f32);
+            let angle_t = (theta / std::f32::consts::TAU + 1.0).rem_euclid(1.0);
+            let rgb = enhancement_gem_color(enh, angle_t, r_norm);
+            let alpha = 0.6 + 0.4 * (1.0 - r_norm);
+            put(rgba, cx + dx, cy + dy, rgb, alpha);
+        }
+    }
+}
+
+/// Per-pixel colour of the enhancement border at perimeter parameter `t`.
+fn enhancement_border_color(enh: TileEnhancement, t: f32) -> (u8, u8, u8) {
+    match enh {
+        TileEnhancement::Polychrome => hsv_to_rgb_u8(t, 0.85, 1.0),
+
+        TileEnhancement::Pearl => {
+            // Iridescent: low-saturation hue drift. Adjacent pixels share
+            // similar tints so the rim looks like nacre catching the light
+            // rather than a candy-coloured rainbow.
+            let hue = (t + 0.55).rem_euclid(1.0);
+            hsv_to_rgb_u8(hue, 0.22, 1.0)
+        }
+
+        TileEnhancement::Gilded => {
+            // Polished gold: a sine-wave brightness pulse runs around the
+            // perimeter so one side of the frame catches light strongly
+            // while the opposite side falls into warm shadow.
+            let phase = (t * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2).sin();
+            let bright = 0.55 + 0.45 * (phase * 0.5 + 0.5);
+            let r = (1.00 * bright * 255.0).clamp(0.0, 255.0) as u8;
+            let g = (0.80 * bright * 255.0).clamp(0.0, 255.0) as u8;
+            let b = (0.25 * bright * bright * 255.0).clamp(0.0, 255.0) as u8;
+            (r, g, b)
+        }
+
+        TileEnhancement::Jade => {
+            // Two-tone carved stone: cosine over t puts the highlight along
+            // the top of the frame and the deepest green along the bottom.
+            // top_w ≈ 1 at the top edge, ≈ 0 at the bottom.
+            let top_w = ((t * std::f32::consts::TAU).cos() * 0.5 + 0.5).clamp(0.0, 1.0);
+            let r = ((0.10 + 0.30 * top_w) * 255.0) as u8;
+            let g = ((0.50 + 0.40 * top_w) * 255.0) as u8;
+            let b = ((0.30 + 0.25 * top_w) * 255.0) as u8;
+            (r, g, b)
+        }
+    }
+}
+
+/// Per-pixel colour of the corner gem. `angle_t ∈ [0,1)` is the clockwise
+/// angle from the top of the gem; `r_norm ∈ [0,1]` is normalised distance
+/// from the gem centre (0 = centre, 1 = rim).
+fn enhancement_gem_color(enh: TileEnhancement, angle_t: f32, r_norm: f32) -> (u8, u8, u8) {
+    match enh {
+        TileEnhancement::Polychrome => hsv_to_rgb_u8(angle_t, 0.9, 1.0),
+
+        TileEnhancement::Pearl => {
+            // Radial pearl: hue drifts around the gem at low saturation,
+            // brighter at the centre to suggest a polished orb catching
+            // a specular highlight.
+            let hue = (angle_t + 0.6).rem_euclid(1.0);
+            let v = (1.0 - 0.25 * r_norm).clamp(0.0, 1.0);
+            hsv_to_rgb_u8(hue, 0.18, v)
+        }
+
+        TileEnhancement::Gilded => {
+            // Polished gold orb: bright specular near a fixed angle (top-
+            // left of the gem) falling off into warmer amber elsewhere.
+            // Distance from the highlight angle in [0, 0.5].
+            let highlight = 0.875_f32; // ~10 o'clock
+            let mut d_angle = (angle_t - highlight).abs();
+            if d_angle > 0.5 {
+                d_angle = 1.0 - d_angle;
+            }
+            let bright = 1.0 - 0.55 * (d_angle * 2.0) - 0.20 * r_norm;
+            let bright = bright.clamp(0.35, 1.0);
+            let r = (1.00 * bright * 255.0) as u8;
+            let g = (0.82 * bright * 255.0) as u8;
+            let b = (0.28 * bright * bright * 255.0) as u8;
+            (r, g, b)
+        }
+
+        TileEnhancement::Jade => {
+            // Carved jade orb: brighter highlight in the upper-left, deeper
+            // green in the lower-right. Same axis convention as the frame.
+            let highlight = 0.875_f32;
+            let mut d_angle = (angle_t - highlight).abs();
+            if d_angle > 0.5 {
+                d_angle = 1.0 - d_angle;
+            }
+            let lit = (1.0 - d_angle * 2.0).clamp(0.0, 1.0) * (1.0 - 0.4 * r_norm);
+            let r = ((0.10 + 0.35 * lit) * 255.0) as u8;
+            let g = ((0.50 + 0.45 * lit) * 255.0) as u8;
+            let b = ((0.28 + 0.30 * lit) * 255.0) as u8;
+            (r, g, b)
+        }
+    }
+}
+
+/// Convert HSV (h,s,v in [0,1]) to an 8-bit RGB triple. Used by the
+/// polychrome border / gem so we don't need a colour-space dependency.
+fn hsv_to_rgb_u8(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let h = (h.rem_euclid(1.0)) * 6.0;
+    let i = h.floor();
+    let f = h - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    let (r, g, b) = match i as i32 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    (
+        (r * 255.0).clamp(0.0, 255.0) as u8,
+        (g * 255.0).clamp(0.0, 255.0) as u8,
+        (b * 255.0).clamp(0.0, 255.0) as u8,
+    )
 }
 
 /// Blit a single-channel-in-alpha RGBA source onto an RGBA destination at
@@ -448,11 +693,20 @@ pub fn measure_label_advances(
     text: &str,
     width: u32,
     height: u32,
+    font_px: Option<f32>,
 ) -> (f32, f32, Vec<f32>) {
     let char_count = text.chars().count().max(1) as f32;
-    let font_px = (height as f32 * 0.55)
-        .min(width as f32 * 1.5 / char_count)
-        .max(8.0);
+    // Mirror `rasterize_label_styled`: honour a pinned font size when the
+    // caller supplied one, otherwise use the auto-shrink formula. Without
+    // this, glossary-term underlines on labels that pin `font_px` (e.g.
+    // the gameplay score header) get computed at the wrong glyph size and
+    // drift away from the rendered text.
+    let font_px = match font_px {
+        Some(px) => px.max(8.0),
+        None => (height as f32 * 0.55)
+            .min(width as f32 * 1.5 / char_count)
+            .max(8.0),
+    };
 
     let advances: Vec<f32> = text
         .chars()

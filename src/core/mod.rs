@@ -1,3 +1,5 @@
+pub mod boss;
+pub mod consumable;
 pub mod deck;
 pub mod hand;
 pub mod progression;
@@ -5,6 +7,7 @@ pub mod relic;
 pub mod rules;
 pub mod scoring;
 pub mod shanten;
+pub mod talisman;
 pub mod tile;
 pub mod yaku;
 pub mod zodiac;

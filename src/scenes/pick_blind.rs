@@ -1,6 +1,10 @@
-//! Pick-blind scene — Balatro-style: shows the next blind in the
-//! Small → Big → Boss cycle. The player can play it, or skip it
-//! (Small/Big only) to jump straight to the next blind.
+//! Pick-blind scene — Balatro-style: shows all three blinds for the
+//! current ante (Small / Big / Boss) at once, with the upcoming one
+//! highlighted. Already-cleared blinds are dimmed; future blinds preview
+//! their target so the player can plan around the boss before reaching it.
+//!
+//! The boss card always shows its themed name and effect, since
+//! `RunState::upcoming_boss` is rolled at the ante boundary.
 
 use crate::core::rules::BlindKind;
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
@@ -28,6 +32,17 @@ impl BlindAction {
     }
 }
 
+/// Visual state of one of the three blind cards in the row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CardState {
+    /// Already played and cleared this ante. Drawn dim with a "DONE" tag.
+    Cleared,
+    /// The blind the player is about to face — has the focus halo.
+    Upcoming,
+    /// Future blind in this ante — drawn dim, used for preview only.
+    Future,
+}
+
 pub struct PickBlindScene {
     tree: TreeState,
     pause_menu: PauseMenu,
@@ -47,17 +62,57 @@ impl PickBlindScene {
         !matches!(blind, BlindKind::Boss)
     }
 
-    /// Single source of truth: card rect + skip button rect, registered as
-    /// flat hit-targets shared between update() and draw().
-    fn flat_items(layout: &LayoutResult, can_skip: bool) -> Vec<FlatItem<BlindAction>> {
-        let w = layout.window_w;
-        let h = layout.window_h;
+    /// Compute the card state for `card` given the player's `upcoming` blind.
+    /// Cards earlier in the Small → Big → Boss cycle are Cleared; the
+    /// upcoming one is Upcoming; later ones are Future.
+    fn card_state(card: BlindKind, upcoming: BlindKind) -> CardState {
+        let order = |b: BlindKind| match b {
+            BlindKind::Small => 0,
+            BlindKind::Big => 1,
+            BlindKind::Boss => 2,
+        };
+        let c = order(card);
+        let u = order(upcoming);
+        if c < u {
+            CardState::Cleared
+        } else if c == u {
+            CardState::Upcoming
+        } else {
+            CardState::Future
+        }
+    }
+
+    /// Layout: three card rects in a row, plus the skip button rect.
+    /// The upcoming card sits in the centre slot so the player's eye lands on
+    /// the choice they're actually making, not on the blind that already passed.
+    fn layout_cards(layout: &LayoutResult) -> [[f32; 4]; 3] {
         let hs = layout.hand_strip;
-        let card_w = hs.w * 0.42;
         let pad_y = hs.h * 0.08;
         let card_h = hs.h - pad_y * 2.0;
-        let card_x = hs.x + (hs.w - card_w) * 0.5;
+        let gap = hs.w * 0.02;
+        let card_w = (hs.w - gap * 4.0) / 3.0;
         let card_y = hs.y + pad_y;
+        let row_w = card_w * 3.0 + gap * 2.0;
+        let row_x = hs.x + (hs.w - row_w) * 0.5;
+        [
+            [row_x, card_y, card_w, card_h],
+            [row_x + card_w + gap, card_y, card_w, card_h],
+            [row_x + (card_w + gap) * 2.0, card_y, card_w, card_h],
+        ]
+    }
+
+    /// Hit-test rects shared between update() and draw(). The play target is
+    /// always the upcoming card (whichever slot it's in), so the focus tree
+    /// has just one card click target plus the skip button.
+    fn flat_items(layout: &LayoutResult, upcoming: BlindKind, can_skip: bool) -> Vec<FlatItem<BlindAction>> {
+        let cards = Self::layout_cards(layout);
+        let upcoming_idx = match upcoming {
+            BlindKind::Small => 0,
+            BlindKind::Big => 1,
+            BlindKind::Boss => 2,
+        };
+        let w = layout.window_w;
+        let h = layout.window_h;
         let scale = (w.min(h)) / 600.0;
         let btn_w = (160.0 * scale).max(80.0);
         let btn_h = (38.0 * scale).max(24.0);
@@ -66,7 +121,7 @@ impl PickBlindScene {
 
         let mut items = vec![FlatItem::new(
             BlindAction::PlayBlind.id(),
-            [card_x, card_y, card_w, card_h],
+            cards[upcoming_idx],
             BlindAction::PlayBlind,
         )];
         if can_skip {
@@ -94,8 +149,6 @@ impl SceneBehavior for PickBlindScene {
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
-        // Pause menu handling — drives the menu while paused and intercepts
-        // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             return t;
         }
@@ -103,7 +156,7 @@ impl SceneBehavior for PickBlindScene {
         let upcoming = ctx.run.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
 
-        let items = Self::flat_items(ctx.layout, can_skip);
+        let items = Self::flat_items(ctx.layout, upcoming, can_skip);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -114,8 +167,6 @@ impl SceneBehavior for PickBlindScene {
             },
         );
 
-        // Cancel-to-skip shortcut. (The pause shortcut is already handled
-        // by `pause_menu.handle()` above.)
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip {
                 let reward = upcoming.skip_reward();
@@ -143,61 +194,22 @@ impl SceneBehavior for PickBlindScene {
     fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let hs = ctx.layout.hand_strip;
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
             color: color::OBSIDIAN,
         }];
 
-        // Relic row in its own strip.
         let (relic_insts, relic_labels, relic_icons) =
             relic_row(&ctx.run.relics, &ctx.layout.relic_strip, w);
         instances.extend(relic_insts);
 
         let upcoming = ctx.run.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
-
-        // Single centered card for the upcoming blind.
-        let card_w = hs.w * 0.42;
-        let pad_y = hs.h * 0.08;
-        let card_h = hs.h - pad_y * 2.0;
-        let card_x = hs.x + (hs.w - card_w) * 0.5;
-        let card_y = hs.y + pad_y;
-
-        // Faint gold halo when the card is the focused choice.
-        let skip_focused = self.skip_focused();
-        if !skip_focused {
-            let halo = card_h * 0.04;
-            instances.push(GpuInstance {
-                rect: [
-                    card_x - halo,
-                    card_y - halo,
-                    card_w + halo * 2.0,
-                    card_h + halo * 2.0,
-                ],
-                color: color::alpha(color::GOLD, 0.45),
-            });
-        }
-        // Card background — Hero panel for boss, Default otherwise.
-        let variant = match upcoming {
-            BlindKind::Boss => PanelVariant::Hero,
-            _ => PanelVariant::Default,
-        };
-        widget::push_panel(&mut instances, [card_x, card_y, card_w, card_h], variant);
-
-        // Skip button at bottom (Small/Big only).
-        let scale = (w.min(h)) / 600.0;
-        let btn_w = (160.0 * scale).max(80.0);
-        let btn_h = (38.0 * scale).max(24.0);
-        let btn_x = (w - btn_w) * 0.5;
-        let btn_y = h - btn_h - (12.0 * scale);
-
-        // Text labels.
-        let ms = ctx.layout.modifier_strip;
+        let cards = Self::layout_cards(ctx.layout);
+        let blinds = [BlindKind::Small, BlindKind::Big, BlindKind::Boss];
         let base = ctx.run.base_target;
         let gold = ctx.run.gold;
-        let effective_target = (base as f32 * upcoming.target_multiplier()) as u32;
 
         // Score header — Hero panel.
         widget::push_panel(
@@ -210,80 +222,196 @@ impl SceneBehavior for PickBlindScene {
             ],
             PanelVariant::Hero,
         );
-        let mut text_labels = vec![
-            TextLabel {
-                rect: [
-                    ctx.layout.score_panel.x,
-                    ctx.layout.score_panel.y,
-                    ctx.layout.score_panel.w,
-                    ctx.layout.score_panel.h,
-                ],
-                text: format!(
-                    "ANTE {}/{}   ·   Gold {}   ·   Target {}",
-                    ctx.run.ante,
-                    crate::game::run::FINAL_ANTE,
-                    gold,
-                    effective_target
-                ),
-                color: color::CHAMPAGNE,
-                ..Default::default()
-            },
-            TextLabel {
-                rect: [ms.x, ms.y, ms.w, ms.h],
-                text: format!(
-                    "{}   |   Enter play   {}",
-                    upcoming.description(),
-                    if can_skip { "Esc/↓ skip" } else { "" }
-                ),
-                color: color::PARCHMENT,
-                ..Default::default()
-            },
-        ];
-        text_labels.extend(relic_labels);
-
-        // rasterize_label renders glyphs at ~0.55 of rect.h, so rect heights
-        // need a 1.8× bump for the rendered text to match the typography tier.
-        let name_h = typography::size(typography::TITLE, h) * 1.8;
-        let name_y = card_y + card_h * 0.16;
-        text_labels.push(TextLabel {
-            rect: [card_x, name_y, card_w, name_h],
-            text: upcoming.name().to_string(),
+        let mut text_labels = vec![TextLabel {
+            rect: [
+                ctx.layout.score_panel.x,
+                ctx.layout.score_panel.y,
+                ctx.layout.score_panel.w,
+                ctx.layout.score_panel.h,
+            ],
+            text: format!(
+                "ANTE {}/{}   ·   Gold {}",
+                ctx.run.ante,
+                crate::game::run::FINAL_ANTE,
+                gold
+            ),
             color: color::CHAMPAGNE,
             ..Default::default()
-        });
-        let mult = upcoming.target_multiplier();
-        let desc_h = typography::size(typography::HEADING, h) * 1.8;
-        let desc_y = card_y + card_h * 0.42;
+        }];
+        text_labels.extend(relic_labels);
+
+        // Subtitle / instruction strip.
+        let ms = ctx.layout.modifier_strip;
         text_labels.push(TextLabel {
-            rect: [card_x, desc_y, card_w, desc_h],
-            text: format!("×{:.1} target", mult),
+            rect: [ms.x, ms.y, ms.w, ms.h],
+            text: format!(
+                "Choose: {} is up — Enter play   {}",
+                upcoming.name(),
+                if can_skip { "Esc/↓ skip" } else { "" }
+            ),
             color: color::PARCHMENT,
             ..Default::default()
         });
-        // Show forced modifier on Boss card.
-        if let Some(modifier) = upcoming.forced_modifier(ctx.run.run_number) {
-            let mod_h = typography::size(typography::CAPTION, h) * 1.8;
-            let mod_y = card_y + card_h * 0.68;
+
+        let skip_focused = self.skip_focused();
+
+        // ── Render the three blind cards ──────────────────────────────
+        for (i, &card_blind) in blinds.iter().enumerate() {
+            let rect = cards[i];
+            let state = Self::card_state(card_blind, upcoming);
+            let [cx, cy, cw, ch] = rect;
+
+            // Halo: only the upcoming card gets one. Boss bosses get a
+            // tier-tinted halo so the player can read severity at a glance.
+            if state == CardState::Upcoming && !skip_focused {
+                let halo = ch * 0.04;
+                let halo_color = if card_blind == BlindKind::Boss {
+                    if let Some(kind) = ctx.run.upcoming_boss {
+                        color::alpha(kind.tier().halo_color(), 0.55)
+                    } else {
+                        color::alpha(color::GOLD, 0.45)
+                    }
+                } else {
+                    color::alpha(color::GOLD, 0.45)
+                };
+                instances.push(GpuInstance {
+                    rect: [cx - halo, cy - halo, cw + halo * 2.0, ch + halo * 2.0],
+                    color: halo_color,
+                });
+            }
+
+            // Panel variant: boss → Hero (gold border), others → Default.
+            // Cleared cards drop to Sunken so they read as "done."
+            let variant = match (state, card_blind) {
+                (CardState::Cleared, _) => PanelVariant::Sunken,
+                (_, BlindKind::Boss) => PanelVariant::Hero,
+                _ => PanelVariant::Default,
+            };
+            widget::push_panel(&mut instances, rect, variant);
+
+            // Per-state text colors so dim cards visibly recede.
+            let title_color = match state {
+                CardState::Upcoming => color::CHAMPAGNE,
+                CardState::Cleared => color::SLATE,
+                CardState::Future => color::MIST,
+            };
+            let body_color = match state {
+                CardState::Upcoming => color::PARCHMENT,
+                CardState::Cleared => color::SLATE,
+                CardState::Future => color::MIST,
+            };
+
+            // Card title — boss card prefers the themed name.
+            let title_text: String = if card_blind == BlindKind::Boss {
+                ctx.run
+                    .upcoming_boss
+                    .map(|k| k.def().name.to_string())
+                    .unwrap_or_else(|| "Boss Blind".to_string())
+            } else {
+                card_blind.name().to_string()
+            };
+            let title_h = typography::size(typography::HEADING, h) * 1.8;
+            let title_y = cy + ch * 0.10;
             text_labels.push(TextLabel {
-                rect: [card_x, mod_y, card_w, mod_h],
-                text: format!("{}: {}", modifier.name(), modifier.description()),
-                color: color::AMBER,
+                rect: [cx, title_y, cw, title_h],
+                text: title_text,
+                color: title_color,
+                ..Default::default()
+            });
+
+            // Target chip count (each card shows its own derived target).
+            let target = (base as f32 * card_blind.target_multiplier()) as u32;
+            let target_h = typography::size(typography::CAPTION, h) * 1.8;
+            let target_y = cy + ch * 0.34;
+            text_labels.push(TextLabel {
+                rect: [cx, target_y, cw, target_h],
+                text: format!("Target {}", target),
+                color: body_color,
+                ..Default::default()
+            });
+
+            // Boss-only: name + effect description on the boss card.
+            if card_blind == BlindKind::Boss {
+                if let Some(kind) = ctx.run.upcoming_boss {
+                    let def = kind.def();
+                    // Reactive bosses (Mirror, Tax Collector) override the
+                    // static description with the variant chosen at reveal
+                    // time, so the player sees the *actual* rule before
+                    // they ever fight it. Static bosses fall through.
+                    let description: &str = ctx
+                        .run
+                        .upcoming_boss_effect
+                        .as_ref()
+                        .and_then(|e| e.description_override.as_deref())
+                        .unwrap_or(def.description);
+                    let desc_h = typography::size(typography::CAPTION, h) * 1.8;
+                    let desc_y = cy + ch * 0.50;
+                    text_labels.push(TextLabel {
+                        rect: [cx, desc_y, cw, desc_h],
+                        text: description.to_string(),
+                        color: color::AMBER,
+                        ..Default::default()
+                    });
+                    let tier_y = cy + ch * 0.66;
+                    text_labels.push(TextLabel {
+                        rect: [cx, tier_y, cw, desc_h],
+                        text: format!("[{}]", def.tier.label()),
+                        color: def.tier.halo_color(),
+                        ..Default::default()
+                    });
+                }
+            } else {
+                // Reward summary for non-boss cards.
+                let reward_h = typography::size(typography::CAPTION, h) * 1.8;
+                let reward_y = cy + ch * 0.50;
+                text_labels.push(TextLabel {
+                    rect: [cx, reward_y, cw, reward_h],
+                    text: format!("×{:.2} gold", card_blind.gold_multiplier()),
+                    color: body_color,
+                    ..Default::default()
+                });
+            }
+
+            // State stamp at the bottom of the card.
+            let stamp_h = typography::size(typography::CAPTION, h) * 1.6;
+            let stamp_y = cy + ch * 0.83;
+            let stamp_text = match state {
+                CardState::Cleared => "DONE",
+                CardState::Upcoming => "▶ NEXT",
+                CardState::Future => "Coming up",
+            };
+            let stamp_color = match state {
+                CardState::Cleared => color::SLATE,
+                CardState::Upcoming => color::GOLD,
+                CardState::Future => color::MIST,
+            };
+            text_labels.push(TextLabel {
+                rect: [cx, stamp_y, cw, stamp_h],
+                text: stamp_text.to_string(),
+                color: stamp_color,
                 ..Default::default()
             });
         }
 
-        // Round wind for the upcoming ante (Patch B). Triplets/kongs of this
-        // wind fire the Yakuhai yaku, so showing it here lets the player plan
-        // their hand before sitting down.
+        // Round wind line (kept from the prior layout — drives Yakuhai
+        // planning before the player commits to a hand).
         let wind_rank = BlindKind::round_wind_for_ante(ctx.run.ante);
+        let wind_strip = ctx.layout.hand_strip;
         let wind_h = typography::size(typography::CAPTION, h) * 1.8;
-        let wind_y = card_y + card_h * 0.83;
+        let wind_y = wind_strip.y + wind_strip.h - wind_h - 6.0;
         text_labels.push(TextLabel {
-            rect: [card_x, wind_y, card_w, wind_h],
+            rect: [wind_strip.x, wind_y, wind_strip.w, wind_h],
             text: format!("Round Wind: {}", BlindKind::wind_name(wind_rank)),
             color: color::GOLD,
             ..Default::default()
         });
+
+        // Skip button at bottom (Small/Big only).
+        let scale = (w.min(h)) / 600.0;
+        let btn_w = (160.0 * scale).max(80.0);
+        let btn_h = (38.0 * scale).max(24.0);
+        let btn_x = (w - btn_w) * 0.5;
+        let btn_y = h - btn_h - (12.0 * scale);
 
         let mut buttons = Vec::new();
         if can_skip {
@@ -302,17 +430,21 @@ impl SceneBehavior for PickBlindScene {
                 },
                 UiAction::Cancel,
             );
-            // Drop the synthetic ButtonDef::ui from push_button — flat_items
-            // re-registers with stable click ids below.
             buttons.pop();
         }
-        // Single hit-target list shared with update() — single source of truth.
-        let items = Self::flat_items(ctx.layout, can_skip);
+        let items = Self::flat_items(ctx.layout, upcoming, can_skip);
         self.tree.register_flat_buttons(&items, &mut buttons);
 
-        // Pause overlay.
+        // While paused, drop the scene's own buttons so only the pause
+        // menu's own clickable surfaces survive into `frame.buttons`.
+        if self.pause_menu.paused {
+            buttons.clear();
+        }
         self.pause_menu
             .draw(w, h, scale, &mut instances, &mut text_labels, &mut buttons);
+        if self.pause_menu.paused {
+            buttons.push(crate::scenes::ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
+        }
 
         SceneDrawOutput {
             background: Default::default(),

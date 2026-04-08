@@ -4,7 +4,10 @@
 
 use muda::{Menu, MenuEvent, MenuId, MenuItem, Submenu};
 
+use crate::core::boss::{ALL_BOSSES, BossKind, FINAL_BOSSES};
 use crate::core::relic::{RelicId, all_relic_defs};
+use crate::core::talisman::TalismanKind;
+use crate::core::zodiac::ZodiacKind;
 
 /// Identifies which debug action was triggered.
 #[derive(Clone, Debug)]
@@ -13,7 +16,14 @@ pub enum DebugAction {
     SetGold(u32),
     AddRelic(RelicId),
     ClearRelics,
+    AddTalisman(TalismanKind),
+    AddZodiac(ZodiacKind),
+    ClearConsumables,
+    /// Replace the current ante's `upcoming_boss` and re-resolve its effect
+    /// (so reactive variants like Mirror/Tax Collector pick fresh).
+    SetBoss(BossKind),
     ToggleShowFps,
+    ToggleHideTiles,
     OpenTuning,
     OpenSfxTest,
     BlowWindGust,
@@ -44,6 +54,11 @@ impl DebugMenuBar {
         let fps_item = MenuItem::new("Show FPS", true, None);
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = debug_menu.append(&fps_item);
+
+        // Hide hand tiles toggle (debug aid for inspecting backgrounds, lighting, etc.).
+        let hide_tiles_item = MenuItem::new("Hide Tiles", true, None);
+        mappings.push((hide_tiles_item.id().clone(), DebugAction::ToggleHideTiles));
+        let _ = debug_menu.append(&hide_tiles_item);
 
         // Cascade tuning overlay.
         let tuning_item = MenuItem::new("Cascade Tuning...", true, None);
@@ -94,6 +109,46 @@ impl DebugMenuBar {
         }
         let _ = relic_sub.append(&add_sub);
         let _ = debug_menu.append(&relic_sub);
+
+        // Consumable Inventory submenu — talismans + zodiacs share slots, so
+        // expose both under one parent. Capacity is auto-expanded when full,
+        // mirroring the relic add behavior above.
+        let consumable_sub = Submenu::new("Consumable Inventory", true);
+        let clear_cons_item = MenuItem::new("Clear All Consumables", true, None);
+        mappings.push((
+            clear_cons_item.id().clone(),
+            DebugAction::ClearConsumables,
+        ));
+        let _ = consumable_sub.append(&clear_cons_item);
+
+        let add_talisman_sub = Submenu::new("Add Talisman", true);
+        for &kind in TalismanKind::all() {
+            let item = MenuItem::new(kind.name(), true, None);
+            mappings.push((item.id().clone(), DebugAction::AddTalisman(kind)));
+            let _ = add_talisman_sub.append(&item);
+        }
+        let _ = consumable_sub.append(&add_talisman_sub);
+
+        let add_zodiac_sub = Submenu::new("Add Zodiac", true);
+        for &kind in ZodiacKind::all() {
+            let item = MenuItem::new(kind.name(), true, None);
+            mappings.push((item.id().clone(), DebugAction::AddZodiac(kind)));
+            let _ = add_zodiac_sub.append(&item);
+        }
+        let _ = consumable_sub.append(&add_zodiac_sub);
+        let _ = debug_menu.append(&consumable_sub);
+
+        // Boss override submenu — pick any boss (regular or final) and the
+        // current ante's upcoming_boss is replaced + re-resolved. Useful for
+        // testing reactive bosses (Mirror, Tax Collector) against specific
+        // run states without rerolling antes until the right boss appears.
+        let boss_sub = Submenu::new("Set Current Boss", true);
+        for def in ALL_BOSSES.iter().chain(FINAL_BOSSES.iter()) {
+            let item = MenuItem::new(format!("{} [{}]", def.name, def.tier.label()), true, None);
+            mappings.push((item.id().clone(), DebugAction::SetBoss(def.kind)));
+            let _ = boss_sub.append(&item);
+        }
+        let _ = debug_menu.append(&boss_sub);
 
         let _ = menu.append(&debug_menu);
 

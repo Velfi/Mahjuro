@@ -88,6 +88,10 @@ pub struct UpdateCtx<'a> {
     pub loading_done: bool,
     /// Cascade animation timing parameters.
     pub cascade_tuning: &'a CascadeTuning,
+    /// Result of `pick_shop_object` for the cursor this frame, when the
+    /// shop scene is active. Used by the shop's update() to route mouse
+    /// clicks to 3D objects (relics, ribbons, dishes).
+    pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -117,6 +121,24 @@ pub struct DrawCtx<'a> {
     /// the physical relic boxes sitting in the dish. Empty before the first
     /// frame the dish is drawn.
     pub projected_relic_rects: &'a [[f32; 4]],
+    /// Per-ribbon screen-space rects from the previous frame's perspective
+    /// projection. Empty unless the shop scene is active.
+    pub projected_ribbon_rects: &'a [[f32; 4]],
+    /// Per-talisman screen-space rects from the previous frame's perspective
+    /// projection. Empty unless the shop scene is active.
+    pub projected_talisman_rects: &'a [[f32; 4]],
+    /// Per-plaque screen-space rects from the previous frame's perspective
+    /// projection. Each entry is the projected face of one `frame.plaque(...)`
+    /// call, in cmd order. Used by scenes to overlay 2D text aligned with
+    /// the rendered plaque.
+    pub projected_plaque_rects: &'a [[f32; 4]],
+    /// Auxiliary dish screen rects from the previous frame, paired with
+    /// their `pick_id`. Used by the shop scene to anchor 2D tooltips above
+    /// the relic dish + coin dish.
+    pub aux_dish_rects: &'a [(Option<u32>, [f32; 4])],
+    /// Result of `pick_shop_object` — the topmost shop object the cursor is
+    /// over this frame, if any. Used by the shop scene for hover routing.
+    pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
 }
 
 /// What happens when a `ButtonDef` is clicked.

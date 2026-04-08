@@ -182,6 +182,7 @@ fn ctx_for(run: &RunState) -> ScoreContext<'_> {
         riichi_active: false,
         yaku_levels: Some(run.yaku_levels.clone()),
         yaku_loadout: run.yaku_loadout.clone(),
+        played_yaku_this_round: run.played_yaku_this_round.clone(),
     }
 }
 
@@ -429,6 +430,7 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     let plays_used = run.mode.starting_plays.saturating_sub(run.plays_remaining);
     let yaku_levels = Some(run.yaku_levels.clone());
     let yaku_loadout = run.yaku_loadout.clone();
+    let played_yaku = run.played_yaku_this_round.clone();
     let baseline_ctx = ScoreContext {
         relics: &run.relics,
         scored_last_turn: run.scored_last_turn,
@@ -440,6 +442,7 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
         riichi_active: false,
         yaku_levels: yaku_levels.clone(),
         yaku_loadout: yaku_loadout.clone(),
+        played_yaku_this_round: played_yaku.clone(),
     };
     let hypo_ctx = ScoreContext {
         relics: &hypothetical,
@@ -452,6 +455,7 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
         riichi_active: false,
         yaku_levels,
         yaku_loadout,
+        played_yaku_this_round: played_yaku,
     };
 
     let score = |hand: &[Tile], ctx: &ScoreContext| -> i32 {

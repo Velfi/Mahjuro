@@ -1,16 +1,31 @@
 //! Single-run state: wall, hand, score target, round modifiers.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
+use crate::core::boss::{self, BossKind};
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets};
-use crate::core::tile::{Suit, Tile};
+use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
+
+/// Result of consuming a slot from the shared consumable inventory.
+#[derive(Clone, Copy, Debug)]
+pub enum ConsumableUseResult {
+    Zodiac {
+        yaku: crate::core::yaku::YakuKind,
+        new_level: u32,
+    },
+    Talisman {
+        kind: crate::core::talisman::TalismanKind,
+    },
+}
 
 pub const HAND_SIZE: usize = 14;
 pub const STARTING_PLAYS: u32 = 4;
@@ -57,8 +72,10 @@ pub struct RunState {
     pub full_hand_played_this_round: bool,
     /// Per-yaku level (default 1). Incremented by Zodiac card use.
     pub yaku_levels: crate::core::zodiac::YakuLevels,
-    /// Player's current Zodiac card inventory.
-    pub zodiac_inventory: crate::core::zodiac::ZodiacInventory,
+    /// Player's shared consumable inventory — holds both Zodiacs and Talismans
+    /// in the same capped slot list. Capacity expands via Zodiac Pouch and
+    /// Lunar Almanac relics.
+    pub consumables: crate::core::consumable::ConsumableInventory,
     /// Active yaku loadout — these score at full strength. Yaku not in the
     /// loadout still detect but at 50% chip/mult per Patch B finishing's
     /// "amplification, not gating" rule. `FullHand` and `Yakuhai` are always
@@ -68,6 +85,46 @@ pub struct RunState {
     pub yaku_loadout_capacity: usize,
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
+    // ── Boss blind state ─────────────────────────────────────────────────
+    /// Bosses still available for this run, in randomized order. Drawn
+    /// without replacement so each ante's boss is distinct.
+    pub boss_pool_remaining: Vec<BossKind>,
+    /// The boss for the current ante (rolled at ante boundary, before the
+    /// player even sees the Small/Big screens). Lets `pick_blind` preview
+    /// the upcoming fight.
+    pub upcoming_boss: Option<BossKind>,
+    /// Resolved effect for `upcoming_boss`, built when the boss is rolled
+    /// (in `resolve_upcoming_boss`). For static bosses this is just a
+    /// `ResolvedBossEffect::from_static` wrapper; for reactive bosses
+    /// (Mirror, TaxCollector) it captures the variant chosen at reveal time.
+    /// `apply_blind` / `score_selected_tiles` read hooks from here instead
+    /// of the static def so reactive variants land at the right moment.
+    /// Skipped by serde — rebuilt from `upcoming_boss` on load.
+    #[serde(skip)]
+    pub upcoming_boss_effect: Option<crate::core::boss::ResolvedBossEffect>,
+    /// Per-round hand-size delta from boss effects (e.g. The Whisper sets
+    /// this to -1). Reset by `advance_round` and `skip_to_next_blind`.
+    pub bonus_hand_size: i32,
+    /// Gold cost charged after each successful play, set by The Tribute. 0
+    /// outside that boss's round.
+    pub gold_cost_per_play: u32,
+    /// Per-play cost baked in by The Tax Collector at reveal time. Read by
+    /// `tax_collector_apply` to set `gold_cost_per_play` once the boss
+    /// blind starts. 0 unless the current ante's boss is Tax Collector.
+    #[serde(default)]
+    pub tax_collector_cost: u32,
+    /// Yaku detected on prior plays in this round. Used by The Censor to
+    /// halve repeat-yaku contributions. Reset on round start.
+    #[serde(skip)]
+    pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
+    /// Per-run tile enhancement map, keyed by tile id. Talismans stamp every
+    /// hand tile's id into this map; whenever tiles are drawn (initial deal,
+    /// post-play refill, mid-round draws, new-round redeals), we re-apply the
+    /// stored enhancement so it persists for the rest of the run. Tile ids are
+    /// stable across walls because `build_wall` assigns them deterministically
+    /// (so id 5 is always the same suit+rank, even after a reshuffle).
+    #[serde(default)]
+    pub tile_enhancements: BTreeMap<u32, TileEnhancement>,
 }
 
 impl RunState {
@@ -90,7 +147,11 @@ impl RunState {
             }
         }
 
-        Self {
+        let mut boss_pool_remaining = boss::regular_pool();
+        let mut rng = rand::rng();
+        let upcoming_boss = boss::pick_for_ante(&mut boss_pool_remaining, 1, &mut rng);
+
+        let mut state = Self {
             wall,
             hand,
             selected,
@@ -114,7 +175,7 @@ impl RunState {
             joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
-            zodiac_inventory: crate::core::zodiac::ZodiacInventory::default(),
+            consumables: crate::core::consumable::ConsumableInventory::default(),
             yaku_loadout: vec![
                 crate::core::yaku::YakuKind::Tanyao,
                 crate::core::yaku::YakuKind::Toitoi,
@@ -122,7 +183,46 @@ impl RunState {
             ],
             yaku_loadout_capacity: 3,
             mode,
-        }
+            boss_pool_remaining,
+            upcoming_boss,
+            upcoming_boss_effect: None,
+            bonus_hand_size: 0,
+            gold_cost_per_play: 0,
+            tax_collector_cost: 0,
+            played_yaku_this_round: Vec::new(),
+            tile_enhancements: BTreeMap::new(),
+        };
+        // Resolve the first ante's boss now so reactive variants are baked
+        // in before pick_blind ever reads `upcoming_boss_effect`.
+        state.resolve_upcoming_boss();
+        // No-op for a fresh run (empty enhancement map), but kept here so the
+        // invariant "hand always reflects tile_enhancements" holds uniformly.
+        state.restamp_hand_enhancements();
+        state
+    }
+
+    /// Build the `ResolvedBossEffect` for the current `upcoming_boss`. For
+    /// static bosses this is a thin wrap of `BossDef::effect`. For reactive
+    /// bosses (those with an `on_reveal` hook), the hook runs against the
+    /// current `RunState` and produces a tailored effect that's locked in
+    /// for the rest of the ante. Idempotent — safe to call from
+    /// `RunState::new`, `advance_round`, and the save-load rehydrate path.
+    pub fn resolve_upcoming_boss(&mut self) {
+        use crate::core::boss::ResolvedBossEffect;
+        // Reset any reactive scratch — the new boss may not need it.
+        self.tax_collector_cost = 0;
+        let Some(kind) = self.upcoming_boss else {
+            self.upcoming_boss_effect = None;
+            return;
+        };
+        let def = kind.def();
+        // Two-step to keep borrows clean: pull `on_reveal` out as a
+        // function pointer (Copy), then call it with `&mut *self`.
+        let effect = match def.on_reveal {
+            Some(hook) => hook(self),
+            None => ResolvedBossEffect::from_static(&def.effect),
+        };
+        self.upcoming_boss_effect = Some(effect);
     }
 
     /// Convenience constructor using the standard game mode.
@@ -130,20 +230,52 @@ impl RunState {
         Self::new(GameMode::standard())
     }
 
-    /// Use a Zodiac card from the inventory: removes it and levels its yaku.
-    /// Returns the yaku and its new level on success.
-    #[allow(dead_code)]
-    pub fn use_zodiac(&mut self, index: usize) -> Option<(crate::core::yaku::YakuKind, u32)> {
-        let z = self.zodiac_inventory.take(index)?;
-        let yaku = z.yaku();
-        let new_level = self.yaku_levels.level_up(yaku);
-        Some((yaku, new_level))
+    /// Use a consumable from the shared inventory at `index`. Zodiacs level
+    /// their yaku for the run; Talismans stamp their enhancement onto every
+    /// tile currently in the player's hand. Returns a [`ConsumableUseResult`]
+    /// describing what happened so the UI can log/animate appropriately.
+    pub fn use_consumable(&mut self, index: usize) -> Option<ConsumableUseResult> {
+        use crate::core::consumable::Consumable;
+        let item = self.consumables.take(index)?;
+        match item {
+            Consumable::Zodiac(z) => {
+                let yaku = z.yaku();
+                let new_level = self.yaku_levels.level_up(yaku);
+                Some(ConsumableUseResult::Zodiac { yaku, new_level })
+            }
+            Consumable::Talisman(t) => {
+                let enh = t.enhancement();
+                // Record the enhancement against each current hand tile's id
+                // so it persists when those tiles get redrawn next round.
+                for tile in &self.hand {
+                    self.tile_enhancements.insert(tile.id, enh);
+                }
+                crate::core::talisman::apply_to_hand(&mut self.hand, t);
+                Some(ConsumableUseResult::Talisman { kind: t })
+            }
+        }
+    }
+
+    /// Re-stamp every tile in the current hand with whatever enhancement is
+    /// stored against its id in `tile_enhancements`. Called after any path
+    /// that adds tiles to the hand (initial deal, post-play refill, mid-round
+    /// draws, new-round redeal) so talisman effects survive for the whole run.
+    fn restamp_hand_enhancements(&mut self) {
+        if self.tile_enhancements.is_empty() {
+            return;
+        }
+        for tile in &mut self.hand {
+            if let Some(&enh) = self.tile_enhancements.get(&tile.id) {
+                tile.enhancement = Some(enh);
+            }
+        }
     }
 
     /// Try to add a Zodiac card to the inventory; returns `true` on success.
     #[allow(dead_code)]
     pub fn grant_zodiac(&mut self, z: crate::core::zodiac::ZodiacKind) -> bool {
-        self.zodiac_inventory.try_push(z)
+        self.consumables
+            .try_push(crate::core::consumable::Consumable::Zodiac(z))
     }
 
     /// Replace one yaku in the loadout with another. The new yaku must not
@@ -160,18 +292,21 @@ impl RunState {
         true
     }
 
-    /// Recompute Zodiac inventory capacity and yaku-loadout capacity from
+    /// Recompute consumable inventory capacity and yaku-loadout capacity from
     /// currently-owned relics. Idempotent — call after any relic add/remove.
+    /// The inventory is shared between Zodiacs and Talismans, so the slot
+    /// count starts at 3 (was 2 when only Zodiacs occupied it) to leave the
+    /// player room to mix consumable types.
     /// (Patch C: ZodiacPouch +1, LunarAlmanac +1, YakuScholar loadout +1.)
     pub fn recompute_capacities(&mut self) {
-        let mut zodiac_cap = 2usize;
+        let mut consumable_cap = 3usize;
         if self.relics.has(RelicId::ZodiacPouch) {
-            zodiac_cap += 1;
+            consumable_cap += 1;
         }
         if self.relics.has(RelicId::LunarAlmanac) {
-            zodiac_cap += 1;
+            consumable_cap += 1;
         }
-        self.zodiac_inventory.capacity = zodiac_cap;
+        self.consumables.capacity = consumable_cap;
 
         let loadout_cap = if self.relics.has(RelicId::YakuScholar) {
             4
@@ -191,13 +326,28 @@ impl RunState {
         self.ante > FINAL_ANTE
     }
 
-    /// Apply a blind choice: sets target score and any forced modifiers.
+    /// Apply a blind choice: sets target score, dispatches boss effect on
+    /// boss blinds, and applies any per-round resource resets.
     pub fn apply_blind(&mut self, blind: BlindKind) {
         self.blind = blind;
         self.target_score = (self.base_target as f32 * blind.target_multiplier()) as u32;
-        if let Some(modifier) = blind.forced_modifier(self.run_number) {
-            if !self.round_rules.contains(&modifier) {
-                self.round_rules.push(modifier);
+        // Boss dispatch — push rule modifiers and run the on_apply hook so
+        // category-C taxers (zero discards, hand-size shrink, gold cost) take
+        // effect before the player draws their first hand.
+        if blind == BlindKind::Boss {
+            // Read from the resolved effect (built at reveal time) so reactive
+            // bosses' chosen variants land correctly. Take/restore to dodge
+            // the &mut self conflict when calling on_apply.
+            if let Some(eff) = self.upcoming_boss_effect.take() {
+                for &m in &eff.rule_pushes {
+                    if !self.round_rules.contains(&m) {
+                        self.round_rules.push(m);
+                    }
+                }
+                if let Some(hook) = eff.on_apply {
+                    hook(self);
+                }
+                self.upcoming_boss_effect = Some(eff);
             }
         }
         // ReducedPlays modifier reduces plays from 4 to 3.
@@ -250,6 +400,7 @@ impl RunState {
             riichi_active: false,
             yaku_levels: Some(self.yaku_levels.clone()),
             yaku_loadout: self.yaku_loadout.clone(),
+            played_yaku_this_round: self.played_yaku_this_round.clone(),
         };
         let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
         let earned = breakdown.total.max(0) as u32;
@@ -267,6 +418,13 @@ impl RunState {
             let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
+            }
+        }
+        // Record played yaku for The Censor (repeat-yaku half-strength) before
+        // moving the breakdown into last_breakdown.
+        for &y in &breakdown.detected_yaku {
+            if !self.played_yaku_this_round.contains(&y) {
+                self.played_yaku_this_round.push(y);
             }
         }
         self.last_breakdown = Some(breakdown);
@@ -288,7 +446,9 @@ impl RunState {
             use rand::seq::IndexedRandom;
             let mut rng = rand::rng();
             if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
-                self.zodiac_inventory.items.push(z);
+                self.consumables
+                    .items
+                    .push(crate::core::consumable::Consumable::Zodiac(z));
             }
         }
 
@@ -316,12 +476,14 @@ impl RunState {
             self.hand.remove(i);
         }
 
-        // Auto-draw back to full hand.
+        // Auto-draw back to full hand. Effective hand size accounts for any
+        // boss-induced shrink (e.g. The Whisper).
+        let effective = boss::effective_hand_size(self);
         let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
             self.quickdraw_used = true;
-            HAND_SIZE + 1
+            effective + 1
         } else {
-            HAND_SIZE
+            effective
         };
         while self.hand.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };
@@ -341,6 +503,21 @@ impl RunState {
 
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-apply persistent enhancements to any newly-drawn tiles.
+        self.restamp_hand_enhancements();
+
+        // Per-play boss hook: fires after the hand refill so wall-burn etc.
+        // affects the *next* draw, not the one we just refilled into. Only
+        // active during boss blinds — checked via `upcoming_boss` because
+        // `apply_blind` is what set this run's boss.
+        if self.blind == BlindKind::Boss {
+            if let Some(eff) = self.upcoming_boss_effect.take() {
+                if let Some(hook) = eff.on_play {
+                    hook(self);
+                }
+                self.upcoming_boss_effect = Some(eff);
+            }
+        }
 
         bus.push(GameEvent::ScoreUpdated(self.round_score));
         if self.round_score >= self.target_score {
@@ -476,15 +653,19 @@ impl RunState {
     }
 
     /// Draw tiles from the wall until the hand is full, then sort and reset
-    /// the selection vector to match the new hand size.
+    /// the selection vector to match the new hand size. Honors boss-induced
+    /// hand-size shrinks (e.g. The Whisper).
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
-        while self.hand.len() < HAND_SIZE {
+        let target = boss::effective_hand_size(self);
+        while self.hand.len() < target {
             let Some(t) = self.wall.draw() else { break };
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-apply persistent enhancements to any newly-drawn tiles.
+        self.restamp_hand_enhancements();
     }
 
     /// Swap two tiles in the hand by index. Clears selection afterward.
@@ -527,7 +708,8 @@ impl RunState {
     /// next ante; within an ante, the base stays put.
     pub fn advance_round(&mut self) {
         // Defeating the Boss completes an ante and scales the base for the next one.
-        if self.blind == BlindKind::Boss {
+        let was_boss = self.blind == BlindKind::Boss;
+        if was_boss {
             self.ante += 1;
             self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
         }
@@ -542,6 +724,9 @@ impl RunState {
         self.quickdraw_used = false;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
+        self.bonus_hand_size = 0;
+        self.gold_cost_per_play = 0;
+        self.played_yaku_this_round.clear();
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
@@ -553,6 +738,26 @@ impl RunState {
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-apply persistent enhancements to the newly-dealt hand.
+        self.restamp_hand_enhancements();
+
+        // Roll the next ante's boss when we cross an ante boundary. Final
+        // ante draws from the dedicated final pool; everyone else draws
+        // without replacement from the regular pool.
+        if was_boss {
+            let mut rng = rand::rng();
+            self.upcoming_boss = if self.ante == FINAL_ANTE {
+                Some(boss::pick_final(&mut rng))
+            } else if self.ante > FINAL_ANTE {
+                None
+            } else {
+                boss::pick_for_ante(&mut self.boss_pool_remaining, self.ante, &mut rng)
+            };
+            // Bake the resolved effect now so reactive bosses see the
+            // post-shop run state of the *outgoing* ante (their reveal
+            // moment) and pick_blind shows the chosen variant immediately.
+            self.resolve_upcoming_boss();
+        }
     }
 
     /// Skip the upcoming blind: advance to the next in the cycle without
@@ -572,6 +777,11 @@ impl RunState {
         self.scored_last_turn = false;
         self.quickdraw_used = false;
         self.joker_used = false;
+        // Reset per-round boss-effect state. The ante's `upcoming_boss` is
+        // unchanged — skipping a Small/Big still leaves the same boss waiting.
+        self.bonus_hand_size = 0;
+        self.gold_cost_per_play = 0;
+        self.played_yaku_this_round.clear();
         self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
         self.hand.clear();
@@ -582,6 +792,8 @@ impl RunState {
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-apply persistent enhancements to the newly-dealt hand.
+        self.restamp_hand_enhancements();
     }
 }
 
@@ -631,7 +843,7 @@ mod tests {
             joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
-            zodiac_inventory: crate::core::zodiac::ZodiacInventory::default(),
+            consumables: crate::core::consumable::ConsumableInventory::default(),
             yaku_loadout: vec![
                 crate::core::yaku::YakuKind::Tanyao,
                 crate::core::yaku::YakuKind::Toitoi,
@@ -639,6 +851,11 @@ mod tests {
             ],
             yaku_loadout_capacity: 3,
             mode,
+            boss_pool_remaining: vec![],
+            upcoming_boss: None,
+            bonus_hand_size: 0,
+            gold_cost_per_play: 0,
+            played_yaku_this_round: vec![],
         }
     }
 

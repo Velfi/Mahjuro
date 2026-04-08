@@ -1,6 +1,7 @@
 //! Collection scene — paginated grids of relics, yaku, and rules.
 //! Locked items show a placeholder card with a clue hint.
 
+use crate::core::boss::{ALL_BOSSES, FINAL_BOSSES};
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
 use crate::core::yaku::YakuKind;
@@ -28,6 +29,7 @@ impl CollectionAction {
             CollectionAction::SelectTab(Tab::Relics) => FocusId(1),
             CollectionAction::SelectTab(Tab::Yaku) => FocusId(2),
             CollectionAction::SelectTab(Tab::Rules) => FocusId(3),
+            CollectionAction::SelectTab(Tab::Bosses) => FocusId(4),
             CollectionAction::PrevPage => FocusId(10),
             CollectionAction::NextPage => FocusId(11),
             CollectionAction::Back => FocusId(20),
@@ -42,9 +44,10 @@ enum Tab {
     Relics,
     Yaku,
     Rules,
+    Bosses,
 }
 
-const TABS: [Tab; 3] = [Tab::Relics, Tab::Yaku, Tab::Rules];
+const TABS: [Tab; 4] = [Tab::Relics, Tab::Yaku, Tab::Rules, Tab::Bosses];
 
 // ── Grid card data ──────────────────────────────────────────────────
 
@@ -92,12 +95,13 @@ impl CollectionScene {
         let tab_font = (13.0 * scale).max(9.0);
         let tab_y = title_y + title_h + h * 0.015;
         let tab_h = text_rect_h(tab_font);
-        let tab_w = (110.0 * scale).min(w * 0.26);
+        let tab_w = (95.0 * scale).min(w * 0.22);
         let tab_gap = (6.0 * scale).max(3.0);
-        let tab_total_w = tab_w * 3.0 + tab_gap * 2.0;
+        let tab_count = TABS.len() as f32;
+        let tab_total_w = tab_w * tab_count + tab_gap * (tab_count - 1.0);
         let tab_start_x = (w - tab_total_w) * 0.5;
 
-        let mut items = Vec::with_capacity(6);
+        let mut items = Vec::with_capacity(7);
         for (i, &t) in TABS.iter().enumerate() {
             let tx = tab_start_x + i as f32 * (tab_w + tab_gap);
             items.push(FlatItem::new(
@@ -229,12 +233,13 @@ impl SceneBehavior for CollectionScene {
         let tab_font = (13.0 * scale).max(9.0);
         let tab_y = title_y + title_h + h * 0.015;
         let tab_h = text_rect_h(tab_font);
-        let tab_w = (110.0 * scale).min(w * 0.26);
+        let tab_w = (95.0 * scale).min(w * 0.22);
         let tab_gap = (6.0 * scale).max(3.0);
-        let tab_total_w = tab_w * 3.0 + tab_gap * 2.0;
+        let tab_count = TABS.len() as f32;
+        let tab_total_w = tab_w * tab_count + tab_gap * (tab_count - 1.0);
         let tab_start_x = (w - tab_total_w) * 0.5;
 
-        let tab_names = ["Relics", "Yaku", "Rules"];
+        let tab_names = ["Relics", "Yaku", "Rules", "Bosses"];
         for (i, name) in tab_names.iter().enumerate() {
             let tx = tab_start_x + i as f32 * (tab_w + tab_gap);
             let is_active = TABS[i] == self.tab;
@@ -270,11 +275,12 @@ impl SceneBehavior for CollectionScene {
         let margin_x = w * 0.04;
         let grid_w = w - margin_x * 2.0;
 
-        // Card sizing: aim for ~4 columns on relics, ~3 on yaku/rules.
+        // Card sizing: aim for ~4 columns on relics, ~3 on yaku/rules/bosses.
         let target_cols: usize = match self.tab {
             Tab::Relics => 4,
             Tab::Yaku => 3,
             Tab::Rules => 3,
+            Tab::Bosses => 3,
         };
         let card_gap = (8.0 * scale).max(4.0);
         let card_w =
@@ -293,6 +299,7 @@ impl SceneBehavior for CollectionScene {
             Tab::Relics => build_relic_cards(progress),
             Tab::Yaku => build_yaku_cards(progress),
             Tab::Rules => build_rule_cards(progress),
+            Tab::Bosses => build_boss_cards(),
         };
 
         let total_pages = self.page_count(cards.len(), per_page);
@@ -726,6 +733,24 @@ fn build_yaku_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<
         .collect()
 }
 
+/// All bosses, always unlocked. The collection's "Bosses" tab is reference
+/// material — players want to read what each boss does outside of a fight,
+/// not earn them like relics.
+fn build_boss_cards() -> Vec<GridCard> {
+    ALL_BOSSES
+        .iter()
+        .chain(FINAL_BOSSES.iter())
+        .map(|def| GridCard {
+            name: def.name.to_string(),
+            subtitle: format!("[{}]  {}", def.tier.label(), def.description),
+            clue: String::new(),
+            unlocked: true,
+            relic_id: None,
+            rarity_color: def.tier.halo_color(),
+        })
+        .collect()
+}
+
 fn build_rule_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
     let all = [
         RuleModifier::PairDoubleScore,
@@ -843,5 +868,14 @@ fn rule_clue(rm: RuleModifier) -> String {
         RuleModifier::NoSequences => "Reach Level 6.".into(),
         RuleModifier::ReducedPlays => "Reach Level 6.".into(),
         RuleModifier::HonorTripleScore => "Reach Level 5.".into(),
+        // Boss-only rule modifiers — applied by specific boss blinds, not
+        // earned via progression. Surface them as boss flavor in the
+        // collection so the player can read what each does outside a fight.
+        RuleModifier::PairsScoreZero => "The Hermit boss.".into(),
+        RuleModifier::SequencesHalved => "The Forest boss.".into(),
+        RuleModifier::MiddleTilesZero => "The Drunkard boss.".into(),
+        RuleModifier::MustPlayFour => "The Bureaucrat boss.".into(),
+        RuleModifier::RequireHonor => "The Dragon final boss.".into(),
+        RuleModifier::CensorRepeats => "The Censor boss.".into(),
     }
 }

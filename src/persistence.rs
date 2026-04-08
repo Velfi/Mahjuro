@@ -153,6 +153,8 @@ pub struct AppSettings {
     pub gamma: f32,
     #[serde(default = "default_true")]
     pub shadows_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ssr_enabled: bool,
 }
 
 fn default_volume() -> f32 {
@@ -181,6 +183,7 @@ impl Default for AppSettings {
             tile_preset: TilePreset::Chinese,
             gamma: 1.0,
             shadows_enabled: true,
+            ssr_enabled: true,
         }
     }
 }
@@ -318,7 +321,13 @@ pub fn load_run(index: usize) -> Option<RunState> {
         let _ = fs::remove_file(&path);
         return None;
     }
-    Some(saved.run)
+    // Rehydrate the resolved boss effect — it's `#[serde(skip)]`, so on
+    // reload `upcoming_boss_effect` is `None`. Reactive bosses re-run their
+    // `on_reveal` hook against current state; since neither relics nor gold
+    // change between save and reload, the result matches the original pick.
+    let mut run = saved.run;
+    run.resolve_upcoming_boss();
+    Some(run)
 }
 
 /// Remove the saved run for a profile (e.g. after a run ends or a new run

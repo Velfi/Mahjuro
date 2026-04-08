@@ -609,11 +609,16 @@ struct App {
     gamma: f32,
     /// Whether realtime shadows are enabled (persisted in settings).
     shadows_enabled: bool,
+    /// Whether screen-space reflections on the lacquered floor are enabled
+    /// (persisted in settings).
+    ssr_enabled: bool,
     /// Previous cursor position for computing cursor velocity.
     #[allow(dead_code)]
     prev_cursor: (f32, f32),
     /// Whether to show the FPS counter (debug toggle).
     show_fps: bool,
+    /// Whether to hide hand tiles from rendering (debug toggle).
+    hide_tiles: bool,
     /// Smoothed FPS value for display.
     fps_smoothed: f32,
     /// Paradox-style nested tooltip system.
@@ -711,8 +716,10 @@ impl App {
             tile_preset: settings.tile_preset,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
+            ssr_enabled: settings.ssr_enabled,
             prev_cursor: (0.0, 0.0),
             show_fps: false,
+            hide_tiles: false,
             fps_smoothed: 60.0,
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
@@ -793,7 +800,10 @@ impl App {
                     let mut rng = rand::rng();
                     for _ in 0..drops {
                         if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
-                            self.run.zodiac_inventory.items.push(z);
+                            self.run
+                                .consumables
+                                .items
+                                .push(crate::core::consumable::Consumable::Zodiac(z));
                         }
                     }
                 }
@@ -843,6 +853,16 @@ impl App {
         // about us calling `&self` methods while `self.renderer` is held
         // mutably below.
         let modal_active = self.modal_overlay_active();
+        // The button-wipe below must only fire for *app-owned* overlays
+        // (modals, tuning, sfx test). Scene-owned overlays like the pause
+        // menu push their own clickable buttons through `frame.buttons`,
+        // so wiping `active_buttons` for them would nuke the pause-menu
+        // buttons themselves and clicks would land on nothing. Scenes are
+        // responsible for suppressing their own non-overlay buttons while
+        // their overlay is up (see e.g. `GameplayScene::draw_frame`).
+        let app_overlay_wipe = self.modals.is_active()
+            || self.tuning_overlay.is_some()
+            || self.sfx_test_overlay.is_some();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -866,10 +886,18 @@ impl App {
             game_in_progress: self.run.is_in_progress(),
             projected_hand_rects: renderer.projected_hand_rects(),
             projected_relic_rects: renderer.projected_relic_rects(),
+            projected_ribbon_rects: renderer.projected_ribbon_rects(),
+            projected_talisman_rects: renderer.projected_talisman_rects(),
+            projected_plaque_rects: renderer.projected_plaque_rects(),
+            aux_dish_rects: renderer.aux_dish_rects(),
             picked_hand_tile: self
                 .input
                 .as_ref()
                 .and_then(|i| renderer.pick_hand_tile(i.last_cursor.0, i.last_cursor.1)),
+            picked_shop_object: self
+                .input
+                .as_ref()
+                .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -900,7 +928,7 @@ impl App {
         // clickable surface (e.g. `ModalQueue`'s full-screen dismiss button)
         // write to `active_buttons` *after* this point in their draw step.
         // See `App::modal_overlay_active` for the contract.
-        if modal_active {
+        if app_overlay_wipe {
             self.active_buttons.clear();
         }
 
@@ -929,6 +957,7 @@ impl App {
                         rect: l.rect,
                         text: l.text.clone(),
                         color: l.color,
+                        no_glossary: l.no_glossary,
                         ..Default::default()
                     })
                 } else {
@@ -1038,6 +1067,19 @@ impl App {
             });
         }
 
+        // Debug: drop hand-tile draw markers so the 3D tile bodies and face
+        // labels don't render. Lets us inspect the table, lighting, and
+        // background art without tiles in the way.
+        if self.hide_tiles {
+            frame.cmds.retain(|c| {
+                !matches!(
+                    c,
+                    crate::render::draw_cmd::DrawCmd::HandTileBackdrop
+                        | crate::render::draw_cmd::DrawCmd::HandTileFaces
+                )
+            });
+        }
+
         // Convert settle ms to exponential decay speed (inversely proportional).
         // Default: 500ms → speed 8.0, 400ms → speed 10.0.
         let draw_settle_speed = 8.0 * (500.0 / self.cascade_tuning.draw_settle_ms.max(1) as f32);
@@ -1051,6 +1093,7 @@ impl App {
             sort_settle_speed,
             self.gamma,
             self.shadows_enabled,
+            self.ssr_enabled,
         ) {
             log::error!("render: {e:?}");
         }
@@ -1102,9 +1145,33 @@ impl App {
                 self.run.relics.active.clear();
                 log::info!("[Debug] Cleared all relics");
             }
+            DebugAction::AddTalisman(kind) => {
+                use crate::core::consumable::Consumable;
+                if self.run.consumables.is_full() {
+                    self.run.consumables.capacity += 1;
+                }
+                self.run.consumables.try_push(Consumable::Talisman(kind));
+                log::info!("[Debug] Added talisman {:?}", kind);
+            }
+            DebugAction::AddZodiac(kind) => {
+                use crate::core::consumable::Consumable;
+                if self.run.consumables.is_full() {
+                    self.run.consumables.capacity += 1;
+                }
+                self.run.consumables.try_push(Consumable::Zodiac(kind));
+                log::info!("[Debug] Added zodiac {:?}", kind);
+            }
+            DebugAction::ClearConsumables => {
+                self.run.consumables.items.clear();
+                log::info!("[Debug] Cleared all consumables");
+            }
             DebugAction::ToggleShowFps => {
                 self.show_fps = !self.show_fps;
                 log::info!("[Debug] Show FPS: {}", self.show_fps);
+            }
+            DebugAction::ToggleHideTiles => {
+                self.hide_tiles = !self.hide_tiles;
+                log::info!("[Debug] Hide tiles: {}", self.hide_tiles);
             }
             DebugAction::OpenTuning => {
                 if self.tuning_overlay.is_none() {
@@ -1124,6 +1191,16 @@ impl App {
                 // picks it up on the next frame.
                 self.mouse_actions.push(UiAction::DebugBlowWind);
                 log::info!("[Debug] Blow wind gust queued");
+            }
+            DebugAction::SetBoss(kind) => {
+                // Replace the current ante's boss and rebuild the resolved
+                // effect. resolve_upcoming_boss handles both static (wraps
+                // BossDef::effect) and reactive (calls on_reveal) cases —
+                // and zeros tax_collector_cost so leftover state from a
+                // prior boss doesn't leak through.
+                self.run.upcoming_boss = Some(kind);
+                self.run.resolve_upcoming_boss();
+                log::info!("[Debug] Set boss to {}", kind.name());
             }
         }
         // Request redraw to reflect changes immediately.
@@ -1377,6 +1454,10 @@ impl ApplicationHandler for App {
                     .map(|i| i.last_cursor)
                     .unwrap_or((0.0, 0.0));
                 let loading_done = self.renderer.as_ref().map_or(true, |r| !r.is_loading());
+                let picked_shop_object = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| r.pick_shop_object(cursor_pos.0, cursor_pos.1));
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -1390,6 +1471,7 @@ impl ApplicationHandler for App {
                     cursor_pos,
                     loading_done,
                     cascade_tuning: &self.cascade_tuning,
+                    picked_shop_object,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -1418,6 +1500,7 @@ impl ApplicationHandler for App {
                     self.tile_preset = opts.tile_preset;
                     self.gamma = opts.gamma;
                     self.shadows_enabled = opts.shadows_enabled;
+                    self.ssr_enabled = opts.ssr_enabled;
                 }
 
                 // Handle profile switch request.

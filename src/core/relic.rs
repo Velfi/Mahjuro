@@ -388,6 +388,9 @@ pub struct ScoreContext<'a> {
     /// half. Empty list = treat all detected yaku as full-strength (test/bot
     /// default).
     pub yaku_loadout: Vec<crate::core::yaku::YakuKind>,
+    /// Yaku detected on prior plays in the current round, used by The Censor
+    /// boss to halve repeat-yaku contributions. Empty in normal rounds.
+    pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
 }
 
 // All scoring effects now live in `core::scoring::score_sets` directly,

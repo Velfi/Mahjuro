@@ -159,6 +159,50 @@ struct ShadowGlobals {
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
 @group(2) @binding(2) var shadow_samp: sampler_comparison;
 
+// ── SSR globals (group 3, shared frame-wide) ─────────────────────────
+// The lacquered-floor branch marches reflection rays in screen space
+// against the previous frame's composited colour + depth. The camera
+// is fixed in this game, so a one-frame stale snapshot is effectively
+// current. Disabled (params.x < 0.5) → analytic clearcoat only.
+struct SsrGlobals {
+    inv_view_proj: mat4x4<f32>,
+    view_proj: mat4x4<f32>,
+    view_pos: vec4<f32>,
+    // x = enabled (0/1), y = max_distance (world units),
+    // z = stride (world units / step), w = max_steps
+    params: vec4<f32>,
+};
+@group(3) @binding(0) var<uniform> ssr_globals: SsrGlobals;
+@group(3) @binding(1) var ssr_scene_prev: texture_2d<f32>;
+@group(3) @binding(2) var ssr_depth: texture_depth_2d;
+@group(3) @binding(3) var ssr_samp: sampler;
+
+// Project a world-space point to screen-space UV (0..1, top-left origin
+// to match wgpu/webgpu texture sampling) plus its NDC z. Returns w<0 if
+// the point is behind the camera.
+fn ssr_project(world: vec3<f32>) -> vec4<f32> {
+    let clip = ssr_globals.view_proj * vec4<f32>(world, 1.0);
+    if (clip.w <= 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, -1.0);
+    }
+    let inv_w = 1.0 / clip.w;
+    let ndc = clip.xyz * inv_w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+    return vec4<f32>(uv, ndc.z, 1.0);
+}
+
+// Sample the SSR depth texture at a UV (clamped) and unproject the
+// resulting NDC point back to world space. Returns world Y of the
+// nearest opaque surface at that screen position.
+fn ssr_world_at(uv: vec2<f32>) -> vec3<f32> {
+    let dim = vec2<f32>(textureDimensions(ssr_depth, 0));
+    let px = vec2<i32>(clamp(uv * dim, vec2<f32>(0.0), dim - vec2<f32>(1.0)));
+    let d = textureLoad(ssr_depth, px, 0);
+    let ndc = vec3<f32>(uv.x * 2.0 - 1.0, (1.0 - uv.y) * 2.0 - 1.0, d);
+    let world = ssr_globals.inv_view_proj * vec4<f32>(ndc, 1.0);
+    return world.xyz / max(world.w, 1e-6);
+}
+
 // Returns visibility in [0,1]: 1 = fully lit by the key direction,
 // 0 = fully occluded. Uses 3×3 PCF on the hardware comparison sampler.
 fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
@@ -620,6 +664,91 @@ fn fs_main(
     // distant pools all hitting the same fragment.
     var coat_final = coat_acc;
     var spec_final = spec_acc;
+
+    // ── Screen-space reflections (lacquered wood only) ─────────────
+    // The analytic clearcoat lobe above gives the table a glassy
+    // highlight pinpoint, but a real polished tabletop also reflects
+    // the *content* of the scene above it — most importantly, the
+    // candle flames smear into vertical pillars pointing toward the
+    // viewer. We march a reflection ray in world space against the
+    // previous frame's depth + colour to capture that.
+    if (is_wood && ssr_globals.params.x > 0.5) {
+        let cam_pos_ssr = ssr_globals.view_pos.xyz;
+        let v_ssr = normalize(cam_pos_ssr - in.world_pos);
+        let r = reflect(-v_ssr, n);
+        // Only march rays that point upward away from the table.
+        // Reject grazing/down rays — they'd just hit the floor itself.
+        if (r.y > 0.02) {
+            let max_dist = ssr_globals.params.y;
+            let stride = ssr_globals.params.z;
+            let max_steps = i32(ssr_globals.params.w);
+            // Start a hair above the surface to avoid self-intersection.
+            let origin = in.world_pos + n * (stride * 0.5);
+            var t_prev = 0.0;
+            var t_hit = -1.0;
+            var hit_uv = vec2<f32>(0.0, 0.0);
+            for (var i: i32 = 1; i <= 64; i = i + 1) {
+                if (i > max_steps) { break; }
+                let t = f32(i) * stride;
+                if (t > max_dist) { break; }
+                let p = origin + r * t;
+                let proj = ssr_project(p);
+                if (proj.w < 0.0) { break; }
+                let uv = proj.xy;
+                if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+                    break;
+                }
+                let scene_world = ssr_world_at(uv);
+                // The march and the depth texture both encode "how
+                // far above the table". A hit happens when the ray
+                // first dips at-or-below the recorded scene point's
+                // world Y at the same screen pixel.
+                if (p.y <= scene_world.y + stride * 0.6
+                    && scene_world.y > in.world_pos.y + 0.1) {
+                    // Binary refinement between the previous and
+                    // current step for a sharper contact point.
+                    var lo = t_prev;
+                    var hi = t;
+                    for (var k: i32 = 0; k < 4; k = k + 1) {
+                        let mid = (lo + hi) * 0.5;
+                        let pm = origin + r * mid;
+                        let pmp = ssr_project(pm);
+                        if (pmp.w < 0.0) { break; }
+                        let uvm = pmp.xy;
+                        let sw = ssr_world_at(uvm);
+                        if (pm.y <= sw.y && sw.y > in.world_pos.y + 0.1) {
+                            hi = mid;
+                            hit_uv = uvm;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    t_hit = hi;
+                    if (hit_uv.x == 0.0 && hit_uv.y == 0.0) {
+                        hit_uv = uv;
+                    }
+                    break;
+                }
+                t_prev = t;
+            }
+            if (t_hit > 0.0) {
+                // Schlick Fresnel against the actual view (not the
+                // half-vector) — at glancing angles the reflection
+                // should swell toward the lacquer's full intensity.
+                let f0 = 0.04;
+                let f_view = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, v_ssr), 0.0), 5.0);
+                // Fade against screen edges so the reflection doesn't
+                // pop when it walks off the framebuffer.
+                let edge = min(min(hit_uv.x, 1.0 - hit_uv.x), min(hit_uv.y, 1.0 - hit_uv.y));
+                let edge_fade = smoothstep(0.0, 0.08, edge);
+                // Distance fade so far reflections don't dominate.
+                let dist_fade = 1.0 - clamp(t_hit / ssr_globals.params.y, 0.0, 1.0);
+                let refl = textureSampleLevel(ssr_scene_prev, ssr_samp, hit_uv, 0.0).rgb;
+                coat_final = coat_final + refl * (f_view * 0.55 * edge_fade * dist_fade);
+            }
+        }
+    }
+
     if (is_wood) {
         coat_final = coat_final / (vec3<f32>(1.0) + coat_final * 0.7);
     }
