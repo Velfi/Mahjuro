@@ -1132,35 +1132,6 @@ impl SceneBehavior for ShopScene {
                 color: [0.34, 0.22, 0.10, 1.0],
             });
         }
-        // Title text — overlaid on the projected plaque face. Engraved
-        // gold lettering with a dark offset shadow. `no_glossary` so the
-        // tooltip overlay doesn't underline its words and (more
-        // importantly) doesn't anchor a popup to it.
-        let title_font = (plaque_screen[3] * 0.52).clamp(22.0, 56.0);
-        let title = format!("SHOP  ·  Round {}", self.came_from_round);
-        frame.text(TextLabel {
-            rect: [
-                plaque_screen[0] + 1.5,
-                plaque_screen[1] + 1.5,
-                plaque_screen[2],
-                plaque_screen[3],
-            ],
-            text: title.clone(),
-            color: [0.0, 0.0, 0.0, 0.75],
-            font_px: Some(title_font),
-            align: TextAlign::Center,
-            no_glossary: true,
-            ..Default::default()
-        });
-        frame.text(TextLabel {
-            rect: plaque_screen,
-            text: title,
-            color: color::CHAMPAGNE,
-            font_px: Some(title_font),
-            align: TextAlign::Center,
-            no_glossary: true,
-            ..Default::default()
-        });
 
         // ── 2D HUD: tooltip + chrome buttons ───────────────────────────
         let mut quads: Vec<GpuInstance> = Vec::new();

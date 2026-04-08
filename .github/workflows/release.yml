@@ -26,20 +26,20 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             binary: mahjuro.exe
-            archive_suffix: windows-x86_64
-            archive_ext: zip
+            artifact_suffix: windows-x86_64-setup
+            artifact_ext: exe
           - name: Linux
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: mahjuro
-            archive_suffix: linux-x86_64
-            archive_ext: tar.gz
+            artifact_suffix: linux-x86_64
+            artifact_ext: AppImage
           - name: macOS
             runner: macos-latest
             target: aarch64-apple-darwin
             binary: mahjuro
-            archive_suffix: macos-universal
-            archive_ext: zip
+            artifact_suffix: macos-universal
+            artifact_ext: dmg
 
     name: Release ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
@@ -51,6 +51,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Compute version (strip leading v)
+        id: version
+        shell: bash
+        run: |
+          TAG="${RELEASE_TAG}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -78,6 +86,7 @@ jobs:
             libvulkan-dev \
             libgtk-3-dev \
             libxdo-dev \
+            libfuse2 \
             xvfb
 
       - name: Install AzureSignTool (Windows code signing)
@@ -85,6 +94,14 @@ jobs:
         shell: bash
         run: |
           dotnet tool install --global AzureSignTool --version 7.0.1
+
+      - name: Install NSIS (Windows)
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          # Make sure makensis is on PATH for subsequent steps.
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
       - name: Verify Azure Key Vault signing cert (Windows)
         if: matrix.name == 'Windows'
@@ -171,30 +188,110 @@ jobs:
             target/x86_64-apple-darwin/release/mahjuro \
             -output target/release-universal/mahjuro
 
-      - name: Sign binary (macOS)
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          NAME="mahjuro-${RELEASE_TAG}-${{ matrix.artifact_suffix }}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "filename=${NAME}.${{ matrix.artifact_ext }}" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────── macOS: .app + .dmg ────────────────────────────
+      - name: Build .app bundle (macOS)
+        if: matrix.name == 'macOS'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="Mahjuro.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+          # Binary
+          cp target/release-universal/mahjuro "$APP/Contents/MacOS/mahjuro"
+          chmod +x "$APP/Contents/MacOS/mahjuro"
+
+          # Info.plist with version substituted in
+          sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
+
+          # Generate AppIcon.icns from icon.png. Source is small (120x120) so larger
+          # sizes will be upscaled — replace icon.png with a higher-resolution
+          # source to improve quality.
+          ICONSET="AppIcon.iconset"
+          rm -rf "$ICONSET"
+          mkdir -p "$ICONSET"
+          for spec in "16:icon_16x16.png" "32:icon_16x16@2x.png" \
+                      "32:icon_32x32.png" "64:icon_32x32@2x.png" \
+                      "128:icon_128x128.png" "256:icon_128x128@2x.png" \
+                      "256:icon_256x256.png" "512:icon_256x256@2x.png" \
+                      "512:icon_512x512.png" "1024:icon_512x512@2x.png"; do
+            size="${spec%%:*}"
+            name="${spec##*:}"
+            sips -z "$size" "$size" icon.png --out "$ICONSET/$name" >/dev/null
+          done
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+          rm -rf "$ICONSET"
+
+      - name: Sign .app bundle (macOS)
         if: matrix.name == 'macOS'
         run: |
           codesign --sign "$APPLE_SIGNING_IDENTITY" \
             --entitlements Entitlements.plist \
             --options runtime \
             --force \
+            --deep \
             --timestamp \
-            target/release-universal/mahjuro
+            Mahjuro.app
+          codesign --verify --strict --verbose=2 Mahjuro.app
 
-      - name: Notarize binary (macOS)
+      - name: Notarize .app bundle (macOS)
         if: matrix.name == 'macOS'
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
-          zip -j mahjuro-notarize.zip target/release-universal/mahjuro
-          xcrun notarytool submit mahjuro-notarize.zip \
+          ditto -c -k --keepParent Mahjuro.app Mahjuro-notarize.zip
+          xcrun notarytool submit Mahjuro-notarize.zip \
             --key "$APPLE_API_KEY_PATH" \
             --key-id "$APPLE_API_KEY" \
             --issuer "$APPLE_API_ISSUER" \
             --wait
-          rm mahjuro-notarize.zip
+          rm Mahjuro-notarize.zip
+          xcrun stapler staple Mahjuro.app
 
+      - name: Build DMG (macOS)
+        if: matrix.name == 'macOS'
+        run: |
+          DMG="${{ steps.artifact.outputs.filename }}"
+          STAGING="dmg-staging"
+          rm -rf "$STAGING" "$DMG"
+          mkdir "$STAGING"
+          cp -R Mahjuro.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "Mahjuro" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+          rm -rf "$STAGING"
+
+      - name: Sign and notarize DMG (macOS)
+        if: matrix.name == 'macOS'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          DMG="${{ steps.artifact.outputs.filename }}"
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
+          xcrun notarytool submit "$DMG" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+      # ──────────────────────────── Windows: NSIS .exe ────────────────────────────
       - name: Sign binary (Windows)
         if: matrix.name == 'Windows'
         shell: bash
@@ -213,46 +310,77 @@ jobs:
             -td sha256 \
             "target/${{ matrix.target }}/release/${{ matrix.binary }}"
 
-      - name: Set archive name
-        id: archive
-        shell: bash
-        run: |
-          TAG="${RELEASE_TAG}"
-          NAME="mahjuro-${TAG}-${{ matrix.archive_suffix }}"
-          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
-          echo "filename=${NAME}.${{ matrix.archive_ext }}" >> "$GITHUB_OUTPUT"
-
-      - name: Package archive (Linux)
-        if: matrix.name == 'Linux'
-        run: |
-          mkdir -p "${{ steps.archive.outputs.name }}"
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "${{ steps.archive.outputs.name }}/"
-          rsync -a --exclude='*.blend' --exclude='*.blend1' assets/ "${{ steps.archive.outputs.name }}/assets/"
-          tar czf "${{ steps.archive.outputs.filename }}" "${{ steps.archive.outputs.name }}"
-
-      - name: Package archive (macOS)
-        if: matrix.name == 'macOS'
-        run: |
-          mkdir -p "${{ steps.archive.outputs.name }}"
-          cp target/release-universal/mahjuro "${{ steps.archive.outputs.name }}/"
-          rsync -a --exclude='*.blend' --exclude='*.blend1' assets/ "${{ steps.archive.outputs.name }}/assets/"
-          zip -r "${{ steps.archive.outputs.filename }}" "${{ steps.archive.outputs.name }}"
-
-      - name: Package archive (Windows)
+      - name: Stage installer source (Windows)
         if: matrix.name == 'Windows'
         shell: pwsh
         run: |
-          $dir = "${{ steps.archive.outputs.name }}"
-          New-Item -ItemType Directory -Force $dir
-          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" "$dir\"
-          Copy-Item -Recurse assets "$dir\assets"
-          Get-ChildItem "$dir\assets" -Recurse -Include *.blend,*.blend1 | Remove-Item -Force
-          Compress-Archive -Path "$dir\*" -DestinationPath "${{ steps.archive.outputs.filename }}"
+          $stage = "installer-src"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" "$stage\"
+          # Generate multi-resolution icon.ico from icon.png. ImageMagick is
+          # preinstalled on windows-latest runners as `magick`.
+          magick icon.png -define icon:auto-resize=256,128,64,48,32,16 "$stage\icon.ico"
+
+      - name: Build NSIS installer (Windows)
+        if: matrix.name == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $out = "${{ steps.artifact.outputs.filename }}"
+          makensis `
+            "/DVERSION=$env:VERSION" `
+            "/DSOURCE_DIR=$PWD\installer-src" `
+            "/DOUTFILE=$PWD\$out" `
+            packaging\installer.nsi
+
+      - name: Sign installer (Windows)
+        if: matrix.name == 'Windows'
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          AzureSignTool sign \
+            -kvu https://mahjuro.vault.azure.net \
+            -kvc Mahjuro \
+            -kvi "$AZURE_CLIENT_ID" \
+            -kvt "$AZURE_TENANT_ID" \
+            -kvs "$AZURE_CLIENT_SECRET" \
+            -tr http://timestamp.digicert.com \
+            -td sha256 \
+            "${{ steps.artifact.outputs.filename }}"
+
+      # ──────────────────────────── Linux: AppImage ────────────────────────────
+      - name: Build AppImage (Linux)
+        if: matrix.name == 'Linux'
+        run: |
+          set -euo pipefail
+          APPDIR="Mahjuro.AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin"
+
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$APPDIR/usr/bin/mahjuro"
+          chmod +x "$APPDIR/usr/bin/mahjuro"
+
+          cp packaging/AppRun "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          cp packaging/mahjuro.desktop "$APPDIR/mahjuro.desktop"
+          cp icon.png "$APPDIR/mahjuro.png"
+
+          # Fetch appimagetool.
+          curl -L -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+          ARCH=x86_64 ./appimagetool "$APPDIR" "${{ steps.artifact.outputs.filename }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.archive.outputs.filename }}
-          path: ${{ steps.archive.outputs.filename }}
+          name: ${{ steps.artifact.outputs.filename }}
+          path: ${{ steps.artifact.outputs.filename }}
 
   create-release:
     needs: build-release
