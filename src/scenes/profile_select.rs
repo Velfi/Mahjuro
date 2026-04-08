@@ -68,7 +68,6 @@ impl ProfileSelectScene {
             .map(|(i, rect)| FlatItem::new(FocusId(i as u32), rect, PickProfile(i)))
             .collect()
     }
-
 }
 
 impl SceneBehavior for ProfileSelectScene {
@@ -130,7 +129,11 @@ impl SceneBehavior for ProfileSelectScene {
             let is_active = i == ctx.active_profile;
 
             // Card background.
-            let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
+            let bg_color = if is_focused {
+                color::DUSK
+            } else {
+                color::INDIGO
+            };
             instances.push(GpuInstance {
                 rect: [card_x, card_y, card_w, card_h],
                 color: bg_color,
@@ -173,7 +176,11 @@ impl SceneBehavior for ProfileSelectScene {
             text_labels.push(TextLabel {
                 rect: header_rect,
                 text: header_text,
-                color: if is_focused { color::CHAMPAGNE } else { color::PARCHMENT },
+                color: if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::PARCHMENT
+                },
                 ..Default::default()
             });
 
@@ -233,7 +240,6 @@ impl SceneBehavior for ProfileSelectScene {
                     ..Default::default()
                 });
             }
-
         }
 
         // Single hit-target list shared with update() — no layout drift.

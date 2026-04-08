@@ -16,6 +16,7 @@ pub enum DebugAction {
     ToggleShowFps,
     OpenTuning,
     OpenSfxTest,
+    BlowWindGust,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -53,6 +54,13 @@ impl DebugMenuBar {
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
         let _ = debug_menu.append(&sfx_item);
+
+        // Spawn a strong wind gust at the candle row so the flame's
+        // wind reaction is observable on demand. Mirrors pressing `B`
+        // in the gameplay scene.
+        let wind_item = MenuItem::new("Blow Wind Gust", true, None);
+        mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
+        let _ = debug_menu.append(&wind_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

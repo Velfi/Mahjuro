@@ -38,9 +38,10 @@ use winit::window::{Window, WindowId};
 
 // ── Tuning overlay (debug) ──────────────────────────────────────────
 
-const TUNING_ROW_COUNT: usize = 8; // 7 sliders + Export button
+const TUNING_ROW_COUNT: usize = 10; // 9 sliders + Export button
+const TUNING_SLIDER_ROWS: usize = TUNING_ROW_COUNT - 1;
 const TUNING_MIN_MS: u64 = 50;
-const TUNING_MAX_MS: u64 = 3000;
+const TUNING_MAX_MS: u64 = 5000;
 const TUNING_STEP_MS: u64 = 50;
 
 struct TuningOverlay {
@@ -95,6 +96,8 @@ impl TuningOverlay {
             4 => &mut self.tuning.depart_lifetime_ms,
             5 => &mut self.tuning.draw_settle_ms,
             6 => &mut self.tuning.sort_settle_ms,
+            7 => &mut self.tuning.wind_delay_ms,
+            8 => &mut self.tuning.wind_duration_ms,
             _ => return,
         };
         *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
@@ -121,7 +124,7 @@ impl TuningOverlay {
         let row_total_h = row_h + desc_h + row_gap;
         let panel_h = title_h + row_gap
             + diagram_h + row_gap
-            + 7.0 * row_total_h  // 7 slider rows
+            + TUNING_SLIDER_ROWS as f32 * row_total_h
             + (row_h + row_gap)  // export button
             + row_gap * 3.0;
         let panel_x = (window_w - panel_w) * 0.5;
@@ -244,7 +247,7 @@ impl TuningOverlay {
         let slider_w = panel_w * 0.35;
         let value_w = panel_w * 0.18;
 
-        let rows: [(&str, &str, u64); 7] = [
+        let rows: [(&str, &str, u64); TUNING_SLIDER_ROWS] = [
             (
                 "Base Hold",
                 "Pause on base points before steps begin",
@@ -279,6 +282,16 @@ impl TuningOverlay {
                 "Sort/Drag Speed",
                 "How long sort and drag-reorder animations take",
                 self.tuning.sort_settle_ms,
+            ),
+            (
+                "Wind Delay",
+                "Pause after deal before the smoke gust + candle dim",
+                self.tuning.wind_delay_ms,
+            ),
+            (
+                "Wind Duration",
+                "Length of the post-deal smoke gust + candle dim envelope",
+                self.tuning.wind_duration_ms,
             ),
         ];
 
@@ -369,7 +382,7 @@ impl TuningOverlay {
         }
 
         // Export button row.
-        let export_y = cursor_y + 7.0 * row_total_h;
+        let export_y = cursor_y + TUNING_SLIDER_ROWS as f32 * row_total_h;
         let is_focused = self.cursor == TUNING_ROW_COUNT - 1;
         let bg = if is_focused {
             [0.25, 0.45, 0.30, 0.95]
@@ -432,7 +445,10 @@ impl SfxTestOverlay {
                 UiAction::FocusUp => {
                     self.cursor = (self.cursor + count - 1) % count;
                 }
-                UiAction::Confirm => {
+                // Accept both Confirm (Space / gamepad South) and
+                // CommitDiscard (Enter) — the footer hint advertises Enter
+                // as the play key, and Enter doesn't map to Confirm globally.
+                UiAction::Confirm | UiAction::CommitDiscard => {
                     if let Some(&id) = audio::all_sfx_ids().get(self.cursor) {
                         audio.play_sfx(id);
                     }
@@ -465,13 +481,8 @@ impl SfxTestOverlay {
         let pad = (16.0 * scale).max(8.0);
 
         let panel_w = (560.0 * scale).min(window_w * 0.92);
-        let panel_h = pad
-            + title_h
-            + pad
-            + (ids.len() as f32) * (row_h + row_gap)
-            + pad
-            + hint_h
-            + pad;
+        let panel_h =
+            pad + title_h + pad + (ids.len() as f32) * (row_h + row_gap) + pad + hint_h + pad;
         let panel_x = (window_w - panel_w) * 0.5;
         let panel_y = (window_h - panel_h) * 0.5;
 
@@ -781,9 +792,7 @@ impl App {
                     use rand::seq::IndexedRandom;
                     let mut rng = rand::rng();
                     for _ in 0..drops {
-                        if let Some(&z) =
-                            crate::core::zodiac::ZodiacKind::all().choose(&mut rng)
-                        {
+                        if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
                             self.run.zodiac_inventory.items.push(z);
                         }
                     }
@@ -862,10 +871,22 @@ impl App {
                 .as_ref()
                 .and_then(|i| renderer.pick_hand_tile(i.last_cursor.0, i.last_cursor.1)),
         };
-        let output = self.scene.draw(ctx);
+        // Build the scene's frame in canonical push-order. For migrated
+        // scenes (gameplay) this calls their direct `draw_frame` impl;
+        // for legacy scenes the default impl forwards through `draw()` +
+        // `into_frame()`. Either way we get back a single ordered
+        // `UiFrame.cmds` list whose push order is z-order.
+        let mut frame: UiFrame = self.scene.draw_frame(ctx);
 
-        win.set_title(&output.window_title);
-        self.active_buttons = output
+        // Index of the last cmd produced by the scene itself, captured
+        // BEFORE any modal/tuning/sfx/fps/tooltip overlay is appended
+        // below. Used by the tooltip-overlay snapshot a few lines down so
+        // glossary-hover scanning only sees scene content (not modal text
+        // or fps debug labels).
+        let scene_cmds_end = frame.cmds.len();
+
+        win.set_title(&frame.window_title);
+        self.active_buttons = frame
             .buttons
             .iter()
             .map(|b| ButtonDef {
@@ -884,41 +905,51 @@ impl App {
         }
 
         // Spawn departure animations before updating hand tiles (old data still in renderer).
-        if !output.departing_indices.is_empty() {
+        if !frame.departing_indices.is_empty() {
             let depart_lifetime = self.cascade_tuning.depart_lifetime_ms as f32 / 1000.0;
-            renderer.depart_tiles(&output.departing_indices, depart_lifetime, self.tile_preset);
+            renderer.depart_tiles(&frame.departing_indices, depart_lifetime, self.tile_preset);
         }
-        renderer.update_hand_tiles(&output.hand_tiles);
+        renderer.update_hand_tiles(&frame.hand_tiles);
 
-        // Snapshot the scene's text labels and relic icons for tooltip
-        // hover-region scanning. We capture them before any modal/overlay
-        // cmds get pushed onto the frame so glossary detection only fires
-        // on scene content.
-        let scene_text_labels: Vec<TextLabel> = output
-            .text_labels
+        // Snapshot the scene's text labels and relic icons for the
+        // tooltip overlay's glossary-hover scanning, by walking the
+        // scene's portion of `frame.cmds` (everything pushed up to
+        // `scene_cmds_end`). This works uniformly for migrated scenes
+        // (which push directly into `frame.cmds`) AND legacy scenes
+        // (whose `into_frame()` lands their `text_labels` / `relic_icons`
+        // as `DrawCmd::Text` / `DrawCmd::RelicIcon` in the same list).
+        // Walking the cmds list — instead of snapshotting separate
+        // `output.text_labels` / `output.relic_icons` vecs — is what
+        // makes the migration transparent to the tooltip system.
+        let scene_text_labels: Vec<TextLabel> = frame.cmds[..scene_cmds_end]
             .iter()
-            .map(|l| TextLabel {
-                rect: l.rect,
-                text: l.text.clone(),
-                color: l.color,
-                ..Default::default()
+            .filter_map(|c| {
+                if let crate::render::draw_cmd::DrawCmd::Text(l) = c {
+                    Some(TextLabel {
+                        rect: l.rect,
+                        text: l.text.clone(),
+                        color: l.color,
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                }
             })
             .collect();
-        let scene_relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = output
-            .relic_icons
+        let scene_relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = frame.cmds
+            [..scene_cmds_end]
             .iter()
-            .map(|i| crate::render::wgpu_renderer::RelicIcon {
-                rect: i.rect,
-                relic_id: i.relic_id,
+            .filter_map(|c| {
+                if let crate::render::draw_cmd::DrawCmd::RelicIcon(i) = c {
+                    Some(crate::render::wgpu_renderer::RelicIcon {
+                        rect: i.rect,
+                        relic_id: i.relic_id,
+                    })
+                } else {
+                    None
+                }
             })
             .collect();
-
-        // Convert SceneDrawOutput → UiFrame in the canonical scene order
-        // (background → hand backdrop → smoke → scene quads → hand faces →
-        // scene text → relic icons). Modal/tuning/fps/tooltip cmds are
-        // appended to the end of `frame.cmds` below — pushed earlier =
-        // renders under, pushed later = renders on top.
-        let mut frame: UiFrame = output.into_frame();
         // Forward the cursor position so the renderer can project it onto
         // the table plane and feed it into the volumetric smoke sim.
         frame.cursor_pos = self.input.as_ref().map(|i| i.last_cursor);
@@ -1087,6 +1118,13 @@ impl App {
                     log::info!("[Debug] Opened SFX test overlay");
                 }
             }
+            DebugAction::BlowWindGust => {
+                // Inject the same UiAction that pressing `B` would push,
+                // so the gameplay scene's existing wind-trigger branch
+                // picks it up on the next frame.
+                self.mouse_actions.push(UiAction::DebugBlowWind);
+                log::info!("[Debug] Blow wind gust queued");
+            }
         }
         // Request redraw to reflect changes immediately.
         if let Some(w) = self.window.as_ref() {
@@ -1130,10 +1168,6 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        let now = Instant::now();
-        self.last_frame = now;
-        self.anim.update(now);
-
         match event {
             WindowEvent::CloseRequested => {
                 if self.close_saved {
@@ -1157,6 +1191,16 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // Advance animation clock once per presented frame. Doing this
+                // at the top of `window_event` instead would tick animations on
+                // every input event (CursorMoved fires faster than vsync), so
+                // the game would effectively run faster than the monitor can
+                // render. RedrawRequested is gated by the Fifo presenter, which
+                // blocks at vsync, so this caps the tick to refresh rate.
+                let now = Instant::now();
+                self.last_frame = now;
+                self.anim.update(now);
+
                 // 1. Drain event bus — bus events can trigger scene transitions.
                 for ev in self.bus.drain() {
                     match ev {
@@ -1232,7 +1276,12 @@ impl ApplicationHandler for App {
                         .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
                     if let Some(idx) = picked {
                         if let Some(s) = slots.get_mut(idx) {
-                            *s = (input.last_cursor.0 - 1.0, input.last_cursor.1 - 1.0, 2.0, 2.0);
+                            *s = (
+                                input.last_cursor.0 - 1.0,
+                                input.last_cursor.1 - 1.0,
+                                2.0,
+                                2.0,
+                            );
                         }
                     }
                     input.update_pointer_hover(input.last_cursor, &slots);
@@ -1532,7 +1581,12 @@ impl ApplicationHandler for App {
                         .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
                     if let Some(idx) = picked {
                         if let Some(s) = slots.get_mut(idx) {
-                            *s = (input.last_cursor.0 - 1.0, input.last_cursor.1 - 1.0, 2.0, 2.0);
+                            *s = (
+                                input.last_cursor.0 - 1.0,
+                                input.last_cursor.1 - 1.0,
+                                2.0,
+                                2.0,
+                            );
                         }
                     }
                     input.update_pointer_hover(input.last_cursor, &slots);

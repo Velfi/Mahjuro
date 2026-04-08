@@ -164,8 +164,6 @@ pub struct YakuPreview {
     pub active: bool,
     /// Progress toward qualifying, in `0.0..=1.0`.
     pub progress: f32,
-    /// Short hint text, e.g. "4/5 same suit" or "P·S" (mixed-set checklist).
-    pub hint: String,
 }
 
 /// Compute a `YakuPreview` for each yaku in the player's available pool, based
@@ -188,10 +186,10 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
         .into_iter()
         .map(|k| {
             let active = active_yaku.contains(&k);
-            let (progress, hint) = match k {
+            let progress = match k {
                 YakuKind::Tanyao => {
                     if tiles.is_empty() {
-                        (0.0, "0/0 simples".to_string())
+                        0.0
                     } else {
                         let n = tiles
                             .iter()
@@ -202,7 +200,7 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                             })
                             .count();
                         let total = tiles.len();
-                        (n as f32 / total as f32, format!("{n}/{total} simples"))
+                        n as f32 / total as f32
                     }
                 }
                 YakuKind::Toitoi => match &sets_opt {
@@ -213,17 +211,17 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                             .count();
                         let seqs = s.iter().filter(|x| x.kind == SetKind::Sequence).count();
                         if seqs > 0 {
-                            (0.0, format!("{seqs} sequence(s)"))
+                            0.0
                         } else {
                             let progress = (trips as f32 / 2.0).min(1.0);
-                            (progress, format!("{trips}/2+ triplets"))
+                            progress
                         }
                     }
-                    None => (0.0, "needs valid hand".to_string()),
+                    None => 0.0,
                 },
                 YakuKind::FullHand => {
                     let n = tiles.len().min(14);
-                    (n as f32 / 14.0, format!("{n}/14 tiles"))
+                    n as f32 / 14.0
                 }
                 YakuKind::Yakuhai => {
                     let max_honor = tiles
@@ -239,8 +237,7 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                         .into_values()
                         .max()
                         .unwrap_or(0);
-                    let progress = (max_honor as f32 / 3.0).min(1.0);
-                    (progress, format!("{max_honor}/3 honor"))
+                    (max_honor as f32 / 3.0).min(1.0)
                 }
                 // The remaining new yaku get a simple active/inactive preview.
                 // The richer Codex UI hint pass lives in the next UI patch.
@@ -252,15 +249,17 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                 | YakuKind::Junchan
                 | YakuKind::Honroutou
                 | YakuKind::Chiitoitsu => {
-                    let progress = if active { 1.0 } else { 0.0 };
-                    (progress, k.name().to_string())
+                    if active {
+                        1.0
+                    } else {
+                        0.0
+                    }
                 }
             };
             YakuPreview {
                 kind: k,
                 active,
                 progress: progress.clamp(0.0, 1.0),
-                hint,
             }
         })
         .collect()
@@ -460,7 +459,10 @@ fn is_ittsu(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
         }
         let mut ranks: Vec<u8> = tile_refs.iter().map(|t| t.rank).collect();
         ranks.sort();
-        suit_lows.entry(tile_refs[0].suit).or_default().push(ranks[0]);
+        suit_lows
+            .entry(tile_refs[0].suit)
+            .or_default()
+            .push(ranks[0]);
     }
     suit_lows
         .values()
@@ -704,13 +706,20 @@ mod tests {
     fn detect_chiitoitsu_seven_pairs() {
         // 7 distinct pairs.
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 3, 2), t(Suit::Bamboos, 3, 3),
-            t(Suit::Characters, 5, 4), t(Suit::Characters, 5, 5),
-            t(Suit::Circles, 7, 6), t(Suit::Circles, 7, 7),
-            t(Suit::Wind, 1, 8), t(Suit::Wind, 1, 9),
-            t(Suit::Wind, 3, 10), t(Suit::Wind, 3, 11),
-            t(Suit::Dragon, 2, 12), t(Suit::Dragon, 2, 13),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 1, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Bamboos, 3, 3),
+            t(Suit::Characters, 5, 4),
+            t(Suit::Characters, 5, 5),
+            t(Suit::Circles, 7, 6),
+            t(Suit::Circles, 7, 7),
+            t(Suit::Wind, 1, 8),
+            t(Suit::Wind, 1, 9),
+            t(Suit::Wind, 3, 10),
+            t(Suit::Wind, 3, 11),
+            t(Suit::Dragon, 2, 12),
+            t(Suit::Dragon, 2, 13),
         ];
         let sets: Vec<DetectedSet> = (0..7)
             .map(|i| DetectedSet {
@@ -725,12 +734,21 @@ mod tests {
     #[test]
     fn detect_chinitsu_single_suit_no_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 2, 1), t(Suit::Bamboos, 3, 2),
-            t(Suit::Bamboos, 4, 3), t(Suit::Bamboos, 4, 4),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 2, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Bamboos, 4, 3),
+            t(Suit::Bamboos, 4, 4),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Pair, tile_ids: vec![3, 4] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![3, 4],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::Chinitsu));
@@ -740,12 +758,21 @@ mod tests {
     #[test]
     fn detect_honitsu_one_suit_with_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 2, 1), t(Suit::Bamboos, 3, 2),
-            t(Suit::Wind, 1, 3), t(Suit::Wind, 1, 4),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 2, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Wind, 1, 3),
+            t(Suit::Wind, 1, 4),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Pair, tile_ids: vec![3, 4] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![3, 4],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::Honitsu));
@@ -755,12 +782,22 @@ mod tests {
     #[test]
     fn detect_iipeikou_two_identical_sequences() {
         let tiles = vec![
-            t(Suit::Characters, 2, 0), t(Suit::Characters, 3, 1), t(Suit::Characters, 4, 2),
-            t(Suit::Characters, 2, 3), t(Suit::Characters, 3, 4), t(Suit::Characters, 4, 5),
+            t(Suit::Characters, 2, 0),
+            t(Suit::Characters, 3, 1),
+            t(Suit::Characters, 4, 2),
+            t(Suit::Characters, 2, 3),
+            t(Suit::Characters, 3, 4),
+            t(Suit::Characters, 4, 5),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![3, 4, 5] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::Iipeikou));
@@ -769,14 +806,29 @@ mod tests {
     #[test]
     fn detect_sanshoku_doujun() {
         let tiles = vec![
-            t(Suit::Characters, 4, 0), t(Suit::Characters, 5, 1), t(Suit::Characters, 6, 2),
-            t(Suit::Bamboos, 4, 3), t(Suit::Bamboos, 5, 4), t(Suit::Bamboos, 6, 5),
-            t(Suit::Circles, 4, 6), t(Suit::Circles, 5, 7), t(Suit::Circles, 6, 8),
+            t(Suit::Characters, 4, 0),
+            t(Suit::Characters, 5, 1),
+            t(Suit::Characters, 6, 2),
+            t(Suit::Bamboos, 4, 3),
+            t(Suit::Bamboos, 5, 4),
+            t(Suit::Bamboos, 6, 5),
+            t(Suit::Circles, 4, 6),
+            t(Suit::Circles, 5, 7),
+            t(Suit::Circles, 6, 8),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![3, 4, 5] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![6, 7, 8] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::SanshokuDoujun));
@@ -785,14 +837,29 @@ mod tests {
     #[test]
     fn detect_ittsu_full_straight_one_suit() {
         let tiles = vec![
-            t(Suit::Circles, 1, 0), t(Suit::Circles, 2, 1), t(Suit::Circles, 3, 2),
-            t(Suit::Circles, 4, 3), t(Suit::Circles, 5, 4), t(Suit::Circles, 6, 5),
-            t(Suit::Circles, 7, 6), t(Suit::Circles, 8, 7), t(Suit::Circles, 9, 8),
+            t(Suit::Circles, 1, 0),
+            t(Suit::Circles, 2, 1),
+            t(Suit::Circles, 3, 2),
+            t(Suit::Circles, 4, 3),
+            t(Suit::Circles, 5, 4),
+            t(Suit::Circles, 6, 5),
+            t(Suit::Circles, 7, 6),
+            t(Suit::Circles, 8, 7),
+            t(Suit::Circles, 9, 8),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![3, 4, 5] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![6, 7, 8] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::Ittsu));
@@ -801,12 +868,21 @@ mod tests {
     #[test]
     fn detect_honroutou_terminals_and_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 1, 1), t(Suit::Bamboos, 1, 2),
-            t(Suit::Wind, 1, 3), t(Suit::Wind, 1, 4),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 1, 1),
+            t(Suit::Bamboos, 1, 2),
+            t(Suit::Wind, 1, 3),
+            t(Suit::Wind, 1, 4),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Pair, tile_ids: vec![3, 4] },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![3, 4],
+            },
         ];
         let yaku = detect_yaku(&tiles, &sets);
         assert!(yaku.contains(&YakuKind::Honroutou));
@@ -818,13 +894,20 @@ mod tests {
         // through the chiitoitsu fallback.
         use crate::core::hand::validate_selection;
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 3, 2), t(Suit::Bamboos, 3, 3),
-            t(Suit::Characters, 5, 4), t(Suit::Characters, 5, 5),
-            t(Suit::Circles, 7, 6), t(Suit::Circles, 7, 7),
-            t(Suit::Wind, 1, 8), t(Suit::Wind, 1, 9),
-            t(Suit::Wind, 3, 10), t(Suit::Wind, 3, 11),
-            t(Suit::Dragon, 2, 12), t(Suit::Dragon, 2, 13),
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 1, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Bamboos, 3, 3),
+            t(Suit::Characters, 5, 4),
+            t(Suit::Characters, 5, 5),
+            t(Suit::Circles, 7, 6),
+            t(Suit::Circles, 7, 7),
+            t(Suit::Wind, 1, 8),
+            t(Suit::Wind, 1, 9),
+            t(Suit::Wind, 3, 10),
+            t(Suit::Wind, 3, 11),
+            t(Suit::Dragon, 2, 12),
+            t(Suit::Dragon, 2, 13),
         ];
         let sets = validate_selection(&tiles).expect("seven pairs should validate");
         assert_eq!(sets.len(), 7);

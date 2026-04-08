@@ -31,8 +31,8 @@ impl GameMode {
             // without touching boss tension.
             starting_discards: 4,
             hand_size: 14,
-            base_target: 200,
-            target_scaling: 1.25,
+            base_target: 300,
+            target_scaling: 1.5,
             starting_relics: vec![],
             starting_rules: vec![RuleModifier::PairDoubleScore],
             // Default starting yaku pool: all 12 canonical yaku are available

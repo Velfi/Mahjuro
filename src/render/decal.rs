@@ -301,10 +301,8 @@ fn rasterize_block(
     let measured: Vec<LineGlyphs> = lines
         .iter()
         .map(|line| {
-            let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> = line
-                .chars()
-                .map(|ch| font.rasterize(ch, font_px))
-                .collect();
+            let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> =
+                line.chars().map(|ch| font.rasterize(ch, font_px)).collect();
             let advance: f32 = glyphs.iter().map(|(m, _)| m.advance_width).sum();
             LineGlyphs { glyphs, advance }
         })
@@ -335,7 +333,10 @@ fn rasterize_block(
         let glyph_view: Vec<GlyphRef> = line
             .glyphs
             .iter()
-            .map(|(m, b)| GlyphRef { metrics: *m, bitmap: b })
+            .map(|(m, b)| GlyphRef {
+                metrics: *m,
+                bitmap: b,
+            })
             .collect();
         blit_line_refs(&glyph_view, &mut rgba, width, height, start_x, baseline_y);
     }
@@ -365,8 +366,7 @@ fn blit_line(
     for g in glyphs {
         if !g.bitmap.is_empty() {
             let glyph_left = (cx + g.metrics.xmin as f32) as i32;
-            let glyph_top =
-                (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
+            let glyph_top = (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
             blit_glyph(
                 &g.bitmap,
                 g.metrics.width,
@@ -394,8 +394,7 @@ fn blit_line_refs(
     for g in glyphs {
         if !g.bitmap.is_empty() {
             let glyph_left = (cx + g.metrics.xmin as f32) as i32;
-            let glyph_top =
-                (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
+            let glyph_top = (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
             blit_glyph(
                 g.bitmap,
                 g.metrics.width,

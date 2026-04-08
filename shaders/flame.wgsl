@@ -2,7 +2,14 @@
 //
 // Instance data:
 //   rect    — bounding box of the flame in screen pixels
-//   color.rgb — flame tint multiplier (use [1,1,1] for the default look)
+//   color.rg  — per-flame wind vector in flame-relative units (signed,
+//               clamped roughly to [-1.5, 1.5]). The renderer fills this in
+//               when batching flames by sampling the active `wind_gusts` at
+//               each candle's wick — gameplay leaves the slot at zero. The
+//               fragment shader uses it to lean the flame, smear the noise
+//               and pump up the flicker so candles visibly react to the
+//               post-deal "blow" gust and any future wind impulses.
+//   color.b   — unused (reserved); leave at 1.0
 //   color.a   — per-instance phase offset in [0,1]; randomises noise + flicker
 //               so neighbouring candles don't beat in sync.
 //
@@ -23,7 +30,7 @@ struct Globals {
 struct VsOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) tint: vec3<f32>,
+    @location(1) wind: vec2<f32>,
     @location(2) phase: f32,
 };
 
@@ -40,7 +47,7 @@ fn vs_main(
     var out: VsOut;
     out.clip_position = vec4<f32>(nx, ny, 0.0, 1.0);
     out.uv = corner;
-    out.tint = color.rgb;
+    out.wind = color.xy;
     out.phase = color.a;
     return out;
 }
@@ -77,27 +84,47 @@ fn fbm(p: vec2<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // uv is [0,1] across the flame quad. Centre x at 0, y up = bottom.
-    let cx = in.uv.x - 0.5;
+    let cx_raw = in.uv.x - 0.5;
     let cy = 1.0 - in.uv.y;          // 0 at base, 1 at tip
     let phase = in.phase * 6.2831853;
     let t = globals.time;
+
+    // ── Wind response ───────────────────────────────────────────────
+    // `in.wind` is a screen-space wind vector in flame-relative units
+    // (~[-1.5, 1.5]) supplied by the renderer from `frame.wind_gusts`.
+    // We tilt the flame's local x axis by `wind.x * cy^1.5` so the
+    // base stays glued to the wick while the tip leans in the wind
+    // direction; the silhouette noise is sheared in the same direction
+    // so the wisps streak rather than just translate. Vertical wind
+    // (`wind.y`) shows up as a small uniform vertical squash so a
+    // downward gust visibly stunts the flame.
+    let wind = in.wind;
+    let wind_mag = clamp(length(wind), 0.0, 1.5);
+    let bend = wind.x * pow(cy, 1.4) * 0.95;
+    let cx = cx_raw - bend;
+    let cy_squash = cy * (1.0 - clamp(wind.y, -0.4, 0.4) * 0.35);
 
     // ── Outer envelope ──────────────────────────────────────────────
     // Asymmetric teardrop: narrow cup at the very base (where it
     // meets the wick), bulging out slightly above, then tapering to
     // a sharp tip. The narrow base reads as "the flame springs from
     // a point on the wick" — broad bases look like clouds.
-    let bulge = smoothstep(0.0, 0.25, cy) * (1.0 - smoothstep(0.25, 1.0, cy));
-    let half_width = mix(0.05, 0.40, bulge) * (1.0 - cy * cy * 0.6) + 0.04;
+    let bulge = smoothstep(0.0, 0.25, cy_squash) * (1.0 - smoothstep(0.25, 1.0, cy_squash));
+    let half_width = mix(0.05, 0.40, bulge) * (1.0 - cy_squash * cy_squash * 0.6) + 0.04;
 
     // Two octaves of advected fbm so the silhouette ripples like real
     // combustion. Lateral wobble shears the upper half so the tip
-    // dances in the air current.
-    let n_uv = vec2<f32>(cx * 2.5 + sin(t * 1.7 + phase) * 0.08, cy * 3.0 - t * 2.4 + phase);
+    // dances in the air current; wind broadens that wobble so a gust
+    // looks like flailing rather than a clean static lean.
+    let n_uv = vec2<f32>(
+        cx * 2.5 + sin(t * 1.7 + phase) * 0.08 - wind.x * cy * 0.45,
+        cy_squash * 3.0 - t * 2.4 + phase,
+    );
     let n = fbm(n_uv) - 0.5;
-    let lateral_wobble = sin(t * 9.0 + phase + cy * 6.0) * 0.05 * cy;
+    let wobble_amp = 0.05 + wind_mag * 0.16;
+    let lateral_wobble = sin(t * 9.0 + phase + cy * 6.0) * wobble_amp * cy;
 
-    let dx_norm = abs(cx + lateral_wobble) - (half_width + n * 0.16 * cy);
+    let dx_norm = abs(cx + lateral_wobble) - (half_width + n * 0.16 * cy_squash);
 
     // Soft outer mask — clamp the negative-distance region to alpha.
     let outer = clamp(-dx_norm * 9.0, 0.0, 1.0);
@@ -107,8 +134,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // different noise phase. Compositing two layers of differing size
     // is the cheapest way to fake volume in 2D — the inner layer
     // brightens the core where they overlap and creates plume detail.
-    let inner_half = (half_width * 0.55 + n * 0.05) * (1.0 - smoothstep(0.0, 0.85, cy));
-    let n2_uv = vec2<f32>(cx * 4.0 + cos(t * 2.3 + phase * 1.7) * 0.06, cy * 5.0 - t * 3.6 + phase * 1.3);
+    let inner_half = (half_width * 0.55 + n * 0.05) * (1.0 - smoothstep(0.0, 0.85, cy_squash));
+    let n2_uv = vec2<f32>(
+        cx * 4.0 + cos(t * 2.3 + phase * 1.7) * 0.06 - wind.x * cy * 0.6,
+        cy_squash * 5.0 - t * 3.6 + phase * 1.3,
+    );
     let n2 = fbm(n2_uv) - 0.5;
     let dx_inner = abs(cx) - (inner_half + n2 * 0.04);
     let inner = clamp(-dx_inner * 14.0, 0.0, 1.0);
@@ -119,8 +149,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let tip_fade = 1.0 - smoothstep(0.55, 1.00, cy);
     let env = base_fade * tip_fade;
 
-    // Per-frame brightness flicker.
-    let flicker = 0.85 + 0.15 * sin(t * 11.0 + phase) + 0.08 * sin(t * 19.0 + phase * 1.3);
+    // Per-frame brightness flicker. Wind pushes more air across the
+    // wick so the flame visibly pumps brighter+darker as it bends.
+    let flicker = (0.85 + 0.15 * sin(t * 11.0 + phase) + 0.08 * sin(t * 19.0 + phase * 1.3))
+                * (1.0 + wind_mag * 0.55);
 
     let alpha = outer * env * flicker;
 
@@ -156,7 +188,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let cup = 1.0 - smoothstep(0.00, 0.06, cy);
     body = mix(body, vec3<f32>(0.18, 0.06, 0.02), cup * 0.6);
 
-    let rgb = body * in.tint;
+    let rgb = body;
 
     // Premultiplied output for additive blending. Boost slightly so
     // saturated cores still pop on the bright wood table; the alpha

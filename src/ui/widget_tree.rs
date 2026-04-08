@@ -41,9 +41,7 @@
 //! The layout cache built during `update()` is reused by `draw()` so the
 //! layout pass runs exactly once per frame.
 
-use crate::render::theme::{
-    self, ButtonState, ButtonVariant, color, metrics, typography,
-};
+use crate::render::theme::{self, ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
@@ -163,10 +161,7 @@ pub enum ItemKind<A: Copy> {
     /// Escape hatch: tree owns the rect, scene owns the visual. The
     /// `kind_tag` is a scene-defined u32 (typically a discriminant) that the
     /// scene's `render_custom` callback matches against to draw the contents.
-    Custom {
-        kind_tag: u32,
-        on_activate: A,
-    },
+    Custom { kind_tag: u32, on_activate: A },
 }
 
 /// Non-interactive node: titles, hint text, spacers.
@@ -230,12 +225,7 @@ pub fn button<A: Copy>(label: &str, action: A, variant: ButtonVariant) -> Node<A
     })
 }
 
-pub fn button_id<A: Copy>(
-    id: FocusId,
-    label: &str,
-    action: A,
-    variant: ButtonVariant,
-) -> Node<A> {
+pub fn button_id<A: Copy>(id: FocusId, label: &str, action: A, variant: ButtonVariant) -> Node<A> {
     Node::Item(Item {
         id,
         size: Size::Auto,
@@ -374,11 +364,7 @@ fn action_id<A: Copy>(action: A) -> u32 {
     let mut buf = [0u8; 8];
     // SAFETY: A is Copy, we read at most size_of::<A>() bytes.
     unsafe {
-        std::ptr::copy_nonoverlapping(
-            &action as *const A as *const u8,
-            buf.as_mut_ptr(),
-            size,
-        );
+        std::ptr::copy_nonoverlapping(&action as *const A as *const u8, buf.as_mut_ptr(), size);
     }
     let v = u64::from_le_bytes(buf);
     // Mix with a small prime so the low bits aren't all clustered at zero.
@@ -649,8 +635,8 @@ fn layout_node<A: Copy>(
             for c in children {
                 child_heights.push(child_height(c, w, window_h, scale));
             }
-            let total_h: f32 =
-                child_heights.iter().sum::<f32>() + gap_px * (children.len().saturating_sub(1) as f32);
+            let total_h: f32 = child_heights.iter().sum::<f32>()
+                + gap_px * (children.len().saturating_sub(1) as f32);
             let mut cy = y + ((h - total_h) * 0.5).max(0.0);
             for (child, ch) in children.iter().zip(child_heights.iter()) {
                 let cw = match align {
@@ -688,7 +674,11 @@ fn layout_node<A: Copy>(
                     VAlign::Bottom => y + h - ch,
                     VAlign::Center | VAlign::Stretch => y + (h - ch) * 0.5,
                 };
-                let final_h = if matches!(align, VAlign::Stretch) { h } else { ch };
+                let final_h = if matches!(align, VAlign::Stretch) {
+                    h
+                } else {
+                    ch
+                };
                 layout_node(child, [cx, cy, cw, final_h], scale, window_h, out, rects);
                 cx += cw + gap_px;
             }
@@ -756,11 +746,7 @@ fn child_height<A: Copy>(node: &Node<A>, container_w: f32, window_h: f32, scale:
 
 impl TreeState {
     /// Lay out the tree, run input, return the activated action (if any).
-    pub fn update<A: Copy>(
-        &mut self,
-        tree: &Tree<A>,
-        input: TreeInput<'_>,
-    ) -> Option<A> {
+    pub fn update<A: Copy>(&mut self, tree: &Tree<A>, input: TreeInput<'_>) -> Option<A> {
         self.last_window = input.window;
         let _ = layout_tree(tree, input.window, &mut self.layout);
 
@@ -874,7 +860,11 @@ fn activate_item<A: Copy>(item: &Item<A>, _id: FocusId) -> Option<A> {
             // clicking a slider — and matches what scenes' Confirm handlers
             // do today (start_screen / pause_menu / options).
             let next = value + step;
-            let snapped = if next > range.1 + 1e-4 { range.0 } else { next.min(range.1) };
+            let snapped = if next > range.1 + 1e-4 {
+                range.0
+            } else {
+                next.min(range.1)
+            };
             Some(on_change(snapped))
         }
         ItemKind::Cycle { on_next, .. } => Some(*on_next),
@@ -1010,7 +1000,11 @@ fn draw_item<A: Copy>(
     } else {
         ButtonState::Rest
     };
-    let focus_state = if focused { FocusState::Hover } else { FocusState::Rest };
+    let focus_state = if focused {
+        FocusState::Hover
+    } else {
+        FocusState::Rest
+    };
 
     match &item.kind {
         ItemKind::Button { label, variant, .. } => {
@@ -1062,7 +1056,10 @@ fn draw_item<A: Copy>(
             ));
         }
         ItemKind::Slider {
-            label, value, range, ..
+            label,
+            value,
+            range,
+            ..
         } => {
             draw_slider_row(frame, rect, label, *value, *range, state);
             frame.buttons.push(ButtonDef::scene(

@@ -133,10 +133,7 @@ impl RunState {
     /// Use a Zodiac card from the inventory: removes it and levels its yaku.
     /// Returns the yaku and its new level on success.
     #[allow(dead_code)]
-    pub fn use_zodiac(
-        &mut self,
-        index: usize,
-    ) -> Option<(crate::core::yaku::YakuKind, u32)> {
+    pub fn use_zodiac(&mut self, index: usize) -> Option<(crate::core::yaku::YakuKind, u32)> {
         let z = self.zodiac_inventory.take(index)?;
         let yaku = z.yaku();
         let new_level = self.yaku_levels.level_up(yaku);
@@ -152,11 +149,7 @@ impl RunState {
     /// Replace one yaku in the loadout with another. The new yaku must not
     /// already be in the loadout. Returns `true` on success.
     #[allow(dead_code)]
-    pub fn swap_loadout(
-        &mut self,
-        index: usize,
-        replacement: crate::core::yaku::YakuKind,
-    ) -> bool {
+    pub fn swap_loadout(&mut self, index: usize, replacement: crate::core::yaku::YakuKind) -> bool {
         if index >= self.yaku_loadout.len() {
             return false;
         }
@@ -250,7 +243,10 @@ impl RunState {
             available_yaku: self.available_yaku.clone(),
             round_wind: Some(BlindKind::round_wind_for_ante(self.ante)),
             first_full_hand_of_round: !self.full_hand_played_this_round,
-            plays_used: self.mode.starting_plays.saturating_sub(self.plays_remaining),
+            plays_used: self
+                .mode
+                .starting_plays
+                .saturating_sub(self.plays_remaining),
             riichi_active: false,
             yaku_levels: Some(self.yaku_levels.clone()),
             yaku_loadout: self.yaku_loadout.clone(),
@@ -268,10 +264,7 @@ impl RunState {
         }
         // KanDrum (Patch C): every Kong scored grants +1 play this round.
         if self.relics.has(RelicId::KanDrum) {
-            let kong_count = sets
-                .iter()
-                .filter(|s| s.kind == SetKind::Kong)
-                .count() as u32;
+            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
             }

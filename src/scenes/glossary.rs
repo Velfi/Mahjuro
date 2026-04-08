@@ -15,6 +15,7 @@
 use std::cell::Cell;
 
 use crate::core::yaku::YakuKind;
+use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
@@ -306,8 +307,8 @@ impl GlossaryOverlay {
                 color: color::OBSIDIAN,
             });
             let thumb_h = (track_h * (visible_rows as f32 / max_entries as f32)).max(12.0 * scale);
-            let thumb_y = track_y
-                + (track_h - thumb_h) * (self.scroll_steps.get() as f32 / max_steps as f32);
+            let thumb_y =
+                track_y + (track_h - thumb_h) * (self.scroll_steps.get() as f32 / max_steps as f32);
             instances.push(GpuInstance {
                 rect: [track_x, thumb_y, track_w, thumb_h],
                 color: color::GOLD,
@@ -319,7 +320,11 @@ impl GlossaryOverlay {
         let btn_h = (44.0 * scale).max(32.0);
         let btn_x = panel_x + (panel_w - btn_w) * 0.5;
         let btn_y = panel_y + panel_h - btn_h - (8.0 * scale);
-        widget::push_panel(instances, [btn_x, btn_y, btn_w, btn_h], PanelVariant::Default);
+        widget::push_panel(
+            instances,
+            [btn_x, btn_y, btn_w, btn_h],
+            PanelVariant::Default,
+        );
         let close_font = typography::size(typography::BODY, window_h).max(17.0);
         text_labels.push(TextLabel {
             rect: [btn_x, btn_y, btn_w, btn_h],
@@ -329,7 +334,46 @@ impl GlossaryOverlay {
             font_px: Some(close_font),
             ..Default::default()
         });
-        buttons.push(ButtonDef::scene((btn_x, btn_y, btn_w, btn_h), GLOSSARY_CLOSE_ID));
+        buttons.push(ButtonDef::scene(
+            (btn_x, btn_y, btn_w, btn_h),
+            GLOSSARY_CLOSE_ID,
+        ));
+    }
+
+    /// Canonical-frame variant of [`Self::draw`] for scenes that have
+    /// migrated off the dual-vec `SceneDrawOutput` model.
+    ///
+    /// Pushes the glossary's quads then its text labels (and the close
+    /// button) directly into the supplied [`UiFrame`]. Internally this
+    /// reuses [`Self::draw`] by passing fresh empty vecs and then merging
+    /// them into the frame in the canonical interleaved order. The
+    /// glossary itself has no internal "tooltip-over-text" hazard — its
+    /// only quad-then-text overlap is the close button (panel quad +
+    /// label text), and pushing all panel quads before all text preserves
+    /// that exact ordering.
+    ///
+    /// Caller is responsible for clearing or reusing `frame.cmds` before
+    /// calling this; the glossary does not touch `frame.cmds` other than
+    /// appending. Migrated scenes that want a "glossary fully covers the
+    /// scene" effect should build a fresh `UiFrame`, optionally push a
+    /// background, and then call this method.
+    ///
+    /// `frame.buttons` is extended with the glossary's own buttons (close
+    /// button + any future glossary controls).
+    pub fn draw_into_frame(&self, frame: &mut UiFrame, window_w: f32, window_h: f32) {
+        if !self.open {
+            return;
+        }
+        let mut quads: Vec<GpuInstance> = Vec::new();
+        let mut text: Vec<TextLabel> = Vec::new();
+        let mut btns: Vec<ButtonDef> = Vec::new();
+        // The legacy draw() begins by clearing each vec — passing fresh
+        // empties is a no-op for that step and lets us reuse all the
+        // layout/scrolling logic without duplication.
+        self.draw(window_w, window_h, &mut quads, &mut text, &mut btns);
+        frame.quads(quads);
+        frame.texts(text);
+        frame.buttons.extend(btns);
     }
 }
 

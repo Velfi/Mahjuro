@@ -45,9 +45,7 @@ impl SfxId {
             SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
             SfxId::TilePlace => "nomagician-ui-button-sound-cancel-back-exit-continue-467877.mp3",
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
-            SfxId::ScoreReveal => {
-                "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI10.ogg"
-            }
+            SfxId::ScoreReveal => "kenney_ui-audio/Audio/switch38.ogg",
             SfxId::ScoreStep => "kenney_ui-audio/Audio/rollover1.ogg",
             SfxId::ScoreFinal => "kenney_interface-sounds/Audio/confirmation_002.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
