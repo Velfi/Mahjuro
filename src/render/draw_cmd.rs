@@ -125,6 +125,10 @@ pub struct TalismanPlacement {
     pub extents: [f32; 3],
     /// Yaw rotation about world Y in degrees (0 = facing the camera).
     pub rotation_y_deg: f32,
+    /// Pitch rotation about world X in degrees. 0 = upright. -90 lays
+    /// the tablet face-up on the table (long axis flat, face normal
+    /// rotated from +Z to +Y).
+    pub rotation_x_deg: f32,
     /// Linear-space RGBA tint.
     pub color: [f32; 4],
 }
@@ -330,6 +334,30 @@ pub struct CascadeTokenPlacement {
     pub pulse: f32,
 }
 
+/// One physical scoring bone tumbling onto the play space during a cascade.
+/// Reuses the `bone_tablet_mesh` geometry; per-instance tint matches the
+/// cascade token kind so chips bones read cool indigo and mult bones read
+/// warm crimson, tying the falling pile back to the HUD readout it spawned
+/// from. The simulation lives in `crate::render::falling_bones` and is
+/// driven by the gameplay scene's cascade reveal events.
+#[derive(Clone, Copy, Debug)]
+pub struct FallingBonePlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the bone's *center*. Pixel x/y
+    /// resolve to world xz via `pixel_to_world`; `world_y` is the live
+    /// height above the table plane that the simulation drives under
+    /// gravity.
+    pub world_pos: [f32; 3],
+    /// Width × thickness × depth in world units.
+    pub extents: [f32; 3],
+    /// Tumble euler angles (rot_x, rot_y, rot_z) in radians.
+    pub rotation: [f32; 3],
+    /// Which scoring axis this bone represents (drives the tint).
+    pub kind: CascadeTokenKind,
+    /// Linear alpha multiplier in [0, 1]. Stays at 1.0 in flight; ramps to
+    /// 0.0 once the bone has landed and its rest timer is bleeding out.
+    pub alpha: f32,
+}
+
 /// One shrine placement (used by the pick-blind scene to draw the three
 /// blind shrines side by side, each scaled by `extents`). Geometry is the
 /// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
@@ -444,14 +472,25 @@ pub enum DrawCmd {
     #[allow(dead_code)]
     PegBlock(PegBlockPlacement),
     /// The wall stack (facedown tiles at the back of the table).
-    #[allow(dead_code)]
     WallStack(WallStackPlacement),
     /// The dora indicator stand.
-    #[allow(dead_code)]
     DoraStand(DoraStandPlacement),
     /// Engraved bone scoring tokens that pop in during a cascade. Reuses
     /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
     CascadeTokenBatch(Vec<CascadeTokenPlacement>),
+    /// Physical scoring bones tumbling onto the play space during a cascade.
+    /// Same bone-tablet mesh as the cascade tokens, with full 3D model
+    /// matrices (gravity-driven world_y + euler tumble) instead of static
+    /// HUD positioning.
+    FallingBoneBatch(Vec<FallingBonePlacement>),
+    /// Non-rendered hover region anchored at a screen rect that resolves
+    /// to a glossary term. Lets scenes attach a tooltip to a 3D object
+    /// (e.g. the coin pile, the wall stack) by giving its approximate
+    /// 2D screen footprint and the glossary term to look up.
+    GlossaryAnchor {
+        rect: [f32; 4],
+        term: &'static str,
+    },
 }
 
 /// Everything a frame's draw needs: an ordered command list plus per-frame
@@ -490,6 +529,11 @@ pub struct UiFrame {
     /// the default "person at the table" gameplay camera. The shop scene
     /// uses this to frame the curio cabinet + foreground dishes.
     pub camera_override: Option<CameraParams>,
+    /// Debug overlay: when true, the renderer draws three colored axis bars
+    /// (red = +X, green = +Y, blue = +Z) anchored at the camera's look
+    /// target. Toggled by `F2` in the gameplay scene to help disambiguate
+    /// world-space directions when iterating on placements.
+    pub debug_axes: bool,
 
     // ── Non-draw scene metadata ─────────────────────────────────────────
     /// Hit-test rects for clickable buttons (not drawn).
@@ -512,6 +556,7 @@ impl UiFrame {
             cursor_pos: None,
             wind_gusts: Vec::new(),
             camera_override: None,
+            debug_axes: false,
             buttons: Vec::new(),
             window_title: String::new(),
         }
@@ -579,16 +624,17 @@ impl UiFrame {
     pub fn peg_block(&mut self, p: PegBlockPlacement) {
         self.cmds.push(DrawCmd::PegBlock(p));
     }
-    #[allow(dead_code)]
     pub fn wall_stack(&mut self, p: WallStackPlacement) {
         self.cmds.push(DrawCmd::WallStack(p));
     }
-    #[allow(dead_code)]
     pub fn dora_stand(&mut self, p: DoraStandPlacement) {
         self.cmds.push(DrawCmd::DoraStand(p));
     }
     pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
         self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
+    }
+    pub fn falling_bone_batch(&mut self, placements: Vec<FallingBonePlacement>) {
+        self.cmds.push(DrawCmd::FallingBoneBatch(placements));
     }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
@@ -607,6 +653,9 @@ impl UiFrame {
     }
     pub fn relic_icons<I: IntoIterator<Item = RelicIcon>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::RelicIcon));
+    }
+    pub fn glossary_anchor(&mut self, rect: [f32; 4], term: &'static str) {
+        self.cmds.push(DrawCmd::GlossaryAnchor { rect, term });
     }
 
     /// Apply a global alpha multiplier to every queued cmd's color.
@@ -646,7 +695,9 @@ impl UiFrame {
                 | DrawCmd::PegBlock(_)
                 | DrawCmd::WallStack(_)
                 | DrawCmd::DoraStand(_)
-                | DrawCmd::CascadeTokenBatch(_) => {}
+                | DrawCmd::CascadeTokenBatch(_)
+                | DrawCmd::FallingBoneBatch(_)
+                | DrawCmd::GlossaryAnchor { .. } => {}
             }
         }
     }

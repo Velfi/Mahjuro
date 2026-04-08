@@ -68,6 +68,70 @@ fn default_smoke() -> SmokeIntensity {
     SmokeIntensity::Subtle
 }
 
+/// Smoke render detail — controls the resolution scale of the offscreen
+/// raymarch target. The volumetric pass is the dominant frame cost on most
+/// machines (a per-pixel ray-march with per-step lighting), so dropping it
+/// to half/quarter/eighth resolution and bilinearly upsampling buys back
+/// 3-8× of that pass for a barely perceptible quality hit on the smoke
+/// itself, which is naturally low-frequency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmokeDetail {
+    /// Render the volumetric pass at native swapchain resolution.
+    Full,
+    /// Half the swapchain in each axis (1/4 the pixels).
+    Half,
+    /// Quarter resolution in each axis (1/16 the pixels).
+    Quarter,
+    /// Eighth resolution in each axis (1/64 the pixels).
+    Eighth,
+}
+
+impl SmokeDetail {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Full => Self::Half,
+            Self::Half => Self::Quarter,
+            Self::Quarter => Self::Eighth,
+            Self::Eighth => Self::Full,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Full => Self::Eighth,
+            Self::Half => Self::Full,
+            Self::Quarter => Self::Half,
+            Self::Eighth => Self::Quarter,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Full => "1x (Native)",
+            Self::Half => "2x (Half)",
+            Self::Quarter => "4x (Quarter)",
+            Self::Eighth => "8x (Eighth)",
+        }
+    }
+
+    /// Linear divisor applied to width and height. The offscreen smoke
+    /// target is `(screen_w / divisor()) × (screen_h / divisor())`.
+    pub fn divisor(self) -> u32 {
+        match self {
+            Self::Full => 1,
+            Self::Half => 2,
+            Self::Quarter => 4,
+            Self::Eighth => 8,
+        }
+    }
+}
+
+fn default_smoke_detail() -> SmokeDetail {
+    // Half-resolution is the sweet spot: ~4× cheaper than native with no
+    // visible quality loss on the candle plumes that drove this work.
+    SmokeDetail::Half
+}
+
 /// Mahjong tile size preset. Proportions are taken from Wikipedia's
 /// "Mahjong tiles" article and reflect the canonical real-world dimensions
 /// of three common regional sets. Each preset controls the face aspect
@@ -147,6 +211,8 @@ pub struct AppSettings {
     pub sfx_enabled: bool,
     #[serde(default = "default_smoke")]
     pub smoke_intensity: SmokeIntensity,
+    #[serde(default = "default_smoke_detail")]
+    pub smoke_detail: SmokeDetail,
     #[serde(default = "default_tile_preset")]
     pub tile_preset: TilePreset,
     #[serde(default = "default_gamma")]
@@ -180,6 +246,7 @@ impl Default for AppSettings {
             music_volume: 0.7,
             sfx_enabled: true,
             smoke_intensity: SmokeIntensity::Subtle,
+            smoke_detail: SmokeDetail::Half,
             tile_preset: TilePreset::Chinese,
             gamma: 1.0,
             shadows_enabled: true,

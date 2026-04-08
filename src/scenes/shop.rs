@@ -574,6 +574,10 @@ impl SceneBehavior for ShopScene {
 
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
+            // Drain a one-shot glossary request from the pause menu.
+            if self.pause_menu.take_glossary_request() {
+                self.glossary.toggle();
+            }
             return t;
         }
 
@@ -745,20 +749,15 @@ impl SceneBehavior for ShopScene {
         );
 
         let mut frame = UiFrame::new();
-        frame.background(BackgroundId::None);
+        // Pitch-black backdrop via the synthetic 1×1 black background
+        // texture so the fill draws in pass A, *before* the smoke
+        // composite. A fullscreen quad here would be reordered into the
+        // late HUD overlay pass and paint over the smoke. The candle-lit
+        // cabinet then pulls a warm pool of light out of the haze, reading
+        // as "shop in a smoky backroom" rather than "game UI on a dark
+        // page."
+        frame.background(BackgroundId::Black);
         frame.camera_override = Some(layout.camera);
-
-        // ── Smoky black background ─────────────────────────────────────
-        // Layered very-dark quads to suggest a sooty interior. The base
-        // is near-black; thin overlays at top + bottom darken the corners
-        // The shop floor is pitch black — the smoke pass below adds the
-        // moody curling haze, and the candle-lit cabinet pulls a warm
-        // pool of light out of it. This reads as "shop in a smoky
-        // backroom" rather than "game UI on a dark page."
-        frame.quad(GpuInstance {
-            rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 1.0],
-        });
 
         // ── Curio cabinet (back wall) ──────────────────────────────────
         frame.curio_cabinet(CurioCabinetPlacement {
@@ -879,6 +878,7 @@ impl SceneBehavior for ShopScene {
                             layout.ribbon_width * 0.35,
                         ],
                         rotation_y_deg: 0.0,
+                        rotation_x_deg: 0.0,
                         color: col,
                     });
                 }
@@ -898,7 +898,9 @@ impl SceneBehavior for ShopScene {
                         length: layout.fan_length,
                         width: layout.fan_width,
                         rotation_y_deg: rot_y,
-                        rotation_x_deg: -25.0,
+                        // Lay flat in the player's owned fan (face up)
+                        // instead of draping forward like the wall row.
+                        rotation_x_deg: -90.0,
                         color: consumable_color(*c),
                     });
                 }
@@ -911,6 +913,8 @@ impl SceneBehavior for ShopScene {
                             layout.fan_width * 0.35,
                         ],
                         rotation_y_deg: rot_y,
+                        // Lay flat on the dish (face up).
+                        rotation_x_deg: -90.0,
                         color: consumable_color(*c),
                     });
                 }
@@ -1503,42 +1507,9 @@ impl SceneBehavior for ShopScene {
             SHOP_NEXT_ROUND_ID,
         ));
 
-        // ── Help (`?`) badge — top-left corner ─────────────────────────
-        let help_w = (38.0 * scale).max(24.0);
-        let help_h = help_w;
-        let help_x = (12.0 * scale).max(8.0);
-        let help_y = (12.0 * scale).max(8.0);
-        quads.push(GpuInstance {
-            rect: [help_x, help_y, help_w, help_h],
-            color: color::alpha(color::INDIGO, 0.92),
-        });
-        let rim = (1.5 * scale).max(1.0);
-        quads.push(GpuInstance {
-            rect: [help_x, help_y, help_w, rim],
-            color: color::GOLD,
-        });
-        quads.push(GpuInstance {
-            rect: [help_x, help_y + help_h - rim, help_w, rim],
-            color: color::GOLD,
-        });
-        quads.push(GpuInstance {
-            rect: [help_x, help_y, rim, help_h],
-            color: color::GOLD,
-        });
-        quads.push(GpuInstance {
-            rect: [help_x + help_w - rim, help_y, rim, help_h],
-            color: color::GOLD,
-        });
-        texts.push(TextLabel {
-            rect: [help_x, help_y, help_w, help_h],
-            text: "?".into(),
-            color: color::CHAMPAGNE,
-            ..Default::default()
-        });
-        buttons.push(ButtonDef::scene(
-            (help_x, help_y, help_w, help_h),
-            SHOP_HELP_BADGE_ID,
-        ));
+        // The `?` glossary badge has been removed — the glossary is
+        // reachable from the pause menu's "Glossary" entry. The keyboard
+        // `Help` action shortcut still works for power users.
 
         // ── Catch-all 3D-hit dispatcher ───────────────────────────────
         // Full-screen button registered LAST so it only wins if no other

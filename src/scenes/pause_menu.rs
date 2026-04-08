@@ -17,6 +17,7 @@ use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 enum PauseAction {
     Resume,
     Restart,
+    Glossary,
     Options,
     MainMenu,
     Exit,
@@ -48,6 +49,12 @@ pub struct PauseMenu {
     /// pause menu — input and draw are delegated to it until the user
     /// chooses Back, at which point we drop back to the pause root.
     options_overlay: Option<OptionsScene>,
+    /// One-shot flag set when the user picks "Glossary" from the menu. The
+    /// owning scene drains it via `take_glossary_request()` after
+    /// `handle()` returns and toggles its glossary overlay; the pause menu
+    /// itself closes in the same step so the glossary can take over the
+    /// screen unobstructed.
+    glossary_requested: bool,
 }
 
 impl PauseMenu {
@@ -56,7 +63,17 @@ impl PauseMenu {
             paused: false,
             tree: TreeState::new(),
             options_overlay: None,
+            glossary_requested: false,
         }
+    }
+
+    /// Drain the glossary-open request flag. Returns `true` exactly once
+    /// after the user picks "Glossary" from the pause menu; subsequent
+    /// calls return `false` until they re-open the menu and pick it again.
+    pub fn take_glossary_request(&mut self) -> bool {
+        let v = self.glossary_requested;
+        self.glossary_requested = false;
+        v
     }
 
     /// Open the pause menu.
@@ -64,6 +81,7 @@ impl PauseMenu {
         self.paused = true;
         self.tree = TreeState::new();
         self.options_overlay = None;
+        self.glossary_requested = false;
     }
 
     /// True when the embedded options overlay is currently visible. Callers
@@ -79,7 +97,7 @@ impl PauseMenu {
         let btn_w = (220.0 * scale).min(window_w * 0.55);
         let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = (12.0 * scale).max(6.0);
-        let count = 5;
+        let count = 6;
         let total_menu_h = count as f32 * btn_h + (count as f32 - 1.0) * btn_gap;
         let title_h = typography::size(typography::TITLE, window_h);
         let title_gap = (24.0 * scale).max(10.0);
@@ -99,6 +117,12 @@ impl PauseMenu {
                 PauseAction::Restart.id(),
                 "Restart",
                 PauseAction::Restart,
+                ButtonVariant::Default,
+            ),
+            wt::button_id(
+                PauseAction::Glossary.id(),
+                "Glossary",
+                PauseAction::Glossary,
                 ButtonVariant::Default,
             ),
             wt::button_id(
@@ -222,6 +246,15 @@ impl PauseMenu {
                 PauseUpdate::Resume
             }
             Some(PauseAction::Restart) => self.do_restart(run),
+            Some(PauseAction::Glossary) => {
+                // Set the one-shot flag and close the pause menu so the
+                // owning scene can take over with its glossary overlay on
+                // the next frame. The scene drains the flag via
+                // `take_glossary_request()` after `handle()` returns.
+                self.glossary_requested = true;
+                self.paused = false;
+                PauseUpdate::Resume
+            }
             Some(PauseAction::Options) => {
                 self.options_overlay = Some(OptionsScene::new());
                 PauseUpdate::StayPaused

@@ -15,9 +15,10 @@ struct InjectionPoint {
     vel_density: vec4<f32>,  // xyz=world vel,  w=density strength
 };
 
-const MAX_INJECTIONS: u32 = 32u;
+// Must stay in sync with `MAX_INJECTIONS` in `src/render/fluid.rs`.
+const MAX_INJECTIONS: u32 = 64u;
 struct InjectionParams {
-    points: array<InjectionPoint, 32>,
+    points: array<InjectionPoint, 64>,
     active_count: vec4<u32>, // x=count
 };
 

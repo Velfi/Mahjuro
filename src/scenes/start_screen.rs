@@ -3,7 +3,7 @@
 use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::theme::{ButtonVariant, color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::widget_tree::{
     self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
 };
@@ -153,15 +153,20 @@ impl SceneBehavior for StartScreenScene {
         let scale = (w.min(h)) / 600.0;
         let in_progress = ctx.game_in_progress;
 
-        let mut instances = vec![GpuInstance {
-            rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
-        }];
+        // The dark backdrop is drawn via `BackgroundId::Black` (a synthetic
+        // 1×1 texture in the renderer) rather than a fullscreen quad. The
+        // renderer reorders quad ops into a HUD overlay pass that runs
+        // *after* the smoke composite, so a fullscreen quad here would paint
+        // over the smoke. Background ops run in pass A, before the smoke
+        // composite, which is what we want.
+        let mut instances: Vec<GpuInstance> = Vec::new();
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 
-        // Title — gold serif display.
-        let title_h = typography::size(typography::DISPLAY, h);
+        // Title — gold serif display. The rect height is bumped above the
+        // raw `typography::size(...)` so the rasterizer's 0.55-of-rect-height
+        // font sizing lands near the nominal tier size instead of well below.
+        let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
         let title_y = h * 0.08;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
@@ -171,8 +176,8 @@ impl SceneBehavior for StartScreenScene {
         });
 
         // Active profile summary below title.
-        let prof_y = title_y + title_h + h * 0.04;
-        let prof_h = typography::size(typography::CAPTION, h);
+        let prof_y = title_y + title_h + h * 0.02;
+        let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
         let summaries = persistence::all_profile_summaries();
         let active = ctx.active_profile;
         let summary = &summaries[active];
@@ -205,7 +210,7 @@ impl SceneBehavior for StartScreenScene {
         self.tree.draw(&tree, &mut frame, &noop_render_custom);
 
         // Hint text at bottom.
-        let hint_h = typography::size(typography::MICRO, h);
+        let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
         let hint_y = h - hint_h - (12.0 * scale);
         text_labels.push(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
@@ -215,7 +220,7 @@ impl SceneBehavior for StartScreenScene {
         });
 
         SceneDrawOutput {
-            background: super::BackgroundId::Menu,
+            background: super::BackgroundId::Black,
             tray_instances: vec![],
             instances,
             hand_tiles: vec![],
@@ -229,7 +234,14 @@ impl SceneBehavior for StartScreenScene {
             departing_indices: vec![],
             hint_indices: vec![],
             flame_instances: vec![],
-            point_lights: vec![],
+            // Same warm overhead key light the shop uses — front-and-above,
+            // depth-aware so the smoke pools under it.
+            point_lights: vec![PointLight {
+                pos: [w * 0.5, h * 0.05, h * 0.55],
+                radius: h * 1.20,
+                color: [1.00, 0.86, 0.55],
+                intensity: 1.40,
+            }],
             candles: vec![],
             relic_placements: vec![],
             draw_table: false,

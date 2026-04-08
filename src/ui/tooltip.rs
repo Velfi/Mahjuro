@@ -78,6 +78,7 @@ impl TooltipState {
         base_labels: &[TextLabel],
         button_rects: &[(f32, f32, f32, f32)],
         relic_icons: &[RelicIcon],
+        glossary_anchors: &[([f32; 4], &'static str)],
         window_w: f32,
         window_h: f32,
     ) {
@@ -123,6 +124,10 @@ impl TooltipState {
         // Relic icons are first-class hover regions: hovering an icon shows
         // its name + description like any glossary term.
         base_regions.extend(relic_hover_regions(relic_icons));
+        // Scene-supplied glossary anchors: arbitrary screen rects (e.g. the
+        // gold-coin pile, the wall stack) that resolve to a glossary entry
+        // by name. Lets 3D objects without a text label become hoverable.
+        base_regions.extend(glossary_anchor_regions(glossary_anchors));
 
         // ── Step 1: find deepest tooltip whose containment zone has cursor ─
         // Containment = tooltip rect ∪ anchor word rect.
@@ -198,6 +203,26 @@ fn hovered_region(
         .iter()
         .find(|r| hit(cursor, r.rect))
         .map(|r| (r.title, r.description, r.rect))
+}
+
+/// Resolve a list of (rect, glossary-term) pairs into hover regions by
+/// looking each term up in the static glossary table. Anchors whose term
+/// isn't in the glossary are silently dropped — typos here become
+/// no-tooltip rather than a panic.
+fn glossary_anchor_regions(anchors: &[([f32; 4], &'static str)]) -> Vec<HoverRegion> {
+    anchors
+        .iter()
+        .filter_map(|(rect, term)| {
+            glossary::GLOSSARY
+                .iter()
+                .find(|e| e.term.eq_ignore_ascii_case(term))
+                .map(|entry| HoverRegion {
+                    title: entry.term,
+                    description: entry.description,
+                    rect: *rect,
+                })
+        })
+        .collect()
 }
 
 /// Build a hoverable region for each visible relic icon.  The title and

@@ -27,7 +27,7 @@ pub use start_screen::StartScreenScene;
 
 use enum_dispatch::enum_dispatch;
 
-use crate::core::relic::{RelicId, RelicState, all_relic_defs};
+use crate::core::relic::{RelicId, RelicState};
 use crate::core::tile::Tile;
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
@@ -44,6 +44,12 @@ pub enum BackgroundId {
     /// No background image — just the clear color.
     #[default]
     None,
+    /// Solid black fill. Synthesised in the renderer (1×1 black texture)
+    /// rather than loaded from disk so scenes that need a true-black backdrop
+    /// behind the volumetric smoke composite have a pass-A draw to bind to.
+    /// Quad-based fills get reordered into the late HUD overlay pass and
+    /// would paint over the smoke instead.
+    Black,
     /// Main menu: scattered tiles on dark wood.
     Menu,
     /// Gameplay: dark felt table surface.
@@ -57,6 +63,7 @@ impl BackgroundId {
     pub fn asset_path(self) -> Option<&'static str> {
         match self {
             BackgroundId::None => None,
+            BackgroundId::Black => None,
             BackgroundId::Menu => Some("backgrounds/menu_bg.png"),
             BackgroundId::Gameplay => Some("backgrounds/gameplay_bg.png"),
             BackgroundId::Score => Some("backgrounds/score_bg.png"),
@@ -92,6 +99,11 @@ pub struct UpdateCtx<'a> {
     /// shop scene is active. Used by the shop's update() to route mouse
     /// clicks to 3D objects (relics, ribbons, dishes).
     pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
+    /// Result of `pick_gameplay_object` for the cursor this frame, when
+    /// the gameplay scene is active. Used by the gameplay scene's
+    /// update() to route mouse clicks to 3D action objects (sort/play
+    /// wood tablets and the discard bowl).
+    pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -132,6 +144,22 @@ pub struct DrawCtx<'a> {
     /// call, in cmd order. Used by scenes to overlay 2D text aligned with
     /// the rendered plaque.
     pub projected_plaque_rects: &'a [[f32; 4]],
+    /// Per-yaku-tablet screen-space rects from the previous frame's
+    /// perspective projection. Indexed in `YakuTabletBatch` placement order.
+    /// **Tooltip anchor only** — hover hit-testing is driven by
+    /// `picked_gameplay_object` (raycast against precomputed local AABBs).
+    /// The projected rect is still useful so the tooltip can snap to the
+    /// *visible* on-screen position of the tablet.
+    pub projected_yaku_tablet_rects: &'a [[f32; 4]],
+    /// Result of `pick_gameplay_object` — the topmost yaku tablet, wood
+    /// action tablet, or discard bowl the cursor is over this frame, if
+    /// any. The gameplay scene reads this for hover state instead of
+    /// screen-rect hit-testing the projected AABBs.
+    pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
+    /// Per-shrine screen-space rects from the previous frame's perspective
+    /// projection. Indexed in `ShrineBatch` placement order. Used by the
+    /// pick-blind scene to anchor floating labels above each shrine.
+    pub projected_shrine_rects: &'a [[f32; 4]],
     /// Auxiliary dish screen rects from the previous frame, paired with
     /// their `pick_id`. Used by the shop scene to anchor 2D tooltips above
     /// the relic dish + coin dish.
@@ -396,76 +424,6 @@ pub fn relic_glow_overlays(
         });
     }
     out
-}
-
-/// Build GPU elements for a relic display row inside the relic strip.
-/// Returns (background quads, text labels, relic icon quads).
-pub fn relic_row(
-    relics: &RelicState,
-    strip: &Rect,
-    window_w: f32,
-) -> (Vec<GpuInstance>, Vec<TextLabel>, Vec<RelicIcon>) {
-    let defs = all_relic_defs();
-    let active: Vec<(RelicId, &str)> = relics
-        .active
-        .iter()
-        .filter_map(|id| defs.iter().find(|d| d.id == *id).map(|d| (*id, d.name)))
-        .collect();
-    let total_slots = relics.max_slots;
-    if total_slots == 0 {
-        return (vec![], vec![], vec![]);
-    }
-    let row_h = strip.h;
-    let row_y = strip.y;
-    // Scale badge width with window size, cap at a reasonable max.
-    let scale = window_w / 600.0;
-    let badge_w = (window_w / total_slots.max(1) as f32).min(160.0 * scale);
-    let total_w = badge_w * total_slots as f32;
-    let start_x = (window_w - total_w) * 0.5;
-
-    let mut instances = Vec::new();
-    let mut labels = Vec::new();
-    let mut icons = Vec::new();
-    for i in 0..total_slots {
-        let bx = start_x + i as f32 * badge_w;
-        let inset = 2.0 * scale;
-        let cell_w = badge_w - inset * 2.0;
-
-        if let Some((relic_id, name)) = active.get(i) {
-            // Filled slot background.
-            instances.push(GpuInstance {
-                rect: [bx + inset, row_y, cell_w, row_h],
-                color: crate::render::theme::color::INDIGO,
-            });
-            // Icon: square, centered horizontally, in the upper portion.
-            let icon_size = row_h * 0.65;
-            let icon_x = bx + inset + (cell_w - icon_size) * 0.5;
-            let icon_y = row_y + row_h * 0.02;
-            icons.push(RelicIcon {
-                rect: [icon_x, icon_y, icon_size, icon_size],
-                relic_id: *relic_id,
-            });
-            // Name label below the icon.
-            let label_h = row_h * 0.28;
-            let label_y = icon_y + icon_size + row_h * 0.02;
-            labels.push(TextLabel {
-                rect: [bx + inset, label_y, cell_w, label_h],
-                text: name.to_string(),
-                color: crate::render::theme::color::CHAMPAGNE,
-                ..Default::default()
-            });
-        } else {
-            // Empty slot: dim outline.
-            instances.push(GpuInstance {
-                rect: [bx + inset, row_y, cell_w, row_h],
-                color: crate::render::theme::color::alpha(
-                    crate::render::theme::color::OBSIDIAN,
-                    0.5,
-                ),
-            });
-        }
-    }
-    (instances, labels, icons)
 }
 
 /// `None` = stay in current scene; `Some(scene)` = transition.

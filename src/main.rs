@@ -576,6 +576,10 @@ struct App {
     bus: EventBus,
     anim: AnimationController,
     last_frame: Instant,
+    /// Real frame-to-frame delta in seconds, captured at the top of
+    /// `RedrawRequested` before `last_frame` is overwritten. Used by the
+    /// FPS overlay so it measures actual frame time, not partial CPU work.
+    last_frame_dt: f32,
     mouse_actions: Vec<UiAction>,
     /// Scene-defined button click ids fired by mouse clicks since the last
     /// frame; drained into `UpdateCtx::button_clicks` each frame.
@@ -603,6 +607,8 @@ struct App {
     debug_menu: Option<DebugMenuBar>,
     /// Smoke effect intensity (persisted in settings).
     smoke_intensity: crate::persistence::SmokeIntensity,
+    /// Smoke render-target detail level (persisted in settings).
+    smoke_detail: crate::persistence::SmokeDetail,
     /// Mahjong tile size preset (persisted in settings).
     tile_preset: crate::persistence::TilePreset,
     /// Display gamma correction exponent (persisted in settings).
@@ -697,6 +703,7 @@ impl App {
             bus: EventBus::default(),
             anim: AnimationController::new(),
             last_frame: Instant::now(),
+            last_frame_dt: 1.0 / 60.0,
             mouse_actions: Vec::new(),
             mouse_button_clicks: Vec::new(),
             active_buttons: Vec::new(),
@@ -713,6 +720,7 @@ impl App {
             deferred_round_end: None,
             debug_menu: None,
             smoke_intensity: settings.smoke_intensity,
+            smoke_detail: settings.smoke_detail,
             tile_preset: settings.tile_preset,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
@@ -889,6 +897,12 @@ impl App {
             projected_ribbon_rects: renderer.projected_ribbon_rects(),
             projected_talisman_rects: renderer.projected_talisman_rects(),
             projected_plaque_rects: renderer.projected_plaque_rects(),
+            projected_yaku_tablet_rects: renderer.projected_yaku_tablet_rects(),
+            picked_gameplay_object: self
+                .input
+                .as_ref()
+                .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
+            projected_shrine_rects: renderer.projected_shrine_rects(),
             aux_dish_rects: renderer.aux_dish_rects(),
             picked_hand_tile: self
                 .input
@@ -957,8 +971,9 @@ impl App {
                         rect: l.rect,
                         text: l.text.clone(),
                         color: l.color,
+                        font_px: l.font_px,
+                        align: l.align,
                         no_glossary: l.no_glossary,
-                        ..Default::default()
                     })
                 } else {
                     None
@@ -974,6 +989,16 @@ impl App {
                         rect: i.rect,
                         relic_id: i.relic_id,
                     })
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let scene_glossary_anchors: Vec<([f32; 4], &'static str)> = frame.cmds[..scene_cmds_end]
+            .iter()
+            .filter_map(|c| {
+                if let crate::render::draw_cmd::DrawCmd::GlossaryAnchor { rect, term } = c {
+                    Some((*rect, *term))
                 } else {
                     None
                 }
@@ -1037,6 +1062,7 @@ impl App {
                 &scene_text_labels,
                 &btn_rects,
                 &scene_relic_icons,
+                &scene_glossary_anchors,
                 ww,
                 wh,
             );
@@ -1046,8 +1072,10 @@ impl App {
 
         // FPS counter overlay (debug) — pushed last so it's always on top.
         if self.show_fps {
-            let dt = self.last_frame.elapsed().as_secs_f32().max(0.001);
-            let instant_fps = 1.0 / dt;
+            // Use the real frame-to-frame delta captured at the top of
+            // RedrawRequested. `self.last_frame.elapsed()` would only see
+            // partial CPU work done so far this frame and report inflated FPS.
+            let instant_fps = 1.0 / self.last_frame_dt;
             // Exponential moving average for smooth display.
             self.fps_smoothed = self.fps_smoothed * 0.9 + instant_fps * 0.1;
             let w = size.width as f32;
@@ -1088,6 +1116,7 @@ impl App {
         if let Err(e) = renderer.render(
             &frame,
             self.smoke_intensity,
+            self.smoke_detail,
             self.tile_preset,
             draw_settle_speed,
             sort_settle_speed,
@@ -1185,6 +1214,14 @@ impl App {
                     log::info!("[Debug] Opened SFX test overlay");
                 }
             }
+            DebugAction::ProfileGpu => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.start_gpu_profile(100);
+                    log::info!("[Debug] GPU profile capture queued (100 frames)");
+                } else {
+                    log::warn!("[Debug] Cannot start GPU profile: renderer not initialised");
+                }
+            }
             DebugAction::BlowWindGust => {
                 // Inject the same UiAction that pressing `B` would push,
                 // so the gameplay scene's existing wind-trigger branch
@@ -1275,6 +1312,10 @@ impl ApplicationHandler for App {
                 // render. RedrawRequested is gated by the Fifo presenter, which
                 // blocks at vsync, so this caps the tick to refresh rate.
                 let now = Instant::now();
+                self.last_frame_dt = now
+                    .saturating_duration_since(self.last_frame)
+                    .as_secs_f32()
+                    .max(0.0001);
                 self.last_frame = now;
                 self.anim.update(now);
 
@@ -1458,6 +1499,10 @@ impl ApplicationHandler for App {
                     .renderer
                     .as_ref()
                     .and_then(|r| r.pick_shop_object(cursor_pos.0, cursor_pos.1));
+                let picked_gameplay_object = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| r.pick_gameplay_object(cursor_pos.0, cursor_pos.1));
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -1472,6 +1517,7 @@ impl ApplicationHandler for App {
                     loading_done,
                     cascade_tuning: &self.cascade_tuning,
                     picked_shop_object,
+                    picked_gameplay_object,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -1497,6 +1543,7 @@ impl ApplicationHandler for App {
                     self.audio.set_music_volume(opts.music_volume);
                     self.audio.set_enabled(opts.sfx_enabled);
                     self.smoke_intensity = opts.smoke_intensity;
+                    self.smoke_detail = opts.smoke_detail;
                     self.tile_preset = opts.tile_preset;
                     self.gamma = opts.gamma;
                     self.shadows_enabled = opts.shadows_enabled;

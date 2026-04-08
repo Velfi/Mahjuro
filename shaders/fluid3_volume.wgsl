@@ -2,10 +2,14 @@
 //
 // Fullscreen triangle. Each pixel reconstructs a world-space ray from the
 // inverse view-projection, slab-clips against the smoke AABB, depth-clips
-// against the scene depth buffer, and integrates density front-to-back with
-// per-step lighting from the candle point lights.
-
-const MAX_LIGHTS: u32 = 8u;
+// against the scene depth buffer, and integrates density front-to-back.
+//
+// Lighting is **pre-baked** by `fluid3_lightbake.wgsl` into the
+// `lit_density_tex` 3D texture: `(rgb = pre-lit smoke colour, a = density)`.
+// The bake runs once per frame at voxel rate (~3.5M evals) instead of
+// per-fragment-per-step (~450M evals), and the resulting bilinear-filtered
+// colour matches the per-step lighting almost exactly because the candle
+// radii are much larger than the voxel size.
 
 struct Globals {
     screen: vec2<f32>,
@@ -19,26 +23,14 @@ struct VolumeCamera {
     cam_pos:       vec4<f32>,   // xyz = world camera origin
     grid_min:      vec4<f32>,
     grid_max:      vec4<f32>,
-    params:        vec4<f32>,   // x=max_alpha, y=step_count, z=light_strength, w=ambient
-};
-
-struct PointLight {
-    pos:   vec4<f32>,   // xyz position, w radius
-    color: vec4<f32>,   // rgb color, a intensity
-};
-struct PointLights {
-    count: vec4<u32>,
-    // extras.x = display gamma exponent; rest reserved.
-    extras: vec4<f32>,
-    lights: array<PointLight, 16>,
+    params:        vec4<f32>,   // x=max_alpha, y=step_count (z/w consumed by lightbake)
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var<uniform> cam: VolumeCamera;
-@group(1) @binding(1) var density_tex: texture_3d<f32>;
+@group(1) @binding(1) var lit_density_tex: texture_3d<f32>;
 @group(1) @binding(2) var density_samp: sampler;
 @group(1) @binding(3) var depth_tex: texture_depth_2d;
-@group(1) @binding(4) var<uniform> lights: PointLights;
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -119,8 +111,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let max_alpha = cam.params.x;
     let nsteps = max(i32(cam.params.y), 4);
-    let light_strength = cam.params.z;
-    let ambient = cam.params.w;
 
     let span = t_far - t_near;
     let step = span / f32(nsteps);
@@ -133,7 +123,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var transmittance = 1.0;
 
     let inv_extent = 1.0 / (cam.grid_max.xyz - cam.grid_min.xyz);
-    let lcount = lights.count.x;
 
     for (var i: i32 = 0; i < nsteps; i = i + 1) {
         if (transmittance < 0.01) { break; }
@@ -143,62 +132,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             t = t + step;
             continue;
         }
-        let sample = textureSampleLevel(density_tex, density_samp, uvw, 0.0);
-        let density = max(sample.w, 0.0);
+        // Pre-lit sample: rgb = lit smoke colour (already includes
+        // ambient + per-light contributions, Reinhard tone-map, and
+        // smoke albedo), a = density. Bilinear-filtered across the
+        // 3D grid by `density_samp`.
+        let sample = textureSampleLevel(lit_density_tex, density_samp, uvw, 0.0);
+        let density = max(sample.a, 0.0);
         if (density > 0.001) {
-            // Per-step absorption.
             let absorb = 1.0 - exp(-density * step * 0.01);
-
-            // Lighting: ambient + sum of point-light contributions.
-            //
-            // Two important deviations from a naïve `(1 - dist/radius)²`
-            // attenuation, both required to stop the smoke columns above
-            // each candle from blowing out into bright shafts:
-            //
-            //   1. Minimum distance clamp. The smoke plume from a wick
-            //      sits *right next to* its own light source. Without a
-            //      floor on the effective distance, every voxel in the
-            //      column near the candle sees `falloff ≈ 1` and gets
-            //      the full unattenuated `light_strength` dumped into
-            //      it — visually, a vertical stripe of pure white above
-            //      every wick. Clamping the effective distance to
-            //      ~25% of the light radius gives the column a sane
-            //      maximum brightness.
-            //
-            //   2. Smoke albedo. Real smoke scatters only a fraction
-            //      of incoming light forward; treating it as ~white
-            //      `(0.85, 0.82, 0.78)` is what makes lit columns
-            //      read as glowing rather than illuminated. The
-            //      darker grey here (with a faint warm bias from the
-            //      candle palette) keeps even brightly-lit cells in
-            //      mid-grey territory.
-            var lit = vec3<f32>(ambient);
-            for (var li: u32 = 0u; li < lcount; li = li + 1u) {
-                let l = lights.lights[li];
-                let to_light = l.pos.xyz - pos;
-                let dist = sqrt(max(dot(to_light, to_light), 1.0));
-                let radius = max(l.pos.w, 1.0);
-                // Floor the effective distance at a fraction of the
-                // light radius. This is what prevents the in-column
-                // brightness spike — voxels closer than `min_dist`
-                // all share the same falloff value rather than
-                // sweeping up to 1.0.
-                let min_dist = radius * 0.28;
-                let eff_dist = max(dist, min_dist);
-                let falloff = clamp(1.0 - eff_dist / radius, 0.0, 1.0);
-                lit = lit + l.color.rgb * l.color.a * falloff * falloff * light_strength;
-            }
-            // Soft-knee the accumulated lighting so a voxel sitting
-            // inside several overlapping candle radii can't push past
-            // the smoke's own albedo. Reinhard preserves the warm
-            // chroma instead of clipping a channel and going pale.
-            lit = lit / (vec3<f32>(1.0) + lit * 0.6);
-
-            // Darker grey base — real smoke is closer to charcoal
-            // than printer paper. The previous (0.85,0.82,0.78) value
-            // turned every lit voxel into a near-white streak.
-            let smoke_color = vec3<f32>(0.42, 0.40, 0.37) * lit;
-            color = color + transmittance * smoke_color * absorb;
+            color = color + transmittance * sample.rgb * absorb;
             transmittance = transmittance * (1.0 - absorb);
         }
         t = t + step;

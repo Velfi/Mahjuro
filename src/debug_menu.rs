@@ -27,6 +27,10 @@ pub enum DebugAction {
     OpenTuning,
     OpenSfxTest,
     BlowWindGust,
+    /// Capture GPU pass timings averaged over the next 100 rendered frames
+    /// and log the result. Only meaningful on backends that support
+    /// `wgpu::Features::TIMESTAMP_QUERY`.
+    ProfileGpu,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -76,6 +80,12 @@ impl DebugMenuBar {
         let wind_item = MenuItem::new("Blow Wind Gust", true, None);
         mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
         let _ = debug_menu.append(&wind_item);
+
+        // Capture GPU pass timings over the next 100 frames. Result is
+        // logged via `log::info!`.
+        let profile_item = MenuItem::new("Profile GPU (100 frames)", true, None);
+        mappings.push((profile_item.id().clone(), DebugAction::ProfileGpu));
+        let _ = debug_menu.append(&profile_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);
