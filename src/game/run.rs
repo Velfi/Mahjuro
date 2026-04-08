@@ -856,6 +856,9 @@ mod tests {
             bonus_hand_size: 0,
             gold_cost_per_play: 0,
             played_yaku_this_round: vec![],
+            upcoming_boss_effect: None,
+            tax_collector_cost: 0,
+            tile_enhancements: BTreeMap::new(),
         }
     }
 
