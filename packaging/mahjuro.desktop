@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mahjuro
+GenericName=Mahjong Roguelike
+Comment=A mahjong roguelike
+Exec=mahjuro
+Icon=mahjuro
+Terminal=false
+Categories=Game;
