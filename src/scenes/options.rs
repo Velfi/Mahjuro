@@ -27,6 +27,7 @@ enum Row {
     Gamma,
     SfxToggle,
     Smoke,
+    SmokeDetail,
     Tile,
     Shadows,
     Ssr,
@@ -40,6 +41,7 @@ const ROWS: &[Row] = &[
     Row::Gamma,
     Row::SfxToggle,
     Row::Smoke,
+    Row::SmokeDetail,
     Row::Tile,
     Row::Shadows,
     Row::Ssr,
@@ -74,6 +76,7 @@ pub struct OptionsScene {
     pub music_volume: f32,
     pub sfx_enabled: bool,
     pub smoke_intensity: crate::persistence::SmokeIntensity,
+    pub smoke_detail: crate::persistence::SmokeDetail,
     pub tile_preset: crate::persistence::TilePreset,
     pub gamma: f32,
     pub shadows_enabled: bool,
@@ -92,6 +95,7 @@ impl OptionsScene {
             music_volume: settings.music_volume,
             sfx_enabled: settings.sfx_enabled,
             smoke_intensity: settings.smoke_intensity,
+            smoke_detail: settings.smoke_detail,
             tile_preset: settings.tile_preset,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
@@ -106,6 +110,7 @@ impl OptionsScene {
         settings.music_volume = self.music_volume;
         settings.sfx_enabled = self.sfx_enabled;
         settings.smoke_intensity = self.smoke_intensity;
+        settings.smoke_detail = self.smoke_detail;
         settings.tile_preset = self.tile_preset;
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
@@ -254,6 +259,9 @@ impl OptionsScene {
                     } else if focused == Row::Smoke {
                         self.smoke_intensity = self.smoke_intensity.next();
                         self.save_settings();
+                    } else if focused == Row::SmokeDetail {
+                        self.smoke_detail = self.smoke_detail.next();
+                        self.save_settings();
                     } else if focused == Row::Tile {
                         self.tile_preset = self.tile_preset.next();
                         self.save_settings();
@@ -270,6 +278,9 @@ impl OptionsScene {
                         self.adjust_slider(focused, -1.0);
                     } else if focused == Row::Smoke {
                         self.smoke_intensity = self.smoke_intensity.prev();
+                        self.save_settings();
+                    } else if focused == Row::SmokeDetail {
+                        self.smoke_detail = self.smoke_detail.prev();
                         self.save_settings();
                     } else if focused == Row::Tile {
                         self.tile_preset = self.tile_preset.prev();
@@ -316,6 +327,10 @@ impl OptionsScene {
             }
             Row::Smoke => {
                 self.smoke_intensity = self.smoke_intensity.next();
+                self.save_settings();
+            }
+            Row::SmokeDetail => {
+                self.smoke_detail = self.smoke_detail.next();
                 self.save_settings();
             }
             Row::Tile => {
@@ -534,6 +549,28 @@ impl OptionsScene {
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: format!("Smoke: {}", self.smoke_intensity.label()),
+                    color: text_color,
+                    ..Default::default()
+                });
+            }
+            Row::SmokeDetail => {
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
+                instances.push(GpuInstance {
+                    rect: [row_x, row_y, row_w, row_h],
+                    color: bg_color,
+                });
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
+                text_labels.push(TextLabel {
+                    rect: [row_x, row_y, row_w, row_h],
+                    text: format!("Smoke Detail: {}", self.smoke_detail.label()),
                     color: text_color,
                     ..Default::default()
                 });

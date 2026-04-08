@@ -26,6 +26,15 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
         0.5,
     );
 
+    // Rotate the +Y face UVs 90° CCW around UP so the engraved label
+    // texture (256×96 landscape) reads along the long screen-X axis instead
+    // of the short local-Z axis. See `bone_tablet_mesh.rs` for the corner
+    // index map — both meshes use the same `push_box` layout.
+    vertices[8].uv = [0.0, 0.0];
+    vertices[9].uv = [0.0, 1.0];
+    vertices[10].uv = [1.0, 1.0];
+    vertices[11].uv = [1.0, 0.0];
+
     MeshCpu {
         vertices,
         indices,

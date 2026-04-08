@@ -127,6 +127,13 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
                       to buy relics.",
     },
     GlossaryEntry {
+        term: "Shanten",
+        aliases: &[],
+        description: "How many tile swaps your hand is away from a complete \
+                      shape (4 melds + 1 pair, or 7 pairs). Shanten 0 means \
+                      tenpai — one tile away. Shanten -1 means won.",
+    },
+    GlossaryEntry {
         term: "Yaku",
         aliases: &[],
         description: "Special hand patterns that award bonus points when \

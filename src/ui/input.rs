@@ -40,6 +40,9 @@ pub enum UiAction {
     /// Debug-only: blow a strong one-shot wind gust at the candle row so we
     /// can verify flame/wind reactions in-game. Bound to `B`.
     DebugBlowWind,
+    /// Debug-only: toggle a world-axes overlay (red = +X, green = +Y,
+    /// blue = +Z) anchored at the camera's look target. Bound to `F2`.
+    DebugToggleAxes,
 }
 
 /// Active drag state for tile reordering.
@@ -129,13 +132,19 @@ impl InputState {
             KeyCode::Escape => actions.push(UiAction::Pause),
             KeyCode::Backspace => actions.push(UiAction::Cancel),
             KeyCode::KeyS => actions.push(UiAction::ScoreHand),
-            KeyCode::Enter => actions.push(UiAction::CommitDiscard),
+            KeyCode::Enter | KeyCode::NumpadEnter => actions.push(UiAction::Confirm),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
+            // HUD strip nav (consumable focus on the gameplay scene). Mirrors
+            // the LB / RB shoulder buttons on the controller so keyboard
+            // players have a non-mouse path to use Zodiacs and Talismans.
+            KeyCode::BracketLeft => actions.push(UiAction::NavigateHudPrev),
+            KeyCode::BracketRight => actions.push(UiAction::NavigateHudNext),
             // Glossary / help — `?`, `/`, `H`, `F1`. ShiftLeft+Slash on
             // most layouts produces `?`, but we don't need shift state here:
             // both Slash and KeyH are unambiguous.
             KeyCode::Slash | KeyCode::KeyH | KeyCode::F1 => actions.push(UiAction::Help),
+            KeyCode::F2 => actions.push(UiAction::DebugToggleAxes),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {
@@ -197,7 +206,8 @@ pub fn apply_ui_actions(
             | UiAction::SortByRank
             | UiAction::Pause
             | UiAction::Help
-            | UiAction::DebugBlowWind => {}
+            | UiAction::DebugBlowWind
+            | UiAction::DebugToggleAxes => {}
             UiAction::FocusNext
             | UiAction::FocusPrev
             | UiAction::FocusDown

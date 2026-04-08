@@ -35,6 +35,31 @@ pub fn build_plaque_mesh() -> MeshCpu {
         HALF_Z,
     );
 
+    // The slab face we want the engraved-text decal to appear on is +Z
+    // (the broad face that tilts toward the camera). `push_box` emits faces
+    // in order +X, -X, +Y, -Y, +Z, -Z, with 4 verts per face — so the +Z
+    // face occupies vertices 16..20. Reorient that face's UVs so the
+    // texture's +u runs along local +X (decal reads landscape across the
+    // long axis) and +v runs along local -Y (top of the texture sits at
+    // the top of the visible plaque face). The +Z corner order pushed by
+    // `push_box` is:
+    //   v16 = (x0, y0, z1)  bottom-left
+    //   v17 = (x1, y0, z1)  bottom-right
+    //   v18 = (x1, y1, z1)  top-right
+    //   v19 = (x0, y1, z1)  top-left
+    vertices[16].uv = [0.0, 1.0];
+    vertices[17].uv = [1.0, 1.0];
+    vertices[18].uv = [1.0, 0.0];
+    vertices[19].uv = [0.0, 0.0];
+    // Every other slab face samples the transparent (0,0) corner of the
+    // decal so the engraved label *only* appears on the front face. The
+    // procedural lacquered-wood material still renders normally because
+    // the shader composites the decal as `mix(albedo, tex_rgb, tex.a)` —
+    // alpha=0 leaves the wood albedo untouched.
+    for i in (0..16).chain(20..24) {
+        vertices[i].uv = [0.0, 0.0];
+    }
+
     // Left chain nub.
     push_box(
         &mut vertices,
@@ -57,6 +82,12 @@ pub fn build_plaque_mesh() -> MeshCpu {
         -HALF_Z * 0.5,
         HALF_Z * 0.5,
     );
+    // Chain-nub vertices (24..72) all sample the transparent corner so
+    // the engraved decal doesn't bleed onto them. The wood material is
+    // procedural and unaffected.
+    for i in 24..vertices.len() {
+        vertices[i].uv = [0.0, 0.0];
+    }
 
     MeshCpu {
         vertices,

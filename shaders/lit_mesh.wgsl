@@ -466,8 +466,20 @@ fn fs_main(
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-
     // flow analysis happy regardless of how it inlines the branch below.
-    let tex_rgb = textureSample(albedo_tex, albedo_samp, in.uv).rgb;
+    let tex_sample = textureSample(albedo_tex, albedo_samp, in.uv);
+    let tex_rgb = tex_sample.rgb;
+    // material_params.w doubles as a "this instance has an engraved decal"
+    // flag. When >0.5 the texture is treated as a transparent overlay
+    // (engraved label) composited *over* the procedural base material rather
+    // than multiplied with it. The yaku/wood tablet pass sets this flag.
+    let has_decal = mesh.material_params.w > 0.5;
     var albedo = mesh.base_color.rgb * tex_rgb;
+    if (has_decal) {
+        // Start from the flat base colour, ignore the texture multiply —
+        // the procedural branch below may overwrite it for wood, and the
+        // decal composite at the end will lay the engraved glyphs on top.
+        albedo = mesh.base_color.rgb;
+    }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
     if (kind > 2.5) {
@@ -476,6 +488,9 @@ fn fs_main(
         albedo = w.albedo;
         wood_grain = w.grain;
         wood_pore = w.pore;
+    }
+    if (has_decal) {
+        albedo = mix(albedo, tex_rgb, tex_sample.a);
     }
 
     // Candle-only lighting: there is no ambient floor and no directional

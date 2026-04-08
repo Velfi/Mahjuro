@@ -13,7 +13,7 @@ use winit::window::Window;
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, Tile};
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
-use crate::render::bowl_mesh::build_bowl_mesh;
+use crate::render::bowl_mesh::{BOWL_LOCAL_CENTER_Y, BOWL_LOCAL_HALF, build_bowl_mesh};
 use crate::render::candle_mesh::{CandlePlacement, build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::curio_cabinet_mesh::build_curio_cabinet_mesh;
@@ -25,8 +25,8 @@ use crate::render::decal::{
 use crate::render::dora_stand_mesh::build_dora_stand_mesh;
 use crate::render::draw_cmd::{
     BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement, CurioCabinetPlacement,
-    DishExplicit, DoraStandPlacement, DrawCmd, OfudaPlacement, PegBlockPlacement, PlaquePlacement,
-    RelicPlacement, ShrinePlacement,
+    DishExplicit, DoraStandPlacement, DrawCmd, FallingBonePlacement, OfudaPlacement,
+    PegBlockPlacement, PlaquePlacement, RelicPlacement, ShrinePlacement,
     TalismanPlacement, UiFrame, WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement,
     ZodiacRibbonPlacement,
 };
@@ -72,6 +72,21 @@ pub struct GpuInstance {
 /// Maximum number of point lights uploaded each frame. Must match the array
 /// length in tile_3d.wgsl.
 pub const MAX_POINT_LIGHTS: usize = 16;
+
+/// Cheap deterministic hash of `(label, width, height)` used as the cache
+/// key for rasterised tablet decals — when this changes, the renderer
+/// re-rasterises the engraved label texture and uploads it. FNV-1a 64.
+fn tablet_label_hash(label: &str, w: u32, h: u32) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in label.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^= w as u64;
+    hash = hash.wrapping_mul(0x100000001b3);
+    hash ^= h as u64;
+    hash.wrapping_mul(0x100000001b3)
+}
 
 /// Maximum number of analytic tile occluders uploaded for the candle-pool
 /// shadow tests in `lit_mesh.wgsl`. One per visible hand tile, conservatively
@@ -341,6 +356,15 @@ pub struct WgpuRenderer {
     /// without aliasing the live depth attachment.
     depth_copy_texture: wgpu::Texture,
     depth_copy_view: wgpu::TextureView,
+    /// Snapshot of the scene depth taken at the *end of pass A1* (before
+    /// the hanging plaques are drawn). The lacquered-table SSR group
+    /// samples this view so the table never reflects the plaques' engraved
+    /// text — keeping the plaque + decal out of the SSR depth and the
+    /// matching `scene_prev_texture` colour snapshot prevents the ghost
+    /// text artefact that would otherwise appear in the table reflection
+    /// directly below the plaque.
+    ssr_prev_depth_texture: wgpu::Texture,
+    ssr_prev_depth_view: wgpu::TextureView,
     quad_pipeline: wgpu::RenderPipeline,
     tile_quad_pipeline: wgpu::RenderPipeline,
     light_beam_pipeline: wgpu::RenderPipeline,
@@ -519,6 +543,10 @@ pub struct WgpuRenderer {
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
     /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
     shrine_instances: Vec<LitMeshInstance>,
+    /// Per-shrine screen-space rects projected this frame. Indexed in
+    /// `ShrineBatch` placement order. Used by `pick_blind` to anchor
+    /// 2D labels above the visible shrine bodies.
+    last_projected_shrine_rects: Vec<[f32; 4]>,
     /// Per-explicit-dish instances (shop scene). Indexed sequentially by
     /// `DishExplicit` placement order; truncated at `MAX_AUX_DISH_SLOTS`.
     aux_dish_instances: Vec<LitMeshInstance>,
@@ -574,6 +602,16 @@ pub struct WgpuRenderer {
     /// but the instances are kept in a dedicated pool so the cascade pulse
     /// scaling doesn't compete with the yaku tablet pool.
     cascade_token_instances: Vec<LitMeshInstance>,
+    /// Per-falling-bone instances. Reuses `bone_tablet_mesh` like the cascade
+    /// tokens, but each instance gets a full 3D model matrix (translation +
+    /// euler tumble) so the bones look like real physical objects falling
+    /// onto the play space during scoring.
+    falling_bone_instances: Vec<LitMeshInstance>,
+    /// Three reusable lit-mesh instances for the debug world-axes overlay
+    /// (one per axis: 0 = X red, 1 = Y green, 2 = Z blue). Drawn through
+    /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
+    /// and stretch each instance into a thin colored bar.
+    debug_axes_instances: Vec<LitMeshInstance>,
     /// Per-yaku-tablet screen-space rects projected this frame. Parallel with
     /// the order tablets were drawn. Used for hit-testing in phase 3.
     last_projected_yaku_tablet_rects: Vec<[f32; 4]>,
@@ -581,6 +619,14 @@ pub struct WgpuRenderer {
     last_projected_wood_tablet_rects: Vec<[f32; 4]>,
     /// Discard bowl projected screen rect this frame, if drawn.
     last_projected_bowl_rect: Option<[f32; 4]>,
+    /// Per-yaku-tablet world-space model matrices for `pick_gameplay_object`.
+    /// Parallel with `last_projected_yaku_tablet_rects`.
+    last_yaku_tablet_models: Vec<Mat4>,
+    /// Per-wood-tablet world-space model matrices for `pick_gameplay_object`.
+    /// Index 0 = sort suit, 1 = sort rank, 2 = play hand.
+    last_wood_tablet_models: Vec<Mat4>,
+    /// Discard bowl world-space model matrix for `pick_gameplay_object`.
+    last_bowl_model: Option<Mat4>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
@@ -609,6 +655,9 @@ pub struct WgpuRenderer {
     /// layouts start with `position : vec3<f32>` at offset 0.
     #[allow(dead_code)]
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Optional GPU timestamp profiler. Built once at startup; activated
+    /// on demand from the Debug menu via `start_gpu_profile`.
+    gpu_profiler: crate::render::gpu_profiler::GpuProfiler,
 }
 
 /// One hit returned by `WgpuRenderer::pick_shop_object`. The renderer's pick
@@ -631,6 +680,26 @@ pub enum ShopHit {
     /// when it pushes the dish (e.g. `1` for the relic dish, `2` for the
     /// coin dish).
     Dish(u32),
+}
+
+/// What 3D gameplay-scene object the cursor is over this frame.
+///
+/// Resolved by [`WgpuRenderer::pick_gameplay_object`] via per-class local
+/// AABB raycasting against the previous frame's model matrices — the same
+/// pattern as `pick_hand_tile` / `pick_shop_object`. The gameplay scene
+/// uses this for hover state and the click-injection path uses it to
+/// route mouse clicks to the right action without screen-space rect
+/// projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GameplayPick {
+    /// Index into the most recent `YakuTabletBatch` (hover only — yaku
+    /// tablets aren't clickable, just informational).
+    YakuTablet(usize),
+    /// Index into the most recent `WoodTabletBatch` — 0 = sort suit,
+    /// 1 = sort rank, 2 = play hand.
+    WoodTablet(usize),
+    /// The discard bowl.
+    DiscardBowl,
 }
 
 /// Maximum number of physical relic placeholders rendered in one batch. Must
@@ -674,6 +743,10 @@ pub const MAX_WALL_TILE_SLOTS: usize = 80;
 pub const MAX_DORA_STAND_SLOTS: usize = 2;
 /// Maximum number of cascade scoring tokens per frame (chips + mult).
 pub const MAX_CASCADE_TOKEN_SLOTS: usize = 4;
+/// Maximum number of physical falling-bone instances in flight at once.
+/// Sized to comfortably hold a multi-step cascade's worth of bursts (each
+/// scoring step spawns a small handful) without overflowing the pool.
+pub const MAX_FALLING_BONE_SLOTS: usize = 192;
 
 /// Pre-loaded relic icon texture + bind group for the image pipeline.
 struct RelicTextureGpu {
@@ -1153,10 +1226,21 @@ impl WgpuRenderer {
         limits.max_storage_textures_per_shader_stage = al.max_storage_textures_per_shader_stage;
         limits.max_storage_buffer_binding_size = al.max_storage_buffer_binding_size;
 
+        // Opt into TIMESTAMP_QUERY when the adapter supports it so the GPU
+        // pass profiler (Debug menu → "Profile GPU…") can record start/end
+        // ticks per render pass. The feature is optional — on backends that
+        // lack it the profiler stays a no-op.
+        let mut required_features = wgpu::Features::empty();
+        let timestamp_supported =
+            adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+        if timestamp_supported {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let t0 = Instant::now();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("mahjuro-device"),
-            required_features: wgpu::Features::empty(),
+            required_features,
             required_limits: limits,
             experimental_features: wgpu::ExperimentalFeatures::default(),
             memory_hints: wgpu::MemoryHints::default(),
@@ -1179,6 +1263,12 @@ impl WgpuRenderer {
         let (depth_texture, depth_view) =
             create_depth(&device, size.width.max(1), size.height.max(1));
         let (depth_copy_texture, depth_copy_view) =
+            create_depth_copy(&device, size.width.max(1), size.height.max(1));
+        // Separate depth snapshot for the lacquered-table SSR sample —
+        // populated at the end of pass A1 (before plaques are drawn) so
+        // the table never reflects the plaque face. See `ssr_prev_depth_*`
+        // doc on the field for the full rationale.
+        let (ssr_prev_depth_texture, ssr_prev_depth_view) =
             create_depth_copy(&device, size.width.max(1), size.height.max(1));
 
         let t0 = Instant::now();
@@ -1829,7 +1919,7 @@ impl WgpuRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&depth_copy_view),
+                    resource: wgpu::BindingResource::TextureView(&ssr_prev_depth_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -2172,9 +2262,13 @@ impl WgpuRenderer {
         // Shared 1×1 white texture for procedural meshes that don't sample.
         let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
-        // Pre-allocate four candle slots (matches the gameplay layout's
-        // four ambient candles). Each slot owns two instances: wax + wick.
-        const NUM_CANDLE_SLOTS: usize = 4;
+        // Pre-allocate candle slots (matches the gameplay layout's ambient
+        // candles plus a "footlight" candle in front of the camera that
+        // illuminates the bottom row of yaku/wood tablets — without it the
+        // 3D action row falls completely outside every other candle's pool
+        // and reads as a black silhouette). Each slot owns two instances:
+        // wax + wick.
+        const NUM_CANDLE_SLOTS: usize = 5;
         let mut candle_instances: Vec<[LitMeshInstance; 2]> = Vec::with_capacity(NUM_CANDLE_SLOTS);
         for _ in 0..NUM_CANDLE_SLOTS {
             candle_instances.push([
@@ -2301,6 +2395,16 @@ impl WgpuRenderer {
         let wall_tile_instances = make_pool(MAX_WALL_TILE_SLOTS);
         let dora_stand_instances = make_pool(MAX_DORA_STAND_SLOTS);
         let cascade_token_instances = make_pool(MAX_CASCADE_TOKEN_SLOTS);
+        let falling_bone_instances = make_pool(MAX_FALLING_BONE_SLOTS);
+        let debug_axes_instances = make_pool(3);
+
+        // Build the GPU profiler up-front while we still have a borrow of
+        // device/queue (the struct literal below moves them).
+        let gpu_profiler = crate::render::gpu_profiler::GpuProfiler::new(
+            &device,
+            &queue,
+            timestamp_supported,
+        );
 
         log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
@@ -2313,6 +2417,8 @@ impl WgpuRenderer {
             depth_view,
             depth_copy_texture,
             depth_copy_view,
+            ssr_prev_depth_texture,
+            ssr_prev_depth_view,
             quad_pipeline,
             tile_quad_pipeline,
             light_beam_pipeline,
@@ -2361,6 +2467,7 @@ impl WgpuRenderer {
             coin_instances,
             cabinet_instance,
             shrine_instances,
+            last_projected_shrine_rects: Vec::new(),
             aux_dish_instances,
             last_projected_ribbon_rects: Vec::new(),
             last_ribbon_models: Vec::new(),
@@ -2387,9 +2494,14 @@ impl WgpuRenderer {
             wall_tile_instances,
             dora_stand_instances,
             cascade_token_instances,
+            falling_bone_instances,
+            debug_axes_instances,
             last_projected_yaku_tablet_rects: Vec::new(),
             last_projected_wood_tablet_rects: Vec::new(),
             last_projected_bowl_rect: None,
+            last_yaku_tablet_models: Vec::new(),
+            last_wood_tablet_models: Vec::new(),
+            last_bowl_model: None,
             last_frame: Instant::now(),
             creation_time: Instant::now(),
             relic_textures: HashMap::new(),
@@ -2428,7 +2540,16 @@ impl WgpuRenderer {
             shadow_globals_buffer,
             shadow_sample_bind_group,
             shadow_pipeline,
+            gpu_profiler,
         })
+    }
+
+    /// Begin a GPU pass timing capture for the next `frames` frames. The
+    /// debug menu binds this to the "Profile GPU…" entry. Results are
+    /// emitted via `log::info!` once the capture finishes; if the adapter
+    /// lacks `TIMESTAMP_QUERY` support a warning is logged instead.
+    pub fn start_gpu_profile(&mut self, frames: u32) {
+        self.gpu_profiler.start(frames);
     }
 
     #[allow(dead_code)]
@@ -2709,6 +2830,23 @@ impl WgpuRenderer {
         &self.last_projected_plaque_rects
     }
 
+    /// Per-yaku-tablet projected screen rects from the previous frame's
+    /// perspective projection. Indexed in the order placements were pushed
+    /// via `YakuTabletBatch`. The gameplay scene uses these to hover-test
+    /// the bone yaku tablets where they actually appear on screen instead
+    /// of where their pre-projection input rect lives.
+    pub fn projected_yaku_tablet_rects(&self) -> &[[f32; 4]] {
+        &self.last_projected_yaku_tablet_rects
+    }
+
+    /// Per-shrine projected screen rects from the most recent frame.
+    /// Indexed in the order shrines were pushed via `ShrineBatch`. The
+    /// pick-blind scene uses these to anchor floating labels above
+    /// each shrine without re-projecting the perspective transform.
+    pub fn projected_shrine_rects(&self) -> &[[f32; 4]] {
+        &self.last_projected_shrine_rects
+    }
+
     /// Auxiliary dish screen rects from the most recent frame, paired with
     /// their `pick_id`. The shop scene uses these to anchor 2D tooltips
     /// above the relic dish + coin dish.
@@ -2889,6 +3027,115 @@ impl WgpuRenderer {
         best.map(|(h, _)| h)
     }
 
+    /// Cast a ray from the camera through the cursor and return the closest
+    /// gameplay-scene object hit (yaku tablet, wood action tablet, or
+    /// discard bowl). One-frame-stale snapshot pattern, mirroring
+    /// `pick_hand_tile` and `pick_shop_object`. The per-class local AABBs
+    /// are precomputed mesh constants — there is no per-frame screen-space
+    /// projection in the hit-test path.
+    pub fn pick_gameplay_object(
+        &self,
+        cursor_x: f32,
+        cursor_y: f32,
+    ) -> Option<GameplayPick> {
+        let cam = self.last_pick_camera.as_ref()?;
+        if self.last_yaku_tablet_models.is_empty()
+            && self.last_wood_tablet_models.is_empty()
+            && self.last_bowl_model.is_none()
+        {
+            return None;
+        }
+        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
+        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
+        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
+        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
+        let near_w = cam.inv_view_proj * near_clip;
+        let far_w = cam.inv_view_proj * far_clip;
+        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
+            return None;
+        }
+        let near = near_w.truncate() / near_w.w;
+        let far = far_w.truncate() / far_w.w;
+        let world_origin = near;
+        let world_dir = (far - near).normalize_or_zero();
+        if world_dir.length_squared() < 1e-6 {
+            return None;
+        }
+        // Local-space slab test against an AABB centered at `(0, oy, 0)` with
+        // half-extents `(hx, hy, hz)`. Returns the entry distance along the
+        // world ray when the ray hits the box.
+        let slab_test = |model: glam::Mat4, hx: f32, hy: f32, hz: f32, oy: f32| -> Option<f32> {
+            let inv = model.inverse();
+            let lo = inv.transform_point3(world_origin);
+            let ld = inv.transform_vector3(world_dir);
+            let bounds = [
+                (lo.x, ld.x, -hx, hx),
+                (lo.y, ld.y, -hy + oy, hy + oy),
+                (lo.z, ld.z, -hz, hz),
+            ];
+            let mut t_min = f32::NEG_INFINITY;
+            let mut t_max = f32::INFINITY;
+            for (o, d, lo_b, hi_b) in bounds {
+                if d.abs() < 1e-8 {
+                    if o < lo_b || o > hi_b {
+                        return None;
+                    }
+                } else {
+                    let inv_d = 1.0 / d;
+                    let mut t1 = (lo_b - o) * inv_d;
+                    let mut t2 = (hi_b - o) * inv_d;
+                    if t1 > t2 {
+                        std::mem::swap(&mut t1, &mut t2);
+                    }
+                    if t1 > t_min {
+                        t_min = t1;
+                    }
+                    if t2 < t_max {
+                        t_max = t2;
+                    }
+                    if t_min > t_max {
+                        return None;
+                    }
+                }
+            }
+            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
+            if t_enter < 0.0 { None } else { Some(t_enter) }
+        };
+
+        let mut best: Option<(GameplayPick, f32)> = None;
+        let mut consider = |hit: GameplayPick, t: f32| match best {
+            Some((_, bt)) if t >= bt => {}
+            _ => best = Some((hit, t)),
+        };
+
+        // Yaku tablets — unit cube `[-0.5, 0.5]^3` (push_box convention).
+        for (i, model) in self.last_yaku_tablet_models.iter().enumerate() {
+            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
+                consider(GameplayPick::YakuTablet(i), t);
+            }
+        }
+        // Wood action tablets — same unit cube as the yaku tablets.
+        for (i, model) in self.last_wood_tablet_models.iter().enumerate() {
+            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
+                consider(GameplayPick::WoodTablet(i), t);
+            }
+        }
+        // Discard bowl — tighter local AABB from the bowl mesh constants.
+        if let Some(model) = self.last_bowl_model.as_ref() {
+            if let Some(t) = slab_test(
+                *model,
+                BOWL_LOCAL_HALF[0],
+                BOWL_LOCAL_HALF[1],
+                BOWL_LOCAL_HALF[2],
+                BOWL_LOCAL_CENTER_Y,
+            ) {
+                consider(GameplayPick::DiscardBowl, t);
+            }
+        }
+
+        best.map(|(h, _)| h)
+    }
+
     /// Ensure `hand_tiles` matches `tiles`.
     ///
     /// Only re-rasterises decals for slots whose tile identity (suit + rank)
@@ -3034,6 +3281,10 @@ impl WgpuRenderer {
         let (dct, dcv) = create_depth_copy(&self.device, new_size.width, new_size.height);
         self.depth_copy_texture = dct;
         self.depth_copy_view = dcv;
+        self.ssr_prev_depth_texture.destroy();
+        let (sdt, sdv) = create_depth_copy(&self.device, new_size.width, new_size.height);
+        self.ssr_prev_depth_texture = sdt;
+        self.ssr_prev_depth_view = sdv;
 
         // SSR scene history texture follows the swapchain size; rebuild
         // the bind group so it points at the freshly allocated views.
@@ -3060,7 +3311,7 @@ impl WgpuRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.depth_copy_view),
+                    resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -3097,6 +3348,7 @@ impl WgpuRenderer {
         &mut self,
         frame: &UiFrame,
         smoke_intensity: crate::persistence::SmokeIntensity,
+        smoke_detail: crate::persistence::SmokeDetail,
         tile_preset: crate::persistence::TilePreset,
         draw_settle_speed: f32,
         sort_settle_speed: f32,
@@ -3304,6 +3556,54 @@ impl WgpuRenderer {
             let sy = (1.0 - (ny * 0.5 + 0.5)) * h;
             (sx, sy)
         };
+
+        // ── Debug axes overlay ──────────────────────────────────────────
+        // When `frame.debug_axes` is set, write three thin colored boxes
+        // (red = +X, green = +Y, blue = +Z) anchored at the current camera
+        // look target. Each axis box extends from the origin in the
+        // *positive* direction so the user can read sign as well as axis.
+        if frame.debug_axes {
+            // Length: a chunky fraction of screen height so the bars are
+            // visible against the table from the default camera.
+            let length = h * 0.35;
+            let thickness = (h * 0.012).max(4.0);
+            let origin = look_target;
+            let axes: [(glam::Vec3, glam::Vec3, [f32; 4]); 3] = [
+                // +X — red
+                (
+                    glam::Vec3::X,
+                    glam::Vec3::new(length, thickness, thickness),
+                    [1.6, 0.10, 0.10, 1.0],
+                ),
+                // +Y — green
+                (
+                    glam::Vec3::Y,
+                    glam::Vec3::new(thickness, length, thickness),
+                    [0.10, 1.6, 0.10, 1.0],
+                ),
+                // +Z — blue
+                (
+                    glam::Vec3::Z,
+                    glam::Vec3::new(thickness, thickness, length),
+                    [0.20, 0.40, 1.8, 1.0],
+                ),
+            ];
+            for (i, (axis_dir, scale, color)) in axes.iter().enumerate() {
+                // Center the box halfway down the positive axis so its
+                // -end sits at `origin` and its +end sticks out by `length`.
+                let center = origin + *axis_dir * (length * 0.5);
+                let model = Mat4::from_translation(center) * Mat4::from_scale(*scale);
+                let material = MaterialParams {
+                    kind: MaterialKind::Plain,
+                    base_color: *color,
+                    specular_strength: 0.0,
+                    specular_power: 8.0,
+                };
+                if let Some(inst) = self.debug_axes_instances.get(i) {
+                    inst.write_uniform(&self.queue, view_proj_arr, model, material);
+                }
+            }
+        }
 
         // ── Flame screen anchors ────────────────────────────────────────
         // The flame is a 2D additive quad in screen-pixel space, but it
@@ -3872,6 +4172,7 @@ impl WgpuRenderer {
             WallStack(usize),      // index into `wall_stack_cmds`
             DoraStand(usize),      // index into `dora_stand_cmds`
             CascadeTokenBatch(usize), // index into `cascade_token_batches`
+            FallingBoneBatch(usize),  // index into `falling_bone_batches`
         }
 
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
@@ -3896,6 +4197,7 @@ impl WgpuRenderer {
         let mut wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut dora_stand_cmds: Vec<&DoraStandPlacement> = Vec::new();
         let mut cascade_token_batches: Vec<&[CascadeTokenPlacement]> = Vec::new();
+        let mut falling_bone_batches: Vec<&[FallingBonePlacement]> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
 
         let mut i = 0;
@@ -4014,6 +4316,12 @@ impl WgpuRenderer {
                     ops.push(RenderOp::CascadeTokenBatch(idx));
                     i += 1;
                 }
+                DrawCmd::FallingBoneBatch(placements) => {
+                    let idx = falling_bone_batches.len();
+                    falling_bone_batches.push(placements.as_slice());
+                    ops.push(RenderOp::FallingBoneBatch(idx));
+                    i += 1;
+                }
                 DrawCmd::FluidSmoke => {
                     ops.push(RenderOp::FluidSmoke);
                     i += 1;
@@ -4102,6 +4410,10 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
+                DrawCmd::GlossaryAnchor { .. } => {
+                    // Pure metadata for the tooltip overlay; no draw work.
+                    i += 1;
+                }
                 DrawCmd::RelicIcon(icon) => {
                     if self.relic_textures.contains_key(&icon.relic_id) {
                         let inst = GpuInstance {
@@ -4123,6 +4435,64 @@ impl WgpuRenderer {
                         ops.push(RenderOp::RelicIconDraw(idx));
                     }
                     i += 1;
+                }
+            }
+        }
+
+        // ── Debug axes overlay labels ───────────────────────────────────
+        // After walking the scene's cmds, append three text labels (one per
+        // axis) projected from the world-space tip of each debug-axes bar.
+        // These get rasterized into ordinary text draws so they ride along
+        // in the same render pass as the bars themselves.
+        if frame.debug_axes {
+            if let Some(ref font) = self.ui_font {
+                let length = h * 0.35;
+                let label_size = (h * 0.04).max(18.0);
+                let label_w = label_size * 3.5;
+                let label_h = label_size * 1.5;
+                let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
+                    (
+                        look_target + glam::Vec3::X * length,
+                        "+X",
+                        [1.0, 0.25, 0.25, 1.0],
+                    ),
+                    (
+                        look_target + glam::Vec3::Y * length,
+                        "+Y",
+                        [0.25, 1.0, 0.25, 1.0],
+                    ),
+                    (
+                        look_target + glam::Vec3::Z * length,
+                        "+Z",
+                        [0.45, 0.65, 1.0, 1.0],
+                    ),
+                ];
+                for (tip_world, text, color) in labels.iter() {
+                    let (sx, sy) = project_to_screen(*tip_world);
+                    let lbl = TextLabel {
+                        rect: [
+                            sx - label_w * 0.5,
+                            sy - label_h * 0.5,
+                            label_w,
+                            label_h,
+                        ],
+                        text: (*text).to_string(),
+                        color: *color,
+                        font_px: Some(label_size),
+                        align: TextAlign::Center,
+                        no_glossary: true,
+                    };
+                    let td = make_text_draw(
+                        &self.device,
+                        &self.queue,
+                        &self.text_bind_group_layout,
+                        &self.tile_sampler,
+                        &lbl,
+                        font,
+                    );
+                    let idx = text_draws.len();
+                    text_draws.push(td);
+                    ops.push(RenderOp::TextDraw(idx));
                 }
             }
         }
@@ -4350,6 +4720,7 @@ impl WgpuRenderer {
         // a per-instance scale by `extents` sizes Small/Big/Boss
         // independently. `world_pos` is the *base center*, so we lift the
         // model up by half the height to put the plinth on the ground.
+        self.last_projected_shrine_rects.clear();
         {
             let mut shrine_cursor: usize = 0;
             for batch in &shrine_batches {
@@ -4370,12 +4741,39 @@ impl WgpuRenderer {
                             s.extents[1],
                             s.extents[2],
                         ));
-                    // Glow brightens the shrine's tint above 1.0 so the
-                    // upcoming shrine reads as the active choice even
-                    // before the warm spotlight bakes in.
+                    // Project the shrine's 8 AABB corners to screen and
+                    // take the bounding rect — gives the scene a 2D rect
+                    // it can anchor labels to without re-projecting the
+                    // perspective transform itself.
+                    let hx = s.extents[0] * 0.5;
+                    let hy = s.extents[1] * 0.5;
+                    let hz = s.extents[2] * 0.5;
+                    let mut mn_x = f32::INFINITY;
+                    let mut mn_y = f32::INFINITY;
+                    let mut mx_x = f32::NEG_INFINITY;
+                    let mut mx_y = f32::NEG_INFINITY;
+                    for cx in [-hx, hx] {
+                        for cy in [-hy, hy] {
+                            for cz in [-hz, hz] {
+                                let world = center + glam::Vec3::new(cx, cy, cz);
+                                let (px, py) = project_to_screen(world);
+                                mn_x = mn_x.min(px);
+                                mn_y = mn_y.min(py);
+                                mx_x = mx_x.max(px);
+                                mx_y = mx_y.max(py);
+                            }
+                        }
+                    }
+                    self.last_projected_shrine_rects
+                        .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
+                    // Glow gently brightens the shrine's tint so the
+                    // upcoming shrine reads as the active choice at
+                    // rest, but most of the warmth still comes from
+                    // the warm spotlight tinting the stone — the
+                    // shrine itself shouldn't self-illuminate.
                     let g = s.glow.clamp(0.0, 1.0);
                     let base_color = if g > 0.0 {
-                        let target = [1.45, 1.30, 0.85, s.color[3]];
+                        let target = [1.10, 1.05, 0.95, s.color[3]];
                         [
                             s.color[0] + (target[0] - s.color[0]) * g,
                             s.color[1] + (target[1] - s.color[1]) * g,
@@ -4385,11 +4783,17 @@ impl WgpuRenderer {
                     } else {
                         s.color
                     };
+                    // Rough stone material: very low specular strength
+                    // and a low specular power so any highlight that
+                    // does catch is wide and soft (like weathered
+                    // rock, not polished marble). Identical params for
+                    // every shrine so cleared/future ones can't catch
+                    // sharp glints from ambient fills.
                     let material = MaterialParams {
-                        kind: MaterialKind::LacqueredWood,
+                        kind: MaterialKind::Plain,
                         base_color,
-                        specular_strength: 0.50 + 0.40 * g,
-                        specular_power: 80.0,
+                        specular_strength: 0.06,
+                        specular_power: 8.0,
                     };
                     self.shrine_instances[slot_i].write_uniform(
                         &self.queue,
@@ -4531,6 +4935,7 @@ impl WgpuRenderer {
                 let sz = t.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(t.rotation_y_deg.to_radians())
+                    * Mat4::from_rotation_x(t.rotation_x_deg.to_radians())
                     * Mat4::from_scale(glam::Vec3::new(sx, sy, sz));
                 let material = MaterialParams {
                     kind: MaterialKind::Plain,
@@ -4619,6 +5024,9 @@ impl WgpuRenderer {
         self.last_projected_yaku_tablet_rects.clear();
         self.last_projected_wood_tablet_rects.clear();
         self.last_projected_bowl_rect = None;
+        self.last_yaku_tablet_models.clear();
+        self.last_wood_tablet_models.clear();
+        self.last_bowl_model = None;
 
         // Helper closure: project the unit-cube AABB transformed by `model`
         // into a screen-space rect. Used by tablets/bowl for hit testing.
@@ -4668,11 +5076,41 @@ impl WgpuRenderer {
                 * Mat4::from_rotation_y(p.rotation_y_deg.to_radians())
                 * Mat4::from_rotation_x(plaque_tilt_x)
                 * Mat4::from_scale(glam::Vec3::new(p.extents[0], p.extents[1], p.extents[2]));
-            self.plaque_instances[slot_i].write_uniform(
+            // Engraved two-line decal painted on the +Z face. Empty top
+            // *and* empty bottom = no decal needed (the second placard
+            // plaque uses this path with no engraved text). Otherwise
+            // rasterize once when either line changes and treat the
+            // texture as a transparent overlay via `has_decal = true`.
+            let has_decal_text = !p.top_text.is_empty() || !p.bot_text.is_empty();
+            if has_decal_text {
+                let (decal_w, decal_h) = crate::render::decal::PLAQUE_DECAL_SIZE;
+                let combined = format!("{}\n{}", p.top_text, p.bot_text);
+                let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
+                let inst = &mut self.plaque_instances[slot_i];
+                if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
+                    let rgba = crate::render::decal::rasterize_plaque_decal(
+                        &p.top_text,
+                        &p.bot_text,
+                        self.ui_font.as_ref(),
+                    );
+                    inst.set_decal(
+                        &self.device,
+                        &self.queue,
+                        &self.lit_mesh_material_layout,
+                        &self.tile_sampler,
+                        &rgba,
+                        decal_w,
+                        decal_h,
+                    );
+                    inst.decal_label_hash = label_hash;
+                }
+            }
+            self.plaque_instances[slot_i].write_uniform_with_decal(
                 &self.queue,
                 view_proj_arr,
                 model,
                 self.plaque_mesh.default_material,
+                has_decal_text,
             );
             // Project the slab face (front +Z) corners to screen so the
             // scene can overlay 2D text aligned with the rendered plaque.
@@ -4753,14 +5191,37 @@ impl WgpuRenderer {
                     specular_strength: 0.30 + 0.20 * t.hover.clamp(0.0, 1.0),
                     specular_power: 32.0,
                 };
-                self.yaku_tablet_instances[slot_i].write_uniform(
+                // Engraved-name decal: rasterise on label change, then bind
+                // it as the per-instance albedo overlay. Cached by label hash
+                // so the steady-state cost is one compare per slot per frame.
+                let label_hash = tablet_label_hash(&t.name, 256, 96);
+                let inst = &mut self.yaku_tablet_instances[slot_i];
+                if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
+                    let rgba = crate::render::decal::rasterize_yaku_tablet_decal(
+                        &t.name,
+                        self.ui_font.as_ref(),
+                    );
+                    inst.set_decal(
+                        &self.device,
+                        &self.queue,
+                        &self.lit_mesh_material_layout,
+                        &self.tile_sampler,
+                        &rgba,
+                        256,
+                        96,
+                    );
+                    inst.decal_label_hash = label_hash;
+                }
+                inst.write_uniform_with_decal(
                     &self.queue,
                     view_proj_arr,
                     model,
                     material,
+                    true,
                 );
                 self.last_projected_yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
+                self.last_yaku_tablet_models.push(model);
             }
         }
 
@@ -4782,14 +5243,34 @@ impl WgpuRenderer {
                 );
                 let model = Mat4::from_translation(center)
                     * Mat4::from_scale(glam::Vec3::new(t.extents[0], t.extents[1], t.extents[2]));
-                self.wood_tablet_instances[slot_i].write_uniform(
+                let label_hash = tablet_label_hash(&t.label, 256, 96);
+                let inst = &mut self.wood_tablet_instances[slot_i];
+                if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
+                    let rgba = crate::render::decal::rasterize_wood_tablet_decal(
+                        &t.label,
+                        self.ui_font.as_ref(),
+                    );
+                    inst.set_decal(
+                        &self.device,
+                        &self.queue,
+                        &self.lit_mesh_material_layout,
+                        &self.tile_sampler,
+                        &rgba,
+                        256,
+                        96,
+                    );
+                    inst.decal_label_hash = label_hash;
+                }
+                inst.write_uniform_with_decal(
                     &self.queue,
                     view_proj_arr,
                     model,
                     self.wood_tablet_mesh.default_material,
+                    true,
                 );
                 self.last_projected_wood_tablet_rects
                     .push(project_unit_cube_rect(model));
+                self.last_wood_tablet_models.push(model);
             }
         }
 
@@ -4814,6 +5295,7 @@ impl WgpuRenderer {
             );
             if slot_i == 0 {
                 self.last_projected_bowl_rect = Some(project_unit_cube_rect(model));
+                self.last_bowl_model = Some(model);
             }
         }
 
@@ -4838,22 +5320,37 @@ impl WgpuRenderer {
                 self.peg_block_mesh.default_material,
             );
 
-            // Pegs sit in two rows (plays on the left half, discards on the
-            // right). They poke up out of the block by ~half the peg height.
-            // The block is `extents` wide; we lay each row across half the
-            // width, with the active peg count drawn as full pegs and the
-            // spent ones omitted.
-            let row_w = p.extents[0] * 0.45;
+            // Pegs sit in two distinct groups: plays clustered at the
+            // LEFT end of the block, discards clustered at the RIGHT end,
+            // with a clear empty gap in the middle so the player can read
+            // the two pools at a glance. Each group spans ~38% of the
+            // block width and is anchored to the outer edge — peg 0 sits
+            // at the outer end and subsequent pegs grow inward toward the
+            // middle, so spent pegs leave their slots blank near the
+            // center and the outermost peg always stays put.
+            let row_w = p.extents[0] * 0.26;
             let peg_radius = (p.extents[1] * 0.18).max(2.0);
             let peg_height = p.extents[1] * 0.6;
             let peg_y = p.world_pos[2] + p.extents[1] + peg_height * 0.5;
 
+            // Per-row peg colors: jade for plays remaining, amber for
+            // discards remaining. Matches the rest of the gameplay HUD's
+            // jade-good / amber-warning palette so the player can read
+            // the block at a glance without parsing which row is which.
+            let plays_color: [f32; 4] = [0.42, 0.82, 0.55, 1.0];
+            let discards_color: [f32; 4] = [0.96, 0.72, 0.28, 1.0];
+
             let draw_row = |slot_cursor: &mut usize,
                             peg_instances: &mut [LitMeshInstance],
                             queue: &wgpu::Queue,
-                            row_center_x: f32,
+                            outer_edge_x: f32,
+                            // +1.0 to grow inward to the right (left
+                            // group), -1.0 to grow inward to the left
+                            // (right group).
+                            grow_dir: f32,
                             count: u32,
-                            max_count: u32| {
+                            max_count: u32,
+                            color: [f32; 4]| {
                 if max_count == 0 {
                     return;
                 }
@@ -4864,12 +5361,11 @@ impl WgpuRenderer {
                 } else {
                     0.0
                 };
-                let row_start_x = row_center_x - row_w * 0.5;
                 for k in 0..n {
                     if *slot_cursor >= MAX_PEG_SLOTS {
                         return;
                     }
-                    let px = row_start_x + step * k as f32;
+                    let px = outer_edge_x + grow_dir * step * k as f32;
                     let center = pixel_to_world(px, p.world_pos[1], peg_y);
                     let model = Mat4::from_translation(center)
                         * Mat4::from_scale(glam::Vec3::new(
@@ -4879,9 +5375,9 @@ impl WgpuRenderer {
                         ));
                     let material = MaterialParams {
                         kind: MaterialKind::Plain,
-                        base_color: [0.93, 0.89, 0.78, 1.0],
-                        specular_strength: 0.35,
-                        specular_power: 48.0,
+                        base_color: color,
+                        specular_strength: 0.45,
+                        specular_power: 56.0,
                     };
                     peg_instances[*slot_cursor]
                         .write_uniform(queue, view_proj_arr, model, material);
@@ -4889,23 +5385,30 @@ impl WgpuRenderer {
                 }
             };
 
-            let plays_center_x = p.world_pos[0] - p.extents[0] * 0.25;
-            let discards_center_x = p.world_pos[0] + p.extents[0] * 0.25;
+            // Outer edge of each group, inset slightly from the block edge
+            // so the outermost peg doesn't kiss the block's bevel.
+            let edge_inset = p.extents[0] * 0.06;
+            let plays_outer_x = p.world_pos[0] - p.extents[0] * 0.5 + edge_inset;
+            let discards_outer_x = p.world_pos[0] + p.extents[0] * 0.5 - edge_inset;
             draw_row(
                 &mut peg_slot_cursor,
                 &mut self.peg_instances,
                 &self.queue,
-                plays_center_x,
+                plays_outer_x,
+                1.0,
                 p.plays_left,
                 p.plays_max,
+                plays_color,
             );
             draw_row(
                 &mut peg_slot_cursor,
                 &mut self.peg_instances,
                 &self.queue,
-                discards_center_x,
+                discards_outer_x,
+                -1.0,
                 p.discards_left,
                 p.discards_max,
+                discards_color,
             );
         }
 
@@ -5000,6 +5503,49 @@ impl WgpuRenderer {
                     specular_power: 48.0,
                 };
                 self.cascade_token_instances[slot_i].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    material,
+                );
+            }
+        }
+
+        // Falling scoring bones — physical objects spawned by the gameplay
+        // scene as each cascade step reveals. Same bone-tablet geometry as
+        // the cascade tokens, but each instance carries a full 3D pose
+        // (gravity-driven world_y + euler tumble) and an alpha that ramps
+        // out as a landed bone bleeds its rest timer.
+        let mut falling_bone_slot_cursor: usize = 0;
+        for batch in &falling_bone_batches {
+            for b in batch.iter() {
+                if falling_bone_slot_cursor >= MAX_FALLING_BONE_SLOTS {
+                    break;
+                }
+                let slot_i = falling_bone_slot_cursor;
+                falling_bone_slot_cursor += 1;
+                let center =
+                    pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                let model = Mat4::from_translation(center)
+                    * Mat4::from_rotation_y(b.rotation[1])
+                    * Mat4::from_rotation_x(b.rotation[0])
+                    * Mat4::from_rotation_z(b.rotation[2])
+                    * Mat4::from_scale(glam::Vec3::new(
+                        b.extents[0],
+                        b.extents[1],
+                        b.extents[2],
+                    ));
+                let base = match b.kind {
+                    CascadeTokenKind::Chips => [0.34, 0.46, 0.78, b.alpha],
+                    CascadeTokenKind::Mult => [0.85, 0.32, 0.42, b.alpha],
+                };
+                let material = MaterialParams {
+                    kind: MaterialKind::Plain,
+                    base_color: base,
+                    specular_strength: 0.45,
+                    specular_power: 48.0,
+                };
+                self.falling_bone_instances[slot_i].write_uniform(
                     &self.queue,
                     view_proj_arr,
                     model,
@@ -5149,6 +5695,11 @@ impl WgpuRenderer {
                 );
                 self.fluid_render_bg_dirty = false;
             }
+
+            // (Re)allocate the offscreen smoke target whenever the user
+            // changes the detail dropdown OR the window resizes. Cheap
+            // no-op when nothing changed.
+            fluid.set_detail(&self.device, smoke_detail);
 
             // Upload the per-frame camera uniform consumed by the volume
             // raymarch shader.
@@ -5363,6 +5914,7 @@ impl WgpuRenderer {
                     let sz = t.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
                     let model = Mat4::from_translation(center)
                         * Mat4::from_rotation_y(t.rotation_y_deg.to_radians())
+                        * Mat4::from_rotation_x(t.rotation_x_deg.to_radians())
                         * Mat4::from_scale(glam::Vec3::new(sx, sy, sz));
                     self.talisman_instances[slot_i].write_shadow_uniform(
                         &self.queue,
@@ -5542,8 +6094,20 @@ impl WgpuRenderer {
             });
 
         // Run fluid simulation compute passes (before render pass).
+        //
+        // Use the real inter-frame `dt` captured at the top of `render()`.
+        // The previous `self.last_frame.elapsed()` here was a bug: by this
+        // point we've already reassigned `self.last_frame = now`, so the
+        // elapsed value is just the time spent on render work earlier in
+        // this same function — typically 5–15 ms regardless of FPS. That
+        // made the sim advance only ~0.5–0.9 seconds of simulated time per
+        // wall second, so the post-deal wind sweep (1.4s wall) only got
+        // ~0.7s of advection and intermittently failed to push the opening
+        // smoke curtain off-grid before the overlay finished fading.
+        // `dt` is already capped at 50 ms above, which is plenty of
+        // headroom for the semi-Lagrangian step to stay stable.
         if let Some(ref mut fluid) = self.fluid {
-            let step_dt = self.last_frame.elapsed().as_secs_f32().max(1.0 / 120.0);
+            let step_dt = dt.max(1.0 / 120.0);
             fluid.step(&mut encoder, &self.queue, step_dt, smoke_intensity);
         }
 
@@ -5553,6 +6117,9 @@ impl WgpuRenderer {
         // the lit shaders short-circuit on `params.x = 0` and the stale
         // map contents go unread.
         if shadows_enabled {
+            let shadow_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Shadow);
             let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow-pre-pass"),
                 color_attachments: &[],
@@ -5565,7 +6132,7 @@ impl WgpuRenderer {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: shadow_ts,
                 multiview_mask: None,
             });
             shadow_pass.set_pipeline(&self.shadow_pipeline);
@@ -6254,6 +6821,33 @@ impl WgpuRenderer {
                         pass.draw_indexed(0..self.bone_tablet_mesh.index_count, 0, 0..1);
                     }
                 }
+                RenderOp::FallingBoneBatch(batch_idx) => {
+                    let batch = falling_bone_batches[*batch_idx];
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.bone_tablet_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.bone_tablet_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    let mut start_slot = 0usize;
+                    for prev in 0..*batch_idx {
+                        start_slot += falling_bone_batches[prev].len();
+                    }
+                    for (i, _) in batch.iter().enumerate() {
+                        let slot_i = start_slot + i;
+                        if slot_i >= MAX_FALLING_BONE_SLOTS {
+                            break;
+                        }
+                        let Some(inst) = self.falling_bone_instances.get(slot_i) else {
+                            break;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.bone_tablet_mesh.index_count, 0, 0..1);
+                    }
+                }
                 RenderOp::HandTileBackdrop => {
                     if let Some(ref lbb) = light_beam_buffer {
                         pass.set_pipeline(&self.light_beam_pipeline);
@@ -6358,7 +6952,11 @@ impl WgpuRenderer {
                 RenderOp::FluidSmoke => {
                     if smoke_intensity != crate::persistence::SmokeIntensity::Off {
                         if let Some(ref fluid) = self.fluid {
-                            fluid.draw(pass, &self.globals_bind_group);
+                            // Composite the offscreen smoke target onto the
+                            // swap chain. The actual raymarch ran earlier in
+                            // its own offscreen pass; this is just a
+                            // bilinear sample + premultiplied blend.
+                            fluid.draw_composite(pass);
                         }
                     }
                 }
@@ -6422,18 +7020,16 @@ impl WgpuRenderer {
 
         // ── Pass A: clear + draw everything that lives behind the smoke ──
         {
+            let main_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.07,
-                            g: 0.05,
-                            b: 0.10,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
@@ -6447,11 +7043,138 @@ impl WgpuRenderer {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: main_ts,
                 multiview_mask: None,
             });
             for op in &ops[..split_end] {
+                // 2D HUD text labels are drawn into the swapchain in a
+                // separate overlay pass after the SSR snapshot, so they
+                // don't end up in `scene_prev_texture` and get reflected by
+                // the lacquered table. See the overlay pass below the
+                // end-of-frame copies.
+                //
+                // `Plaque` ops are also held back: the score plaque now
+                // carries an engraved decal texture (the score header
+                // text) baked onto its +Z face, and if it were drawn here
+                // the lacquered-table SSR would reflect that engraved
+                // text into the table — recreating the exact ghost-text
+                // artefact the overlay pass was originally introduced to
+                // avoid. We snapshot `scene_prev` + `ssr_prev_depth`
+                // immediately after this loop and *then* draw the plaques
+                // in a sibling pass that loads the swapchain.
+                if matches!(op, RenderOp::TextDraw(_) | RenderOp::Plaque(_)) {
+                    continue;
+                }
                 process_op(&mut pass, op);
+            }
+
+            // Debug world-axes overlay: draw three colored bars after the
+            // normal pass-A 3D ops so they sit on top of the table. Uses
+            // the shared `relic_box_mesh` unit cube; per-instance uniforms
+            // were written above.
+            if frame.debug_axes {
+                pass.set_pipeline(&self.lit_mesh_pipeline);
+                pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(
+                    self.relic_box_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                for inst in self.debug_axes_instances.iter() {
+                    pass.set_bind_group(0, &inst.bind_group, &[]);
+                    pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                }
+            }
+        }
+
+        // ── SSR snapshot ────────────────────────────────────────────────
+        // Capture the swapchain colour and depth buffers BEFORE the
+        // hanging plaques are drawn. The lacquered-table SSR samples
+        // these textures next frame, so plaques (and the engraved score
+        // text decal on their +Z face) never end up in the table's
+        // reflection. The smoke pass below still gets a fresh, full
+        // (with-plaques) depth via its own `depth_copy_texture` copy.
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &surface_frame.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.scene_prev_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: self.size.width.max(1),
+                height: self.size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ssr_prev_depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::Extent3d {
+                width: self.size.width.max(1),
+                height: self.size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // ── Plaque pass: draw the hanging score plaque (with its engraved
+        // text decal) into the swapchain *after* the SSR snapshot above
+        // and *before* the smoke pass below. Loading both colour and
+        // depth keeps the rest of pass A intact while the plaques write
+        // their own depth (so smoke occludes them correctly) and their
+        // decal pixels (which never enter `scene_prev` / `ssr_prev_depth`
+        // because the snapshot already happened).
+        if ops.iter().any(|o| matches!(o, RenderOp::Plaque(_))) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("plaque-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            // Walk only the pre-smoke ops slice — plaques live in pass A
+            // ordering; any plaque cmd queued after the FluidSmoke marker
+            // would still get drawn here, which is fine because smoke
+            // already composites over the plaque depth via the
+            // `depth_copy_texture` snapshot taken below.
+            for op in &ops[..split_end] {
+                if matches!(op, RenderOp::Plaque(_)) {
+                    process_op(&mut pass, op);
+                }
             }
         }
 
@@ -6480,8 +7203,85 @@ impl WgpuRenderer {
                 },
             );
 
+            // ── Offscreen smoke raymarch pass ──────────────────────────
+            // Run the volumetric ray-march into the (reduced-resolution)
+            // smoke target BEFORE the swap-chain pass-B begins. The depth
+            // copy above means the shader can sample scene depth without
+            // aliasing the live depth attachment, and rendering offscreen
+            // means the next pass-B can simply sample + bilinear-upsample
+            // the result instead of paying for full-screen ray-marching.
+            //
+            // Skipped entirely when smoke is disabled — the post-smoke
+            // pass below still runs so any UI/text ops queued after the
+            // FluidSmoke marker draw correctly.
+            if smoke_intensity != crate::persistence::SmokeIntensity::Off {
+                if let Some(ref fluid) = self.fluid {
+                    let scissor = fluid.screen_aabb_rect(view_proj);
+                    let smoke_off_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOffscreen);
+                    fluid.render_offscreen(
+                        &mut encoder,
+                        &self.globals_bind_group,
+                        scissor,
+                        smoke_off_ts,
+                    );
+                }
+            }
+
+            let smoke_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::PostSmoke);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("post-smoke-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: smoke_ts,
+                multiview_mask: None,
+            });
+            for op in &ops[split..] {
+                if matches!(op, RenderOp::TextDraw(_)) {
+                    continue;
+                }
+                process_op(&mut pass, op);
+            }
+        }
+
+        // (The SSR colour + depth snapshots that used to live here have
+        // moved up to between pass A and the new plaque pass — see the
+        // "SSR snapshot" block above. The smoke pass already maintains
+        // its own `depth_copy_texture` copy, so nothing else needs the
+        // end-of-frame depth dump.)
+
+        // ── Overlay pass: 2D HUD text labels ────────────────────────────
+        // Drawn AFTER the end-of-frame swapchain → scene_prev snapshot so
+        // the text doesn't end up in next frame's SSR reflection sample.
+        // The lacquered table reflects whatever's in scene_prev, and a
+        // text label rasterised onto the plaque's screen rect would
+        // otherwise appear as a phantom duplicate in the table reflection
+        // immediately below the plaque (text doesn't write depth, so the
+        // SSR ray hits the plaque's depth and samples the colour buffer
+        // there — which has the text on top). Loading the swapchain (no
+        // clear) lets us composite text on top of the just-finished scene.
+        if ops.iter().any(|o| matches!(o, RenderOp::TextDraw(_))) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -6503,59 +7303,20 @@ impl WgpuRenderer {
                 timestamp_writes: None,
                 multiview_mask: None,
             });
-            for op in &ops[split..] {
-                process_op(&mut pass, op);
+            for op in &ops {
+                if matches!(op, RenderOp::TextDraw(_)) {
+                    process_op(&mut pass, op);
+                }
             }
         }
 
-        // ── End-of-frame: snapshot the composited swapchain colour and
-        // the live depth buffer into the SSR history textures. The
-        // lacquered floor in the *next* frame samples both — the camera
-        // is fixed, so a one-frame stale image is essentially correct
-        // for reflecting candle flames + tiles. We do these copies even
-        // when ssr_enabled is false so toggling the option on doesn't
-        // briefly read garbage from never-populated textures.
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &surface_frame.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.scene_prev_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                width: self.size.width.max(1),
-                height: self.size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-        );
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.depth_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.depth_copy_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            wgpu::Extent3d {
-                width: self.size.width.max(1),
-                height: self.size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-        );
-
+        // GPU profiler: resolve query set + stage readback before submit,
+        // then block on map after submit so the readback is frame-accurate.
+        // Both calls are no-ops when no profiling session is active.
+        self.gpu_profiler.before_submit(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
         surface_frame.present();
+        self.gpu_profiler.after_submit(&self.device);
         Ok(())
     }
 }

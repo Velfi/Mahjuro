@@ -127,6 +127,14 @@ pub struct LitMeshInstance {
     pub shadow_uniform_buffer: wgpu::Buffer,
     #[allow(dead_code)]
     pub shadow_bind_group: wgpu::BindGroup,
+    /// Optional per-instance decal texture (used by yaku/wood tablets to
+    /// engrave a label on top of the procedural base material). When set,
+    /// `bind_group` binds this texture at slot 1 instead of the shared
+    /// transparent placeholder. The cached `(width, height, label hash)` lets
+    /// the renderer skip work when nothing has changed.
+    pub decal_texture: Option<wgpu::Texture>,
+    pub decal_label_hash: u64,
+    pub decal_size: (u32, u32),
 }
 
 impl LitMeshInstance {
@@ -187,7 +195,91 @@ impl LitMeshInstance {
             bind_group,
             shadow_uniform_buffer,
             shadow_bind_group,
+            decal_texture: None,
+            decal_label_hash: 0,
+            decal_size: (0, 0),
         }
+    }
+
+    /// Upload an RGBA8 decal texture for this instance and rebind it at
+    /// slot 1 of the material bind group. Used by the tablet decal pass to
+    /// engrave per-instance labels on bone/wood tablets without changing the
+    /// pipeline layout. The instance keeps ownership of the texture so it
+    /// stays alive for as long as the bind group references it.
+    pub fn set_decal(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) {
+        // Reuse the existing texture if its dimensions match — only the bytes
+        // change. Otherwise (or first time) allocate a fresh texture.
+        let needs_alloc = self
+            .decal_texture
+            .as_ref()
+            .map(|_| self.decal_size != (width, height))
+            .unwrap_or(true);
+        if needs_alloc {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("lit-mesh-decal"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.decal_texture = Some(tex);
+            self.decal_size = (width, height);
+        }
+        let tex = self.decal_texture.as_ref().expect("decal texture present");
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-mesh-bg-decal"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
     }
 
     /// Write the per-instance shadow caster uniform with the current
@@ -213,6 +305,21 @@ impl LitMeshInstance {
         model: glam::Mat4,
         material: MaterialParams,
     ) {
+        self.write_uniform_with_decal(queue, view_proj, model, material, false);
+    }
+
+    /// Same as [`write_uniform`] but also sets the per-instance "has engraved
+    /// decal" flag in `material_params.w`. The shader treats the bound
+    /// texture as a transparent overlay (composited via mix) instead of a
+    /// multiplicative albedo when this flag is set.
+    pub fn write_uniform_with_decal(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: [f32; 16],
+        model: glam::Mat4,
+        material: MaterialParams,
+        has_decal: bool,
+    ) {
         let u = MeshUniform {
             view_proj,
             model: model.to_cols_array(),
@@ -221,7 +328,7 @@ impl LitMeshInstance {
                 material.kind as u32 as f32,
                 material.specular_strength,
                 material.specular_power,
-                0.0,
+                if has_decal { 1.0 } else { 0.0 },
             ],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));

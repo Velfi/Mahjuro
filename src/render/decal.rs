@@ -101,6 +101,138 @@ pub fn rasterize_tile_face_decal(
     rgba
 }
 
+/// Rasterise a single-line engraved label onto a transparent RGBA8 buffer at
+/// `width × height`, ready to be uploaded as a per-instance decal texture for
+/// the bone yaku tablets and lacquered wood action tablets.
+///
+/// The text is laid out by [`rasterize_label`] (which auto-shrinks to fit
+/// width), and then blitted twice: once one pixel down/right in a darker
+/// "carved shadow" colour so the engraving reads at oblique camera angles, and
+/// once at the requested `ink` colour. Background is fully transparent so the
+/// shader can `mix` the procedural base material with the decal alpha.
+pub fn rasterize_tablet_label_decal(
+    text: &str,
+    ui_font: Option<&fontdue::Font>,
+    width: u32,
+    height: u32,
+    ink: [f32; 4],
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    // The label fills most of the tablet face but leaves a small margin so
+    // the glyphs don't run into the silhouette edge from the side.
+    let pad_x = (width as f32 * 0.08) as u32;
+    let pad_y = (height as f32 * 0.18) as u32;
+    let inner_w = width.saturating_sub(pad_x * 2).max(1);
+    let inner_h = height.saturating_sub(pad_y * 2).max(1);
+
+    let band = rasterize_label(font, text, inner_w, inner_h);
+
+    // Soft carved-shadow pass: a slightly darker tint, offset 1px down/right,
+    // so the engraving keeps shape under directional lighting.
+    let shadow = [
+        ink[0] * 0.25,
+        ink[1] * 0.22,
+        ink[2] * 0.20,
+        ink[3] * 0.85,
+    ];
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        width,
+        pad_x + 1,
+        pad_y + 1,
+        shadow,
+    );
+    // Main ink pass.
+    blit_tinted(&band, inner_w, inner_h, &mut rgba, width, pad_x, pad_y, ink);
+    rgba
+}
+
+/// Convenience wrapper: warm bone-coloured engraving for the yaku tablets.
+/// The default extents of the bone tablets in the gameplay scene give a
+/// roughly portrait-ish aspect, but the tablet text reads as a single short
+/// line (e.g. "Tanyao"), so we keep the decal landscape and let the shader
+/// stretch it across the face.
+pub fn rasterize_yaku_tablet_decal(name: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
+    rasterize_tablet_label_decal(name, ui_font, 256, 96, [0.42, 0.32, 0.18, 1.0])
+}
+
+/// Convenience wrapper: bright gilt engraving for the wood action tablets.
+/// The procedural lacquered-wood material is dark and busy, so a dark ink
+/// reads as illegible noise — a warm champagne tint pops cleanly against
+/// the grain so labels like "Sort by Suit" stay readable across the table.
+pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
+    rasterize_tablet_label_decal(label, ui_font, 256, 96, [1.00, 0.92, 0.62, 1.0])
+}
+
+/// Two-line engraved decal for the gameplay scene's hanging score plaque.
+/// `top` is the blind/round/score line (champagne ink, slightly larger);
+/// `bot` is the gold/wall/wind/shanten status line (parchment ink, slightly
+/// smaller). Both are baked into a 1024×384 transparent RGBA texture so the
+/// lit-mesh shader can composite them onto the +Z face of the plaque mesh.
+///
+/// Each line is rasterised independently with `font_px = None` so the
+/// auto-shrink path picks a size that fits both the available height
+/// **and** the line length — long score strings shrink horizontally
+/// instead of overflowing the inner band and getting clipped.
+///
+/// The plaque mesh is set up so only the front face samples this decal —
+/// chain nubs and side strips collapse to the (0,0) corner which we leave
+/// fully transparent. A 2-px-offset carved-shadow pass renders behind each
+/// line so the engraving still reads after the texture is bilinear-stretched
+/// across the on-screen plaque face.
+pub fn rasterize_plaque_decal(top: &str, bot: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
+    let (w, h) = PLAQUE_DECAL_SIZE;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    // Horizontal padding so glyphs don't run into the engraved-edge silhouette
+    // of the plaque face.
+    let pad_x = (w as f32 * 0.06) as u32;
+    let pad_y = (h as f32 * 0.10) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y * 2).max(1);
+
+    // Two equal-height bands so the auto-shrink formula has the same vertical
+    // budget for both lines. Auto-shrink picks `min(line_h * 0.55, inner_w *
+    // 1.5 / chars)` so long lines collapse horizontally instead of clipping.
+    let top_h = inner_h / 2;
+    let bot_h = inner_h - top_h;
+
+    let top_band = rasterize_label_styled(font, top, inner_w, top_h, None, LabelAlign::Center);
+    let bot_band = rasterize_label_styled(font, bot, inner_w, bot_h, None, LabelAlign::Center);
+
+    // Champagne ink for the headline, parchment for the status line.
+    let champagne = [1.00_f32, 0.92, 0.62, 1.0];
+    let parchment = [0.96_f32, 0.93, 0.78, 1.0];
+    // Carved shadow: darker tint, offset 2 px down/right so the engraving
+    // reads after bilinear stretch onto the plaque face.
+    let shadow_for = |ink: [f32; 4]| {
+        [
+            ink[0] * 0.22,
+            ink[1] * 0.20,
+            ink[2] * 0.16,
+            ink[3] * 0.85,
+        ]
+    };
+    blit_tinted(&top_band, inner_w, top_h, &mut rgba, w, pad_x + 2, pad_y + 2, shadow_for(champagne));
+    blit_tinted(&top_band, inner_w, top_h, &mut rgba, w, pad_x, pad_y, champagne);
+    blit_tinted(&bot_band, inner_w, bot_h, &mut rgba, w, pad_x + 2, pad_y + top_h + 2, shadow_for(parchment));
+    blit_tinted(&bot_band, inner_w, bot_h, &mut rgba, w, pad_x, pad_y + top_h, parchment);
+    rgba
+}
+
+/// Texture dimensions used by [`rasterize_plaque_decal`]. Exposed so the
+/// renderer can pass matching `(width, height)` to `set_decal` without
+/// hard-coding the same constants in two places.
+pub const PLAQUE_DECAL_SIZE: (u32, u32) = (1024, 384);
+
 /// Paint a soft inner border + corner gem onto an RGBA8 decal to mark a tile
 /// that has been enhanced by a talisman. The border is a 4-px-thick frame
 /// with a softer outer glow that fades to transparent, and a small inlay

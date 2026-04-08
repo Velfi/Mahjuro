@@ -9,7 +9,8 @@ use crate::game::cascade::ScoringCascade;
 use crate::game::run::{STARTING_DISCARDS, STARTING_PLAYS};
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
-use crate::render::draw_cmd::{DrawCmd, UiFrame};
+use crate::render::draw_cmd::{CascadeTokenKind, DrawCmd, UiFrame};
+use crate::render::falling_bones::FallingBoneSystem;
 use crate::render::particles::ParticleSystem;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{
@@ -20,6 +21,13 @@ use crate::ui::widget::{self, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+
+/// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
+/// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
+/// so the per-slot hit-test, focus ring, click target, and tooltip
+/// anchor track the visible (perspective-projected) dish position
+/// instead of the raw pixel anchor we hand the renderer.
+const PICK_CONSUMABLE_DISH: u32 = 1;
 
 /// One candle's animated state. The renderer's flame shader does the heavy
 /// lifting (procedural fbm noise + flicker), but each candle still needs a
@@ -82,12 +90,24 @@ pub struct GameplayScene {
     prev_displayed_score: u32,
     /// Particle effects for scoring.
     particles: ParticleSystem,
+    /// Physical scoring bones that tumble onto the play space during a
+    /// cascade. Spawned by each step reveal, integrated under gravity, and
+    /// cleared when the cascade ends.
+    falling_bones: FallingBoneSystem,
     /// Timestamp of last frame for dt calculation.
     last_frame: Instant,
     /// Shared pause menu overlay.
     pause_menu: PauseMenu,
     /// Which bottom button is focused (None = hand tiles have focus).
     button_focus: Option<GameplayButton>,
+    /// Cross-input consumable focus. When `Some(slot)`, the consumable
+    /// strip in the top-right is the active focus target — Confirm uses
+    /// the focused consumable, Cancel clears the focus, and the focused
+    /// slot is rendered with a brass highlight ring. Cycled by
+    /// `NavigateHudNext` / `NavigateHudPrev` (LB / RB on controller,
+    /// `[` / `]` on the keyboard). Lets controller and keyboard players
+    /// activate Zodiacs and Talismans without ever needing the mouse.
+    consumable_focus: Option<usize>,
     /// Tile indices that should depart this frame (set during update, consumed during draw).
     pending_departures: Vec<usize>,
     /// When set, the hand has been discarded-from but not yet refilled. The
@@ -96,9 +116,12 @@ pub struct GameplayScene {
     pending_refill: Option<Instant>,
     /// Latest cursor position (window coords), captured each update for hover tooltips.
     cursor_pos: (f32, f32),
-    /// Animated state for the four ambient candles flanking the play area.
+    /// Animated state for the ambient candles flanking the play area. The
+    /// first four are the original score-panel + hand-strip lanterns; the
+    /// fifth is a "footlight" candle in front of the camera that lights the
+    /// bottom row of yaku tablets and action buttons.
     /// Updated every frame; consumed in `draw()` to position flames + lights.
-    candles: [CandleState; 4],
+    candles: [CandleState; 5],
     /// Wall-clock time used to advance candle flicker (independent of the
     /// game's `Instant::now()` references so the candles keep moving even if
     /// the game logic is paused).
@@ -136,10 +159,29 @@ pub struct GameplayScene {
     /// wind gust at every candle position for `DEBUG_WIND_DURATION` so the
     /// flame's wind response is visible on demand. Triggered by `B`.
     debug_wind_at: Option<Instant>,
+    /// True until the opening blind transition has finished. While set, the
+    /// draw step floods the smoke grid with positive-density impulses across
+    /// the table during the `wind_delay_secs` window after the first deal,
+    /// so the player enters the round inside a curtain of smoke that the
+    /// existing post-deal wind sweep then blows away. Cleared once that
+    /// sweep completes so subsequent post-discard refills don't re-fill
+    /// the screen.
+    initial_smoke_fill_active: bool,
+    /// Debug-only: when true, the renderer overlays world-axes bars at the
+    /// camera target so we can see which direction is +X / +Y / +Z while
+    /// dialing in placements. Toggled by `F2`.
+    debug_show_axes: bool,
 }
 
 /// How long the debug `B` gust stays active after a press.
 const DEBUG_WIND_DURATION: f32 = 0.9;
+
+/// Wind-delay override used for the *first* deal of the scene only. The
+/// gameplay scene opens behind a fullscreen smoke curtain (a 2D dark
+/// overlay backed by positive-density fluid impulses); after this delay
+/// the existing post-deal wind sweep fires and blows the curtain off,
+/// fading the overlay out in lockstep so the game becomes visible.
+const OPENING_WIND_DELAY_SECS: f32 = 1.0;
 
 /// How long a relic glow lingers after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
@@ -151,11 +193,20 @@ const ZODIAC_USE_BASE: u32 = 0x9000;
 /// Click id for the `?` glossary badge in the gameplay HUD.
 const HELP_BADGE_ID: u32 = 0x9100;
 
+/// Catch-all `ButtonDef::scene` id pushed last so the gameplay scene can
+/// route 3D-object clicks (sort/play wood tablets, discard bowl) through
+/// `update()` based on `ctx.picked_gameplay_object`. Same pattern as the
+/// shop scene's `SHOP_3D_HIT_ID`. Smaller specific buttons (consumables,
+/// help badge) are pushed earlier and win the first-hit search in
+/// `main.rs`'s `MouseInput` handler.
+const GAMEPLAY_3D_HIT_ID: u32 = 0x9200;
+
 impl GameplayScene {
     /// Whether the cascade is actively animating (for redraw requests).
     pub fn is_animating(&self) -> bool {
         self.cascade.is_some()
             || self.particles.is_active()
+            || self.falling_bones.is_active()
             || self.pending_refill.is_some()
             || !self.relic_glow_starts.is_empty()
             || self.post_deal_gust_active()
@@ -188,19 +239,23 @@ impl GameplayScene {
             displayed_score: 0,
             prev_displayed_score: 0,
             particles: ParticleSystem::new(),
+            falling_bones: FallingBoneSystem::new(),
             last_frame: Instant::now(),
             pause_menu: PauseMenu::new(),
             button_focus: None,
+            consumable_focus: None,
             pending_departures: Vec::new(),
             pending_refill: None,
             cursor_pos: (0.0, 0.0),
-            // Four candles with golden-ratio spaced phases so their flicker
-            // never visually syncs up. Phases are in [0, TAU).
+            // Five candles with golden-ratio spaced phases so their flicker
+            // never visually syncs up. Phases are in [0, TAU). The fifth
+            // entry drives the front-camera footlight candle.
             candles: [
                 CandleState::new(0.0),
                 CandleState::new(1.7),
                 CandleState::new(3.9),
                 CandleState::new(5.2),
+                CandleState::new(2.6),
             ],
             candle_time: 0.0,
             relic_glow_starts: std::collections::HashMap::new(),
@@ -212,6 +267,8 @@ impl GameplayScene {
             wind_delay_secs: 3.0,
             wind_duration_secs: 1.4,
             debug_wind_at: None,
+            initial_smoke_fill_active: true,
+            debug_show_axes: false,
         }
     }
 }
@@ -239,6 +296,19 @@ impl SceneBehavior for GameplayScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.particles.update(dt);
+        self.falling_bones.update(dt);
+        // Cursor-movement guard: if the player has touched the mouse since
+        // the last frame, drop any active controller / keyboard consumable
+        // focus. Otherwise a mouse click on a hand tile (which generates
+        // `UiAction::Confirm`) would be eaten by the consumable handler
+        // and activate a Zodiac instead of selecting the tile. The guard
+        // uses a tiny pixel threshold so micro-jitter on a stationary
+        // cursor doesn't fight the controller focus.
+        let cursor_moved = (ctx.cursor_pos.0 - self.cursor_pos.0).abs() > 0.5
+            || (ctx.cursor_pos.1 - self.cursor_pos.1).abs() > 0.5;
+        if cursor_moved && self.consumable_focus.is_some() {
+            self.consumable_focus = None;
+        }
         self.cursor_pos = ctx.cursor_pos;
 
         // Cache the latest wind timing from the cascade tuning so live
@@ -246,6 +316,15 @@ impl SceneBehavior for GameplayScene {
         // `draw()` (no `cascade_tuning` access) can read these.
         self.wind_delay_secs = ctx.cascade_tuning.wind_delay_ms as f32 / 1000.0;
         self.wind_duration_secs = ctx.cascade_tuning.wind_duration_ms as f32 / 1000.0;
+        // First deal of the scene: shorten the wind_delay so the post-deal
+        // sweep fires shortly after the scene fade-in completes, blowing
+        // away the dense smoke curtain that the pick-blind scene already
+        // pumped into the persistent fluid sim. Subsequent post-discard
+        // refills get the normal (cascade-tuned) delay because they're
+        // ambient breath, not a transition handoff.
+        if self.initial_smoke_fill_active {
+            self.wind_delay_secs = OPENING_WIND_DELAY_SECS;
+        }
 
         // Detect deal events: any time the hand grows (initial round deal,
         // post-discard refill) we stamp `last_deal_at` so the post-deal smoke
@@ -255,6 +334,21 @@ impl SceneBehavior for GameplayScene {
             self.last_deal_at = Some(now);
         }
         self.prev_hand_len = cur_hand_len;
+
+        // The opening smoke curtain (`initial_smoke_fill_active`) is a
+        // one-shot: it floods the screen with positive-density impulses for
+        // the `wind_delay_secs` window after the *first* deal of this scene
+        // and then gets blown away by the existing post-deal wind sweep.
+        // Once that sweep finishes, clear the flag so subsequent
+        // post-discard refills don't re-flood the screen.
+        if self.initial_smoke_fill_active {
+            if let Some(deal_at) = self.last_deal_at {
+                let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
+                if elapsed >= self.wind_delay_secs + self.wind_duration_secs {
+                    self.initial_smoke_fill_active = false;
+                }
+            }
+        }
 
         // Advance candle flicker. Each candle's `flicker` is a smoothed
         // approach toward a target wave (sum of two sines per candle), so
@@ -319,6 +413,12 @@ impl SceneBehavior for GameplayScene {
         // Pause menu handling — drives the menu while paused and intercepts
         // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
+            // The pause menu's "Glossary" entry sets a one-shot flag and
+            // closes itself; drain the flag here so the gameplay glossary
+            // overlay opens on the very next frame.
+            if self.pause_menu.take_glossary_request() {
+                self.glossary.toggle();
+            }
             return t;
         }
 
@@ -344,6 +444,25 @@ impl SceneBehavior for GameplayScene {
                     if let Some(step) = cascade.breakdown.steps.get(idx) {
                         if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
                             self.relic_glow_starts.insert(rid, now);
+                        }
+                        // Rain a burst of physical scoring bones onto the
+                        // play area below the modifier strip — chips on the
+                        // left half of the strip, mult on the right half, so
+                        // the falling pile reads back to the HUD token that
+                        // just popped. Final-beat steps spawn from center.
+                        let bone_kind = match step.kind {
+                            StepKind::Chips => Some(CascadeTokenKind::Chips),
+                            StepKind::Mult => Some(CascadeTokenKind::Mult),
+                            StepKind::Final => None,
+                        };
+                        if let Some(kind) = bone_kind {
+                            let ms = ctx.layout.modifier_strip;
+                            let anchor_px = match kind {
+                                CascadeTokenKind::Chips => ms.x + ms.w * 0.30,
+                                CascadeTokenKind::Mult => ms.x + ms.w * 0.70,
+                            };
+                            let anchor_py = ms.y + ms.h + 20.0;
+                            self.falling_bones.burst(anchor_px, anchor_py, 6, kind);
                         }
                     }
                 }
@@ -371,6 +490,9 @@ impl SceneBehavior for GameplayScene {
                 self.cascade = None;
                 self.last_revealed_step = None;
                 self.cascade_final_emitted = false;
+                // Wipe the physical bones the moment scoring ends so the
+                // play space clears for the next hand.
+                self.falling_bones.clear();
             } else {
                 // Allow skip on any key press during cascade.
                 if !ctx.actions.is_empty() {
@@ -379,6 +501,7 @@ impl SceneBehavior for GameplayScene {
                     self.cascade = None;
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
+                    self.falling_bones.clear();
                 }
                 return None;
             }
@@ -431,17 +554,102 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Handle button-bar focus navigation.
+        // Clamp consumable focus to the current capacity (the player may
+        // have spent the focused consumable last frame, or the slot count
+        // could have shrunk after a sale). Out-of-range focus collapses
+        // back to None so the next NavigateHudNext re-enters at slot 0.
+        let consumable_capacity = ctx.run.consumables.capacity;
+        if let Some(idx) = self.consumable_focus {
+            if idx >= consumable_capacity {
+                self.consumable_focus = None;
+            }
+        }
+
+        // Handle button-bar focus navigation. Three focus targets exist:
+        // hand tiles (default, focus state lives in `ctx.focus_tile_index`),
+        // the bottom button bar (`button_focus`), and the consumable strip
+        // in the top-right (`consumable_focus`). At most one of the latter
+        // two is non-None at a time — `NavigateHudNext` / `NavigateHudPrev`
+        // (LB / RB on controller, `[` / `]` on the keyboard) cycle into
+        // the consumable strip from any state and step through its slots.
         let mut actions_for_scene: Vec<UiAction> = Vec::new();
         for &a in ctx.actions.iter() {
             match a {
+                // Cycle into / through the consumable strip. Stepping past
+                // the last slot wraps back to "no consumable focus" so the
+                // player can return to hand-tile / button-bar focus
+                // without needing a separate keybind.
+                UiAction::NavigateHudNext if consumable_capacity > 0 => {
+                    self.consumable_focus = match self.consumable_focus {
+                        None => Some(0),
+                        Some(i) if i + 1 >= consumable_capacity => None,
+                        Some(i) => Some(i + 1),
+                    };
+                    if self.consumable_focus.is_some() {
+                        // Entering consumable focus releases button-bar focus
+                        // so Confirm unambiguously activates the consumable.
+                        self.button_focus = None;
+                    }
+                    continue;
+                }
+                UiAction::NavigateHudPrev if consumable_capacity > 0 => {
+                    self.consumable_focus = match self.consumable_focus {
+                        None => Some(consumable_capacity - 1),
+                        Some(0) => None,
+                        Some(i) => Some(i - 1),
+                    };
+                    if self.consumable_focus.is_some() {
+                        self.button_focus = None;
+                    }
+                    continue;
+                }
+                // Cancel exits consumable focus (like Backspace clearing
+                // tile selection — gives the player a way back out).
+                UiAction::Cancel if self.consumable_focus.is_some() => {
+                    self.consumable_focus = None;
+                    continue;
+                }
+                // Confirm on the consumable strip activates the focused
+                // consumable. Drives the same `use_consumable` path as the
+                // mouse-click handler above, then clears focus so the next
+                // press doesn't double-fire on whatever shifted into the
+                // freed slot.
+                UiAction::Confirm if self.consumable_focus.is_some() => {
+                    let idx = self.consumable_focus.unwrap();
+                    if let Some(result) = ctx.run.use_consumable(idx) {
+                        match result {
+                            crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level } => {
+                                log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level,);
+                            }
+                            crate::game::run::ConsumableUseResult::Talisman { kind } => {
+                                log::info!(
+                                    "Used {} — every tile in hand stamped with {:?}",
+                                    kind.name(),
+                                    kind.enhancement(),
+                                );
+                            }
+                        }
+                    }
+                    self.consumable_focus = None;
+                    continue;
+                }
                 UiAction::FocusDown => {
+                    if self.consumable_focus.is_some() {
+                        // Drop out of consumable focus into the button bar.
+                        self.consumable_focus = None;
+                        self.button_focus = Some(GameplayButton::Play);
+                        continue;
+                    }
                     if self.button_focus.is_none() {
                         self.button_focus = Some(GameplayButton::Play);
                     }
                     continue;
                 }
                 UiAction::FocusUp => {
+                    if self.consumable_focus.is_some() {
+                        self.consumable_focus = None;
+                        continue;
+                    }
                     if self.button_focus.is_some() {
                         self.button_focus = None;
                         continue;
@@ -469,6 +677,33 @@ impl SceneBehavior for GameplayScene {
             actions_for_scene.push(a);
         }
 
+        // 3D-hit dispatcher: when the catch-all `GAMEPLAY_3D_HIT_ID`
+        // button fires, route the click based on what the renderer's
+        // raycast picker actually hit this frame. The picker is the
+        // single source of truth for which 3D action object the cursor
+        // is over — we synthesise the same `UiAction`s that the keyboard
+        // shortcuts enqueue and append them to `actions_for_scene`, so
+        // the rest of the update flow (cascade-active gating, focus
+        // highlighting, animation triggers, etc.) is identical for
+        // mouse and keyboard. Yaku tablets are hover-only and don't
+        // contribute clicks.
+        for &cid in ctx.button_clicks {
+            if cid != GAMEPLAY_3D_HIT_ID {
+                continue;
+            }
+            use crate::render::wgpu_renderer::GameplayPick;
+            let action = match ctx.picked_gameplay_object {
+                Some(GameplayPick::WoodTablet(0)) => Some(UiAction::SortBySuit),
+                Some(GameplayPick::WoodTablet(1)) => Some(UiAction::SortByRank),
+                Some(GameplayPick::WoodTablet(2)) => Some(UiAction::ScoreHand),
+                Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
+                _ => None,
+            };
+            if let Some(a) = action {
+                actions_for_scene.push(a);
+            }
+        }
+
         // Clear any previous frame's departures.
         self.pending_departures.clear();
 
@@ -481,6 +716,17 @@ impl SceneBehavior for GameplayScene {
         {
             self.debug_wind_at = Some(now);
             log::info!("[debug] candle wind gust triggered");
+        }
+
+        if actions_for_scene
+            .iter()
+            .any(|a| matches!(a, UiAction::DebugToggleAxes))
+        {
+            self.debug_show_axes = !self.debug_show_axes;
+            log::info!(
+                "[debug] world-axes overlay {}",
+                if self.debug_show_axes { "ON" } else { "OFF" }
+            );
         }
 
         // Normal input handling when no cascade is active.
@@ -755,10 +1001,10 @@ impl SceneBehavior for GameplayScene {
             run.gold, tiles_left, wind_label, shanten_text, dora_section
         );
         // Captured for the hanging plaque cmd built later in `frame.cmds`.
-        // The plaque carries the same two-line payload, decal-rasterized
-        // onto the wood face in a future phase. For now the existing 2D
-        // text labels (header_text_labels below) sit on top of the wood
-        // and supply the readable text.
+        // The plaque carries the same two-line payload as a per-instance
+        // decal texture engraved onto the wood face — no 2D overlay text
+        // sits on top of the wood anymore, so the smoke composite can
+        // drift over the plaque without text bleeding through it.
         let plaque_top_text = score_text_top.clone();
         let plaque_bot_text = score_text_bot.clone();
         // Boss-rule ofuda payload: derived independently from `run` so the
@@ -836,14 +1082,12 @@ impl SceneBehavior for GameplayScene {
                 // scale uniformly. (chip_pulse - 1) / 0.12 maps the active
                 // band into [0, 1] for the renderer's pulse field.
                 let pulse_t = ((chip_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
-                cascade_token_placements.push(
-                    crate::render::draw_cmd::CascadeTokenPlacement {
-                        world_pos: [cx, cy, 4.0],
-                        extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
-                        kind: crate::render::draw_cmd::CascadeTokenKind::Chips,
-                        pulse: pulse_t,
-                    },
-                );
+                cascade_token_placements.push(crate::render::draw_cmd::CascadeTokenPlacement {
+                    world_pos: [cx, cy, 4.0],
+                    extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                    kind: crate::render::draw_cmd::CascadeTokenKind::Chips,
+                    pulse: pulse_t,
+                });
                 cascade_labels.push(TextLabel {
                     rect: [chips_x, pill_y, pill_w, pill_h],
                     text: format!("{}", frame.displayed_chips),
@@ -864,14 +1108,12 @@ impl SceneBehavior for GameplayScene {
                 let cx = mult_x + pill_w * 0.5;
                 let cy = pill_y + pill_h * 0.5;
                 let pulse_t = ((mult_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
-                cascade_token_placements.push(
-                    crate::render::draw_cmd::CascadeTokenPlacement {
-                        world_pos: [cx, cy, 4.0],
-                        extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
-                        kind: crate::render::draw_cmd::CascadeTokenKind::Mult,
-                        pulse: pulse_t,
-                    },
-                );
+                cascade_token_placements.push(crate::render::draw_cmd::CascadeTokenPlacement {
+                    world_pos: [cx, cy, 4.0],
+                    extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                    kind: crate::render::draw_cmd::CascadeTokenKind::Mult,
+                    pulse: pulse_t,
+                });
                 cascade_labels.push(TextLabel {
                     rect: [mult_x, pill_y, pill_w, pill_h],
                     text: mult_str,
@@ -1040,7 +1282,7 @@ impl SceneBehavior for GameplayScene {
         // that hover tooltips' background quads no longer compete with
         // persistent text — they're a separate downstream batch.
         let mut hud_quads: Vec<GpuInstance> = Vec::new();
-        let mut hud_text: Vec<TextLabel> = Vec::new();
+        let hud_text: Vec<TextLabel> = Vec::new();
         let mut hover_quads: Vec<GpuInstance> = Vec::new();
         let mut hover_text: Vec<TextLabel> = Vec::new();
 
@@ -1100,9 +1342,6 @@ impl SceneBehavior for GameplayScene {
             let n = visible_previews.len() as f32;
             let card_gap = 6.0 * scale;
             let card_w = (panel_w - card_gap * (n - 1.0)) / n;
-            // Pinned font sizes — never let the rasterizer auto-shrink card
-            // text into illegibility, regardless of how narrow the cards get.
-            let name_font = (panel_h * 0.30).max(13.0);
             // Tablets are flat-on-table dominoes: extents[0] is width
             // (matches card width), extents[1] is the thickness above the
             // wood, extents[2] is depth (matches card height into the
@@ -1113,38 +1352,41 @@ impl SceneBehavior for GameplayScene {
                 let cy = panel_y;
                 let center_px = cx + card_w * 0.5;
                 let center_py = cy + panel_h * 0.5;
-                let (cur_x, cur_y) = self.cursor_pos;
-                let hovered_now =
-                    cur_x >= cx && cur_x <= cx + card_w && cur_y >= cy && cur_y <= cy + panel_h;
-                yaku_tablet_placements.push(
-                    crate::render::draw_cmd::YakuTabletPlacement {
-                        world_pos: [center_px, center_py, 0.0],
-                        extents: [card_w, tablet_thickness, panel_h],
-                        name: p.kind.name().to_string(),
-                        progress: p.progress,
-                        active: p.active,
-                        hover: if hovered_now { 1.0 } else { 0.0 },
-                    },
+                // Hover state comes from the renderer's raycast picker
+                // (precomputed local AABB × per-frame model matrix), not
+                // from screen-rect hit-testing the projected AABB. The
+                // picker is one frame stale, like every other 3D pick
+                // path in the engine.
+                let hovered_now = matches!(
+                    ctx.picked_gameplay_object,
+                    Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j))
+                        if j == i,
                 );
-                // Yaku name centered on the tablet face. Color matches the
-                // active/dim state of the underlying tablet.
-                let name_color = if p.active {
-                    [1.0, 0.92, 0.55, 1.0]
-                } else {
-                    [0.92, 0.86, 0.72, 1.0]
-                };
-                hud_text.push(TextLabel {
-                    rect: [cx + 4.0, cy + 2.0, card_w - 8.0, panel_h - 4.0],
-                    text: p.kind.name().to_string(),
-                    color: name_color,
-                    font_px: Some(name_font),
-                    no_glossary: true,
-                    ..Default::default()
+                yaku_tablet_placements.push(crate::render::draw_cmd::YakuTabletPlacement {
+                    world_pos: [center_px, center_py, 0.0],
+                    extents: [card_w, tablet_thickness, panel_h],
+                    name: p.kind.name().to_string(),
+                    progress: p.progress,
+                    active: p.active,
+                    hover: if hovered_now { 1.0 } else { 0.0 },
                 });
+                // The yaku name is now engraved directly on the bone tablet
+                // via a per-instance decal texture (see the renderer's tablet
+                // pass), so no 2D text overlay is pushed here.
 
                 // Hover tracking for the tooltip pass below the loop.
+                // Anchor the tooltip to the *projected* on-screen rect so
+                // it pops up next to the tablet the player can actually
+                // see — falls back to the input pixel rect on the first
+                // frame before projection data is available.
                 if hovered_now {
-                    hovered_yaku = Some((p.kind, center_px, cy));
+                    let (ax, ay) = match ctx.projected_yaku_tablet_rects.get(i).copied() {
+                        Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
+                            (px + pw * 0.5, py)
+                        }
+                        _ => (center_px, cy),
+                    };
+                    hovered_yaku = Some((p.kind, ax, ay));
                 }
             }
         }
@@ -1206,7 +1448,34 @@ impl SceneBehavior for GameplayScene {
         let play_enabled = selection_valid && run.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && run.discards_remaining > 0;
         for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
-            // Focus highlight stays as a 2D rect — keyboard nav affordance.
+            // The hover state for the 3D action objects comes from the
+            // renderer's raycast picker against precomputed local AABBs —
+            // no projected screen rects, no per-frame intersection of
+            // input pixel rects with camera-distorted AABBs. The picker
+            // is one frame stale, like every other 3D pick path.
+            let pick = ctx.picked_gameplay_object;
+            let hovered = match i {
+                0 => matches!(
+                    pick,
+                    Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(0)),
+                ),
+                1 => matches!(
+                    pick,
+                    Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(1)),
+                ),
+                2 => matches!(
+                    pick,
+                    Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(2)),
+                ),
+                3 => matches!(
+                    pick,
+                    Some(crate::render::wgpu_renderer::GameplayPick::DiscardBowl),
+                ),
+                _ => false,
+            };
+            // Keyboard focus highlight still uses the input pixel rect:
+            // it's a 2D affordance for keyboard nav and never needs to
+            // sync with the visible 3D footprint.
             if self.button_focus == Some(ALL_BUTTONS[i]) {
                 let pad = 3.0;
                 hud_quads.push(GpuInstance {
@@ -1216,41 +1485,42 @@ impl SceneBehavior for GameplayScene {
             }
             let center_px = bx + bw * 0.5;
             let center_py = by + bh * 0.5;
-            let (cur_x, cur_y) = self.cursor_pos;
-            let hovered = cur_x >= bx && cur_x <= bx + bw && cur_y >= by && cur_y <= by + bh;
             let tablet_thickness = (bh * 0.35).max(8.0);
             match i {
                 0 | 1 | 2 => {
                     let label = match i {
                         0 => "Sort by Suit",
                         1 => "Sort by Rank",
-                        _ => "Play",
+                        _ => "Play Hand",
                     };
                     let disabled = i == 2 && !play_enabled;
-                    wood_tablet_placements.push(
-                        crate::render::draw_cmd::WoodTabletPlacement {
-                            world_pos: [center_px, center_py, 0.0],
-                            extents: [bw, tablet_thickness, bh],
-                            label: label.to_string(),
-                            pressed: 0.0,
-                            hover: if hovered { 1.0 } else { 0.0 },
-                            disabled,
-                        },
-                    );
+                    wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
+                        world_pos: [center_px, center_py, 0.0],
+                        extents: [bw, tablet_thickness, bh],
+                        label: label.to_string(),
+                        pressed: 0.0,
+                        hover: if hovered { 1.0 } else { 0.0 },
+                        disabled,
+                    });
                 }
                 3 => {
-                    // Discard bowl. The bowl mesh is round, so its X and Z
-                    // extents should be roughly equal — we use the smaller
-                    // of (bw, bh*1.6) so the bowl fits inside the button
-                    // footprint without ballooning sideways.
-                    let bowl_diam = bw.min(bh * 1.8);
-                    let bowl_h = bh * 1.4;
-                    discard_bowl_placement =
-                        Some(crate::render::draw_cmd::BowlPlacement {
-                            world_pos: [center_px, center_py, 0.0],
-                            extents: [bowl_diam, bowl_h, bowl_diam],
-                            hover: if hovered && discard_enabled { 1.0 } else { 0.0 },
-                        });
+                    // Discard bowl. The bowl mesh now bakes its low / wide
+                    // bowl proportions into local space (height ≈ 0.30 vs
+                    // diameter 1.0), so we scale uniformly here and let the
+                    // mesh shape it. We size the rim diameter generously
+                    // — up to 2.4 × the button height — so the bowl reads
+                    // as a clearly-bowl-shaped object next to the wood
+                    // tablets, even when the action row is short.
+                    let bowl_diam = bw.min(bh * 2.4);
+                    // Nudge the bowl to the right of its slot center so it
+                    // sits clearly outboard of the Play Hand tablet rather
+                    // than crowding into it.
+                    let bowl_cx = center_px + bw * 0.45;
+                    discard_bowl_placement = Some(crate::render::draw_cmd::BowlPlacement {
+                        world_pos: [bowl_cx, center_py, 0.0],
+                        extents: [bowl_diam, bowl_diam, bowl_diam],
+                        hover: if hovered && discard_enabled { 1.0 } else { 0.0 },
+                    });
                 }
                 _ => {}
             }
@@ -1275,100 +1545,66 @@ impl SceneBehavior for GameplayScene {
         // strip cascade/idle text are kept in their own dedicated buffers
         // so the final assembly can place them between the score-panel
         // backplane quads and the rest of the HUD body.
-        let header_top_font = (ctx_h * 0.30).max(14.0);
-        let header_bot_font = (ctx_h * 0.21).max(12.0);
-        let line_top_h = ctx_h * 0.55;
-        let line_bot_h = ctx_h * 0.45;
-        let header_text_labels: Vec<TextLabel> = vec![
-            TextLabel {
-                rect: [ctx_x, ctx_y, ctx_w, line_top_h],
-                text: score_text_top,
-                color: crate::render::theme::color::CHAMPAGNE,
-                font_px: Some(header_top_font),
-                ..Default::default()
-            },
-            TextLabel {
-                rect: [ctx_x, ctx_y + line_top_h, ctx_w, line_bot_h],
-                text: score_text_bot,
-                color: crate::render::theme::color::PARCHMENT,
-                font_px: Some(header_bot_font),
-                ..Default::default()
-            },
+        // Score header text is engraved directly onto the hanging plaque's
+        // +Z face via the per-instance decal pipeline (see the plaque draw
+        // path in `wgpu_renderer.rs` and `rasterize_plaque_decal` in
+        // `decal.rs`). The two-line payload travels in `plaque_top_text` /
+        // `plaque_bot_text` on the `PlaquePlacement` cmd pushed below — no
+        // 2D overlay text is emitted for the header anymore, so the smoke
+        // composite can drift over the wood face without text floating
+        // on top of it.
+        let _ = (ctx_x, ctx_y, ctx_w, ctx_h, &score_text_top, &score_text_bot);
+        // Modifier strip: dynamic cascade widgets (when active) or status
+        // text (idle). Anchored to the SECOND projected plaque rect (the
+        // status placard pushed below the main score plaque) so the text
+        // reads as if engraved on its wood face.
+        let placard_rect = ctx
+            .projected_plaque_rects
+            .get(1)
+            .copied()
+            .unwrap_or([ms.x, ms.y, ms.w, ms.h]);
+        let placard_pad_x = placard_rect[2] * 0.05;
+        let placard_pad_y = placard_rect[3] * 0.10;
+        let placard_inner = [
+            placard_rect[0] + placard_pad_x,
+            placard_rect[1] + placard_pad_y,
+            (placard_rect[2] - placard_pad_x * 2.0).max(1.0),
+            (placard_rect[3] - placard_pad_y * 2.0).max(1.0),
         ];
-        // Modifier strip: dynamic cascade widgets (when active) or status text (idle).
+        let placard_font = (placard_inner[3] * 0.55).max(14.0);
         let mut modifier_strip_text: Vec<TextLabel> = Vec::new();
         if cascade_labels.is_empty() {
             modifier_strip_text.push(TextLabel {
-                rect: [ms.x, ms.y, ms.w, ms.h],
+                rect: placard_inner,
                 text: cascade_text,
                 color: cascade_color,
+                font_px: Some(placard_font),
                 ..Default::default()
             });
         } else {
+            // Cascade labels keep their own pre-laid-out rects.
             modifier_strip_text.extend(cascade_labels);
         }
-        // Button bar text labels — pushed into the persistent HUD layer so
-        // they sit on top of the corresponding button base quads.
-        hud_text.push(TextLabel {
-            rect: [
-                suit_btn_rect.0,
-                suit_btn_rect.1,
-                suit_btn_rect.2,
-                suit_btn_rect.3,
-            ],
-            text: "Sort by Suit".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
-            ..Default::default()
-        });
-        hud_text.push(TextLabel {
-            rect: [
-                rank_btn_rect.0,
-                rank_btn_rect.1,
-                rank_btn_rect.2,
-                rank_btn_rect.3,
-            ],
-            text: "Sort by Rank".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
-            ..Default::default()
-        });
-        hud_text.push(TextLabel {
-            rect: [
-                play_btn_rect.0,
-                play_btn_rect.1,
-                play_btn_rect.2,
-                play_btn_rect.3,
-            ],
-            text: "Play Hand".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
-            ..Default::default()
-        });
-        hud_text.push(TextLabel {
-            rect: [
-                discard_btn_rect.0,
-                discard_btn_rect.1,
-                discard_btn_rect.2,
-                discard_btn_rect.3,
-            ],
-            text: "Discard".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
-            ..Default::default()
-        });
+        // The Sort/Play labels are now engraved directly on the wood tablets
+        // (per-instance decals applied in the renderer's tablet pass), and
+        // the Discard bowl reads as a bowl visually, so no 2D button text
+        // labels are pushed into the HUD overlay anymore.
 
-        // While paused, don't expose gameplay buttons as clickable — the
-        // pause overlay (added below) swallows all input via its own buttons
-        // plus a fullscreen blocker. Otherwise a click on Discard while
-        // paused would push CommitDiscard, which the pause menu interprets
-        // as "activate focused item".
-        let mut buttons: Vec<ButtonDef> = if paused {
-            Vec::new()
-        } else {
-            vec![
-                ButtonDef::ui(suit_btn_rect, UiAction::SortBySuit),
-                ButtonDef::ui(rank_btn_rect, UiAction::SortByRank),
-                ButtonDef::ui(play_btn_rect, UiAction::ScoreHand),
-                ButtonDef::ui(discard_btn_rect, UiAction::CommitDiscard),
-            ]
-        };
+        // The 3D action objects (sort suit / sort rank / play hand wood
+        // tablets + discard bowl) no longer go through `frame.buttons`.
+        // Their click routing is driven by `pick_gameplay_object` in
+        // `main.rs`'s `MouseInput` handler — clicks land on whichever 3D
+        // object the cursor is *actually* over per raycast, not whichever
+        // 2D rect happens to overlap the cursor. This avoids the
+        // perspective-distortion issues that plagued the projected-rect
+        // approach. Keyboard nav (button_focus) still works because the
+        // `update()` path enqueues UiActions directly.
+        //
+        // While paused, no gameplay buttons should be clickable — the
+        // pause overlay swallows all input via its own buttons plus a
+        // fullscreen blocker.
+        let mut buttons: Vec<ButtonDef> = Vec::new();
+        let _ = paused;
 
         // ── Consumable inventory bar (Zodiacs + Talismans) ───────────────
         //
@@ -1396,38 +1632,86 @@ impl SceneBehavior for GameplayScene {
             let strip_x = layout.window_w - total_w - (16.0 * zscale);
             let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
             talisman_dish_strip = Some((strip_x, strip_y, total_w, slot_h));
+
+            // ── Projection-aware slot rects ──────────────────────────────
+            // The brass dish gets projected through the gameplay camera
+            // to a different on-screen position than its raw pixel anchor.
+            // We look up the previous frame's projected dish rect and
+            // remap each per-slot rect through the same affine transform
+            // (treating the dish as roughly planar). This keeps the
+            // tooltip hit-test, focus ring, click target, and tooltip
+            // anchor in lockstep with the visible pendant.
+            //
+            // Must match the dish-padding values used at the
+            // `frame.dish_explicit(...)` push site below.
+            let dish_pad_x_ratio = 0.10_f32;
+            let dish_pad_y_ratio = 0.40_f32;
+            let dish_pad_x = total_w * dish_pad_x_ratio;
+            let dish_pad_y = slot_h * dish_pad_y_ratio;
+            let orig_dish_x = strip_x - dish_pad_x;
+            let orig_dish_y = strip_y - dish_pad_y;
+            let orig_dish_w = total_w + dish_pad_x * 2.0;
+            let orig_dish_h = slot_h + dish_pad_y * 2.0;
+            let projected_dish = ctx
+                .aux_dish_rects
+                .iter()
+                .find_map(|(pid, r)| (*pid == Some(PICK_CONSUMABLE_DISH)).then_some(*r));
+            let slot_screen_rect = |slot_idx: usize| -> (f32, f32, f32, f32) {
+                let raw_x = strip_x + slot_idx as f32 * (slot_w + gap);
+                let raw_y = strip_y;
+                if let Some([pdx, pdy, pdw, pdh]) = projected_dish {
+                    if pdw > 0.0 && pdh > 0.0 {
+                        let tx0 = (raw_x - orig_dish_x) / orig_dish_w;
+                        let tx1 = (raw_x + slot_w - orig_dish_x) / orig_dish_w;
+                        let ty0 = (raw_y - orig_dish_y) / orig_dish_h;
+                        let ty1 = (raw_y + slot_h - orig_dish_y) / orig_dish_h;
+                        let psx0 = pdx + pdw * tx0;
+                        let psx1 = pdx + pdw * tx1;
+                        let psy0 = pdy + pdh * ty0;
+                        let psy1 = pdy + pdh * ty1;
+                        return (psx0, psy0, psx1 - psx0, psy1 - psy0);
+                    }
+                }
+                // First-frame fallback (no projection data yet) — use the
+                // raw pixel rect. One frame of misalignment, then the
+                // projected path takes over.
+                (raw_x, raw_y, slot_w, slot_h)
+            };
+
             for slot_idx in 0..consumables.capacity {
+                // Pendant placement still uses the raw pixel anchors
+                // (those get re-projected by the renderer for rendering).
+                // The 2D overlays use the projected slot rect derived
+                // from the dish.
                 let zx = strip_x + slot_idx as f32 * (slot_w + gap);
                 let zy = strip_y;
+                let (slot_sx, slot_sy, slot_sw, slot_sh) = slot_screen_rect(slot_idx);
                 if let Some(&item) = consumables.items.get(slot_idx) {
                     // Physical pendant on the dish — color encodes the
                     // consumable type. Zodiacs read jade-green, talismans
                     // pick up the talisman's enhancement family color.
                     let pendant_color = match item {
-                        crate::core::consumable::Consumable::Zodiac(_) => {
-                            [0.45, 0.78, 0.55, 1.0]
-                        }
-                        crate::core::consumable::Consumable::Talisman(_) => {
-                            [0.92, 0.78, 0.32, 1.0]
-                        }
+                        crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
+                        crate::core::consumable::Consumable::Talisman(_) => [0.92, 0.78, 0.32, 1.0],
                     };
-                    talisman_dish_placements.push(
-                        crate::render::draw_cmd::TalismanPlacement {
-                            center_pos: [zx + slot_w * 0.5, zy + slot_h * 0.5, 8.0],
-                            extents: [slot_w * 0.55, slot_h * 0.85, 6.0],
-                            rotation_y_deg: 0.0,
-                            color: pendant_color,
-                        },
-                    );
-                    let name_font = (slot_h * 0.34).max(14.0);
-                    let sub_font = (slot_h * 0.28).max(12.0);
-                    let name_h = slot_h * 0.46;
-                    let (name_text, sub_text, tooltip_title, tooltip_body) = match item {
+                    talisman_dish_placements.push(crate::render::draw_cmd::TalismanPlacement {
+                        center_pos: [zx + slot_w * 0.5, zy + slot_h * 0.5, 8.0],
+                        extents: [slot_w * 0.55, slot_h * 0.85, 6.0],
+                        rotation_y_deg: 0.0,
+                        // Lay flat on the dish (face up). -90 around
+                        // X (CW from the right view) rotates the
+                        // tablet's front-face normal from +Z to +Y.
+                        rotation_x_deg: -90.0,
+                        color: pendant_color,
+                    });
+                    // The persistent on-slot labels (name + sub) are
+                    // gone — the brass dish + colored pendant are the
+                    // visual representation, and the hover tooltip below
+                    // supplies the full name/description on demand.
+                    let (tooltip_title, tooltip_body) = match item {
                         crate::core::consumable::Consumable::Zodiac(z) => {
                             let level = run.yaku_levels.level_of(z.yaku());
                             (
-                                z.name().to_string(),
-                                format!("{} L{}", z.yaku().name(), level),
                                 format!("{} (Zodiac)", z.name()),
                                 format!(
                                     "Click or press to use. Permanently raises {} from level {} to {} for the rest of the run (+0.5 mult, +20 chips per level).",
@@ -1438,8 +1722,6 @@ impl SceneBehavior for GameplayScene {
                             )
                         }
                         crate::core::consumable::Consumable::Talisman(t) => (
-                            t.name().to_string(),
-                            "Buff hand".to_string(),
                             format!("{} (Talisman)", t.name()),
                             format!(
                                 "Click or press to use. {} The enhancement persists on each tile until it's played or discarded.",
@@ -1447,34 +1729,53 @@ impl SceneBehavior for GameplayScene {
                             ),
                         ),
                     };
-                    hud_text.push(TextLabel {
-                        rect: [zx, zy + 2.0, slot_w, name_h],
-                        text: name_text,
-                        color: crate::render::theme::color::CHAMPAGNE,
-                        font_px: Some(name_font),
-                        ..Default::default()
-                    });
-                    let yaku_h = slot_h * 0.40;
-                    hud_text.push(TextLabel {
-                        rect: [zx, zy + name_h + 2.0, slot_w, yaku_h],
-                        text: sub_text,
-                        color: crate::render::theme::color::PARCHMENT,
-                        font_px: Some(sub_font),
-                        ..Default::default()
-                    });
                     if !paused {
                         buttons.push(ButtonDef::scene(
-                            (zx, zy, slot_w, slot_h),
+                            (slot_sx, slot_sy, slot_sw, slot_sh),
                             ZODIAC_USE_BASE + slot_idx as u32,
                         ));
                     }
+                    // Cross-input focus ring: when this slot is the active
+                    // controller / keyboard consumable focus, draw a brass
+                    // outline around it so the player can see what Confirm
+                    // will activate. Pushed into hud_quads so it lands on
+                    // the same layer as the dish + pendant, before tooltips.
+                    if Some(slot_idx) == self.consumable_focus {
+                        let bt = (3.0 * scale).max(2.0);
+                        let pad = (4.0 * scale).max(3.0);
+                        let rx = slot_sx - pad;
+                        let ry = slot_sy - pad;
+                        let rw = slot_sw + pad * 2.0;
+                        let rh = slot_sh + pad * 2.0;
+                        let ring = [0.95, 0.78, 0.32, 1.0];
+                        hud_quads.push(GpuInstance {
+                            rect: [rx, ry, rw, bt],
+                            color: ring,
+                        });
+                        hud_quads.push(GpuInstance {
+                            rect: [rx, ry + rh - bt, rw, bt],
+                            color: ring,
+                        });
+                        hud_quads.push(GpuInstance {
+                            rect: [rx, ry, bt, rh],
+                            color: ring,
+                        });
+                        hud_quads.push(GpuInstance {
+                            rect: [rx + rw - bt, ry, bt, rh],
+                            color: ring,
+                        });
+                    }
                     let (cx, cy) = self.cursor_pos;
-                    if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
+                    if cx >= slot_sx
+                        && cx <= slot_sx + slot_sw
+                        && cy >= slot_sy
+                        && cy <= slot_sy + slot_sh
+                    {
                         push_tooltip(
                             &mut hover_quads,
                             &mut hover_text,
-                            zx + slot_w * 0.5,
-                            zy,
+                            slot_sx + slot_sw * 0.5,
+                            slot_sy,
                             layout.window_w,
                             layout.window_h,
                             &tooltip_title,
@@ -1485,12 +1786,16 @@ impl SceneBehavior for GameplayScene {
                     // Empty slot — no flat backdrop; the brass dish itself
                     // visually represents the empty cradle. Tooltip on hover.
                     let (cx, cy) = self.cursor_pos;
-                    if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
+                    if cx >= slot_sx
+                        && cx <= slot_sx + slot_sw
+                        && cy >= slot_sy
+                        && cy <= slot_sy + slot_sh
+                    {
                         push_tooltip(
                             &mut hover_quads,
                             &mut hover_text,
-                            zx + slot_w * 0.5,
-                            zy,
+                            slot_sx + slot_sw * 0.5,
+                            slot_sy,
                             layout.window_w,
                             layout.window_h,
                             "Consumable Slot",
@@ -1584,11 +1889,8 @@ impl SceneBehavior for GameplayScene {
                     // headline; the per-source breakdown follows so the
                     // player can see *why* the tile is worth what it is.
                     let dora_faces = run.wall.dora_faces();
-                    let eff = crate::core::scoring::tile_effective_value(
-                        tile,
-                        &run.relics,
-                        &dora_faces,
-                    );
+                    let eff =
+                        crate::core::scoring::tile_effective_value(tile, &run.relics, &dora_faces);
                     let name = tile.full_name();
                     let category = tile.category();
                     let is_selected = run.selected.get(idx).copied().unwrap_or(false);
@@ -1694,50 +1996,10 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // ── Help (`?`) badge — top-left corner ───────────────────────────
-        //
-        // A small clickable badge that opens the glossary overlay. Sized to
-        // match the existing top HUD chrome, positioned outside the score
-        // panel so it doesn't crowd the cartouche.
-        let help_w = (38.0 * scale).max(24.0);
-        let help_h = help_w;
-        let help_x = (12.0 * scale).max(8.0);
-        let help_y = layout.score_panel.y + (layout.score_panel.h - help_h) * 0.5;
-        hud_quads.push(GpuInstance {
-            rect: [help_x, help_y, help_w, help_h],
-            color: crate::render::theme::color::alpha(crate::render::theme::color::INDIGO, 0.92),
-        });
-        // Gold rim so the badge reads as interactive.
-        let rim = (1.5 * scale).max(1.0);
-        let gold = crate::render::theme::color::GOLD;
-        hud_quads.push(GpuInstance {
-            rect: [help_x, help_y, help_w, rim],
-            color: gold,
-        });
-        hud_quads.push(GpuInstance {
-            rect: [help_x, help_y + help_h - rim, help_w, rim],
-            color: gold,
-        });
-        hud_quads.push(GpuInstance {
-            rect: [help_x, help_y, rim, help_h],
-            color: gold,
-        });
-        hud_quads.push(GpuInstance {
-            rect: [help_x + help_w - rim, help_y, rim, help_h],
-            color: gold,
-        });
-        hud_text.push(TextLabel {
-            rect: [help_x, help_y, help_w, help_h],
-            text: "?".into(),
-            color: crate::render::theme::color::CHAMPAGNE,
-            ..Default::default()
-        });
-        if !paused {
-            buttons.push(ButtonDef::scene(
-                (help_x, help_y, help_w, help_h),
-                HELP_BADGE_ID,
-            ));
-        }
+        // Phase 8: the `?` glossary badge has been removed from the
+        // gameplay HUD. The glossary is now reachable from the pause menu's
+        // "Glossary" entry. The keyboard `Help` action shortcut still works
+        // as a hidden affordance for power users.
 
         // Pause overlay — built into its own dedicated layer so it lands
         // ABOVE the hover layer in canonical push order. Reuses the
@@ -1815,7 +2077,7 @@ impl SceneBehavior for GameplayScene {
         // wick projected into the same screen band as the tiles.
         let bottom_pad = edge_pad + candle_w * 1.6;
         let bottom_z_back = candle_h * 0.55; // shift back along table-Z
-        let candle_centers: [(f32, f32); 4] = [
+        let candle_centers: [(f32, f32); 5] = [
             // Score panel left
             (
                 (sp.x - candle_w * 0.5 - edge_pad).max(candle_w * 0.5 + 4.0),
@@ -1838,6 +2100,16 @@ impl SceneBehavior for GameplayScene {
                     .min(layout.window_w - candle_w * 0.5 - 4.0),
                 strip_y - bottom_z_back,
             ),
+            // Footlight: a fifth candle planted *behind* the camera so
+            // its pool spills forward across the bottom row of yaku and
+            // wood tablets without the candle mesh itself floating into
+            // the player's view. The renderer's `pixel_to_world` maps
+            // pixel-y → table-z linearly, and the gameplay camera sits
+            // around z = 0.95 * window_h (i.e. pixel-y ≈ 1.45 * window_h
+            // in this mapping), so anything past ~1.5 * window_h is
+            // safely clipped out of the view frustum. The point light
+            // attached to the wick is what does the actual illumination.
+            (layout.window_w * 0.5, layout.window_h * 1.55),
         ];
 
         // The candles stand vertically on the (now horizontal) wood table.
@@ -1880,7 +2152,10 @@ impl SceneBehavior for GameplayScene {
             let (jitter_x_pix, jitter_y_pix) = match i {
                 0 | 1 => (jx * 22.0 * scale_c, jy * 16.0 * scale_c),
                 2 => (-jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
-                _ => (jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
+                3 => (jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
+                // Footlight (index 4): small symmetric jitter, never
+                // pulled backward into the action row's footprint.
+                _ => (jx * 14.0 * scale_c, jy.abs() * 8.0 * scale_c),
             };
             let cx_j = cx + jitter_x_pix;
             let cy_j = cy_anchor + jitter_y_pix;
@@ -1913,11 +2188,16 @@ impl SceneBehavior for GameplayScene {
             // jittered table-plane (cx_j, cy_j) anchor. The renderer
             // maps the pixel-layout x/y onto the table.
             let wick_world_y = WICK_TIP_Y * candle_scale;
+            // The footlight (index 4) sits well behind the camera, so its
+            // wick is much farther from the action row than any of the
+            // table-edge candles — bump its radius and intensity to
+            // compensate, otherwise the front row stays in shadow.
+            let (light_radius_mul, light_intensity) = if i == 4 { (2.2, 1.0) } else { (1.0, 2.3) };
             point_lights.push(PointLight {
                 pos: [cx_j, cy_j, wick_world_y],
-                radius: radius_px * (1.05 + 0.3 * candle.flicker),
+                radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker),
                 color: [1.0, 0.55, 0.22],
-                intensity: 2.3 * candle.flicker,
+                intensity: light_intensity * candle.flicker,
             });
             let _ = candle_w;
         }
@@ -1939,9 +2219,9 @@ impl SceneBehavior for GameplayScene {
         if !hint_indices.is_empty() {
             let pulse = 0.75 + 0.25 * (self.candle_time * 4.0).sin();
             // Cap to whatever budget remains in the point-light buffer
-            // after the four candle plumes already pushed above. The
-            // shader array is sized for 16, so 4 candles + up to 12 hints
-            // is well inside the limit; this clamp is defensive only.
+            // after the candle plumes already pushed above. The shader
+            // array is sized for 16, so the five candles plus up to ~11
+            // hints fits comfortably; this clamp is defensive only.
             let hint_budget =
                 crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
             for &idx in hint_indices.iter().take(hint_budget) {
@@ -2262,31 +2542,125 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Debug: while the `B` gust timer is live, fire one strong lateral
-        // impulse per candle so the flame visibly bends. The shape envelope
-        // is a 4t(1-t) bell so the gust ramps in/out instead of popping.
-        // Velocity is intentionally large compared to the post-deal sweep
-        // (~280 lateral) — this is a "did the wiring work?" hammer, not a
-        // subtle ambient effect.
+        // Opening smoke curtain. For the `wind_delay_secs` window after the
+        // first deal of the scene, flood the table with positive-density
+        // impulses so the player enters the round inside a wall of smoke.
+        // The post-deal wind sweep above then blows it away on schedule.
+        // Strength ramps in fast (~0.15s) so the curtain forms quickly,
+        // holds, then tapers off in the last ~0.6s before the sweep so we
+        // give the breath fresh smoke to clear instead of fighting it.
+        if self.initial_smoke_fill_active {
+            if let Some(deal_at) = self.last_deal_at {
+                let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
+                if elapsed < wind_delay {
+                    // Top-up curtain runs during the brief window between
+                    // the gameplay fade-in and the wind sweep, refreshing
+                    // the smoke that pick_blind already pumped into the
+                    // persistent fluid sim. Ramp in fast (~0.1s) so the
+                    // curtain stays opaque, taper down in the last 0.15s
+                    // so we hand fresh smoke off to the sweep instead of
+                    // fighting it.
+                    let ramp_in = (elapsed / 0.1).clamp(0.0, 1.0);
+                    let ramp_out = ((wind_delay - elapsed) / 0.15).clamp(0.0, 1.0);
+                    let strength = ramp_in.min(ramp_out);
+                    if strength > 0.0 {
+                        // 6×4 = 24 impulses, same budget shape as the sweep
+                        // grid below — leaves headroom under MAX_INJECTIONS
+                        // for candle plumes and the cursor wind.
+                        const COLS: usize = 6;
+                        const ROWS: usize = 4;
+                        let win_w = layout.window_w;
+                        let win_h = layout.window_h;
+                        let x_pad = win_w * 0.15;
+                        let span_min = -x_pad;
+                        let span_max = win_w + x_pad;
+                        let y_top = win_h * 0.22;
+                        let y_bottom = if !hand_slots.is_empty() {
+                            hand_slots[0].1 + hand_slots[0].3
+                        } else {
+                            win_h * 0.85
+                        };
+                        // Generous radius so neighbouring impulses overlap
+                        // and there are no visible gaps in the curtain.
+                        let radius = ((span_max - span_min) / COLS as f32 * 0.95)
+                            .max((y_bottom - y_top) / ROWS as f32 * 1.6);
+                        for r in 0..ROWS {
+                            let rf = (r as f32 + 0.5) / ROWS as f32;
+                            let cy = y_bottom + (y_top - y_bottom) * rf;
+                            // Lift higher for back rows so the curtain
+                            // climbs into the upper part of the volume the
+                            // ray-march pass covers, not just the table.
+                            let lift = 22.0 + 30.0 * rf;
+                            for c in 0..COLS {
+                                let f = (c as f32 + 0.5) / COLS as f32;
+                                let cx = span_min + (span_max - span_min) * f;
+                                wind_gusts.push(crate::render::draw_cmd::WindGust {
+                                    center_px: (cx, cy),
+                                    lift,
+                                    // Tiny upward drift so the curtain
+                                    // gently churns instead of looking
+                                    // perfectly static while it holds.
+                                    velocity: [0.0, 3.0, 0.0],
+                                    radius,
+                                    density: 0.35 * strength,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Debug: while the `B` gust timer is live, sweep a strong lateral
+        // gust across the *same* grid the opening smoke curtain and the
+        // post-deal breath use, so the wind footprint matches the smoke
+        // footprint exactly — every cell that can hold smoke gets a
+        // negative-density impulse with a big lateral velocity, instead of
+        // only the four candle bases. The shape envelope is a 4t(1-t) bell
+        // so the gust ramps in/out instead of popping. Velocity is
+        // intentionally large compared to the post-deal sweep (~28 lateral)
+        // — this is a "did the wiring work?" hammer, not a subtle ambient
+        // effect, and the radius * 3.0 falloff inside
+        // `wgpu_renderer::flame_anchors` still picks the grid impulses up
+        // to bend the flames as the gust rolls across the candle row.
         if let Some(debug_at) = self.debug_wind_at {
             let elapsed = now.saturating_duration_since(debug_at).as_secs_f32();
             if elapsed < DEBUG_WIND_DURATION {
                 let t = (elapsed / DEBUG_WIND_DURATION).clamp(0.0, 1.0);
                 let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
-                // Each candle gets one impulse centred on its base with
-                // a generous radius so the falloff in
-                // `wgpu_renderer::flame_anchors` definitely picks it up.
-                for c in candle_placements.iter() {
-                    wind_gusts.push(crate::render::draw_cmd::WindGust {
-                        center_px: (c.world_pos[0], c.world_pos[1]),
-                        // Lift the impulse to roughly the wick tip so
-                        // the renderer's distance check (which uses the
-                        // tip world position) gets a near-zero distance.
-                        lift: WICK_TIP_Y * c.scale,
-                        velocity: [1400.0 * envelope, 0.0, -120.0 * envelope],
-                        radius: 320.0,
-                        density: -0.02 * envelope,
-                    });
+                // Mirror the curtain grid in `initial_smoke_fill_active`
+                // above: same COLS/ROWS, same x_pad, same y_top/y_bottom,
+                // same radius formula. If you change one, change both.
+                const COLS: usize = 6;
+                const ROWS: usize = 4;
+                let win_w = layout.window_w;
+                let win_h = layout.window_h;
+                let x_pad = win_w * 0.15;
+                let span_min = -x_pad;
+                let span_max = win_w + x_pad;
+                let y_top = win_h * 0.22;
+                let y_bottom = if !hand_slots.is_empty() {
+                    hand_slots[0].1 + hand_slots[0].3
+                } else {
+                    win_h * 0.85
+                };
+                let radius = ((span_max - span_min) / COLS as f32 * 0.95)
+                    .max((y_bottom - y_top) / ROWS as f32 * 1.6);
+                for r in 0..ROWS {
+                    let rf = (r as f32 + 0.5) / ROWS as f32;
+                    let cy = y_bottom + (y_top - y_bottom) * rf;
+                    let lift = 22.0 + 30.0 * rf;
+                    for c in 0..COLS {
+                        let f = (c as f32 + 0.5) / COLS as f32;
+                        let cx = span_min + (span_max - span_min) * f;
+                        wind_gusts.push(crate::render::draw_cmd::WindGust {
+                            center_px: (cx, cy),
+                            lift,
+                            velocity: [1400.0 * envelope, 0.0, -120.0 * envelope],
+                            radius,
+                            density: -0.04 * envelope,
+                        });
+                    }
                 }
             }
         }
@@ -2312,7 +2686,6 @@ impl SceneBehavior for GameplayScene {
             frame.relic_batch(relic_placements);
         }
         frame.flames(flame_instances);
-        frame.fluid_smoke();
 
         // PERSISTENT HUD: hanging plaque + ofuda (3D wood/paper) → score
         // panel pip indicators → score header text → modifier strip text →
@@ -2324,9 +2697,10 @@ impl SceneBehavior for GameplayScene {
         //
         // The wooden plaque replaces the legacy slate-blue cartouche.
         // Positioned in pixel space matching the score panel rect, with a
-        // modest world-Y lift so it reads as hanging above the table.
-        // Phase 2 keeps the existing 2D text labels on top — true engraved
-        // decals come in a later phase.
+        // modest world-Y lift so it reads as hanging above the table. The
+        // header text is engraved directly onto the +Z face via a
+        // per-instance decal — see the plaque draw path in
+        // `wgpu_renderer.rs` and `rasterize_plaque_decal` in `decal.rs`.
         let sp = layout.score_panel;
         let plaque_thickness = 8.0_f32;
         // Lift is proportional to window height so the plaque tracks the
@@ -2334,12 +2708,47 @@ impl SceneBehavior for GameplayScene {
         // in the renderer). A fixed world-unit lift drifts downward as the
         // window grows because the table grows around a constant lift.
         let plaque_lift = layout.window_h * 0.30;
+        // Push the plaque deeper into the scene (more negative world_z) so
+        // it reads as hanging at the back of the room rather than right
+        // above the player. pixel_y → world_z is a direct mapping in the
+        // renderer's `pixel_to_world`, so subtracting from pixel_y here
+        // moves the plaque back along the table's depth axis.
+        let plaque_back_offset = layout.window_h * 0.18;
         frame.plaque(crate::render::draw_cmd::PlaquePlacement {
-            center_pos: [sp.x + sp.w * 0.5, sp.y + sp.h * 0.5, plaque_lift],
+            center_pos: [
+                sp.x + sp.w * 0.5,
+                sp.y + sp.h * 0.5 - plaque_back_offset,
+                plaque_lift,
+            ],
             extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
             rotation_y_deg: 0.0,
             top_text: plaque_top_text,
             bot_text: plaque_bot_text,
+        });
+        // ── Status placard ───────────────────────────────────────────
+        // A second, smaller wooden placard hanging just below the main
+        // score plaque. Carries the modifier strip text — the contextual
+        // "Select tiles to play" instruction at idle, the live hand
+        // preview when tiles are selected, and the cascade breakdown
+        // during scoring. The 2D modifier_strip_text labels are anchored
+        // to this placard's projected screen rect via
+        // `projected_plaque_rects[1]` below.
+        let ms_for_placard = layout.modifier_strip;
+        let placard_lift = layout.window_h * 0.22;
+        frame.plaque(crate::render::draw_cmd::PlaquePlacement {
+            center_pos: [
+                ms_for_placard.x + ms_for_placard.w * 0.5,
+                ms_for_placard.y + ms_for_placard.h * 0.5 - plaque_back_offset,
+                placard_lift,
+            ],
+            extents: [
+                ms_for_placard.w * 0.65,
+                ms_for_placard.h * 2.6,
+                plaque_thickness * 0.7,
+            ],
+            rotation_y_deg: 0.0,
+            top_text: String::new(),
+            bot_text: String::new(),
         });
         // Ofuda only appears on boss blinds (where there's a rule to show).
         if !ofuda_title_text.is_empty() {
@@ -2357,13 +2766,64 @@ impl SceneBehavior for GameplayScene {
                 rule: ofuda_rule_text,
             });
         }
-        frame.quads(score_panel_quads);
-        frame.texts(header_text_labels);
+        // Plays/discards pip indicators are a *physical* peg block
+        // floating in front of the hanging score plaque. Two rows of
+        // cylinder pegs sit in it — top row = jade plays remaining,
+        // bottom row = amber discards remaining — wired through
+        // `PegBlockPlacement` and rendered by the lit-mesh pipeline
+        // alongside the rest of the table.
+        //
+        // Placement note: an earlier version positioned the block at the
+        // same pixel-y and world-Y as the plaque, intending to "hang it
+        // off the plaque's right side". The plaque is tilted 35° forward
+        // and scaled to ~`sp.h * 1.8` tall, so its tilted bounding box
+        // swallows that whole region — the block ended up depth-tested
+        // *behind* the plaque face and never showed up on screen. The
+        // fix is to push the block forward (larger pixel-y → larger
+        // world Z, toward camera) and lower (smaller world Y) so it
+        // hangs clearly below + in front of the plaque, like a physical
+        // counter sitting on the table edge instead of buried in the
+        // plaque's volume.
+        // Drop the legacy `score_panel_quads` (the old top-of-screen pip
+        // strip) — its data is now driven from this peg block.
+        let _ = score_panel_quads;
+        {
+            let peg_block_w = (sp.w * 0.30).max(160.0);
+            let peg_block_h = (28.0 * scale).max(20.0);
+            let peg_block_d = (52.0 * scale).max(32.0);
+            // Center horizontally under the plaque so both rows of pegs
+            // are visible regardless of how wide the panel renders.
+            let peg_block_x = sp.x + sp.w * 0.5;
+            // Pixel-y well below the score panel rect → forward in world Z,
+            // clear of the tilted plaque's forward extent.
+            let peg_block_y = sp.y + sp.h * 1.20;
+            // Hang low above the table — well below the plaque's lift —
+            // so the camera (looking down) sees the top face and the pegs
+            // poking up out of it.
+            let peg_block_lift = layout.window_h * 0.06;
+            frame.peg_block(crate::render::draw_cmd::PegBlockPlacement {
+                world_pos: [peg_block_x, peg_block_y, peg_block_lift],
+                extents: [peg_block_w, peg_block_h, peg_block_d],
+                plays_left: run.plays_remaining,
+                plays_max: STARTING_PLAYS,
+                discards_left: run.discards_remaining,
+                discards_max: STARTING_DISCARDS,
+            });
+        }
+        // (Score header text is now engraved on the plaque mesh as a
+        // per-instance decal — no overlay TextLabels are pushed here.)
         // Phase 6: cascade scoring tokens (engraved bone, chips + mult)
         // pop in during a scoring cascade. Pushed before the cascade text
         // labels so the numbers read on top of the wood.
         if !cascade_token_placements.is_empty() {
             frame.cascade_token_batch(cascade_token_placements);
+        }
+        // Physical scoring bones tumbling onto the play space during a
+        // cascade. Spawned by the reveal-edge handler in `update()` and
+        // cleared the moment the cascade ends, so they only appear while
+        // scoring is mid-flight.
+        if self.falling_bones.is_active() {
+            frame.falling_bone_batch(self.falling_bones.placements());
         }
         frame.texts(modifier_strip_text);
         frame.quads(hud_quads);
@@ -2390,12 +2850,125 @@ impl SceneBehavior for GameplayScene {
             frame.dish_explicit(crate::render::draw_cmd::DishExplicit {
                 center_pos: [sx + sw * 0.5, sy + sh * 0.5, 0.0],
                 extents: [sw + dish_pad_x * 2.0, 14.0, sh + dish_pad_y * 2.0],
-                pick_id: None,
+                pick_id: Some(PICK_CONSUMABLE_DISH),
             });
             if !talisman_dish_placements.is_empty() {
                 frame.talisman_batch(talisman_dish_placements);
             }
         }
+
+        // Phase 7: ambient table objects — physical coin pile (gold),
+        // facedown wall stack (tiles remaining), and the dora indicator
+        // stand. None of these are clickable; they're pure atmosphere that
+        // makes the score line and wall counter physically present.
+        //
+        // Coin pile — sits to the left of the action row at the front of
+        // the table. Coin count = min(gold, MAX_COIN_SLOTS) so the pile
+        // visibly grows as the player accumulates gold but caps before
+        // overflowing the slot pool.
+        if run.gold > 0 {
+            let coin_count = (run.gold as usize).min(48);
+            let coin_radius = (4.0 * scale).max(3.0);
+            let coin_thickness = (1.5 * scale).max(1.2);
+            // Pile center is tucked closer to the player than the table
+            // edge — between the left candle and the action row, where it
+            // catches candlelight cleanly without crowding the wall stack.
+            let pile_cx = layout.window_w * 0.16;
+            let pile_cy = layout.window_h * 0.82;
+            let cols: i32 = 6;
+            let dx = coin_radius * 1.9;
+            let dz = coin_radius * 1.9;
+            let per_layer = (cols * cols) as usize;
+            let mut coins: Vec<crate::render::draw_cmd::CoinPlacement> =
+                Vec::with_capacity(coin_count);
+            for i in 0..coin_count {
+                let layer = (i / per_layer.max(1)) as i32;
+                let in_layer = (i % per_layer.max(1)) as i32;
+                let r = in_layer / cols;
+                let c = in_layer % cols;
+                let row_offset = if r % 2 == 0 { 0.0 } else { dx * 0.5 };
+                let lx = (c as f32 - cols as f32 * 0.5) * dx + row_offset;
+                let lz = (r as f32 - cols as f32 * 0.5) * dz;
+                let world_y = coin_thickness * 0.5 + layer as f32 * coin_thickness;
+                // Simple integer hash for per-coin yaw jitter.
+                let hash = (i as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
+                let rot_y = ((hash & 0xFFFF) as f32 / 65535.0 - 0.5) * std::f32::consts::TAU;
+                coins.push(crate::render::draw_cmd::CoinPlacement {
+                    world_pos: [pile_cx + lx, pile_cy + lz, world_y],
+                    rotation_y: rot_y,
+                    radius: coin_radius,
+                    thickness: coin_thickness,
+                    color: [1.00, 0.78, 0.30, 1.0],
+                });
+            }
+            if !coins.is_empty() {
+                frame.coin_batch(coins);
+            }
+            // Hover region for the coin pile → "Gold" glossary entry. The
+            // pile is rendered as 3D coins projected via `pixel_to_world`,
+            // so the screen footprint roughly tracks (pile_cx, pile_cy);
+            // a generously-sized rect around that anchor catches the
+            // cursor across the visible mound without needing the exact
+            // projected hull.
+            let pile_half_w = (cols as f32 * dx) * 0.6 + coin_radius * 2.0;
+            let pile_half_h = (cols as f32 * dz) * 0.6 + coin_radius * 2.0;
+            frame.glossary_anchor(
+                [
+                    pile_cx - pile_half_w,
+                    pile_cy - pile_half_h,
+                    pile_half_w * 2.0,
+                    pile_half_h * 2.0,
+                ],
+                "Gold",
+            );
+        }
+
+        // Facedown wall stack at the back-left of the table. Capped at the
+        // renderer's MAX_WALL_TILE_SLOTS (80). Reuses the bone tablet mesh
+        // (the renderer's WallStack dispatch instances bone tablets in a
+        // grid based on `remaining` and `row_len`).
+        let wall_remaining = run.wall.remaining() as u32;
+        if wall_remaining > 0 {
+            let tile_w = (12.0 * scale).max(8.0);
+            let tile_h = (4.0 * scale).max(3.0);
+            let tile_d = (16.0 * scale).max(11.0);
+            let row_len: u32 = 17;
+            let wall_x = layout.window_w * 0.02;
+            let wall_y = layout.window_h * 0.18;
+            frame.wall_stack(crate::render::draw_cmd::WallStackPlacement {
+                world_pos: [wall_x, wall_y, 0.0],
+                tile_extents: [tile_w, tile_h, tile_d],
+                remaining: wall_remaining,
+                row_len,
+            });
+        }
+
+        // Dora indicator stand — small brass plinth at the back-right of
+        // the table. Phase 7 just draws the plinth; the actual face-up
+        // indicator tile mesh will be added when the tile pipeline gains
+        // an "arbitrary world-space face tile" entrypoint.
+        let dora_x = layout.window_w * 0.94;
+        let dora_y = layout.window_h * 0.22;
+        frame.dora_stand(crate::render::draw_cmd::DoraStandPlacement {
+            world_pos: [dora_x, dora_y, 0.0],
+            extents: [
+                (20.0 * scale).max(14.0),
+                (24.0 * scale).max(16.0),
+                (14.0 * scale).max(10.0),
+            ],
+        });
+
+        // Volumetric smoke pass. Pushed *after* every persistent 3D scene
+        // object (plaques, ofuda, peg block, yaku/wood tablets, bowl,
+        // talisman dish, coins, wall stack, dora stand) so all of them
+        // land in pass A and the smoke draws over them — mirroring the
+        // shop scene's order. Pushing this earlier (next to the candles)
+        // dropped most of the table HUD into pass B, where it painted
+        // right over the smoke and hid it. The 2D HUD text below, plus
+        // `hand_tile_faces` and the hover/pause overlays, remain after
+        // this marker so they stay readable on top of the haze.
+        frame.fluid_smoke();
+
         frame.texts(hud_text);
 
         // Hand tile face labels — read on top of the persistent HUD
@@ -2426,8 +2999,74 @@ impl SceneBehavior for GameplayScene {
         frame.departing_indices = self.pending_departures.clone();
         frame.point_lights = point_lights;
         frame.wind_gusts = wind_gusts;
+        // Catch-all 3D-hit dispatcher: a full-screen `ButtonDef::scene`
+        // pushed last so it only wins the first-hit search if no other
+        // (smaller) button matched the cursor first. The matching click
+        // routes through `update()` via `ctx.picked_gameplay_object`.
+        //
+        // Only push it when the cursor is *actually* over a 3D pickable
+        // this frame. Otherwise the fullscreen rect intercepts clicks
+        // meant for hand tiles (which aren't buttons — they're routed
+        // through `pointer_slot` in `main.rs`'s `MouseInput` handler) and
+        // silently drops them, since `picked_gameplay_object` is `None`
+        // over a tile and the dispatch loop produces no action.
+        //
+        // Also suppressed while paused — the pause overlay already pushed
+        // its own buttons + fullscreen blocker into `buttons` earlier in
+        // this function, and the catch-all would otherwise intercept
+        // clicks meant for the pause menu. Crucially we do *not* clear
+        // `buttons` here: that would also wipe the pause-menu buttons we
+        // just added, leaving the pause overlay completely unclickable.
+        if !self.pause_menu.paused && ctx.picked_gameplay_object.is_some() {
+            buttons.push(ButtonDef::scene(
+                (0.0, 0.0, layout.window_w, layout.window_h),
+                GAMEPLAY_3D_HIT_ID,
+            ));
+        }
         frame.buttons = buttons;
         frame.window_title = window_title;
+        frame.debug_axes = self.debug_show_axes;
+
+        // Opening smoke curtain overlay. The volumetric smoke alone can't
+        // reliably hide the freshly-loaded game elements during the brief
+        // post-transition window (the smoke pass composites depth-aware
+        // and the HUD lives in front of it), so we lay a flat dark quad
+        // over *everything* during the same window the fill impulses are
+        // pumping. The overlay holds at near-opaque while the curtain
+        // fills, then fades out in lockstep with the wind sweep so the
+        // game and the dispersing smoke are revealed together.
+        if self.initial_smoke_fill_active {
+            if let Some(deal_at) = self.last_deal_at {
+                let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
+                let total = self.wind_delay_secs + self.wind_duration_secs;
+                if elapsed < total {
+                    let alpha = if elapsed < self.wind_delay_secs {
+                        // Fill phase: ramp in over 0.1s, then hold near
+                        // opaque so the game underneath is hidden.
+                        (elapsed / 0.1).clamp(0.0, 1.0) * 0.96
+                    } else {
+                        // Wind phase: linear fade from full to 0 across
+                        // the wind duration so the overlay disappears as
+                        // the smoke is blown away.
+                        let t = ((elapsed - self.wind_delay_secs)
+                            / self.wind_duration_secs.max(0.001))
+                        .clamp(0.0, 1.0);
+                        (1.0 - t) * 0.96
+                    };
+                    if alpha > 0.0 {
+                        // OBSIDIAN with the computed alpha — matches the
+                        // indigo+gold theme so the curtain reads as the
+                        // same dark space the rest of the HUD lives in,
+                        // not as a neutral grey wash.
+                        let base = crate::render::theme::color::OBSIDIAN;
+                        frame.quad(GpuInstance {
+                            rect: [0.0, 0.0, layout.window_w, layout.window_h],
+                            color: [base[0], base[1], base[2], alpha],
+                        });
+                    }
+                }
+            }
+        }
 
         // Cheap invariant check — catches future migration mistakes that
         // accidentally push two `HandTileFaces` markers (or zero of one)

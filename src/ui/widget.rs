@@ -24,8 +24,6 @@ use crate::ui::input::UiAction;
 pub enum PanelVariant {
     /// Default raised panel: INDIGO with a BRASS border.
     Default,
-    /// Sunken panel one step darker than the surrounding surface.
-    Sunken,
     /// Hero panel for the score / important callouts: TWILIGHT with GOLD border.
     Hero,
 }
@@ -37,7 +35,6 @@ pub enum PanelVariant {
 pub fn push_panel(out: &mut Vec<GpuInstance>, rect: [f32; 4], variant: PanelVariant) {
     let (bg, border) = match variant {
         PanelVariant::Default => (color::INDIGO, color::BRASS),
-        PanelVariant::Sunken => (color::OBSIDIAN, color::ANTIQUE),
         PanelVariant::Hero => (color::TWILIGHT, color::GOLD),
     };
     push_panel_colored(out, rect, bg, border);
