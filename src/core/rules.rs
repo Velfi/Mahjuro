@@ -16,6 +16,20 @@ pub enum RuleModifier {
     HonorTripleScore,
     /// If no sequences in the scored hand, +80 bonus.
     NoSequenceBonus,
+    // ── Boss-only scoring/validation effects ────────────────────────────
+    /// Pairs contribute zero base chips. (The Hermit boss.)
+    PairsScoreZero,
+    /// Sequences contribute half their normal base chips. (The Forest boss.)
+    SequencesHalved,
+    /// Tiles of rank 5 contribute zero point value. (The Drunkard boss.)
+    MiddleTilesZero,
+    /// Selection must contain exactly 4 tiles. (The Bureaucrat boss.)
+    MustPlayFour,
+    /// Selection must contain at least one Honor (Wind or Dragon) tile.
+    /// (The Dragon final boss.)
+    RequireHonor,
+    /// Yaku already played this round score at half strength. (The Censor boss.)
+    CensorRepeats,
 }
 
 impl RuleModifier {
@@ -27,6 +41,12 @@ impl RuleModifier {
             RuleModifier::ReducedPlays => "Reduced Plays",
             RuleModifier::HonorTripleScore => "Honor Triple",
             RuleModifier::NoSequenceBonus => "No-Seq Bonus",
+            RuleModifier::PairsScoreZero => "Silent Pairs",
+            RuleModifier::SequencesHalved => "Withered Sequences",
+            RuleModifier::MiddleTilesZero => "Drunken Middles",
+            RuleModifier::MustPlayFour => "Bureaucratic Form",
+            RuleModifier::RequireHonor => "Honor Required",
+            RuleModifier::CensorRepeats => "Repeats Censored",
         }
     }
 
@@ -38,6 +58,12 @@ impl RuleModifier {
             RuleModifier::ReducedPlays => "Only 3 plays this round",
             RuleModifier::HonorTripleScore => "Honor triplets score ×3",
             RuleModifier::NoSequenceBonus => "No sequences in hand → +80 bonus",
+            RuleModifier::PairsScoreZero => "Pairs score 0 base chips",
+            RuleModifier::SequencesHalved => "Sequences score half base chips",
+            RuleModifier::MiddleTilesZero => "Rank-5 tiles score 0",
+            RuleModifier::MustPlayFour => "Must play exactly 4 tiles",
+            RuleModifier::RequireHonor => "Hand must contain a Wind or Dragon tile",
+            RuleModifier::CensorRepeats => "Repeated yaku score at half",
         }
     }
 }
@@ -58,7 +84,7 @@ impl BlindKind {
         match self {
             BlindKind::Small => 0.85,
             BlindKind::Big => 1.35,
-            BlindKind::Boss => 2.0,
+            BlindKind::Boss => 1.5,
         }
     }
 
@@ -99,21 +125,6 @@ impl BlindKind {
         }
     }
 
-    /// Forced rule modifier for boss blinds (None for small/big).
-    /// Rotates through modifiers based on `run_number`.
-    pub fn forced_modifier(self, run_number: u32) -> Option<RuleModifier> {
-        const BOSS_MODIFIERS: [RuleModifier; 4] = [
-            RuleModifier::PairDoubleScore,
-            RuleModifier::NoSequences,
-            RuleModifier::ReducedPlays,
-            RuleModifier::HonorTripleScore,
-        ];
-        match self {
-            BlindKind::Boss => Some(BOSS_MODIFIERS[run_number as usize % BOSS_MODIFIERS.len()]),
-            _ => None,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             BlindKind::Small => "Small Blind",
@@ -122,11 +133,12 @@ impl BlindKind {
         }
     }
 
+    #[allow(dead_code)]
     pub fn description(self) -> &'static str {
         match self {
-            BlindKind::Small => "×0.85 target · 2 relic picks · ×1 gold",
-            BlindKind::Big => "×1.35 target · 3 relic picks · ×1.5 gold",
-            BlindKind::Boss => "×2 target + modifier · 3 relic picks · ×2.5 gold",
+            BlindKind::Small => "×0.85 target · ×1 gold",
+            BlindKind::Big => "×1.35 target · ×1.5 gold",
+            BlindKind::Boss => "×1.5 target · boss effect · ×2.5 gold",
         }
     }
 

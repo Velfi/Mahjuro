@@ -220,11 +220,28 @@ pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
 /// Like `validate_selection`, but respects active rule modifiers:
 /// - `SequenceWrap`: allows wrapping sequences (8-9-1, 9-1-2)
 /// - `NoSequences`: rejects any decomposition containing sequences
+/// - `MustPlayFour`: rejects selections that aren't exactly 4 tiles
+/// - `RequireDragon`: rejects selections without at least one Dragon tile
 pub fn validate_selection_with_rules(
     tiles: &[Tile],
     rules: &[RuleModifier],
 ) -> Option<Vec<DetectedSet>> {
     if tiles.is_empty() {
+        return None;
+    }
+    // Pre-validation rejects from boss effects. These run before decomposition
+    // so we don't waste cycles on hands the boss already disqualifies.
+    if rules.contains(&RuleModifier::MustPlayFour) && tiles.len() != 4 {
+        return None;
+    }
+    if rules.contains(&RuleModifier::RequireHonor)
+        && !tiles.iter().any(|t| {
+            matches!(
+                t.suit,
+                crate::core::tile::Suit::Wind | crate::core::tile::Suit::Dragon
+            )
+        })
+    {
         return None;
     }
     let mut sorted: Vec<Tile> = tiles.to_vec();

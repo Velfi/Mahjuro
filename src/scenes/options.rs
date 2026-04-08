@@ -29,6 +29,7 @@ enum Row {
     Smoke,
     Tile,
     Shadows,
+    Ssr,
     Back,
 }
 
@@ -41,6 +42,7 @@ const ROWS: &[Row] = &[
     Row::Smoke,
     Row::Tile,
     Row::Shadows,
+    Row::Ssr,
     Row::Back,
 ];
 
@@ -75,6 +77,7 @@ pub struct OptionsScene {
     pub tile_preset: crate::persistence::TilePreset,
     pub gamma: f32,
     pub shadows_enabled: bool,
+    pub ssr_enabled: bool,
 }
 
 impl OptionsScene {
@@ -92,6 +95,7 @@ impl OptionsScene {
             tile_preset: settings.tile_preset,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
+            ssr_enabled: settings.ssr_enabled,
         }
     }
 
@@ -105,6 +109,7 @@ impl OptionsScene {
         settings.tile_preset = self.tile_preset;
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
+        settings.ssr_enabled = self.ssr_enabled;
         let _ = crate::persistence::save_settings(&settings);
     }
 
@@ -255,6 +260,9 @@ impl OptionsScene {
                     } else if focused == Row::Shadows {
                         self.shadows_enabled = !self.shadows_enabled;
                         self.save_settings();
+                    } else if focused == Row::Ssr {
+                        self.ssr_enabled = !self.ssr_enabled;
+                        self.save_settings();
                     }
                 }
                 UiAction::FocusPrev => {
@@ -268,6 +276,9 @@ impl OptionsScene {
                         self.save_settings();
                     } else if focused == Row::Shadows {
                         self.shadows_enabled = !self.shadows_enabled;
+                        self.save_settings();
+                    } else if focused == Row::Ssr {
+                        self.ssr_enabled = !self.ssr_enabled;
                         self.save_settings();
                     }
                 }
@@ -313,6 +324,10 @@ impl OptionsScene {
             }
             Row::Shadows => {
                 self.shadows_enabled = !self.shadows_enabled;
+                self.save_settings();
+            }
+            Row::Ssr => {
+                self.ssr_enabled = !self.ssr_enabled;
                 self.save_settings();
             }
             Row::Back => {
@@ -565,6 +580,31 @@ impl OptionsScene {
                     text: format!(
                         "Shadows: {}",
                         if self.shadows_enabled { "ON" } else { "OFF" }
+                    ),
+                    color: text_color,
+                    ..Default::default()
+                });
+            }
+            Row::Ssr => {
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
+                instances.push(GpuInstance {
+                    rect: [row_x, row_y, row_w, row_h],
+                    color: bg_color,
+                });
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
+                text_labels.push(TextLabel {
+                    rect: [row_x, row_y, row_w, row_h],
+                    text: format!(
+                        "Reflections: {}",
+                        if self.ssr_enabled { "ON" } else { "OFF" }
                     ),
                     color: text_color,
                     ..Default::default()

@@ -294,6 +294,159 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     })
 }
 
+/// Frame-shared SSR globals consumed by `lit_mesh.wgsl` (group 3) for
+/// the lacquered-wood reflection march. The camera is fixed, so this is
+/// rewritten once per frame with the current view-projection inverse.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SsrGlobals {
+    pub inv_view_proj: [f32; 16],
+    pub view_proj: [f32; 16],
+    /// xyz = camera world position, w = unused
+    pub view_pos: [f32; 4],
+    /// x = enabled (0/1), y = max_distance (world units), z = stride
+    /// (world units per step), w = max_steps
+    pub params: [f32; 4],
+}
+
+/// Bind-group layout for the lit_mesh SSR group (group 3): SSR globals
+/// uniform + previous-frame scene colour + scene depth + a filtering
+/// sampler shared by both textures.
+pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("lit-mesh-ssr-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+/// Append a colored axis-aligned box to (vertices, indices). 6 quads, 24
+/// verts (each face has its own normal so the lit shader reads flat).
+/// Shared helper for procedural mesh builders that compose from boxes
+/// (plaque, ofuda, tablets, peg block, dora stand). The standalone curio
+/// cabinet keeps its own private copy because it predates this helper.
+pub fn push_box(
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    z0: f32,
+    z1: f32,
+) {
+    let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
+        // +X
+        (
+            [1.0, 0.0, 0.0],
+            [
+                [x1, y0, z0],
+                [x1, y1, z0],
+                [x1, y1, z1],
+                [x1, y0, z1],
+            ],
+        ),
+        // -X
+        (
+            [-1.0, 0.0, 0.0],
+            [
+                [x0, y0, z1],
+                [x0, y1, z1],
+                [x0, y1, z0],
+                [x0, y0, z0],
+            ],
+        ),
+        // +Y
+        (
+            [0.0, 1.0, 0.0],
+            [
+                [x0, y1, z0],
+                [x0, y1, z1],
+                [x1, y1, z1],
+                [x1, y1, z0],
+            ],
+        ),
+        // -Y
+        (
+            [0.0, -1.0, 0.0],
+            [
+                [x0, y0, z1],
+                [x0, y0, z0],
+                [x1, y0, z0],
+                [x1, y0, z1],
+            ],
+        ),
+        // +Z
+        (
+            [0.0, 0.0, 1.0],
+            [
+                [x0, y0, z1],
+                [x1, y0, z1],
+                [x1, y1, z1],
+                [x0, y1, z1],
+            ],
+        ),
+        // -Z
+        (
+            [0.0, 0.0, -1.0],
+            [
+                [x1, y0, z0],
+                [x0, y0, z0],
+                [x0, y1, z0],
+                [x1, y1, z0],
+            ],
+        ),
+    ];
+    for (normal, corners) in faces {
+        let base = vertices.len() as u32;
+        let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        for (corner, uv) in corners.iter().zip(uvs.iter()) {
+            vertices.push(Vertex3dTex {
+                position: *corner,
+                normal: *normal,
+                uv: *uv,
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+}
+
 /// Build the bind-group layout shared by every lit-mesh primitive.
 pub fn create_lit_mesh_material_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

@@ -25,6 +25,22 @@ use crate::render::candle_mesh::CandlePlacement;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 
+/// Per-frame camera override supplied by a scene that wants to draw the 3D
+/// world from a perspective other than the renderer's default "person at the
+/// table" camera. When `UiFrame.camera_override` is `None`, the renderer
+/// builds the gameplay camera from the window size as before.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraParams {
+    /// Camera world-space position.
+    pub eye: [f32; 3],
+    /// Camera look target in world space.
+    pub target: [f32; 3],
+    /// Up vector (typically `[0, 1, 0]`).
+    pub up: [f32; 3],
+    /// Vertical field of view in degrees.
+    pub fovy_deg: f32,
+}
+
 /// One soft wind impulse to inject into the volumetric smoke sim this frame.
 ///
 /// Coordinates use the same `(pixel_x, pixel_y)` convention as the rest of the
@@ -74,6 +90,275 @@ pub struct RelicPlacement {
     pub glow: f32,
 }
 
+/// One zodiac/talisman ribbon hanging from an anchor point.
+///
+/// Used by the shop scene for both the wall-pinned for-sale ribbons (in the
+/// curio cabinet) and the player's owned-consumable fan in front of the
+/// counter. `rotation_y_deg` lets the same mesh be reused for the radial fan
+/// (set per-ribbon to spread them) and for plain vertical drops (set 0).
+#[derive(Clone, Copy, Debug)]
+pub struct ZodiacRibbonPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the ribbon's *top anchor*.
+    pub anchor_pos: [f32; 3],
+    /// Length the ribbon hangs in world units.
+    pub length: f32,
+    /// Width of the ribbon in world units.
+    pub width: f32,
+    /// Yaw rotation about world Y around the anchor, in degrees. 0 = the
+    /// ribbon hangs straight down with its face toward the camera.
+    pub rotation_y_deg: f32,
+    /// Pitch rotation about world X around the anchor, in degrees. Used by
+    /// the inventory fan to drape ribbons forward toward the camera.
+    pub rotation_x_deg: f32,
+    /// Linear-space RGBA tint.
+    pub color: [f32; 4],
+}
+
+/// One hanging talisman tablet (jade-amulet pendant). Used by the shop scene
+/// for the for-sale talismans pinned in the curio cabinet — distinct from the
+/// silken zodiac ribbons hanging next to them.
+#[derive(Clone, Copy, Debug)]
+pub struct TalismanPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the tablet's *center*.
+    pub center_pos: [f32; 3],
+    /// Width × height × thickness in world units.
+    pub extents: [f32; 3],
+    /// Yaw rotation about world Y in degrees (0 = facing the camera).
+    pub rotation_y_deg: f32,
+    /// Linear-space RGBA tint.
+    pub color: [f32; 4],
+}
+
+/// One physical gold coin sitting in (or on) the coin dish.
+///
+/// Coins are stamped via the lit-mesh pipeline using a shared 16-prism
+/// cylinder mesh; per-instance position + rotation + scale supply the visual
+/// variety in a stacked pile.
+#[derive(Clone, Copy, Debug)]
+pub struct CoinPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the coin's center.
+    pub world_pos: [f32; 3],
+    /// Yaw rotation about world Y in radians (small per-coin jitter).
+    pub rotation_y: f32,
+    /// World-units radius (typically a few pixels).
+    pub radius: f32,
+    /// World-units thickness.
+    pub thickness: f32,
+    /// Linear-space RGBA tint.
+    pub color: [f32; 4],
+}
+
+/// One free-standing dish placement in world space (no auto-sizing from a
+/// relic batch). Used by the shop scene to draw the foreground relic dish
+/// and the coin dish at fixed positions, independent of the for-sale relics
+/// living up in the curio cabinet.
+#[derive(Clone, Copy, Debug)]
+pub struct DishExplicit {
+    /// `(pixel_x, pixel_y, world_y)` for the dish base center.
+    pub center_pos: [f32; 3],
+    /// Full extents in world units (width × height × depth). The dish mesh
+    /// itself is a wide low box; height ≈ rim height.
+    pub extents: [f32; 3],
+    /// Optional id used by `pick_shop_object` to recognize a hit on this
+    /// dish (e.g. so the scene can route a click on the coin dish to "show
+    /// gold count" rather than to a relic).
+    pub pick_id: Option<u32>,
+}
+
+// ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
+//
+// Phase 1 of the in-game UI redesign: physical objects rendered through the
+// `lit_mesh` pipeline replace the flat slate-blue HUD rects. Each variant has
+// a sibling DrawCmd below.
+//
+// Phase 1 wires up the mesh + draw cmd infrastructure but no scene actually
+// pushes these yet — phases 2-7 introduce the corresponding `gameplay.rs`
+// pushes one region at a time. The unused-field/variant warnings stay
+// suppressed via the `allow(dead_code)` until then.
+
+/// Hanging blind/score plaque suspended above the gameplay table.
+#[allow(dead_code)]
+///
+/// The wood + chain mesh is uploaded once at renderer init; per-instance
+/// position + extents drive a model matrix and the renderer rasterizes the
+/// `top_text` / `bot_text` payload into a decal texture sampled by the
+/// lit-mesh shader.
+#[derive(Clone, Debug)]
+pub struct PlaquePlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the plaque's *center*.
+    pub center_pos: [f32; 3],
+    /// Width × height × thickness in world units.
+    pub extents: [f32; 3],
+    /// Yaw rotation about world Y in degrees (0 = facing the camera).
+    pub rotation_y_deg: f32,
+    /// Display string for the large top line (blind name + ante + score/target).
+    pub top_text: String,
+    /// Display string for the smaller bottom line (gold · wind · shanten · ...).
+    pub bot_text: String,
+}
+
+/// Hanging boss-rule ofuda paper.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct OfudaPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the ofuda's *center*.
+    pub center_pos: [f32; 3],
+    /// Width × height × thickness in world units.
+    pub extents: [f32; 3],
+    /// Yaw rotation about world Y in degrees.
+    pub rotation_y_deg: f32,
+    /// Boss name (large title at the top of the paper).
+    pub title: String,
+    /// Boss rule description (smaller body text below the title).
+    pub rule: String,
+}
+
+/// One yaku selector tablet (carved bone, sitting in a row below the hand).
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct YakuTabletPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the tablet's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Yaku display name (engraved on the face via decal).
+    pub name: String,
+    /// Progress toward this yaku in [0, 1] — drives the inlay glow strip.
+    pub progress: f32,
+    /// True when this yaku is the player's currently selected target.
+    pub active: bool,
+    /// Hover lift envelope in [0, 1] driven by the scene each frame.
+    pub hover: f32,
+}
+
+/// One sort/play action wood tablet. Same mesh as the yaku tablets but
+/// lacquered wood; visually consistent with the table.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct WoodTabletPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the tablet's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Engraved label (Sort by Suit, Sort by Rank, Play, …).
+    pub label: String,
+    /// Press envelope in [0, 1] (1.0 = fully pressed in).
+    pub pressed: f32,
+    /// Hover lift envelope in [0, 1].
+    pub hover: f32,
+    /// True if the action is currently disabled (e.g. no tiles selected).
+    pub disabled: bool,
+}
+
+/// The discard bowl. Click target = drop selected tile in.
+#[derive(Clone, Copy, Debug)]
+pub struct BowlPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the bowl's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Hover lift envelope in [0, 1].
+    pub hover: f32,
+}
+
+/// The plays/discards remaining peg block. The block itself is a single
+/// wooden mesh; pegs (small cylinders) are emitted as separate coin-mesh
+/// instances by the renderer based on the live counts.
+#[derive(Clone, Copy, Debug)]
+pub struct PegBlockPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the block's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Number of plays remaining (left peg row, capped at `plays_max`).
+    pub plays_left: u32,
+    /// Maximum number of play pegs (the row length).
+    pub plays_max: u32,
+    /// Number of discards remaining (right peg row, capped at `discards_max`).
+    pub discards_left: u32,
+    /// Maximum number of discard pegs (the row length).
+    pub discards_max: u32,
+}
+
+/// Stack of facedown wall tiles at the back of the table.
+#[derive(Clone, Copy, Debug)]
+pub struct WallStackPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the bottom-back-left of the stack.
+    pub world_pos: [f32; 3],
+    /// Tile slot dimensions in world units (per-tile width/height/depth).
+    pub tile_extents: [f32; 3],
+    /// Number of facedown tiles still in the wall.
+    pub remaining: u32,
+    /// Number of tiles per row in the stack (the pile fans wide).
+    pub row_len: u32,
+}
+
+/// The dora indicator stand: a brass plinth + a single face-up tile resting
+/// against the back board.
+#[derive(Clone, Copy, Debug)]
+pub struct DoraStandPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the stand's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+}
+
+/// Which cascade-readout axis a token represents — drives its tint and
+/// the gameplay scene's pulse animation routing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CascadeTokenKind {
+    Chips,
+    Mult,
+}
+
+/// One engraved bone token in the cascade scoring readout. Reuses the
+/// `bone_tablet_mesh` geometry, tinted per axis (chips = cool indigo,
+/// mult = warm crimson). The gameplay scene drives the per-frame `pulse`
+/// envelope from the existing cascade timing math; the renderer turns it
+/// into a brief uniform scale-up so the active token visibly pops on each
+/// scoring step.
+#[derive(Clone, Copy, Debug)]
+pub struct CascadeTokenPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the token's *center*.
+    pub world_pos: [f32; 3],
+    /// Width × thickness × depth in world units.
+    pub extents: [f32; 3],
+    /// Which scoring axis this token shows.
+    pub kind: CascadeTokenKind,
+    /// Pulse envelope in [0, 1] from the cascade frame's pop-in/settle
+    /// timing. 1.0 = freshly fired, 0.0 = settled.
+    pub pulse: f32,
+}
+
+/// One shrine placement (used by the pick-blind scene to draw the three
+/// blind shrines side by side, each scaled by `extents`). Geometry is the
+/// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
+/// `extents` and translated to `world_pos`.
+#[derive(Clone, Copy, Debug)]
+pub struct ShrinePlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the shrine's *base center*.
+    pub world_pos: [f32; 3],
+    /// Full extents in world units (width × height × depth). Per-instance
+    /// scaling is how the Small / Big / Boss shrines get visibly distinct
+    /// sizes.
+    pub extents: [f32; 3],
+    /// Linear-space RGBA tint applied to every face of the mesh.
+    pub color: [f32; 4],
+    /// Brighten multiplier in [0, 1]. The upcoming shrine pushes this above
+    /// 0 so it reads as the active choice even before the spotlight
+    /// `PointLight` adds its bloom on top.
+    pub glow: f32,
+}
+
+/// One curio-cabinet placement (single instance — the back wall of the shop).
+#[derive(Clone, Copy, Debug)]
+pub struct CurioCabinetPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the cabinet's *center*.
+    pub center_pos: [f32; 3],
+    /// Full extents in world units (width × height × depth).
+    pub extents: [f32; 3],
+}
+
 /// One drawable element in a `UiFrame`.
 ///
 /// The renderer walks `UiFrame.cmds` in order and dispatches each variant to
@@ -99,6 +384,32 @@ pub enum DrawCmd {
     /// `lit_mesh_pipeline`, instanced from the renderer's pre-allocated
     /// relic slot pool.
     RelicBatch(Vec<RelicPlacement>),
+    /// Free-standing dish placement (alternative to `Dish` which auto-sizes
+    /// from `RelicBatch`). Used by the shop scene to draw multiple dishes at
+    /// fixed positions in the same frame.
+    DishExplicit(DishExplicit),
+    /// Single curio-cabinet (back-wall shadow box) placement. The shop scene
+    /// uses one per frame; gameplay leaves this empty.
+    CurioCabinet(CurioCabinetPlacement),
+    /// Batch of shrine meshes drawn via the lit-mesh pipeline, instanced
+    /// from the renderer's pre-allocated shrine slot pool. The pick-blind
+    /// scene uses one batch of three (Small / Big / Boss) per frame.
+    ShrineBatch(Vec<ShrinePlacement>),
+    /// Batch of zodiac/talisman ribbons drawn via the lit-mesh pipeline,
+    /// instanced from the renderer's pre-allocated ribbon slot pool. Used by
+    /// the shop scene for both the wall-pinned for-sale ribbons and the
+    /// owned-consumable inventory fan.
+    ZodiacBatch(Vec<ZodiacRibbonPlacement>),
+    /// Batch of jade talisman tablets drawn via the lit-mesh pipeline,
+    /// instanced from the renderer's pre-allocated talisman slot pool. Used
+    /// by the shop scene for the for-sale talismans pinned in the curio
+    /// cabinet next to the zodiac ribbons.
+    TalismanBatch(Vec<TalismanPlacement>),
+    /// Batch of physical gold coins drawn via the lit-mesh pipeline,
+    /// instanced from the renderer's pre-allocated coin slot pool. Used by
+    /// the shop scene to display the player's gold as a pile of coins in a
+    /// dish.
+    CoinBatch(Vec<CoinPlacement>),
     /// Light beams + hand tile body quads (drawn via `light_beam_pipeline` +
     /// `tile_quad_pipeline`). Renderer pulls hand state from `UiFrame`.
     HandTileBackdrop,
@@ -118,6 +429,29 @@ pub enum DrawCmd {
     Text(TextLabel),
     /// Pre-loaded relic icon texture.
     RelicIcon(RelicIcon),
+    // ── Skeuomorphic gameplay HUD ──
+    /// Hanging blind/score plaque (gameplay HUD). Single placement per cmd.
+    Plaque(PlaquePlacement),
+    /// Hanging boss-rule ofuda paper (gameplay HUD). Single placement per cmd.
+    Ofuda(OfudaPlacement),
+    /// Batch of bone yaku tablets sitting in a row below the hand.
+    YakuTabletBatch(Vec<YakuTabletPlacement>),
+    /// Batch of wood action tablets (sort suit / sort rank / play).
+    WoodTabletBatch(Vec<WoodTabletPlacement>),
+    /// The discard bowl.
+    Bowl(BowlPlacement),
+    /// The plays/discards remaining peg block.
+    #[allow(dead_code)]
+    PegBlock(PegBlockPlacement),
+    /// The wall stack (facedown tiles at the back of the table).
+    #[allow(dead_code)]
+    WallStack(WallStackPlacement),
+    /// The dora indicator stand.
+    #[allow(dead_code)]
+    DoraStand(DoraStandPlacement),
+    /// Engraved bone scoring tokens that pop in during a cascade. Reuses
+    /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
+    CascadeTokenBatch(Vec<CascadeTokenPlacement>),
 }
 
 /// Everything a frame's draw needs: an ordered command list plus per-frame
@@ -151,6 +485,11 @@ pub struct UiFrame {
     /// top of the per-cursor wind. Used by gameplay to "blow" smoke off the
     /// hand strip a few seconds after dealing.
     pub wind_gusts: Vec<WindGust>,
+    /// Optional 3D camera override. When `Some`, the renderer uses this
+    /// camera (eye/target/up/fovy) for all 3D draws this frame instead of
+    /// the default "person at the table" gameplay camera. The shop scene
+    /// uses this to frame the curio cabinet + foreground dishes.
+    pub camera_override: Option<CameraParams>,
 
     // ── Non-draw scene metadata ─────────────────────────────────────────
     /// Hit-test rects for clickable buttons (not drawn).
@@ -172,6 +511,7 @@ impl UiFrame {
             point_lights: Vec::new(),
             cursor_pos: None,
             wind_gusts: Vec::new(),
+            camera_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
         }
@@ -201,6 +541,54 @@ impl UiFrame {
     }
     pub fn relic_batch(&mut self, placements: Vec<RelicPlacement>) {
         self.cmds.push(DrawCmd::RelicBatch(placements));
+    }
+    pub fn dish_explicit(&mut self, dish: DishExplicit) {
+        self.cmds.push(DrawCmd::DishExplicit(dish));
+    }
+    pub fn curio_cabinet(&mut self, cabinet: CurioCabinetPlacement) {
+        self.cmds.push(DrawCmd::CurioCabinet(cabinet));
+    }
+    pub fn shrine_batch(&mut self, placements: Vec<ShrinePlacement>) {
+        self.cmds.push(DrawCmd::ShrineBatch(placements));
+    }
+    pub fn zodiac_batch(&mut self, placements: Vec<ZodiacRibbonPlacement>) {
+        self.cmds.push(DrawCmd::ZodiacBatch(placements));
+    }
+    pub fn talisman_batch(&mut self, placements: Vec<TalismanPlacement>) {
+        self.cmds.push(DrawCmd::TalismanBatch(placements));
+    }
+    pub fn coin_batch(&mut self, placements: Vec<CoinPlacement>) {
+        self.cmds.push(DrawCmd::CoinBatch(placements));
+    }
+    pub fn plaque(&mut self, p: PlaquePlacement) {
+        self.cmds.push(DrawCmd::Plaque(p));
+    }
+    pub fn ofuda(&mut self, p: OfudaPlacement) {
+        self.cmds.push(DrawCmd::Ofuda(p));
+    }
+    pub fn yaku_tablet_batch(&mut self, placements: Vec<YakuTabletPlacement>) {
+        self.cmds.push(DrawCmd::YakuTabletBatch(placements));
+    }
+    pub fn wood_tablet_batch(&mut self, placements: Vec<WoodTabletPlacement>) {
+        self.cmds.push(DrawCmd::WoodTabletBatch(placements));
+    }
+    pub fn bowl(&mut self, p: BowlPlacement) {
+        self.cmds.push(DrawCmd::Bowl(p));
+    }
+    #[allow(dead_code)]
+    pub fn peg_block(&mut self, p: PegBlockPlacement) {
+        self.cmds.push(DrawCmd::PegBlock(p));
+    }
+    #[allow(dead_code)]
+    pub fn wall_stack(&mut self, p: WallStackPlacement) {
+        self.cmds.push(DrawCmd::WallStack(p));
+    }
+    #[allow(dead_code)]
+    pub fn dora_stand(&mut self, p: DoraStandPlacement) {
+        self.cmds.push(DrawCmd::DoraStand(p));
+    }
+    pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
+        self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
     }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
@@ -243,7 +631,22 @@ impl UiFrame {
                 | DrawCmd::CandleBatch(_)
                 | DrawCmd::Dish
                 | DrawCmd::RelicBatch(_)
-                | DrawCmd::RelicIcon(_) => {}
+                | DrawCmd::DishExplicit(_)
+                | DrawCmd::CurioCabinet(_)
+                | DrawCmd::ShrineBatch(_)
+                | DrawCmd::ZodiacBatch(_)
+                | DrawCmd::TalismanBatch(_)
+                | DrawCmd::CoinBatch(_)
+                | DrawCmd::RelicIcon(_)
+                | DrawCmd::Plaque(_)
+                | DrawCmd::Ofuda(_)
+                | DrawCmd::YakuTabletBatch(_)
+                | DrawCmd::WoodTabletBatch(_)
+                | DrawCmd::Bowl(_)
+                | DrawCmd::PegBlock(_)
+                | DrawCmd::WallStack(_)
+                | DrawCmd::DoraStand(_)
+                | DrawCmd::CascadeTokenBatch(_) => {}
             }
         }
     }

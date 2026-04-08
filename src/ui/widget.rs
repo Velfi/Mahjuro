@@ -248,6 +248,7 @@ pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
 
 /// Push a small "price tag" pill — used by the shop. Brass background with
 /// champagne numerals; desaturates when `affordable` is false.
+#[allow(dead_code)]
 pub fn push_price_tag(
     quads: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,

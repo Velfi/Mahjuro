@@ -396,8 +396,18 @@ impl SceneBehavior for GameplayScene {
         for &cid in ctx.button_clicks {
             if cid >= ZODIAC_USE_BASE && cid < ZODIAC_USE_BASE + 16 {
                 let idx = (cid - ZODIAC_USE_BASE) as usize;
-                if let Some((yaku, level)) = ctx.run.use_zodiac(idx) {
-                    log::info!("Used Zodiac → {} now level {}", yaku.name(), level);
+                match ctx.run.use_consumable(idx) {
+                    Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) => {
+                        log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level);
+                    }
+                    Some(crate::game::run::ConsumableUseResult::Talisman { kind }) => {
+                        log::info!(
+                            "Used {} — every tile in hand stamped with {:?}",
+                            kind.name(),
+                            kind.enhancement()
+                        );
+                    }
+                    None => {}
                 }
             }
         }
@@ -726,24 +736,61 @@ impl SceneBehavior for GameplayScene {
         // into the cartouche. The cartouche is only ~38% of the score panel
         // width and the rasterizer's width-based fallback would otherwise
         // squeeze a 100-char single-line string to the 8px floor.
+        // On boss blinds, prefer the boss's themed name over the generic
+        // "Boss Blind" label so the player can read what they're up against
+        // at a glance.
+        let blind_label: String = if run.blind == crate::core::rules::BlindKind::Boss {
+            run.upcoming_boss
+                .map(|k| k.def().name.to_string())
+                .unwrap_or_else(|| run.blind.name().to_string())
+        } else {
+            run.blind.name().to_string()
+        };
         let score_text_top = format!(
             "{}  ·  R{}  ·  {} / {}",
-            run.blind.name(),
-            run.run_number,
-            shown_score,
-            run.target_score,
+            blind_label, run.run_number, shown_score, run.target_score,
         );
         let score_text_bot = format!(
             "${}  ·  Wall {}  ·  Wind {}  ·  {}{}",
             run.gold, tiles_left, wind_label, shanten_text, dora_section
         );
+        // Captured for the hanging plaque cmd built later in `frame.cmds`.
+        // The plaque carries the same two-line payload, decal-rasterized
+        // onto the wood face in a future phase. For now the existing 2D
+        // text labels (header_text_labels below) sit on top of the wood
+        // and supply the readable text.
+        let plaque_top_text = score_text_top.clone();
+        let plaque_bot_text = score_text_bot.clone();
+        // Boss-rule ofuda payload: derived independently from `run` so the
+        // hanging paper always reflects the active boss rule, regardless of
+        // whether a cascade is currently animating in the modifier strip.
+        let (ofuda_title_text, ofuda_rule_text) =
+            if run.blind == crate::core::rules::BlindKind::Boss {
+                if let Some(k) = run.upcoming_boss {
+                    let d = k.def();
+                    let desc: &str = run
+                        .upcoming_boss_effect
+                        .as_ref()
+                        .and_then(|e| e.description_override.as_deref())
+                        .unwrap_or(d.description);
+                    (d.name.to_string(), desc.to_string())
+                } else {
+                    (String::new(), String::new())
+                }
+            } else {
+                (String::new(), String::new())
+            };
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
         let ms = layout.modifier_strip;
 
         // Dynamic readout buffers — when populated by the cascade branch, they
         // replace the legacy single-line cascade text label (which becomes "").
-        let mut cascade_instances: Vec<GpuInstance> = Vec::new();
+        // Phase 6: the chips/mult pills become physical engraved bone tokens
+        // pushed via `cascade_token_placements`; the legacy `cascade_instances`
+        // flat-quad buffer is no longer populated, only the text labels.
+        let mut cascade_token_placements: Vec<crate::render::draw_cmd::CascadeTokenPlacement> =
+            Vec::new();
         let mut cascade_labels: Vec<TextLabel> = Vec::new();
 
         // Build cascade / sets text for left panel.
@@ -776,27 +823,36 @@ impl SceneBehavior for GameplayScene {
                 1.0
             };
 
-            // Chips pill — cool indigo background, gold number.
+            // Chips token — engraved bone, cool indigo tint. The pulse
+            // envelope from `chip_pulse` (computed above) drives the
+            // renderer's per-instance scale-up so the active axis pops on
+            // each scoring step.
             let chips_x = inner_x;
             {
-                let scaled_w = pill_w * chip_pulse;
-                let scaled_h = pill_h * chip_pulse;
                 let cx = chips_x + pill_w * 0.5;
                 let cy = pill_y + pill_h * 0.5;
-                let rect = [cx - scaled_w * 0.5, cy - scaled_h * 0.5, scaled_w, scaled_h];
-                cascade_instances.push(GpuInstance {
-                    rect,
-                    color: [0.18, 0.24, 0.42, 0.95],
-                });
+                // Pull the existing chip_pulse value out of the [1.0, 1.12]
+                // band the pill code used so the cascade token batch can
+                // scale uniformly. (chip_pulse - 1) / 0.12 maps the active
+                // band into [0, 1] for the renderer's pulse field.
+                let pulse_t = ((chip_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
+                cascade_token_placements.push(
+                    crate::render::draw_cmd::CascadeTokenPlacement {
+                        world_pos: [cx, cy, 4.0],
+                        extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                        kind: crate::render::draw_cmd::CascadeTokenKind::Chips,
+                        pulse: pulse_t,
+                    },
+                );
                 cascade_labels.push(TextLabel {
-                    rect,
+                    rect: [chips_x, pill_y, pill_w, pill_h],
                     text: format!("{}", frame.displayed_chips),
                     color: [1.0, 0.93, 0.55, 1.0],
                     ..Default::default()
                 });
             }
 
-            // Mult pill — warm crimson background, soft pink number.
+            // Mult token — engraved bone, warm crimson tint.
             let mult_x = inner_x + pill_w + cross_w;
             let mult_value = frame.displayed_mult;
             let mult_str = if (mult_value - mult_value.round()).abs() < 0.05 {
@@ -805,17 +861,19 @@ impl SceneBehavior for GameplayScene {
                 format!("×{:.1}", mult_value)
             };
             {
-                let scaled_w = pill_w * mult_pulse;
-                let scaled_h = pill_h * mult_pulse;
                 let cx = mult_x + pill_w * 0.5;
                 let cy = pill_y + pill_h * 0.5;
-                let rect = [cx - scaled_w * 0.5, cy - scaled_h * 0.5, scaled_w, scaled_h];
-                cascade_instances.push(GpuInstance {
-                    rect,
-                    color: [0.45, 0.16, 0.22, 0.95],
-                });
+                let pulse_t = ((mult_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
+                cascade_token_placements.push(
+                    crate::render::draw_cmd::CascadeTokenPlacement {
+                        world_pos: [cx, cy, 4.0],
+                        extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                        kind: crate::render::draw_cmd::CascadeTokenKind::Mult,
+                        pulse: pulse_t,
+                    },
+                );
                 cascade_labels.push(TextLabel {
-                    rect,
+                    rect: [mult_x, pill_y, pill_w, pill_h],
                     text: mult_str,
                     color: [1.0, 0.85, 0.85, 1.0],
                     ..Default::default()
@@ -888,7 +946,28 @@ impl SceneBehavior for GameplayScene {
                 .map(|(t, _)| *t)
                 .collect();
             if selected_tiles.is_empty() {
-                ("Select tiles to play".to_string(), [0.6, 0.6, 0.6, 1.0])
+                // On boss blinds, surface the boss's effect description here
+                // so the player has a constant reminder of what's hurting them.
+                let idle_text = if run.blind == crate::core::rules::BlindKind::Boss {
+                    run.upcoming_boss
+                        .map(|k| {
+                            let d = k.def();
+                            // Reactive bosses (Mirror, Tax Collector) have a
+                            // resolved description set at reveal time — prefer
+                            // it so the in-fight reminder shows the actual
+                            // chosen variant, not the generic static text.
+                            let desc: &str = run
+                                .upcoming_boss_effect
+                                .as_ref()
+                                .and_then(|e| e.description_override.as_deref())
+                                .unwrap_or(d.description);
+                            format!("{} — {}", d.name, desc)
+                        })
+                        .unwrap_or_else(|| "Select tiles to play".to_string())
+                } else {
+                    "Select tiles to play".to_string()
+                };
+                (idle_text, [0.85, 0.7, 0.4, 1.0])
             } else {
                 let hand_desc = describe_hand(&selected_tiles);
                 let preview = run.preview_selection();
@@ -1003,6 +1082,15 @@ impl SceneBehavior for GameplayScene {
             })
             .collect();
 
+        // Phase 3: yaku selectors are now physical bone tablets sitting in
+        // a row in front of the hand. The flat slate-blue card quads + the
+        // progress-fill bar are gone — replaced by `YakuTabletBatch` that
+        // the renderer dispatches through the lit-mesh pipeline. The 2D
+        // text labels stay as a screen-space overlay until the engraved
+        // decal pass lands; hover tracking still uses the original screen
+        // rect (the cards live in the same pixel region as before).
+        let mut yaku_tablet_placements: Vec<crate::render::draw_cmd::YakuTabletPlacement> =
+            Vec::new();
         if !visible_previews.is_empty() {
             let panel_h = (66.0 * scale).max(48.0);
             let panel_gap = 8.0 * scale;
@@ -1015,58 +1103,48 @@ impl SceneBehavior for GameplayScene {
             // Pinned font sizes — never let the rasterizer auto-shrink card
             // text into illegibility, regardless of how narrow the cards get.
             let name_font = (panel_h * 0.30).max(13.0);
+            // Tablets are flat-on-table dominoes: extents[0] is width
+            // (matches card width), extents[1] is the thickness above the
+            // wood, extents[2] is depth (matches card height into the
+            // scene).
+            let tablet_thickness = (8.0 * scale).max(6.0);
             for (i, p) in visible_previews.iter().enumerate() {
                 let cx = panel_x + i as f32 * (card_w + card_gap);
                 let cy = panel_y;
-                // Card background — dim slate, brighter when active.
-                let bg_color = if p.active {
-                    [0.28, 0.24, 0.10, 0.95]
-                } else {
-                    [0.10, 0.12, 0.20, 0.85]
-                };
-                hud_quads.push(GpuInstance {
-                    rect: [cx, cy, card_w, panel_h],
-                    color: bg_color,
-                });
-                // Progress fill — bottom strip of the card.
-                let fill_h = (8.0 * scale).max(5.0);
-                let fill_y = cy + panel_h - fill_h - 2.0;
-                hud_quads.push(GpuInstance {
-                    rect: [cx + 4.0, fill_y, card_w - 8.0, fill_h],
-                    color: [0.06, 0.07, 0.12, 0.9],
-                });
-                let fill_w = (card_w - 8.0) * p.progress;
-                if fill_w > 0.5 {
-                    let fill_color = if p.active {
-                        [0.95, 0.78, 0.25, 1.0]
-                    } else {
-                        [0.45, 0.55, 0.85, 0.9]
-                    };
-                    hud_quads.push(GpuInstance {
-                        rect: [cx + 4.0, fill_y, fill_w, fill_h],
-                        color: fill_color,
-                    });
-                }
-                // Yaku name centered above the progress bar; bonus values and
-                // hint live in the hover tooltip.
-                let name_h = panel_h - fill_h - 4.0;
+                let center_px = cx + card_w * 0.5;
+                let center_py = cy + panel_h * 0.5;
+                let (cur_x, cur_y) = self.cursor_pos;
+                let hovered_now =
+                    cur_x >= cx && cur_x <= cx + card_w && cur_y >= cy && cur_y <= cy + panel_h;
+                yaku_tablet_placements.push(
+                    crate::render::draw_cmd::YakuTabletPlacement {
+                        world_pos: [center_px, center_py, 0.0],
+                        extents: [card_w, tablet_thickness, panel_h],
+                        name: p.kind.name().to_string(),
+                        progress: p.progress,
+                        active: p.active,
+                        hover: if hovered_now { 1.0 } else { 0.0 },
+                    },
+                );
+                // Yaku name centered on the tablet face. Color matches the
+                // active/dim state of the underlying tablet.
                 let name_color = if p.active {
                     [1.0, 0.92, 0.55, 1.0]
                 } else {
-                    [0.78, 0.80, 0.90, 1.0]
+                    [0.92, 0.86, 0.72, 1.0]
                 };
                 hud_text.push(TextLabel {
-                    rect: [cx + 4.0, cy + 2.0, card_w - 8.0, name_h],
+                    rect: [cx + 4.0, cy + 2.0, card_w - 8.0, panel_h - 4.0],
                     text: p.kind.name().to_string(),
                     color: name_color,
                     font_px: Some(name_font),
+                    no_glossary: true,
                     ..Default::default()
                 });
 
                 // Hover tracking for the tooltip pass below the loop.
-                let (cur_x, cur_y) = self.cursor_pos;
-                if cur_x >= cx && cur_x <= cx + card_w && cur_y >= cy && cur_y <= cy + panel_h {
-                    hovered_yaku = Some((p.kind, cx + card_w * 0.5, cy));
+                if hovered_now {
+                    hovered_yaku = Some((p.kind, center_px, cy));
                 }
             }
         }
@@ -1115,22 +1193,20 @@ impl SceneBehavior for GameplayScene {
             play_btn_rect,
             discard_btn_rect,
         ];
-        let base_colors: [[f32; 4]; 4] = [
-            [0.22, 0.38, 0.55, 0.92], // sort suit
-            [0.22, 0.38, 0.55, 0.92], // sort rank
-            if selection_valid && run.plays_remaining > 0 {
-                [0.18, 0.55, 0.25, 0.92]
-            } else {
-                [0.35, 0.35, 0.35, 0.60]
-            },
-            if selected_count > 0 && run.discards_remaining > 0 {
-                [0.65, 0.18, 0.18, 0.92]
-            } else {
-                [0.35, 0.35, 0.35, 0.60]
-            },
-        ];
+        // Phase 4: action row is now physical objects.
+        //   - Sort by Suit / Sort by Rank → carved wood tablets
+        //   - Play Hand                   → carved wood tablet (same mesh)
+        //   - Discard                     → lacquered wood bowl
+        // The flat slate-blue button background quads are gone; only the
+        // focus-highlight border remains as a 2D affordance for keyboard
+        // navigation.
+        let mut wood_tablet_placements: Vec<crate::render::draw_cmd::WoodTabletPlacement> =
+            Vec::new();
+        let mut discard_bowl_placement: Option<crate::render::draw_cmd::BowlPlacement> = None;
+        let play_enabled = selection_valid && run.plays_remaining > 0;
+        let discard_enabled = selected_count > 0 && run.discards_remaining > 0;
         for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
-            // Draw a highlight border if this button is focused.
+            // Focus highlight stays as a 2D rect — keyboard nav affordance.
             if self.button_focus == Some(ALL_BUTTONS[i]) {
                 let pad = 3.0;
                 hud_quads.push(GpuInstance {
@@ -1138,10 +1214,46 @@ impl SceneBehavior for GameplayScene {
                     color: [0.9, 0.8, 0.2, 0.95],
                 });
             }
-            hud_quads.push(GpuInstance {
-                rect: [bx, by, bw, bh],
-                color: base_colors[i],
-            });
+            let center_px = bx + bw * 0.5;
+            let center_py = by + bh * 0.5;
+            let (cur_x, cur_y) = self.cursor_pos;
+            let hovered = cur_x >= bx && cur_x <= bx + bw && cur_y >= by && cur_y <= by + bh;
+            let tablet_thickness = (bh * 0.35).max(8.0);
+            match i {
+                0 | 1 | 2 => {
+                    let label = match i {
+                        0 => "Sort by Suit",
+                        1 => "Sort by Rank",
+                        _ => "Play",
+                    };
+                    let disabled = i == 2 && !play_enabled;
+                    wood_tablet_placements.push(
+                        crate::render::draw_cmd::WoodTabletPlacement {
+                            world_pos: [center_px, center_py, 0.0],
+                            extents: [bw, tablet_thickness, bh],
+                            label: label.to_string(),
+                            pressed: 0.0,
+                            hover: if hovered { 1.0 } else { 0.0 },
+                            disabled,
+                        },
+                    );
+                }
+                3 => {
+                    // Discard bowl. The bowl mesh is round, so its X and Z
+                    // extents should be roughly equal — we use the smaller
+                    // of (bw, bh*1.6) so the bowl fits inside the button
+                    // footprint without ballooning sideways.
+                    let bowl_diam = bw.min(bh * 1.8);
+                    let bowl_h = bh * 1.4;
+                    discard_bowl_placement =
+                        Some(crate::render::draw_cmd::BowlPlacement {
+                            world_pos: [center_px, center_py, 0.0],
+                            extents: [bowl_diam, bowl_h, bowl_diam],
+                            hover: if hovered && discard_enabled { 1.0 } else { 0.0 },
+                        });
+                }
+                _ => {}
+            }
         }
 
         // Score-panel text fits inside the narrow centered cartouche painted
@@ -1258,74 +1370,96 @@ impl SceneBehavior for GameplayScene {
             ]
         };
 
-        // ── Zodiac inventory bar (Patch B finishing) ─────────────────────
+        // ── Consumable inventory bar (Zodiacs + Talismans) ───────────────
         //
         // Sits in the top-right corner of the screen, away from the score
-        // cartouche and relic dish. Each slot is a clickable badge showing
-        // the Zodiac's name and the yaku it levels; clicking it consumes the
-        // card and bumps the yaku level for the rest of the run.
+        // cartouche and relic dish. Each slot is a clickable badge for one
+        // consumable — Zodiacs level a yaku for the run, Talismans stamp
+        // their enhancement onto every tile in the current hand at once.
         //
-        // Slot dimensions are sized to comfortably fit two pinned-font lines
-        // plus the longest yaku name + level suffix (e.g. "→ Sanshoku L9").
-        let zodiac_inv = &run.zodiac_inventory;
-        if zodiac_inv.capacity > 0 {
+        // Phase 5: the flat slot backgrounds + gold rims are gone; the
+        // consumable inventory now lives on a brass `DishExplicit` with
+        // `TalismanBatch` pendants for each filled slot. The text labels
+        // and click handlers stay at the same screen positions so hover +
+        // input plumbing is unchanged.
+        let consumables = &run.consumables;
+        let mut talisman_dish_placements: Vec<crate::render::draw_cmd::TalismanPlacement> =
+            Vec::new();
+        let mut talisman_dish_strip: Option<(f32, f32, f32, f32)> = None;
+        if consumables.capacity > 0 {
             let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
             let slot_w = (140.0 * zscale).max(120.0);
             let slot_h = (56.0 * zscale).max(48.0);
             let gap = (6.0 * zscale).max(3.0);
             let total_w =
-                slot_w * zodiac_inv.capacity as f32 + gap * (zodiac_inv.capacity as f32 - 1.0);
+                slot_w * consumables.capacity as f32 + gap * (consumables.capacity as f32 - 1.0);
             let strip_x = layout.window_w - total_w - (16.0 * zscale);
             let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
-            for slot_idx in 0..zodiac_inv.capacity {
+            talisman_dish_strip = Some((strip_x, strip_y, total_w, slot_h));
+            for slot_idx in 0..consumables.capacity {
                 let zx = strip_x + slot_idx as f32 * (slot_w + gap);
                 let zy = strip_y;
-                if let Some(&z) = zodiac_inv.items.get(slot_idx) {
-                    // Filled slot — gold background, click registers the use.
-                    hud_quads.push(GpuInstance {
-                        rect: [zx, zy, slot_w, slot_h],
-                        color: [0.42, 0.32, 0.10, 0.92],
-                    });
-                    // Gold rim.
-                    let rim = 1.5 * zscale;
-                    let gold = crate::render::theme::color::GOLD;
-                    hud_quads.push(GpuInstance {
-                        rect: [zx, zy, slot_w, rim],
-                        color: gold,
-                    });
-                    hud_quads.push(GpuInstance {
-                        rect: [zx, zy + slot_h - rim, slot_w, rim],
-                        color: gold,
-                    });
-                    hud_quads.push(GpuInstance {
-                        rect: [zx, zy, rim, slot_h],
-                        color: gold,
-                    });
-                    hud_quads.push(GpuInstance {
-                        rect: [zx + slot_w - rim, zy, rim, slot_h],
-                        color: gold,
-                    });
-                    // Two pinned-font rows: zodiac name (gold) over the
-                    // target yaku + level (parchment). Pinning prevents the
-                    // rasterizer from auto-shrinking long yaku names like
-                    // "Sanshoku" to the 8px floor when the slot is narrow.
+                if let Some(&item) = consumables.items.get(slot_idx) {
+                    // Physical pendant on the dish — color encodes the
+                    // consumable type. Zodiacs read jade-green, talismans
+                    // pick up the talisman's enhancement family color.
+                    let pendant_color = match item {
+                        crate::core::consumable::Consumable::Zodiac(_) => {
+                            [0.45, 0.78, 0.55, 1.0]
+                        }
+                        crate::core::consumable::Consumable::Talisman(_) => {
+                            [0.92, 0.78, 0.32, 1.0]
+                        }
+                    };
+                    talisman_dish_placements.push(
+                        crate::render::draw_cmd::TalismanPlacement {
+                            center_pos: [zx + slot_w * 0.5, zy + slot_h * 0.5, 8.0],
+                            extents: [slot_w * 0.55, slot_h * 0.85, 6.0],
+                            rotation_y_deg: 0.0,
+                            color: pendant_color,
+                        },
+                    );
                     let name_font = (slot_h * 0.34).max(14.0);
-                    let yaku_font = (slot_h * 0.28).max(12.0);
+                    let sub_font = (slot_h * 0.28).max(12.0);
                     let name_h = slot_h * 0.46;
+                    let (name_text, sub_text, tooltip_title, tooltip_body) = match item {
+                        crate::core::consumable::Consumable::Zodiac(z) => {
+                            let level = run.yaku_levels.level_of(z.yaku());
+                            (
+                                z.name().to_string(),
+                                format!("{} L{}", z.yaku().name(), level),
+                                format!("{} (Zodiac)", z.name()),
+                                format!(
+                                    "Click or press to use. Permanently raises {} from level {} to {} for the rest of the run (+0.5 mult, +20 chips per level).",
+                                    z.yaku().name(),
+                                    level,
+                                    level + 1,
+                                ),
+                            )
+                        }
+                        crate::core::consumable::Consumable::Talisman(t) => (
+                            t.name().to_string(),
+                            "Buff hand".to_string(),
+                            format!("{} (Talisman)", t.name()),
+                            format!(
+                                "Click or press to use. {} The enhancement persists on each tile until it's played or discarded.",
+                                t.description()
+                            ),
+                        ),
+                    };
                     hud_text.push(TextLabel {
                         rect: [zx, zy + 2.0, slot_w, name_h],
-                        text: z.name().to_string(),
+                        text: name_text,
                         color: crate::render::theme::color::CHAMPAGNE,
                         font_px: Some(name_font),
                         ..Default::default()
                     });
-                    let level = run.yaku_levels.level_of(z.yaku());
                     let yaku_h = slot_h * 0.40;
                     hud_text.push(TextLabel {
                         rect: [zx, zy + name_h + 2.0, slot_w, yaku_h],
-                        text: format!("{} L{}", z.yaku().name(), level),
+                        text: sub_text,
                         color: crate::render::theme::color::PARCHMENT,
-                        font_px: Some(yaku_font),
+                        font_px: Some(sub_font),
                         ..Default::default()
                     });
                     if !paused {
@@ -1334,20 +1468,8 @@ impl SceneBehavior for GameplayScene {
                             ZODIAC_USE_BASE + slot_idx as u32,
                         ));
                     }
-                    // Hover tooltip — pushed into the *hover layer* so its
-                    // background quad lands AFTER the slot's name + yaku
-                    // labels above. This is the core fix for the recurring
-                    // "tooltip BG renders under parent text" bug.
                     let (cx, cy) = self.cursor_pos;
                     if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
-                        let level = run.yaku_levels.level_of(z.yaku());
-                        let title = format!("{} (Zodiac)", z.name());
-                        let body = format!(
-                            "Click or press to use. Permanently raises {} from level {} to {} for the rest of the run (+0.5 mult, +20 chips per level).",
-                            z.yaku().name(),
-                            level,
-                            level + 1,
-                        );
                         push_tooltip(
                             &mut hover_quads,
                             &mut hover_text,
@@ -1355,19 +1477,13 @@ impl SceneBehavior for GameplayScene {
                             zy,
                             layout.window_w,
                             layout.window_h,
-                            &title,
-                            &body,
+                            &tooltip_title,
+                            &tooltip_body,
                         );
                     }
                 } else {
-                    // Empty slot — dim outline.
-                    hud_quads.push(GpuInstance {
-                        rect: [zx, zy, slot_w, slot_h],
-                        color: [0.06, 0.07, 0.12, 0.55],
-                    });
-                    // Hover tooltip even on empty slots: tells the player what
-                    // the strip is for. Pushed into the hover layer for the
-                    // same reason as the filled-slot tooltip above.
+                    // Empty slot — no flat backdrop; the brass dish itself
+                    // visually represents the empty cradle. Tooltip on hover.
                     let (cx, cy) = self.cursor_pos;
                     if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
                         push_tooltip(
@@ -1377,8 +1493,8 @@ impl SceneBehavior for GameplayScene {
                             zy,
                             layout.window_w,
                             layout.window_h,
-                            "Zodiac Slot",
-                            "Empty. Earn Zodiac cards by clearing blinds or buying them in the shop. Using one permanently levels its yaku.",
+                            "Consumable Slot",
+                            "Empty. Earn Zodiac cards from blind clears or buy Zodiacs and Talismans in the shop. Both share these slots.",
                         );
                     }
                 }
@@ -1414,7 +1530,22 @@ impl SceneBehavior for GameplayScene {
         // position rather than the flat layout slot. Falls back to the slot
         // rect on the very first frame before the renderer has projected.
         // Suppressed during cascade and while the pause menu is open.
-        if self.cascade.is_none() && !self.pause_menu.paused {
+        //
+        // Also suppressed when the cursor is over any 2D UI element (a
+        // button or a hovered yaku card). The 3D raycast pick happily
+        // intersects a hand tile even when the cursor sits visually atop a
+        // floating UI panel above the hand, which used to surface the tile
+        // tooltip + ▼ pointer underneath the panel's own tooltip. Gating
+        // here keeps a single tooltip on screen at a time.
+        let cursor_over_ui = {
+            let (cx, cy) = self.cursor_pos;
+            let in_button = buttons.iter().any(|b| {
+                let (bx, by, bw, bh) = b.rect;
+                cx >= bx && cx <= bx + bw && cy >= by && cy <= by + bh
+            });
+            in_button || hovered_yaku.is_some()
+        };
+        if self.cascade.is_none() && !self.pause_menu.paused && !cursor_over_ui {
             let (cx, cy) = self.cursor_pos;
             // Hit-test against the projected rects when available, since
             // those reflect what the user actually sees. Fall back to the
@@ -1446,14 +1577,40 @@ impl SceneBehavior for GameplayScene {
                     let (ax, ay, aw, ah) = anchor;
 
                     // ── Build the lines ───────────────────────────────
-                    let pts = tile.point_value();
+                    // Show the tile's *effective* value: base point worth
+                    // plus every per-tile bonus that doesn't depend on the
+                    // surrounding meld structure (talisman enhancements,
+                    // dora, owned chip relics). The total chips line is the
+                    // headline; the per-source breakdown follows so the
+                    // player can see *why* the tile is worth what it is.
+                    let dora_faces = run.wall.dora_faces();
+                    let eff = crate::core::scoring::tile_effective_value(
+                        tile,
+                        &run.relics,
+                        &dora_faces,
+                    );
                     let name = tile.full_name();
                     let category = tile.category();
                     let is_selected = run.selected.get(idx).copied().unwrap_or(false);
 
                     let mut lines: Vec<String> = Vec::new();
                     lines.push(name);
-                    lines.push(format!("{category} · {pts} pts"));
+                    if eff.bonus_chips != 0 || eff.mult_bonus != 0.0 {
+                        // Effective chips (base + bonuses).
+                        lines.push(format!(
+                            "{category} · {} pts (base {})",
+                            eff.total_chips(),
+                            eff.base_chips,
+                        ));
+                    } else {
+                        lines.push(format!("{category} · {} pts", eff.base_chips));
+                    }
+                    if eff.mult_bonus != 0.0 {
+                        lines.push(format!("+{:.1} mult", eff.mult_bonus));
+                    }
+                    for (src, body) in &eff.sources {
+                        lines.push(format!("{src}: {body}"));
+                    }
                     if is_selected {
                         lines.push("selected".to_string());
                     }
@@ -1824,9 +1981,15 @@ impl SceneBehavior for GameplayScene {
             let row_center_x = layout.window_w * 0.5;
             let row_y = layout.score_panel.y + layout.score_panel.h + layout.window_h * 0.08;
             let n = active_ids.len() as f32;
-            // Each cell ~160px wide so the relics read as substantial
-            // physical objects rather than dice.
-            let cell_w = 160.0_f32;
+            // Scale relic-dish geometry with window size so the dish reads the
+            // same proportionally at every resolution. The constants below were
+            // tuned at the 1920x1080 design size, so a window-height ratio of
+            // 1.0 at 1080 keeps them unchanged and shrinks them on smaller
+            // windows along with the rest of the layout.
+            let dish_scale = layout.window_h / 1080.0;
+            // Each cell ~160px wide (at design size) so the relics read as
+            // substantial physical objects rather than dice.
+            let cell_w = 160.0_f32 * dish_scale;
             let total_w = cell_w * n;
             let start_x = row_center_x - total_w * 0.5 + cell_w * 0.5;
             for (i, &rid) in active_ids.iter().enumerate() {
@@ -1835,9 +1998,9 @@ impl SceneBehavior for GameplayScene {
                 let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
                 let r1 = ((seed >> 16) & 0xFF) as f32 / 255.0;
                 let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
-                let half_x = 55.0 + r0 * 18.0;
-                let half_y = 40.0 + r1 * 22.0;
-                let half_z = 38.0 + r2 * 16.0;
+                let half_x = (55.0 + r0 * 18.0) * dish_scale;
+                let half_y = (40.0 + r1 * 22.0) * dish_scale;
+                let half_z = (38.0 + r2 * 16.0) * dish_scale;
 
                 // Color tracks the relic's rarity tier so similar-rarity
                 // relics share a visual family.
@@ -2151,16 +2314,88 @@ impl SceneBehavior for GameplayScene {
         frame.flames(flame_instances);
         frame.fluid_smoke();
 
-        // PERSISTENT HUD: score panel backplane → score header text →
-        // modifier strip text → yaku card bodies + button bar quads +
-        // zodiac slots + particles + help badge → button labels + zodiac
-        // labels + help text. Persistent quads first, then text on top of
-        // them — exactly the behaviour the legacy flush had, just scoped
-        // to the persistent layer instead of mixing with hover content.
+        // PERSISTENT HUD: hanging plaque + ofuda (3D wood/paper) → score
+        // panel pip indicators → score header text → modifier strip text →
+        // yaku card bodies + button bar quads + zodiac slots + particles +
+        // help badge → button labels + zodiac labels + help text.
+        // Persistent quads first, then text on top of them — exactly the
+        // behaviour the legacy flush had, just scoped to the persistent
+        // layer instead of mixing with hover content.
+        //
+        // The wooden plaque replaces the legacy slate-blue cartouche.
+        // Positioned in pixel space matching the score panel rect, with a
+        // modest world-Y lift so it reads as hanging above the table.
+        // Phase 2 keeps the existing 2D text labels on top — true engraved
+        // decals come in a later phase.
+        let sp = layout.score_panel;
+        let plaque_thickness = 8.0_f32;
+        // Lift is proportional to window height so the plaque tracks the
+        // camera (which also scales with `h` — see `eye_height = h * 0.55`
+        // in the renderer). A fixed world-unit lift drifts downward as the
+        // window grows because the table grows around a constant lift.
+        let plaque_lift = layout.window_h * 0.30;
+        frame.plaque(crate::render::draw_cmd::PlaquePlacement {
+            center_pos: [sp.x + sp.w * 0.5, sp.y + sp.h * 0.5, plaque_lift],
+            extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
+            rotation_y_deg: 0.0,
+            top_text: plaque_top_text,
+            bot_text: plaque_bot_text,
+        });
+        // Ofuda only appears on boss blinds (where there's a rule to show).
+        if !ofuda_title_text.is_empty() {
+            let ms_rect = layout.modifier_strip;
+            let ofuda_lift = layout.window_h * 0.085;
+            frame.ofuda(crate::render::draw_cmd::OfudaPlacement {
+                center_pos: [
+                    ms_rect.x + ms_rect.w * 0.85,
+                    ms_rect.y + ms_rect.h * 0.5,
+                    ofuda_lift,
+                ],
+                extents: [ms_rect.w * 0.28, ms_rect.h * 1.4, 4.0],
+                rotation_y_deg: 0.0,
+                title: ofuda_title_text,
+                rule: ofuda_rule_text,
+            });
+        }
         frame.quads(score_panel_quads);
         frame.texts(header_text_labels);
+        // Phase 6: cascade scoring tokens (engraved bone, chips + mult)
+        // pop in during a scoring cascade. Pushed before the cascade text
+        // labels so the numbers read on top of the wood.
+        if !cascade_token_placements.is_empty() {
+            frame.cascade_token_batch(cascade_token_placements);
+        }
         frame.texts(modifier_strip_text);
         frame.quads(hud_quads);
+        // Phase 3: bone yaku tablets sit just below the hand. Pushed before
+        // hud_text so the 2D yaku name labels render on top of the wood.
+        if !yaku_tablet_placements.is_empty() {
+            frame.yaku_tablet_batch(yaku_tablet_placements);
+        }
+        // Phase 4: action row. Wood sort/play tablets + lacquered discard
+        // bowl. The 2D button text labels in `hud_text` sit on top of the
+        // wood, same hybrid pattern as the yaku tablets.
+        if !wood_tablet_placements.is_empty() {
+            frame.wood_tablet_batch(wood_tablet_placements);
+        }
+        if let Some(bowl) = discard_bowl_placement {
+            frame.bowl(bowl);
+        }
+        // Phase 5: brass talisman/zodiac dish on the right side of the
+        // table. Dish is sized to wrap the consumables strip; pendants are
+        // pushed in slot order.
+        if let Some((sx, sy, sw, sh)) = talisman_dish_strip {
+            let dish_pad_x = sw * 0.10;
+            let dish_pad_y = sh * 0.40;
+            frame.dish_explicit(crate::render::draw_cmd::DishExplicit {
+                center_pos: [sx + sw * 0.5, sy + sh * 0.5, 0.0],
+                extents: [sw + dish_pad_x * 2.0, 14.0, sh + dish_pad_y * 2.0],
+                pick_id: None,
+            });
+            if !talisman_dish_placements.is_empty() {
+                frame.talisman_batch(talisman_dish_placements);
+            }
+        }
         frame.texts(hud_text);
 
         // Hand tile face labels — read on top of the persistent HUD

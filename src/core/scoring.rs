@@ -117,6 +117,10 @@ pub fn score_sets(
     let pair_double = rules.contains(&RuleModifier::PairDoubleScore);
     let honor_triple = rules.contains(&RuleModifier::HonorTripleScore);
     let no_seq_bonus = rules.contains(&RuleModifier::NoSequenceBonus);
+    let pairs_zero = rules.contains(&RuleModifier::PairsScoreZero);
+    let sequences_halved = rules.contains(&RuleModifier::SequencesHalved);
+    let middle_tiles_zero = rules.contains(&RuleModifier::MiddleTilesZero);
+    let censor_repeats = rules.contains(&RuleModifier::CensorRepeats);
 
     // Tiny helpers that mutate `chips`/`mult` in-place and emit a cascade step.
     macro_rules! push_chips {
@@ -150,14 +154,31 @@ pub fn score_sets(
     //
     // These don't get individual cascade steps — they're rolled into the
     // "Base" line the UI shows before the steps start ticking.
+    //
+    // Boss-effect tweaks happen here so they affect the chip floor everyone
+    // builds on top of:
+    //   * `pairs_zero`        → pair melds contribute nothing
+    //   * `sequences_halved`  → sequence melds contribute half
+    //   * `middle_tiles_zero` → rank-5 tiles contribute 0 point value
     let mut base_chips: i32 = 0;
     for s in sets {
-        base_chips += meld_chip_bonus(s.kind);
+        let mut meld_contrib = meld_chip_bonus(s.kind);
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
-                base_chips += t.point_value() as i32;
+                let mut v = t.point_value() as i32;
+                if middle_tiles_zero && t.rank == 5 {
+                    v = 0;
+                }
+                meld_contrib += v;
             }
         }
+        if pairs_zero && s.kind == SetKind::Pair {
+            meld_contrib = 0;
+        }
+        if sequences_halved && s.kind == SetKind::Sequence {
+            meld_contrib /= 2;
+        }
+        base_chips += meld_contrib;
     }
     chips = base_chips;
 
@@ -203,6 +224,69 @@ pub fn score_sets(
         let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
         if pair_count > 0 {
             push_chips!("Pair Double (rule)", 30 * pair_count);
+        }
+    }
+
+    // ── Phase 2.5: talisman tile enhancements ────────────────────────────
+    //
+    // Walk every scored tile across all melds and apply its
+    // [`crate::core::tile::TileEnhancement`] (if any). Talismans stamp these
+    // onto every tile in the player's hand at once via
+    // [`crate::core::talisman::apply_to_hand`]; here is where they cash out.
+    //
+    // Each enhancement contributes either chips or mult or a per-meld mult
+    // multiplier. They're aggregated into single cascade steps per kind so
+    // the cascade reads cleanly even when the whole hand is buffed.
+    {
+        use crate::core::tile::TileEnhancement;
+        let mut jade_chips = 0i32;
+        let mut pearl_chips = 0i32;
+        let mut gilded_mult = 0.0f64;
+        let mut polychrome_melds = 0i32;
+        for s in sets {
+            // Per-meld polychrome: any tile in this meld carrying Polychrome
+            // grants the meld a single ×1.2 mult bonus (counted once even if
+            // multiple polychrome tiles are present, to keep it bounded).
+            let mut meld_has_polychrome = false;
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else { continue };
+                let Some(enh) = t.enhancement else { continue };
+                match enh {
+                    TileEnhancement::Jade => {
+                        if !matches!(s.kind, SetKind::Pair) {
+                            jade_chips += 20;
+                        }
+                    }
+                    TileEnhancement::Pearl => pearl_chips += 30,
+                    TileEnhancement::Gilded => {
+                        if !matches!(s.kind, SetKind::Pair) {
+                            gilded_mult += 0.5;
+                        }
+                    }
+                    TileEnhancement::Polychrome => meld_has_polychrome = true,
+                }
+            }
+            if meld_has_polychrome {
+                polychrome_melds += 1;
+            }
+        }
+        if jade_chips > 0 {
+            push_chips!("Jade Talisman", jade_chips);
+        }
+        if pearl_chips > 0 {
+            push_chips!("Pearl Talisman", pearl_chips);
+        }
+        if gilded_mult > 0.0 {
+            push_mult!("Gilded Talisman", gilded_mult);
+        }
+        // Polychrome is multiplicative, but we already build mult additively
+        // (`mult = 1 + sum(deltas)`). Convert each polychrome meld's ×1.2 into
+        // an equivalent additive `+0.2 × current_mult` step so the cascade stays
+        // single-axis. This understates true multiplicativity slightly but
+        // keeps the math reproducible and matches the existing pipeline.
+        for _ in 0..polychrome_melds {
+            let delta = mult * 0.2;
+            push_mult!("Polychrome Talisman", delta);
         }
     }
 
@@ -316,6 +400,12 @@ pub fn score_sets(
         let mut mult_bonus = yaku.mult_bonus_at(level);
         let mut chip_bonus = chip;
         if !in_loadout(*yaku) {
+            chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
+            mult_bonus *= 0.5;
+        }
+        // The Censor: any yaku that has already fired this round contributes
+        // at half strength, stacking with the loadout half if applicable.
+        if censor_repeats && ctx.played_yaku_this_round.contains(yaku) {
             chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
             mult_bonus *= 0.5;
         }
@@ -561,6 +651,106 @@ pub fn score_sets_total(
     score_sets(tiles, sets, ctx, rules).total
 }
 
+/// Per-tile scoring estimate used by the gameplay tooltip to show a tile's
+/// "true worth" — base point value plus every per-tile bonus that doesn't
+/// require fine-grained meld context (talisman enhancements, dora, owned
+/// chip relics that key on tile properties).
+///
+/// Caveats:
+/// * Bonuses that only fire inside a non-pair meld (Jade, Gilded, Honor
+///   Fury) are included optimistically — i.e. we assume the player will
+///   actually score this tile inside a triplet/sequence/kong, since that's
+///   what the tooltip is meant to *promise*.
+/// * Polychrome's per-meld ×1.2 mult is approximated as a flat `+0.2 mult`
+///   line on the tile, matching the additive expansion the cascade uses in
+///   `score_sets`.
+/// * Cross-set / structural relics (DragonEcho, ChainReaction, MultiplierMaster…)
+///   are intentionally omitted because their value depends on the rest of
+///   the hand and would mislead the per-tile read.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TileEffectiveValue {
+    /// Base point value from the tile face (rank for numbered, 12 for honors).
+    pub base_chips: i32,
+    /// Sum of per-tile chip bonuses on top of the base.
+    pub bonus_chips: i32,
+    /// Sum of per-tile additive mult contributions.
+    pub mult_bonus: f64,
+    /// Per-source breakdown lines for tooltip rendering, e.g.
+    /// `("Pearl Talisman", "+30 chips")`. Order is the order they should be
+    /// displayed.
+    pub sources: Vec<(&'static str, String)>,
+}
+
+impl TileEffectiveValue {
+    pub fn total_chips(&self) -> i32 {
+        self.base_chips + self.bonus_chips
+    }
+}
+
+pub fn tile_effective_value(
+    tile: &Tile,
+    relics: &crate::core::relic::RelicState,
+    dora_faces: &[(Suit, u8)],
+) -> TileEffectiveValue {
+    use crate::core::tile::TileEnhancement;
+
+    let mut out = TileEffectiveValue {
+        base_chips: tile.point_value() as i32,
+        bonus_chips: 0,
+        mult_bonus: 0.0,
+        sources: Vec::new(),
+    };
+
+    // ── Talisman enhancements ───────────────────────────────────────────
+    // Optimistic: assume the tile lands in a non-pair meld so the
+    // meld-gated effects (Jade, Gilded) actually fire.
+    if let Some(enh) = tile.enhancement {
+        match enh {
+            TileEnhancement::Pearl => {
+                out.bonus_chips += 30;
+                out.sources.push(("Pearl Talisman", "+30 chips".into()));
+            }
+            TileEnhancement::Jade => {
+                out.bonus_chips += 20;
+                out.sources.push(("Jade Talisman", "+20 chips".into()));
+            }
+            TileEnhancement::Gilded => {
+                out.mult_bonus += 0.5;
+                out.sources.push(("Gilded Talisman", "+0.5 mult".into()));
+            }
+            TileEnhancement::Polychrome => {
+                // Per-meld ×1.2; the cascade expands this as +0.2 × current_mult.
+                // Show the +0.2 figure so the tooltip reflects what the
+                // cascade actually adds.
+                out.mult_bonus += 0.2;
+                out.sources
+                    .push(("Polychrome Talisman", "+0.2 mult / meld".into()));
+            }
+        }
+    }
+
+    // ── Dora ────────────────────────────────────────────────────────────
+    if dora_faces.contains(&(tile.suit, tile.rank)) {
+        let per_dora = if relics.has(RelicId::DoraCrown) { 35 } else { 25 };
+        out.bonus_chips += per_dora;
+        out.sources.push(("Dora", format!("+{per_dora} chips")));
+    }
+
+    // ── Per-tile chip relics ────────────────────────────────────────────
+    // Honor Fury: +18 per honor tile inside a meld.
+    if relics.has(RelicId::HonorFury) && matches!(tile.suit, Suit::Wind | Suit::Dragon) {
+        out.bonus_chips += 18;
+        out.sources.push(("Honor Fury", "+18 chips".into()));
+    }
+    // Shanten Lens: +5 per tile in any scored set.
+    if relics.has(RelicId::ShantenLens) {
+        out.bonus_chips += 5;
+        out.sources.push(("Shanten Lens", "+5 chips".into()));
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,6 +770,7 @@ mod tests {
             riichi_active: false,
             yaku_levels: None,
             yaku_loadout: vec![],
+            played_yaku_this_round: vec![],
         }
     }
 
@@ -716,6 +907,7 @@ mod tests {
             riichi_active: false,
             yaku_levels: None,
             yaku_loadout: vec![crate::core::yaku::YakuKind::Chinitsu],
+            played_yaku_this_round: vec![],
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Off-loadout: Ittsu (4 mult, 50 chips) → halved to (2 mult, 25 chips).
@@ -768,6 +960,7 @@ mod tests {
             riichi_active: false,
             yaku_levels: Some(levels),
             yaku_loadout: vec![],
+            played_yaku_this_round: vec![],
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Verify Toitoi step exists with expected chip & mult deltas.
@@ -1036,6 +1229,7 @@ mod tests {
             riichi_active: false,
             yaku_levels: None,
             yaku_loadout: vec![],
+            played_yaku_this_round: vec![],
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // 3 dora tiles × 25 (Patch A retune, was 20) = +75 chips

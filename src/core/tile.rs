@@ -12,6 +12,54 @@ pub enum Suit {
     Dragon,
 }
 
+/// A talisman-applied enhancement attached to an individual tile. The
+/// enhancement is recorded against the tile's id in
+/// [`crate::game::run::RunState::tile_enhancements`] and re-stamped onto the
+/// hand whenever tiles are drawn, so it persists for the rest of the run
+/// (across plays, discards, refills, and new-round redeals). See
+/// [`crate::core::talisman`] for the consumables that stamp these onto every
+/// hand tile at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum TileEnhancement {
+    /// +20 chips when this tile is part of a scored meld.
+    Jade,
+    /// +30 flat chips when this tile is scored, meld or pair.
+    Pearl,
+    /// +0.5 mult when this tile is part of a scored meld.
+    Gilded,
+    /// ×1.2 mult applied once per meld that contains this tile.
+    Polychrome,
+}
+
+impl TileEnhancement {
+    #[allow(dead_code)]
+    pub fn name(self) -> &'static str {
+        match self {
+            TileEnhancement::Jade => "Jade",
+            TileEnhancement::Pearl => "Pearl",
+            TileEnhancement::Gilded => "Gilded",
+            TileEnhancement::Polychrome => "Polychrome",
+        }
+    }
+
+    /// Distinct accent colour used by tile renderers to mark an enhanced tile
+    /// (border / corner gem). Each variant gets a clearly different hue so the
+    /// player can tell at a glance which talisman is on a hand.
+    #[allow(dead_code)]
+    pub fn accent_color(self) -> [f32; 4] {
+        match self {
+            // Jade — vivid imperial green.
+            TileEnhancement::Jade => [0.20, 0.78, 0.45, 1.0],
+            // Pearl — soft cool ivory with a faint blue cast.
+            TileEnhancement::Pearl => [0.88, 0.92, 1.00, 1.0],
+            // Gilded — warm polished gold.
+            TileEnhancement::Gilded => [0.95, 0.78, 0.25, 1.0],
+            // Polychrome — saturated magenta-violet (stand-in for the rainbow).
+            TileEnhancement::Polychrome => [0.85, 0.30, 0.85, 1.0],
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tile {
     pub suit: Suit,
@@ -19,11 +67,21 @@ pub struct Tile {
     pub rank: u8,
     /// Unique id within a run (duplicates allowed).
     pub id: u32,
+    /// Optional talisman enhancement. Newly-built tiles default to `None`;
+    /// `RunState` re-applies persistent enhancements (keyed by tile id) every
+    /// time a tile is drawn into the player's hand.
+    #[serde(default)]
+    pub enhancement: Option<TileEnhancement>,
 }
 
 impl Tile {
     pub fn new(suit: Suit, rank: u8, id: u32) -> Self {
-        Self { suit, rank, id }
+        Self {
+            suit,
+            rank,
+            id,
+            enhancement: None,
+        }
     }
 
     /// Same tile face (ignores id).
