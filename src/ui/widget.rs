@@ -34,11 +34,7 @@ pub enum PanelVariant {
 ///
 /// The border is drawn as four thin quads on the inside edge of `rect` so it
 /// reads as a recessed gold inlay rather than a hard outline.
-pub fn push_panel(
-    out: &mut Vec<GpuInstance>,
-    rect: [f32; 4],
-    variant: PanelVariant,
-) {
+pub fn push_panel(out: &mut Vec<GpuInstance>, rect: [f32; 4], variant: PanelVariant) {
     let (bg, border) = match variant {
         PanelVariant::Default => (color::INDIGO, color::BRASS),
         PanelVariant::Sunken => (color::OBSIDIAN, color::ANTIQUE),
@@ -112,10 +108,7 @@ pub fn push_button(
     action: UiAction,
 ) {
     push_button_visuals(quads, labels, rect, label, variant, state);
-    buttons.push(ButtonDef::ui(
-        (rect[0], rect[1], rect[2], rect[3]),
-        action,
-    ));
+    buttons.push(ButtonDef::ui((rect[0], rect[1], rect[2], rect[3]), action));
 }
 
 fn push_button_visuals(

@@ -32,7 +32,7 @@ struct PointLights {
     count: vec4<u32>,
     // extras.x = display gamma exponent; rest reserved.
     extras: vec4<f32>,
-    lights: array<PointLight, 8>,
+    lights: array<PointLight, 16>,
 };
 
 @group(1) @binding(0) var<uniform> lights: PointLights;
@@ -127,10 +127,17 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
         let dir = frag_pos - lp;
         let safe = dir + vec3<f32>(1e-6, 1e-6, 1e-6);
         let inv = vec3<f32>(1.0) / safe;
+        // Iterate the constant slot count and skip empty slots via the
+        // sentinel half-extent. Looping on a uniform `n` was unreliable —
+        // some naga versions appeared to fold the bound to 1, which is
+        // why earlier builds only ever produced a single tile shadow.
         var blocked = false;
-        for (var k: u32 = 0u; k < n; k = k + 1u) {
-            let c = occluders.boxes[k].center.xyz;
+        for (var k: u32 = 0u; k < 16u; k = k + 1u) {
             let h = occluders.boxes[k].half_extents.xyz;
+            if (h.x <= 0.0) {
+                continue;
+            }
+            let c = occluders.boxes[k].center.xyz;
             if (segment_hits_aabb(lp, inv, c, h)) {
                 blocked = true;
             }

@@ -91,10 +91,10 @@ pub mod color {
     /// `tier` is 0..=3: common, uncommon, rare, legendary.
     pub fn rarity(tier: u8) -> [f32; 4] {
         match tier {
-            0 => MIST,        // common — neutral
-            1 => JADE,        // uncommon — green
-            2 => TWILIGHT,    // rare — bright indigo
-            _ => CHAMPAGNE,   // legendary — gold
+            0 => MIST,      // common — neutral
+            1 => JADE,      // uncommon — green
+            2 => TWILIGHT,  // rare — bright indigo
+            _ => CHAMPAGNE, // legendary — gold
         }
     }
 }

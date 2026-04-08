@@ -3,8 +3,8 @@
 
 pub mod collection;
 pub mod game_over;
-pub mod glossary;
 pub mod gameplay;
+pub mod glossary;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
@@ -472,6 +472,26 @@ pub trait SceneBehavior {
 
     /// Build the draw output for this frame.
     fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput;
+
+    /// Build the canonical `UiFrame` for this scene's frame.
+    ///
+    /// **This is the new canonical scene draw API.** It returns a single
+    /// ordered `UiFrame.cmds` list where push order *is* z-order, so quads
+    /// and text labels interleave correctly. Scenes that need fine-grained
+    /// z-control between background panels and text on top of them
+    /// (notably the gameplay HUD with its hover tooltips) should override
+    /// this method directly and push into `UiFrame` in canonical order.
+    ///
+    /// The default impl forwards to the legacy [`Self::draw`] +
+    /// [`SceneDrawOutput::into_frame`] path, which flushes ALL quads, then
+    /// hand-tile faces, then ALL text. That ordering is fine for simple
+    /// scenes (start screen, splash, options, game over, …) but breaks any
+    /// scene where a quad must sit *above* a text label (e.g. tooltip
+    /// panels). Migrated scenes override this method and either don't
+    /// implement `draw` at all or leave it as `unimplemented!()`.
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        self.draw(ctx).into_frame()
+    }
 
     /// Whether the scene has a *modal-like internal overlay* currently up
     /// (pause menu, glossary, embedded options sub-screen, scoring cascade,

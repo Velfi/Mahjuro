@@ -37,6 +37,9 @@ pub enum UiAction {
     Pause,
     /// Open the glossary / help overlay (`?`, `F1`, `H`, gamepad Select).
     Help,
+    /// Debug-only: blow a strong one-shot wind gust at the candle row so we
+    /// can verify flame/wind reactions in-game. Bound to `B`.
+    DebugBlowWind,
 }
 
 /// Active drag state for tile reordering.
@@ -190,7 +193,11 @@ pub fn apply_ui_actions(
             UiAction::Cancel => {
                 run.clear_selection();
             }
-            UiAction::SortBySuit | UiAction::SortByRank | UiAction::Pause | UiAction::Help => {}
+            UiAction::SortBySuit
+            | UiAction::SortByRank
+            | UiAction::Pause
+            | UiAction::Help
+            | UiAction::DebugBlowWind => {}
             UiAction::FocusNext
             | UiAction::FocusPrev
             | UiAction::FocusDown

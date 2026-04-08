@@ -120,7 +120,12 @@ impl ShopScene {
 
     /// Build the flat hit-target list from current state. Used by both
     /// update() and draw() for single-source-of-truth click routing.
-    fn flat_items(&self, layout: &LayoutResult, n_owned: usize, max_slots: usize) -> Vec<FlatItem<ShopAction>> {
+    fn flat_items(
+        &self,
+        layout: &LayoutResult,
+        n_owned: usize,
+        max_slots: usize,
+    ) -> Vec<FlatItem<ShopAction>> {
         let mut items = Vec::with_capacity(self.items.len() + n_owned + self.zodiacs.len() + 1);
         for (i, &(cx, cy, cw, ch)) in self.card_rects(layout).iter().enumerate() {
             items.push(FlatItem::new(
@@ -250,7 +255,6 @@ impl ShopScene {
         let btn_y = h - btn_h - (16.0 * scale);
         (btn_x, btn_y, btn_w, btn_h)
     }
-
 }
 
 impl SceneBehavior for ShopScene {
@@ -449,7 +453,12 @@ impl SceneBehavior for ShopScene {
                 let bt = (ch * 0.025).clamp(1.0, 3.0);
                 let stripe_h = ch * 0.04;
                 instances.push(GpuInstance {
-                    rect: [card_rect[0] + bt, card_rect[1] + bt, card_rect[2] - bt * 2.0, stripe_h],
+                    rect: [
+                        card_rect[0] + bt,
+                        card_rect[1] + bt,
+                        card_rect[2] - bt * 2.0,
+                        stripe_h,
+                    ],
                     color: rarity_accent(item.rarity),
                 });
             }
@@ -470,7 +479,11 @@ impl SceneBehavior for ShopScene {
             text_labels.push(TextLabel {
                 rect: [cx, rarity_y, cw, rarity_h],
                 text: rarity_text.to_string(),
-                color: if item.sold { color::SLATE } else { rarity_color },
+                color: if item.sold {
+                    color::SLATE
+                } else {
+                    rarity_color
+                },
                 ..Default::default()
             });
 
@@ -628,7 +641,11 @@ impl SceneBehavior for ShopScene {
                 text_labels.push(TextLabel {
                     rect: [zx, tag_y, zw, row_h],
                     text: format!("{}g", ZodiacKind::shop_price()),
-                    color: if can_afford_z { color::GOLD } else { color::RUBY },
+                    color: if can_afford_z {
+                        color::GOLD
+                    } else {
+                        color::RUBY
+                    },
                     font_px: Some(price_font),
                     ..Default::default()
                 });
@@ -636,14 +653,13 @@ impl SceneBehavior for ShopScene {
         }
 
         // ── Score panel header (SHOP) ───────────────────────────────────
-        widget::push_panel(
-            &mut instances,
-            [sp.x, sp.y, sp.w, sp.h],
-            PanelVariant::Hero,
-        );
+        widget::push_panel(&mut instances, [sp.x, sp.y, sp.w, sp.h], PanelVariant::Hero);
         text_labels.push(TextLabel {
             rect: [sp.x, sp.y, sp.w, sp.h],
-            text: format!("SHOP  ·  Round {}  ·  Gold {}", self.came_from_round, ctx.run.gold),
+            text: format!(
+                "SHOP  ·  Round {}  ·  Gold {}",
+                self.came_from_round, ctx.run.gold
+            ),
             color: color::CHAMPAGNE,
             ..Default::default()
         });

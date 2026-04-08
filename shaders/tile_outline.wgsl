@@ -26,7 +26,7 @@ struct PointLights {
     count: vec4<u32>,
     // extras.x = display gamma exponent; rest reserved.
     extras: vec4<f32>,
-    lights: array<PointLight, 8>,
+    lights: array<PointLight, 16>,
 };
 @group(1) @binding(0) var<uniform> lights: PointLights;
 

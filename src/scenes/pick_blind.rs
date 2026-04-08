@@ -12,7 +12,9 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::gameplay::GameplayScene;
 use super::pause_menu::PauseMenu;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row};
+use super::{
+    DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx, relic_row,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlindAction {
@@ -80,7 +82,6 @@ impl PickBlindScene {
     fn skip_focused(&self) -> bool {
         self.tree.focused() == Some(BlindAction::SkipBlind.id())
     }
-
 }
 
 impl SceneBehavior for PickBlindScene {

@@ -9,11 +9,12 @@ use crate::game::cascade::ScoringCascade;
 use crate::game::run::{STARTING_DISCARDS, STARTING_PLAYS};
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
+use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::particles::ParticleSystem;
+use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, TextAlign, TextLabel, build_instances_from_layout,
 };
-use crate::render::theme::typography;
 use crate::ui::input::{UiAction, apply_ui_actions};
 use crate::ui::widget::{self, TextStyle};
 
@@ -121,16 +122,24 @@ pub struct GameplayScene {
     /// `last_deal_at` so the post-deal smoke breath can fire.
     prev_hand_len: usize,
     /// When the most recent deal landed. The post-deal smoke gust starts
-    /// `POST_DEAL_GUST_DELAY` after this and tapers off over
-    /// `POST_DEAL_GUST_DURATION`. `None` between rounds and after the gust
-    /// has finished playing.
+    /// `wind_delay_secs` after this and tapers off over `wind_duration_secs`.
+    /// `None` between rounds and after the gust has finished playing.
     last_deal_at: Option<Instant>,
+    /// Cached copy of `cascade_tuning.wind_delay_ms` (in seconds), updated
+    /// each `update()` so live tweaks in the debug tuning overlay take
+    /// effect on the next deal — and so `draw()` (which has no
+    /// `cascade_tuning` access) can read it without re-borrowing.
+    wind_delay_secs: f32,
+    /// Cached copy of `cascade_tuning.wind_duration_ms` (in seconds).
+    wind_duration_secs: f32,
+    /// Debug-only: when set, the draw step injects a strong directional
+    /// wind gust at every candle position for `DEBUG_WIND_DURATION` so the
+    /// flame's wind response is visible on demand. Triggered by `B`.
+    debug_wind_at: Option<Instant>,
 }
 
-/// How long after a deal to wait before exhaling on the smoke.
-const POST_DEAL_GUST_DELAY: f32 = 3.0;
-/// Duration of the post-deal exhale once it begins.
-const POST_DEAL_GUST_DURATION: f32 = 1.4;
+/// How long the debug `B` gust stays active after a press.
+const DEBUG_WIND_DURATION: f32 = 0.9;
 
 /// How long a relic glow lingers after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
@@ -150,6 +159,7 @@ impl GameplayScene {
             || self.pending_refill.is_some()
             || !self.relic_glow_starts.is_empty()
             || self.post_deal_gust_active()
+            || self.debug_wind_active()
     }
 
     /// True while the post-deal smoke breath is either pending or actively
@@ -160,7 +170,16 @@ impl GameplayScene {
             return false;
         };
         let elapsed = Instant::now().saturating_duration_since(t).as_secs_f32();
-        elapsed < POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
+        elapsed < self.wind_delay_secs + self.wind_duration_secs
+    }
+
+    /// True while the debug `B` gust is still firing — keeps the main loop
+    /// drawing frames so the flame bend animates without needing other input.
+    fn debug_wind_active(&self) -> bool {
+        let Some(t) = self.debug_wind_at else {
+            return false;
+        };
+        Instant::now().saturating_duration_since(t).as_secs_f32() < DEBUG_WIND_DURATION
     }
 
     pub fn new() -> Self {
@@ -190,9 +209,11 @@ impl GameplayScene {
             glossary: super::glossary::GlossaryOverlay::new(),
             prev_hand_len: 0,
             last_deal_at: None,
+            wind_delay_secs: 3.0,
+            wind_duration_secs: 1.4,
+            debug_wind_at: None,
         }
     }
-
 }
 
 impl SceneBehavior for GameplayScene {
@@ -220,9 +241,15 @@ impl SceneBehavior for GameplayScene {
         self.particles.update(dt);
         self.cursor_pos = ctx.cursor_pos;
 
+        // Cache the latest wind timing from the cascade tuning so live
+        // tweaks in the debug overlay take effect on the next frame and so
+        // `draw()` (no `cascade_tuning` access) can read these.
+        self.wind_delay_secs = ctx.cascade_tuning.wind_delay_ms as f32 / 1000.0;
+        self.wind_duration_secs = ctx.cascade_tuning.wind_duration_ms as f32 / 1000.0;
+
         // Detect deal events: any time the hand grows (initial round deal,
         // post-discard refill) we stamp `last_deal_at` so the post-deal smoke
-        // gust can fire `POST_DEAL_GUST_DELAY` later.
+        // gust can fire `wind_delay_secs` later.
         let cur_hand_len = ctx.run.hand.len();
         if cur_hand_len > self.prev_hand_len {
             self.last_deal_at = Some(now);
@@ -242,12 +269,12 @@ impl SceneBehavior for GameplayScene {
             .last_deal_at
             .map(|d| {
                 let elapsed = now.saturating_duration_since(d).as_secs_f32();
-                if elapsed < POST_DEAL_GUST_DELAY
-                    || elapsed >= POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
-                {
+                let delay = self.wind_delay_secs;
+                let dur = self.wind_duration_secs.max(0.001);
+                if elapsed < delay || elapsed >= delay + dur {
                     1.0
                 } else {
-                    let t = (elapsed - POST_DEAL_GUST_DELAY) / POST_DEAL_GUST_DURATION;
+                    let t = (elapsed - delay) / dur;
                     let env = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
                     1.0 - 0.88 * env
                 }
@@ -256,10 +283,9 @@ impl SceneBehavior for GameplayScene {
         self.candle_time += dt;
         for c in self.candles.iter_mut() {
             let t = self.candle_time;
-            let target = (0.9
-                + 0.18 * (t * 7.3 + c.phase).sin()
-                + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
-                * candle_dim;
+            let target =
+                (0.9 + 0.18 * (t * 7.3 + c.phase).sin() + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
+                    * candle_dim;
             // Exponential smoothing — keeps the light from snapping. Bump
             // the rate during a gust so the dim/recover edge reads as a
             // wind hit instead of a slow fade.
@@ -436,6 +462,17 @@ impl SceneBehavior for GameplayScene {
         // Clear any previous frame's departures.
         self.pending_departures.clear();
 
+        // Debug: `B` blows a strong gust of wind at the candle row so the
+        // flame's wind reaction is observable on demand. Stamps a timer the
+        // draw step reads to emit the actual `WindGust` impulses.
+        if actions_for_scene
+            .iter()
+            .any(|a| matches!(a, UiAction::DebugBlowWind))
+        {
+            self.debug_wind_at = Some(now);
+            log::info!("[debug] candle wind gust triggered");
+        }
+
         // Normal input handling when no cascade is active.
         for a in &actions_for_scene {
             match a {
@@ -537,15 +574,75 @@ impl SceneBehavior for GameplayScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    /// Gameplay is migrated off the legacy `SceneDrawOutput` dual-vec
+    /// model — its draw output flows through `draw_frame` instead, where
+    /// quads, text, and 3D markers all interleave inside a single ordered
+    /// `UiFrame.cmds` list. The trait still requires `draw`, but main.rs
+    /// only calls `draw_frame` and the default `draw_frame` impl is
+    /// overridden here, so this stub is unreachable in normal flow.
+    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
+        unreachable!(
+            "GameplayScene uses draw_frame; the legacy dual-vec draw path is not implemented. \
+             Call SceneBehavior::draw_frame instead."
+        )
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let layout = ctx.layout;
         let run = ctx.run;
         let focus = ctx.focus_tile_index.min(run.hand.len().saturating_sub(1));
         let now = Instant::now();
+        let glossary_open = self.glossary.open;
+
+        // The window title is recomputed unconditionally so the OS chrome
+        // tracks the current run state even when the glossary takes over
+        // the screen.
+        let window_title = format!(
+            "Mahjuro — {} Round {}  {} / {}  Gold: {}  Hands: {}  Discards: {}",
+            run.blind.name(),
+            run.run_number,
+            if self.cascade.is_some() {
+                self.displayed_score
+            } else {
+                run.round_score
+            },
+            run.target_score,
+            run.gold,
+            run.plays_remaining,
+            run.discards_remaining,
+        );
+
+        // ── Glossary early-return path ──────────────────────────────────
+        //
+        // When the glossary overlay is open, the entire HUD / 3D scene is
+        // suppressed and the glossary panel takes over the screen. The
+        // legacy code handled this by drawing the HUD and then having
+        // `GlossaryOverlay::draw` blow the per-frame vecs away — that hack
+        // is the original source of the tooltip-z-order bug class. The
+        // canonical-frame port instead returns a *fresh* `UiFrame`
+        // containing only the background and the glossary panel.
+        if glossary_open {
+            let mut frame = UiFrame::new();
+            frame.background(super::BackgroundId::Gameplay);
+            self.glossary
+                .draw_into_frame(&mut frame, layout.window_w, layout.window_h);
+            // Click-blocker behind the glossary's own buttons (added last
+            // so it never preempts a real button click).
+            frame.buttons.push(ButtonDef::scene(
+                (0.0, 0.0, layout.window_w, layout.window_h),
+                u32::MAX,
+            ));
+            frame.focus = focus;
+            frame.window_title = window_title;
+            return frame;
+        }
 
         let ts = ctx.anim.transform_for(ENTITY_SCORE_PANEL);
 
-        let instances = build_instances_from_layout(
+        // Score-panel cartouche + modifier strip backplane quads. Returned
+        // as a vec because they need to land in the persistent-HUD section
+        // of the frame, which is built further down.
+        let score_panel_quads = build_instances_from_layout(
             (
                 layout.score_panel.x,
                 layout.score_panel.y,
@@ -838,7 +935,35 @@ impl SceneBehavior for GameplayScene {
         let play_btn_rect = (container_x + (btn_w + btn_gap) * 2.0, btn_y, btn_w, btn_h);
         let discard_btn_rect = (container_x + (btn_w + btn_gap) * 3.0, btn_y, btn_w, btn_h);
 
-        let mut instances = instances;
+        // ── Frame accumulators ───────────────────────────────────────────
+        //
+        // The migrated draw_frame separates HUD content into three layers
+        // and pushes them into the final `UiFrame` at the end of this
+        // function in canonical order:
+        //
+        //   1. PERSISTENT HUD (`hud_quads` + `hud_text`) — score panel,
+        //      yaku cards, button bar, zodiac slots, particles, help
+        //      badge. Lives between the 3D backdrop and the
+        //      `HandTileFaces` marker so tile faces read on top of HUD
+        //      panels they overlap.
+        //
+        //   2. HOVER LAYER (`hover_quads` + `hover_text`) — tile hover
+        //      outline, tile/yaku/zodiac/relic hover tooltips. Lives
+        //      *after* the `HandTileFaces` marker so tooltips always sit
+        //      on top of tile faces.
+        //
+        //   3. PAUSE OVERLAY (`pause_quads` + `pause_text`) — built only
+        //      when the pause menu is open, sits above the hover layer.
+        //
+        // Within each accumulator, quads are pushed first then text on
+        // top, which preserves the existing visual contract (text reads
+        // above panels). The crucial fix vs. the legacy dual-vec model is
+        // that hover tooltips' background quads no longer compete with
+        // persistent text — they're a separate downstream batch.
+        let mut hud_quads: Vec<GpuInstance> = Vec::new();
+        let mut hud_text: Vec<TextLabel> = Vec::new();
+        let mut hover_quads: Vec<GpuInstance> = Vec::new();
+        let mut hover_text: Vec<TextLabel> = Vec::new();
 
         // ── Yaku progress panel (above the bottom button bar) ────────────
         // Builds one card per available yaku showing how close the current
@@ -852,10 +977,10 @@ impl SceneBehavior for GameplayScene {
             .map(|(t, _)| *t)
             .collect();
         let previews = yaku_preview(&selected_tiles_for_yaku, &run.available_yaku);
-        let mut yaku_text_labels: Vec<TextLabel> = Vec::new();
         // Captured during the loop below — `(yaku_kind, anchor_x, anchor_y)`
         // for the card the cursor is currently hovering, if any. The tooltip
-        // is pushed after the loop completes so it draws on top of all cards.
+        // is pushed into the *hover layer* after the loop completes so it
+        // draws on top of every yaku card regardless of which one captured it.
         let mut hovered_yaku: Option<(crate::core::yaku::YakuKind, f32, f32)> = None;
 
         // Filter previews so the panel only shows the *meaningful* cards:
@@ -889,8 +1014,7 @@ impl SceneBehavior for GameplayScene {
             let card_w = (panel_w - card_gap * (n - 1.0)) / n;
             // Pinned font sizes — never let the rasterizer auto-shrink card
             // text into illegibility, regardless of how narrow the cards get.
-            let name_font = (panel_h * 0.30).clamp(13.0, 20.0);
-            let hint_font = (panel_h * 0.24).clamp(11.0, 16.0);
+            let name_font = (panel_h * 0.30).max(13.0);
             for (i, p) in visible_previews.iter().enumerate() {
                 let cx = panel_x + i as f32 * (card_w + card_gap);
                 let cy = panel_y;
@@ -900,14 +1024,14 @@ impl SceneBehavior for GameplayScene {
                 } else {
                     [0.10, 0.12, 0.20, 0.85]
                 };
-                instances.push(GpuInstance {
+                hud_quads.push(GpuInstance {
                     rect: [cx, cy, card_w, panel_h],
                     color: bg_color,
                 });
                 // Progress fill — bottom strip of the card.
                 let fill_h = (8.0 * scale).max(5.0);
                 let fill_y = cy + panel_h - fill_h - 2.0;
-                instances.push(GpuInstance {
+                hud_quads.push(GpuInstance {
                     rect: [cx + 4.0, fill_y, card_w - 8.0, fill_h],
                     color: [0.06, 0.07, 0.12, 0.9],
                 });
@@ -918,54 +1042,38 @@ impl SceneBehavior for GameplayScene {
                     } else {
                         [0.45, 0.55, 0.85, 0.9]
                     };
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [cx + 4.0, fill_y, fill_w, fill_h],
                         color: fill_color,
                     });
                 }
-                // Top text: yaku name + bonus value, pinned font_px.
-                let name_h = panel_h * 0.42;
+                // Yaku name centered above the progress bar; bonus values and
+                // hint live in the hover tooltip.
+                let name_h = panel_h - fill_h - 4.0;
                 let name_color = if p.active {
                     [1.0, 0.92, 0.55, 1.0]
                 } else {
                     [0.78, 0.80, 0.90, 1.0]
                 };
-                yaku_text_labels.push(TextLabel {
+                hud_text.push(TextLabel {
                     rect: [cx + 4.0, cy + 2.0, card_w - 8.0, name_h],
-                    text: format!("{} +{}", p.kind.name(), p.kind.mult_bonus()),
+                    text: p.kind.name().to_string(),
                     color: name_color,
                     font_px: Some(name_font),
-                    ..Default::default()
-                });
-                let hint_h = panel_h - name_h - fill_h - 6.0;
-                let hint_y = cy + name_h + 2.0;
-                let hint_color = if p.active {
-                    [1.0, 0.85, 0.45, 1.0]
-                } else {
-                    [0.62, 0.66, 0.78, 1.0]
-                };
-                yaku_text_labels.push(TextLabel {
-                    rect: [cx + 4.0, hint_y, card_w - 8.0, hint_h.max(8.0)],
-                    text: p.hint.clone(),
-                    color: hint_color,
-                    font_px: Some(hint_font),
                     ..Default::default()
                 });
 
                 // Hover tracking for the tooltip pass below the loop.
                 let (cur_x, cur_y) = self.cursor_pos;
-                if cur_x >= cx
-                    && cur_x <= cx + card_w
-                    && cur_y >= cy
-                    && cur_y <= cy + panel_h
-                {
+                if cur_x >= cx && cur_x <= cx + card_w && cur_y >= cy && cur_y <= cy + panel_h {
                     hovered_yaku = Some((p.kind, cx + card_w * 0.5, cy));
                 }
             }
         }
-        // Yaku card hover tooltip — pushed into `instances` (which exists)
-        // and into `yaku_text_labels`, which gets merged into `text_labels`
-        // later in this function.
+        // Yaku card hover tooltip — pushed into the *hover layer* so its
+        // background quad lands AFTER every persistent HUD text label, which
+        // is the structural fix for the legacy "tooltip BG renders under
+        // parent text" bug class.
         if let Some((yk, ax, ay)) = hovered_yaku {
             let title = format!(
                 "{}  (+{} mult, +{} chips)",
@@ -979,7 +1087,8 @@ impl SceneBehavior for GameplayScene {
                 if run.yaku_loadout.contains(&yk)
                     || matches!(
                         yk,
-                        crate::core::yaku::YakuKind::FullHand | crate::core::yaku::YakuKind::Yakuhai
+                        crate::core::yaku::YakuKind::FullHand
+                            | crate::core::yaku::YakuKind::Yakuhai
                     )
                 {
                     "yes (full strength)"
@@ -988,8 +1097,8 @@ impl SceneBehavior for GameplayScene {
                 },
             );
             push_tooltip(
-                &mut instances,
-                &mut yaku_text_labels,
+                &mut hover_quads,
+                &mut hover_text,
                 ax,
                 ay,
                 layout.window_w,
@@ -1024,19 +1133,16 @@ impl SceneBehavior for GameplayScene {
             // Draw a highlight border if this button is focused.
             if self.button_focus == Some(ALL_BUTTONS[i]) {
                 let pad = 3.0;
-                instances.push(GpuInstance {
+                hud_quads.push(GpuInstance {
                     rect: [bx - pad, by - pad, bw + pad * 2.0, bh + pad * 2.0],
                     color: [0.9, 0.8, 0.2, 0.95],
                 });
             }
-            instances.push(GpuInstance {
+            hud_quads.push(GpuInstance {
                 rect: [bx, by, bw, bh],
                 color: base_colors[i],
             });
         }
-
-        // Cascade pill backgrounds (drawn before relics so the relic row reads cleanly).
-        instances.extend(cascade_instances);
 
         // Score-panel text fits inside the narrow centered cartouche painted
         // by `build_instances_from_layout`. Cartouche geometry mirrors that
@@ -1053,12 +1159,15 @@ impl SceneBehavior for GameplayScene {
         // Two-line stack inside the cartouche: top = blind/round/score, bot =
         // status row (gold/wall/wind/shanten). Each line gets its own pinned
         // font_px so they render at the same readable size regardless of how
-        // long the strings are.
-        let header_top_font = (ctx_h * 0.42).clamp(14.0, 28.0);
-        let header_bot_font = (ctx_h * 0.30).clamp(12.0, 22.0);
+        // long the strings are. The cartouche header text + the modifier
+        // strip cascade/idle text are kept in their own dedicated buffers
+        // so the final assembly can place them between the score-panel
+        // backplane quads and the rest of the HUD body.
+        let header_top_font = (ctx_h * 0.30).max(14.0);
+        let header_bot_font = (ctx_h * 0.21).max(12.0);
         let line_top_h = ctx_h * 0.55;
         let line_bot_h = ctx_h * 0.45;
-        let mut text_labels = vec![
+        let header_text_labels: Vec<TextLabel> = vec![
             TextLabel {
                 rect: [ctx_x, ctx_y, ctx_w, line_top_h],
                 text: score_text_top,
@@ -1075,18 +1184,20 @@ impl SceneBehavior for GameplayScene {
             },
         ];
         // Modifier strip: dynamic cascade widgets (when active) or status text (idle).
+        let mut modifier_strip_text: Vec<TextLabel> = Vec::new();
         if cascade_labels.is_empty() {
-            text_labels.push(TextLabel {
+            modifier_strip_text.push(TextLabel {
                 rect: [ms.x, ms.y, ms.w, ms.h],
                 text: cascade_text,
                 color: cascade_color,
                 ..Default::default()
             });
         } else {
-            text_labels.extend(cascade_labels);
+            modifier_strip_text.extend(cascade_labels);
         }
-        text_labels.extend(yaku_text_labels);
-        text_labels.push(TextLabel {
+        // Button bar text labels — pushed into the persistent HUD layer so
+        // they sit on top of the corresponding button base quads.
+        hud_text.push(TextLabel {
             rect: [
                 suit_btn_rect.0,
                 suit_btn_rect.1,
@@ -1097,7 +1208,7 @@ impl SceneBehavior for GameplayScene {
             color: [1.0, 1.0, 1.0, 1.0],
             ..Default::default()
         });
-        text_labels.push(TextLabel {
+        hud_text.push(TextLabel {
             rect: [
                 rank_btn_rect.0,
                 rank_btn_rect.1,
@@ -1108,27 +1219,25 @@ impl SceneBehavior for GameplayScene {
             color: [1.0, 1.0, 1.0, 1.0],
             ..Default::default()
         });
-        let play_label = "Play Hand".into();
-        text_labels.push(TextLabel {
+        hud_text.push(TextLabel {
             rect: [
                 play_btn_rect.0,
                 play_btn_rect.1,
                 play_btn_rect.2,
                 play_btn_rect.3,
             ],
-            text: play_label,
+            text: "Play Hand".into(),
             color: [1.0, 1.0, 1.0, 1.0],
             ..Default::default()
         });
-        let discard_label = "Discard".into();
-        text_labels.push(TextLabel {
+        hud_text.push(TextLabel {
             rect: [
                 discard_btn_rect.0,
                 discard_btn_rect.1,
                 discard_btn_rect.2,
                 discard_btn_rect.3,
             ],
-            text: discard_label,
+            text: "Discard".into(),
             color: [1.0, 1.0, 1.0, 1.0],
             ..Default::default()
         });
@@ -1164,8 +1273,8 @@ impl SceneBehavior for GameplayScene {
             let slot_w = (140.0 * zscale).max(120.0);
             let slot_h = (56.0 * zscale).max(48.0);
             let gap = (6.0 * zscale).max(3.0);
-            let total_w = slot_w * zodiac_inv.capacity as f32
-                + gap * (zodiac_inv.capacity as f32 - 1.0);
+            let total_w =
+                slot_w * zodiac_inv.capacity as f32 + gap * (zodiac_inv.capacity as f32 - 1.0);
             let strip_x = layout.window_w - total_w - (16.0 * zscale);
             let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
             for slot_idx in 0..zodiac_inv.capacity {
@@ -1173,26 +1282,26 @@ impl SceneBehavior for GameplayScene {
                 let zy = strip_y;
                 if let Some(&z) = zodiac_inv.items.get(slot_idx) {
                     // Filled slot — gold background, click registers the use.
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx, zy, slot_w, slot_h],
                         color: [0.42, 0.32, 0.10, 0.92],
                     });
                     // Gold rim.
                     let rim = 1.5 * zscale;
                     let gold = crate::render::theme::color::GOLD;
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx, zy, slot_w, rim],
                         color: gold,
                     });
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx, zy + slot_h - rim, slot_w, rim],
                         color: gold,
                     });
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx, zy, rim, slot_h],
                         color: gold,
                     });
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx + slot_w - rim, zy, rim, slot_h],
                         color: gold,
                     });
@@ -1200,10 +1309,10 @@ impl SceneBehavior for GameplayScene {
                     // target yaku + level (parchment). Pinning prevents the
                     // rasterizer from auto-shrinking long yaku names like
                     // "Sanshoku" to the 8px floor when the slot is narrow.
-                    let name_font = (slot_h * 0.34).clamp(14.0, 22.0);
-                    let yaku_font = (slot_h * 0.28).clamp(12.0, 18.0);
+                    let name_font = (slot_h * 0.34).max(14.0);
+                    let yaku_font = (slot_h * 0.28).max(12.0);
                     let name_h = slot_h * 0.46;
-                    text_labels.push(TextLabel {
+                    hud_text.push(TextLabel {
                         rect: [zx, zy + 2.0, slot_w, name_h],
                         text: z.name().to_string(),
                         color: crate::render::theme::color::CHAMPAGNE,
@@ -1212,7 +1321,7 @@ impl SceneBehavior for GameplayScene {
                     });
                     let level = run.yaku_levels.level_of(z.yaku());
                     let yaku_h = slot_h * 0.40;
-                    text_labels.push(TextLabel {
+                    hud_text.push(TextLabel {
                         rect: [zx, zy + name_h + 2.0, slot_w, yaku_h],
                         text: format!("{} L{}", z.yaku().name(), level),
                         color: crate::render::theme::color::PARCHMENT,
@@ -1225,7 +1334,10 @@ impl SceneBehavior for GameplayScene {
                             ZODIAC_USE_BASE + slot_idx as u32,
                         ));
                     }
-                    // Hover tooltip — mirrors the relic tooltip pattern.
+                    // Hover tooltip — pushed into the *hover layer* so its
+                    // background quad lands AFTER the slot's name + yaku
+                    // labels above. This is the core fix for the recurring
+                    // "tooltip BG renders under parent text" bug.
                     let (cx, cy) = self.cursor_pos;
                     if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
                         let level = run.yaku_levels.level_of(z.yaku());
@@ -1237,8 +1349,8 @@ impl SceneBehavior for GameplayScene {
                             level + 1,
                         );
                         push_tooltip(
-                            &mut instances,
-                            &mut text_labels,
+                            &mut hover_quads,
+                            &mut hover_text,
                             zx + slot_w * 0.5,
                             zy,
                             layout.window_w,
@@ -1249,17 +1361,18 @@ impl SceneBehavior for GameplayScene {
                     }
                 } else {
                     // Empty slot — dim outline.
-                    instances.push(GpuInstance {
+                    hud_quads.push(GpuInstance {
                         rect: [zx, zy, slot_w, slot_h],
                         color: [0.06, 0.07, 0.12, 0.55],
                     });
                     // Hover tooltip even on empty slots: tells the player what
-                    // the strip is for.
+                    // the strip is for. Pushed into the hover layer for the
+                    // same reason as the filled-slot tooltip above.
                     let (cx, cy) = self.cursor_pos;
                     if cx >= zx && cx <= zx + slot_w && cy >= zy && cy <= zy + slot_h {
                         push_tooltip(
-                            &mut instances,
-                            &mut text_labels,
+                            &mut hover_quads,
+                            &mut hover_text,
                             zx + slot_w * 0.5,
                             zy,
                             layout.window_w,
@@ -1272,9 +1385,13 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Particle instances.
+        // Particle instances. Pushed into the persistent HUD layer (under
+        // hand tile faces) to preserve the legacy z-order — score-cascade
+        // bursts visually peek out *around* the tiles rather than over
+        // them. Move to `hover_quads` if a future design wants particles
+        // to fly over tile faces.
         for (rect, color) in self.particles.instances() {
-            instances.push(GpuInstance { rect, color });
+            hud_quads.push(GpuInstance { rect, color });
         }
 
         // Hint: compute tile indices that would complete a meld with current selection.
@@ -1345,11 +1462,7 @@ impl SceneBehavior for GameplayScene {
                     let line_h = 18.0 * scale;
                     let pad_x = 8.0 * scale;
                     let pad_y = 6.0 * scale;
-                    let widest = lines
-                        .iter()
-                        .map(|s| s.chars().count())
-                        .max()
-                        .unwrap_or(0) as f32;
+                    let widest = lines.iter().map(|s| s.chars().count()).max().unwrap_or(0) as f32;
                     let tw = (widest * 7.5 * scale + pad_x * 2.0).max(120.0 * scale);
                     let th = line_h * lines.len() as f32 + pad_y * 2.0;
 
@@ -1368,27 +1481,29 @@ impl SceneBehavior for GameplayScene {
                         tx = 4.0;
                     }
 
-                    // Background.
-                    instances.push(GpuInstance {
+                    // Background. Pushed into the hover layer so the
+                    // tooltip BG always lands ABOVE the persistent HUD
+                    // text labels (this is the structural fix).
+                    hover_quads.push(GpuInstance {
                         rect: [tx, ty, tw, th],
                         color: [0.06, 0.06, 0.12, 0.95],
                     });
                     // Gold border.
                     let bc = [0.65, 0.55, 0.25, 0.85];
                     let b = 1.5;
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tx, ty, tw, b],
                         color: bc,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tx, ty + th - b, tw, b],
                         color: bc,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tx, ty, b, th],
                         color: bc,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tx + tw - b, ty, b, th],
                         color: bc,
                     });
@@ -1406,7 +1521,7 @@ impl SceneBehavior for GameplayScene {
                     let body_color = [0.95, 0.85, 0.4, 1.0];
                     for (i, line) in lines.into_iter().enumerate() {
                         let color = if i == 0 { title_color } else { body_color };
-                        text_labels.push(TextLabel {
+                        hover_text.push(TextLabel {
                             rect: [
                                 tx + pad_x,
                                 ty + pad_y + i as f32 * line_h,
@@ -1431,33 +1546,30 @@ impl SceneBehavior for GameplayScene {
         let help_h = help_w;
         let help_x = (12.0 * scale).max(8.0);
         let help_y = layout.score_panel.y + (layout.score_panel.h - help_h) * 0.5;
-        instances.push(GpuInstance {
+        hud_quads.push(GpuInstance {
             rect: [help_x, help_y, help_w, help_h],
-            color: crate::render::theme::color::alpha(
-                crate::render::theme::color::INDIGO,
-                0.92,
-            ),
+            color: crate::render::theme::color::alpha(crate::render::theme::color::INDIGO, 0.92),
         });
         // Gold rim so the badge reads as interactive.
         let rim = (1.5 * scale).max(1.0);
         let gold = crate::render::theme::color::GOLD;
-        instances.push(GpuInstance {
+        hud_quads.push(GpuInstance {
             rect: [help_x, help_y, help_w, rim],
             color: gold,
         });
-        instances.push(GpuInstance {
+        hud_quads.push(GpuInstance {
             rect: [help_x, help_y + help_h - rim, help_w, rim],
             color: gold,
         });
-        instances.push(GpuInstance {
+        hud_quads.push(GpuInstance {
             rect: [help_x, help_y, rim, help_h],
             color: gold,
         });
-        instances.push(GpuInstance {
+        hud_quads.push(GpuInstance {
             rect: [help_x + help_w - rim, help_y, rim, help_h],
             color: gold,
         });
-        text_labels.push(TextLabel {
+        hud_text.push(TextLabel {
             rect: [help_x, help_y, help_w, help_h],
             text: "?".into(),
             color: crate::render::theme::color::CHAMPAGNE,
@@ -1470,13 +1582,20 @@ impl SceneBehavior for GameplayScene {
             ));
         }
 
-        // Pause overlay.
+        // Pause overlay — built into its own dedicated layer so it lands
+        // ABOVE the hover layer in canonical push order. Reuses the
+        // existing dual-vec `PauseMenu::draw` API with fresh local
+        // accumulators (the pause menu has no internal interleaving
+        // hazards — it's a dim panel + buttons + text where text-on-top is
+        // the desired contract).
+        let mut pause_quads: Vec<GpuInstance> = Vec::new();
+        let mut pause_text: Vec<TextLabel> = Vec::new();
         self.pause_menu.draw(
             layout.window_w,
             layout.window_h,
             scale,
-            &mut instances,
-            &mut text_labels,
+            &mut pause_quads,
+            &mut pause_text,
             &mut buttons,
         );
 
@@ -1492,24 +1611,8 @@ impl SceneBehavior for GameplayScene {
                 u32::MAX,
             ));
         }
-
-        // Glossary overlay — drawn last so it sits on top of everything,
-        // including the pause menu (closing the glossary returns the player
-        // to whatever they were doing underneath).
-        self.glossary.draw(
-            layout.window_w,
-            layout.window_h,
-            &mut instances,
-            &mut text_labels,
-            &mut buttons,
-        );
-        if self.glossary.open {
-            // Click-blocker behind the glossary's own buttons.
-            buttons.push(ButtonDef::scene(
-                (0.0, 0.0, layout.window_w, layout.window_h),
-                u32::MAX,
-            ));
-        }
+        // The glossary overlay path has its own early-return at the top of
+        // this function, so it does not appear here.
 
         // ── Candles ─────────────────────────────────────────────────────
         // Four ambient candles flank the play area: one on each side of the
@@ -1655,11 +1758,48 @@ impl SceneBehavior for GameplayScene {
             let wick_world_y = WICK_TIP_Y * candle_scale;
             point_lights.push(PointLight {
                 pos: [cx_j, cy_j, wick_world_y],
-                radius: radius_px * (0.85 + 0.3 * candle.flicker),
+                radius: radius_px * (1.05 + 0.3 * candle.flicker),
                 color: [1.0, 0.55, 0.22],
-                intensity: 1.6 * candle.flicker,
+                intensity: 2.3 * candle.flicker,
             });
             let _ = candle_w;
+        }
+
+        // ── Hint lights ──────────────────────────────────────────────────
+        // For each tile that the suggester flagged as a completion, push a
+        // real green PointLight high above it. This replaces the old 2D
+        // green-quad "light beam" overlay with an actual scene light: the
+        // hinted tile (and its immediate neighbours) get a top-down green
+        // pool through the same lighting model the candles use, including
+        // the AABB occlusion + per-light Lambertian + clearcoat lobes.
+        //
+        // The light is positioned ~1.5 tile widths above the table with a
+        // tight radius (~1.6 tile widths) so it stays localized to the
+        // hinted tile rather than washing the whole hand. A slow sine pulse
+        // on intensity makes it read as an active hint instead of a
+        // permanent fixture, and the candle-style flicker hook lets the
+        // post-deal wind gust dim hints alongside the real candles.
+        if !hint_indices.is_empty() {
+            let pulse = 0.75 + 0.25 * (self.candle_time * 4.0).sin();
+            // Cap to whatever budget remains in the point-light buffer
+            // after the four candle plumes already pushed above. The
+            // shader array is sized for 16, so 4 candles + up to 12 hints
+            // is well inside the limit; this clamp is defensive only.
+            let hint_budget =
+                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
+            for &idx in hint_indices.iter().take(hint_budget) {
+                let Some(&(sx, sy, sw, sh)) = hand_slots.get(idx) else {
+                    continue;
+                };
+                let cx = sx + sw * 0.5;
+                let cy = sy + sh * 0.5;
+                point_lights.push(PointLight {
+                    pos: [cx, cy, sw * 1.5],
+                    radius: sw * 1.6,
+                    color: [0.30, 1.00, 0.45],
+                    intensity: 3.4 * pulse,
+                });
+            }
         }
 
         // The 3D table + tiles + candles ARE the UI. Selection feedback is
@@ -1773,19 +1913,19 @@ impl SceneBehavior for GameplayScene {
                 let [rx, ry, rw, rh] = *rect;
                 let t = (rh * 0.04).clamp(2.0, 4.0);
                 let rim = crate::render::theme::color::CHAMPAGNE;
-                instances.push(GpuInstance {
+                hover_quads.push(GpuInstance {
                     rect: [rx - t, ry - t, rw + t * 2.0, t],
                     color: rim,
                 });
-                instances.push(GpuInstance {
+                hover_quads.push(GpuInstance {
                     rect: [rx - t, ry + rh, rw + t * 2.0, t],
                     color: rim,
                 });
-                instances.push(GpuInstance {
+                hover_quads.push(GpuInstance {
                     rect: [rx - t, ry, t, rh],
                     color: rim,
                 });
-                instances.push(GpuInstance {
+                hover_quads.push(GpuInstance {
                     rect: [rx + rw, ry, t, rh],
                     color: rim,
                 });
@@ -1810,7 +1950,8 @@ impl SceneBehavior for GameplayScene {
                     let body_step = body_line_h * 1.6;
                     let body_box = body_line_h * 1.8;
                     let body_inner_w = tip_w - pad * 2.0;
-                    let wrapped_lines = widget::wrap_text(def.description, body_inner_w, body_line_h);
+                    let wrapped_lines =
+                        widget::wrap_text(def.description, body_inner_w, body_line_h);
                     let body_h = (wrapped_lines.len() as f32 * body_step).max(body_box);
                     let tip_h = pad * 2.0 + title_h + body_h;
                     let mut tip_x = rx + rw * 0.5 - tip_w * 0.5;
@@ -1824,37 +1965,37 @@ impl SceneBehavior for GameplayScene {
                         crate::render::theme::color::MIDNIGHT,
                         0.96,
                     );
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tip_x, tip_y, tip_w, tip_h],
                         color: bg,
                     });
                     // Gold border (4 thin quads).
                     let bt = 1.5_f32;
                     let border = crate::render::theme::color::BRASS;
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tip_x, tip_y, tip_w, bt],
                         color: border,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tip_x, tip_y + tip_h - bt, tip_w, bt],
                         color: border,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tip_x, tip_y + bt, bt, tip_h - bt * 2.0],
                         color: border,
                     });
-                    instances.push(GpuInstance {
+                    hover_quads.push(GpuInstance {
                         rect: [tip_x + tip_w - bt, tip_y + bt, bt, tip_h - bt * 2.0],
                         color: border,
                     });
-                    text_labels.push(TextLabel {
+                    hover_text.push(TextLabel {
                         rect: [tip_x + pad, tip_y + pad, tip_w - pad * 2.0, title_h],
                         text: def.name.to_string(),
                         color: crate::render::theme::color::CHAMPAGNE,
                         ..Default::default()
                     });
                     widget::push_text_block(
-                        &mut text_labels,
+                        &mut hover_text,
                         [
                             tip_x + pad,
                             tip_y + pad + title_h,
@@ -1869,121 +2010,226 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // When the glossary is open we suppress every 3D-pass element so the
-        // overlay reads as a clean help screen instead of a transparent panel
-        // floating over the table. The quad pass is already self-contained
-        // (the glossary cleared `instances`/`text_labels`/`buttons` itself),
-        // but the 3D mesh / tile / candle / particle passes use these other
-        // SceneDrawOutput fields and need explicit suppression here.
-        let glossary_open = self.glossary.open;
-        let final_hand_tiles = if glossary_open { Vec::new() } else { run.hand.to_vec() };
-        let final_hand_slots = if glossary_open { Vec::new() } else { hand_slots };
-        let final_selected_tiles = if glossary_open {
-            Vec::new()
-        } else {
-            run.selected.clone()
-        };
-        let final_relic_icons = if glossary_open { Vec::new() } else { relic_icons };
-        let final_flame_instances = if glossary_open {
-            Vec::new()
-        } else {
-            flame_instances
-        };
-        let final_point_lights = if glossary_open { Vec::new() } else { point_lights };
-        let final_candles = if glossary_open { Vec::new() } else { candle_placements };
-        let final_relic_placements = if glossary_open {
-            Vec::new()
-        } else {
-            relic_placements
-        };
+        // The glossary-suppression branch from the legacy path is gone:
+        // when the glossary is open we early-return a dedicated frame at
+        // the very top of `draw_frame`, so by the time we reach this
+        // point the glossary is *not* open and every variable below uses
+        // its real value directly.
 
-        // Post-deal smoke breath. `POST_DEAL_GUST_DELAY` after the most
+        // Post-deal smoke breath. `wind_delay_secs` after the most
         // recent deal we exhale a soft sweep of impulses across the hand
         // strip — a few evenly spaced points pushed back-and-up — so the
         // smoke that built up while the tiles were sliding in drifts off
         // toward the back of the table. The strength follows a 4t(1-t)
         // bell so the breath fades in and out instead of snapping on.
         let mut wind_gusts: Vec<crate::render::draw_cmd::WindGust> = Vec::new();
-        if !glossary_open {
+        let wind_delay = self.wind_delay_secs;
+        let wind_duration = self.wind_duration_secs.max(0.001);
+        {
             if let Some(deal_at) = self.last_deal_at {
                 let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
-                if elapsed >= POST_DEAL_GUST_DELAY
-                    && elapsed < POST_DEAL_GUST_DELAY + POST_DEAL_GUST_DURATION
-                {
-                    let t = (elapsed - POST_DEAL_GUST_DELAY) / POST_DEAL_GUST_DURATION;
+                if elapsed >= wind_delay && elapsed < wind_delay + wind_duration {
+                    let t = (elapsed - wind_delay) / wind_duration;
                     let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
-                    if !final_hand_slots.is_empty() {
-                        // Sample anchor: y from the hand strip, but x is
-                        // swept across the FULL window width (with a little
-                        // overshoot past the edges) so the gusts also push
-                        // smoke off the corners of the table — not just the
-                        // smoke directly above the hand. Each impulse uses
-                        // a generous radius so neighbouring gusts overlap
-                        // into one continuous sheet of wind.
-                        let sw = final_hand_slots[0].2;
-                        let sy = final_hand_slots[0].1;
-                        let cy = sy - sw * 0.25;
-                        const SAMPLES: usize = 9;
+                    if !hand_slots.is_empty() {
+                        // Sweep a 2D grid of impulses across the screen so
+                        // the breath covers both the hand strip *and* the
+                        // table interior above it. Horizontal axis: full
+                        // window width with edge overshoot, so corner smoke
+                        // gets shoved off-stage. Vertical axis: starts just
+                        // below the hand strip (where smoke pools above the
+                        // tile faces) and extends upward into the table all
+                        // the way to the candle row, with each row lifted a
+                        // bit higher off the table than the last so the
+                        // sweep also catches the rising candle plumes.
+                        let sw = hand_slots[0].2;
+                        let sy = hand_slots[0].1;
+                        // 6×4 = 24 impulses keeps us under MAX_INJECTIONS
+                        // (32) with headroom for the 4 candle plumes and
+                        // the cursor wind that share the same per-frame
+                        // budget on the fluid sim.
+                        const COLS: usize = 6;
+                        const ROWS: usize = 4;
                         let win_w = layout.window_w;
-                        let pad = win_w * 0.12;
-                        let span_min = -pad;
-                        let span_max = win_w + pad;
-                        for i in 0..SAMPLES {
-                            let f = (i as f32 + 0.5) / SAMPLES as f32;
-                            let cx = span_min + (span_max - span_min) * f;
-                            // Slightly tilt the velocity outward at the
-                            // edges so smoke at the sides gets pushed both
-                            // back AND laterally off-stage instead of just
-                            // straight back.
-                            let edge_bias = (f - 0.5) * 2.0; // -1..1
-                            let lateral = 28.0 * edge_bias * envelope;
-                            wind_gusts.push(crate::render::draw_cmd::WindGust {
-                                center_px: (cx, cy),
-                                lift: 18.0,
-                                velocity: [lateral, 6.0 * envelope, -55.0 * envelope],
-                                radius: (win_w / SAMPLES as f32) * 1.6,
-                                density: -0.04 * envelope,
-                            });
+                        let win_h = layout.window_h;
+                        let x_pad = win_w * 0.12;
+                        let span_min = -x_pad;
+                        let span_max = win_w + x_pad;
+                        // Vertical span: from a touch under the hand strip
+                        // up to the back of the playable table area (~22%
+                        // of window height from the top, where the candles
+                        // and dish sit). Anything further back is outside
+                        // the smoke grid anyway.
+                        let y_bottom = sy + sw * 0.5;
+                        let y_top = win_h * 0.22;
+                        let radius =
+                            ((win_w / COLS as f32) * 1.55).max((sy - y_top) / ROWS as f32 * 1.6);
+                        for r in 0..ROWS {
+                            // 0..1 across rows, 0 = nearest the player
+                            let rf = (r as f32 + 0.5) / ROWS as f32;
+                            let cy = y_bottom + (y_top - y_bottom) * rf;
+                            // Lift higher for back rows so the gust also
+                            // reaches the upper part of the candle plumes,
+                            // not just the table surface.
+                            let lift = 18.0 + 32.0 * rf;
+                            // Back rows fade slightly so the sweep reads
+                            // as a directional breath rolling forward, not
+                            // a uniform wall of wind.
+                            let row_strength = 1.0 - 0.25 * rf;
+                            for c in 0..COLS {
+                                let f = (c as f32 + 0.5) / COLS as f32;
+                                let cx = span_min + (span_max - span_min) * f;
+                                let edge_bias = (f - 0.5) * 2.0; // -1..1
+                                let lateral = 28.0 * edge_bias * envelope * row_strength;
+                                wind_gusts.push(crate::render::draw_cmd::WindGust {
+                                    center_px: (cx, cy),
+                                    lift,
+                                    velocity: [
+                                        lateral,
+                                        (6.0 + 4.0 * rf) * envelope * row_strength,
+                                        -55.0 * envelope * row_strength,
+                                    ],
+                                    radius,
+                                    density: -0.04 * envelope * row_strength,
+                                });
+                            }
                         }
                     }
                 }
             }
         }
 
-        SceneDrawOutput {
-            background: super::BackgroundId::Gameplay,
-            tray_instances: Vec::new(),
-            instances,
-            hand_tiles: final_hand_tiles,
-            hand_slots: final_hand_slots,
-            focus,
-            selected_tiles: final_selected_tiles,
-            text_labels,
-            relic_icons: final_relic_icons,
-            buttons,
-            window_title: format!(
-                "Mahjuro — {} Round {}  {} / {}  Gold: {}  Hands: {}  Discards: {}",
-                run.blind.name(),
-                run.run_number,
-                shown_score,
-                run.target_score,
-                run.gold,
-                run.plays_remaining,
-                run.discards_remaining
-            ),
-            departing_indices: if glossary_open {
-                Vec::new()
-            } else {
-                self.pending_departures.clone()
-            },
-            hint_indices: if glossary_open { Vec::new() } else { hint_indices },
-            flame_instances: final_flame_instances,
-            point_lights: final_point_lights,
-            candles: final_candles,
-            relic_placements: final_relic_placements,
-            draw_table: !glossary_open,
-            wind_gusts,
+        // Debug: while the `B` gust timer is live, fire one strong lateral
+        // impulse per candle so the flame visibly bends. The shape envelope
+        // is a 4t(1-t) bell so the gust ramps in/out instead of popping.
+        // Velocity is intentionally large compared to the post-deal sweep
+        // (~280 lateral) — this is a "did the wiring work?" hammer, not a
+        // subtle ambient effect.
+        if let Some(debug_at) = self.debug_wind_at {
+            let elapsed = now.saturating_duration_since(debug_at).as_secs_f32();
+            if elapsed < DEBUG_WIND_DURATION {
+                let t = (elapsed / DEBUG_WIND_DURATION).clamp(0.0, 1.0);
+                let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
+                // Each candle gets one impulse centred on its base with
+                // a generous radius so the falloff in
+                // `wgpu_renderer::flame_anchors` definitely picks it up.
+                for c in candle_placements.iter() {
+                    wind_gusts.push(crate::render::draw_cmd::WindGust {
+                        center_px: (c.world_pos[0], c.world_pos[1]),
+                        // Lift the impulse to roughly the wick tip so
+                        // the renderer's distance check (which uses the
+                        // tip world position) gets a near-zero distance.
+                        lift: WICK_TIP_Y * c.scale,
+                        velocity: [1400.0 * envelope, 0.0, -120.0 * envelope],
+                        radius: 320.0,
+                        density: -0.02 * envelope,
+                    });
+                }
+            }
         }
+
+        // ── Frame assembly ──────────────────────────────────────────────
+        //
+        // Now push every layer into a fresh `UiFrame` in canonical order.
+        // The single ordered cmd list (push order = z order) is what kills
+        // the legacy "tooltip BG renders under parent text" bug class:
+        // every hover-layer push happens *after* every persistent-HUD
+        // text push, so a tooltip background can never compete with a
+        // parent text label drawn in the same flush.
+        let _ = relic_icons; // gameplay no longer renders 2D relic icons.
+        let mut frame = UiFrame::new();
+        frame.background(super::BackgroundId::Gameplay);
+        frame.table();
+        frame.hand_tile_backdrop();
+        if !candle_placements.is_empty() {
+            frame.candles(candle_placements.clone());
+        }
+        if !relic_placements.is_empty() {
+            frame.dish();
+            frame.relic_batch(relic_placements);
+        }
+        frame.flames(flame_instances);
+        frame.fluid_smoke();
+
+        // PERSISTENT HUD: score panel backplane → score header text →
+        // modifier strip text → yaku card bodies + button bar quads +
+        // zodiac slots + particles + help badge → button labels + zodiac
+        // labels + help text. Persistent quads first, then text on top of
+        // them — exactly the behaviour the legacy flush had, just scoped
+        // to the persistent layer instead of mixing with hover content.
+        frame.quads(score_panel_quads);
+        frame.texts(header_text_labels);
+        frame.texts(modifier_strip_text);
+        frame.quads(hud_quads);
+        frame.texts(hud_text);
+
+        // Hand tile face labels — read on top of the persistent HUD
+        // (score cartouche, button bar, zodiac strip) but under any
+        // hover overlay so tooltips can still cover the tiles cleanly.
+        frame.hand_tile_faces();
+
+        // HOVER LAYER: tile hover outline + tooltip, yaku card hover
+        // tooltip, zodiac slot hover tooltip, relic hover outline +
+        // tooltip. Pushed *after* `hand_tile_faces` so they always sit
+        // on top of the visible tile rank text, not under it.
+        frame.quads(hover_quads);
+        frame.texts(hover_text);
+
+        // PAUSE OVERLAY: dim panel + buttons + text built earlier into
+        // its own buffers. Sits above the hover layer so the pause menu
+        // always visually wins.
+        frame.quads(pause_quads);
+        frame.texts(pause_text);
+
+        // Non-cmd state — consumed by the renderer's 3D pass and the
+        // main loop's input plumbing.
+        frame.hand_tiles = run.hand.to_vec();
+        frame.hand_slots = hand_slots;
+        frame.focus = focus;
+        frame.selected_tiles = run.selected.clone();
+        frame.hint_indices = hint_indices;
+        frame.departing_indices = self.pending_departures.clone();
+        frame.point_lights = point_lights;
+        frame.wind_gusts = wind_gusts;
+        frame.buttons = buttons;
+        frame.window_title = window_title;
+
+        // Cheap invariant check — catches future migration mistakes that
+        // accidentally push two `HandTileFaces` markers (or zero of one)
+        // into the cmds list, which would silently break tile-face z
+        // order. Compiled out of release builds.
+        debug_assert_marker_uniqueness(&frame);
+
+        frame
+    }
+}
+
+/// Debug-only invariant: a frame should contain at most one
+/// `HandTileBackdrop` and at most one `HandTileFaces` marker. Two of
+/// either silently break tile face z-ordering, and zero of either skips
+/// the corresponding 3D pass — both bugs are easy to introduce when
+/// editing a long `draw_frame` impl. Costs nothing in release.
+#[inline]
+fn debug_assert_marker_uniqueness(frame: &UiFrame) {
+    if cfg!(debug_assertions) {
+        let backdrops = frame
+            .cmds
+            .iter()
+            .filter(|c| matches!(c, DrawCmd::HandTileBackdrop))
+            .count();
+        let faces = frame
+            .cmds
+            .iter()
+            .filter(|c| matches!(c, DrawCmd::HandTileFaces))
+            .count();
+        debug_assert!(
+            backdrops <= 1,
+            "UiFrame contains {backdrops} HandTileBackdrop markers (expected ≤ 1)"
+        );
+        debug_assert!(
+            faces <= 1,
+            "UiFrame contains {faces} HandTileFaces markers (expected ≤ 1)"
+        );
     }
 }
 

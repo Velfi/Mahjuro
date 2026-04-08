@@ -6,7 +6,9 @@ use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::start_screen::StartScreenScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{
+    ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx,
+};
 
 /// Volume adjustment step per input press.
 const VOL_STEP: f32 = 0.05;
@@ -441,7 +443,11 @@ impl OptionsScene {
                     color: color::OBSIDIAN,
                 });
                 let fill_w = slider_w * fill_ratio;
-                let fill_color = if is_focused { color::GOLD } else { color::BRASS };
+                let fill_color = if is_focused {
+                    color::GOLD
+                } else {
+                    color::BRASS
+                };
                 instances.push(GpuInstance {
                     rect: [slider_x, track_y, fill_w, track_h],
                     color: fill_color,
@@ -471,12 +477,20 @@ impl OptionsScene {
                 });
             }
             Row::SfxToggle => {
-                let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
                     color: bg_color,
                 });
-                let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: format!(
@@ -488,12 +502,20 @@ impl OptionsScene {
                 });
             }
             Row::Smoke => {
-                let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
                     color: bg_color,
                 });
-                let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: format!("Smoke: {}", self.smoke_intensity.label()),
@@ -502,12 +524,20 @@ impl OptionsScene {
                 });
             }
             Row::Tile => {
-                let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
                     color: bg_color,
                 });
-                let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: format!("Tile Style: {}", self.tile_preset.label()),
@@ -516,12 +546,20 @@ impl OptionsScene {
                 });
             }
             Row::Shadows => {
-                let bg_color = if is_focused { color::DUSK } else { color::INDIGO };
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
                     color: bg_color,
                 });
-                let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: format!(
@@ -533,12 +571,20 @@ impl OptionsScene {
                 });
             }
             Row::Back => {
-                let bg_color = if is_focused { color::TWILIGHT } else { color::INDIGO };
+                let bg_color = if is_focused {
+                    color::TWILIGHT
+                } else {
+                    color::INDIGO
+                };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
                     color: bg_color,
                 });
-                let text_color = if is_focused { color::CHAMPAGNE } else { color::MIST };
+                let text_color = if is_focused {
+                    color::CHAMPAGNE
+                } else {
+                    color::MIST
+                };
                 text_labels.push(TextLabel {
                     rect: [row_x, row_y, row_w, row_h],
                     text: "Back".into(),

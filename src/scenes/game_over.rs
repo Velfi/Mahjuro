@@ -41,7 +41,6 @@ impl GameOverScene {
     fn flat_items(&self, w: f32, h: f32) -> [FlatItem<DismissAction>; 1] {
         [FlatItem::new(FocusId(0), [0.0, 0.0, w, h], DismissAction)]
     }
-
 }
 
 impl SceneBehavior for GameOverScene {
@@ -68,7 +67,11 @@ impl SceneBehavior for GameOverScene {
         let h = ctx.layout.window_h;
         let bg_color = color::OBSIDIAN;
         let headline = if self.won { "VICTORY" } else { "DEFEAT" };
-        let headline_color = if self.won { color::CHAMPAGNE } else { color::RUBY };
+        let headline_color = if self.won {
+            color::CHAMPAGNE
+        } else {
+            color::RUBY
+        };
         let subtitle = if self.won {
             "Final ante cleared".to_string()
         } else {

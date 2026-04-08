@@ -194,10 +194,7 @@ impl FluidSim {
             dimension: Some(wgpu::TextureViewDimension::D3),
             ..Default::default()
         };
-        let vd_view = [
-            vd[0].create_view(&view_desc),
-            vd[1].create_view(&view_desc),
-        ];
+        let vd_view = [vd[0].create_view(&view_desc), vd[1].create_view(&view_desc)];
         let pressure_view = [
             pressure[0].create_view(&view_desc),
             pressure[1].create_view(&view_desc),
@@ -260,27 +257,45 @@ impl FluidSim {
         };
         let inject_shader = make_shader(
             "fluid3-inject",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_inject.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_inject.wgsl"
+            )),
         );
         let advect_shader = make_shader(
             "fluid3-advect",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_advect.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_advect.wgsl"
+            )),
         );
         let divergence_shader = make_shader(
             "fluid3-divergence",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_divergence.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_divergence.wgsl"
+            )),
         );
         let jacobi_shader = make_shader(
             "fluid3-jacobi",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_jacobi.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_jacobi.wgsl"
+            )),
         );
         let project_shader = make_shader(
             "fluid3-project",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_project.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_project.wgsl"
+            )),
         );
         let volume_shader = make_shader(
             "fluid3-volume",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/fluid3_volume.wgsl")),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_volume.wgsl"
+            )),
         );
 
         // ── Bind group layouts ─────────────────────────────────────────
@@ -565,13 +580,7 @@ impl FluidSim {
     }
 
     /// Queue a world-space impulse for the current frame.
-    pub fn inject_impulse(
-        &mut self,
-        world_pos: Vec3,
-        world_vel: Vec3,
-        radius: f32,
-        density: f32,
-    ) {
+    pub fn inject_impulse(&mut self, world_pos: Vec3, world_vel: Vec3, radius: f32, density: f32) {
         if self.impulses.len() < MAX_INJECTIONS {
             self.impulses.push(Impulse {
                 world_pos,
@@ -631,8 +640,18 @@ impl FluidSim {
         };
         for (i, imp) in self.impulses.iter().take(MAX_INJECTIONS).enumerate() {
             injection.points[i] = InjectionPointGpu {
-                pos_radius: [imp.world_pos.x, imp.world_pos.y, imp.world_pos.z, imp.radius],
-                vel_density: [imp.world_vel.x, imp.world_vel.y, imp.world_vel.z, imp.density],
+                pos_radius: [
+                    imp.world_pos.x,
+                    imp.world_pos.y,
+                    imp.world_pos.z,
+                    imp.radius,
+                ],
+                vel_density: [
+                    imp.world_vel.x,
+                    imp.world_vel.y,
+                    imp.world_vel.z,
+                    imp.density,
+                ],
             };
         }
         self.impulses.clear();
@@ -754,9 +773,9 @@ impl FluidSim {
         let inv_vp = view_proj.inverse();
         let (max_alpha, step_count, light_strength, ambient) = match intensity {
             SmokeIntensity::Off => (0.0, 8.0, 0.0, 0.0),
-            SmokeIntensity::Subtle => (0.45, 28.0, 1.4, 0.10),
-            SmokeIntensity::Strong => (0.65, 40.0, 1.8, 0.14),
-            SmokeIntensity::OverTheTop => (0.85, 56.0, 2.2, 0.18),
+            SmokeIntensity::Subtle => (0.45, 28.0, 1.0, 0.08),
+            SmokeIntensity::Strong => (0.65, 40.0, 1.3, 0.11),
+            SmokeIntensity::OverTheTop => (0.85, 56.0, 1.6, 0.14),
         };
         queue.write_buffer(
             &self.cam_buf,
@@ -774,11 +793,7 @@ impl FluidSim {
 
     /// Draw the volumetric smoke. The render bind group must have been built
     /// for the current frame's depth view.
-    pub fn draw(
-        &self,
-        pass: &mut wgpu::RenderPass<'_>,
-        globals_bind_group: &wgpu::BindGroup,
-    ) {
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>, globals_bind_group: &wgpu::BindGroup) {
         let Some(ref bg) = self.render_bg else {
             return;
         };

@@ -32,6 +32,16 @@ pub struct CascadeTuning {
     /// Duration for sort/drag tile repositioning (ms). Higher = slower shuffle.
     #[serde(default = "default_sort_ms")]
     pub sort_settle_ms: u64,
+    /// Delay after a deal before the post-deal smoke "blow it away" gust
+    /// fires (ms). The gameplay scene reads this each frame so live edits
+    /// in the debug tuning overlay take effect on the next deal.
+    #[serde(default = "default_wind_delay_ms")]
+    pub wind_delay_ms: u64,
+    /// Duration of the post-deal smoke gust + candle-dim envelope (ms).
+    /// Shapes the 4t(1-t) bell that drives both the wind impulses and the
+    /// momentary candle dimming.
+    #[serde(default = "default_wind_duration_ms")]
+    pub wind_duration_ms: u64,
 }
 
 fn default_depart_ms() -> u64 {
@@ -42,6 +52,12 @@ fn default_draw_ms() -> u64 {
 }
 fn default_sort_ms() -> u64 {
     400
+}
+fn default_wind_delay_ms() -> u64 {
+    3000
+}
+fn default_wind_duration_ms() -> u64 {
+    1400
 }
 
 impl Default for CascadeTuning {
@@ -54,6 +70,8 @@ impl Default for CascadeTuning {
             depart_lifetime_ms: 700,
             draw_settle_ms: 500,
             sort_settle_ms: 400,
+            wind_delay_ms: 3000,
+            wind_duration_ms: 1400,
         }
     }
 }

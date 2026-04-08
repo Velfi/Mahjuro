@@ -24,7 +24,6 @@ impl SplashScene {
             done: false,
         }
     }
-
 }
 
 impl SceneBehavior for SplashScene {

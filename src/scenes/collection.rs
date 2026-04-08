@@ -5,9 +5,9 @@ use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
 use crate::core::yaku::YakuKind;
 use crate::render::theme::{color, typography};
+use crate::render::wgpu_renderer::TextAlign;
 use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
-use crate::render::wgpu_renderer::TextAlign;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -139,7 +139,6 @@ impl CollectionScene {
 
         items
     }
-
 }
 
 impl SceneBehavior for CollectionScene {

@@ -12,7 +12,9 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 
 use super::start_screen::StartScreenScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{
+    ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx,
+};
 
 // ── Layout definition ──────────────────────────────────────────────
 
@@ -260,7 +262,6 @@ impl SolitaireScene {
         }
         self.finished = Some(Finished::Stuck);
     }
-
 }
 
 impl SceneBehavior for SolitaireScene {

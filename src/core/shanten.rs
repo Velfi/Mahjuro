@@ -13,7 +13,7 @@
 //! Tenpai Bonus in `scoring.rs` reads only the `Complete` axis, so the
 //! approximation is purely a UI hint.
 
-use crate::core::hand::{find_pairs_and_triplets, validate_selection, SetKind};
+use crate::core::hand::{SetKind, find_pairs_and_triplets, validate_selection};
 use crate::core::tile::{Suit, Tile};
 
 /// All 34 tile faces in a standard set: 9 ranks × 3 number suits + 4 winds + 3 dragons.
@@ -41,12 +41,7 @@ pub fn is_complete(tiles: &[Tile]) -> bool {
         let kongs = sets.iter().filter(|s| s.kind == SetKind::Kong).count();
         let melds = sets
             .iter()
-            .filter(|s| {
-                matches!(
-                    s.kind,
-                    SetKind::Triplet | SetKind::Sequence | SetKind::Kong
-                )
-            })
+            .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Sequence | SetKind::Kong))
             .count();
         let pairs = sets.iter().filter(|s| s.kind == SetKind::Pair).count();
         tiles.len() == 14 + kongs && melds == 4 && pairs == 1

@@ -271,7 +271,11 @@ pub fn score_sets(
             .count() as i32;
         if dora_count > 0 {
             // Use a custom step so we can label "Dora ×N" instead of the source name.
-            let per_dora = if ctx.relics.has(RelicId::DoraCrown) { 35 } else { 25 };
+            let per_dora = if ctx.relics.has(RelicId::DoraCrown) {
+                35
+            } else {
+                25
+            };
             let delta = per_dora * dora_count;
             chips += delta;
             steps.push(ScoreStep {
@@ -299,12 +303,8 @@ pub fn score_sets(
     // its current level (default 1) from `ctx.yaku_levels`. Yaku outside the
     // active loadout score at half strength — except FullHand and Yakuhai,
     // which are always at full strength as the universal incentives.
-    let level_of = |y: YakuKind| -> u32 {
-        ctx.yaku_levels
-            .as_ref()
-            .map(|m| m.level_of(y))
-            .unwrap_or(1)
-    };
+    let level_of =
+        |y: YakuKind| -> u32 { ctx.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
     let in_loadout = |y: YakuKind| -> bool {
         ctx.yaku_loadout.is_empty()
             || ctx.yaku_loadout.contains(&y)
@@ -683,11 +683,26 @@ mod tests {
             Tile::new(Suit::Bamboos, 7, 13),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![3, 4, 5] },
-            DetectedSet { kind: SetKind::Sequence, tile_ids: vec![6, 7, 8] },
-            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![9, 10, 11] },
-            DetectedSet { kind: SetKind::Pair, tile_ids: vec![12, 13] },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![12, 13],
+            },
         ];
         let r = RelicState::default();
         let ctx = ScoreContext {
@@ -726,9 +741,18 @@ mod tests {
             Tile::new(Suit::Wind, 1, 7),
         ];
         let sets = vec![
-            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![0, 1, 2] },
-            DetectedSet { kind: SetKind::Triplet, tile_ids: vec![3, 4, 5] },
-            DetectedSet { kind: SetKind::Pair, tile_ids: vec![6, 7] },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![6, 7],
+            },
         ];
         let r = RelicState::default();
         let mut levels = crate::core::zodiac::YakuLevels::default();
@@ -747,8 +771,10 @@ mod tests {
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Verify Toitoi step exists with expected chip & mult deltas.
-        let toitoi_chip = breakdown.steps.iter().find(|s| s.source == "Toitoi"
-            && s.kind == StepKind::Chips);
+        let toitoi_chip = breakdown
+            .steps
+            .iter()
+            .find(|s| s.source == "Toitoi" && s.kind == StepKind::Chips);
         assert!(toitoi_chip.is_some(), "missing Toitoi chip step");
     }
 
@@ -833,7 +859,12 @@ mod tests {
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
         // RedDragonRage must NOT fire on green — assert no Red Dragon Rage step.
         // (Yakuhai will fire on the green triplet, so final_mult is 4.0, not 1.0.)
-        assert!(!breakdown.steps.iter().any(|s| s.source == "Red Dragon Rage"));
+        assert!(
+            !breakdown
+                .steps
+                .iter()
+                .any(|s| s.source == "Red Dragon Rage")
+        );
     }
 
     // ── Multiplier Master ───────────────────────────────────────────
