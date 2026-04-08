@@ -4,7 +4,7 @@
 struct Globals {
     screen: vec2<f32>,
     time: f32,
-    _pad: f32,
+    gamma: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -108,5 +108,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let edge = smoothstep(0.0, 0.08, uv.x) * smoothstep(1.0, 0.92, uv.x)
              * smoothstep(0.0, 0.08, uv.y) * smoothstep(1.0, 0.92, uv.y);
 
-    return vec4<f32>(in.color.rgb * alpha * edge, alpha * edge);
+    let inv_g = 1.0 / max(globals.gamma, 0.01);
+    let rgb = pow(in.color.rgb * alpha * edge, vec3<f32>(inv_g));
+    return vec4<f32>(rgb, alpha * edge);
 }

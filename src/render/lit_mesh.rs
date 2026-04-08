@@ -103,17 +103,37 @@ impl LitMeshGpu {
     }
 }
 
+/// Uniform written into a caster's shadow bind group each frame: the
+/// light's view-projection matrix paired with the caster's world-space
+/// model matrix. The shadow vertex shader (`shaders/shadow.wgsl`) reads
+/// this and emits clip positions in light space.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShadowCasterUniform {
+    pub light_view_proj: [f32; 16],
+    pub model: [f32; 16],
+}
+
 /// Per-instance state: a uniform buffer (rewritten each frame) + a bind group
 /// that points at the buffer plus a shared 1×1 white albedo texture/sampler.
+///
+/// Also owns a sibling shadow-caster uniform + bind group used by the
+/// shadow pre-pass. Both buffers are rewritten in lockstep with the same
+/// model matrix every frame.
 pub struct LitMeshInstance {
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    pub shadow_uniform_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    pub shadow_bind_group: wgpu::BindGroup,
 }
 
 impl LitMeshInstance {
     pub fn new(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
+        shadow_caster_layout: &wgpu::BindGroupLayout,
         white_view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
     ) -> Self {
@@ -146,10 +166,44 @@ impl LitMeshInstance {
                 },
             ],
         });
+        let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("lit-mesh-shadow-uniform"),
+            contents: bytemuck::bytes_of(&ShadowCasterUniform {
+                light_view_proj: identity,
+                model: identity,
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-mesh-shadow-bg"),
+            layout: shadow_caster_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: shadow_uniform_buffer.as_entire_binding(),
+            }],
+        });
         Self {
             uniform_buffer,
             bind_group,
+            shadow_uniform_buffer,
+            shadow_bind_group,
         }
+    }
+
+    /// Write the per-instance shadow caster uniform with the current
+    /// frame's light view-projection and the instance's model matrix.
+    #[allow(dead_code)]
+    pub fn write_shadow_uniform(
+        &self,
+        queue: &wgpu::Queue,
+        light_view_proj: [f32; 16],
+        model: glam::Mat4,
+    ) {
+        let u = ShadowCasterUniform {
+            light_view_proj,
+            model: model.to_cols_array(),
+        };
+        queue.write_buffer(&self.shadow_uniform_buffer, 0, bytemuck::bytes_of(&u));
     }
 
     pub fn write_uniform(
@@ -172,6 +226,72 @@ impl LitMeshInstance {
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
     }
+}
+
+/// Bind-group layout for the per-caster shadow uniform consumed by
+/// `shaders/shadow.wgsl` during the shadow pre-pass. A single uniform
+/// containing `(light_view_proj, model)`.
+pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shadow-caster-layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
+}
+
+/// Frame-shared shadow sampling uniform consumed by lit_mesh.wgsl /
+/// tile_3d.wgsl / tile_outline.wgsl in the main pass via group 2.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShadowGlobals {
+    pub light_view_proj: [f32; 16],
+    /// x = enabled (0/1), y = depth bias, z = texel size, w = unused.
+    pub params: [f32; 4],
+}
+
+/// Bind-group layout for the shadow-sampling group (group 2) shared by
+/// all 3D scene shaders. Layout: uniform + depth texture + comparison
+/// sampler.
+pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shadow-sample-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                count: None,
+            },
+        ],
+    })
 }
 
 /// Build the bind-group layout shared by every lit-mesh primitive.

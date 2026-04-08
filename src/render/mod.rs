@@ -5,6 +5,7 @@ pub mod draw_cmd;
 pub mod fluid;
 pub mod lit_mesh;
 pub mod particles;
+pub mod relic_dish;
 pub mod table_mesh;
 pub mod theme;
 pub mod tile_glb;

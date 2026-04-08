@@ -4,21 +4,40 @@
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
 use crate::core::yaku::YakuKind;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
+use crate::render::wgpu_renderer::TextAlign;
+use crate::ui::widget::{self, TextStyle};
+use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::start_screen::StartScreenScene;
-use super::{ButtonDef, DrawCtx, Scene, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
 
-// Scene-defined button click ids — see `ButtonAction::Scene` in scenes/mod.rs.
-const CLICK_TAB_RELICS: u32 = 0;
-const CLICK_TAB_YAKU: u32 = 1;
-const CLICK_TAB_RULES: u32 = 2;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CollectionAction {
+    SelectTab(Tab),
+    PrevPage,
+    NextPage,
+    Back,
+}
+
+impl CollectionAction {
+    fn id(self) -> FocusId {
+        match self {
+            CollectionAction::SelectTab(Tab::Relics) => FocusId(1),
+            CollectionAction::SelectTab(Tab::Yaku) => FocusId(2),
+            CollectionAction::SelectTab(Tab::Rules) => FocusId(3),
+            CollectionAction::PrevPage => FocusId(10),
+            CollectionAction::NextPage => FocusId(11),
+            CollectionAction::Back => FocusId(20),
+        }
+    }
+}
 
 // ── Tab enum ────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
     Relics,
     Yaku,
@@ -43,6 +62,7 @@ struct GridCard {
 pub struct CollectionScene {
     tab: Tab,
     page: usize,
+    tree: TreeState,
 }
 
 impl CollectionScene {
@@ -50,6 +70,7 @@ impl CollectionScene {
         Self {
             tab: Tab::Relics,
             page: 0,
+            tree: TreeState::new(),
         }
     }
 
@@ -60,30 +81,84 @@ impl CollectionScene {
         (entries + per_page - 1) / per_page
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        // Mouse-click tab targets — each tab fires its own scene click id so
-        // clicking jumps directly to that tab instead of cycling.
-        for &id in ctx.button_clicks {
-            match id {
-                CLICK_TAB_RELICS => {
-                    self.tab = Tab::Relics;
-                    self.page = 0;
-                }
-                CLICK_TAB_YAKU => {
-                    self.tab = Tab::Yaku;
-                    self.page = 0;
-                }
-                CLICK_TAB_RULES => {
-                    self.tab = Tab::Rules;
-                    self.page = 0;
-                }
-                _ => {}
-            }
+    /// Single source of truth for tab/footer/back rects. Returns the flat
+    /// item list shared by update() (hit-test) and draw() (button registration).
+    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<CollectionAction>> {
+        let scale = (w.min(h)) / 600.0;
+        let title_font = (24.0 * scale).max(14.0);
+        let title_h = text_rect_h(title_font);
+        let title_y = h * 0.02;
+
+        let tab_font = (13.0 * scale).max(9.0);
+        let tab_y = title_y + title_h + h * 0.015;
+        let tab_h = text_rect_h(tab_font);
+        let tab_w = (110.0 * scale).min(w * 0.26);
+        let tab_gap = (6.0 * scale).max(3.0);
+        let tab_total_w = tab_w * 3.0 + tab_gap * 2.0;
+        let tab_start_x = (w - tab_total_w) * 0.5;
+
+        let mut items = Vec::with_capacity(6);
+        for (i, &t) in TABS.iter().enumerate() {
+            let tx = tab_start_x + i as f32 * (tab_w + tab_gap);
+            items.push(FlatItem::new(
+                CollectionAction::SelectTab(t).id(),
+                [tx, tab_y, tab_w, tab_h],
+                CollectionAction::SelectTab(t),
+            ));
         }
 
+        // Footer arrows (always pushed; the click handler clamps page).
+        let footer_font = (11.0 * scale).max(8.0);
+        let footer_h = text_rect_h(footer_font);
+        let grid_bottom = h - footer_h - h * 0.02;
+        let footer_y = grid_bottom + h * 0.005;
+        let arrow_w = (30.0 * scale).max(20.0);
+        let center_x = w * 0.5;
+        let left_x = center_x - arrow_w - (60.0 * scale);
+        let right_x = center_x + (60.0 * scale);
+        items.push(FlatItem::new(
+            CollectionAction::PrevPage.id(),
+            [left_x, footer_y, arrow_w, footer_h],
+            CollectionAction::PrevPage,
+        ));
+        items.push(FlatItem::new(
+            CollectionAction::NextPage.id(),
+            [right_x, footer_y, arrow_w, footer_h],
+            CollectionAction::NextPage,
+        ));
+
+        // Back button (top-left).
+        let margin_x = w * 0.04;
+        let back_w = (70.0 * scale).max(48.0);
+        let back_h = (24.0 * scale).max(18.0);
+        items.push(FlatItem::new(
+            CollectionAction::Back.id(),
+            [margin_x, title_y, back_w, back_h],
+            CollectionAction::Back,
+        ));
+
+        items
+    }
+
+}
+
+impl SceneBehavior for CollectionScene {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        let action = self.tree.update_flat(
+            &items,
+            TreeInput {
+                actions: ctx.actions,
+                button_clicks: ctx.button_clicks,
+                cursor_pos: ctx.cursor_pos,
+                window: (ctx.layout.window_w, ctx.layout.window_h),
+            },
+        );
+
+        // Keyboard tab cycling stays separate from the flat-tree's linear nav
+        // (which would otherwise fight with page-flip arrows).
         for a in ctx.actions {
             match a {
-                // Tab switching (keyboard cycle).
                 UiAction::NavigateHudNext => {
                     let idx = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
                     self.tab = TABS[(idx + 1) % TABS.len()];
@@ -94,24 +169,39 @@ impl CollectionScene {
                     self.tab = TABS[(idx + TABS.len() - 1) % TABS.len()];
                     self.page = 0;
                 }
-                // Page navigation.
                 UiAction::FocusNext | UiAction::FocusDown => {
                     self.page = self.page.saturating_add(1);
                 }
                 UiAction::FocusPrev | UiAction::FocusUp => {
                     self.page = self.page.saturating_sub(1);
                 }
-                // Back.
                 UiAction::Cancel | UiAction::Pause | UiAction::CommitDiscard => {
                     return Some(Scene::StartScreen(StartScreenScene::new()));
                 }
                 _ => {}
             }
         }
+
+        match action {
+            Some(CollectionAction::SelectTab(t)) => {
+                self.tab = t;
+                self.page = 0;
+            }
+            Some(CollectionAction::PrevPage) => {
+                self.page = self.page.saturating_sub(1);
+            }
+            Some(CollectionAction::NextPage) => {
+                self.page = self.page.saturating_add(1);
+            }
+            Some(CollectionAction::Back) => {
+                return Some(Scene::StartScreen(StartScreenScene::new()));
+            }
+            None => {}
+        }
         None
     }
 
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = (w.min(h)) / 600.0;
@@ -133,6 +223,7 @@ impl CollectionScene {
             rect: [0.0, title_y, w, title_h],
             text: "Collection".into(),
             color: color::CHAMPAGNE,
+            ..Default::default()
         });
 
         // ── Tab bar ─────────────────────────────────────────────────
@@ -164,15 +255,10 @@ impl CollectionScene {
                 } else {
                     [0.45, 0.45, 0.55, 0.9]
                 },
+                ..Default::default()
             });
-            // Clicking a tab fires the matching scene click id so update()
-            // can jump directly to that tab.
-            let click_id = match i {
-                0 => CLICK_TAB_RELICS,
-                1 => CLICK_TAB_YAKU,
-                _ => CLICK_TAB_RULES,
-            };
-            buttons.push(ButtonDef::scene((tx, tab_y, tab_w, tab_h), click_id));
+            // Click registration handled by `flat_items()` + `register_flat_buttons`
+            // at the end of draw — same source of truth as update().
         }
 
         // ── Grid area ───────────────────────────────────────────────
@@ -237,6 +323,7 @@ impl CollectionScene {
                     scale,
                     card,
                     w,
+                    h,
                     &mut instances,
                     &mut text_labels,
                     &mut relic_icons,
@@ -275,11 +362,9 @@ impl CollectionScene {
                 rect: [left_x, footer_y, arrow_w, footer_h],
                 text: "<".into(),
                 color: [1.0, 1.0, 1.0, 0.9],
+                ..Default::default()
             });
-            buttons.push(ButtonDef::ui(
-                (left_x, footer_y, arrow_w, footer_h),
-                UiAction::FocusPrev,
-            ));
+            // Click registration handled by flat_items().
 
             // Page number.
             let page_text = format!("{} / {}", page + 1, total_pages);
@@ -288,6 +373,7 @@ impl CollectionScene {
                 rect: [center_x - page_w * 0.5, footer_y, page_w, footer_h],
                 text: page_text,
                 color: [0.7, 0.7, 0.8, 0.9],
+                ..Default::default()
             });
 
             // Right arrow button.
@@ -304,11 +390,9 @@ impl CollectionScene {
                 rect: [right_x, footer_y, arrow_w, footer_h],
                 text: ">".into(),
                 color: [1.0, 1.0, 1.0, 0.9],
+                ..Default::default()
             });
-            buttons.push(ButtonDef::ui(
-                (right_x, footer_y, arrow_w, footer_h),
-                UiAction::FocusNext,
-            ));
+            // Click registration handled by flat_items().
         }
 
         // ── Unlock counter ──────────────────────────────────────────
@@ -319,6 +403,7 @@ impl CollectionScene {
             rect: [w - counter_w - margin_x, footer_y, counter_w, footer_h],
             text: format!("{} / {} unlocked", unlocked, total),
             color: [0.5, 0.5, 0.6, 0.8],
+            ..Default::default()
         });
 
         // ── Hint ────────────────────────────────────────────────────
@@ -327,6 +412,7 @@ impl CollectionScene {
             rect: [margin_x, footer_y, hint_w, footer_h],
             text: "L/R tabs  |  Arrows page  |  Esc back".into(),
             color: [0.35, 0.35, 0.45, 0.7],
+            ..Default::default()
         });
 
         // ── Back button ─────────────────────────────────────────────
@@ -343,11 +429,11 @@ impl CollectionScene {
             rect: [back_x, back_y, back_w, back_h],
             text: "< Back".into(),
             color: [0.85, 0.85, 0.95, 1.0],
+            ..Default::default()
         });
-        buttons.push(ButtonDef::ui(
-            (back_x, back_y, back_w, back_h),
-            UiAction::Cancel,
-        ));
+        // Single hit-target list shared with update() — single source of truth.
+        let items = self.flat_items(w, h);
+        self.tree.register_flat_buttons(&items, &mut buttons);
 
         SceneDrawOutput {
             background: Default::default(),
@@ -366,7 +452,9 @@ impl CollectionScene {
             flame_instances: vec![],
             point_lights: vec![],
             candles: vec![],
+            relic_placements: vec![],
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }
@@ -393,6 +481,7 @@ fn draw_unlocked_card(
     scale: f32,
     card: &GridCard,
     win_w: f32,
+    win_h: f32,
     instances: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,
     icons: &mut Vec<RelicIcon>,
@@ -436,16 +525,24 @@ fn draw_unlocked_card(
             rect: [nx, name_y, nw, name_rect_h],
             text: card.name.clone(),
             color: [0.95, 0.9, 0.65, 1.0],
+            ..Default::default()
         });
 
-        // Subtitle (description).
+        // Subtitle (description) — wrapped into the remaining card space.
         let sub_y = name_y + name_rect_h + pad * 0.3;
-        let (sx, sw) = readable_text_rect(x, w, pad, &card.subtitle, sub_font, win_w);
-        labels.push(TextLabel {
-            rect: [sx, sub_y, sw, sub_rect_h],
-            text: card.subtitle.clone(),
-            color: [0.6, 0.6, 0.7, 0.9],
-        });
+        let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
+        widget::push_text_block(
+            labels,
+            [x + pad, sub_y, w - pad * 2.0, sub_h],
+            &card.subtitle,
+            TextStyle {
+                tier: typography::CAPTION,
+                color: [0.6, 0.6, 0.7, 0.9],
+                padding: 0.0,
+                align: TextAlign::Left,
+            },
+            win_h,
+        );
     } else {
         // Non-relic card (yaku / rule): no icon, text layout only.
         let name_y = y + accent_h + h * 0.15;
@@ -454,15 +551,23 @@ fn draw_unlocked_card(
             rect: [nx, name_y, nw, name_rect_h],
             text: card.name.clone(),
             color: [0.95, 0.9, 0.65, 1.0],
+            ..Default::default()
         });
 
         let sub_y = name_y + name_rect_h + pad;
-        let (sx, sw) = readable_text_rect(x, w, pad, &card.subtitle, sub_font, win_w);
-        labels.push(TextLabel {
-            rect: [sx, sub_y, sw, sub_rect_h],
-            text: card.subtitle.clone(),
-            color: [0.65, 0.65, 0.75, 0.9],
-        });
+        let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
+        widget::push_text_block(
+            labels,
+            [x + pad, sub_y, w - pad * 2.0, sub_h],
+            &card.subtitle,
+            TextStyle {
+                tier: typography::CAPTION,
+                color: [0.65, 0.65, 0.75, 0.9],
+                padding: 0.0,
+                align: TextAlign::Left,
+            },
+            win_h,
+        );
     }
 }
 
@@ -499,6 +604,7 @@ fn draw_locked_card(
         rect: [x, lock_y, w, lock_rect_h],
         text: "?".into(),
         color: [0.25, 0.25, 0.35, 0.7],
+        ..Default::default()
     });
 
     // Clue text — use screen-relative sizing.
@@ -510,6 +616,7 @@ fn draw_locked_card(
         rect: [cx, clue_y, cw, clue_rect_h],
         text: card.clue.clone(),
         color: [0.30, 0.30, 0.40, 0.7],
+        ..Default::default()
     });
 }
 
@@ -591,13 +698,7 @@ fn build_relic_cards(progress: &crate::core::progression::PlayerProgress) -> Vec
 }
 
 fn build_yaku_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
-    let all = [
-        YakuKind::FullHand,
-        YakuKind::AllTriplets,
-        YakuKind::AllSimples,
-        YakuKind::MixedSets,
-        YakuKind::Flush,
-    ];
+    let all = YakuKind::all();
     let available = progress.available_yaku();
     all.iter()
         .map(|&yk| {
@@ -670,8 +771,6 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::TripletBoost => "Rewards grouping three of a kind.".into(),
         RelicId::SequenceSurge => "Power in consecutive tiles.".into(),
         RelicId::PairPower => "Two of a kind, stronger than they appear.".into(),
-        RelicId::BambooCharm => "A simple but steady charm from the groves.".into(),
-        RelicId::LuckyPair => "Fortune favors matched tiles.".into(),
         RelicId::MultiplierMaster => "Compound strength from collecting.".into(),
         RelicId::GreenLuck => "Gold in simplicity.".into(),
         RelicId::QuickDraw => "The swift hand gains advantage.".into(),
@@ -683,30 +782,57 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::JokerTile => "Becomes anything, once per round.".into(),
         RelicId::WildWinds => "Winds bend to fill gaps.".into(),
         RelicId::DragonEcho => "Resonates with adjacent sets.".into(),
-        RelicId::ReverseTile => "Reshape your hand unexpectedly.".into(),
-        RelicId::StealthTile => "Slips past negative effects.".into(),
-        RelicId::LockedSet => "Immovable anchors in your hand.".into(),
-        RelicId::RedDragonRage => "Legendary fury, multiplied fivefold.".into(),
+        RelicId::RedDragonRage => "Fury of the red dragon.".into(),
+        // ── Patch C new relics ──
+        RelicId::ShantenLens => "Sees the path to completion.".into(),
+        RelicId::WallPeek => "Glimpses what's coming.".into(),
+        RelicId::KanDrum => "Beats louder for every kong.".into(),
+        RelicId::DoraCrown => "Crown of indicators.".into(),
+        RelicId::RiichiStick => "A bet declared with confidence.".into(),
+        RelicId::TenpaiTalisman => "Doubles the first complete hand bonus.".into(),
+        RelicId::RiverEraser => "Wipes the river clean.".into(),
+        RelicId::FuritenWard => "Wards against your own discards.".into(),
+        RelicId::RoundCompass => "Honors the round wind.".into(),
+        RelicId::ZodiacPouch => "Holds an extra Zodiac.".into(),
+        RelicId::LunarAlmanac => "Doubles every third Zodiac use.".into(),
+        RelicId::YakuScholar => "Master more yaku at once.".into(),
+        RelicId::EightTreasures => "A complete hand pulls a Zodiac from the air.".into(),
+        RelicId::KongsBlessing => "Kongs blessed with a pair's power.".into(),
+        RelicId::CodexCompass => "Reshape your loadout mid-round.".into(),
     }
 }
 
 fn yaku_clue(yk: YakuKind) -> String {
     match yk {
         YakuKind::FullHand => "Play all 14 tiles perfectly.".into(),
-        YakuKind::AllTriplets => "Reach Level 2.".into(),
-        YakuKind::AllSimples => "Reach Level 2.".into(),
-        YakuKind::MixedSets => "Reach Level 3.".into(),
-        YakuKind::Flush => "Reach Level 4.".into(),
+        YakuKind::Yakuhai => "Available from the start.".into(),
+        YakuKind::Toitoi => "Reach Level 2.".into(),
+        YakuKind::Tanyao => "Reach Level 2.".into(),
+        YakuKind::Iipeikou => "Reach Level 3.".into(),
+        YakuKind::Honitsu => "Reach Level 3.".into(),
+        YakuKind::Chinitsu => "Reach Level 4.".into(),
+        YakuKind::Chiitoitsu => "Reach Level 4.".into(),
+        YakuKind::SanshokuDoujun => "Reach Level 5.".into(),
+        YakuKind::Honroutou => "Reach Level 5.".into(),
+        YakuKind::Junchan => "Reach Level 6.".into(),
+        YakuKind::Ittsu => "Reach Level 6.".into(),
     }
 }
 
 fn yaku_description(yk: YakuKind) -> &'static str {
     match yk {
         YakuKind::FullHand => "14 tiles: 4 melds + 1 pair",
-        YakuKind::AllTriplets => "All melds are triplets",
-        YakuKind::AllSimples => "Only numbered tiles rank 2-8",
-        YakuKind::MixedSets => "At least one pair, triplet, and sequence",
-        YakuKind::Flush => "All tiles share one suit",
+        YakuKind::Toitoi => "All melds are triplets/kongs",
+        YakuKind::Tanyao => "Only numbered tiles rank 2-8",
+        YakuKind::Yakuhai => "Triplet of dragon or round wind",
+        YakuKind::Iipeikou => "Two identical sequences in one suit",
+        YakuKind::SanshokuDoujun => "Same sequence in all three number suits",
+        YakuKind::Ittsu => "1-9 straight in one number suit",
+        YakuKind::Honitsu => "One number suit + honors",
+        YakuKind::Chinitsu => "Single number suit, no honors",
+        YakuKind::Junchan => "Every meld contains a terminal",
+        YakuKind::Honroutou => "Only terminals (1/9) and honors",
+        YakuKind::Chiitoitsu => "Seven distinct pairs",
     }
 }
 

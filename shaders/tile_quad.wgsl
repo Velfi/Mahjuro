@@ -4,7 +4,7 @@
 struct Globals {
     screen: vec2<f32>,
     time: f32,
-    _pad: f32,
+    gamma: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -91,5 +91,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, tint, intensity);
     }
 
-    return vec4<f32>(rgb, outer_alpha);
+    let inv_g = 1.0 / max(globals.gamma, 0.01);
+    let rgb_g = pow(rgb, vec3<f32>(inv_g));
+    return vec4<f32>(rgb_g, outer_alpha);
 }

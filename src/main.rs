@@ -18,14 +18,14 @@ use std::time::Instant;
 use debug_menu::{DebugAction, DebugMenuBar};
 use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
-use game::run::{RunState, pick_relic_choices};
+use game::run::RunState;
 use render::animation::AnimationController;
 use render::draw_cmd::UiFrame;
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
-use scenes::results::ResultsScene;
+use scenes::shop::ShopScene;
 use scenes::splash::SplashScene;
-use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, UpdateCtx};
+use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme};
@@ -154,6 +154,7 @@ impl TuningOverlay {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
             text: "Cascade Tuning".into(),
             color: [1.0, 0.95, 0.7, 1.0],
+            ..Default::default()
         });
 
         let mut cursor_y = panel_y + row_gap + title_h + row_gap;
@@ -202,6 +203,7 @@ impl TuningOverlay {
                     rect: [seg_x, bar_y, seg_w, bar_h],
                     text: seg_labels[i].to_string(),
                     color: [0.0, 0.0, 0.0, 0.9],
+                    ..Default::default()
                 });
             }
             seg_x += seg_w;
@@ -216,6 +218,7 @@ impl TuningOverlay {
             ],
             text: "Timeline: Base > Steps (x N) > Total".into(),
             color: [0.6, 0.6, 0.7, 0.8],
+            ..Default::default()
         });
         // Tick duration annotation.
         let tick_label_y = bar_y + bar_h + 4.0 * scale;
@@ -231,6 +234,7 @@ impl TuningOverlay {
                 self.tuning.tick_duration_ms
             ),
             color: [0.5, 0.5, 0.6, 0.7],
+            ..Default::default()
         });
 
         cursor_y += diagram_h + row_gap;
@@ -303,6 +307,7 @@ impl TuningOverlay {
                 rect: [panel_x + 12.0 * scale, row_y, label_w, row_h],
                 text: name.to_string(),
                 color: tc,
+                ..Default::default()
             });
 
             // Description below label.
@@ -315,6 +320,7 @@ impl TuningOverlay {
                 ],
                 text: desc.to_string(),
                 color: [0.45, 0.45, 0.55, 0.7],
+                ..Default::default()
             });
 
             // Slider track.
@@ -358,6 +364,7 @@ impl TuningOverlay {
                 rect: [value_x, row_y, value_w, row_h],
                 text: format!("{}ms", value),
                 color: tc,
+                ..Default::default()
             });
         }
 
@@ -381,6 +388,7 @@ impl TuningOverlay {
             } else {
                 [0.6, 0.6, 0.7, 0.9]
             },
+            ..Default::default()
         });
 
         // Hint.
@@ -389,6 +397,7 @@ impl TuningOverlay {
             rect: [panel_x, hint_y, panel_w, row_h * 0.6],
             text: "Left/Right: adjust   Esc: close".into(),
             color: [0.4, 0.4, 0.5, 0.6],
+            ..Default::default()
         });
 
         (instances, labels)
@@ -399,6 +408,152 @@ enum TuningResult {
     Stay,
     Close,
     Export,
+}
+
+// ── Sound effects test overlay (debug) ──────────────────────────────
+
+struct SfxTestOverlay {
+    cursor: usize,
+}
+
+impl SfxTestOverlay {
+    fn new() -> Self {
+        Self { cursor: 0 }
+    }
+
+    /// Returns `true` if the overlay should close.
+    fn update(&mut self, actions: &[UiAction], audio: &audio::AudioManager) -> bool {
+        let count = audio::all_sfx_ids().len();
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % count;
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + count - 1) % count;
+                }
+                UiAction::Confirm => {
+                    if let Some(&id) = audio::all_sfx_ids().get(self.cursor) {
+                        audio.play_sfx(id);
+                    }
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0;
+        let mut instances = Vec::new();
+        let mut labels = Vec::new();
+
+        // Dim overlay background.
+        instances.push(GpuInstance {
+            rect: [0.0, 0.0, window_w, window_h],
+            color: [0.0, 0.0, 0.0, 0.7],
+        });
+
+        let ids = audio::all_sfx_ids();
+        let row_h = (36.0 * scale).max(24.0);
+        let row_gap = (6.0 * scale).max(3.0);
+        let title_h = (48.0 * scale).max(28.0);
+        let hint_h = (22.0 * scale).max(14.0);
+        let pad = (16.0 * scale).max(8.0);
+
+        let panel_w = (560.0 * scale).min(window_w * 0.92);
+        let panel_h = pad
+            + title_h
+            + pad
+            + (ids.len() as f32) * (row_h + row_gap)
+            + pad
+            + hint_h
+            + pad;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+
+        // Border.
+        let border = 3.0;
+        instances.push(GpuInstance {
+            rect: [
+                panel_x - border,
+                panel_y - border,
+                panel_w + border * 2.0,
+                panel_h + border * 2.0,
+            ],
+            color: [0.55, 0.45, 0.20, 0.85],
+        });
+        // Panel background (Midnight Gold cool indigo).
+        instances.push(GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: [0.06, 0.07, 0.14, 0.97],
+        });
+
+        // Title.
+        labels.push(TextLabel {
+            rect: [panel_x, panel_y + pad, panel_w, title_h],
+            text: "Sound Effects Test".into(),
+            color: [1.0, 0.85, 0.45, 1.0],
+            ..Default::default()
+        });
+
+        // Rows.
+        let rows_y0 = panel_y + pad + title_h + pad;
+        for (i, &id) in ids.iter().enumerate() {
+            let row_y = rows_y0 + i as f32 * (row_h + row_gap);
+            let is_focused = self.cursor == i;
+
+            let bg = if is_focused {
+                [0.30, 0.26, 0.50, 0.95]
+            } else {
+                [0.10, 0.12, 0.20, 0.80]
+            };
+            instances.push(GpuInstance {
+                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
+                color: bg,
+            });
+
+            let tc = if is_focused {
+                [1.0, 0.92, 0.60, 1.0]
+            } else {
+                [0.65, 0.65, 0.78, 0.95]
+            };
+            // Variant name (left).
+            let name_w = panel_w * 0.32;
+            labels.push(TextLabel {
+                rect: [panel_x + 12.0 * scale, row_y, name_w, row_h],
+                text: format!("{:?}", id),
+                color: tc,
+                ..Default::default()
+            });
+            // Filename (right).
+            labels.push(TextLabel {
+                rect: [
+                    panel_x + 12.0 * scale + name_w,
+                    row_y,
+                    panel_w - name_w - 24.0 * scale,
+                    row_h,
+                ],
+                text: id.filename().to_string(),
+                color: [tc[0] * 0.85, tc[1] * 0.85, tc[2] * 0.85, tc[3] * 0.9],
+                ..Default::default()
+            });
+        }
+
+        // Footer hint.
+        let hint_y = rows_y0 + ids.len() as f32 * (row_h + row_gap) + pad;
+        labels.push(TextLabel {
+            rect: [panel_x, hint_y, panel_w, hint_h],
+            text: "Up/Down: select   Enter: play   Esc: close".into(),
+            color: [0.55, 0.55, 0.65, 0.75],
+            ..Default::default()
+        });
+
+        (instances, labels)
+    }
 }
 
 struct App {
@@ -437,7 +592,14 @@ struct App {
     debug_menu: Option<DebugMenuBar>,
     /// Smoke effect intensity (persisted in settings).
     smoke_intensity: crate::persistence::SmokeIntensity,
+    /// Mahjong tile size preset (persisted in settings).
+    tile_preset: crate::persistence::TilePreset,
+    /// Display gamma correction exponent (persisted in settings).
+    gamma: f32,
+    /// Whether realtime shadows are enabled (persisted in settings).
+    shadows_enabled: bool,
     /// Previous cursor position for computing cursor velocity.
+    #[allow(dead_code)]
     prev_cursor: (f32, f32),
     /// Whether to show the FPS counter (debug toggle).
     show_fps: bool,
@@ -449,6 +611,8 @@ struct App {
     cascade_tuning: CascadeTuning,
     /// Tuning overlay (None = closed).
     tuning_overlay: Option<TuningOverlay>,
+    /// Sound effects test overlay (None = closed).
+    sfx_test_overlay: Option<SfxTestOverlay>,
     /// Round-end events held until the active scoring cascade finishes.
     /// Lets the player watch the winning cascade play out before the
     /// Results / GameOver scene fades in.
@@ -456,12 +620,48 @@ struct App {
 }
 
 impl App {
+    /// Single source of truth for "is anything modal-like up right now?"
+    ///
+    /// **The modal-blocking pattern.** Any overlay that should block input
+    /// and hover for elements below it is reported here, by ORing together:
+    ///   - The app-owned [`ModalQueue`] (toast modals).
+    ///   - App-owned debug overlays (`tuning_overlay`, `sfx_test_overlay`).
+    ///   - The active scene's own internal overlays, via
+    ///     [`Scene::has_blocking_overlay`].
+    ///
+    /// Two universal gates in the main loop consult this:
+    ///   1. **Tooltip/hover gate** — `skip_tooltips` in the redraw path
+    ///      suppresses the global tooltip overlay so hover effects never
+    ///      leak through a modal.
+    ///   2. **Click safety wipe** — right after the scene populates
+    ///      `active_buttons`, those buttons are cleared if any modal is up,
+    ///      so scene buttons can never be clicked through. Overlays that
+    ///      *want* their own clickable surface (e.g. `ModalQueue`'s full-
+    ///      screen dismiss) write to `active_buttons` *after* the wipe in
+    ///      their own draw step.
+    ///
+    /// To make a new overlay modal-blocking by default:
+    ///   - If it's app-owned: add it to this OR-chain.
+    ///   - If it's scene-owned: report it from the scene's
+    ///     `has_blocking_overlay()` method.
+    /// No per-call-site changes are needed — the gates pick it up
+    /// automatically.
+    fn modal_overlay_active(&self) -> bool {
+        self.modals.is_active()
+            || self.tuning_overlay.is_some()
+            || self.sfx_test_overlay.is_some()
+            || self.scene.has_blocking_overlay()
+    }
+
     fn new() -> Self {
         let t0 = Instant::now();
         let settings = persistence::load_settings();
         let active_profile = settings.active_profile;
         let progress = persistence::load_profile(active_profile);
-        let mut run = RunState::new_demo();
+        // Prefer a saved-on-quit run for this profile (resume). If none
+        // exists or it was written by a previous build version, fall back
+        // to a fresh demo run. `load_run` deletes stale/corrupt saves.
+        let mut run = persistence::load_run(active_profile).unwrap_or_else(RunState::new_demo);
         run.available_yaku = progress.available_yaku();
         run.available_rules = progress.available_rules();
         let mut audio = audio::AudioManager::new();
@@ -497,28 +697,51 @@ impl App {
             deferred_round_end: None,
             debug_menu: None,
             smoke_intensity: settings.smoke_intensity,
+            tile_preset: settings.tile_preset,
+            gamma: settings.gamma,
+            shadows_enabled: settings.shadows_enabled,
             prev_cursor: (0.0, 0.0),
             show_fps: false,
             fps_smoothed: 60.0,
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
             tuning_overlay: None,
+            sfx_test_overlay: None,
         }
     }
 
     /// Switch to a different profile, reloading progress.
     fn switch_profile(&mut self, new_index: usize) {
-        // Save current profile first.
+        // Save current profile + any in-progress run before swapping out.
         let _ = persistence::save_profile(self.active_profile, &self.progress);
+        self.persist_run_if_in_progress();
         self.active_profile = new_index;
         self.progress = persistence::load_profile(new_index);
-        self.run = RunState::new_demo();
+        // Resume the new profile's saved run if it has one — otherwise a
+        // fresh demo run, exactly like first-launch behavior.
+        self.run = persistence::load_run(new_index).unwrap_or_else(RunState::new_demo);
         self.run.available_yaku = self.progress.available_yaku();
         self.run.available_rules = self.progress.available_rules();
         // Persist the active profile choice.
         let mut settings = persistence::load_settings();
         settings.active_profile = new_index;
         let _ = persistence::save_settings(&settings);
+    }
+
+    /// Persist `self.run` for resume on next launch. Called from every quit
+    /// path so the player can resume regardless of how the game was closed.
+    /// If the run is fresh (default starting state — e.g. the player started
+    /// a new game then quit immediately), the saved-run file is deleted
+    /// instead of overwritten. Otherwise the existing save would still
+    /// linger and we'd resume into a stale run on next launch.
+    fn persist_run_if_in_progress(&self) {
+        if self.run.is_in_progress() {
+            if let Err(e) = persistence::save_run(self.active_profile, &self.run) {
+                log::warn!("save_run failed: {e}");
+            }
+        } else {
+            persistence::delete_saved_run(self.active_profile);
+        }
     }
 
     /// Process a `RoundComplete` or `GameOver` event that was held while the
@@ -545,10 +768,34 @@ impl App {
                 )
                 .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                 self.modals.push(modal);
-                let count = self.run.blind.relic_choices();
-                let available = self.progress.available_relics();
-                let choices = pick_relic_choices(&self.run.relics, count, &available);
-                self.pending_scene = Some(Scene::Results(ResultsScene::new(choices)));
+                // Patch B: each cleared blind drops Zodiac cards. Small=1,
+                // Big=1, Boss=2. Drops bypass the inventory cap so the player
+                // never loses a reward — capacity governs purchasing, not
+                // gifts.
+                let drops = match self.run.blind {
+                    crate::core::rules::BlindKind::Small => 1,
+                    crate::core::rules::BlindKind::Big => 1,
+                    crate::core::rules::BlindKind::Boss => 2,
+                };
+                {
+                    use rand::seq::IndexedRandom;
+                    let mut rng = rand::rng();
+                    for _ in 0..drops {
+                        if let Some(&z) =
+                            crate::core::zodiac::ZodiacKind::all().choose(&mut rng)
+                        {
+                            self.run.zodiac_inventory.items.push(z);
+                        }
+                    }
+                }
+                let final_score = self.run.round_score;
+                let target = self.run.target_score;
+                self.run.advance_round();
+                self.pending_scene = Some(if self.run.is_run_complete() {
+                    Scene::GameOver(GameOverScene::victory(final_score, target))
+                } else {
+                    Scene::Shop(ShopScene::new(self.run.run_number, &self.run.relics))
+                });
                 self.transition_alpha = 1.0;
             }
             GameEvent::GameOver { .. } => {
@@ -556,6 +803,9 @@ impl App {
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
+                // Run is over — drop any saved-on-quit snapshot so the
+                // player isn't offered "Continue" into a finished game.
+                persistence::delete_saved_run(self.active_profile);
 
                 if let Some(level) = level_up {
                     log::info!("Level up! Now level {}", level);
@@ -580,6 +830,10 @@ impl App {
     }
 
     fn draw(&mut self) {
+        // Cache once up front so the borrow checker doesn't have to reason
+        // about us calling `&self` methods while `self.renderer` is held
+        // mutably below.
+        let modal_active = self.modal_overlay_active();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -602,6 +856,11 @@ impl App {
             active_profile: self.active_profile,
             game_in_progress: self.run.is_in_progress(),
             projected_hand_rects: renderer.projected_hand_rects(),
+            projected_relic_rects: renderer.projected_relic_rects(),
+            picked_hand_tile: self
+                .input
+                .as_ref()
+                .and_then(|i| renderer.pick_hand_tile(i.last_cursor.0, i.last_cursor.1)),
         };
         let output = self.scene.draw(ctx);
 
@@ -615,10 +874,19 @@ impl App {
             })
             .collect();
 
+        // Click-safety wipe: if any modal-like overlay is up, scene buttons
+        // must not be clickable through it. Overlays that want their own
+        // clickable surface (e.g. `ModalQueue`'s full-screen dismiss button)
+        // write to `active_buttons` *after* this point in their draw step.
+        // See `App::modal_overlay_active` for the contract.
+        if modal_active {
+            self.active_buttons.clear();
+        }
+
         // Spawn departure animations before updating hand tiles (old data still in renderer).
         if !output.departing_indices.is_empty() {
             let depart_lifetime = self.cascade_tuning.depart_lifetime_ms as f32 / 1000.0;
-            renderer.depart_tiles(&output.departing_indices, depart_lifetime);
+            renderer.depart_tiles(&output.departing_indices, depart_lifetime, self.tile_preset);
         }
         renderer.update_hand_tiles(&output.hand_tiles);
 
@@ -633,6 +901,7 @@ impl App {
                 rect: l.rect,
                 text: l.text.clone(),
                 color: l.color,
+                ..Default::default()
             })
             .collect();
         let scene_relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = output
@@ -650,6 +919,9 @@ impl App {
         // appended to the end of `frame.cmds` below — pushed earlier =
         // renders under, pushed later = renders on top.
         let mut frame: UiFrame = output.into_frame();
+        // Forward the cursor position so the renderer can project it onto
+        // the table plane and feed it into the volumetric smoke sim.
+        frame.cursor_pos = self.input.as_ref().map(|i| i.last_cursor);
 
         // Apply transition alpha to everything that's part of the scene
         // (after into_frame so all scene cmds exist; before overlays are
@@ -676,9 +948,19 @@ impl App {
             self.active_buttons.clear(); // Block scene buttons.
         }
 
+        // SFX test overlay — on top of modals.
+        if let Some(ref overlay) = self.sfx_test_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            frame.quads(insts);
+            frame.texts(lbls);
+            self.active_buttons.clear();
+        }
+
         // Tooltip overlay — pushed *after* modals/tuning so it sits on top
-        // of all scene/modal content. Disabled on overlay screens like Options.
-        let skip_tooltips = self.modals.is_active() || matches!(&self.scene, Scene::Options(_));
+        // of all scene/modal content. Suppressed whenever any modal-like
+        // overlay is up so hover effects don't leak through to elements
+        // below it. See `App::modal_overlay_active` for the contract.
+        let skip_tooltips = modal_active || matches!(&self.scene, Scene::Options(_));
         if !skip_tooltips {
             let cursor = self
                 .input
@@ -721,6 +1003,7 @@ impl App {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.fps_smoothed),
                 color: [0.9, 0.9, 0.3, 1.0],
+                ..Default::default()
             });
         }
 
@@ -732,8 +1015,11 @@ impl App {
         if let Err(e) = renderer.render(
             &frame,
             self.smoke_intensity,
+            self.tile_preset,
             draw_settle_speed,
             sort_settle_speed,
+            self.gamma,
+            self.shadows_enabled,
         ) {
             log::error!("render: {e:?}");
         }
@@ -775,6 +1061,7 @@ impl App {
                         self.run.relics.max_slots += 1;
                     }
                     self.run.relics.active.push(relic_id);
+                    self.run.recompute_capacities();
                     log::info!("[Debug] Added relic {:?}", relic_id);
                 } else {
                     log::info!("[Debug] Relic {:?} already active", relic_id);
@@ -792,6 +1079,12 @@ impl App {
                 if self.tuning_overlay.is_none() {
                     self.tuning_overlay = Some(TuningOverlay::new(&self.cascade_tuning));
                     log::info!("[Debug] Opened cascade tuning overlay");
+                }
+            }
+            DebugAction::OpenSfxTest => {
+                if self.sfx_test_overlay.is_none() {
+                    self.sfx_test_overlay = Some(SfxTestOverlay::new());
+                    log::info!("[Debug] Opened SFX test overlay");
                 }
             }
         }
@@ -850,6 +1143,7 @@ impl ApplicationHandler for App {
                     log::info!("CloseRequested — saving profile and exiting");
                     self.progress.record_score(self.run.round_score);
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.persist_run_if_in_progress();
                     self.close_saved = true;
                     event_loop.exit();
                 }
@@ -874,6 +1168,12 @@ impl ApplicationHandler for App {
                         }
                         GameEvent::ScoreUpdated(_) => {
                             self.audio.play_sfx(audio::SfxId::ScoreReveal);
+                        }
+                        GameEvent::ScoreStepRevealed { .. } => {
+                            self.audio.play_sfx(audio::SfxId::ScoreStep);
+                        }
+                        GameEvent::ScoreCascadeFinal => {
+                            self.audio.play_sfx(audio::SfxId::ScoreFinal);
                         }
                         ev @ GameEvent::RoundComplete { .. } => {
                             // Hold the win sting + scene transition until the
@@ -916,11 +1216,25 @@ impl ApplicationHandler for App {
                     let layout = self
                         .layout_engine
                         .solve(size.width as f32, size.height as f32);
-                    let slots: Vec<(f32, f32, f32, f32)> = layout
+                    // Hit-test by raycasting from the camera through the
+                    // cursor against each tile's OBB (last-frame snapshot).
+                    // We feed `update_pointer_hover` synthetic slots so only
+                    // the picked tile contains the cursor — the rest are
+                    // collapsed off-screen so they can't compete.
+                    let mut slots: Vec<(f32, f32, f32, f32)> = layout
                         .hand_slots
                         .iter()
-                        .map(|r| (r.x, r.y, r.w, r.h))
+                        .map(|_| (-9999.0, -9999.0, 0.0, 0.0))
                         .collect();
+                    let picked = self
+                        .renderer
+                        .as_ref()
+                        .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
+                    if let Some(idx) = picked {
+                        if let Some(s) = slots.get_mut(idx) {
+                            *s = (input.last_cursor.0 - 1.0, input.last_cursor.1 - 1.0, 2.0, 2.0);
+                        }
+                    }
                     input.update_pointer_hover(input.last_cursor, &slots);
 
                     // 3. Update focus slot (App-level, shared across scenes).
@@ -966,6 +1280,18 @@ impl ApplicationHandler for App {
                                 Err(e) => log::error!("[Debug] Failed to export tuning: {e}"),
                             }
                         }
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
+                // 3b'. If the SFX test overlay is open, intercept input.
+                if let Some(mut overlay) = self.sfx_test_overlay.take() {
+                    let close = overlay.update(&actions, &self.audio);
+                    if !close {
+                        self.sfx_test_overlay = Some(overlay);
+                    } else {
+                        log::info!("[Debug] Closed SFX test overlay");
                     }
                     actions.clear();
                     button_clicks.clear();
@@ -1022,13 +1348,27 @@ impl ApplicationHandler for App {
                     self.transition_alpha = 1.0;
                 }
 
-                // Sync live audio/graphics settings when in Options scene.
-                if let Scene::Options(opts) = &self.scene {
+                // Sync live audio/graphics settings whenever the player has
+                // an options menu open — either the standalone Options scene
+                // (from the start screen) or the embedded options overlay
+                // inside the in-game pause menu.
+                let active_options_overlay = match &self.scene {
+                    // Standalone Options scene IS the options screen, so its
+                    // own state is what we sync. Every other scene defers to
+                    // its `SceneBehavior::pause_options_overlay()` (default
+                    // `None` for scenes without an embedded pause menu).
+                    Scene::Options(opts) => Some(opts),
+                    other => other.pause_options_overlay(),
+                };
+                if let Some(opts) = active_options_overlay {
                     self.audio.set_master_volume(opts.master_volume);
                     self.audio.set_sfx_volume(opts.sfx_volume);
                     self.audio.set_music_volume(opts.music_volume);
                     self.audio.set_enabled(opts.sfx_enabled);
                     self.smoke_intensity = opts.smoke_intensity;
+                    self.tile_preset = opts.tile_preset;
+                    self.gamma = opts.gamma;
+                    self.shadows_enabled = opts.shadows_enabled;
                 }
 
                 // Handle profile switch request.
@@ -1103,41 +1443,9 @@ impl ApplicationHandler for App {
                     self.quit_requested = true;
                 }
 
-                // Inject fluid impulses from cursor movement.
-                if self.smoke_intensity != crate::persistence::SmokeIntensity::Off {
-                    if let Some(ref mut renderer) = self.renderer {
-                        if let Some(ref mut fluid) = renderer.fluid {
-                            let cursor = self
-                                .input
-                                .as_ref()
-                                .map(|i| i.last_cursor)
-                                .unwrap_or((0.0, 0.0));
-                            let now = Instant::now();
-                            let dt = now
-                                .saturating_duration_since(self.last_frame)
-                                .as_secs_f32()
-                                .max(1.0 / 120.0);
-                            let vx = (cursor.0 - self.prev_cursor.0) / dt;
-                            let vy = (cursor.1 - self.prev_cursor.1) / dt;
-                            let speed = (vx * vx + vy * vy).sqrt();
-                            self.prev_cursor = cursor;
-
-                            // Only inject when cursor is moving noticeably.
-                            if speed > 5.0 {
-                                fluid.inject_impulse(
-                                    cursor.0,
-                                    cursor.1,
-                                    4.0,
-                                    vx * 0.3,
-                                    vy * 0.3,
-                                    [0.85, 0.55, 0.3], // amber
-                                    0.5,
-                                );
-                            }
-                        }
-                    }
-                }
-
+                // Cursor → smoke impulses are now injected by the renderer
+                // itself (it has the gameplay camera matrices required to
+                // unproject the cursor onto the table plane).
                 self.draw();
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -1212,11 +1520,21 @@ impl ApplicationHandler for App {
                     let layout = self
                         .layout_engine
                         .solve(size.width as f32, size.height as f32);
-                    let slots: Vec<(f32, f32, f32, f32)> = layout
+                    // Same raycast-based pick as the per-frame update path.
+                    let mut slots: Vec<(f32, f32, f32, f32)> = layout
                         .hand_slots
                         .iter()
-                        .map(|r| (r.x, r.y, r.w, r.h))
+                        .map(|_| (-9999.0, -9999.0, 0.0, 0.0))
                         .collect();
+                    let picked = self
+                        .renderer
+                        .as_ref()
+                        .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
+                    if let Some(idx) = picked {
+                        if let Some(s) = slots.get_mut(idx) {
+                            *s = (input.last_cursor.0 - 1.0, input.last_cursor.1 - 1.0, 2.0, 2.0);
+                        }
+                    }
                     input.update_pointer_hover(input.last_cursor, &slots);
                     // Update drag position if dragging.
                     if let Some(ref mut drag) = input.drag {
@@ -1255,6 +1573,7 @@ impl ApplicationHandler for App {
         if self.quit_requested {
             let _ = persistence::save_profile(self.active_profile, &self.progress);
             let _ = persistence::save_settings(&persistence::load_settings());
+            self.persist_run_if_in_progress();
             _event_loop.exit();
             return;
         }

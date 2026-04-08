@@ -35,6 +35,8 @@ pub enum UiAction {
     SortByRank,
     /// Pause the game (Escape / Start button).
     Pause,
+    /// Open the glossary / help overlay (`?`, `F1`, `H`, gamepad Select).
+    Help,
 }
 
 /// Active drag state for tile reordering.
@@ -95,6 +97,7 @@ impl InputState {
                 ButtonPressed(Button::DPadDown, _) => actions.push(UiAction::FocusDown),
                 ButtonPressed(Button::DPadUp, _) => actions.push(UiAction::FocusUp),
                 ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
+                ButtonPressed(Button::Select, _) => actions.push(UiAction::Help),
                 ButtonPressed(Button::LeftTrigger, _) => actions.push(UiAction::NavigateHudPrev),
                 ButtonPressed(Button::RightTrigger, _) => actions.push(UiAction::NavigateHudNext),
                 _ => {}
@@ -126,6 +129,10 @@ impl InputState {
             KeyCode::Enter => actions.push(UiAction::CommitDiscard),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
+            // Glossary / help — `?`, `/`, `H`, `F1`. ShiftLeft+Slash on
+            // most layouts produces `?`, but we don't need shift state here:
+            // both Slash and KeyH are unambiguous.
+            KeyCode::Slash | KeyCode::KeyH | KeyCode::F1 => actions.push(UiAction::Help),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {
@@ -183,7 +190,7 @@ pub fn apply_ui_actions(
             UiAction::Cancel => {
                 run.clear_selection();
             }
-            UiAction::SortBySuit | UiAction::SortByRank | UiAction::Pause => {}
+            UiAction::SortBySuit | UiAction::SortByRank | UiAction::Pause | UiAction::Help => {}
             UiAction::FocusNext
             | UiAction::FocusPrev
             | UiAction::FocusDown

@@ -3,12 +3,12 @@
 
 pub mod collection;
 pub mod game_over;
+pub mod glossary;
 pub mod gameplay;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
 pub mod profile_select;
-pub mod results;
 pub mod shop;
 pub mod solitaire;
 pub mod splash;
@@ -20,11 +20,12 @@ pub use gameplay::GameplayScene;
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
-pub use results::ResultsScene;
 pub use shop::ShopScene;
 pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
 pub use start_screen::StartScreenScene;
+
+use enum_dispatch::enum_dispatch;
 
 use crate::core::relic::{RelicId, RelicState, all_relic_defs};
 use crate::core::tile::Tile;
@@ -32,7 +33,7 @@ use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
-use crate::render::draw_cmd::UiFrame;
+use crate::render::draw_cmd::{RelicPlacement, UiFrame};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::layout::{LayoutResult, Rect};
@@ -105,6 +106,17 @@ pub struct DrawCtx<'a> {
     /// visible 3D tile should look the index up here and fall back to the
     /// layout slot rect if not found.
     pub projected_hand_rects: &'a [(usize, [f32; 4])],
+    /// Index of the hand tile under the cursor as determined by raycasting
+    /// from the camera through the cursor against each tile's OBB. `None` if
+    /// no tile is under the cursor or no pick data is available yet (first
+    /// frame). This is the source of truth for hand-tile hover/click —
+    /// `projected_hand_rects` remains for anchoring 2D HUD elements.
+    pub picked_hand_tile: Option<usize>,
+    /// Per-relic-placeholder screen-space rects from the previous frame's
+    /// perspective projection — analogous to `projected_hand_rects` but for
+    /// the physical relic boxes sitting in the dish. Empty before the first
+    /// frame the dish is drawn.
+    pub projected_relic_rects: &'a [[f32; 4]],
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -196,10 +208,19 @@ pub struct SceneDrawOutput {
     /// 3D candle placements drawn via the lit-mesh pipeline. Most scenes
     /// leave this empty; gameplay populates it.
     pub candles: Vec<crate::render::candle_mesh::CandlePlacement>,
+    /// Physical relic placeholders sitting on the table dish. Empty for
+    /// scenes that don't show the dish (most non-gameplay scenes). When
+    /// non-empty, the renderer also draws the dish underneath.
+    pub relic_placements: Vec<RelicPlacement>,
     /// Whether to draw the procedural lacquered-wood table backplane behind
     /// the 3D scene. Set by gameplay-style scenes that want a physical
     /// surface under the floating tiles.
     pub draw_table: bool,
+    /// Wind impulses to inject into the volumetric smoke sim this frame.
+    /// Forwarded verbatim onto the resulting `UiFrame`. Most scenes leave
+    /// this empty; gameplay populates it for the post-deal "blow it away"
+    /// effect.
+    pub wind_gusts: Vec<crate::render::draw_cmd::WindGust>,
 }
 
 impl Default for SceneDrawOutput {
@@ -221,7 +242,9 @@ impl Default for SceneDrawOutput {
             flame_instances: Vec::new(),
             point_lights: Vec::new(),
             candles: Vec::new(),
+            relic_placements: Vec::new(),
             draw_table: false,
+            wind_gusts: Vec::new(),
         }
     }
 }
@@ -250,6 +273,12 @@ impl SceneDrawOutput {
         if !self.candles.is_empty() {
             frame.candles(self.candles);
         }
+        // Physical relic dish + placeholders. The dish auto-sizes around the
+        // batch in the renderer, so we always push them as a pair.
+        if !self.relic_placements.is_empty() {
+            frame.dish();
+            frame.relic_batch(self.relic_placements);
+        }
         // Flames belong to the 3D candle scene — push them *before* the
         // 2D scene quads so any UI panel (score, buttons, tooltips) draws
         // on top instead of the additive flame bleeding through.
@@ -267,6 +296,7 @@ impl SceneDrawOutput {
         frame.hint_indices = self.hint_indices;
         frame.departing_indices = self.departing_indices;
         frame.point_lights = self.point_lights;
+        frame.wind_gusts = self.wind_gusts;
         frame.buttons = self.buttons;
         frame.window_title = self.window_title;
         frame
@@ -289,6 +319,61 @@ pub fn relic_badge_rect(
     let inset = 2.0 * scale;
     let bx = start_x + slot_idx as f32 * badge_w;
     (bx + inset, strip.y, badge_w - inset * 2.0, strip.h)
+}
+
+/// Build glow overlay quads for relics that recently activated during a
+/// scoring cascade. Draws *behind* the relic row's icon so the existing badge
+/// background remains the dominant color, with the glow blooming around it.
+///
+/// `glow_starts` maps each glowing relic id to the `Instant` it last fired.
+/// The glow fades over `lifetime`, after which the entry should be evicted by
+/// the caller. Returns the additive overlay quads.
+///
+/// The gameplay scene uses its own 3D-projected glow path (the relics live
+/// on a brass dish, not in this 2D row), so this helper is here for future
+/// scenes that *do* render relics via `relic_row` (shop, results).
+#[allow(dead_code)]
+pub fn relic_glow_overlays(
+    relics: &RelicState,
+    glow_starts: &std::collections::HashMap<RelicId, std::time::Instant>,
+    strip: &Rect,
+    window_w: f32,
+    now: std::time::Instant,
+    lifetime: std::time::Duration,
+) -> Vec<GpuInstance> {
+    if glow_starts.is_empty() {
+        return Vec::new();
+    }
+    let total_slots = relics.max_slots;
+    if total_slots == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let lifetime_s = lifetime.as_secs_f32().max(0.001);
+    for (slot_idx, id) in relics.active.iter().enumerate() {
+        let Some(start) = glow_starts.get(id) else {
+            continue;
+        };
+        let age = now.saturating_duration_since(*start).as_secs_f32();
+        if age >= lifetime_s {
+            continue;
+        }
+        // Quadratic falloff: bright at start, soft tail.
+        let t = (1.0 - age / lifetime_s).clamp(0.0, 1.0);
+        let alpha = (t * t * 0.85).clamp(0.0, 0.85);
+        let (rx, ry, rw, rh) = relic_badge_rect(strip, window_w, total_slots, slot_idx);
+        // Bloom rect: slightly larger than the badge so the glow appears to
+        // spill outward. Use the gold accent so it reads as "this fired".
+        let pad = (rh * 0.18).max(2.0);
+        out.push(GpuInstance {
+            rect: [rx - pad, ry - pad, rw + pad * 2.0, rh + pad * 2.0],
+            color: crate::render::theme::color::alpha(
+                crate::render::theme::color::CHAMPAGNE,
+                alpha,
+            ),
+        });
+    }
+    out
 }
 
 /// Build GPU elements for a relic display row inside the relic strip.
@@ -345,6 +430,7 @@ pub fn relic_row(
                 rect: [bx + inset, label_y, cell_w, label_h],
                 text: name.to_string(),
                 color: crate::render::theme::color::CHAMPAGNE,
+                ..Default::default()
             });
         } else {
             // Empty slot: dim outline.
@@ -363,7 +449,63 @@ pub fn relic_row(
 /// `None` = stay in current scene; `Some(scene)` = transition.
 pub type SceneTransition = Option<Scene>;
 
+/// Behavior shared by every scene variant.
+///
+/// `enum_dispatch` generates the dispatch arms on `Scene` automatically: each
+/// trait method becomes a `match self { Scene::X(s) => s.method(...), ... }`
+/// at compile time, so calling `scene.update(ctx)` on the enum forwards to
+/// the inner type with zero overhead and no `Box<dyn Trait>` indirection.
+///
+/// **Why a trait instead of hand-rolled match dispatch:**
+///   - Adding a method here = define it once. The compiler enforces that
+///     every variant implements it (or inherits a default), so there is no
+///     hand-maintained dispatch table to forget.
+///   - Default methods like [`Self::has_blocking_overlay`] mean scenes that
+///     don't care just inherit the safe answer — no per-variant `_ => false`
+///     enumeration.
+///   - Adding a new scene = add it to the [`Scene`] enum and `impl
+///     SceneBehavior for NewScene { ... }`. No other files change.
+#[enum_dispatch]
+pub trait SceneBehavior {
+    /// Advance scene state by one frame. Returns `Some(next)` to transition.
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition;
+
+    /// Build the draw output for this frame.
+    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput;
+
+    /// Whether the scene has a *modal-like internal overlay* currently up
+    /// (pause menu, glossary, embedded options sub-screen, scoring cascade,
+    /// etc). This is the scene's contribution to `App::modal_overlay_active`,
+    /// which centralizes the "is anything blocking input below it" question.
+    ///
+    /// **Pattern contract:** any new in-scene overlay that should block
+    /// input and hover for elements below it MUST be reported here. The
+    /// two universal gates (`skip_tooltips` and the `active_buttons` safety
+    /// wipe in `main.rs`) consult `App::modal_overlay_active`, so a scene
+    /// that forgets to declare its overlay will leak hover/clicks through
+    /// it.
+    ///
+    /// Default: `false`. Scenes without internal overlays inherit the
+    /// safe answer automatically.
+    fn has_blocking_overlay(&self) -> bool {
+        false
+    }
+
+    /// Borrow the in-pause-menu options overlay if the player has opened
+    /// it. Used by the main loop to sync live audio/graphics settings the
+    /// same way it does for the standalone `OptionsScene`.
+    ///
+    /// Default: `None`. Scenes without an embedded pause menu inherit it.
+    fn pause_options_overlay(&self) -> Option<&OptionsScene> {
+        None
+    }
+}
+
 /// The active scene. Enum dispatch — no `Box<dyn Trait>`.
+///
+/// `enum_dispatch` reads this attribute and generates `impl SceneBehavior
+/// for Scene` arms automatically; see [`SceneBehavior`] for the contract.
+#[enum_dispatch(SceneBehavior)]
 pub enum Scene {
     Splash(SplashScene),
     StartScreen(StartScreenScene),
@@ -371,43 +513,8 @@ pub enum Scene {
     Shop(ShopScene),
     PickBlind(PickBlindScene),
     Gameplay(GameplayScene),
-    Results(ResultsScene),
     GameOver(GameOverScene),
     Options(OptionsScene),
     Collection(CollectionScene),
     Solitaire(SolitaireScene),
-}
-
-impl Scene {
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        match self {
-            Scene::Splash(s) => s.update(ctx),
-            Scene::StartScreen(s) => s.update(ctx),
-            Scene::ProfileSelect(s) => s.update(ctx),
-            Scene::Shop(s) => s.update(ctx),
-            Scene::PickBlind(s) => s.update(ctx),
-            Scene::Gameplay(s) => s.update(ctx),
-            Scene::Results(s) => s.update(ctx),
-            Scene::GameOver(s) => s.update(ctx),
-            Scene::Options(s) => s.update(ctx),
-            Scene::Collection(s) => s.update(ctx),
-            Scene::Solitaire(s) => s.update(ctx),
-        }
-    }
-
-    pub fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
-        match self {
-            Scene::Splash(s) => s.draw(ctx),
-            Scene::StartScreen(s) => s.draw(ctx),
-            Scene::ProfileSelect(s) => s.draw(ctx),
-            Scene::Shop(s) => s.draw(ctx),
-            Scene::PickBlind(s) => s.draw(ctx),
-            Scene::Gameplay(s) => s.draw(ctx),
-            Scene::Results(s) => s.draw(ctx),
-            Scene::GameOver(s) => s.draw(ctx),
-            Scene::Options(s) => s.draw(ctx),
-            Scene::Collection(s) => s.draw(ctx),
-            Scene::Solitaire(s) => s.draw(ctx),
-        }
-    }
 }

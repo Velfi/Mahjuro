@@ -177,6 +177,12 @@ impl ScoringCascade {
         !matches!(self.phase, Phase::Done)
     }
 
+    /// Is the cascade currently on the final-total beat (or already done)?
+    /// The scene uses this to detect the edge into `ShowTotal` for audio.
+    pub fn is_in_total(&self) -> bool {
+        matches!(self.phase, Phase::ShowTotal | Phase::Done)
+    }
+
     /// Skip to done (e.g. if player presses a key to skip).
     pub fn skip(&mut self) {
         self.phase = Phase::Done;

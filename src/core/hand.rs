@@ -17,7 +17,7 @@ pub fn describe_hand(tiles: &[Tile]) -> String {
         return describe_sets(tiles, &sets);
     }
 
-    // Fallback: invalid selection — show only pair/triplet faces, which can't overlap.
+    // Fallback: invalid selection — show only pair/triplet/kong faces, which can't overlap.
     let pairs_trips = find_pairs_and_triplets(tiles);
     let mut parts: Vec<String> = Vec::new();
     for s in &pairs_trips {
@@ -27,6 +27,7 @@ pub fn describe_hand(tiles: &[Tile]) -> String {
                 match s.kind {
                     SetKind::Pair => parts.push(format!("{label}×2")),
                     SetKind::Triplet => parts.push(format!("{label}×3")),
+                    SetKind::Kong => parts.push(format!("{label}×4")),
                     SetKind::Sequence => {}
                 }
             }
@@ -55,6 +56,11 @@ fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
                     parts.push(format!("{}×3", t.label()));
                 }
             }
+            SetKind::Kong => {
+                if let Some(t) = tile_refs.first() {
+                    parts.push(format!("{}×4", t.label()));
+                }
+            }
             SetKind::Sequence if tile_refs.len() == 3 => {
                 let suffix = match tile_refs[0].suit {
                     Suit::Characters => "m",
@@ -78,6 +84,10 @@ pub enum SetKind {
     Pair,
     Triplet,
     Sequence,
+    /// Four of a kind (mahjong "kan"). Counts as a triplet for yaku and meld
+    /// detection but scores larger and can flip an extra dora indicator at the
+    /// run-state level.
+    Kong,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,7 +108,8 @@ fn face_groups(tiles: &[Tile]) -> HashMap<(Suit, u8), Vec<u32>> {
     m
 }
 
-/// Find pairs and triplets from multiset counts.
+/// Find pairs, triplets, and kongs from multiset counts. A face with 4+ copies
+/// emits a kong (preferred) before falling back to triplet/pair leftovers.
 pub fn find_pairs_and_triplets(tiles: &[Tile]) -> Vec<DetectedSet> {
     let groups = face_groups(tiles);
     let mut sorted_keys: Vec<_> = groups.keys().copied().collect();
@@ -107,6 +118,15 @@ pub fn find_pairs_and_triplets(tiles: &[Tile]) -> Vec<DetectedSet> {
     for key in &sorted_keys {
         let ids = &groups[key];
         let mut i = 0;
+        // Kongs first: a face with all 4 copies in selection always wants to
+        // be a kong, not a triplet+singleton.
+        while i + 3 < ids.len() {
+            out.push(DetectedSet {
+                kind: SetKind::Kong,
+                tile_ids: vec![ids[i], ids[i + 1], ids[i + 2], ids[i + 3]],
+            });
+            i += 4;
+        }
         while i + 2 < ids.len() {
             out.push(DetectedSet {
                 kind: SetKind::Triplet,
@@ -216,10 +236,44 @@ pub fn validate_selection_with_rules(
         if no_sequences && result.iter().any(|s| s.kind == SetKind::Sequence) {
             return None;
         }
-        Some(result)
-    } else {
-        None
+        return Some(result);
     }
+    // Chiitoitsu fallback: 14 tiles forming 7 distinct pairs is a valid hand
+    // even though it doesn't fit the standard 4-meld + 1-pair decomposition.
+    // We try this only when the standard backtracker fails so we don't reframe
+    // hands that could decompose normally.
+    if let Some(pairs) = try_chiitoitsu(&sorted) {
+        return Some(pairs);
+    }
+    None
+}
+
+/// Detect a Chiitoitsu (seven pairs) hand: exactly 14 tiles, decomposing into
+/// 7 distinct face pairs (no triplets or kongs of the same face). Returns
+/// `Some(pairs)` on success.
+fn try_chiitoitsu(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
+    if tiles.len() != 14 {
+        return None;
+    }
+    let groups = face_groups(tiles);
+    // Must have exactly 7 distinct faces, each with exactly 2 copies.
+    if groups.len() != 7 {
+        return None;
+    }
+    let mut pairs = Vec::with_capacity(7);
+    let mut keys: Vec<_> = groups.keys().copied().collect();
+    keys.sort();
+    for key in keys {
+        let ids = &groups[&key];
+        if ids.len() != 2 {
+            return None;
+        }
+        pairs.push(DetectedSet {
+            kind: SetKind::Pair,
+            tile_ids: vec![ids[0], ids[1]],
+        });
+    }
+    Some(pairs)
 }
 
 /// Recursive helper: try to decompose `remaining` (sorted) into melds.
@@ -228,6 +282,33 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_w
         return true;
     }
     let first = &remaining[0];
+
+    // Try kong (4 of a kind) first — a 4-tile face wants to be a kong, not a
+    // triplet+leftover. Sorted input means duplicates are contiguous.
+    if remaining.len() >= 4
+        && remaining[1].suit == first.suit
+        && remaining[1].rank == first.rank
+        && remaining[2].suit == first.suit
+        && remaining[2].rank == first.rank
+        && remaining[3].suit == first.suit
+        && remaining[3].rank == first.rank
+    {
+        let set = DetectedSet {
+            kind: SetKind::Kong,
+            tile_ids: vec![
+                remaining[0].id,
+                remaining[1].id,
+                remaining[2].id,
+                remaining[3].id,
+            ],
+        };
+        found.push(set);
+        let rest: Vec<Tile> = remaining[4..].to_vec();
+        if backtrack_decompose(&rest, found, allow_wrap) {
+            return true;
+        }
+        found.pop();
+    }
 
     // Try triplet: 3 tiles with same suit+rank starting from first.
     if remaining.len() >= 3
@@ -509,6 +590,34 @@ mod tests {
     }
 
     #[test]
+    fn validate_kong_four_of_a_kind() {
+        // 4 identical tiles must decompose as a single Kong, not Triplet+leftover.
+        let tiles = vec![
+            t(Suit::Bamboos, 5, 0),
+            t(Suit::Bamboos, 5, 1),
+            t(Suit::Bamboos, 5, 2),
+            t(Suit::Bamboos, 5, 3),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Kong);
+        assert_eq!(sets[0].tile_ids.len(), 4);
+    }
+
+    #[test]
+    fn find_pairs_and_triplets_emits_kong() {
+        let tiles = vec![
+            t(Suit::Circles, 7, 0),
+            t(Suit::Circles, 7, 1),
+            t(Suit::Circles, 7, 2),
+            t(Suit::Circles, 7, 3),
+        ];
+        let sets = find_pairs_and_triplets(&tiles);
+        assert!(sets.iter().any(|s| s.kind == SetKind::Kong));
+        assert!(!sets.iter().any(|s| s.kind == SetKind::Triplet));
+    }
+
+    #[test]
     fn validate_ambiguous_decomposition() {
         // 1-1-1-2-3 bamboo: could be triplet(1,1,1) + leftover(2,3) = FAIL
         // or pair(1,1) + sequence(1,2,3) = SUCCESS
@@ -766,6 +875,13 @@ mod proptests {
                             prop_assert_eq!(set_tiles[0].suit, set_tiles[2].suit);
                             prop_assert_eq!(ranks[1], ranks[0] + 1, "sequence not consecutive");
                             prop_assert_eq!(ranks[2], ranks[1] + 1, "sequence not consecutive");
+                        }
+                        SetKind::Kong => {
+                            prop_assert_eq!(set_tiles.len(), 4);
+                            for i in 1..4 {
+                                prop_assert_eq!(set_tiles[0].suit, set_tiles[i].suit);
+                                prop_assert_eq!(set_tiles[0].rank, set_tiles[i].rank);
+                            }
                         }
                     }
                 }

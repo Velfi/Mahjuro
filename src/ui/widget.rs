@@ -13,9 +13,9 @@
 //!
 //! See [`crate::render::theme`] for the color tokens these helpers consume.
 
-use crate::render::decal::{load_ui_font, measure_label_advances};
+use crate::render::decal::load_ui_font;
 use crate::render::theme::{self, ButtonState, ButtonVariant, color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
 
@@ -132,6 +132,7 @@ fn push_button_visuals(
         rect,
         text: label.to_string(),
         color: colors.text,
+        ..Default::default()
     });
 }
 
@@ -143,11 +144,25 @@ pub struct TextStyle {
     pub color: [f32; 4],
     /// Padding inside the rect, in pixels.
     pub padding: f32,
+    /// Horizontal alignment for each wrapped line.
+    pub align: TextAlign,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            tier: typography::BODY,
+            color: color::PARCHMENT,
+            padding: 0.0,
+            align: TextAlign::Center,
+        }
+    }
 }
 
 /// Wrap `text` into multiple lines that fit `rect` (minus padding) and push
-/// one `TextLabel` per line. Uses `measure_label_advances` to find break
-/// points, so the wrap respects the same font sizing the renderer will use.
+/// a single multi-line `TextLabel`. The label carries an explicit `font_px`
+/// so every line in the paragraph rasterises at exactly the same size — no
+/// per-line auto-shrink, no jagged sizing across the block.
 ///
 /// This is the helper that ensures long descriptions don't get crammed into
 /// raw slot rects — the explicit fix for prior text-readability feedback.
@@ -161,47 +176,72 @@ pub fn push_text_block(
     let [x, y, w, h] = rect;
     let pad = style.padding;
     let inner_w = (w - 2.0 * pad).max(1.0);
+    let inner_h = (h - 2.0 * pad).max(1.0);
     let line_h = typography::size(style.tier, window_h);
-    let max_lines = ((h - 2.0 * pad) / line_h).max(1.0) as usize;
+    // The rasteriser pins font_px directly, so it doesn't depend on the
+    // rect's aspect ratio anymore. Use line_h as the pinned font_px.
+    let font_px = line_h.max(8.0);
+    let line_step = line_h * 1.4;
+    let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 
     let lines = wrap_text(text, inner_w, line_h);
-    let drawn = lines.iter().take(max_lines);
-    for (i, line) in drawn.enumerate() {
-        let line_y = y + pad + i as f32 * line_h;
-        out.push(TextLabel {
-            rect: [x + pad, line_y, inner_w, line_h],
-            text: line.clone(),
-            color: style.color,
-        });
-    }
+    let drawn: Vec<&String> = lines.iter().take(max_lines).collect();
+    let joined = drawn
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n");
+
+    out.push(TextLabel {
+        rect: [x + pad, y + pad, inner_w, inner_h],
+        text: joined,
+        color: style.color,
+        font_px: Some(font_px),
+        align: style.align,
+        ..Default::default()
+    });
 }
 
-/// Greedy word-wrap. Falls back to character wrapping for very long words.
-fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
+/// Greedy word-wrap at a fixed target font size.
+///
+/// Important: do *not* go through `measure_label_advances` here. That helper
+/// auto-shrinks `font_px` to make over-long text fit a rect, so a long string
+/// would always "fit" `max_width_px` at a tiny font and the wrapper would
+/// never break a line. Instead we measure each word's advance width at the
+/// font size the line will actually render at — `font_px ≈ line_h * 0.99`,
+/// matching `rasterize_label`'s `height * 0.55` term against the line-box
+/// height of `line_h * 1.8` that `push_text_block` produces.
+pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
     let Some(font) = load_ui_font() else {
         // No font loaded — don't crash, just return the input as one line.
         return vec![text.to_string()];
     };
-    // Measure with the same font sizing as the renderer.
-    let height_u = line_h.max(8.0) as u32;
+    let font_px = (line_h * 0.99).max(8.0);
+    let space_w = font.metrics(' ', font_px).advance_width;
+    let word_w = |w: &str| -> f32 {
+        w.chars()
+            .map(|c| font.metrics(c, font_px).advance_width)
+            .sum()
+    };
+
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
+    let mut current_w = 0.0f32;
+
     for word in text.split_whitespace() {
-        let trial = if current.is_empty() {
-            word.to_string()
-        } else {
-            format!("{current} {word}")
-        };
-        // Use measure_label_advances to estimate the rendered width of the
-        // *trial* string at the target line height.
-        let (_, _, advances) =
-            measure_label_advances(&font, &trial, max_width_px as u32, height_u);
-        let total: f32 = advances.iter().sum();
-        if total <= max_width_px || current.is_empty() {
-            current = trial;
-        } else {
+        let ww = word_w(word);
+        let need = if current.is_empty() { ww } else { space_w + ww };
+        if !current.is_empty() && current_w + need > max_width_px {
             lines.push(std::mem::take(&mut current));
             current = word.to_string();
+            current_w = ww;
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+                current_w += space_w;
+            }
+            current.push_str(word);
+            current_w += ww;
         }
     }
     if !current.is_empty() {
@@ -232,5 +272,6 @@ pub fn push_price_tag(
         rect,
         text: format!("${price}"),
         color: text,
+        ..Default::default()
     });
 }

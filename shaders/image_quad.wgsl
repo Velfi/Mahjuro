@@ -4,7 +4,7 @@
 struct Globals {
     screen: vec2<f32>,
     time: f32,
-    _pad: f32,
+    gamma: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -37,5 +37,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let tex = textureSample(t_img, s_img, in.uv);
-    return vec4<f32>(tex.rgb * in.color.rgb, tex.a * in.color.a);
+    let inv_g = 1.0 / max(globals.gamma, 0.01);
+    let rgb = pow(tex.rgb * in.color.rgb, vec3<f32>(inv_g));
+    return vec4<f32>(rgb, tex.a * in.color.a);
 }

@@ -32,6 +32,11 @@ pub struct LayoutResult {
 const SCORE_H_RATIO: f64 = 0.12; // 12% of window height (72px at 600px)
 const MOD_H_RATIO: f64 = 0.08; //  8% of window height (48px at 600px)
 const RELIC_H_RATIO: f64 = 0.12; // 12% of window height
+/// Horizontal inset (per side) of the hand strip relative to the window. The
+/// tiles are drawn through a perspective camera that spreads the silhouettes
+/// of the leftmost/rightmost tiles outward beyond their flat slot rects, so
+/// the strip needs a margin or the edge tiles get clipped by the window.
+const HAND_X_PAD_RATIO: f64 = 0.07;
 
 pub struct UiLayout {
     solver: Solver,
@@ -93,8 +98,8 @@ impl UiLayout {
                 relic_left | EQ(REQUIRED) | 0.0,
                 relic_w | EQ(REQUIRED) | win_w,
                 relic_top | EQ(REQUIRED) | mod_top + mod_h,
-                hand_left | EQ(REQUIRED) | 0.0,
-                hand_w | EQ(REQUIRED) | win_w,
+                hand_left | EQ(REQUIRED) | win_w * HAND_X_PAD_RATIO,
+                hand_w | EQ(REQUIRED) | win_w * (1.0 - 2.0 * HAND_X_PAD_RATIO),
                 hand_top | EQ(REQUIRED) | relic_top + relic_h,
                 hand_h | EQ(REQUIRED) | win_h - hand_top,
             ])

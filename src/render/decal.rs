@@ -181,26 +181,62 @@ pub fn load_ui_font() -> Option<fontdue::Font> {
         .clone()
 }
 
-/// Rasterise `text` into a `width × height` RGBA8 bitmap, centred on the baseline.
+/// Horizontal alignment hint for [`rasterize_label_styled`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// Legacy single-line rasterise — keeps the old auto-shrink behaviour so
+/// existing call sites (tile-face decals, single-line labels with no explicit
+/// `font_px` set) render exactly as before.
+pub fn rasterize_label(font: &fontdue::Font, text: &str, width: u32, height: u32) -> Vec<u8> {
+    rasterize_label_styled(font, text, width, height, None, LabelAlign::Center)
+}
+
+/// Rasterise `text` into a `width × height` RGBA8 bitmap.
+///
+/// - `font_px = Some(px)` pins the font size — every line in the (possibly
+///   multi-line) text is laid out at exactly that pixel size, so a wrapped
+///   paragraph reads as a uniform block instead of each line shrink-fitting
+///   independently. `None` falls back to the legacy auto-sizing formula
+///   `min(height * 0.55, width * 1.5 / chars).max(8.0)`.
+/// - `text` may contain `\n` to indicate hard line breaks. Lines stack
+///   vertically and `align` controls horizontal placement of each line
+///   within the rect.
 ///
 /// Uses fontdue's per-glyph metrics for correct baseline and bearing placement so
 /// that descenders (g, p, y …) sit below the baseline while ascenders (h, f, k …)
 /// rise above it.  Horizontal advance widths are used for spacing (fontdue does not
 /// expose kerning tables, so letter-spacing is at the "natural" advance level).
-pub fn rasterize_label(font: &fontdue::Font, text: &str, width: u32, height: u32) -> Vec<u8> {
-    // Target font size: 55 % of the rect height, clamped so the text fits horizontally.
-    let font_px = (height as f32 * 0.55)
-        .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
-        .max(8.0);
+pub fn rasterize_label_styled(
+    font: &fontdue::Font,
+    text: &str,
+    width: u32,
+    height: u32,
+    font_px: Option<f32>,
+    align: LabelAlign,
+) -> Vec<u8> {
+    // Multi-line: lay out each line at the same font size, stacked vertically.
+    let lines: Vec<&str> = text.split('\n').collect();
+    if lines.len() > 1 {
+        return rasterize_block(font, &lines, width, height, font_px, align);
+    }
+
+    // Single-line fast path retains the historical centring behaviour.
+    let font_px = match font_px {
+        Some(px) => px.max(8.0),
+        None => (height as f32 * 0.55)
+            .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
+            .max(8.0),
+    };
 
     let chars: Vec<char> = text.chars().collect();
 
     // Measure every glyph once to figure out the total advance and the maximum
     // ascender height (for vertical centring of the baseline).
-    struct GlyphData {
-        metrics: fontdue::Metrics,
-        bitmap: Vec<u8>,
-    }
     let glyphs: Vec<GlyphData> = chars
         .iter()
         .map(|&ch| {
@@ -227,40 +263,180 @@ pub fn rasterize_label(font: &fontdue::Font, text: &str, width: u32, height: u32
     // In the pixel buffer Y increases downward, while fontdue uses Y-up from baseline.
     let baseline_y = (height as f32 - text_block_h) * 0.5 + ascender_px;
 
-    // Horizontal start: centre the full advance width.
-    let start_x = (width as f32 - total_advance) * 0.5;
+    // Horizontal start depends on alignment.
+    let start_x = match align {
+        LabelAlign::Left => 0.0,
+        LabelAlign::Center => (width as f32 - total_advance) * 0.5,
+        LabelAlign::Right => width as f32 - total_advance,
+    };
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];
+    blit_line(&glyphs, &mut rgba, width, height, start_x, baseline_y);
+    rgba
+}
+
+/// Multi-line block layout. Lines are stacked vertically, all rendered at the
+/// same `font_px` so the paragraph reads as a coherent block.
+fn rasterize_block(
+    font: &fontdue::Font,
+    lines: &[&str],
+    width: u32,
+    height: u32,
+    font_px: Option<f32>,
+    align: LabelAlign,
+) -> Vec<u8> {
+    // For multi-line blocks the font size MUST be pinned — auto-shrink would
+    // produce different sizes per line which defeats the purpose. If the
+    // caller didn't pin one, derive it from height / line_count.
+    let font_px = font_px
+        .unwrap_or_else(|| (height as f32 * 0.55 / lines.len() as f32).max(8.0))
+        .max(8.0);
+
+    // Per-line layout: rasterise glyphs once, measure the widest, compute a
+    // shared baseline step.
+    struct LineGlyphs {
+        glyphs: Vec<(fontdue::Metrics, Vec<u8>)>,
+        advance: f32,
+    }
+    let measured: Vec<LineGlyphs> = lines
+        .iter()
+        .map(|line| {
+            let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> = line
+                .chars()
+                .map(|ch| font.rasterize(ch, font_px))
+                .collect();
+            let advance: f32 = glyphs.iter().map(|(m, _)| m.advance_width).sum();
+            LineGlyphs { glyphs, advance }
+        })
+        .collect();
+
+    // Use font.line_metrics for a stable line height across lines.
+    let line_metrics = font.horizontal_line_metrics(font_px);
+    let (line_h, ascender_px) = if let Some(lm) = line_metrics {
+        (lm.new_line_size, lm.ascent)
+    } else {
+        (font_px * 1.2, font_px * 0.8)
+    };
+
+    let total_h = line_h * lines.len() as f32;
+    let block_top = ((height as f32 - total_h) * 0.5).max(0.0);
+
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+    for (i, line) in measured.iter().enumerate() {
+        let baseline_y = block_top + i as f32 * line_h + ascender_px;
+        let start_x = match align {
+            LabelAlign::Left => 0.0,
+            LabelAlign::Center => (width as f32 - line.advance) * 0.5,
+            LabelAlign::Right => width as f32 - line.advance,
+        };
+        // Convert to the (metrics, Vec<u8>) shape blit_line expects via a
+        // temporary GlyphData wrapper.
+        let glyph_view: Vec<GlyphRef> = line
+            .glyphs
+            .iter()
+            .map(|(m, b)| GlyphRef { metrics: *m, bitmap: b })
+            .collect();
+        blit_line_refs(&glyph_view, &mut rgba, width, height, start_x, baseline_y);
+    }
+
+    rgba
+}
+
+struct GlyphData {
+    metrics: fontdue::Metrics,
+    bitmap: Vec<u8>,
+}
+
+struct GlyphRef<'a> {
+    metrics: fontdue::Metrics,
+    bitmap: &'a [u8],
+}
+
+fn blit_line(
+    glyphs: &[GlyphData],
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    start_x: f32,
+    baseline_y: f32,
+) {
     let mut cx = start_x;
-
-    for g in &glyphs {
+    for g in glyphs {
         if !g.bitmap.is_empty() {
-            // Top-left corner of this glyph in buffer coordinates.
-            // fontdue: origin is the baseline; ymin is signed pixels from baseline to
-            // bottom of the glyph bounding box (positive = above baseline).
             let glyph_left = (cx + g.metrics.xmin as f32) as i32;
-            let glyph_top = (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
-
-            for row in 0..g.metrics.height as i32 {
-                for col in 0..g.metrics.width as i32 {
-                    let px = glyph_left + col;
-                    let py = glyph_top + row;
-                    if px < 0 || px >= width as i32 || py < 0 || py >= height as i32 {
-                        continue;
-                    }
-                    let src = (row as usize) * g.metrics.width + col as usize;
-                    let dst = ((py as u32 * width + px as u32) * 4) as usize;
-                    let v = g.bitmap[src];
-                    rgba[dst] = 255;
-                    rgba[dst + 1] = 255;
-                    rgba[dst + 2] = 255;
-                    rgba[dst + 3] = rgba[dst + 3].saturating_add(v);
-                }
-            }
+            let glyph_top =
+                (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
+            blit_glyph(
+                &g.bitmap,
+                g.metrics.width,
+                g.metrics.height,
+                glyph_left,
+                glyph_top,
+                rgba,
+                width,
+                height,
+            );
         }
         cx += g.metrics.advance_width;
     }
-    rgba
+}
+
+fn blit_line_refs(
+    glyphs: &[GlyphRef<'_>],
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    start_x: f32,
+    baseline_y: f32,
+) {
+    let mut cx = start_x;
+    for g in glyphs {
+        if !g.bitmap.is_empty() {
+            let glyph_left = (cx + g.metrics.xmin as f32) as i32;
+            let glyph_top =
+                (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
+            blit_glyph(
+                g.bitmap,
+                g.metrics.width,
+                g.metrics.height,
+                glyph_left,
+                glyph_top,
+                rgba,
+                width,
+                height,
+            );
+        }
+        cx += g.metrics.advance_width;
+    }
+}
+
+fn blit_glyph(
+    bitmap: &[u8],
+    gw: usize,
+    gh: usize,
+    glyph_left: i32,
+    glyph_top: i32,
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+) {
+    for row in 0..gh as i32 {
+        for col in 0..gw as i32 {
+            let px = glyph_left + col;
+            let py = glyph_top + row;
+            if px < 0 || px >= width as i32 || py < 0 || py >= height as i32 {
+                continue;
+            }
+            let src = (row as usize) * gw + col as usize;
+            let dst = ((py as u32 * width + px as u32) * 4) as usize;
+            let v = bitmap[src];
+            rgba[dst] = 255;
+            rgba[dst + 1] = 255;
+            rgba[dst + 2] = 255;
+            rgba[dst + 3] = rgba[dst + 3].saturating_add(v);
+        }
+    }
 }
 
 /// Compute per-character advance widths for text rendered in a rect.

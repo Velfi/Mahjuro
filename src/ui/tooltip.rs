@@ -217,6 +217,7 @@ fn regions_for_label_refs(
             rect: l.rect,
             text: l.text.clone(),
             color: l.color,
+            ..Default::default()
         })
         .collect();
     regions_for_labels(font, &owned, exclude)
@@ -351,6 +352,7 @@ fn build_tooltip(
             rect: [tx + padding, desc_y + i as f32 * line_h, content_w, line_h],
             text: txt.clone(),
             color: themec::PARCHMENT,
+            ..Default::default()
         })
         .collect();
 
@@ -425,6 +427,7 @@ fn draw_tooltip_into(entry: &TooltipEntry, frame: &mut UiFrame) {
         rect: [tx + pad, ty + pad, tw - pad * 2.0, lh],
         text: entry.title.to_string(),
         color: themec::CHAMPAGNE,
+        ..Default::default()
     });
 
     // Description lines.
@@ -434,6 +437,7 @@ fn draw_tooltip_into(entry: &TooltipEntry, frame: &mut UiFrame) {
             rect: [tx + pad, desc_y + i as f32 * lh, tw - pad * 2.0, lh],
             text: line.clone(),
             color: themec::PARCHMENT,
+            ..Default::default()
         });
     }
 }

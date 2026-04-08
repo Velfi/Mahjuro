@@ -8,6 +8,12 @@ pub enum GameEvent {
     TileDrawn(Tile),
     TileDiscarded { slot_index: usize },
     ScoreUpdated(u32),
+    /// A scoring cascade just revealed step `index` of the breakdown.
+    /// Fires once per step, on the frame the reveal edge is crossed.
+    ScoreStepRevealed { index: usize },
+    /// A scoring cascade just transitioned into its final-total beat.
+    /// Fires once per cascade, on the frame the transition happens.
+    ScoreCascadeFinal,
     RoundComplete { reached_target: bool },
     RunComplete,
     GameOver { final_score: u32 },

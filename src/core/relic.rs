@@ -7,11 +7,11 @@ use crate::core::tile::Suit;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelicId {
+    // ── 15 retuned keepers from Patch A ────────────────────────────────
     TripletBoost,
     SequenceSurge,
     PairPower,
     HonorFury,
-    BambooCharm,
     RedDragonRage,
     GreenLuck,
     WhiteSilence,
@@ -23,10 +23,43 @@ pub enum RelicId {
     SetMagnet,
     WildWinds,
     DragonEcho,
-    ReverseTile,
-    StealthTile,
-    LockedSet,
-    LuckyPair,
+    // ── 15 new relics introduced in Patch C ────────────────────────────
+    /// Reveals shanten meter; +5 chips per tile in the current best
+    /// decomposition. Information + a small chip nudge for tile efficiency.
+    ShantenLens,
+    /// Reveals the next 2 wall tiles. Pure-info — no scoring effect.
+    WallPeek,
+    /// Kongs grant +1 play this round and +4 mult when scored.
+    KanDrum,
+    /// Reveal an extra dora indicator at round start; dora chips become +35.
+    DoraCrown,
+    /// First riichi declaration each round costs no discard; failed riichi
+    /// floors at 80% target instead of 60%. (No-op until Patch E lands the
+    /// declaration UI.)
+    RiichiStick,
+    /// Tenpai Bonus is doubled.
+    TenpaiTalisman,
+    /// Once per round, clear 3 tiles from your river. (No-op until Patch D
+    /// lands the river system.)
+    RiverEraser,
+    /// Your river only retains the last 6 tiles instead of 12. (No-op until
+    /// Patch D lands the river system.)
+    FuritenWard,
+    /// Round Wind triplets/kongs grant +6 mult instead of the base +3.
+    RoundCompass,
+    /// +1 zodiac inventory slot.
+    ZodiacPouch,
+    /// +1 zodiac inventory slot; every 3rd Zodiac you use is duplicated.
+    LunarAlmanac,
+    /// Active yaku loadout has 4 slots instead of 3.
+    YakuScholar,
+    /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
+    EightTreasures,
+    /// Kongs count as both a triplet AND a pair for yaku detection.
+    KongsBlessing,
+    /// Once per round, swap one yaku in your loadout for another unlocked.
+    /// (No active scoring effect — UI hook only.)
+    CodexCompass,
 }
 
 impl RelicId {
@@ -37,7 +70,6 @@ impl RelicId {
             RelicId::SequenceSurge => "sequence_surge.png",
             RelicId::PairPower => "pair_power.png",
             RelicId::HonorFury => "honor_fury.png",
-            RelicId::BambooCharm => "bamboo_charm.png",
             RelicId::RedDragonRage => "red_dragon_rage.png",
             RelicId::GreenLuck => "green_luck.png",
             RelicId::WhiteSilence => "white_silence.png",
@@ -49,10 +81,23 @@ impl RelicId {
             RelicId::SetMagnet => "set_magnet.png",
             RelicId::WildWinds => "wild_winds.png",
             RelicId::DragonEcho => "dragon_echo.png",
-            RelicId::ReverseTile => "reverse_tile.png",
-            RelicId::StealthTile => "stealth_tile.png",
-            RelicId::LockedSet => "locked_set.png",
-            RelicId::LuckyPair => "lucky_pair.png",
+            // Patch C new relics — placeholder asset names that fall back to
+            // the relic's slug. Art for these can come later.
+            RelicId::ShantenLens => "shanten_lens.png",
+            RelicId::WallPeek => "wall_peek.png",
+            RelicId::KanDrum => "kan_drum.png",
+            RelicId::DoraCrown => "dora_crown.png",
+            RelicId::RiichiStick => "riichi_stick.png",
+            RelicId::TenpaiTalisman => "tenpai_talisman.png",
+            RelicId::RiverEraser => "river_eraser.png",
+            RelicId::FuritenWard => "furiten_ward.png",
+            RelicId::RoundCompass => "round_compass.png",
+            RelicId::ZodiacPouch => "zodiac_pouch.png",
+            RelicId::LunarAlmanac => "lunar_almanac.png",
+            RelicId::YakuScholar => "yaku_scholar.png",
+            RelicId::EightTreasures => "eight_treasures.png",
+            RelicId::KongsBlessing => "kongs_blessing.png",
+            RelicId::CodexCompass => "codex_compass.png",
         }
     }
 }
@@ -63,18 +108,6 @@ pub enum Rarity {
     Uncommon,
     Rare,
     Legendary,
-}
-
-impl Rarity {
-    /// Weight for random selection (higher = more likely).
-    pub fn weight(self) -> u32 {
-        match self {
-            Rarity::Common => 4,
-            Rarity::Uncommon => 3,
-            Rarity::Rare => 2,
-            Rarity::Legendary => 1,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +126,17 @@ pub fn relic_buy_price(id: RelicId) -> u32 {
     3 + (idx as u32 % 4)
 }
 
+/// Find the relic whose display name exactly matches `name`. The scoring
+/// cascade reveals steps labeled with the relic's display name (e.g.
+/// "Triplet Boost"); the gameplay scene calls this to map a cascade step
+/// back to a relic id so it can glow the matching badge.
+pub fn relic_by_name(name: &str) -> Option<RelicId> {
+    all_relic_defs()
+        .iter()
+        .find(|d| d.name == name)
+        .map(|d| d.id)
+}
+
 /// Refund when selling a relic — half buy price, minimum 1 gold.
 pub fn relic_sell_price(id: RelicId) -> u32 {
     (relic_buy_price(id) / 2).max(1)
@@ -100,52 +144,47 @@ pub fn relic_sell_price(id: RelicId) -> u32 {
 
 pub fn all_relic_defs() -> &'static [RelicDef] {
     &[
+        // ── Retuned keepers ─────────────────────────────────────────────
         RelicDef {
             id: RelicId::TripletBoost,
             name: "Triplet Boost",
-            description: "Triplets +40 chips",
+            description: "Triplets/Kongs +40 chips",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::SequenceSurge,
             name: "Sequence Surge",
-            description: "Sequences +25 chips",
+            description: "Sequences +25 chips and +0.5 mult",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::PairPower,
             name: "Pair Power",
-            description: "Pairs +30 chips",
+            description: "Pairs +30 chips and +1 mult",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::HonorFury,
             name: "Honor Fury",
-            description: "+15 chips per honor tile in sets",
+            description: "+18 chips per honor tile in sets",
             rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::BambooCharm,
-            name: "Bamboo Charm",
-            description: "+4 chips per bamboo tile in sets",
-            rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::RedDragonRage,
             name: "Red Dragon Rage",
-            description: "Red dragon triplet: +10 mult",
-            rarity: Rarity::Legendary,
+            description: "Red dragon triplet/kong: +8 mult",
+            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::GreenLuck,
             name: "Green Luck",
-            description: "Hands without honors earn +4 gold",
+            description: "Hands without honors earn +6 gold",
             rarity: Rarity::Common,
         },
         RelicDef {
             id: RelicId::WhiteSilence,
             name: "White Silence",
-            description: "White dragon pair: +4 mult",
+            description: "White dragon pair: +4 mult, draws a Zodiac",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -169,13 +208,13 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::ChainReaction,
             name: "Chain Reaction",
-            description: "+4 mult if you scored last turn",
+            description: "+4 mult if you scored a yaku last turn",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::MultiplierMaster,
             name: "Multiplier Master",
-            description: "+0.5 mult per relic owned",
+            description: "+0.3 mult per relic owned",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -193,38 +232,105 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::DragonEcho,
             name: "Dragon Echo",
-            description: "Dragon triplets copy adjacent sets' chips",
+            description: "Dragon triplets/kongs copy adjacent sets' chips",
             rarity: Rarity::Legendary,
         },
+        // ── New Patch C relics ──────────────────────────────────────────
         RelicDef {
-            id: RelicId::ReverseTile,
-            name: "Reverse Tile",
-            description: "Once per round: swap suit/rank of 2 tiles",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::StealthTile,
-            name: "Stealth Tile",
-            description: "First discard ignores negative rule effects",
+            id: RelicId::ShantenLens,
+            name: "Shanten Lens",
+            description: "Shanten meter visible; +5 chips per tile in best decomposition",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
-            id: RelicId::LockedSet,
-            name: "Locked Set",
-            description: "Scored triplets lock for 3 turns (can't discard)",
+            id: RelicId::WallPeek,
+            name: "Wall Peek",
+            description: "See the next 2 tiles in the wall",
             rarity: Rarity::Common,
         },
         RelicDef {
-            id: RelicId::LuckyPair,
-            name: "Lucky Pair",
-            description: "Hand has a pair: +3 mult",
+            id: RelicId::KanDrum,
+            name: "Kan Drum",
+            description: "Kongs grant +1 play this round and +4 mult",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::DoraCrown,
+            name: "Dora Crown",
+            description: "+1 dora indicator; dora chips become +35",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::RiichiStick,
+            name: "Riichi Stick",
+            description: "First riichi each round is free; failed riichi floors at 80%",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::TenpaiTalisman,
+            name: "Tenpai Talisman",
+            description: "Tenpai Bonus is doubled",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::RiverEraser,
+            name: "River Eraser",
+            description: "Once per round: clear 3 tiles from your river",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::FuritenWard,
+            name: "Furiten Ward",
+            description: "Your river only retains the last 6 tiles",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::RoundCompass,
+            name: "Round Compass",
+            description: "Round Wind triplets/kongs: +6 mult",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::ZodiacPouch,
+            name: "Zodiac Pouch",
+            description: "+1 Zodiac inventory slot",
             rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::LunarAlmanac,
+            name: "Lunar Almanac",
+            description: "+1 Zodiac slot; every 3rd Zodiac use is duplicated",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::YakuScholar,
+            name: "Yaku Scholar",
+            description: "Active loadout has 4 yaku slots instead of 3",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::EightTreasures,
+            name: "Eight Treasures",
+            description: "Scoring a Full Hand grants a random Zodiac",
+            rarity: Rarity::Legendary,
+        },
+        RelicDef {
+            id: RelicId::KongsBlessing,
+            name: "Kong's Blessing",
+            description: "Kongs count as both triplet and pair for yaku",
+            rarity: Rarity::Legendary,
+        },
+        RelicDef {
+            id: RelicId::CodexCompass,
+            name: "Codex Compass",
+            description: "Once per round: swap one yaku in your loadout",
+            rarity: Rarity::Uncommon,
         },
     ]
 }
 
 /// Active relics during a run (by id).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RelicState {
     pub active: Vec<RelicId>,
     pub max_slots: usize,
@@ -258,6 +364,30 @@ pub struct ScoreContext<'a> {
     pub dora_faces: Vec<(Suit, u8)>,
     /// Yaku patterns available at the player's progression level.
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
+    /// Current ante's round wind (1=East, 2=South, 3=West, 4=North) — drives
+    /// the round-wind branch of the Yakuhai yaku. `None` outside a run.
+    pub round_wind: Option<u8>,
+    /// True if this play would be the *first* FullHand of the round. The
+    /// scoring cascade fires the Tenpai Bonus only when this is true and the
+    /// hand actually completes as a FullHand. The bonus's chip pile scales
+    /// down as `plays_used` grows.
+    pub first_full_hand_of_round: bool,
+    /// Plays already consumed this round at the moment of scoring (so the
+    /// current play is `plays_used + 1`-th). Used to scale the Tenpai Bonus.
+    pub plays_used: u32,
+    /// True if the player has declared riichi this round and this hand
+    /// completes the wait. When set and the play scores a FullHand, the
+    /// Phase 6.5 hook applies a 2× mult. Riichi UI is Patch E; the field
+    /// exists now so the scoring spine is ready.
+    pub riichi_active: bool,
+    /// Per-yaku level (Zodiac-card-driven). `None` falls back to all level 1
+    /// — used by tests and the bot.
+    pub yaku_levels: Option<crate::core::zodiac::YakuLevels>,
+    /// Active yaku loadout: yaku in this list contribute at full strength,
+    /// others (except the always-active FullHand and Yakuhai) contribute at
+    /// half. Empty list = treat all detected yaku as full-strength (test/bot
+    /// default).
+    pub yaku_loadout: Vec<crate::core::yaku::YakuKind>,
 }
 
 // All scoring effects now live in `core::scoring::score_sets` directly,

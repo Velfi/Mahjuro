@@ -7,6 +7,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::core::progression::PlayerProgress;
+use crate::game::run::RunState;
 
 const MAX_PROFILES: usize = 3;
 const SETTINGS_NAME: &str = "settings.json";
@@ -67,6 +68,70 @@ fn default_smoke() -> SmokeIntensity {
     SmokeIntensity::Subtle
 }
 
+/// Mahjong tile size preset. Proportions are taken from Wikipedia's
+/// "Mahjong tiles" article and reflect the canonical real-world dimensions
+/// of three common regional sets. Each preset controls the face aspect
+/// (long edge / short edge) and the slab thickness relative to the short
+/// edge — i.e. it changes the *shape* of every rendered tile, not just a
+/// uniform size scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TilePreset {
+    /// Chinese standard, ~30 × 20 × 15 mm.
+    Chinese,
+    /// Japanese riichi, ~26 × 19 × 16 mm — chunkier and squarer.
+    Japanese,
+    /// American mah jongg, ~32 × 25 × 19 mm — largest.
+    American,
+}
+
+impl TilePreset {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Chinese => Self::Japanese,
+            Self::Japanese => Self::American,
+            Self::American => Self::Chinese,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Chinese => Self::American,
+            Self::Japanese => Self::Chinese,
+            Self::American => Self::Japanese,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chinese => "Chinese (30×20×15mm)",
+            Self::Japanese => "Japanese (26×19×16mm)",
+            Self::American => "American (32×25×19mm)",
+        }
+    }
+
+    /// Face long edge divided by short edge.
+    pub fn face_long_ratio(self) -> f32 {
+        match self {
+            Self::Chinese => 30.0 / 20.0,
+            Self::Japanese => 26.0 / 19.0,
+            Self::American => 32.0 / 25.0,
+        }
+    }
+
+    /// Slab thickness divided by short edge.
+    pub fn thickness_ratio(self) -> f32 {
+        match self {
+            Self::Chinese => 15.0 / 20.0,
+            Self::Japanese => 16.0 / 19.0,
+            Self::American => 19.0 / 25.0,
+        }
+    }
+}
+
+fn default_tile_preset() -> TilePreset {
+    TilePreset::Chinese
+}
+
 /// Persistent settings (which profile is active, audio prefs, etc.).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -82,6 +147,12 @@ pub struct AppSettings {
     pub sfx_enabled: bool,
     #[serde(default = "default_smoke")]
     pub smoke_intensity: SmokeIntensity,
+    #[serde(default = "default_tile_preset")]
+    pub tile_preset: TilePreset,
+    #[serde(default = "default_gamma")]
+    pub gamma: f32,
+    #[serde(default = "default_true")]
+    pub shadows_enabled: bool,
 }
 
 fn default_volume() -> f32 {
@@ -90,6 +161,13 @@ fn default_volume() -> f32 {
 fn default_true() -> bool {
     true
 }
+fn default_gamma() -> f32 {
+    1.0
+}
+
+/// Min/max for the user-facing gamma slider.
+pub const GAMMA_MIN: f32 = 0.5;
+pub const GAMMA_MAX: f32 = 2.0;
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -100,6 +178,9 @@ impl Default for AppSettings {
             music_volume: 0.7,
             sfx_enabled: true,
             smoke_intensity: SmokeIntensity::Subtle,
+            tile_preset: TilePreset::Chinese,
+            gamma: 1.0,
+            shadows_enabled: true,
         }
     }
 }
@@ -171,6 +252,84 @@ fn saved_run_path(index: usize) -> PathBuf {
 /// Check if a profile has a saved in-progress run.
 pub fn has_saved_run(index: usize) -> bool {
     saved_run_path(index).exists()
+}
+
+/// Wrapper that stamps each saved run with the build version. On load we
+/// reject any save whose version doesn't match the current binary so an
+/// update can ship breaking changes to `RunState` without having to write a
+/// migration — the player simply starts a fresh run after upgrading. The
+/// stale file is deleted so the "Continue" affordance disappears.
+#[derive(Serialize)]
+struct SavedRunRef<'a> {
+    version: &'a str,
+    run: &'a RunState,
+}
+
+#[derive(Deserialize)]
+struct SavedRunOwned {
+    version: String,
+    run: RunState,
+}
+
+fn current_save_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Persist an in-progress run for the given profile. Best-effort: any IO or
+/// serialization failure is logged and swallowed so quit paths never block.
+pub fn save_run(index: usize, run: &RunState) -> anyhow::Result<()> {
+    let payload = SavedRunRef {
+        version: current_save_version(),
+        run,
+    };
+    let json = serde_json::to_string_pretty(&payload).context("serialize saved run")?;
+    fs::write(saved_run_path(index), json).context("write saved run")
+}
+
+/// Load the saved run for `index`. Returns `None` if no save exists, the
+/// file is corrupt, or the save was written by a different build version
+/// (in which case the stale file is deleted on the spot).
+pub fn load_run(index: usize) -> Option<RunState> {
+    let path = saved_run_path(index);
+    if !path.exists() {
+        return None;
+    }
+    let data = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("load_run: read failed: {e}");
+            return None;
+        }
+    };
+    let saved: SavedRunOwned = match serde_json::from_str(&data) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("load_run: parse failed (deleting stale save): {e}");
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+    };
+    if saved.version != current_save_version() {
+        log::info!(
+            "load_run: save version {} != current {} (deleting)",
+            saved.version,
+            current_save_version()
+        );
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    Some(saved.run)
+}
+
+/// Remove the saved run for a profile (e.g. after a run ends or a new run
+/// is started). No-op if no save exists.
+pub fn delete_saved_run(index: usize) {
+    let path = saved_run_path(index);
+    if path.exists() {
+        if let Err(e) = fs::remove_file(&path) {
+            log::warn!("delete_saved_run: {e}");
+        }
+    }
 }
 
 pub fn profile_summary(index: usize) -> ProfileSummary {

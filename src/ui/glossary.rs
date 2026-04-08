@@ -142,30 +142,84 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
     GlossaryEntry {
         term: "Full Hand",
         aliases: &[],
-        description: "Yaku: 14 tiles forming 4 melds + 1 pair. \
-                      Bonus: 200 points.",
+        description: "Yaku: a complete 14-tile hand. Build 4 melds \
+                      (triplets, sequences, or kongs) plus 1 pair, then \
+                      score them all in one round. +5 mult, +60 chips.",
     },
     GlossaryEntry {
-        term: "All Triplets",
-        aliases: &[],
-        description: "Yaku: every meld is a triplet. Bonus: 100 points.",
+        term: "Tanyao",
+        aliases: &["all simples"],
+        description: "Yaku: all simples. Use only number tiles ranked 2–8 \
+                      — no terminals (1 or 9) and no honors. +2 mult, \
+                      +30 chips.",
     },
     GlossaryEntry {
-        term: "All Simples",
-        aliases: &[],
-        description: "Yaku: only tiles rank 2–8, no terminals or honors. \
-                      Bonus: 60 points.",
+        term: "Toitoi",
+        aliases: &["all triplets"],
+        description: "Yaku: every meld is a triplet (or kong). Build only \
+                      triplets and a pair — no sequences allowed. +4 mult, \
+                      +50 chips.",
     },
     GlossaryEntry {
-        term: "Mixed Sets",
-        aliases: &[],
-        description: "Yaku: hand contains at least one pair, one triplet, \
-                      and one sequence. Bonus: 50 points.",
+        term: "Yakuhai",
+        aliases: &["value tiles"],
+        description: "Yaku: a triplet (or kong) of any dragon, or of the \
+                      current round wind. Collect three matching honor \
+                      tiles. +3 mult, +40 chips.",
     },
     GlossaryEntry {
-        term: "Flush",
-        aliases: &[],
-        description: "Yaku: all tiles share one suit. Bonus: 120 points.",
+        term: "Iipeikou",
+        aliases: &["pure double sequence"],
+        description: "Yaku: two identical sequences in the same suit \
+                      (e.g. 2-3-4 bamboo + 2-3-4 bamboo). +3 mult, \
+                      +40 chips.",
+    },
+    GlossaryEntry {
+        term: "Sanshoku",
+        aliases: &["three colour straight"],
+        description: "Yaku: the same number sequence in all three number \
+                      suits (e.g. 4-5-6 in characters, bamboo, and \
+                      circles). +4 mult, +50 chips.",
+    },
+    GlossaryEntry {
+        term: "Ittsu",
+        aliases: &["pure straight"],
+        description: "Yaku: a 1–9 run in one number suit, built from three \
+                      sequences: 1-2-3, 4-5-6, and 7-8-9. +4 mult, \
+                      +50 chips.",
+    },
+    GlossaryEntry {
+        term: "Honitsu",
+        aliases: &["half flush"],
+        description: "Yaku: one number suit plus honors only — no other \
+                      number suits in the hand. +4 mult, +50 chips.",
+    },
+    GlossaryEntry {
+        term: "Chinitsu",
+        aliases: &["full flush", "flush"],
+        description: "Yaku: a single number suit with no honors. Every \
+                      tile shares the same suit. +6 mult, +80 chips.",
+    },
+    GlossaryEntry {
+        term: "Junchan",
+        aliases: &["terminal in each set"],
+        description: "Yaku: every meld contains a terminal (rank 1 or 9). \
+                      Sequences must be 1-2-3 or 7-8-9; pairs and triplets \
+                      must be of 1s or 9s. No honors. +4 mult, +50 chips.",
+    },
+    GlossaryEntry {
+        term: "Honroutou",
+        aliases: &["all terminals and honors"],
+        description: "Yaku: every tile is either a terminal (1 or 9) or \
+                      an honor. No simples anywhere in the hand. +4 mult, \
+                      +40 chips.",
+    },
+    GlossaryEntry {
+        term: "Chiitoitsu",
+        aliases: &["seven pairs"],
+        description: "Yaku: an alternate hand shape — seven distinct \
+                      pairs, no melds. Each pair must be a different tile. \
+                      +4 mult, +50 chips.",
     },
 ];
 
