@@ -125,10 +125,7 @@ impl DebugMenuBar {
         // mirroring the relic add behavior above.
         let consumable_sub = Submenu::new("Consumable Inventory", true);
         let clear_cons_item = MenuItem::new("Clear All Consumables", true, None);
-        mappings.push((
-            clear_cons_item.id().clone(),
-            DebugAction::ClearConsumables,
-        ));
+        mappings.push((clear_cons_item.id().clone(), DebugAction::ClearConsumables));
         let _ = consumable_sub.append(&clear_cons_item);
 
         let add_talisman_sub = Submenu::new("Add Talisman", true);

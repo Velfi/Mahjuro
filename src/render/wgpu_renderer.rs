@@ -17,7 +17,6 @@ use crate::render::bowl_mesh::{BOWL_LOCAL_CENTER_Y, BOWL_LOCAL_HALF, build_bowl_
 use crate::render::candle_mesh::{CandlePlacement, build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::curio_cabinet_mesh::build_curio_cabinet_mesh;
-use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::decal::{
     LabelAlign, load_noto_emoji_font, load_ui_font, rasterize_label_styled,
     rasterize_tile_face_decal, tile_short_label, tile_suit_emoji,
@@ -26,24 +25,24 @@ use crate::render::dora_stand_mesh::build_dora_stand_mesh;
 use crate::render::draw_cmd::{
     BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement, CurioCabinetPlacement,
     DishExplicit, DoraStandPlacement, DrawCmd, FallingBonePlacement, OfudaPlacement,
-    PegBlockPlacement, PlaquePlacement, RelicPlacement, ShrinePlacement,
-    TalismanPlacement, UiFrame, WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement,
-    ZodiacRibbonPlacement,
+    PegBlockPlacement, PlaquePlacement, RelicPlacement, ShrinePlacement, TalismanPlacement,
+    UiFrame, WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement, ZodiacRibbonPlacement,
 };
-use crate::render::ofuda_mesh::build_ofuda_mesh;
-use crate::render::peg_block_mesh::build_peg_block_mesh;
-use crate::render::plaque_mesh::build_plaque_mesh;
-use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
     create_shadow_caster_layout, create_shadow_sample_layout,
 };
+use crate::render::ofuda_mesh::build_ofuda_mesh;
+use crate::render::peg_block_mesh::build_peg_block_mesh;
+use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::relic_dish::{build_dish_mesh, build_unit_box_mesh};
 use crate::render::ribbon_mesh::build_ribbon_mesh;
-use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
+use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
+use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
+use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::scenes::BackgroundId;
 
 #[repr(C)]
@@ -1231,8 +1230,7 @@ impl WgpuRenderer {
         // ticks per render pass. The feature is optional — on backends that
         // lack it the profiler stays a no-op.
         let mut required_features = wgpu::Features::empty();
-        let timestamp_supported =
-            adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+        let timestamp_supported = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         if timestamp_supported {
             required_features |= wgpu::Features::TIMESTAMP_QUERY;
         }
@@ -2250,14 +2248,11 @@ impl WgpuRenderer {
         // Skeuomorphic gameplay HUD meshes (phase 1).
         let plaque_mesh = LitMeshGpu::new(&device, &build_plaque_mesh(), "plaque");
         let ofuda_mesh = LitMeshGpu::new(&device, &build_ofuda_mesh(), "ofuda");
-        let bone_tablet_mesh =
-            LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
-        let wood_tablet_mesh =
-            LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
+        let bone_tablet_mesh = LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
+        let wood_tablet_mesh = LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
         let bowl_mesh = LitMeshGpu::new(&device, &build_bowl_mesh(), "bowl");
         let peg_block_mesh = LitMeshGpu::new(&device, &build_peg_block_mesh(), "peg-block");
-        let dora_stand_mesh =
-            LitMeshGpu::new(&device, &build_dora_stand_mesh(), "dora-stand");
+        let dora_stand_mesh = LitMeshGpu::new(&device, &build_dora_stand_mesh(), "dora-stand");
 
         // Shared 1×1 white texture for procedural meshes that don't sample.
         let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
@@ -2332,8 +2327,7 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
-        let mut talisman_instances: Vec<LitMeshInstance> =
-            Vec::with_capacity(MAX_TALISMAN_SLOTS);
+        let mut talisman_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_TALISMAN_SLOTS);
         for _ in 0..MAX_TALISMAN_SLOTS {
             talisman_instances.push(LitMeshInstance::new(
                 &device,
@@ -2400,11 +2394,8 @@ impl WgpuRenderer {
 
         // Build the GPU profiler up-front while we still have a borrow of
         // device/queue (the struct literal below moves them).
-        let gpu_profiler = crate::render::gpu_profiler::GpuProfiler::new(
-            &device,
-            &queue,
-            timestamp_supported,
-        );
+        let gpu_profiler =
+            crate::render::gpu_profiler::GpuProfiler::new(&device, &queue, timestamp_supported);
 
         log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
@@ -3033,11 +3024,7 @@ impl WgpuRenderer {
     /// `pick_hand_tile` and `pick_shop_object`. The per-class local AABBs
     /// are precomputed mesh constants — there is no per-frame screen-space
     /// projection in the hit-test path.
-    pub fn pick_gameplay_object(
-        &self,
-        cursor_x: f32,
-        cursor_y: f32,
-    ) -> Option<GameplayPick> {
+    pub fn pick_gameplay_object(&self, cursor_x: f32, cursor_y: f32) -> Option<GameplayPick> {
         let cam = self.last_pick_camera.as_ref()?;
         if self.last_yaku_tablet_models.is_empty()
             && self.last_wood_tablet_models.is_empty()
@@ -4147,14 +4134,14 @@ impl WgpuRenderer {
             Background(BackgroundId),
             Table,
             Dish,
-            RelicBatch(usize),   // index into `relic_batches`
-            CandleBatch(usize),  // index into `candle_batches`
-            DishExplicit(usize), // index into `aux_dish_cmds`
+            RelicBatch(usize),    // index into `relic_batches`
+            CandleBatch(usize),   // index into `candle_batches`
+            DishExplicit(usize),  // index into `aux_dish_cmds`
             CurioCabinet, // single instance — only the most-recent CurioCabinet cmd is drawn
-            ShrineBatch(usize),  // index into `shrine_batches`
-            ZodiacBatch(usize),  // index into `ribbon_batches`
+            ShrineBatch(usize), // index into `shrine_batches`
+            ZodiacBatch(usize), // index into `ribbon_batches`
             TalismanBatch(usize), // index into `talisman_batches`
-            CoinBatch(usize),    // index into `coin_batches`
+            CoinBatch(usize), // index into `coin_batches`
             QuadBatch { buf_idx: usize, count: u32 },
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
@@ -4163,14 +4150,14 @@ impl WgpuRenderer {
             HandTileFaces,
             FluidSmoke,
             // Skeuomorphic gameplay HUD (phase 1).
-            Plaque(usize),         // index into `plaque_cmds`
-            Ofuda(usize),          // index into `ofuda_cmds`
-            YakuTabletBatch(usize), // index into `yaku_tablet_batches`
-            WoodTabletBatch(usize), // index into `wood_tablet_batches`
-            Bowl(usize),           // index into `bowl_cmds`
-            PegBlock(usize),       // index into `peg_block_cmds`
-            WallStack(usize),      // index into `wall_stack_cmds`
-            DoraStand(usize),      // index into `dora_stand_cmds`
+            Plaque(usize),            // index into `plaque_cmds`
+            Ofuda(usize),             // index into `ofuda_cmds`
+            YakuTabletBatch(usize),   // index into `yaku_tablet_batches`
+            WoodTabletBatch(usize),   // index into `wood_tablet_batches`
+            Bowl(usize),              // index into `bowl_cmds`
+            PegBlock(usize),          // index into `peg_block_cmds`
+            WallStack(usize),         // index into `wall_stack_cmds`
+            DoraStand(usize),         // index into `dora_stand_cmds`
             CascadeTokenBatch(usize), // index into `cascade_token_batches`
             FallingBoneBatch(usize),  // index into `falling_bone_batches`
         }
@@ -4470,12 +4457,7 @@ impl WgpuRenderer {
                 for (tip_world, text, color) in labels.iter() {
                     let (sx, sy) = project_to_screen(*tip_world);
                     let lbl = TextLabel {
-                        rect: [
-                            sx - label_w * 0.5,
-                            sy - label_h * 0.5,
-                            label_w,
-                            label_h,
-                        ],
+                        rect: [sx - label_w * 0.5, sy - label_h * 0.5, label_w, label_h],
                         text: (*text).to_string(),
                         color: *color,
                         font_px: Some(label_size),
@@ -4925,8 +4907,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = talisman_slot_cursor;
                 talisman_slot_cursor += 1;
-                let center =
-                    pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
+                let center = pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
                 // Talisman mesh local extents are (HALF_W, HALF_H, HALF_T) ≈
                 // (0.5, 0.7, 0.09); scale so the world-space bounds match
                 // the requested extents.
@@ -5212,13 +5193,7 @@ impl WgpuRenderer {
                     );
                     inst.decal_label_hash = label_hash;
                 }
-                inst.write_uniform_with_decal(
-                    &self.queue,
-                    view_proj_arr,
-                    model,
-                    material,
-                    true,
-                );
+                inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, material, true);
                 self.last_projected_yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_yaku_tablet_models.push(model);
@@ -5379,8 +5354,12 @@ impl WgpuRenderer {
                         specular_strength: 0.45,
                         specular_power: 56.0,
                     };
-                    peg_instances[*slot_cursor]
-                        .write_uniform(queue, view_proj_arr, model, material);
+                    peg_instances[*slot_cursor].write_uniform(
+                        queue,
+                        view_proj_arr,
+                        model,
+                        material,
+                    );
                     *slot_cursor += 1;
                 }
             };
@@ -5484,8 +5463,7 @@ impl WgpuRenderer {
                 let slot_i = cascade_token_slot_cursor;
                 cascade_token_slot_cursor += 1;
                 let pulse_scale = 1.0 + 0.18 * t.pulse.clamp(0.0, 1.0);
-                let center =
-                    pixel_to_world(t.world_pos[0], t.world_pos[1], t.world_pos[2]);
+                let center = pixel_to_world(t.world_pos[0], t.world_pos[1], t.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_scale(glam::Vec3::new(
                         t.extents[0] * pulse_scale,
@@ -5524,17 +5502,12 @@ impl WgpuRenderer {
                 }
                 let slot_i = falling_bone_slot_cursor;
                 falling_bone_slot_cursor += 1;
-                let center =
-                    pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(b.rotation[1])
                     * Mat4::from_rotation_x(b.rotation[0])
                     * Mat4::from_rotation_z(b.rotation[2])
-                    * Mat4::from_scale(glam::Vec3::new(
-                        b.extents[0],
-                        b.extents[1],
-                        b.extents[2],
-                    ));
+                    * Mat4::from_scale(glam::Vec3::new(b.extents[0], b.extents[1], b.extents[2]));
                 let base = match b.kind {
                     CascadeTokenKind::Chips => [0.34, 0.46, 0.78, b.alpha],
                     CascadeTokenKind::Mult => [0.85, 0.32, 0.42, b.alpha],
@@ -5907,8 +5880,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = talisman_shadow_cursor;
                     talisman_shadow_cursor += 1;
-                    let center =
-                        pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
+                    let center = pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
                     let sx = t.extents[0] / (TALISMAN_LOCAL_HALF[0] * 2.0);
                     let sy = t.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                     let sz = t.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
@@ -6280,8 +6252,7 @@ impl WgpuRenderer {
                     .sum::<usize>()
                     .min(MAX_TALISMAN_SLOTS);
                 if total_talismans > 0 {
-                    shadow_pass
-                        .set_vertex_buffer(0, self.talisman_mesh.vertex_buffer.slice(..));
+                    shadow_pass.set_vertex_buffer(0, self.talisman_mesh.vertex_buffer.slice(..));
                     shadow_pass.set_index_buffer(
                         self.talisman_mesh.index_buffer.slice(..),
                         wgpu::IndexFormat::Uint32,
@@ -6756,8 +6727,8 @@ impl WgpuRenderer {
                     let cmd = wall_stack_cmds[*slot_i];
                     let mut start_slot = 0usize;
                     for prev in 0..*slot_i {
-                        start_slot += (wall_stack_cmds[prev].remaining as usize)
-                            .min(MAX_WALL_TILE_SLOTS);
+                        start_slot +=
+                            (wall_stack_cmds[prev].remaining as usize).min(MAX_WALL_TILE_SLOTS);
                     }
                     let n = (cmd.remaining as usize).min(MAX_WALL_TILE_SLOTS);
                     if n == 0 {

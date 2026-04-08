@@ -249,7 +249,9 @@ pub fn score_sets(
             // multiple polychrome tiles are present, to keep it bounded).
             let mut meld_has_polychrome = false;
             for &tid in &s.tile_ids {
-                let Some(t) = tile_by_id(tiles, tid) else { continue };
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    continue;
+                };
                 let Some(enh) = t.enhancement else { continue };
                 match enh {
                     TileEnhancement::Jade => {
@@ -731,7 +733,11 @@ pub fn tile_effective_value(
 
     // ── Dora ────────────────────────────────────────────────────────────
     if dora_faces.contains(&(tile.suit, tile.rank)) {
-        let per_dora = if relics.has(RelicId::DoraCrown) { 35 } else { 25 };
+        let per_dora = if relics.has(RelicId::DoraCrown) {
+            35
+        } else {
+            25
+        };
         out.bonus_chips += per_dora;
         out.sources.push(("Dora", format!("+{per_dora} chips")));
     }

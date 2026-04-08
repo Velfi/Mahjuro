@@ -52,9 +52,7 @@ impl TalismanKind {
             TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
             TalismanKind::Pearl => "Every tile in hand: +30 flat chips when scored.",
             TalismanKind::Gilded => "Every tile in hand: +0.5 mult when scored in a meld.",
-            TalismanKind::Polychrome => {
-                "Every meld played from this hand gets ×1.2 mult."
-            }
+            TalismanKind::Polychrome => "Every meld played from this hand gets ×1.2 mult.",
         }
     }
 

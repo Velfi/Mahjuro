@@ -267,7 +267,14 @@ struct ShopLayout {
 }
 
 impl ShopLayout {
-    fn build(w: f32, h: f32, n_for_sale: usize, n_for_sale_ribbons: usize, n_owned_relics: usize, n_fan: usize) -> Self {
+    fn build(
+        w: f32,
+        h: f32,
+        n_for_sale: usize,
+        n_for_sale_ribbons: usize,
+        n_owned_relics: usize,
+        n_fan: usize,
+    ) -> Self {
         // ── Camera: shop perspective ─────────────────────────────────────
         // Eye is in front of the counter looking back at the cabinet, with
         // a slight downward tilt so the foreground dishes are visible.
@@ -304,8 +311,7 @@ impl ShopLayout {
             // forward to clear the front frame and catch light cleanly.
             let py = cabinet_front_py - cabinet_extents[2] * 0.30;
             // World-y of the relic — at the center height of its compartment.
-            let wy =
-                cabinet_world_y + lpt[1] * cabinet_extents[1] - cabinet_extents[1] * 0.04;
+            let wy = cabinet_world_y + lpt[1] * cabinet_extents[1] - cabinet_extents[1] * 0.04;
             niche_centers_px[i] = (px, py, wy);
         }
 
@@ -701,10 +707,7 @@ impl SceneBehavior for ShopScene {
                     if idx < self.consumable_items.len() {
                         let item = &self.consumable_items[idx];
                         let price = item.price();
-                        if !item.sold
-                            && ctx.run.gold >= price
-                            && !ctx.run.consumables.is_full()
-                        {
+                        if !item.sold && ctx.run.gold >= price && !ctx.run.consumables.is_full() {
                             let consumable = item.consumable;
                             ctx.run.gold -= price;
                             ctx.run.consumables.items.push(consumable);
@@ -983,47 +986,46 @@ impl SceneBehavior for ShopScene {
             // spotlight placement. Walks the same partition the renderer
             // uses (for-sale-of-kind, then owned-of-kind) to find which
             // wall slot or fan position to light up.
-            let consumable_anchor =
-                |is_zodiac: bool, hit_idx: usize| -> Option<(f32, f32, f32)> {
-                    let mut for_sale_count = 0usize;
-                    for (slot_i, item) in self.consumable_items.iter().enumerate() {
-                        let matches = match item.consumable {
-                            Consumable::Zodiac(_) => is_zodiac,
-                            Consumable::Talisman(_) => !is_zodiac,
-                        };
-                        if !matches {
-                            continue;
-                        }
-                        if for_sale_count == hit_idx {
-                            if slot_i < layout.ribbon_count {
-                                return Some(layout.ribbon_anchors_px[slot_i]);
-                            }
-                            return None;
-                        }
-                        for_sale_count += 1;
+            let consumable_anchor = |is_zodiac: bool, hit_idx: usize| -> Option<(f32, f32, f32)> {
+                let mut for_sale_count = 0usize;
+                for (slot_i, item) in self.consumable_items.iter().enumerate() {
+                    let matches = match item.consumable {
+                        Consumable::Zodiac(_) => is_zodiac,
+                        Consumable::Talisman(_) => !is_zodiac,
+                    };
+                    if !matches {
+                        continue;
                     }
-                    // Owned-fan section.
-                    let owned_target = hit_idx - for_sale_count;
-                    let mut owned_count = 0usize;
-                    for (fan_i, c) in ctx.run.consumables.items.iter().enumerate() {
-                        let matches = match c {
-                            Consumable::Zodiac(_) => is_zodiac,
-                            Consumable::Talisman(_) => !is_zodiac,
-                        };
-                        if !matches {
-                            continue;
+                    if for_sale_count == hit_idx {
+                        if slot_i < layout.ribbon_count {
+                            return Some(layout.ribbon_anchors_px[slot_i]);
                         }
-                        if owned_count == owned_target {
-                            if fan_i < layout.fan_count {
-                                let (ax, ay, awy, _rot) = layout.fan_ribbon(fan_i);
-                                return Some((ax, ay, awy));
-                            }
-                            return None;
-                        }
-                        owned_count += 1;
+                        return None;
                     }
-                    None
-                };
+                    for_sale_count += 1;
+                }
+                // Owned-fan section.
+                let owned_target = hit_idx - for_sale_count;
+                let mut owned_count = 0usize;
+                for (fan_i, c) in ctx.run.consumables.items.iter().enumerate() {
+                    let matches = match c {
+                        Consumable::Zodiac(_) => is_zodiac,
+                        Consumable::Talisman(_) => !is_zodiac,
+                    };
+                    if !matches {
+                        continue;
+                    }
+                    if owned_count == owned_target {
+                        if fan_i < layout.fan_count {
+                            let (ax, ay, awy, _rot) = layout.fan_ribbon(fan_i);
+                            return Some((ax, ay, awy));
+                        }
+                        return None;
+                    }
+                    owned_count += 1;
+                }
+                None
+            };
             match hit {
                 ShopHit::Relic(i) => {
                     let (px, py, wy) = if i < n_for_sale_relics {
@@ -1174,24 +1176,23 @@ impl SceneBehavior for ShopScene {
             // Helper: walk consumable_items and find the i-th item of the
             // requested kind (zodiac or talisman). Same partition rule the
             // renderer uses to assign hit indices.
-            let nth_consumable_of_kind =
-                |is_zodiac: bool, hit_idx: usize| -> Option<usize> {
-                    let mut count = 0usize;
-                    for (slot_i, item) in self.consumable_items.iter().enumerate() {
-                        let matches = match item.consumable {
-                            Consumable::Zodiac(_) => is_zodiac,
-                            Consumable::Talisman(_) => !is_zodiac,
-                        };
-                        if !matches {
-                            continue;
-                        }
-                        if count == hit_idx {
-                            return Some(slot_i);
-                        }
-                        count += 1;
+            let nth_consumable_of_kind = |is_zodiac: bool, hit_idx: usize| -> Option<usize> {
+                let mut count = 0usize;
+                for (slot_i, item) in self.consumable_items.iter().enumerate() {
+                    let matches = match item.consumable {
+                        Consumable::Zodiac(_) => is_zodiac,
+                        Consumable::Talisman(_) => !is_zodiac,
+                    };
+                    if !matches {
+                        continue;
                     }
-                    None
-                };
+                    if count == hit_idx {
+                        return Some(slot_i);
+                    }
+                    count += 1;
+                }
+                None
+            };
             let n_for_sale_zodiacs = self
                 .consumable_items
                 .iter()
@@ -1266,9 +1267,8 @@ impl SceneBehavior for ShopScene {
                     if let Some(slot_i) = nth_consumable_of_kind(true, i) {
                         let item = &self.consumable_items[slot_i];
                         let price = item.price();
-                        let can_afford = ctx.run.gold >= price
-                            && !ctx.run.consumables.is_full()
-                            && !item.sold;
+                        let can_afford =
+                            ctx.run.gold >= price && !ctx.run.consumables.is_full() && !item.sold;
                         let cta = if item.sold {
                             "SOLD".to_string()
                         } else if !can_afford {
@@ -1325,9 +1325,8 @@ impl SceneBehavior for ShopScene {
                     if let Some(slot_i) = nth_consumable_of_kind(false, i) {
                         let item = &self.consumable_items[slot_i];
                         let price = item.price();
-                        let can_afford = ctx.run.gold >= price
-                            && !ctx.run.consumables.is_full()
-                            && !item.sold;
+                        let can_afford =
+                            ctx.run.gold >= price && !ctx.run.consumables.is_full() && !item.sold;
                         let cta = if item.sold {
                             "SOLD".to_string()
                         } else if !can_afford {
@@ -1413,10 +1412,9 @@ impl SceneBehavior for ShopScene {
                     let body_inner_w = tip_w - pad * 2.0;
                     let wrapped = widget::wrap_text(&subtitle, body_inner_w, body_font);
                     let body_lines = wrapped.len().max(1) as f32;
-                    let body_h = (body_lines * body_line_step + body_line_step * 0.4)
-                        .max(body_line_step);
-                    let needed_h =
-                        pad * 2.0 + title_h + 6.0 + body_h + 12.0 + cta_h;
+                    let body_h =
+                        (body_lines * body_line_step + body_line_step * 0.4).max(body_line_step);
+                    let needed_h = pad * 2.0 + title_h + 6.0 + body_h + 12.0 + cta_h;
                     let tip_h = needed_h.min(h - 32.0).max(180.0);
                     // Anchor above the projected rect, clamped to screen.
                     let mut tip_x = rect[0] + rect[2] * 0.5 - tip_w * 0.5;
@@ -1481,7 +1479,6 @@ impl SceneBehavior for ShopScene {
                 }
             }
         }
-
 
         // ── Next Round button (always-visible, 2D) ─────────────────────
         let scale = (w.min(h)) / 600.0;

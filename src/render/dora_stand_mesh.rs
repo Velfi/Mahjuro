@@ -7,7 +7,7 @@
 //! Local space spans `-0.5..+0.5` on each axis. The stand is wider (X) than
 //! it is deep (Z), and the back board reaches to the top of local Y.
 
-use crate::render::lit_mesh::{push_box, MaterialKind, MaterialParams, MeshCpu};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Build the dora stand mesh: a flat base + a vertical back board.

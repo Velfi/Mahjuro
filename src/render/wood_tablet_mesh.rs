@@ -7,7 +7,7 @@
 //! separate mesh so each can be sized + lit independently in the slot pool.
 //! Local space spans `-0.5..+0.5` on each axis.
 
-use crate::render::lit_mesh::{push_box, MaterialKind, MaterialParams, MeshCpu};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Build the wood tablet mesh: a single rectangular block, lacquered wood.
@@ -15,16 +15,7 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    push_box(
-        &mut vertices,
-        &mut indices,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-    );
+    push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
 
     // Rotate the +Y face UVs 90° CCW around UP so the engraved label
     // texture (256×96 landscape) reads along the long screen-X axis instead

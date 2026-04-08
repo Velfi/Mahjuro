@@ -8,7 +8,7 @@
 //!
 //! Local space spans `-0.5..+0.5` on each axis.
 
-use crate::render::lit_mesh::{push_box, MaterialKind, MaterialParams, MeshCpu};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Build the peg block mesh: a single rectangular wooden block.
@@ -16,16 +16,7 @@ pub fn build_peg_block_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    push_box(
-        &mut vertices,
-        &mut indices,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-    );
+    push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
 
     MeshCpu {
         vertices,
