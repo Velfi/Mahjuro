@@ -214,7 +214,7 @@ mod tests {
             assert!(seen.insert(z.yaku()), "duplicate yaku for {:?}", z);
         }
         // All 12 yaku should be covered.
-        assert_eq!(seen.len(), 12);
+        assert_eq!(seen.len(), 13);
     }
 
     #[test]
