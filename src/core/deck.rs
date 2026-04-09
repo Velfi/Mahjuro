@@ -123,17 +123,6 @@ impl Wall {
         Self::new(build_wall())
     }
 
-    /// Build a standard wall but filter out any tile IDs that have been
-    /// permanently removed (e.g. via the Kiln talisman).
-    pub fn from_standard_shuffled_filtered(removed: &std::collections::HashSet<u32>) -> Self {
-        if removed.is_empty() {
-            return Self::from_standard_shuffled();
-        }
-        let mut tiles = build_wall();
-        tiles.retain(|t| !removed.contains(&t.id));
-        Self::new(tiles)
-    }
-
     /// Build a wall with tile-pack extras injected, then filter removed IDs.
     /// Pack tiles get pre-stamped enhancements from `enhancements` (e.g.
     /// Polychrome pack tiles carry their ×1.2 mult enhancement).
@@ -207,23 +196,6 @@ impl Wall {
     /// The dora indicator tiles themselves (for UI display).
     pub fn dora_indicator_tiles(&self) -> &[Tile] {
         &self.dora_indicators
-    }
-
-    /// Remove all overflow-extra tiles (ID >= [`OVERFLOW_TILE_ID_BASE`]) from
-    /// the undrawn portion of the wall. Called when the Overflow relic is lost
-    /// mid-round so the thicker wall doesn't persist.
-    pub fn strip_overflow_tiles(&mut self) {
-        // Only touch tiles that haven't been drawn yet.
-        let undrawable: Vec<usize> = self.tiles[self.cursor..]
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.id >= OVERFLOW_TILE_ID_BASE)
-            .map(|(i, _)| self.cursor + i)
-            .rev()
-            .collect();
-        for idx in undrawable {
-            self.tiles.remove(idx);
-        }
     }
 
     /// How many tiles remain in the wall.
