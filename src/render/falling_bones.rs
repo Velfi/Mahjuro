@@ -37,6 +37,37 @@ const REST_LIFETIME: f32 = 0.9;
 /// the stream finishes spawning before the next step's burst arrives.
 const BURST_SPREAD: f32 = 0.45;
 
+/// Snapshot of a landed bone's 2D footprint + top surface, used by the
+/// stacking pass so an in-flight bone can come to rest on top of an
+/// already-landed one whose horizontal AABB it overlaps.
+#[derive(Clone, Copy, Debug)]
+struct LandedFootprint {
+    px: f32,
+    py: f32,
+    half_w: f32,
+    half_d: f32,
+    /// World-y of the top face of this landed bone.
+    top_y: f32,
+}
+
+/// Walk the landed-bone snapshot and return the highest top-surface y
+/// value of any bone whose 2D footprint overlaps `b`'s footprint. Falls
+/// back to `floor_y` (the table plane) when nothing overlaps.
+fn highest_support_below(landed: &[LandedFootprint], b: &FallingBone, floor_y: f32) -> f32 {
+    let half_w = b.extents[0] * 0.5;
+    let half_d = b.extents[2] * 0.5;
+    let mut best = floor_y;
+    for l in landed {
+        // 2D AABB overlap in (px, py) plane.
+        let dx = (b.px - l.px).abs();
+        let dy = (b.py - l.py).abs();
+        if dx < half_w + l.half_w && dy < half_d + l.half_d && l.top_y > best {
+            best = l.top_y;
+        }
+    }
+    best
+}
+
 /// One physical scoring bone in flight or at rest on the table.
 #[derive(Clone, Debug)]
 struct FallingBone {
@@ -142,7 +173,9 @@ impl FallingBoneSystem {
 
     /// Advance the simulation by `dt` seconds. Bones in flight integrate
     /// gravity + tumble; landed bones tick down their rest timer and despawn
-    /// when it reaches zero.
+    /// when it reaches zero. Newly-landed bones rest *on top* of any
+    /// previously-landed bones whose 2D footprint they overlap, so the pile
+    /// stacks instead of inter-penetrating.
     pub fn update(&mut self, dt: f32) {
         // Drip pending spawns into the live pool as their timers expire.
         // Walk in reverse so swap_remove keeps the iteration cheap and the
@@ -156,6 +189,22 @@ impl FallingBoneSystem {
                 self.spawn_one(p.anchor_px, p.anchor_py, p.kind);
             }
         }
+        // Snapshot every currently-landed bone's footprint so the in-flight
+        // bones in the loop below can stack on top of them. We can't borrow
+        // `self.bones` immutably and mutably in the same loop, so a one-pass
+        // copy of just the data we need is the cheapest workaround.
+        let landed_snapshot: Vec<LandedFootprint> = self
+            .bones
+            .iter()
+            .filter(|b| b.rest_remaining.is_some())
+            .map(|b| LandedFootprint {
+                px: b.px,
+                py: b.py,
+                half_w: b.extents[0] * 0.5,
+                half_d: b.extents[2] * 0.5,
+                top_y: b.world_y + b.extents[1] * 0.5,
+            })
+            .collect();
         for b in &mut self.bones {
             if let Some(rest) = b.rest_remaining.as_mut() {
                 *rest -= dt;
@@ -174,14 +223,26 @@ impl FallingBoneSystem {
             b.rot_x += b.rvx * dt;
             b.rot_y += b.rvy * dt;
             b.rot_z += b.rvz * dt;
-            // Collision against the table plane, sized from the bone's own
-            // extents. The rest height is the half-thickness so the bone
-            // ends up lying flat on its widest face — like a tablet that
-            // just slapped down — and the rotation snaps to flat on landing
-            // so the half-thickness is the actual bottom of the box.
+            // Collision against the table plane *or* the top of any
+            // already-rested bone whose 2D footprint we overlap. The rest
+            // height is half-thickness above whichever surface we hit so
+            // the bone ends up lying flat on its widest face — like a
+            // tablet that just slapped down — and the rotation snaps to
+            // flat on landing so the half-thickness is the actual bottom
+            // of the box.
             let half_thickness = b.extents[1] * 0.5;
-            if b.world_y - half_thickness <= TABLE_Y {
-                b.world_y = TABLE_Y + half_thickness;
+            // Find the highest landed-bone surface this bone is about to
+            // land on. We scan in `self.bones` directly because we hold
+            // `&mut self.bones` here — but Rust borrow rules mean we can't
+            // take an immutable reference to the same vec while mutating
+            // an item, so the scan and the mutation are split: collect the
+            // highest contact y first, then mutate `b` after.
+            //
+            // (Pulled out into its own scope below the loop body for
+            // clarity.)
+            let support_y = highest_support_below(&landed_snapshot, b, TABLE_Y);
+            if b.world_y - half_thickness <= support_y {
+                b.world_y = support_y + half_thickness;
                 b.vy = 0.0;
                 // Snap pitch + roll to zero so the bone rests flat. Yaw is
                 // preserved so each bone keeps its own facing.

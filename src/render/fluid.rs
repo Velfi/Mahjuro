@@ -922,6 +922,18 @@ impl FluidSim {
             1.0 / extent.z.max(1e-3),
         );
         let dt_clamped = dt.min(0.05);
+        // Make per-step density/velocity dissipation framerate-independent.
+        // The intensity table above lists the *per-frame at 60 Hz reference*
+        // multiplier; the shader applies whatever value we upload once per
+        // step, so without this rescale a low frame rate causes far fewer
+        // multiplies per wall second and the smoke lingers visibly longer
+        // (manifests as the post-deal opening curtain "sometimes taking
+        // forever" to clear when the round-start work hitches the FPS).
+        // pow(c, dt*60) is the closed-form continuous decay equivalent and
+        // reproduces the old behavior exactly when dt = 1/60.
+        let dt_scale = dt_clamped * 60.0;
+        let density_dis_step = (density_dis as f32).powf(dt_scale);
+        let vel_dis_step = (vel_dis as f32).powf(dt_scale);
         queue.write_buffer(
             &self.fluid_uniforms_buf,
             0,
@@ -930,7 +942,7 @@ impl FluidSim {
                 grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
                 grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
                 inv_extent: [inv_extent.x, inv_extent.y, inv_extent.z, 0.0],
-                params: [dt_clamped, density_dis, vel_dis, buoyancy],
+                params: [dt_clamped, density_dis_step, vel_dis_step, buoyancy],
             }),
         );
 

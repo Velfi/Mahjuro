@@ -2,6 +2,18 @@
 
 use crate::core::tile::Tile;
 
+/// Itemized breakdown of the gold awarded for clearing a blind. Mirrors
+/// the calculation in `RunState::play_selected` so the celebration UI can
+/// show the player exactly where each coin came from.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RoundPayout {
+    pub base_reward: u32,
+    pub unused_play_bonus: u32,
+    pub interest: u32,
+    pub green_luck_bonus: u32,
+    pub total: u32,
+}
+
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum GameEvent {
@@ -20,6 +32,7 @@ pub enum GameEvent {
     ScoreCascadeFinal,
     RoundComplete {
         reached_target: bool,
+        payout: RoundPayout,
     },
     RunComplete,
     GameOver {

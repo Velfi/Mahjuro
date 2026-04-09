@@ -110,8 +110,13 @@ pub struct ZodiacRibbonPlacement {
     /// Pitch rotation about world X around the anchor, in degrees. Used by
     /// the inventory fan to drape ribbons forward toward the camera.
     pub rotation_x_deg: f32,
-    /// Linear-space RGBA tint.
+    /// Linear-space RGBA tint. When `kind` is `Some`, this is multiplied
+    /// against the silk texture (use white to show the texture unmodified;
+    /// drop alpha to dim sold ribbons).
     pub color: [f32; 4],
+    /// Which zodiac silk texture to bind. `None` falls back to the flat
+    /// untextured ribbon (used as a generic placeholder).
+    pub kind: Option<crate::core::zodiac::ZodiacKind>,
 }
 
 /// One hanging talisman tablet (jade-amulet pendant). Used by the shop scene
@@ -254,10 +259,67 @@ pub struct WoodTabletPlacement {
     pub disabled: bool,
 }
 
+/// Live "meld pill" — a soroban-styled readout floating above the player's
+/// current tile selection. The renderer composes one of these from the
+/// frame mesh + two brass rods + N beads in `soroban_mesh.rs`, sliding the
+/// beads along the rails based on `chip_fill` / `mult_fill` and engraving
+/// the meld name on the inset bone tag via a per-instance decal texture.
+///
+/// Mahjuro's analogue of Balatro's hand-name + chips×mult pill: present
+/// every frame, reactive on every tile toggle, never modal.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct SorobanPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the soroban frame's *center*.
+    pub center_pos: [f32; 3],
+    /// Width × height × thickness in world units. The mesh is authored in
+    /// `-0.5..+0.5` local space so a per-instance scale matrix sizes it.
+    pub extents: [f32; 3],
+    /// Yaw rotation about world Y in degrees (0 = facing the camera).
+    pub rotation_y_deg: f32,
+    /// Pitch rotation about world X in degrees. Positive values lift the
+    /// top edge of the pill toward the camera so the +Z front face
+    /// presents more directly to the player instead of catching the
+    /// gameplay camera at an oblique table-grazing angle.
+    pub rotation_x_deg: f32,
+    /// Meld name engraved on the inset bone tag (e.g. "Pung", "Chow",
+    /// "Pair", "Chicken Hand", or empty for the rest state).
+    pub meld_name: String,
+    /// Chip rail fill in `0.0..=1.0`. Drives bead positions on the upper rail.
+    pub chip_fill: f32,
+    /// Mult rail fill in `0.0..=1.0`. Drives bead positions on the lower rail.
+    pub mult_fill: f32,
+    /// Raw chips value to engrave on the frame face (left of the ×).
+    /// `None` produces no numerals (rest state). The numerals are the
+    /// primary readout — beads are ambient counting flavor.
+    pub chips_value: Option<i32>,
+    /// Raw mult value to engrave on the frame face (right of the ×).
+    /// Pairs with `chips_value`; both must be `Some` for the decal to
+    /// render numerals.
+    pub mult_value: Option<f32>,
+    /// True when the current selection forms a complete-but-yaku-less hand.
+    /// The renderer paints the tag in muted grey instead of gold to signal
+    /// "structurally legal, scores nothing" without celebrating it.
+    pub chicken_hand: bool,
+}
+
 /// The discard bowl. Click target = drop selected tile in.
 #[derive(Clone, Copy, Debug)]
 pub struct BowlPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the bowl's *base center*.
+    pub world_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Hover lift envelope in [0, 1].
+    pub hover: f32,
+}
+
+/// The bronze mirror. Click target = play the selected hand. Visual
+/// counterpart to the discard bowl, sharing the same flat-on-table
+/// footprint and hover-lift convention.
+#[derive(Clone, Copy, Debug)]
+pub struct MirrorPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the mirror's *base center*.
     pub world_pos: [f32; 3],
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
@@ -332,6 +394,41 @@ pub struct CascadeTokenPlacement {
     /// Pulse envelope in [0, 1] from the cascade frame's pop-in/settle
     /// timing. 1.0 = freshly fired, 0.0 = settled.
     pub pulse: f32,
+}
+
+/// One floating 3D extruded-glyph score popup ("+50", "×3", "=12500"). The
+/// renderer turns each placement into one indexed draw of the glyph mesh
+/// cached for `label` (lazily built on first use), positioned and tinted
+/// per-instance. Popups are short-lived: the gameplay scene's
+/// `ScorePopupSystem` spawns them on each cascade reveal-edge and clears
+/// them when the cascade ends.
+#[derive(Clone, Debug)]
+pub struct ExtrudedGlyphPlacement {
+    /// `(pixel_x, pixel_y, world_y_lift)` for the popup's *center*. Pixel
+    /// x/y resolve to world xz via `pixel_to_world`; `world_y_lift` is the
+    /// height above the table plane the popup currently floats at.
+    pub world_pos: [f32; 3],
+    /// Uniform world-units scale applied to the glyph mesh. The mesh itself
+    /// is normalised to a height of 1.0 unit, so this directly sets the
+    /// rendered character height in world space.
+    pub scale: f32,
+    /// Pitch rotation (radians) about world X. The popup defaults to lying
+    /// flat on the table (face-up), so a small positive tilt rocks the top
+    /// edge toward the camera for legibility.
+    pub rotation_x: f32,
+    /// Yaw rotation (radians) about world Y — small per-popup random
+    /// jitter so a chain of popups doesn't read as a stamped row.
+    pub rotation_y: f32,
+    /// The label string ("+50", "×3", "=12500"). Used as the cache key for
+    /// the renderer's lazy `GlyphMeshCache` upload.
+    pub label: String,
+    /// Linear-space RGBA tint. Alpha is multiplied by the lit_mesh
+    /// material's base alpha so the popup can fade out at end of life.
+    pub color: [f32; 4],
+    /// Emissive boost in [0, 1]. The renderer adds this to the lit base
+    /// color so popups read against busy backgrounds without depending on
+    /// candle illumination.
+    pub emissive: f32,
 }
 
 /// One physical scoring bone tumbling onto the play space during a cascade.
@@ -468,6 +565,8 @@ pub enum DrawCmd {
     WoodTabletBatch(Vec<WoodTabletPlacement>),
     /// The discard bowl.
     Bowl(BowlPlacement),
+    /// The bronze "play hand" mirror.
+    Mirror(MirrorPlacement),
     /// The plays/discards remaining peg block.
     #[allow(dead_code)]
     PegBlock(PegBlockPlacement),
@@ -475,6 +574,8 @@ pub enum DrawCmd {
     WallStack(WallStackPlacement),
     /// The dora indicator stand.
     DoraStand(DoraStandPlacement),
+    /// Live meld pill (soroban-styled readout) above the tile selection.
+    Soroban(SorobanPlacement),
     /// Engraved bone scoring tokens that pop in during a cascade. Reuses
     /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
     CascadeTokenBatch(Vec<CascadeTokenPlacement>),
@@ -483,6 +584,10 @@ pub enum DrawCmd {
     /// matrices (gravity-driven world_y + euler tumble) instead of static
     /// HUD positioning.
     FallingBoneBatch(Vec<FallingBonePlacement>),
+    /// Floating 3D extruded-glyph score popups. Each placement carries its
+    /// own label string; the renderer lazily builds a per-string mesh on
+    /// first use and reuses it on subsequent frames.
+    ExtrudedGlyphBatch(Vec<ExtrudedGlyphPlacement>),
     /// Non-rendered hover region anchored at a screen rect that resolves
     /// to a glossary term. Lets scenes attach a tooltip to a 3D object
     /// (e.g. the coin pile, the wall stack) by giving its approximate
@@ -528,8 +633,9 @@ pub struct UiFrame {
     pub camera_override: Option<CameraParams>,
     /// Debug overlay: when true, the renderer draws three colored axis bars
     /// (red = +X, green = +Y, blue = +Z) anchored at the camera's look
-    /// target. Toggled by `F2` in the gameplay scene to help disambiguate
-    /// world-space directions when iterating on placements.
+    /// target. Toggled from the native Debug menu in the gameplay scene to
+    /// help disambiguate world-space directions when iterating on
+    /// placements.
     pub debug_axes: bool,
 
     // ── Non-draw scene metadata ─────────────────────────────────────────
@@ -617,6 +723,9 @@ impl UiFrame {
     pub fn bowl(&mut self, p: BowlPlacement) {
         self.cmds.push(DrawCmd::Bowl(p));
     }
+    pub fn mirror(&mut self, p: MirrorPlacement) {
+        self.cmds.push(DrawCmd::Mirror(p));
+    }
     #[allow(dead_code)]
     pub fn peg_block(&mut self, p: PegBlockPlacement) {
         self.cmds.push(DrawCmd::PegBlock(p));
@@ -627,11 +736,17 @@ impl UiFrame {
     pub fn dora_stand(&mut self, p: DoraStandPlacement) {
         self.cmds.push(DrawCmd::DoraStand(p));
     }
+    pub fn soroban(&mut self, p: SorobanPlacement) {
+        self.cmds.push(DrawCmd::Soroban(p));
+    }
     pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
         self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
     }
     pub fn falling_bone_batch(&mut self, placements: Vec<FallingBonePlacement>) {
         self.cmds.push(DrawCmd::FallingBoneBatch(placements));
+    }
+    pub fn extruded_glyph_batch(&mut self, placements: Vec<ExtrudedGlyphPlacement>) {
+        self.cmds.push(DrawCmd::ExtrudedGlyphBatch(placements));
     }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
@@ -689,11 +804,14 @@ impl UiFrame {
                 | DrawCmd::YakuTabletBatch(_)
                 | DrawCmd::WoodTabletBatch(_)
                 | DrawCmd::Bowl(_)
+                | DrawCmd::Mirror(_)
                 | DrawCmd::PegBlock(_)
                 | DrawCmd::WallStack(_)
                 | DrawCmd::DoraStand(_)
+                | DrawCmd::Soroban(_)
                 | DrawCmd::CascadeTokenBatch(_)
                 | DrawCmd::FallingBoneBatch(_)
+                | DrawCmd::ExtrudedGlyphBatch(_)
                 | DrawCmd::GlossaryAnchor { .. } => {}
             }
         }

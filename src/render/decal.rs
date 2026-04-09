@@ -181,74 +181,417 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 /// fully transparent. A 2-px-offset carved-shadow pass renders behind each
 /// line so the engraving still reads after the texture is bilinear-stretched
 /// across the on-screen plaque face.
-pub fn rasterize_plaque_decal(top: &str, bot: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
-    let (w, h) = PLAQUE_DECAL_SIZE;
+pub fn rasterize_plaque_decal(
+    top: &str,
+    bot: &str,
+    ui_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     let Some(font) = ui_font else {
         return rgba;
     };
     // Horizontal padding so glyphs don't run into the engraved-edge silhouette
-    // of the plaque face.
-    let pad_x = (w as f32 * 0.06) as u32;
-    let pad_y = (h as f32 * 0.10) as u32;
+    // of the plaque face. Vertical padding is kept tight so the two lines fill
+    // most of the texture height — the plaque face is now upright (no
+    // foreshortening tilt) so the text needs every vertical pixel it can get
+    // to avoid looking squished after bilinear stretch onto the wood face.
+    let pad_x = (w as f32 * 0.05) as u32;
+    let pad_y = (h as f32 * 0.05) as u32;
     let inner_w = w.saturating_sub(pad_x * 2).max(1);
     let inner_h = h.saturating_sub(pad_y * 2).max(1);
 
-    // Two equal-height bands so the auto-shrink formula has the same vertical
-    // budget for both lines. Auto-shrink picks `min(line_h * 0.55, inner_w *
-    // 1.5 / chars)` so long lines collapse horizontally instead of clipping.
-    let top_h = inner_h / 2;
-    let bot_h = inner_h - top_h;
+    // Pick font sizes against a *nominal* half-band, then build tight bands
+    // sized just large enough for the chosen glyphs. This collapses the
+    // empty whitespace that the previous equal-half layout left between the
+    // two lines, so the engraving reads as a compact stacked label.
+    let nominal_band = inner_h / 2;
+    let pin_for = |text: &str, band_h: u32| -> f32 {
+        let by_height = band_h as f32 * 0.85;
+        let chars = text.chars().count().max(1) as f32;
+        // Allow up to ~1.7x glyph density horizontally before clamping —
+        // looser than the default 1.5 because the plaque text is short.
+        let by_width = inner_w as f32 * 1.7 / chars;
+        by_height.min(by_width).max(12.0)
+    };
+    let top_px = pin_for(top, nominal_band);
+    let bot_px = pin_for(bot, nominal_band);
 
-    let top_band = rasterize_label_styled(font, top, inner_w, top_h, None, LabelAlign::Center);
-    let bot_band = rasterize_label_styled(font, bot, inner_w, bot_h, None, LabelAlign::Center);
+    // Tight band heights: ~1.15× font_px gives just enough room for ascender
+    // + descender without leaving a gap that puffs the line spacing.
+    let top_h = ((top_px * 1.15) as u32).min(inner_h).max(1);
+    let bot_h = ((bot_px * 1.15) as u32).min(inner_h - top_h.min(inner_h - 1)).max(1);
 
-    // Champagne ink for the headline, parchment for the status line.
-    let champagne = [1.00_f32, 0.92, 0.62, 1.0];
-    let parchment = [0.96_f32, 0.93, 0.78, 1.0];
-    // Carved shadow: darker tint, offset 2 px down/right so the engraving
-    // reads after bilinear stretch onto the plaque face.
-    let shadow_for = |ink: [f32; 4]| [ink[0] * 0.22, ink[1] * 0.20, ink[2] * 0.16, ink[3] * 0.85];
-    blit_tinted(
-        &top_band,
+    let top_band =
+        rasterize_label_styled(font, top, inner_w, top_h, Some(top_px), LabelAlign::Center);
+    let bot_band =
+        rasterize_label_styled(font, bot, inner_w, bot_h, Some(bot_px), LabelAlign::Center);
+
+    // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
+    // by a bright pale-gold highlight offset up-left. Three passes per band
+    // give the engraving a metallic, leafed-gold read at any size.
+    let gold_base = [0.92_f32, 0.74, 0.28, 1.0]; // rich antique gold
+    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0]; // pale champagne sheen
+    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92]; // burnt umber recess
+
+    let gild = |band: &[u8], band_h: u32, y_off: u32, rgba: &mut Vec<u8>| {
+        // Drop shadow first (offset down-right so the recess reads from above).
+        blit_tinted(band, inner_w, band_h, rgba, w, pad_x + 3, y_off + 3, gold_shadow);
+        // Gold body.
+        blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, gold_base);
+        // Bright highlight offset up-left so the leaf catches the light.
+        blit_tinted(
+            band,
+            inner_w,
+            band_h,
+            rgba,
+            w,
+            pad_x.saturating_sub(1),
+            y_off.saturating_sub(1),
+            gold_highlight,
+        );
+    };
+
+    // Centre the tight two-band stack vertically inside `inner_h` so the
+    // engraving sits in the middle of the plaque face rather than hugging
+    // the top edge.
+    let stack_h = top_h + bot_h;
+    let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
+    gild(&top_band, top_h, stack_top, &mut rgba);
+    gild(&bot_band, bot_h, stack_top + top_h, &mut rgba);
+    rgba
+}
+
+/// Reference height (in texels) for the plaque decal texture. The actual
+/// width is computed at draw time from the plaque face's world-space aspect
+/// ratio so glyphs don't get stretched by the bilinear sampler when the face
+/// isn't ~landscape — see the call site in `wgpu_renderer.rs`.
+pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
+
+/// Reference long-edge size (in texels) for the ofuda decal texture. The
+/// other dimension is computed at draw time from the paper face's world-space
+/// aspect ratio so the bilinear sampler doesn't stretch glyphs — see the
+/// call site in `wgpu_renderer.rs`.
+pub const OFUDA_DECAL_LONG_EDGE: u32 = 1024;
+
+/// Paint a boss-rule ofuda paper face: large title (boss name) at the top,
+/// wrapped rule description below in a smaller hand. Both passes use a deep
+/// sumi-ink tint with a soft drop shadow so the calligraphy reads off the
+/// warm paper background.
+pub fn rasterize_ofuda_decal(
+    title: &str,
+    rule: &str,
+    ui_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    let pad_x = (w as f32 * 0.08) as u32;
+    let pad_y = (h as f32 * 0.06) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y * 2).max(1);
+
+    // Pick a title font size from a *nominal* title band (~28% of inner_h),
+    // then build a tight title band sized just to the chosen glyphs. The
+    // wrapped rule body gets whatever's left after a small inter-block gap,
+    // and the whole stack is centred vertically — same pattern as the
+    // gameplay plaque so spacing collapses to a thin breathing margin.
+    let nominal_title_h = (inner_h as f32 * 0.28) as u32;
+    let title_chars = title.chars().count().max(1) as f32;
+    let title_px = (nominal_title_h as f32 * 0.78)
+        .min(inner_w as f32 * 1.5 / title_chars)
+        .max(14.0);
+    let title_h = ((title_px * 1.15) as u32).min(inner_h).max(1);
+
+    // Tiny inter-block gap — just enough to keep the title from kissing the
+    // first line of body copy. A few texels at this scale read as a thin
+    // breathing margin once stretched onto the paper face.
+    let gap_h: u32 = 6;
+
+    // Rule: word-wrap on a rough character budget per line so the body
+    // reads as 2–3 stacked lines. The wrapped block gets the remaining
+    // vertical room after the title and gap.
+    let rule_h = inner_h
+        .saturating_sub(title_h + gap_h)
+        .max(1);
+    // Aim for ~3 lines of body copy at maximum (most boss rules wrap to 1–2),
+    // with a tall clamp ceiling so short rules render at full size and fill
+    // the paper face rather than floating as thin strokes after the bilinear
+    // stretch onto the ofuda mesh.
+    let rule_px_target = (rule_h as f32 / 3.0).clamp(48.0, 140.0);
+    let approx_glyph_w = rule_px_target * 0.55;
+    let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(8);
+    let wrapped_rule = wrap_text(rule, chars_per_line);
+
+    let title_band = rasterize_label_styled(
+        font,
+        title,
         inner_w,
-        top_h,
+        title_h,
+        Some(title_px),
+        LabelAlign::Center,
+    );
+    let rule_band = rasterize_label_styled(
+        font,
+        &wrapped_rule,
+        inner_w,
+        rule_h,
+        Some(rule_px_target),
+        LabelAlign::Center,
+    );
+
+    // Sumi-ink calligraphy: warm-black body with a soft brown drop shadow so
+    // the strokes lift off the parchment background even when the candle
+    // light desaturates the paper.
+    let ink = [0.12_f32, 0.08, 0.05, 1.0];
+    let shadow = [0.55_f32, 0.30, 0.10, 0.55];
+
+    let stamp = |band: &[u8], band_h: u32, y_off: u32, rgba: &mut Vec<u8>| {
+        blit_tinted(band, inner_w, band_h, rgba, w, pad_x + 2, y_off + 2, shadow);
+        blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, ink);
+    };
+
+    // Centre the (title + gap + rule) stack vertically inside `inner_h`.
+    let stack_h = title_h + gap_h + rule_h;
+    let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
+    stamp(&title_band, title_h, stack_top, &mut rgba);
+    stamp(&rule_band, rule_h, stack_top + title_h + gap_h, &mut rgba);
+    rgba
+}
+
+/// Reference height (in texels) for the soroban frame's front-face decal.
+/// The width is computed at draw time from the frame face's world-space
+/// aspect (the soroban is wide, ~3.5:1) so the bilinear sampler maps texels
+/// roughly 1:1 onto the wood and the engraved numerals stay sharp.
+pub const SOROBAN_DECAL_HEIGHT: u32 = 192;
+
+/// Reference height (in texels) for the cartouche front-face decal. The
+/// cartouche is roughly 2.4:1 wide; the renderer derives the actual width
+/// from the cartouche's world aspect at draw time.
+pub const SOROBAN_CARTOUCHE_DECAL_HEIGHT: u32 = 192;
+
+/// Paint the soroban frame's front-face decal: a single big "12 × 3"
+/// numeral pair gilded across the wood face, dead center, with the brass
+/// rails + beads as ambient surrounding flavor. The meld name lives on a
+/// separate cartouche mesh (see `rasterize_soroban_cartouche_decal`).
+///
+/// The decal coordinate system is `[0..w] x [0..h]` mapped onto the +Z face
+/// of the frame mesh (which spans `[-0.5..0.5]` in local x/y). When
+/// `chips` or `mult` is `None` we return a fully-transparent buffer so
+/// the wood face shows through and the rest state reads as a quiet
+/// physical object instead of a stale number.
+///
+/// `chicken_hand` flips the numeral ink from gilded gold → muted grey so
+/// a complete-but-yaku-less hand reads as "structurally legal, scores
+/// nothing" without celebrating it.
+pub fn rasterize_soroban_decal(
+    chips: Option<i32>,
+    mult: Option<f32>,
+    chicken_hand: bool,
+    ui_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    let (Some(chips), Some(mult)) = (chips, mult) else {
+        return rgba;
+    };
+
+    // Format the value pair. Mult is rendered without a trailing zero
+    // when it's a whole number ("3" not "3.0") and with a single decimal
+    // otherwise ("2.5"), matching how Balatro stamps integers vs fractional
+    // multipliers. The × glyph between them is `\u{00d7}` (multiplication
+    // sign) — narrower and more typographically right than ASCII 'x'.
+    let mult_text = if (mult - mult.round()).abs() < 0.05 {
+        format!("{}", mult.round() as i32)
+    } else {
+        format!("{:.1}", mult)
+    };
+    let label = format!("{}  \u{00d7}  {}", chips, mult_text);
+
+    // Numeral band fills most of the face vertically so it reads from
+    // across the table. Horizontal padding leaves room for the rails to
+    // poke past the numerals on either side without colliding with the
+    // engraved digits.
+    let pad_x = (w as f32 * 0.10) as u32;
+    let pad_y = (h as f32 * 0.12) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y * 2).max(1);
+    let chars = label.chars().count().max(1) as f32;
+    let by_h = inner_h as f32 * 0.85;
+    let by_w = inner_w as f32 * 1.5 / chars;
+    let font_px = by_h.min(by_w).max(20.0);
+    let band = rasterize_label_styled(
+        font,
+        &label,
+        inner_w,
+        inner_h,
+        Some(font_px),
+        LabelAlign::Center,
+    );
+
+    // Gilded engraving stack — same three-pass treatment as the score
+    // plaque so the numerals read as gold-leafed engraving on the wood.
+    let (gold_base, gold_highlight, gold_shadow) = if chicken_hand {
+        (
+            [0.55_f32, 0.54, 0.50, 1.0],
+            [0.78_f32, 0.78, 0.74, 1.0],
+            [0.16_f32, 0.16, 0.14, 0.85],
+        )
+    } else {
+        (
+            [0.92_f32, 0.74, 0.28, 1.0],
+            [1.00_f32, 0.96, 0.74, 1.0],
+            [0.18_f32, 0.12, 0.04, 0.92],
+        )
+    };
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
         &mut rgba,
         w,
-        pad_x + 2,
-        pad_y + 2,
-        shadow_for(champagne),
+        pad_x + 3,
+        pad_y + 3,
+        gold_shadow,
     );
     blit_tinted(
-        &top_band, inner_w, top_h, &mut rgba, w, pad_x, pad_y, champagne,
-    );
-    blit_tinted(
-        &bot_band,
+        &band,
         inner_w,
-        bot_h,
-        &mut rgba,
-        w,
-        pad_x + 2,
-        pad_y + top_h + 2,
-        shadow_for(parchment),
-    );
-    blit_tinted(
-        &bot_band,
-        inner_w,
-        bot_h,
+        inner_h,
         &mut rgba,
         w,
         pad_x,
-        pad_y + top_h,
-        parchment,
+        pad_y,
+        gold_base,
+    );
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        w,
+        pad_x.saturating_sub(1),
+        pad_y.saturating_sub(1),
+        gold_highlight,
     );
     rgba
 }
 
-/// Texture dimensions used by [`rasterize_plaque_decal`]. Exposed so the
-/// renderer can pass matching `(width, height)` to `set_decal` without
-/// hard-coding the same constants in two places.
-pub const PLAQUE_DECAL_SIZE: (u32, u32) = (1024, 384);
+/// Paint the cartouche front-face decal: just the meld name, big and
+/// centered, in a single dark-ink engraved pass against the cartouche's
+/// bone material. No background fill — the bone albedo from the mesh's
+/// `Plain` material shows through the transparent corners exactly the
+/// way the plaque/ofuda decals work.
+///
+/// `chicken_hand` flips the ink to a muted slate grey so a complete-
+/// but-yaku-less hand's nameplate reads as "structurally legal, scores
+/// nothing" without the warm sumi-ink celebration.
+pub fn rasterize_soroban_cartouche_decal(
+    meld_name: &str,
+    chicken_hand: bool,
+    ui_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    if meld_name.is_empty() {
+        return rgba;
+    }
+    // The cartouche's brass nubs poke down out of the bottom edge of
+    // the slab, so the visible *face* region of the mesh is the upper
+    // ~80% of the texture. Pad the engraving inside that region.
+    let pad_x = (w as f32 * 0.10) as u32;
+    let pad_y_top = (h as f32 * 0.10) as u32;
+    let pad_y_bot = (h as f32 * 0.18) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y_top + pad_y_bot).max(1);
+    let chars = meld_name.chars().count().max(1) as f32;
+    let by_h = inner_h as f32 * 0.85;
+    let by_w = inner_w as f32 * 1.6 / chars;
+    let font_px = by_h.min(by_w).max(16.0);
+    let band = rasterize_label_styled(
+        font,
+        meld_name,
+        inner_w,
+        inner_h,
+        Some(font_px),
+        LabelAlign::Center,
+    );
+    let ink = if chicken_hand {
+        [0.22_f32, 0.22, 0.24, 1.0]
+    } else {
+        [0.35_f32, 0.20, 0.06, 1.0]
+    };
+    let shadow = [ink[0] * 0.4, ink[1] * 0.4, ink[2] * 0.4, ink[3] * 0.7];
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        w,
+        pad_x + 1,
+        pad_y_top + 1,
+        shadow,
+    );
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        w,
+        pad_x,
+        pad_y_top,
+        ink,
+    );
+    rgba
+}
+
+/// Greedy word-wrap by character budget. Returns lines joined with `\n` so
+/// the result can flow straight into `rasterize_label_styled`'s multi-line
+/// path. Falls back to splitting an oversized single word at the budget so a
+/// runaway token can't blow past the line cap.
+fn wrap_text(text: &str, max_chars: usize) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            if word.chars().count() > max_chars {
+                // Hard split a single oversized word.
+                let mut buf = String::new();
+                for ch in word.chars() {
+                    buf.push(ch);
+                    if buf.chars().count() == max_chars {
+                        lines.push(std::mem::take(&mut buf));
+                    }
+                }
+                current = buf;
+            } else {
+                current.push_str(word);
+            }
+        } else if current.chars().count() + 1 + word.chars().count() <= max_chars {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines.join("\n")
+}
 
 /// Paint a soft inner border + corner gem onto an RGBA8 decal to mark a tile
 /// that has been enhanced by a talisman. The border is a 4-px-thick frame

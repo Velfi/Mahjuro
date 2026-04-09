@@ -28,7 +28,10 @@ use crate::render::draw_cmd::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
-use crate::ui::input::UiAction;
+use crate::ui::focus_nav::{
+    FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring,
+};
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 use super::pause_menu::PauseMenu;
@@ -45,6 +48,189 @@ enum ShopAction {
     BuyConsumable(usize),
     /// Sell the consumable at this index in `run.consumables.items`.
     SellConsumable(usize),
+}
+
+/// Every shop element a controller / keyboard player can navigate to.
+/// Mirrors the [`ShopHit`] flat-index scheme so the same action-dispatch
+/// path that handles mouse clicks can also handle Confirm presses, plus
+/// a synthetic `NextRound` variant for the 2D button at the bottom of
+/// the screen (which has no 3D pick equivalent).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShopFocus {
+    /// Index into the renderer's flat relic list — for-sale niches first,
+    /// then owned-dish relics. Matches `ShopHit::Relic(i)`.
+    Relic(usize),
+    /// Index into the for-sale-zodiacs-then-owned-zodiacs flat list.
+    /// Matches `ShopHit::Ribbon(i)`.
+    Ribbon(usize),
+    /// Index into the for-sale-talismans-then-owned-talismans flat list.
+    /// Matches `ShopHit::Talisman(i)`.
+    Talisman(usize),
+    /// Pick id of a foreground dish — relic dish, coin dish, or journal
+    /// book. Matches `ShopHit::Dish(id)`.
+    Dish(u32),
+    /// The 2D "Next Round" button at the bottom of the screen.
+    NextRound,
+}
+
+impl ShopFocus {
+    fn from_hit(h: ShopHit) -> Self {
+        match h {
+            ShopHit::Relic(i) => Self::Relic(i),
+            ShopHit::Ribbon(i) => Self::Ribbon(i),
+            ShopHit::Talisman(i) => Self::Talisman(i),
+            ShopHit::Dish(id) => Self::Dish(id),
+        }
+    }
+    /// The equivalent [`ShopHit`] for the variants that have one — i.e.
+    /// everything except `NextRound`. Used to feed the focus state into
+    /// the spotlight + tooltip + click-dispatch paths that already key
+    /// off `ShopHit`.
+    fn to_hit(self) -> Option<ShopHit> {
+        match self {
+            Self::Relic(i) => Some(ShopHit::Relic(i)),
+            Self::Ribbon(i) => Some(ShopHit::Ribbon(i)),
+            Self::Talisman(i) => Some(ShopHit::Talisman(i)),
+            Self::Dish(id) => Some(ShopHit::Dish(id)),
+            Self::NextRound => None,
+        }
+    }
+}
+
+/// Map a `ShopHit` (from a click *or* a focus Confirm) to the
+/// corresponding `ShopAction`. Pure lookup against the current shop
+/// stock + run state — no mutation. Dishes are info-only and return
+/// `None`. Returns `None` for the journal book too; the caller handles
+/// the journal toggle separately because it switches scene state
+/// (`self.journal.open`) rather than running an action.
+fn shop_action_for_hit(
+    hit: ShopHit,
+    items: &[ShopItem],
+    consumable_items: &[ConsumableShopItem],
+    run: &crate::game::run::RunState,
+) -> Option<ShopAction> {
+    let n_for_sale = items.len();
+    match hit {
+        ShopHit::Relic(i) => {
+            if i < n_for_sale {
+                Some(ShopAction::BuyCard(i))
+            } else {
+                Some(ShopAction::SellRelic(i - n_for_sale))
+            }
+        }
+        ShopHit::Ribbon(i) => {
+            // Ribbon hits index into the for-sale-zodiacs-then-owned-
+            // zodiacs flat list. Walk consumable_items in order, take
+            // the i-th zodiac. The for-sale section emits Buy; the
+            // owned-fan section emits Sell.
+            let zodiac_for_sale: Vec<usize> = consumable_items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, c)| {
+                    matches!(c.consumable, Consumable::Zodiac(_)).then_some(idx)
+                })
+                .collect();
+            if i < zodiac_for_sale.len() {
+                Some(ShopAction::BuyConsumable(zodiac_for_sale[i]))
+            } else {
+                let oi = i - zodiac_for_sale.len();
+                let mut count = 0usize;
+                let mut inv_idx = None;
+                for (idx, c) in run.consumables.items.iter().enumerate() {
+                    if matches!(c, Consumable::Zodiac(_)) {
+                        if count == oi {
+                            inv_idx = Some(idx);
+                            break;
+                        }
+                        count += 1;
+                    }
+                }
+                inv_idx.map(ShopAction::SellConsumable)
+            }
+        }
+        ShopHit::Talisman(i) => {
+            let talisman_for_sale: Vec<usize> = consumable_items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, c)| {
+                    matches!(c.consumable, Consumable::Talisman(_)).then_some(idx)
+                })
+                .collect();
+            if i < talisman_for_sale.len() {
+                Some(ShopAction::BuyConsumable(talisman_for_sale[i]))
+            } else {
+                let oi = i - talisman_for_sale.len();
+                let mut count = 0usize;
+                let mut inv_idx = None;
+                for (idx, c) in run.consumables.items.iter().enumerate() {
+                    if matches!(c, Consumable::Talisman(_)) {
+                        if count == oi {
+                            inv_idx = Some(idx);
+                            break;
+                        }
+                        count += 1;
+                    }
+                }
+                inv_idx.map(ShopAction::SellConsumable)
+            }
+        }
+        ShopHit::Dish(_) => None,
+    }
+}
+
+/// Apply a `ShopAction` to the shop's stock + the player's run state.
+/// Pulled out of the inline click-dispatch code so the focus model's
+/// `Confirm` path can fire the same action handlers without
+/// duplication.
+fn apply_shop_action(
+    action: ShopAction,
+    items: &mut Vec<ShopItem>,
+    consumable_items: &mut Vec<ConsumableShopItem>,
+    run: &mut crate::game::run::RunState,
+) {
+    match action {
+        ShopAction::BuyCard(idx) => {
+            if idx < items.len() {
+                let item = &items[idx];
+                if !item.sold && run.gold >= item.price && !run.relics.is_full() {
+                    let price = item.price;
+                    let relic = item.relic;
+                    run.gold -= price;
+                    run.relics.active.push(relic);
+                    run.recompute_capacities();
+                    items.remove(idx);
+                }
+            }
+        }
+        ShopAction::SellRelic(idx) => {
+            if idx < run.relics.active.len() {
+                let rid = run.relics.active[idx];
+                let refund = relic_sell_price(rid);
+                run.relics.active.remove(idx);
+                run.gold = run.gold.saturating_add(refund);
+            }
+        }
+        ShopAction::BuyConsumable(idx) => {
+            if idx < consumable_items.len() {
+                let item = &consumable_items[idx];
+                let price = item.price();
+                if !item.sold && run.gold >= price && !run.consumables.is_full() {
+                    let consumable = item.consumable;
+                    run.gold -= price;
+                    run.consumables.items.push(consumable);
+                    consumable_items.remove(idx);
+                }
+            }
+        }
+        ShopAction::SellConsumable(idx) => {
+            if idx < run.consumables.items.len() {
+                let c = run.consumables.items[idx];
+                let refund = consumable_sell_price(c);
+                run.consumables.items.remove(idx);
+                run.gold = run.gold.saturating_add(refund);
+            }
+        }
+    }
 }
 
 /// Refund when selling a consumable — half buy price, minimum 1 gold,
@@ -102,6 +288,16 @@ pub struct ShopScene {
     consumable_items: Vec<ConsumableShopItem>,
     pause_menu: PauseMenu,
     glossary: super::glossary::GlossaryOverlay,
+    journal: super::journal::JournalOverlay,
+    /// Currently focused shop element. `None` until the player presses a
+    /// directional input or moves the cursor over a shop object.
+    focus: Option<ShopFocus>,
+    /// Focus rect graph captured at the end of the previous `draw_frame`,
+    /// consumed by `update()` for cursor hit-tests and spatial navigation.
+    /// One frame stale — same pattern as `projected_relic_rects` and the
+    /// gameplay scene's identical mechanism. Wrapped in a `RefCell` because
+    /// `draw_frame` takes `&self` but needs to update this stash.
+    last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -115,6 +311,12 @@ const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 const PICK_RELIC_DISH: u32 = 1;
 /// Pick id for the coin dish.
 const PICK_COIN_DISH: u32 = 2;
+/// Pick id for the Yaku Journal book on the shop counter. Reuses the
+/// existing `DishExplicit` + `ShopHit::Dish(u32)` pick path so the shop
+/// can offer the journal without renderer changes — the silhouette is
+/// dish-shaped until proper book art lands, but the click target is
+/// what matters here.
+const PICK_JOURNAL_BOOK: u32 = 3;
 
 impl ShopScene {
     pub fn new(came_from_round: u32, relics: &RelicState) -> Self {
@@ -227,6 +429,9 @@ impl ShopScene {
             consumable_items,
             pause_menu: PauseMenu::new(),
             glossary: super::glossary::GlossaryOverlay::new(),
+            journal: super::journal::JournalOverlay::new(),
+            focus: None,
+            last_focus_rects: std::cell::RefCell::new(Vec::new()),
         }
     }
 }
@@ -259,39 +464,55 @@ struct ShopLayout {
     coin_dish_extents: [f32; 3],
     // ── Owned-relic positions inside the relic dish ──
     owned_relic_count: usize,
-    // ── Owned consumable fan ──
-    fan_anchor_px: (f32, f32, f32),
-    fan_count: usize,
-    fan_length: f32,
-    fan_width: f32,
+    // ── Owned consumable row (flat tray on the inventory shelf) ──
+    consumable_row_center_px: (f32, f32, f32),
+    consumable_row_extents: [f32; 3],
+    consumable_count: usize,
+    consumable_length: f32,
+    consumable_width: f32,
 }
 
 impl ShopLayout {
     fn build(
-        w: f32,
-        h: f32,
+        layout: &crate::ui::layout::LayoutResult,
         n_for_sale: usize,
         n_for_sale_ribbons: usize,
         n_owned_relics: usize,
         n_fan: usize,
     ) -> Self {
+        let w = layout.window_w;
+        let h = layout.window_h;
         // ── Camera: shop perspective ─────────────────────────────────────
-        // Eye is in front of the counter looking back at the cabinet, with
-        // a slight downward tilt so the foreground dishes are visible.
+        // Pulled in close with a wide FOV so the scene fills the screen
+        // on small/handheld displays — wasted black space around the
+        // cabinet was the dominant readability problem at low resolution.
         let camera = CameraParams {
-            eye: [0.0, h * 0.55, h * 1.30],
-            target: [0.0, h * 0.20, -h * 0.20],
+            eye: [0.0, h * 0.45, h * 0.95],
+            target: [0.0, h * 0.30, -h * 0.20],
             up: [0.0, 1.0, 0.0],
-            fovy_deg: 50.0,
+            fovy_deg: 60.0,
         };
 
         // ── Cabinet (back wall) ──────────────────────────────────────────
-        // Made deeper so the niches read as actual compartments and there's
-        // room to place relics inside them clearly visible from the camera.
-        let cabinet_extents = [w * 0.60, h * 0.55, 110.0_f32];
+        // Sized to fill most of the screen width and the upper two-thirds
+        // of the screen height. The previous w*0.60 × h*0.55 cabinet only
+        // covered ~40% of the viewport once perspective foreshortening
+        // was applied, leaving handheld players staring at black borders.
+        // Cabinet z-depth in real units — a curio cabinet is typically
+        // ~200-300mm front-to-back. Width and height stay layout-relative
+        // because the cabinet must fill most of the screen at any
+        // resolution; only the depth is a true physical measurement.
+        // Pushed back in depth so the cabinet sits well behind the
+        // inventory dish band. In the renderer's coord system the
+        // *second* component of `center_pos` is the world-Z anchor (depth)
+        // and the *third* is world-Y (vertical) — see `pixel_to_world` in
+        // wgpu_renderer.rs. Smaller `cabinet_pixel_y` = further from the
+        // camera. We slot the cabinet further upstage and bump its size
+        // back up to compensate for the perspective shrink.
+        let cabinet_extents = [w * 0.92, h * 0.78, layout.mm(220.0)];
         let cabinet_pixel_x = w * 0.5;
-        let cabinet_pixel_y = h * 0.20;
-        let cabinet_world_y = h * 0.32;
+        let cabinet_pixel_y = -h * 0.10;
+        let cabinet_world_y = h * 0.42;
         // Pixel-y of the cabinet's *front face* (toward camera). Anything
         // we want to display "in" the cabinet should sit at or in front
         // of this, otherwise it gets hidden behind the cabinet's wood.
@@ -315,25 +536,39 @@ impl ShopLayout {
             niche_centers_px[i] = (px, py, wy);
         }
 
-        // For-sale ribbon anchors: spread across the right half of the
-        // cabinet, pinned at the *front face* of the cabinet so they hang
-        // visibly in front of the back panel.
+        // For-sale ribbon anchors: spread across the (narrower) right side
+        // of the cabinet, pinned at the *front face* so they hang visibly
+        // in front of the back panel. The cabinet is asymmetric — the
+        // central divider sits at local-x = DIVIDER_X (≈+0.10), so the
+        // ribbon area runs from just-past-the-divider out to the inner
+        // edge of the right frame strip.
         let mut ribbon_anchors_px: [(f32, f32, f32); 8] = [(0.0, 0.0, 0.0); 8];
         let n_ribbons = n_for_sale_ribbons.min(8);
         if n_ribbons > 0 {
-            let right_x0 = cabinet_pixel_x + (cabinet_extents[0] * 0.5) * 0.18;
-            let right_x1 = cabinet_pixel_x + (cabinet_extents[0] * 0.5) * 0.86;
+            // Inner-right-area bounds in local-x (matches curio_cabinet_mesh).
+            let right_lx0 = crate::render::curio_cabinet_mesh::DIVIDER_X + 0.0125;
+            let right_lx1 = 0.5 - 0.04; // FRAME
+            let right_inner_w = right_lx1 - right_lx0;
+            // Tightened spread (0.25..0.78 of the inner area) so 3 ribbons
+            // read as a deliberate grouping rather than scattered laundry.
+            let right_x0 =
+                cabinet_pixel_x + (right_lx0 + right_inner_w * 0.25) * cabinet_extents[0];
+            let right_x1 =
+                cabinet_pixel_x + (right_lx0 + right_inner_w * 0.78) * cabinet_extents[0];
             let avail = right_x1 - right_x0;
             let step = if n_ribbons > 1 {
                 avail / (n_ribbons as f32 - 1.0)
             } else {
                 0.0
             };
-            // Pin near the top of the cabinet's interior.
-            let pin_world_y = cabinet_world_y + cabinet_extents[1] * 0.40;
+            // Pin near the very top of the cabinet's interior, just below
+            // the front frame, so the hanging ribbons fill the upper third
+            // of the cabinet where the camera frames them cleanly.
+            let pin_world_y = cabinet_world_y + cabinet_extents[1] * 0.46;
             // Pin slightly *in front of* the cabinet's front face so the
             // ribbon hangs toward the player and doesn't z-fight the wood.
-            let pin_pixel_y = cabinet_front_py + 8.0;
+            // Scaled with cabinet depth so it stays consistent at any size.
+            let pin_pixel_y = cabinet_front_py + cabinet_extents[2] * 0.05;
             for i in 0..n_ribbons {
                 let x = if n_ribbons == 1 {
                     (right_x0 + right_x1) * 0.5
@@ -343,19 +578,64 @@ impl ShopLayout {
                 ribbon_anchors_px[i] = (x, pin_pixel_y, pin_world_y);
             }
         }
-        let ribbon_length = h * 0.32;
-        let ribbon_width = h * 0.05;
+        // Hanging zodiac/talisman ribbons — sized layout-relative (not mm)
+        // so they hold their visual weight inside the (also layout-relative)
+        // cabinet at every resolution. Earlier we used mm-based dimensions,
+        // which made ribbons read as postage stamps lost on a wide back wall
+        // at high-DPI. Talisman extents derive from `ribbon_width`, so they
+        // scale automatically.
+        //
+        // Width drives the rendered ribbon size now that the renderer fits
+        // textured ribbons to the silk texture's natural 2:3 aspect (length =
+        // width × 1.5). `ribbon_length` stays as the upper bound the
+        // aspect-fit clamps against, so adjusting just `ribbon_width` is
+        // enough to resize the wall ribbons proportionally.
+        let ribbon_width = h * 0.085;
+        let ribbon_length = ribbon_width * 1.5;
 
-        // ── Foreground dishes ────────────────────────────────────────────
-        let relic_dish_center_px = (w * 0.50 - w * 0.13, h * 0.85, 0.0);
-        let relic_dish_extents = [w * 0.18, 18.0, h * 0.10];
-        let coin_dish_center_px = (w * 0.50 + w * 0.13, h * 0.85, 0.0);
-        let coin_dish_extents = [w * 0.13, 18.0, h * 0.08];
+        // ── Inventory shelf (bottom band) ────────────────────────────────
+        // The bottom ~25% of the screen is the player's inventory shelf:
+        // a single tray broken into three sub-zones — owned relics on the
+        // left (widest), owned consumables center-right, coin dish on the
+        // far right. Symmetry of language: relics and consumables share
+        // the same "laid flat in a tray" treatment so they parse as "your
+        // collection" rather than two unrelated systems.
+        // Inventory shelf. With the wide-FOV close camera, anything below
+        // ~h*0.74 pixel-y projects into the dark bottom corners outside
+        // the cabinet's lit area. The shelf is lifted to h*0.70 and all
+        // tray x-positions are tightened toward the screen center so the
+        // player's possessions read as one cohesive band rather than
+        // four objects flung to the corners.
+        let shelf_y = h * 0.70;
+        // All three inventory trays share a ~12mm brass rim — small
+        // decorative dishes that hold the player's items. Footprint
+        // (width/depth) stays layout-relative so the shelf reads as a
+        // wide band across the bottom of the screen at any resolution.
+        let dish_rim = layout.mm(12.0);
+        // Relic tray spans 16%–44% w → center at 30% w, half-width 14% w.
+        let relic_dish_center_px = (w * 0.30, shelf_y, 0.0);
+        let relic_dish_extents = [w * 0.14, dish_rim, h * 0.10];
+        // Consumable tray spans 48%–68% w → center at 58% w, half-width 10% w.
+        let consumable_row_center_px = (w * 0.58, shelf_y, 0.0);
+        let consumable_row_extents = [w * 0.10, dish_rim, h * 0.10];
+        // Coin dish — sits just right of the consumable tray as the
+        // rightmost item on the shelf. 71.5%–80.5% w.
+        let coin_dish_center_px = (w * 0.76, shelf_y, 0.0);
+        let coin_dish_extents = [w * 0.045, dish_rim, h * 0.07];
 
-        // ── Owned consumable fan ─────────────────────────────────────────
-        let fan_anchor_px = (w * 0.50, h * 0.78, h * 0.06);
-        let fan_length = h * 0.18;
-        let fan_width = h * 0.04;
+        // ── Owned consumables: flat row in the consumable tray ───────────
+        // Laid flat (face-up) like the relic tray, no radial fan. The
+        // ribbon length must fit inside the tray's z-extent (h*0.10) once
+        // rotated -90° about X, otherwise the back end of the ribbon (and
+        // the talisman center, which sits at `awy - length*0.4`) sinks
+        // below the tray surface and reads as "items submerged in wood."
+        // Owned-consumable face plates laid flat in the tray. Width drives
+        // the visible size; the renderer enforces a 2:3 aspect when a
+        // zodiac silk texture is bound, so we set length = width × 1.5
+        // here to match (talisman tablets reuse `consumable_width` for
+        // their footprint, so this also keeps tablet proportions sensible).
+        let consumable_width = layout.mm(9.0);
+        let consumable_length = consumable_width * 1.5;
 
         Self {
             camera,
@@ -374,10 +654,11 @@ impl ShopLayout {
             coin_dish_center_px,
             coin_dish_extents,
             owned_relic_count: n_owned_relics,
-            fan_anchor_px,
-            fan_count: n_fan,
-            fan_length,
-            fan_width,
+            consumable_row_center_px,
+            consumable_row_extents,
+            consumable_count: n_fan,
+            consumable_length,
+            consumable_width,
         }
     }
 
@@ -393,25 +674,20 @@ impl ShopLayout {
         (px, py, wy)
     }
 
-    /// `(anchor_px, anchor_py, anchor_wy, rotation_y_deg)` for the i-th
-    /// owned consumable ribbon in the fan.
-    fn fan_ribbon(&self, idx: usize) -> (f32, f32, f32, f32) {
-        let n = self.fan_count.max(1) as f32;
-        // Spread radially around the central anchor: -spread/2..+spread/2.
-        let spread = 60.0_f32.min(20.0 * n);
-        let t = if self.fan_count <= 1 {
-            0.0
-        } else {
-            (idx as f32 / (n - 1.0)) - 0.5
-        };
-        let rot_y = t * spread;
-        // All ribbons share the same anchor (their "hand grip").
-        (
-            self.fan_anchor_px.0,
-            self.fan_anchor_px.1,
-            self.fan_anchor_px.2,
-            rot_y,
-        )
+    /// Center pixel coords + base world_y of the i-th owned consumable
+    /// laid flat in the consumable tray. Single row, evenly spaced across
+    /// the tray width — capped at 8 items by the caller.
+    fn consumable_pos(&self, idx: usize) -> (f32, f32, f32) {
+        let n = self.consumable_count.max(1) as f32;
+        let row_w = self.consumable_row_extents[0] * 0.85;
+        let start_x = self.consumable_row_center_px.0 - row_w * 0.5 + (row_w / n) * 0.5;
+        let px = start_x + (row_w / n) * idx as f32;
+        let py = self.consumable_row_center_px.1;
+        // Lift the anchor well above the tray top so that talismans
+        // (centered at `awy - length*0.4`) and the back end of laid-flat
+        // ribbons stay above the wood instead of clipping into it.
+        let wy = self.consumable_row_extents[1] * 0.5 + self.consumable_length * 0.5 + 6.0;
+        (px, py, wy)
     }
 }
 
@@ -555,7 +831,7 @@ impl SceneBehavior for ShopScene {
     }
 
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused || self.glossary.open
+        self.pause_menu.paused || self.glossary.open || self.journal.open
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -578,6 +854,14 @@ impl SceneBehavior for ShopScene {
             return None;
         }
 
+        // Yaku Journal overlay — opened by clicking the Journal book on
+        // the counter (routed via the 3D-hit dispatcher below as
+        // `ShopHit::Dish(PICK_JOURNAL_BOOK)`).
+        if self.journal.open {
+            self.journal.handle_input(ctx.actions, ctx.button_clicks);
+            return None;
+        }
+
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a one-shot glossary request from the pause menu.
@@ -587,7 +871,110 @@ impl SceneBehavior for ShopScene {
             return t;
         }
 
-        // Enter / Next Round 2D button.
+        // ── Focus model: cursor sync, spatial navigation, Confirm ──────
+        //
+        // The shop's focus_rect_graph is rebuilt every draw frame from
+        // the projected screen rects of every focusable shop element
+        // (relics, ribbons, talismans, dishes, the Next Round button).
+        // We pull the previous frame's snapshot here for both cursor
+        // hit-testing and directional nav, mirroring the gameplay
+        // scene's pattern.
+        let focus_rects = self.last_focus_rects.borrow().clone();
+
+        // Cursor-mode sync: when the player is using the mouse, hover IS
+        // focus. We override `self.focus` from the renderer's pick path
+        // first (which is precise — it raycasts against the actual 3D
+        // mesh), and fall back to the projected 2D rect graph for the
+        // Next Round button (which lives entirely in 2D).
+        if ctx.input_mode == InputMode::Cursor {
+            let (cx, cy) = ctx.cursor_pos;
+            let new_focus = if let Some(hit) = ctx.picked_shop_object {
+                Some(ShopFocus::from_hit(hit))
+            } else {
+                focus_target_at_cursor(&focus_rects, cx, cy)
+            };
+            self.focus = new_focus;
+        }
+
+        // Resolve the rect of the currently-focused element so the
+        // spatial picker has a starting position.
+        let current_focus_rect = self.focus.and_then(|t| {
+            focus_rects
+                .iter()
+                .find_map(|(t2, r)| (*t2 == t).then_some(*r))
+        });
+
+        // Process directional + Confirm + Next-Round actions in one
+        // pass so they cooperate cleanly with the existing
+        // `CommitDiscard` shortcut and the SHOP_NEXT_ROUND_ID button.
+        // CommitDiscard is left in place as the gameplay-style "always
+        // advance" shortcut even when focus is on something else.
+        for &a in ctx.actions {
+            // Directional nav.
+            let dir: Option<FocusDir> = match a {
+                UiAction::FocusUp => Some(FocusDir::Up),
+                UiAction::FocusDown => Some(FocusDir::Down),
+                UiAction::FocusPrev => Some(FocusDir::Left),
+                UiAction::FocusNext => Some(FocusDir::Right),
+                _ => None,
+            };
+            if let Some(dir) = dir {
+                let start_rect = current_focus_rect.or_else(|| {
+                    // Seed on first directional press: prefer the first
+                    // for-sale relic, else any first entry.
+                    focus_rects
+                        .iter()
+                        .find_map(|(t, r)| matches!(t, ShopFocus::Relic(_)).then_some(*r))
+                });
+                if let Some(rect) = start_rect {
+                    if let Some(next) = pick_neighbor(rect, dir, &focus_rects) {
+                        self.focus = Some(next);
+                    }
+                } else if let Some((first, _)) = focus_rects.first() {
+                    self.focus = Some(*first);
+                }
+                continue;
+            }
+            // Confirm: route by focused element. NextRound advances the
+            // run; everything else fires the same action the click
+            // dispatcher below would have fired for an equivalent mouse
+            // click on the same target.
+            if matches!(a, UiAction::Confirm) {
+                if let Some(focus) = self.focus {
+                    if matches!(focus, ShopFocus::NextRound) {
+                        return Some(Scene::PickBlind(PickBlindScene::new()));
+                    }
+                    if let Some(hit) = focus.to_hit() {
+                        if let Some(action) = shop_action_for_hit(
+                            hit,
+                            &self.items,
+                            &self.consumable_items,
+                            ctx.run,
+                        ) {
+                            apply_shop_action(
+                                action,
+                                &mut self.items,
+                                &mut self.consumable_items,
+                                ctx.run,
+                            );
+                        } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
+                            // Journal book: same toggle as the click path.
+                            self.journal.toggle();
+                            return None;
+                        }
+                    }
+                }
+                continue;
+            }
+            // Cancel: clear focus so the next directional press re-seeds.
+            if matches!(a, UiAction::Cancel) {
+                self.focus = None;
+                continue;
+            }
+        }
+
+        // Enter / Next Round 2D button — kept as a global shortcut so
+        // the legacy keybind still works regardless of where focus is.
         for a in ctx.actions {
             if matches!(a, UiAction::CommitDiscard) {
                 return Some(Scene::PickBlind(PickBlindScene::new()));
@@ -608,122 +995,22 @@ impl SceneBehavior for ShopScene {
             let Some(hit) = ctx.picked_shop_object else {
                 continue;
             };
-            // Map the renderer's flat indices back to scene-meaningful actions.
-            let n_for_sale = self.items.iter().filter(|_| true).count();
-            let action: Option<ShopAction> = match hit {
-                ShopHit::Relic(i) => {
-                    if i < n_for_sale {
-                        Some(ShopAction::BuyCard(i))
-                    } else {
-                        let owned_idx = i - n_for_sale;
-                        Some(ShopAction::SellRelic(owned_idx))
-                    }
-                }
-                ShopHit::Ribbon(i) => {
-                    // Ribbon hits index into the for-sale-zodiacs-then-
-                    // owned-zodiacs flat list. Walk consumable_items in
-                    // order, take the i-th zodiac. The for-sale section
-                    // emits Buy; the owned-fan section emits Sell.
-                    let zodiac_for_sale: Vec<usize> = self
-                        .consumable_items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, c)| {
-                            matches!(c.consumable, Consumable::Zodiac(_)).then_some(idx)
-                        })
-                        .collect();
-                    if i < zodiac_for_sale.len() {
-                        Some(ShopAction::BuyConsumable(zodiac_for_sale[i]))
-                    } else {
-                        let oi = i - zodiac_for_sale.len();
-                        // Find the inventory index of the oi-th owned zodiac.
-                        let mut count = 0usize;
-                        let mut inv_idx = None;
-                        for (idx, c) in ctx.run.consumables.items.iter().enumerate() {
-                            if matches!(c, Consumable::Zodiac(_)) {
-                                if count == oi {
-                                    inv_idx = Some(idx);
-                                    break;
-                                }
-                                count += 1;
-                            }
-                        }
-                        inv_idx.map(ShopAction::SellConsumable)
-                    }
-                }
-                ShopHit::Talisman(i) => {
-                    // Same scheme: i indexes for-sale-talismans then owned.
-                    let talisman_for_sale: Vec<usize> = self
-                        .consumable_items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, c)| {
-                            matches!(c.consumable, Consumable::Talisman(_)).then_some(idx)
-                        })
-                        .collect();
-                    if i < talisman_for_sale.len() {
-                        Some(ShopAction::BuyConsumable(talisman_for_sale[i]))
-                    } else {
-                        let oi = i - talisman_for_sale.len();
-                        let mut count = 0usize;
-                        let mut inv_idx = None;
-                        for (idx, c) in ctx.run.consumables.items.iter().enumerate() {
-                            if matches!(c, Consumable::Talisman(_)) {
-                                if count == oi {
-                                    inv_idx = Some(idx);
-                                    break;
-                                }
-                                count += 1;
-                            }
-                        }
-                        inv_idx.map(ShopAction::SellConsumable)
-                    }
-                }
-                ShopHit::Dish(_) => None, // dishes are info-only on hover
-            };
-            match action {
-                Some(ShopAction::BuyCard(idx)) => {
-                    if idx < self.items.len() {
-                        let item = &self.items[idx];
-                        if !item.sold && ctx.run.gold >= item.price && !ctx.run.relics.is_full() {
-                            let price = item.price;
-                            let relic = item.relic;
-                            ctx.run.gold -= price;
-                            ctx.run.relics.active.push(relic);
-                            ctx.run.recompute_capacities();
-                            self.items.remove(idx);
-                        }
-                    }
-                }
-                Some(ShopAction::SellRelic(idx)) => {
-                    if idx < ctx.run.relics.active.len() {
-                        let rid = ctx.run.relics.active[idx];
-                        let refund = relic_sell_price(rid);
-                        ctx.run.relics.active.remove(idx);
-                        ctx.run.gold = ctx.run.gold.saturating_add(refund);
-                    }
-                }
-                Some(ShopAction::BuyConsumable(idx)) => {
-                    if idx < self.consumable_items.len() {
-                        let item = &self.consumable_items[idx];
-                        let price = item.price();
-                        if !item.sold && ctx.run.gold >= price && !ctx.run.consumables.is_full() {
-                            let consumable = item.consumable;
-                            ctx.run.gold -= price;
-                            ctx.run.consumables.items.push(consumable);
-                            self.consumable_items.remove(idx);
-                        }
-                    }
-                }
-                Some(ShopAction::SellConsumable(idx)) => {
-                    if idx < ctx.run.consumables.items.len() {
-                        let c = ctx.run.consumables.items[idx];
-                        let refund = consumable_sell_price(c);
-                        ctx.run.consumables.items.remove(idx);
-                        ctx.run.gold = ctx.run.gold.saturating_add(refund);
-                    }
-                }
-                None => {}
+            // Journal book intercept — clicking it opens the Yaku
+            // Journal overlay; the rest of update() bails out next
+            // frame because `journal.open` will be true.
+            if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
+                self.journal.toggle();
+                return None;
+            }
+            if let Some(action) =
+                shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
+            {
+                apply_shop_action(
+                    action,
+                    &mut self.items,
+                    &mut self.consumable_items,
+                    ctx.run,
+                );
             }
             return None;
         }
@@ -743,8 +1030,7 @@ impl SceneBehavior for ShopScene {
         let n_owned_relics = ctx.run.relics.active.len();
         let n_fan = ctx.run.consumables.items.len();
         let layout = ShopLayout::build(
-            w,
-            h,
+            ctx.layout,
             self.items.len(),
             n_for_sale_ribbons,
             n_owned_relics,
@@ -782,6 +1068,19 @@ impl SceneBehavior for ShopScene {
             extents: layout.relic_dish_extents,
             pick_id: Some(PICK_RELIC_DISH),
         });
+        // Consumable tray — same visual language as the relic dish, just
+        // a second compartment of the inventory shelf.
+        frame.dish_explicit(DishExplicit {
+            center_pos: [
+                layout.consumable_row_center_px.0,
+                layout.consumable_row_center_px.1,
+                layout.consumable_row_center_px.2,
+            ],
+            extents: layout.consumable_row_extents,
+            // No pick id — clicking individual consumables hits the
+            // ribbon/talisman pick paths, not the tray itself.
+            pick_id: None,
+        });
         frame.dish_explicit(DishExplicit {
             center_pos: [
                 layout.coin_dish_center_px.0,
@@ -791,16 +1090,29 @@ impl SceneBehavior for ShopScene {
             extents: layout.coin_dish_extents,
             pick_id: Some(PICK_COIN_DISH),
         });
+        // Yaku Journal book — sits at the far-left of the inventory
+        // shelf as a bookend to the player's possession area. Reuses the
+        // dish pick path; clicking it opens `JournalOverlay`.
+        let journal_cx = w * 0.13;
+        let journal_cy = h * 0.70;
+        let journal_cz = h * 0.05;
+        let journal_extents = [w * 0.030, 22.0, h * 0.05];
+        frame.dish_explicit(DishExplicit {
+            center_pos: [journal_cx, journal_cy, journal_cz],
+            extents: journal_extents,
+            pick_id: Some(PICK_JOURNAL_BOOK),
+        });
 
         // ── Relic batch: for-sale relics in cabinet niches, then owned ─
         // relics in the foreground dish. The order matters: pick_shop_object
         // returns indices into a flat list, so we partition with the
         // for-sale slots first and the owned slots second.
         let mut relic_placements: Vec<RelicPlacement> = Vec::new();
-        // Niche cell width is roughly cabinet_extents[0]/NICHE_COLS; size
-        // each relic so its full width (= 2 * half_extents) fits inside the
-        // cell with margin to clear the dividers and frame strips.
-        let niche_base = (layout.cabinet_extents[0] / NICHE_COLS as f32) * 0.18;
+        // Relic half-extent expressed directly as a fraction of cabinet
+        // width. The relics are the visual hero of the shop, so they want
+        // to *own* their niche (~80% fill). Anchoring to cabinet width
+        // (rather than mm) keeps them commanding at every resolution.
+        let niche_base = layout.cabinet_extents[0] * 0.065;
         for (i, item) in self.items.iter().enumerate() {
             if i >= layout.niche_count {
                 break;
@@ -860,14 +1172,19 @@ impl SceneBehavior for ShopScene {
                 col[3] = 0.30;
             }
             match item.consumable {
-                Consumable::Zodiac(_) => {
+                Consumable::Zodiac(z) => {
+                    // Textured ribbons: white base so the silk texture
+                    // shows through unmodified, but keep the per-item alpha
+                    // (sold = 0.30) so spent slots dim out.
+                    let alpha = col[3];
                     ribbon_placements.push(ZodiacRibbonPlacement {
                         anchor_pos: [ax, ay, awy],
                         length: layout.ribbon_length,
                         width: layout.ribbon_width,
                         rotation_y_deg: 0.0,
                         rotation_x_deg: 0.0,
-                        color: col,
+                        color: [1.0, 1.0, 1.0, alpha],
+                        kind: Some(z),
                     });
                 }
                 Consumable::Talisman(_) => {
@@ -887,36 +1204,38 @@ impl SceneBehavior for ShopScene {
                 }
             }
         }
-        // Owned fan: zodiacs hang as small ribbons, talismans float as
-        // small tablets, both rotated radially around the shared anchor.
+        // Owned consumables: flat row in the consumable tray. Both
+        // zodiac ribbons and talisman tablets lay face-up in the same
+        // tray so they parse as one inventory section. Capped at 8 items
+        // by `consumable_count` (the caller enforces the cap).
         for (i, c) in ctx.run.consumables.items.iter().enumerate() {
-            if i >= layout.fan_count {
+            if i >= layout.consumable_count {
                 break;
             }
-            let (ax, ay, awy, rot_y) = layout.fan_ribbon(i);
+            let (ax, ay, awy) = layout.consumable_pos(i);
             match c {
-                Consumable::Zodiac(_) => {
+                Consumable::Zodiac(z) => {
                     ribbon_placements.push(ZodiacRibbonPlacement {
                         anchor_pos: [ax, ay, awy],
-                        length: layout.fan_length,
-                        width: layout.fan_width,
-                        rotation_y_deg: rot_y,
-                        // Lay flat in the player's owned fan (face up)
-                        // instead of draping forward like the wall row.
+                        length: layout.consumable_length,
+                        width: layout.consumable_width,
+                        rotation_y_deg: 0.0,
+                        // Lay flat (face up) in the tray.
                         rotation_x_deg: -90.0,
-                        color: consumable_color(*c),
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Some(*z),
                     });
                 }
                 Consumable::Talisman(_) => {
                     talisman_placements.push(TalismanPlacement {
-                        center_pos: [ax, ay, awy - layout.fan_length * 0.4],
+                        center_pos: [ax, ay, awy - layout.consumable_length * 0.4],
                         extents: [
-                            layout.fan_width * 1.4,
-                            layout.fan_width * 2.0,
-                            layout.fan_width * 0.35,
+                            layout.consumable_width * 1.4,
+                            layout.consumable_width * 2.0,
+                            layout.consumable_width * 0.35,
                         ],
-                        rotation_y_deg: rot_y,
-                        // Lay flat on the dish (face up).
+                        rotation_y_deg: 0.0,
+                        // Lay flat in the tray (face up).
                         rotation_x_deg: -90.0,
                         color: consumable_color(*c),
                     });
@@ -958,28 +1277,95 @@ impl SceneBehavior for ShopScene {
                 pos: [w * 0.5, h * 0.05, h * 0.55],
                 radius: h * 1.20,
                 color: [1.00, 0.86, 0.55],
-                intensity: 1.40,
+                intensity: 1.85,
             },
             // Soft side fill on the cabinet's left half (relic niches).
             PointLight {
                 pos: [w * 0.20, h * 0.20, h * 0.30],
                 radius: h * 0.80,
                 color: [1.00, 0.78, 0.46],
-                intensity: 0.55,
+                intensity: 0.80,
             },
-            // Warm key on the foreground dishes.
+            // ── Inventory shelf spotlights ────────────────────────────
+            // One warm key per zone on the shelf. Each light sits at
+            // the same pixel-x as its tray but well *forward* in world
+            // space (large world_y), so the light hangs above the shelf
+            // like a track-mounted lamp instead of getting buried inside
+            // the cabinet's wood mesh (which now spans most of the upper
+            // pixel range after the handheld density pass).
+            // Relic tray spotlight. Height kept inside the radius (see
+            // the consumable spotlight comment below for the falloff math
+            // — same bug, same fix).
             PointLight {
-                pos: [w * 0.50, h * 0.65, h * 0.20],
-                radius: h * 0.70,
-                color: [1.00, 0.84, 0.56],
-                intensity: 1.10,
+                pos: [
+                    layout.relic_dish_center_px.0,
+                    layout.relic_dish_center_px.1,
+                    h * 0.20,
+                ],
+                radius: h * 0.65,
+                color: [1.00, 0.88, 0.60],
+                intensity: 2.80,
+            },
+            // Consumable tray spotlight — lights the player's owned
+            // zodiac ribbons / talisman tablets laid flat in the tray.
+            //
+            // CRITICAL: lit_mesh.wgsl attenuation is `(1 - dist/radius)²`
+            // and clamps to zero past `radius`. The tray surface sits at
+            // world_y ≈ 0 (a few scaled-mm above), so a light hovering at
+            // `h * 0.95` with a `h * 0.70` radius is *outside* its own
+            // reach (dist 1026 > radius 756) and contributes literally
+            // nothing — which is why the items read as if the light were
+            // *below* the tray. Drop the height to `h * 0.18` so the
+            // light actually lives inside its falloff envelope, and
+            // widen the radius so the entire 8-slot row is inside it.
+            PointLight {
+                pos: [
+                    layout.consumable_row_center_px.0,
+                    layout.consumable_row_center_px.1,
+                    h * 0.18,
+                ],
+                radius: h * 0.60,
+                color: [1.00, 0.90, 0.62],
+                intensity: 3.00,
+            },
+            // Coin dish spotlight — tighter, slightly cooler so the gold
+            // pops without overpowering the relic tray. Height kept
+            // inside the radius (same falloff fix as above).
+            PointLight {
+                pos: [
+                    layout.coin_dish_center_px.0,
+                    layout.coin_dish_center_px.1,
+                    h * 0.14,
+                ],
+                radius: h * 0.42,
+                color: [1.00, 0.92, 0.66],
+                intensity: 2.60,
+            },
+            // Journal book spotlight — small, anchored to the bookend
+            // at the far-left of the shelf so it reads as its own object.
+            // Height kept inside the radius (same falloff fix as above).
+            PointLight {
+                pos: [journal_cx, journal_cy, h * 0.10],
+                radius: h * 0.30,
+                color: [1.00, 0.90, 0.64],
+                intensity: 2.40,
             },
         ];
 
         // ── Hover spotlight: literal point light on the picked object ──
         // Uses the renderer's pick result so the spotlight is anchored to
         // the actual visible object the cursor is over.
-        let hover = ctx.picked_shop_object;
+        // Hover follows focus first (so controller / keyboard players see
+        // the spotlight + tooltip on whatever they've navigated to), with
+        // the cursor pick acting as a fallback for first-frame mouse
+        // hovers before update() has had a chance to sync focus to the
+        // cursor. Cursor mode `update()` writes `self.focus` from the
+        // pick result already, so this expression collapses to "show the
+        // focused element" in the steady state.
+        let hover: Option<ShopHit> = self
+            .focus
+            .and_then(|f| f.to_hit())
+            .or(ctx.picked_shop_object);
         if let Some(hit) = hover {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
             // Helper: get the (px, py, wy) anchor of a hit consumable for
@@ -1004,10 +1390,10 @@ impl SceneBehavior for ShopScene {
                     }
                     for_sale_count += 1;
                 }
-                // Owned-fan section.
+                // Owned-tray section.
                 let owned_target = hit_idx - for_sale_count;
                 let mut owned_count = 0usize;
-                for (fan_i, c) in ctx.run.consumables.items.iter().enumerate() {
+                for (row_i, c) in ctx.run.consumables.items.iter().enumerate() {
                     let matches = match c {
                         Consumable::Zodiac(_) => is_zodiac,
                         Consumable::Talisman(_) => !is_zodiac,
@@ -1016,9 +1402,8 @@ impl SceneBehavior for ShopScene {
                         continue;
                     }
                     if owned_count == owned_target {
-                        if fan_i < layout.fan_count {
-                            let (ax, ay, awy, _rot) = layout.fan_ribbon(fan_i);
-                            return Some((ax, ay, awy));
+                        if row_i < layout.consumable_count {
+                            return Some(layout.consumable_pos(row_i));
                         }
                         return None;
                     }
@@ -1068,6 +1453,8 @@ impl SceneBehavior for ShopScene {
                 ShopHit::Dish(id) => {
                     let center = if id == PICK_RELIC_DISH {
                         layout.relic_dish_center_px
+                    } else if id == PICK_JOURNAL_BOOK {
+                        (journal_cx, journal_cy, journal_cz)
                     } else {
                         layout.coin_dish_center_px
                     };
@@ -1356,6 +1743,12 @@ impl SceneBehavior for ShopScene {
                     format!("{}g", ctx.run.gold),
                     color::GOLD,
                 ),
+                ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK => (
+                    "Yaku Journal".to_string(),
+                    "Levels, plays, and how to build every yaku".to_string(),
+                    "Open".to_string(),
+                    color::CHAMPAGNE,
+                ),
                 ShopHit::Dish(_) => (
                     "Relic dish".to_string(),
                     "Hover an owned relic to sell it".to_string(),
@@ -1474,6 +1867,63 @@ impl SceneBehavior for ShopScene {
             (btn_x, btn_y, btn_w, btn_h),
             SHOP_NEXT_ROUND_ID,
         ));
+        let next_round_rect: [f32; 4] = [btn_x, btn_y, btn_w, btn_h];
+
+        // ── Focus rect graph + brass focus ring ────────────────────────
+        //
+        // Build a single list of `(ShopFocus, screen_rect)` covering
+        // every navigable shop element this frame, then stash it for
+        // `update()` to consume next frame. Same one-frame-stale pattern
+        // the gameplay scene uses.
+        //
+        // Source rects:
+        //   - Relics: `projected_relic_rects` (in-cabinet then in-dish
+        //     order, matching the renderer's flat list)
+        //   - Ribbons: `projected_ribbon_rects`
+        //   - Talismans: `projected_talisman_rects`
+        //   - Dishes: `aux_dish_rects` paired with their pick id
+        //   - Next Round: the 2D button rect we just computed above
+        let mut focus_rect_graph: Vec<(ShopFocus, [f32; 4])> = Vec::new();
+        for (i, r) in ctx.projected_relic_rects.iter().enumerate() {
+            if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
+                focus_rect_graph.push((ShopFocus::Relic(i), *r));
+            }
+        }
+        for (i, r) in ctx.projected_ribbon_rects.iter().enumerate() {
+            if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
+                focus_rect_graph.push((ShopFocus::Ribbon(i), *r));
+            }
+        }
+        for (i, r) in ctx.projected_talisman_rects.iter().enumerate() {
+            if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
+                focus_rect_graph.push((ShopFocus::Talisman(i), *r));
+            }
+        }
+        for (pid, r) in ctx.aux_dish_rects.iter() {
+            if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
+                if let Some(id) = pid {
+                    focus_rect_graph.push((ShopFocus::Dish(*id), *r));
+                }
+            }
+        }
+        focus_rect_graph.push((ShopFocus::NextRound, next_round_rect));
+
+        // Push the brass focus ring on top of the 2D HUD layer so it
+        // sits above the cabinet wood and dishes. Skipped during pause /
+        // overlay states because the overlay's own buttons take focus.
+        if !self.pause_menu.paused && !self.glossary.open && !self.journal.open {
+            if let Some(target) = self.focus {
+                let rect_lookup = focus_rect_graph
+                    .iter()
+                    .find_map(|(t, r)| (*t == target).then_some(*r));
+                if let Some(rect) = rect_lookup {
+                    push_focus_ring(rect, scale, &mut quads);
+                }
+            }
+        }
+
+        // Stash for next frame's update().
+        *self.last_focus_rects.borrow_mut() = focus_rect_graph;
 
         // The `?` glossary badge has been removed — the glossary is
         // reachable from the pause menu's "Glossary" entry. The keyboard
@@ -1504,6 +1954,15 @@ impl SceneBehavior for ShopScene {
         self.glossary
             .draw(w, h, &mut quads, &mut texts, &mut buttons);
         if self.glossary.open {
+            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
+        }
+
+        // Yaku Journal overlay — drawn after the glossary so opening
+        // both at once would let the journal win, mirroring the
+        // glossary-vs-pause precedence.
+        self.journal
+            .draw(w, h, ctx.run, &mut quads, &mut texts, &mut buttons);
+        if self.journal.open {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
 

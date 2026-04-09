@@ -18,6 +18,24 @@ pub enum MaterialKind {
     Wax = 1,
     Wick = 2,
     LacqueredWood = 3,
+    /// Same wood albedo branch as `LacqueredWood`, but with no vertex
+    /// displacement and no SSR. Used for thin upright slabs (e.g. the
+    /// hanging score plaque) where the table-tuned heightfield amplitude
+    /// would push vertices through the slab thickness and produce
+    /// rectangular ghost artifacts on the face.
+    LacqueredWoodFlat = 4,
+    /// Polished metal: tinted specular driven by Schlick Fresnel against the
+    /// instance base colour (no separate clearcoat). Diffuse is suppressed
+    /// almost entirely so the surface reads as a metallic conductor rather
+    /// than a brightly painted plastic.
+    Metal = 5,
+    /// Discard-river surface: a single mesh that mixes a stone trough and
+    /// a flowing water plane in one draw call. Per-fragment branch is
+    /// driven by the vertex `uv.y` channel — `uv.y > 0.5` is the water
+    /// surface (procedural scrolling normals + indigo/foam tint),
+    /// otherwise the fragment is treated as dark stone. Reads `extras.y`
+    /// from the point-light buffer for an animated time uniform.
+    Water = 6,
 }
 
 /// Compact per-mesh material parameters.

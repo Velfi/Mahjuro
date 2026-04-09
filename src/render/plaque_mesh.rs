@@ -93,7 +93,14 @@ pub fn build_plaque_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::LacqueredWood,
+            // `LacqueredWoodFlat` (not `LacqueredWood`): the table-tuned
+            // wood vertex displacement amplitude (1.6 world units) is
+            // larger than the plaque slab's world-Z thickness (~0.96),
+            // so the regular `LacqueredWood` would shove the front face
+            // vertices forward and backward through the slab and shade
+            // them as ghost rectangles on the face. The flat variant
+            // uses the same wood albedo branch but skips displacement.
+            kind: MaterialKind::LacqueredWoodFlat,
             base_color: [1.0, 1.0, 1.0, 1.0], // procedural wood
             specular_strength: 0.55,
             specular_power: 96.0,

@@ -209,7 +209,9 @@ struct PickBlindLayout {
 }
 
 impl PickBlindLayout {
-    fn build(w: f32, h: f32, upcoming_idx: usize) -> Self {
+    fn build(layout: &crate::ui::layout::LayoutResult, upcoming_idx: usize) -> Self {
+        let w = layout.window_w;
+        let h = layout.window_h;
         // ── Camera: front-elevated, looking at the shrine row ────────────
         // Mirrors the shop's "person standing in front of the cabinet"
         // setup. The eye is dropped a bit so the boss shrine reads as
@@ -255,7 +257,10 @@ impl PickBlindLayout {
         // before the small shrine to well after the boss shrine, with
         // depth that catches the spotlight pool around each base.
         let floor_anchor_px = (w * 0.50, row_y);
-        let floor_extents = [w * 0.95, 8.0, h * 0.30];
+        // Floor slab thickness — a thin stage platform (~6mm) so the
+        // shrines clearly stand on something without that something
+        // dominating the scene.
+        let floor_extents = [w * 0.95, layout.mm(6.0), h * 0.30];
 
         // ── Bottom info panel (text only — no buttons; Play and Skip
         // are 3D objects on the floor in front of the shrines).
@@ -281,8 +286,11 @@ impl PickBlindLayout {
         // Horizontal offset: half the upcoming shrine's footprint plus
         // half the altar dish width plus a small gap, so the altars
         // sit visibly outside the shrine's silhouette.
-        let play_dish_extents = [h * 0.12, 12.0, h * 0.06];
-        let skip_dish_extents = [h * 0.10, 11.0, h * 0.055];
+        // Brass altar dishes — small offering trays (~9mm rim height).
+        // Width and depth stay layout-relative so they scale with the
+        // shrine row at any resolution.
+        let play_dish_extents = [h * 0.12, layout.mm(9.0), h * 0.06];
+        let skip_dish_extents = [h * 0.10, layout.mm(8.0), h * 0.055];
         let gap = h * 0.04;
         let play_offset = up_ext[0] * 0.55 + play_dish_extents[0] * 0.6 + gap;
         let skip_offset = up_ext[0] * 0.55 + skip_dish_extents[0] * 0.6 + gap;
@@ -351,11 +359,7 @@ impl SceneBehavior for PickBlindScene {
         let upcoming = ctx.run.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
 
-        let layout = PickBlindLayout::build(
-            ctx.layout.window_w,
-            ctx.layout.window_h,
-            upcoming_index(upcoming),
-        );
+        let layout = PickBlindLayout::build(ctx.layout, upcoming_index(upcoming));
         let items = Self::flat_items(
             &layout,
             upcoming,
@@ -409,7 +413,7 @@ impl SceneBehavior for PickBlindScene {
         let upcoming = ctx.run.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
         let upcoming_idx = upcoming_index(upcoming);
-        let layout = PickBlindLayout::build(w, h, upcoming_idx);
+        let layout = PickBlindLayout::build(ctx.layout, upcoming_idx);
         let blinds = [BlindKind::Small, BlindKind::Big, BlindKind::Boss];
 
         let mut frame = UiFrame::new();
@@ -796,9 +800,9 @@ impl SceneBehavior for PickBlindScene {
         texts.push(TextLabel {
             rect: [panel_inner_x, summary_y, panel_inner_w, line_h],
             text: format!(
-                "Target {}   ·   Reward ×{:.2}   ·   Gold {}",
+                "Target {}   ·   Reward ${}   ·   Gold {}",
                 target_value,
-                upcoming.gold_multiplier(),
+                upcoming.clear_reward(),
                 ctx.run.gold,
             ),
             color: color::PARCHMENT,

@@ -56,7 +56,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             vd.x = vd.x + pt.vel_density.x * gauss;
             vd.y = vd.y + pt.vel_density.y * gauss;
             vd.z = vd.z + pt.vel_density.z * gauss;
-            vd.w = vd.w + pt.vel_density.w * gauss;
+            // Clamp density at zero. Smoke density is physically non-negative,
+            // but the inject step is otherwise purely additive — so a "remove
+            // smoke" impulse with negative density (e.g. the post-deal wind
+            // sweep in gameplay.rs) running for many frames at the same cells
+            // would drive density arbitrarily negative. The lightbake clamps
+            // negative density to 0 for the raymarcher, so the well stays
+            // *invisible*, but subsequent positive injections (cursor puffs,
+            // candle plumes) get absorbed into it and don't render until
+            // natural dissipation drains the well — which takes ~10 seconds
+            // and presents as "the cursor stopped emitting smoke." Clamping
+            // here keeps negative impulses doing their job (subtracting from
+            // existing positive density) without letting them dig wells.
+            vd.w = max(vd.w + pt.vel_density.w * gauss, 0.0);
         }
     }
 

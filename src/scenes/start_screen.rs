@@ -44,6 +44,28 @@ impl StartScreenScene {
         }
     }
 
+    /// Anchor rect for the menu column. Pushes the menu below the title +
+    /// active-profile summary so they never overlap on short windows, where
+    /// the default vertically-centered anchor would otherwise put the topmost
+    /// button right under the profile line.
+    fn menu_anchor(w: f32, h: f32) -> [f32; 4] {
+        let scale = (w.min(h)) / 600.0;
+        // Mirror the header math in `draw` so the anchor tracks the real
+        // bottom of the title + profile block.
+        let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
+        let title_y = h * 0.08;
+        let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
+        let header_bottom = title_y + title_h + h * 0.02 + prof_h;
+        // Reserve room at the bottom for the hint line.
+        let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
+        let bottom_reserve = hint_h + 24.0 * scale;
+        let cw = (260.0 * scale).min(w * 0.7);
+        let cx = (w - cw) * 0.5;
+        let cy = header_bottom + h * 0.02;
+        let ch = (h - cy - bottom_reserve).max(0.0);
+        [cx, cy, cw, ch]
+    }
+
     fn build_tree(&self, in_progress: bool) -> Tree<MainAction> {
         let mut items: Vec<wt::Node<MainAction>> = Vec::new();
         if in_progress {
@@ -100,6 +122,10 @@ impl StartScreenScene {
         Tree::vertical_menu(items)
     }
 
+    fn build_anchored_tree(&self, in_progress: bool, w: f32, h: f32) -> Tree<MainAction> {
+        self.build_tree(in_progress).with_anchor(Self::menu_anchor(w, h))
+    }
+
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
         *run = RunState::new_demo();
         Some(Scene::Shop(ShopScene::new(run.run_number, &run.relics)))
@@ -109,7 +135,7 @@ impl StartScreenScene {
 impl SceneBehavior for StartScreenScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let in_progress = ctx.run.is_in_progress();
-        let tree = self.build_tree(in_progress);
+        let tree = self.build_anchored_tree(in_progress, ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -200,7 +226,7 @@ impl SceneBehavior for StartScreenScene {
 
         // Render the menu via the widget tree (single source of truth for
         // layout, hit-test, hover, focus, click registration).
-        let tree = self.build_tree(in_progress);
+        let tree = self.build_anchored_tree(in_progress, w, h);
         let mut frame = TreeFrame {
             instances: &mut instances,
             labels: &mut text_labels,

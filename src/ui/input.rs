@@ -41,7 +41,8 @@ pub enum UiAction {
     /// can verify flame/wind reactions in-game. Bound to `B`.
     DebugBlowWind,
     /// Debug-only: toggle a world-axes overlay (red = +X, green = +Y,
-    /// blue = +Z) anchored at the camera's look target. Bound to `F2`.
+    /// blue = +Z) anchored at the camera's look target. Triggered from the
+    /// native Debug menu.
     DebugToggleAxes,
 }
 
@@ -144,7 +145,6 @@ impl InputState {
             // most layouts produces `?`, but we don't need shift state here:
             // both Slash and KeyH are unambiguous.
             KeyCode::Slash | KeyCode::KeyH | KeyCode::F1 => actions.push(UiAction::Help),
-            KeyCode::F2 => actions.push(UiAction::DebugToggleAxes),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {

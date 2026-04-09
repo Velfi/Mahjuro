@@ -202,6 +202,12 @@ pub fn score_sets(
             SetKind::Pair if has_pair_power => push_chips!("Pair Power", 30),
             _ => {}
         }
+        // KongsBlessing chip side: Kongs are rare enough that the relic
+        // needs to feel like jackpot loot when one finally lands. The
+        // mult side fires in Phase 5 alongside KanDrum.
+        if matches!(s.kind, SetKind::Kong) && ctx.relics.has(RelicId::KongsBlessing) {
+            push_chips!("Kong's Blessing", 120);
+        }
 
         // Per-tile chip relics within this set.
         if has_honor_fury {
@@ -212,7 +218,7 @@ pub fn score_sets(
                 .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
                 .count() as i32;
             if honor_count > 0 {
-                push_chips!("Honor Fury", 18 * honor_count);
+                push_chips!("Honor Fury", 28 * honor_count);
             }
         }
     }
@@ -294,12 +300,14 @@ pub fn score_sets(
 
     // ── Phase 3: cross-set chip relics ───────────────────────────────────
 
-    // DragonEcho: each dragon triplet adds the *base chips* of its adjacent
-    // sets (tile values + meld bonus) to the chip pile. The original semantic
-    // was "copy adjacent base points"; we keep that, just measured in chips.
+    // DragonEcho: each dragon triplet/kong copies the base chip value of
+    // every other (non-dragon-triplet) set in the hand. Adjacency was the
+    // original constraint but it made the relic punishingly positional —
+    // dropping it lets a single dragon triplet echo the whole rest of the
+    // hand, which finally feels Legendary.
     if ctx.relics.has(RelicId::DragonEcho) {
-        // Pre-compute each set's base chip contribution so we can index it
-        // without recomputing inside the loop.
+        // Pre-compute every set's base chip contribution so the inner loop
+        // is O(n) instead of O(n²).
         let set_bases: Vec<i32> = sets
             .iter()
             .map(|s| {
@@ -312,26 +320,33 @@ pub fn score_sets(
                 c
             })
             .collect();
+        // Tag which sets are dragon triplets/kongs so we can both (a) find
+        // the echoers and (b) exclude them from the echoed total (otherwise
+        // two dragon triplets in the same hand would copy each other and
+        // double up trivially).
+        let is_dragon_trip: Vec<bool> = sets
+            .iter()
+            .map(|s| {
+                if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                    return false;
+                }
+                s.tile_ids
+                    .first()
+                    .and_then(|id| tile_by_id(tiles, *id))
+                    .is_some_and(|t| t.suit == Suit::Dragon)
+            })
+            .collect();
 
-        for (i, s) in sets.iter().enumerate() {
-            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+        for (i, &is_echoer) in is_dragon_trip.iter().enumerate() {
+            if !is_echoer {
                 continue;
             }
-            let is_dragon = s
-                .tile_ids
-                .first()
-                .and_then(|id| tile_by_id(tiles, *id))
-                .is_some_and(|t| t.suit == Suit::Dragon);
-            if !is_dragon {
-                continue;
-            }
-            let mut echo = 0i32;
-            if i > 0 {
-                echo += set_bases[i - 1];
-            }
-            if i + 1 < sets.len() {
-                echo += set_bases[i + 1];
-            }
+            let echo: i32 = set_bases
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i && !is_dragon_trip[j])
+                .map(|(_, b)| *b)
+                .sum();
             if echo > 0 {
                 push_chips!("Dragon Echo", echo);
             }
@@ -440,14 +455,17 @@ pub fn score_sets(
             if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
                 continue;
             }
-            let is_red_dragon = s
+            let is_dragon = s
                 .tile_ids
                 .first()
                 .and_then(|id| tile_by_id(tiles, *id))
-                .is_some_and(|t| t.suit == Suit::Dragon && t.rank == 1);
-            if is_red_dragon {
-                // Patch C: 10 → 8 (rebalanced down with the rarity demotion).
-                push_mult!("Red Dragon Rage", 8.0);
+                .is_some_and(|t| t.suit == Suit::Dragon);
+            if is_dragon {
+                // Broadened from "red only" to any dragon (the original
+                // narrow trigger meant the relic could go a whole run
+                // without firing). Mult tuned 8 → 5 to compensate for the
+                // ~3× wider trigger window.
+                push_mult!("Red Dragon Rage", 5.0);
             }
         }
     }
@@ -491,6 +509,29 @@ pub fn score_sets(
         let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
         if kong_count > 0 {
             push_mult!("Kan Drum", 4.0 * kong_count as f64);
+        }
+    }
+
+    // KongsBlessing mult side: +2 mult per Kong. Pairs with the +120 chips
+    // in Phase 2. The chip side fires alongside Triplet Boost / Pair Power
+    // because it's a per-meld-kind chip relic; this is the mult half.
+    if ctx.relics.has(RelicId::KongsBlessing) {
+        let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+        if kong_count > 0 {
+            push_mult!("Kong's Blessing", 2.0 * kong_count as f64);
+        }
+    }
+
+    // Triplet Boost mult side: +0.2 mult per triplet/kong. Keeps the
+    // relic relevant past the early game when flat chip bonuses get
+    // drowned out by mult escalation.
+    if has_triplet_boost {
+        let trip_count = sets
+            .iter()
+            .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+            .count() as i32;
+        if trip_count > 0 {
+            push_mult!("Triplet Boost", 0.2 * trip_count as f64);
         }
     }
 
@@ -540,9 +581,11 @@ pub fn score_sets(
     // ── Phase 6: global mult relics ──────────────────────────────────────
 
     if ctx.relics.has(RelicId::MultiplierMaster) {
-        // Patch C retune: +0.3 mult per relic owned (was +0.5). The new
-        // 30-relic pool would otherwise let MM dominate every late build.
-        let bonus = 0.3 * ctx.relics.active.len() as f64;
+        // +0.5 mult per relic owned. Caps at +2.5 with a full 5-slot
+        // inventory, which is a real swing for a Rare. (Earlier Patch C
+        // tuning had this at +0.3 — too weak once dead-stub relics were
+        // pulled from the pool.)
+        let bonus = 0.5 * ctx.relics.active.len() as f64;
         if bonus > 0.0 {
             push_mult!("Multiplier Master", bonus);
         }
@@ -743,10 +786,10 @@ pub fn tile_effective_value(
     }
 
     // ── Per-tile chip relics ────────────────────────────────────────────
-    // Honor Fury: +18 per honor tile inside a meld.
+    // Honor Fury: +28 per honor tile inside a meld.
     if relics.has(RelicId::HonorFury) && matches!(tile.suit, Suit::Wind | Suit::Dragon) {
-        out.bonus_chips += 18;
-        out.sources.push(("Honor Fury", "+18 chips".into()));
+        out.bonus_chips += 28;
+        out.sources.push(("Honor Fury", "+28 chips".into()));
     }
     // Shanten Lens: +5 per tile in any scored set.
     if relics.has(RelicId::ShantenLens) {
@@ -831,9 +874,12 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let r = relics(vec![RelicId::TripletBoost]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-        // 59 base + 40 triplet boost = 99 chips, ×1 mult.
+        // 59 base + 40 triplet boost = 99 chips, ×1.2 mult (mult side added
+        // to keep the relic relevant past the early game).
+        // total = floor(99 × 1.2) = 118
         assert_eq!(breakdown.final_chips, 99);
-        assert_eq!(breakdown.total, 99);
+        assert_eq!(breakdown.final_mult, 1.2);
+        assert_eq!(breakdown.total, 118);
         assert!(breakdown.steps.iter().any(|s| s.source == "Triplet Boost"));
     }
 
@@ -1021,8 +1067,8 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let r = relics(vec![RelicId::HonorFury]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-        // 86 base (honor 12 × 3 + triplet 50) + Patch C retune 18×3 = 140
-        assert_eq!(breakdown.final_chips, 140);
+        // 86 base (honor 12 × 3 + triplet 50) + 28 × 3 (Honor Fury) = 170
+        assert_eq!(breakdown.final_chips, 170);
     }
 
     // ── Red Dragon Rage ─────────────────────────────────────────────
@@ -1037,17 +1083,18 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let r = relics(vec![RelicId::RedDragonRage]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-        // Patch C: RedDragonRage retuned 10 → 8 mult.
+        // RedDragonRage broadened to any dragon triplet/kong, mult 8 → 5.
         // chips: 12+12+12 (honor 12) + 50 (triplet) + 40 (Yakuhai) = 126
-        // mult: 1 + 8 (RedDragonRage) + 3 (Yakuhai) = 12
-        // total: 126 × 12 = 1512
+        // mult: 1 + 5 (RedDragonRage) + 3 (Yakuhai) = 9
+        // total: 126 × 9 = 1134
         assert_eq!(breakdown.final_chips, 126);
-        assert_eq!(breakdown.final_mult, 12.0);
-        assert_eq!(breakdown.total, 1512);
+        assert_eq!(breakdown.final_mult, 9.0);
+        assert_eq!(breakdown.total, 1134);
     }
 
     #[test]
-    fn red_dragon_rage_ignores_green_dragon() {
+    fn red_dragon_rage_fires_on_any_dragon_triplet() {
+        // Broadened trigger: green dragon triplet now fires the relic too.
         let hand = vec![
             Tile::new(Suit::Dragon, 2, 0),
             Tile::new(Suit::Dragon, 2, 1),
@@ -1056,10 +1103,8 @@ mod tests {
         let sets = find_pairs_and_triplets(&hand);
         let r = relics(vec![RelicId::RedDragonRage]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-        // RedDragonRage must NOT fire on green — assert no Red Dragon Rage step.
-        // (Yakuhai will fire on the green triplet, so final_mult is 4.0, not 1.0.)
         assert!(
-            !breakdown
+            breakdown
                 .steps
                 .iter()
                 .any(|s| s.source == "Red Dragon Rage")
@@ -1083,9 +1128,9 @@ mod tests {
             RelicId::QuickDraw,
         ]);
         let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-        // Patch C retune: MultiplierMaster is +0.3 per relic. 3 relics → +0.9.
-        // Final mult: 1.0 + 0.9 = 1.9.
-        assert_eq!(breakdown.final_mult, 1.9);
+        // MultiplierMaster: +0.5 per relic. 3 relics → +1.5.
+        // Final mult: 1.0 + 1.5 = 2.5.
+        assert_eq!(breakdown.final_mult, 2.5);
     }
 
     // ── Dragon Echo ─────────────────────────────────────────────────
