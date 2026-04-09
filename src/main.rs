@@ -38,6 +38,218 @@ use winit::window::{Window, WindowId};
 
 // ── Tuning overlay (debug) ──────────────────────────────────────────
 
+// ── Debug visibility overlay ────────────────────────────────────────────
+//
+// Five-row checkbox modal for hiding gameplay HUD elements (tiles, candles,
+// the two hanging plaques, the inventory dish). Used to inspect the
+// underlying procedurally generated 3D scene without the HUD in the way.
+// Modeled on `TuningOverlay`: keyboard-driven, App-owned, drawn in
+// `App::draw` after the scene's frame is built.
+
+const DEBUG_VIS_ROW_COUNT: usize = 5;
+
+struct DebugVisibilityOverlay {
+    cursor: usize,
+    hide_tiles: bool,
+    hide_candles: bool,
+    hide_blind_plaque: bool,
+    hide_scoring_placard: bool,
+    hide_inventory: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DebugVisResult {
+    Stay,
+    Close,
+}
+
+impl DebugVisibilityOverlay {
+    fn new(
+        hide_tiles: bool,
+        hide_candles: bool,
+        hide_blind_plaque: bool,
+        hide_scoring_placard: bool,
+        hide_inventory: bool,
+    ) -> Self {
+        Self {
+            cursor: 0,
+            hide_tiles,
+            hide_candles,
+            hide_blind_plaque,
+            hide_scoring_placard,
+            hide_inventory,
+        }
+    }
+
+    fn update(&mut self, actions: &[UiAction]) -> DebugVisResult {
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % DEBUG_VIS_ROW_COUNT;
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + DEBUG_VIS_ROW_COUNT - 1) % DEBUG_VIS_ROW_COUNT;
+                }
+                UiAction::Confirm => {
+                    self.toggle_current();
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    return DebugVisResult::Close;
+                }
+                _ => {}
+            }
+        }
+        DebugVisResult::Stay
+    }
+
+    fn toggle_current(&mut self) {
+        let f = match self.cursor {
+            0 => &mut self.hide_tiles,
+            1 => &mut self.hide_candles,
+            2 => &mut self.hide_blind_plaque,
+            3 => &mut self.hide_scoring_placard,
+            4 => &mut self.hide_inventory,
+            _ => return,
+        };
+        *f = !*f;
+    }
+
+    fn row(&self, i: usize) -> (&'static str, bool) {
+        match i {
+            0 => ("Hand Tiles", self.hide_tiles),
+            1 => ("Candles", self.hide_candles),
+            2 => ("Blind Plaque", self.hide_blind_plaque),
+            3 => ("Scoring Placard", self.hide_scoring_placard),
+            4 => ("Inventory + Items", self.hide_inventory),
+            _ => ("", false),
+        }
+    }
+
+    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0;
+        let mut instances = Vec::new();
+        let mut labels = Vec::new();
+
+        // Dim full-screen backdrop.
+        instances.push(GpuInstance {
+            rect: [0.0, 0.0, window_w, window_h],
+            color: [0.0, 0.0, 0.0, 0.7],
+        });
+
+        let panel_w = (440.0 * scale).min(window_w * 0.90);
+        let row_h = (44.0 * scale).max(28.0);
+        let row_gap = (8.0 * scale).max(4.0);
+        let title_h = (48.0 * scale).max(28.0);
+        let footer_h = (22.0 * scale).max(14.0);
+        let panel_h = title_h
+            + row_gap
+            + DEBUG_VIS_ROW_COUNT as f32 * (row_h + row_gap)
+            + footer_h
+            + row_gap * 3.0;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+
+        // Border.
+        let border = 3.0;
+        instances.push(GpuInstance {
+            rect: [
+                panel_x - border,
+                panel_y - border,
+                panel_w + border * 2.0,
+                panel_h + border * 2.0,
+            ],
+            color: [0.3, 0.45, 0.7, 0.85],
+        });
+        // Panel.
+        instances.push(GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: [0.08, 0.08, 0.14, 0.95],
+        });
+
+        // Title.
+        labels.push(TextLabel {
+            rect: [panel_x, panel_y + row_gap, panel_w, title_h],
+            text: "Debug Visibility".into(),
+            color: [1.0, 0.95, 0.7, 1.0],
+            ..Default::default()
+        });
+
+        let mut row_y = panel_y + row_gap + title_h + row_gap;
+        let row_pad = 12.0 * scale;
+        let check_size = row_h * 0.55;
+        for i in 0..DEBUG_VIS_ROW_COUNT {
+            let (name, checked) = self.row(i);
+            let is_focused = self.cursor == i;
+
+            // Row background.
+            let bg = if is_focused {
+                [0.20, 0.32, 0.50, 0.90]
+            } else {
+                [0.12, 0.15, 0.24, 0.75]
+            };
+            instances.push(GpuInstance {
+                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
+                color: bg,
+            });
+
+            // Checkbox border.
+            let cb_x = panel_x + row_pad;
+            let cb_y = row_y + (row_h - check_size) * 0.5;
+            instances.push(GpuInstance {
+                rect: [cb_x - 2.0, cb_y - 2.0, check_size + 4.0, check_size + 4.0],
+                color: [0.55, 0.65, 0.85, 0.9],
+            });
+            instances.push(GpuInstance {
+                rect: [cb_x, cb_y, check_size, check_size],
+                color: [0.04, 0.05, 0.10, 1.0],
+            });
+            // Filled square when checked.
+            if checked {
+                let pad = check_size * 0.18;
+                instances.push(GpuInstance {
+                    rect: [
+                        cb_x + pad,
+                        cb_y + pad,
+                        check_size - pad * 2.0,
+                        check_size - pad * 2.0,
+                    ],
+                    color: [0.95, 0.80, 0.30, 1.0],
+                });
+            }
+
+            // Label.
+            let tc = if is_focused {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                [0.7, 0.72, 0.82, 0.9]
+            };
+            labels.push(TextLabel {
+                rect: [
+                    cb_x + check_size + row_pad,
+                    row_y,
+                    panel_w - (check_size + row_pad * 3.0),
+                    row_h,
+                ],
+                text: name.to_string(),
+                color: tc,
+                ..Default::default()
+            });
+
+            row_y += row_h + row_gap;
+        }
+
+        // Footer hint.
+        labels.push(TextLabel {
+            rect: [panel_x, row_y + row_gap, panel_w, footer_h],
+            text: "↑/↓ select   ⏎ toggle   Esc close".into(),
+            color: [0.55, 0.6, 0.75, 0.9],
+            ..Default::default()
+        });
+
+        (instances, labels)
+    }
+}
+
 const TUNING_ROW_COUNT: usize = 10; // 9 sliders + Export button
 const TUNING_SLIDER_ROWS: usize = TUNING_ROW_COUNT - 1;
 const TUNING_MIN_MS: u64 = 50;
@@ -625,6 +837,20 @@ struct App {
     show_fps: bool,
     /// Whether to hide hand tiles from rendering (debug toggle).
     hide_tiles: bool,
+    /// Whether to hide candles + their flames + per-candle point lights.
+    /// Set from the debug visibility modal.
+    hide_candles: bool,
+    /// Whether to hide the top hanging blind/score plaque (gameplay HUD).
+    hide_blind_plaque: bool,
+    /// Whether to hide the smaller status placard hanging below the blind
+    /// plaque (gameplay HUD).
+    hide_scoring_placard: bool,
+    /// Whether to hide the inventory dish + relic boxes + zodiac ribbons +
+    /// talismans (everything sitting on the brass tray).
+    hide_inventory: bool,
+    /// In-game modal that toggles the `hide_*` debug flags above.
+    /// `None` = closed.
+    debug_visibility_overlay: Option<DebugVisibilityOverlay>,
     /// Smoothed FPS value for display.
     fps_smoothed: f32,
     /// Paradox-style nested tooltip system.
@@ -639,6 +865,11 @@ struct App {
     /// Lets the player watch the winning cascade play out before the
     /// Results / GameOver scene fades in.
     deferred_round_end: Option<GameEvent>,
+    /// One-shot debug picker armed by the "Object Hit Test" debug menu
+    /// item. When `true`, the next mouse-press is consumed: it's
+    /// hit-tested against every known scene object via
+    /// `WgpuRenderer::pick_debug_object` and the matched name is logged.
+    debug_object_hit_test_armed: bool,
 }
 
 impl App {
@@ -672,6 +903,7 @@ impl App {
         self.modals.is_active()
             || self.tuning_overlay.is_some()
             || self.sfx_test_overlay.is_some()
+            || self.debug_visibility_overlay.is_some()
             || self.scene.has_blocking_overlay()
     }
 
@@ -718,6 +950,7 @@ impl App {
             modals: ModalQueue::default(),
             pending_post_game_over_modals: Vec::new(),
             deferred_round_end: None,
+            debug_object_hit_test_armed: false,
             debug_menu: None,
             smoke_intensity: settings.smoke_intensity,
             smoke_detail: settings.smoke_detail,
@@ -728,6 +961,11 @@ impl App {
             prev_cursor: (0.0, 0.0),
             show_fps: false,
             hide_tiles: false,
+            hide_candles: false,
+            hide_blind_plaque: false,
+            hide_scoring_placard: false,
+            hide_inventory: false,
+            debug_visibility_overlay: None,
             fps_smoothed: 60.0,
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
@@ -782,39 +1020,36 @@ impl App {
         let ww = win_size.width as f32;
         let wh = win_size.height as f32;
         match ev {
-            GameEvent::RoundComplete { .. } => {
+            GameEvent::RoundComplete { payout, .. } => {
                 self.audio.play_sfx(audio::SfxId::RoundWin);
+                let mut lines = vec![format!(
+                    "Score: {} / {}",
+                    self.run.round_score, self.run.target_score
+                )];
+                lines.push(format!("Base reward  +${}", payout.base_reward));
+                if payout.unused_play_bonus > 0 {
+                    lines.push(format!(
+                        "Unused plays  +${}",
+                        payout.unused_play_bonus
+                    ));
+                }
+                if payout.interest > 0 {
+                    lines.push(format!("Interest  +${}", payout.interest));
+                }
+                if payout.green_luck_bonus > 0 {
+                    lines.push(format!(
+                        "Green Luck  +${}",
+                        payout.green_luck_bonus
+                    ));
+                }
+                lines.push(format!("Total  +${}", payout.total));
                 let modal = Modal::new(
                     "Round Complete!",
-                    format!(
-                        "Score: {} / {}  —  Well played!",
-                        self.run.round_score, self.run.target_score
-                    ),
+                    lines.join("\n"),
                     ModalTheme::Success,
                 )
                 .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                 self.modals.push(modal);
-                // Patch B: each cleared blind drops Zodiac cards. Small=1,
-                // Big=1, Boss=2. Drops bypass the inventory cap so the player
-                // never loses a reward — capacity governs purchasing, not
-                // gifts.
-                let drops = match self.run.blind {
-                    crate::core::rules::BlindKind::Small => 1,
-                    crate::core::rules::BlindKind::Big => 1,
-                    crate::core::rules::BlindKind::Boss => 2,
-                };
-                {
-                    use rand::seq::IndexedRandom;
-                    let mut rng = rand::rng();
-                    for _ in 0..drops {
-                        if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
-                            self.run
-                                .consumables
-                                .items
-                                .push(crate::core::consumable::Consumable::Zodiac(z));
-                        }
-                    }
-                }
                 let final_score = self.run.round_score;
                 let target = self.run.target_score;
                 self.run.advance_round();
@@ -882,13 +1117,11 @@ impl App {
         let layout = self
             .layout_engine
             .solve(size.width as f32, size.height as f32);
-        let focus = self.input.as_ref().map(|i| i.focused_index()).unwrap_or(0);
 
         let ctx = DrawCtx {
             layout: &layout,
             anim: &self.anim,
             run: &self.run,
-            focus_tile_index: focus,
             progress: &self.progress,
             active_profile: self.active_profile,
             game_in_progress: self.run.is_in_progress(),
@@ -898,20 +1131,25 @@ impl App {
             projected_talisman_rects: renderer.projected_talisman_rects(),
             projected_plaque_rects: renderer.projected_plaque_rects(),
             projected_yaku_tablet_rects: renderer.projected_yaku_tablet_rects(),
+            projected_bowl_rect: renderer.projected_bowl_rect(),
+            projected_mirror_rect: renderer.projected_mirror_rect(),
+            projected_wood_tablet_rects: renderer.projected_wood_tablet_rects(),
             picked_gameplay_object: self
                 .input
                 .as_ref()
                 .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
             projected_shrine_rects: renderer.projected_shrine_rects(),
             aux_dish_rects: renderer.aux_dish_rects(),
-            picked_hand_tile: self
-                .input
-                .as_ref()
-                .and_then(|i| renderer.pick_hand_tile(i.last_cursor.0, i.last_cursor.1)),
             picked_shop_object: self
                 .input
                 .as_ref()
                 .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
+            projected_peg_rects: renderer.projected_peg_rects(),
+            debug_visibility: scenes::DebugVisibility {
+                hide_candles: self.hide_candles,
+                hide_blind_plaque: self.hide_blind_plaque,
+                hide_scoring_placard: self.hide_scoring_placard,
+            },
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -1041,6 +1279,14 @@ impl App {
             self.active_buttons.clear();
         }
 
+        // Debug visibility overlay — on top of modals.
+        if let Some(ref overlay) = self.debug_visibility_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            frame.quads(insts);
+            frame.texts(lbls);
+            self.active_buttons.clear();
+        }
+
         // Tooltip overlay — pushed *after* modals/tuning so it sits on top
         // of all scene/modal content. Suppressed whenever any modal-like
         // overlay is up so hover effects don't leak through to elements
@@ -1095,16 +1341,40 @@ impl App {
             });
         }
 
-        // Debug: drop hand-tile draw markers so the 3D tile bodies and face
-        // labels don't render. Lets us inspect the table, lighting, and
-        // background art without tiles in the way.
-        if self.hide_tiles {
+        // Debug: drop draw cmds for hidden HUD elements so we can inspect the
+        // procedural 3D scene underneath. The blind plaque, scoring placard,
+        // and candles are gated at the *call site* in `gameplay.rs` (via
+        // `DrawCtx::debug_visibility`) because (a) the two plaques share the
+        // same `DrawCmd::Plaque(_)` variant and can't be told apart by a
+        // post-process filter, and (b) skipping candle pushes also skips the
+        // attached `PointLight`s, which a cmd-only filter would leak. Tiles
+        // and inventory items have unambiguous variants and can be safely
+        // dropped after the fact.
+        let any_hide = self.hide_tiles || self.hide_inventory;
+        if any_hide {
+            let hide_tiles = self.hide_tiles;
+            let hide_inv = self.hide_inventory;
             frame.cmds.retain(|c| {
-                !matches!(
-                    c,
-                    crate::render::draw_cmd::DrawCmd::HandTileBackdrop
-                        | crate::render::draw_cmd::DrawCmd::HandTileFaces
-                )
+                use crate::render::draw_cmd::DrawCmd;
+                if hide_tiles
+                    && matches!(c, DrawCmd::HandTileBackdrop | DrawCmd::HandTileFaces)
+                {
+                    return false;
+                }
+                if hide_inv
+                    && matches!(
+                        c,
+                        DrawCmd::Dish
+                            | DrawCmd::DishExplicit(_)
+                            | DrawCmd::RelicBatch(_)
+                            | DrawCmd::ZodiacBatch(_)
+                            | DrawCmd::TalismanBatch(_)
+                            | DrawCmd::RelicIcon(_)
+                    )
+                {
+                    return false;
+                }
+                true
             });
         }
 
@@ -1198,9 +1468,20 @@ impl App {
                 self.show_fps = !self.show_fps;
                 log::info!("[Debug] Show FPS: {}", self.show_fps);
             }
-            DebugAction::ToggleHideTiles => {
-                self.hide_tiles = !self.hide_tiles;
-                log::info!("[Debug] Hide tiles: {}", self.hide_tiles);
+            DebugAction::OpenDebugVisibility => {
+                if self.debug_visibility_overlay.is_some() {
+                    self.debug_visibility_overlay = None;
+                    log::info!("[Debug] Closed debug visibility overlay");
+                } else {
+                    self.debug_visibility_overlay = Some(DebugVisibilityOverlay::new(
+                        self.hide_tiles,
+                        self.hide_candles,
+                        self.hide_blind_plaque,
+                        self.hide_scoring_placard,
+                        self.hide_inventory,
+                    ));
+                    log::info!("[Debug] Opened debug visibility overlay");
+                }
             }
             DebugAction::OpenTuning => {
                 if self.tuning_overlay.is_none() {
@@ -1228,6 +1509,22 @@ impl App {
                 // picks it up on the next frame.
                 self.mouse_actions.push(UiAction::DebugBlowWind);
                 log::info!("[Debug] Blow wind gust queued");
+            }
+            DebugAction::ToggleWorldAxes => {
+                // Forward to the gameplay scene's existing toggle branch
+                // via the same UiAction the keyboard binding used to push.
+                self.mouse_actions.push(UiAction::DebugToggleAxes);
+                log::info!("[Debug] World-axes overlay toggled");
+            }
+            DebugAction::ArmObjectHitTest => {
+                self.debug_object_hit_test_armed = !self.debug_object_hit_test_armed;
+                if self.debug_object_hit_test_armed {
+                    log::info!(
+                        "[Debug] Object hit test ARMED — click anywhere in the world to identify the object under the cursor"
+                    );
+                } else {
+                    log::info!("[Debug] Object hit test disarmed");
+                }
             }
             DebugAction::SetBoss(kind) => {
                 // Replace the current ante's boss and rebuild the resolved
@@ -1331,11 +1628,28 @@ impl ApplicationHandler for App {
                         GameEvent::ScoreUpdated(_) => {
                             self.audio.play_sfx(audio::SfxId::ScoreReveal);
                         }
-                        GameEvent::ScoreStepRevealed { .. } => {
+                        GameEvent::ScoreStepRevealed { index } => {
+                            // Cycle three pre-recorded tick pitches per
+                            // step so the cascade audibly climbs through
+                            // its reveal sequence (rodio doesn't support
+                            // runtime pitch shifting). Layer the existing
+                            // ScoreStep "rollover" sound on top to keep the
+                            // soft confirmation that's already wired into
+                            // the game.
+                            let tick = match index % 3 {
+                                0 => audio::SfxId::ScoreTickA,
+                                1 => audio::SfxId::ScoreTickB,
+                                _ => audio::SfxId::ScoreTickC,
+                            };
+                            self.audio.play_sfx(tick);
                             self.audio.play_sfx(audio::SfxId::ScoreStep);
                         }
                         GameEvent::ScoreCascadeFinal => {
+                            // Crescendo: brassy hit jingle layered over the
+                            // existing confirmation sting so the closing
+                            // beat lands with weight.
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
+                            self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
                         }
                         ev @ GameEvent::RoundComplete { .. } => {
                             // Hold the win sting + scene transition until the
@@ -1464,6 +1778,26 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
+                // 3b''. If the debug visibility overlay is open, intercept
+                // input. Mirror the toggle state back to App fields each
+                // frame so the gameplay scene + retain filter pick up live
+                // changes immediately.
+                if let Some(mut overlay) = self.debug_visibility_overlay.take() {
+                    let result = overlay.update(&actions);
+                    self.hide_tiles = overlay.hide_tiles;
+                    self.hide_candles = overlay.hide_candles;
+                    self.hide_blind_plaque = overlay.hide_blind_plaque;
+                    self.hide_scoring_placard = overlay.hide_scoring_placard;
+                    self.hide_inventory = overlay.hide_inventory;
+                    if result == DebugVisResult::Stay {
+                        self.debug_visibility_overlay = Some(overlay);
+                    } else {
+                        log::info!("[Debug] Closed debug visibility overlay");
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
                 // 3c. If a modal is active, intercept input: dismiss on Confirm/Cancel.
                 if self.modals.is_active() {
                     for a in &actions {
@@ -1503,6 +1837,10 @@ impl ApplicationHandler for App {
                     .renderer
                     .as_ref()
                     .and_then(|r| r.pick_gameplay_object(cursor_pos.0, cursor_pos.1));
+                let picked_hand_tile_for_update = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -1518,6 +1856,12 @@ impl ApplicationHandler for App {
                     cascade_tuning: &self.cascade_tuning,
                     picked_shop_object,
                     picked_gameplay_object,
+                    input_mode: self
+                        .input
+                        .as_ref()
+                        .map(|i| i.mode)
+                        .unwrap_or(crate::ui::input::InputMode::Cursor),
+                    picked_hand_tile: picked_hand_tile_for_update,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -1636,6 +1980,36 @@ impl ApplicationHandler for App {
                         .unwrap_or((0.0, 0.0));
 
                     if state == ElementState::Pressed {
+                        // Debug "Object Hit Test" one-shot picker. If armed,
+                        // consume this click: hit-test the cursor against
+                        // every known scene object and log the match. Skip
+                        // all the normal click dispatch (buttons, tiles,
+                        // drag) so the click can't accidentally fire a
+                        // gameplay action while we're just probing.
+                        if self.debug_object_hit_test_armed {
+                            self.debug_object_hit_test_armed = false;
+                            let name = self
+                                .renderer
+                                .as_ref()
+                                .and_then(|r| r.pick_debug_object(cursor.0, cursor.1));
+                            match name {
+                                Some(n) => log::info!(
+                                    "[Debug] Object hit test: {n} at ({:.0}, {:.0})",
+                                    cursor.0,
+                                    cursor.1
+                                ),
+                                None => log::info!(
+                                    "[Debug] Object hit test: (no object) at ({:.0}, {:.0})",
+                                    cursor.0,
+                                    cursor.1
+                                ),
+                            }
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+
                         // Check if click hit any button.
                         let mut hit = false;
                         for btn in &self.active_buttons {

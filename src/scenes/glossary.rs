@@ -380,7 +380,7 @@ impl GlossaryOverlay {
 /// Short hand-shape description for each yaku — keeps the glossary entries
 /// pithy. Long enough to teach, short enough to fit on one line at typical
 /// window sizes.
-fn yaku_shape_text(yk: YakuKind) -> &'static str {
+pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     match yk {
         YakuKind::Tanyao => "All tiles 2–8, no honors/terminals",
         YakuKind::Toitoi => "All triplets/kongs (no sequences)",
@@ -397,7 +397,7 @@ fn yaku_shape_text(yk: YakuKind) -> &'static str {
     }
 }
 
-fn section_heading_h(window_h: f32, scale: f32) -> f32 {
+pub(crate) fn section_heading_h(window_h: f32, scale: f32) -> f32 {
     section_heading_font(window_h) * 1.7 + (6.0 * scale)
 }
 
@@ -408,7 +408,7 @@ fn section_heading_font(window_h: f32) -> f32 {
 /// Total height (name row + body rows + bottom padding) of one glossary
 /// entry. Must match `push_glossary_entry`'s layout exactly so the scroll
 /// machinery in `draw` can compute row positions ahead of time.
-fn entry_height(window_h: f32, scale: f32) -> f32 {
+pub(crate) fn entry_height(window_h: f32, scale: f32) -> f32 {
     let name_font = name_font(window_h);
     let name_h = (name_font * 1.5).max(22.0);
     let body_font = body_font(window_h);
@@ -427,7 +427,7 @@ fn body_font(window_h: f32) -> f32 {
     typography::size(typography::BODY, window_h).max(15.0)
 }
 
-fn push_section_heading(
+pub(crate) fn push_section_heading(
     labels: &mut Vec<TextLabel>,
     text: &str,
     x: f32,
@@ -450,7 +450,7 @@ fn push_section_heading(
 /// Render one glossary entry (gold name on top, parchment body below) at
 /// the given top-left. Layout must match `entry_height` so the scroll
 /// stepping in `GlossaryOverlay::draw` aligns rows perfectly.
-fn push_glossary_entry(
+pub(crate) fn push_glossary_entry(
     labels: &mut Vec<TextLabel>,
     name: &str,
     body: &str,

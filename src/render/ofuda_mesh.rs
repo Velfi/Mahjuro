@@ -35,7 +35,31 @@ pub fn build_ofuda_mesh() -> MeshCpu {
         HALF_Z,
     );
 
+    // The slab face we want the title/rule decal to appear on is +Z (the
+    // broad paper face that tilts toward the camera). `push_box` emits
+    // faces in order +X, -X, +Y, -Y, +Z, -Z, with 4 verts per face — so
+    // the +Z face occupies vertices 16..20. Reorient that face's UVs so
+    // the texture's +u runs along local +X and +v runs along local -Y
+    // (top of the texture sits at the top of the visible paper face).
+    // The +Z corner order pushed by `push_box` is:
+    //   v16 = (x0, y0, z1)  bottom-left
+    //   v17 = (x1, y0, z1)  bottom-right
+    //   v18 = (x1, y1, z1)  top-right
+    //   v19 = (x0, y1, z1)  top-left
+    vertices[16].uv = [0.0, 1.0];
+    vertices[17].uv = [1.0, 1.0];
+    vertices[18].uv = [1.0, 0.0];
+    vertices[19].uv = [0.0, 0.0];
+    // Every other slab face samples the transparent (0,0) corner of the
+    // decal so the title/rule only appears on the front face. The shader
+    // composites decal as `mix(albedo, tex_rgb, tex.a)`, so alpha=0
+    // leaves the paper albedo untouched on the back/edges.
+    for i in (0..16).chain(20..24) {
+        vertices[i].uv = [0.0, 0.0];
+    }
+
     // Brass eyelet centered at the top edge.
+    let eyelet_base = vertices.len();
     push_box(
         &mut vertices,
         &mut indices,
@@ -46,6 +70,11 @@ pub fn build_ofuda_mesh() -> MeshCpu {
         -HALF_Z * 1.5,
         HALF_Z * 1.5,
     );
+    // Eyelet samples the transparent corner so the title/rule decal stays
+    // pinned to the paper face only.
+    for i in eyelet_base..vertices.len() {
+        vertices[i].uv = [0.0, 0.0];
+    }
 
     MeshCpu {
         vertices,

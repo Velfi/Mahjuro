@@ -172,7 +172,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::HonorFury,
                 RelicId::WhiteSilence,
                 RelicId::Overflow,
-                RelicId::CodexCompass,
+                // CodexCompass disabled — see core::relic::all_relic_defs.
             ],
             rules: vec![RuleModifier::NoSequenceBonus],
         },
@@ -188,9 +188,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         },
         6 => LevelUnlocks {
             relics: vec![
-                RelicId::RiichiStick,
-                RelicId::RiverEraser,
-                RelicId::FuritenWard,
+                // RiichiStick / RiverEraser / FuritenWard disabled — see
+                // core::relic::all_relic_defs and PATCH_D / PATCH_E docs.
                 RelicId::LunarAlmanac,
             ],
             rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],

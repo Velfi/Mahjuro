@@ -76,6 +76,12 @@ impl Default for CascadeTuning {
     }
 }
 
+/// How long the cascade visibly hangs between the last step and the final
+/// total beat. Acts as a poor-man's time dilation: the screen briefly
+/// freezes on the previous step's values so the player anticipates the
+/// closing crescendo.
+const PRE_TOTAL_FREEZE_MS: u64 = 140;
+
 impl CascadeTuning {
     pub fn base_hold(&self) -> Duration {
         Duration::from_millis(self.base_hold_ms)
@@ -97,6 +103,10 @@ enum Phase {
     ShowBase,
     /// Showing relic/rule step at index `i`.
     ShowStep(usize),
+    /// Brief freeze after the last step finishes, before snapping into
+    /// `ShowTotal`. Acts as a dramatic anticipation pause for the closing
+    /// crescendo. Holds the last step's displayed values.
+    PreTotalFreeze,
     /// Holding on the final total.
     ShowTotal,
     /// Cascade complete.
@@ -175,8 +185,17 @@ impl ScoringCascade {
                     if i + 1 < self.breakdown.steps.len() {
                         self.phase = Phase::ShowStep(i + 1);
                     } else {
-                        self.phase = Phase::ShowTotal;
+                        // Insert a brief freeze before the final beat so
+                        // the screen visibly hangs and the player feels
+                        // the closing crescendo land.
+                        self.phase = Phase::PreTotalFreeze;
                     }
+                    self.phase_started = now;
+                }
+            }
+            Phase::PreTotalFreeze => {
+                if elapsed >= Duration::from_millis(PRE_TOTAL_FREEZE_MS) {
+                    self.phase = Phase::ShowTotal;
                     self.phase_started = now;
                 }
             }
@@ -221,6 +240,9 @@ impl ScoringCascade {
             Phase::ShowStep(_) => {
                 (elapsed.as_secs_f32() / self.tuning.step_hold().as_secs_f32()).min(1.0)
             }
+            Phase::PreTotalFreeze => {
+                (elapsed.as_millis() as f32 / PRE_TOTAL_FREEZE_MS as f32).min(1.0)
+            }
             Phase::ShowTotal => {
                 (elapsed.as_secs_f32() / self.tuning.total_hold().as_secs_f32()).min(1.0)
             }
@@ -245,6 +267,17 @@ impl ScoringCascade {
                 let to = self.score_before + running;
                 (lerp_u32(from, to, tick_t), Some(i))
             }
+            Phase::PreTotalFreeze => {
+                // Hold on whatever the *last* step landed on. We're hanging
+                // here on purpose so the player anticipates the final beat.
+                let last = self
+                    .breakdown
+                    .steps
+                    .last()
+                    .map(|s| s.running_total.max(0) as u32)
+                    .unwrap_or_else(|| self.breakdown.base_chips.max(0) as u32);
+                (self.score_before + last, None)
+            }
             Phase::ShowTotal | Phase::Done => {
                 let total = self.score_before + self.earned;
                 (total, None)
@@ -262,6 +295,23 @@ impl ScoringCascade {
                 let to = self.breakdown.base_chips as f64;
                 let chips = (to * tick_t as f64).round() as i32;
                 (chips, 1.0, None, None)
+            }
+            Phase::PreTotalFreeze => {
+                // Hold the last step's chips/mult so the readout visibly
+                // freezes through the anticipation pause.
+                let chips = self
+                    .breakdown
+                    .steps
+                    .last()
+                    .map(|s| s.running_chips)
+                    .unwrap_or(self.breakdown.base_chips);
+                let mult = self
+                    .breakdown
+                    .steps
+                    .last()
+                    .map(|s| s.running_mult)
+                    .unwrap_or(1.0);
+                (chips, mult, None, None)
             }
             Phase::ShowStep(i) => {
                 let i = *i;

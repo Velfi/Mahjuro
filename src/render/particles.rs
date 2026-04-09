@@ -25,7 +25,7 @@ impl ParticleSystem {
         }
     }
 
-    /// Emit particles from a position with radial velocity.
+    /// Emit a soft puff of small particles. Used for ambient feedback.
     pub fn emit(&mut self, x: f32, y: f32, count: usize, color: [f32; 4], lifetime: f32) {
         let mut rng = rand::rng();
         for _ in 0..count {
@@ -37,6 +37,33 @@ impl ParticleSystem {
                 y,
                 vx: angle.cos() * speed,
                 vy: angle.sin() * speed - 20.0, // slight upward bias
+                color,
+                life: 1.0,
+                max_life: lifetime,
+                size,
+            });
+        }
+    }
+
+    /// Emit a *real* explosion: dramatically larger particles, faster
+    /// outward velocity, and a heavy upward kick so the burst reads as a
+    /// firework rather than a polite puff. Used by the scoring cascade
+    /// when a hand actually scores so the player feels the impact.
+    pub fn explode(&mut self, x: f32, y: f32, count: usize, color: [f32; 4], lifetime: f32) {
+        let mut rng = rand::rng();
+        for _ in 0..count {
+            let angle: f32 = rng.random::<f32>() * std::f32::consts::TAU;
+            // ~3× the soft-puff outward speed.
+            let speed: f32 = 120.0 + rng.random::<f32>() * 260.0;
+            // Big chunky shards so the explosion is visible from across
+            // the screen, not just up close to the source.
+            let size: f32 = 6.0 + rng.random::<f32>() * 14.0;
+            self.particles.push(Particle {
+                x,
+                y,
+                vx: angle.cos() * speed,
+                // Strong upward bias — fireworks-style.
+                vy: angle.sin() * speed - 180.0,
                 color,
                 life: 1.0,
                 max_life: lifetime,

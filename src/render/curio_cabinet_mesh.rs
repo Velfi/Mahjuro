@@ -35,6 +35,11 @@ const NICHE_DEPTH: f32 = 0.55;
 const FRAME: f32 = 0.04;
 /// Thickness of dividers between niches.
 const DIVIDER: f32 = 0.025;
+/// X offset (in local space) of the central left/right divider. Positive
+/// pushes the divider rightward, giving the relic-niche side more width
+/// than the ribbon-hanging side. Relics are the visual hero of the shop,
+/// so the cabinet is intentionally asymmetric: ~60% relics, ~40% ribbons.
+pub const DIVIDER_X: f32 = 0.10;
 /// Half-thickness of the cabinet's front plane (z extent).
 const HALF_Z: f32 = 0.5;
 
@@ -122,12 +127,13 @@ pub fn build_curio_cabinet_mesh() -> MeshCpu {
         zfront_hi,
     );
 
-    // ── 3. Middle divider splitting left/right halves.
+    // ── 3. Middle divider splitting left/right halves. Offset by
+    //         DIVIDER_X so the relic side is wider than the ribbon side.
     push_box(
         &mut vertices,
         &mut indices,
-        -DIVIDER * 0.5,
-        DIVIDER * 0.5,
+        DIVIDER_X - DIVIDER * 0.5,
+        DIVIDER_X + DIVIDER * 0.5,
         ymin + FRAME,
         ymax - FRAME,
         zfront_lo,
@@ -138,7 +144,7 @@ pub fn build_curio_cabinet_mesh() -> MeshCpu {
     //         horizontal between rows). Each divider sits flush with the
     //         cabinet front plane.
     let left_x0 = xmin + FRAME;
-    let left_x1 = -DIVIDER * 0.5;
+    let left_x1 = DIVIDER_X - DIVIDER * 0.5;
     let inner_y0 = ymin + FRAME;
     let inner_y1 = ymax - FRAME;
     let cell_w = (left_x1 - left_x0) / NICHE_COLS as f32;
@@ -215,7 +221,7 @@ pub fn niche_centers_local(n: usize) -> Vec<[f32; 3]> {
     let ymin = -0.5;
     let ymax = 0.5;
     let left_x0 = xmin + FRAME;
-    let left_x1 = -DIVIDER * 0.5;
+    let left_x1 = DIVIDER_X - DIVIDER * 0.5;
     let inner_y0 = ymin + FRAME;
     let inner_y1 = ymax - FRAME;
     let cell_w = (left_x1 - left_x0) / NICHE_COLS as f32;

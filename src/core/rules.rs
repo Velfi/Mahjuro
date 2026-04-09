@@ -116,12 +116,15 @@ impl BlindKind {
         }
     }
 
-    /// Gold bonus multiplier for clearing this blind.
-    pub fn gold_multiplier(self) -> f32 {
+    /// Flat gold reward for clearing this blind. Balatro-style: a fixed
+    /// payout per blind, not scaled by overscoring. Late-run income comes
+    /// from interest on banked gold and unused-plays payout, not from
+    /// blowing past the target.
+    pub fn clear_reward(self) -> u32 {
         match self {
-            BlindKind::Small => 1.0,
-            BlindKind::Big => 1.5,
-            BlindKind::Boss => 2.5,
+            BlindKind::Small => 3,
+            BlindKind::Big => 4,
+            BlindKind::Boss => 5,
         }
     }
 

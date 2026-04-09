@@ -98,6 +98,26 @@ impl ZodiacKind {
         }
     }
 
+    /// Lowercase slug used for asset filenames (e.g. `dragon` →
+    /// `assets/textures/zodiac_dragon.png`). See
+    /// `scripts/generate_zodiac_ribbons.py`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            ZodiacKind::Rat => "rat",
+            ZodiacKind::Ox => "ox",
+            ZodiacKind::Tiger => "tiger",
+            ZodiacKind::Rabbit => "rabbit",
+            ZodiacKind::Dragon => "dragon",
+            ZodiacKind::Snake => "snake",
+            ZodiacKind::Horse => "horse",
+            ZodiacKind::Goat => "goat",
+            ZodiacKind::Monkey => "monkey",
+            ZodiacKind::Rooster => "rooster",
+            ZodiacKind::Dog => "dog",
+            ZodiacKind::Pig => "pig",
+        }
+    }
+
     /// Look up the zodiac that levels a given yaku, if any.
     pub fn for_yaku(yaku: YakuKind) -> Option<ZodiacKind> {
         Self::all().iter().copied().find(|z| z.yaku() == yaku)

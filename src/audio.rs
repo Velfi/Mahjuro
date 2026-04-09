@@ -15,6 +15,16 @@ pub enum SfxId {
     TileDiscard,
     ScoreReveal,
     ScoreStep,
+    /// Three perceptibly different tick pitches cycled per cascade step so
+    /// the audio rises through the reveal sequence even though `rodio`
+    /// doesn't support runtime pitch shifting. Mapped to Kenney
+    /// `tick_001/002/004.ogg`.
+    ScoreTickA,
+    ScoreTickB,
+    ScoreTickC,
+    /// Brassy hit jingle layered on top of `ScoreFinal` to add weight to
+    /// the closing crescendo.
+    ScoreCrescendo,
     ScoreFinal,
     RelicPickup,
     InvalidAction,
@@ -31,6 +41,10 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::TileDiscard,
         SfxId::ScoreReveal,
         SfxId::ScoreStep,
+        SfxId::ScoreTickA,
+        SfxId::ScoreTickB,
+        SfxId::ScoreTickC,
+        SfxId::ScoreCrescendo,
         SfxId::ScoreFinal,
         SfxId::RelicPickup,
         SfxId::InvalidAction,
@@ -47,6 +61,10 @@ impl SfxId {
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
             SfxId::ScoreReveal => "kenney_ui-audio/Audio/switch38.ogg",
             SfxId::ScoreStep => "kenney_ui-audio/Audio/rollover1.ogg",
+            SfxId::ScoreTickA => "kenney_interface-sounds/Audio/tick_001.ogg",
+            SfxId::ScoreTickB => "kenney_interface-sounds/Audio/tick_002.ogg",
+            SfxId::ScoreTickC => "kenney_interface-sounds/Audio/tick_004.ogg",
+            SfxId::ScoreCrescendo => "kenney_music-jingles/Audio/Hit jingles/jingles_HIT09.ogg",
             SfxId::ScoreFinal => "kenney_interface-sounds/Audio/confirmation_002.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
             SfxId::InvalidAction => "kenney_interface-sounds/Audio/drop_003.ogg",

@@ -5,6 +5,7 @@ pub mod collection;
 pub mod game_over;
 pub mod gameplay;
 pub mod glossary;
+pub mod journal;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
@@ -35,8 +36,20 @@ use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::{RelicPlacement, UiFrame};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
-use crate::ui::input::UiAction;
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::layout::{LayoutResult, Rect};
+
+/// Per-element visibility flags driven by the debug visibility modal.
+/// Plumbed through `DrawCtx` so scenes can skip pushing draw cmds at the
+/// call site (necessary for elements that share a `DrawCmd` variant — e.g.
+/// the blind plaque vs. the scoring placard, both of which are
+/// `DrawCmd::Plaque(_)` and so can't be told apart by a post-process filter).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugVisibility {
+    pub hide_candles: bool,
+    pub hide_blind_plaque: bool,
+    pub hide_scoring_placard: bool,
+}
 
 /// Which background image to display behind the scene.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -52,8 +65,6 @@ pub enum BackgroundId {
     Black,
     /// Main menu: scattered tiles on dark wood.
     Menu,
-    /// Gameplay: dark felt table surface.
-    Gameplay,
     /// Score/results: golden radiant center burst.
     Score,
 }
@@ -65,7 +76,6 @@ impl BackgroundId {
             BackgroundId::None => None,
             BackgroundId::Black => None,
             BackgroundId::Menu => Some("backgrounds/menu_bg.png"),
-            BackgroundId::Gameplay => Some("backgrounds/gameplay_bg.png"),
             BackgroundId::Score => Some("backgrounds/score_bg.png"),
         }
     }
@@ -104,6 +114,15 @@ pub struct UpdateCtx<'a> {
     /// update() to route mouse clicks to 3D action objects (sort/play
     /// wood tablets and the discard bowl).
     pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
+    /// Which input device the player most recently used. Mirrors
+    /// `DrawCtx::input_mode` so scenes can route directional actions
+    /// vs. cursor activity in `update()` without re-deriving it.
+    pub input_mode: InputMode,
+    /// Index of the hand tile under the cursor as determined by raycasting
+    /// from the camera through the cursor against each tile's OBB. Mirrors
+    /// `DrawCtx::picked_hand_tile` so scenes can sync cursor → focus during
+    /// `update()` without going back to the renderer.
+    pub picked_hand_tile: Option<usize>,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -111,7 +130,6 @@ pub struct DrawCtx<'a> {
     pub layout: &'a LayoutResult,
     pub anim: &'a AnimationController,
     pub run: &'a RunState,
-    pub focus_tile_index: usize,
     pub progress: &'a crate::core::progression::PlayerProgress,
     pub active_profile: usize,
     /// Whether a game run is currently in progress (for resume/restart UI).
@@ -122,12 +140,6 @@ pub struct DrawCtx<'a> {
     /// visible 3D tile should look the index up here and fall back to the
     /// layout slot rect if not found.
     pub projected_hand_rects: &'a [(usize, [f32; 4])],
-    /// Index of the hand tile under the cursor as determined by raycasting
-    /// from the camera through the cursor against each tile's OBB. `None` if
-    /// no tile is under the cursor or no pick data is available yet (first
-    /// frame). This is the source of truth for hand-tile hover/click —
-    /// `projected_hand_rects` remains for anchoring 2D HUD elements.
-    pub picked_hand_tile: Option<usize>,
     /// Per-relic-placeholder screen-space rects from the previous frame's
     /// perspective projection — analogous to `projected_hand_rects` but for
     /// the physical relic boxes sitting in the dish. Empty before the first
@@ -151,6 +163,19 @@ pub struct DrawCtx<'a> {
     /// The projected rect is still useful so the tooltip can snap to the
     /// *visible* on-screen position of the tablet.
     pub projected_yaku_tablet_rects: &'a [[f32; 4]],
+    /// Screen-space rect of the discard river (the legacy "bowl" slot)
+    /// from the previous frame, if drawn. Used by the gameplay scene to
+    /// anchor floating overlay text to the river's actual visible
+    /// position rather than its synthesized layout hit rect.
+    pub projected_bowl_rect: Option<[f32; 4]>,
+    /// Screen-space rect of the bronze mirror from the previous frame, if
+    /// drawn. Same role as `projected_bowl_rect` for the Play action.
+    pub projected_mirror_rect: Option<[f32; 4]>,
+    /// Per-wood-tablet projected screen rects from the previous frame, in
+    /// `WoodTabletPlacement` push order: `[0]` = sort suit, `[1]` = sort
+    /// rank, `[2]` = journal book. Used by the gameplay scene to anchor
+    /// floating overlay text to the visible tablet positions.
+    pub projected_wood_tablet_rects: &'a [[f32; 4]],
     /// Result of `pick_gameplay_object` — the topmost yaku tablet, wood
     /// action tablet, or discard bowl the cursor is over this frame, if
     /// any. The gameplay scene reads this for hover state instead of
@@ -167,6 +192,15 @@ pub struct DrawCtx<'a> {
     /// Result of `pick_shop_object` — the topmost shop object the cursor is
     /// over this frame, if any. Used by the shop scene for hover routing.
     pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
+    /// Screen-space rects for the gameplay scene's counter peg block:
+    /// `[0]` = plays/hands group (left half), `[1]` = discards group (right
+    /// half). Each is `Some` only when the renderer drew a peg block last
+    /// frame. Used by the gameplay scene's unified focus system to hit-test
+    /// the pegs and anchor focus highlights / info tooltips on them.
+    pub projected_peg_rects: &'a [Option<[f32; 4]>; 2],
+    /// Debug visibility toggles set from the in-game debug visibility modal.
+    /// Scenes consult these to skip pushing specific element draw cmds.
+    pub debug_visibility: DebugVisibility,
 }
 
 /// What happens when a `ButtonDef` is clicked.

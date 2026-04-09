@@ -55,7 +55,9 @@ pub enum RelicId {
     YakuScholar,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
-    /// Kongs count as both a triplet AND a pair for yaku detection.
+    /// Kongs grant +120 chips and +2 mult each. (The original "counts as
+    /// both triplet and pair" semantic was never wired into yaku detection;
+    /// this flat bonus replaces it as a real, scoring effect.)
     KongsBlessing,
     /// Once per round, swap one yaku in your loadout for another unlocked.
     /// (No active scoring effect — UI hook only.)
@@ -148,7 +150,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::TripletBoost,
             name: "Triplet Boost",
-            description: "Triplets/Kongs +40 chips",
+            description: "Triplets/Kongs: +40 chips and +0.2 mult",
             rarity: Rarity::Common,
         },
         RelicDef {
@@ -166,19 +168,19 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::HonorFury,
             name: "Honor Fury",
-            description: "+18 chips per honor tile in sets",
+            description: "+28 chips per honor tile in sets",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::RedDragonRage,
             name: "Red Dragon Rage",
-            description: "Red dragon triplet/kong: +8 mult",
+            description: "Any dragon triplet/kong: +5 mult",
             rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::GreenLuck,
             name: "Green Luck",
-            description: "Hands without honors earn +6 gold",
+            description: "+4 gold at round end if no honors scored",
             rarity: Rarity::Common,
         },
         RelicDef {
@@ -214,7 +216,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::MultiplierMaster,
             name: "Multiplier Master",
-            description: "+0.3 mult per relic owned",
+            description: "+0.5 mult per relic owned",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -232,7 +234,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::DragonEcho,
             name: "Dragon Echo",
-            description: "Dragon triplets/kongs copy adjacent sets' chips",
+            description: "Dragon triplets/kongs copy every other set's base chips",
             rarity: Rarity::Legendary,
         },
         // ── New Patch C relics ──────────────────────────────────────────
@@ -260,30 +262,38 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             description: "+1 dora indicator; dora chips become +35",
             rarity: Rarity::Rare,
         },
-        RelicDef {
-            id: RelicId::RiichiStick,
-            name: "Riichi Stick",
-            description: "First riichi each round is free; failed riichi floors at 80%",
-            rarity: Rarity::Rare,
-        },
+        // RiichiStick — disabled until Patch E (riichi declaration system).
+        // See PATCH_E_RIICHI.md. Re-enable by uncommenting once `RunState`
+        // gains `riichi_declared`, the failure-floor branch lands, and the
+        // gameplay scene grows a declaration button.
+        // RelicDef {
+        //     id: RelicId::RiichiStick,
+        //     name: "Riichi Stick",
+        //     description: "First riichi each round is free; failed riichi floors at 80%",
+        //     rarity: Rarity::Rare,
+        // },
         RelicDef {
             id: RelicId::TenpaiTalisman,
             name: "Tenpai Talisman",
             description: "Tenpai Bonus is doubled",
             rarity: Rarity::Rare,
         },
-        RelicDef {
-            id: RelicId::RiverEraser,
-            name: "River Eraser",
-            description: "Once per round: clear 3 tiles from your river",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::FuritenWard,
-            name: "Furiten Ward",
-            description: "Your river only retains the last 6 tiles",
-            rarity: Rarity::Uncommon,
-        },
+        // RiverEraser & FuritenWard — disabled until Patch D (river system).
+        // See PATCH_D_RIVER.md. Re-enable by uncommenting once `RunState`
+        // gains a `river: Vec<Tile>`, the discard hook populates it, and the
+        // furiten taint rule lands in `score_sets`.
+        // RelicDef {
+        //     id: RelicId::RiverEraser,
+        //     name: "River Eraser",
+        //     description: "Once per round: clear 3 tiles from your river",
+        //     rarity: Rarity::Uncommon,
+        // },
+        // RelicDef {
+        //     id: RelicId::FuritenWard,
+        //     name: "Furiten Ward",
+        //     description: "Your river only retains the last 6 tiles",
+        //     rarity: Rarity::Uncommon,
+        // },
         RelicDef {
             id: RelicId::RoundCompass,
             name: "Round Compass",
@@ -317,15 +327,18 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::KongsBlessing,
             name: "Kong's Blessing",
-            description: "Kongs count as both triplet and pair for yaku",
+            description: "Kongs: +120 chips and +2 mult",
             rarity: Rarity::Legendary,
         },
-        RelicDef {
-            id: RelicId::CodexCompass,
-            name: "Codex Compass",
-            description: "Once per round: swap one yaku in your loadout",
-            rarity: Rarity::Uncommon,
-        },
+        // CodexCompass — disabled because the relic has no scoring effect
+        // and the in-round yaku-loadout swap UI doesn't exist. Re-enable
+        // when the loadout-swap action is wired into the gameplay scene.
+        // RelicDef {
+        //     id: RelicId::CodexCompass,
+        //     name: "Codex Compass",
+        //     description: "Once per round: swap one yaku in your loadout",
+        //     rarity: Rarity::Uncommon,
+        // },
     ]
 }
 
@@ -352,6 +365,10 @@ impl RelicState {
 
     pub fn is_full(&self) -> bool {
         self.active.len() >= self.max_slots
+    }
+
+    pub fn len(&self) -> usize {
+        self.active.len()
     }
 }
 

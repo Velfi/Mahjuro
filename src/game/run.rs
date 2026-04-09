@@ -117,6 +117,17 @@ pub struct RunState {
     /// halve repeat-yaku contributions. Reset on round start.
     #[serde(skip)]
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
+    /// Set true the first time this round a scored hand contains a Wind
+    /// or Dragon tile. Powers Green Luck's per-round payout — the relic
+    /// awards its bonus at round clear iff this stays false. Reset by
+    /// `advance_round` and `skip_to_next_blind`.
+    #[serde(skip)]
+    pub honors_scored_this_round: bool,
+    /// Per-yaku cumulative play counter for the entire run. Powers the
+    /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
+    /// (defaults to empty for old saves).
+    #[serde(default)]
+    pub yaku_times_played: std::collections::HashMap<crate::core::yaku::YakuKind, u32>,
     /// Per-run tile enhancement map, keyed by tile id. Talismans stamp every
     /// hand tile's id into this map; whenever tiles are drawn (initial deal,
     /// post-play refill, mid-round draws, new-round redeals), we re-apply the
@@ -190,6 +201,8 @@ impl RunState {
             gold_cost_per_play: 0,
             tax_collector_cost: 0,
             played_yaku_this_round: Vec::new(),
+            honors_scored_this_round: false,
+            yaku_times_played: std::collections::HashMap::new(),
             tile_enhancements: BTreeMap::new(),
         };
         // Resolve the first ante's boss now so reactive variants are baked
@@ -421,8 +434,11 @@ impl RunState {
             }
         }
         // Record played yaku for The Censor (repeat-yaku half-strength) before
-        // moving the breakdown into last_breakdown.
+        // moving the breakdown into last_breakdown. Also bump the run-wide
+        // counter that powers the Yaku Journal — this tracks every firing,
+        // independent of the Censor de-dup, so the journal reflects raw plays.
         for &y in &breakdown.detected_yaku {
+            *self.yaku_times_played.entry(y).or_insert(0) += 1;
             if !self.played_yaku_this_round.contains(&y) {
                 self.played_yaku_this_round.push(y);
             }
@@ -431,13 +447,16 @@ impl RunState {
         self.plays_remaining = self.plays_remaining.saturating_sub(1);
         self.scored_last_turn = earned > 0;
 
-        // GreenLuck (Patch C retune): hands without honors earn +6 gold.
-        if self.relics.has(RelicId::GreenLuck)
-            && !selected_tiles
+        // Track honors-played for the per-round Green Luck payout. Once
+        // any scored hand this round contains a Wind/Dragon the relic's
+        // round-end bonus is forfeit; the flag stays set until round
+        // reset (advance_round / skip_to_next_blind).
+        if !self.honors_scored_this_round
+            && selected_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
         {
-            self.gold = self.gold.saturating_add(6);
+            self.honors_scored_this_round = true;
         }
 
         // EightTreasures (Patch C): scoring a FullHand grants a random Zodiac
@@ -521,11 +540,36 @@ impl RunState {
 
         bus.push(GameEvent::ScoreUpdated(self.round_score));
         if self.round_score >= self.target_score {
-            let excess_gold = (self.round_score.saturating_sub(self.target_score)) / 50;
-            let gold_earned = ((5 + excess_gold) as f32 * self.blind.gold_multiplier()) as u32;
+            // Balatro-style payout: a flat per-blind reward, +$1 per
+            // unused play, +$1 per $5 banked (capped at $5), and Green
+            // Luck's honors-free round bonus on top. Overscoring is
+            // worth nothing on its own — late-run income comes from
+            // efficient clears and banked interest, not from blowing
+            // past the target.
+            let base_reward = self.blind.clear_reward();
+            let unused_play_bonus = self.plays_remaining;
+            let interest = (self.gold / 5).min(5);
+            let green_luck_bonus = if self.relics.has(RelicId::GreenLuck)
+                && !self.honors_scored_this_round
+            {
+                4
+            } else {
+                0
+            };
+            let gold_earned = base_reward
+                .saturating_add(unused_play_bonus)
+                .saturating_add(interest)
+                .saturating_add(green_luck_bonus);
             self.gold = self.gold.saturating_add(gold_earned);
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
+                payout: crate::game::event_bus::RoundPayout {
+                    base_reward,
+                    unused_play_bonus,
+                    interest,
+                    green_luck_bonus,
+                    total: gold_earned,
+                },
             });
         } else if self.plays_remaining == 0 {
             bus.push(GameEvent::GameOver {
@@ -727,6 +771,7 @@ impl RunState {
         self.bonus_hand_size = 0;
         self.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
+        self.honors_scored_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
@@ -782,6 +827,7 @@ impl RunState {
         self.bonus_hand_size = 0;
         self.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
+        self.honors_scored_this_round = false;
         self.blind = self.upcoming_blind;
         self.wall = Wall::from_standard_shuffled();
         self.hand.clear();
@@ -837,6 +883,8 @@ mod tests {
             last_breakdown: None,
             mode: mode.clone(),
             played_yaku_this_round: vec![],
+            honors_scored_this_round: false,
+            yaku_times_played: std::collections::HashMap::new(),
             plays_remaining: mode.starting_plays,
             quickdraw_used: false,
             relics: RelicState::default(),

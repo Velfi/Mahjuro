@@ -23,7 +23,16 @@ pub enum DebugAction {
     /// (so reactive variants like Mirror/Tax Collector pick fresh).
     SetBoss(BossKind),
     ToggleShowFps,
-    ToggleHideTiles,
+    /// Open the in-game debug visibility modal — a checkbox panel for
+    /// hiding individual gameplay HUD elements (tiles, candles, the two
+    /// hanging plaques, the inventory dish) so the procedural 3D scene
+    /// underneath can be inspected.
+    OpenDebugVisibility,
+    /// Toggle a debug overlay that draws three colored bars (red = +X,
+    /// green = +Y, blue = +Z) anchored at the camera's look target. Useful
+    /// for disambiguating world-space directions when iterating on
+    /// placements.
+    ToggleWorldAxes,
     OpenTuning,
     OpenSfxTest,
     BlowWindGust,
@@ -31,6 +40,10 @@ pub enum DebugAction {
     /// and log the result. Only meaningful on backends that support
     /// `wgpu::Features::TIMESTAMP_QUERY`.
     ProfileGpu,
+    /// Arm a one-shot picker: the next mouse click in the game world is
+    /// hit-tested against every known scene object and the matched object's
+    /// name is logged. Activating this while already armed disarms it.
+    ArmObjectHitTest,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -59,10 +72,20 @@ impl DebugMenuBar {
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
         let _ = debug_menu.append(&fps_item);
 
-        // Hide hand tiles toggle (debug aid for inspecting backgrounds, lighting, etc.).
-        let hide_tiles_item = MenuItem::new("Hide Tiles", true, None);
-        mappings.push((hide_tiles_item.id().clone(), DebugAction::ToggleHideTiles));
-        let _ = debug_menu.append(&hide_tiles_item);
+        // In-game checkbox modal that can hide tiles, candles, the blind
+        // plaque, the scoring placard, and the inventory dish independently.
+        // Lets us inspect the procedural 3D scene without the HUD in the way.
+        let visibility_item = MenuItem::new("Visibility...", true, None);
+        mappings.push((
+            visibility_item.id().clone(),
+            DebugAction::OpenDebugVisibility,
+        ));
+        let _ = debug_menu.append(&visibility_item);
+
+        // World-axes overlay toggle (red = +X, green = +Y, blue = +Z).
+        let axes_item = MenuItem::new("World Axes Overlay", true, None);
+        mappings.push((axes_item.id().clone(), DebugAction::ToggleWorldAxes));
+        let _ = debug_menu.append(&axes_item);
 
         // Cascade tuning overlay.
         let tuning_item = MenuItem::new("Cascade Tuning...", true, None);
@@ -86,6 +109,12 @@ impl DebugMenuBar {
         let profile_item = MenuItem::new("Profile GPU (100 frames)", true, None);
         mappings.push((profile_item.id().clone(), DebugAction::ProfileGpu));
         let _ = debug_menu.append(&profile_item);
+
+        // Arm a one-shot debug picker — the next click is hit-tested
+        // against every known scene object and its name logged.
+        let hit_test_item = MenuItem::new("Object Hit Test", true, None);
+        mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
+        let _ = debug_menu.append(&hit_test_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

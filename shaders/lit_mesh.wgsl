@@ -7,6 +7,7 @@
 //   1.0 = wax       — pale beeswax with a high ambient floor (fake SSS)
 //   2.0 = wick      — dark, no specular
 //   3.0 = lacquered wood — procedural ring grain + Blinn-Phong specular
+//   5.0 = metal     — tinted-Fresnel conductor (gold coins)
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -30,7 +31,10 @@ struct PointLight {
 
 struct PointLights {
     count: vec4<u32>,
-    // extras.x = display gamma exponent; rest reserved.
+    // extras.x = display gamma exponent.
+    // extras.y = wall-clock time in seconds (used by the water material
+    //            branch to scroll the surface and animate foam crests).
+    // extras.z/.w reserved.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -242,44 +246,45 @@ fn vs_main(
     @location(1) n: vec3<f32>,
     @location(2) uv: vec2<f32>,
 ) -> VsOut {
-    var displaced = pos;
     var world_normal = normalize((mesh.model * vec4<f32>(n, 0.0)).xyz);
+    var world_pos_out = (mesh.model * vec4<f32>(pos, 1.0)).xyz;
 
-    // Lacquered wood: displace along the local +Z (table normal in
-    // local space) using the same procedural field the FS uses for
-    // shading, then rebuild the normal from a finite-difference of the
-    // height field. The model matrix has wildly non-uniform scale
-    // (X/Y are huge, Z is 1.0), so we evaluate the gradient in WORLD
-    // units by multiplying the local epsilon by the model's column
-    // lengths — otherwise the slopes would be off by 1000× and the
-    // surface would look mirror-flat.
-    if (mesh.material_params.x > 2.5) {
-        let scale_x = length(mesh.model[0].xyz); // local +X axis world length
-        let scale_y = length(mesh.model[1].xyz); // local +Y axis world length
-        // Local Z scale is 1 in the table model matrix, so a unit of
-        // height here is a unit in world Y. Tune amplitude in world units.
+    // Lacquered wood (kind 3 — the table): evaluate the procedural wood
+    // field in WORLD XZ coordinates rather than local mesh coordinates.
+    // This decouples the grain density from the model's local-to-world
+    // scale, so the table can be enlarged to "infinite plane" extents
+    // without the rings stretching with it. The displacement is applied
+    // directly in world Y (the table normal), and the normal is rebuilt
+    // from a finite-difference of the world-space height field.
+    //
+    // Kind 3 only — kind 4 (LacqueredWoodFlat) shares the wood albedo
+    // branch in the FS but skips this displacement because the table-
+    // tuned 1.6-world-unit amplitude blows through the thin slab
+    // thickness of small upright wood meshes (the score plaque), and
+    // because that slab is not horizontal — its surface coords aren't
+    // world XZ.
+    if (mesh.material_params.x > 2.5 && mesh.material_params.x < 3.5) {
         let amp = 1.6;
-        let eps = 1.0 / 200.0; // matches build_table_mesh segments
+        let eps_w = 1.0; // 1 world unit step for the gradient
+        let wxz = world_pos_out.xz;
+        let h_c = wood_height_world(wxz);
+        let h_x = wood_height_world(wxz + vec2<f32>(eps_w, 0.0));
+        let h_z = wood_height_world(wxz + vec2<f32>(0.0, eps_w));
 
-        let h_c = wood_height(pos.xy);
-        let h_x = wood_height(pos.xy + vec2<f32>(eps, 0.0));
-        let h_y = wood_height(pos.xy + vec2<f32>(0.0, eps));
+        world_pos_out.y = world_pos_out.y + h_c * amp;
 
-        displaced.z = pos.z + h_c * amp;
-
-        // Rotation Rx(-90°) maps local +X → world +X, local +Y → world -Z,
-        // local +Z → world +Y. So the world-space tangent vectors are:
         let dh_x = (h_x - h_c) * amp;
-        let dh_y = (h_y - h_c) * amp;
-        let t_x = vec3<f32>(eps * scale_x, dh_x, 0.0);
-        let t_y = vec3<f32>(0.0,            dh_y, -eps * scale_y);
-        world_normal = normalize(cross(t_x, t_y));
+        let dh_z = (h_z - h_c) * amp;
+        // World-space tangent vectors along +X and +Z. Cross(t_z, t_x)
+        // produces a normal with a positive Y component (table-up).
+        let t_x = vec3<f32>(eps_w, dh_x, 0.0);
+        let t_z = vec3<f32>(0.0,    dh_z, eps_w);
+        world_normal = normalize(cross(t_z, t_x));
     }
 
-    let world = mesh.model * vec4<f32>(displaced, 1.0);
     var o: VsOut;
-    o.clip_pos = mesh.view_proj * world;
-    o.world_pos = world.xyz;
+    o.clip_pos = mesh.view_proj * vec4<f32>(world_pos_out, 1.0);
+    o.world_pos = world_pos_out;
     o.world_n = world_normal;
     // Pass the *undisplaced* local position so the FS samples the wood
     // basis at the same surface coordinate the VS displaced from.
@@ -347,12 +352,21 @@ struct WoodBasis {
     fiber: f32,
 };
 
-fn wood_basis(local_xy: vec2<f32>) -> WoodBasis {
-    // Stretch X harder than Y so rings are tall and sweeping, the way a
-    // long board would look. Scale matches the ring count we want across
-    // the visible slab — large because the table model matrix scales the
-    // local [-0.5, 0.5] range up to thousands of world units.
-    let p = vec2<f32>(local_xy.x * 14.0, local_xy.y * 4.0);
+// World-space scale factors that map (world_x, world_z) into the wood
+// field's pre-multiplied coordinate space. Tuned so that rings sweep
+// across the table at the same density as the original 3.5×screen
+// table on a 1280×720 layout, but now driven by world units instead
+// of local mesh coords — so the table can be enlarged to "infinite
+// plane" extents without stretching the grain.
+const TABLE_WOOD_SCALE_X: f32 = 0.003125;
+const TABLE_WOOD_SCALE_Z: f32 = 0.001587;
+
+// Inner wood-basis evaluator: takes coordinates already in the field's
+// pre-scaled space (the `p` the rest of this function uses). Both the
+// local-space wrapper (for upright slabs like the score plaque) and
+// the world-space wrapper (for the horizontal table) feed this.
+fn wood_basis_p(p_in: vec2<f32>) -> WoodBasis {
+    let p = p_in;
 
     // Distort the ring axis with two octaves of fbm so rings curve
     // organically and occasionally pinch / fork. Amplitude is low so
@@ -397,14 +411,35 @@ fn wood_basis(local_xy: vec2<f32>) -> WoodBasis {
     return b;
 }
 
+// Local-space wrapper used by upright wood slabs (the score plaque).
+// Maps the slab's local [-0.5, 0.5] surface coords into the wood field's
+// pre-scaled space using the original tuning constants.
+fn wood_basis(local_xy: vec2<f32>) -> WoodBasis {
+    return wood_basis_p(vec2<f32>(local_xy.x * 14.0, local_xy.y * 4.0));
+}
+
+// World-space wrapper used by the horizontal lacquered table. Tiles the
+// wood field at a fixed world-space frequency regardless of how big the
+// table model has been scaled.
+fn wood_basis_world(world_xz: vec2<f32>) -> WoodBasis {
+    return wood_basis_p(vec2<f32>(
+        world_xz.x * TABLE_WOOD_SCALE_X,
+        world_xz.y * TABLE_WOOD_SCALE_Z,
+    ));
+}
+
 // Signed surface height from the wood basis. Positive on early-wood
-// ridges, negative inside late-wood lines and pores. Returned in the
-// same units as the model's local Z so the vertex shader can scale it
-// directly into world units.
+// ridges, negative inside late-wood lines and pores. Returned in
+// world units so the vertex shader can apply it directly to world Y.
 fn wood_height(local_xy: vec2<f32>) -> f32 {
     let b = wood_basis(local_xy);
     // Early-wood bulges up; late-wood and pores recess. The mean is
     // close to zero so displacement does not visibly raise the slab.
+    return b.early_wood * 0.55 - b.late_wood * 0.85 - b.pore * 1.6;
+}
+
+fn wood_height_world(world_xz: vec2<f32>) -> f32 {
+    let b = wood_basis_world(world_xz);
     return b.early_wood * 0.55 - b.late_wood * 0.85 - b.pore * 1.6;
 }
 
@@ -454,6 +489,10 @@ fn wood_sample(local_pos: vec3<f32>) -> WoodSample {
     return wood_sample_basis(wood_basis(local_pos.xy));
 }
 
+fn wood_sample_world(world_xz: vec2<f32>) -> WoodSample {
+    return wood_sample_basis(wood_basis_world(world_xz));
+}
+
 @fragment
 fn fs_main(
     in: VsOut,
@@ -480,11 +519,28 @@ fn fs_main(
         // decal composite at the end will lay the engraved glyphs on top.
         albedo = mesh.base_color.rgb;
     }
+    if (kind > 4.5) {
+        // Metal: the bound texture is a heightmap, not an albedo. Use the
+        // raw base colour and let the height contribute later via the
+        // normal-perturbation block below.
+        albedo = mesh.base_color.rgb;
+    }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
-    if (kind > 2.5) {
+    if (kind > 2.5 && kind < 4.5) {
         // Lacquered wood: procedural grain overrides the (white) albedo tex.
-        let w = wood_sample(in.local_pos);
+        // Kind 3 (the horizontal table) samples in world XZ so the grain
+        // tiles at a fixed world-space frequency regardless of the model's
+        // scale — this is what lets the table extend to the horizon as an
+        // "infinite plane" without stretching the rings. Kind 4 (the
+        // upright score plaque) keeps using local surface coords because
+        // its slab face isn't aligned with world XZ.
+        var w: WoodSample;
+        if (kind < 3.5) {
+            w = wood_sample_world(in.world_pos.xz);
+        } else {
+            w = wood_sample(in.local_pos);
+        }
         albedo = w.albedo;
         wood_grain = w.grain;
         wood_pore = w.pore;
@@ -500,6 +556,149 @@ fn fs_main(
     var n = normalize(in.world_n);
     if (!front_facing) {
         n = -n;
+    }
+
+    // ── Discard-river material ─────────────────────────────────────────
+    // Single mesh draws both the stone trough and the water surface; the
+    // per-vertex `uv.y` channel switches between them. Stone fragments
+    // (`uv.y < 0.5`) get a dark, slightly speckled rock shade; water
+    // fragments (`uv.y > 0.5`) get scrolling normal perturbation, an
+    // indigo→teal gradient with foam crests, and a Blinn-Phong specular
+    // pool from the candle lights. The branch returns immediately so we
+    // skip the wood/wax/metal lighting path entirely.
+    if (kind > 5.5 && kind < 6.5) {
+        let time = lights.extras.y;
+        let is_water = in.uv.y > 0.5;
+        var water_n = n;
+        var water_albedo: vec3<f32>;
+        var water_spec_strength = 0.0;
+        var water_spec_power = 1.0;
+        if (is_water) {
+            // Use local-space XZ as a stable surface coordinate. Two
+            // scrolling noise layers at different speeds + scales perturb
+            // the normal, the sum acts as a pseudo-foam mask.
+            let p = vec2<f32>(in.local_pos.x, in.local_pos.z) * 12.0;
+            let f1 = fbm2(p + vec2<f32>(time * 0.45, time * 0.10));
+            let f2 = fbm2(p * 1.7 + vec2<f32>(time * 0.18, -time * 0.30));
+            let crest = smoothstep(0.55, 0.85, f1 * 0.6 + f2 * 0.6);
+            // Cheap finite-difference normal from the noise sum.
+            let eps = 0.6;
+            let h_c = f1 + f2;
+            let h_x = fbm2(p + vec2<f32>(eps + time * 0.45, time * 0.10))
+                    + fbm2(p * 1.7 + vec2<f32>(eps * 1.7 + time * 0.18, -time * 0.30));
+            let h_z = fbm2(p + vec2<f32>(time * 0.45, eps + time * 0.10))
+                    + fbm2(p * 1.7 + vec2<f32>(time * 0.18, eps * 1.7 - time * 0.30));
+            let bump = 0.55;
+            let dhdu = (h_x - h_c) * bump;
+            let dhdv = (h_z - h_c) * bump;
+            // Surface tangent basis is local +X / +Z (the water plane is
+            // a flat horizontal quad in local space). Build a perturbed
+            // normal pointing mostly +Y with the gradient subtracted.
+            let n_w = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
+            // Re-orient the perturbed normal into world space using the
+            // model matrix's upper 3x3 (the trough only translates +
+            // uniformly scales, so passing through is a fine
+            // approximation).
+            water_n = normalize((mesh.model * vec4<f32>(n_w, 0.0)).xyz);
+            // Indigo deep water → teal lift in shallow noise valleys, plus
+            // bright foam where crests pile up. The Midnight Gold palette
+            // hint sits on the cool indigo side; the foam pops it.
+            let deep = vec3<f32>(0.018, 0.030, 0.075);
+            let mid  = vec3<f32>(0.045, 0.085, 0.155);
+            water_albedo = mix(deep, mid, clamp(f2 * 1.2, 0.0, 1.0))
+                         + vec3<f32>(crest) * vec3<f32>(0.55, 0.62, 0.78);
+            water_spec_strength = 1.4;
+            water_spec_power = 220.0;
+        } else {
+            // Stone trough: dark slate with a tiny per-pixel speckle so
+            // the walls don't read as plastic-flat. Spec is low — the
+            // stone should not compete with the water highlight.
+            let p = vec2<f32>(in.local_pos.x, in.local_pos.z) * 22.0;
+            let speckle = vnoise2(p) * 0.08;
+            water_albedo = vec3<f32>(0.038, 0.044, 0.052) + vec3<f32>(speckle);
+            water_spec_strength = 0.10;
+            water_spec_power = 24.0;
+        }
+
+        var lit_water = vec3<f32>(0.0);
+        var spec_water = vec3<f32>(0.0);
+        let cam_pos_w = vec3<f32>(0.0, 0.0, 4000.0);
+        let view_dir_w = normalize(cam_pos_w - in.world_pos);
+        let count_w = lights.count.x;
+        for (var i: u32 = 0u; i < count_w; i = i + 1u) {
+            let lp = lights.lights[i].pos.xyz;
+            let radius = lights.lights[i].pos.w;
+            let lc = lights.lights[i].color.rgb;
+            let intensity = lights.lights[i].color.a;
+            let to_light = lp - in.world_pos;
+            let dist = length(to_light);
+            let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
+            let atten = t * t;
+            let l_dir = to_light / max(dist, 0.0001);
+            let nl = max(dot(water_n, l_dir), 0.0);
+            // Lift the ambient floor on water so the trough silhouette
+            // reads even when no candle pool is overhead.
+            let lambert = select(0.30, 0.45, is_water) + 0.55 * nl;
+            lit_water = lit_water + lc * intensity * atten * lambert;
+
+            if (water_spec_strength > 0.001) {
+                let h = normalize(l_dir + view_dir_w);
+                let nh = max(dot(water_n, h), 0.0);
+                let s = pow(nh, water_spec_power) * water_spec_strength;
+                spec_water = spec_water + lc * intensity * atten * s;
+            }
+        }
+        // A constant cool ambient term so the river is visible across the
+        // whole table even between candle pools — the surface is the
+        // discard target, players should never lose track of where it is.
+        let ambient = select(
+            vec3<f32>(0.020, 0.024, 0.034),
+            vec3<f32>(0.032, 0.046, 0.090),
+            is_water,
+        );
+        var rgb_w = water_albedo * (lit_water + ambient) + spec_water;
+        let inv_g_w = 1.0 / max(lights.extras.x, 0.01);
+        let out_w = pow(rgb_w, vec3<f32>(inv_g_w));
+        return vec4<f32>(out_w, mesh.base_color.a);
+    }
+
+    // ── Metal heightmap perturbation ─────────────────────────────────────
+    // For metal kind we treat the bound texture as a grayscale heightfield
+    // (the engraved Chinese cash-coin face). Central differences along U
+    // and V give an approximate gradient; we lift it into world space using
+    // the coin's flat-face tangent basis (UV maps to local XZ on the top
+    // and bottom of the coin) and rotate the normal toward the gradient.
+    // Only flat-ish faces are perturbed — the rim's UVs wrap once around
+    // the cylinder and the gradient there would be meaningless.
+    if (kind > 4.5) {
+        let face_flat = abs(n.y);
+        if (face_flat > 0.6) {
+            let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
+            let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+            let h_l = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r;
+            let h_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
+            let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
+            let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
+            // Bump strength — small enough that the engraving reads as
+            // shallow strike depth, not a relief sculpture.
+            let bump = 2.4;
+            let dhdu = (h_r - h_l) * bump;
+            let dhdv = (h_u - h_d) * bump;
+            // Coin top/bottom tangent basis: tangent = +X, bitangent = +Z,
+            // surface normal = ±Y. The heightmap perturbation pushes the
+            // normal *away* from the gradient direction.
+            let sgn = sign(n.y);
+            let perturbed = normalize(vec3<f32>(-dhdu, sgn, -dhdv));
+            // Re-orient the perturbed normal so it sits on the actual face
+            // (pointing the same way the original normal does).
+            var n_face = vec3<f32>(perturbed.x, perturbed.y * sgn, perturbed.z);
+            n_face = normalize(n_face);
+            // Fade between the original normal (rim and bevel) and the
+            // perturbed normal (flat faces) by `face_flat` so the seam
+            // between disc and rim doesn't pop.
+            let blend = smoothstep(0.6, 0.95, face_flat);
+            n = normalize(mix(n, n_face, blend));
+        }
     }
     var rgb = vec3<f32>(0.0);
 
@@ -517,8 +716,9 @@ fn fs_main(
     let view_dir = normalize(cam_pos - in.world_pos);
     let ndv_view = clamp(dot(n, view_dir), 0.0, 1.0);
 
-    let is_wood = kind > 2.5;
+    let is_wood = (kind > 2.5 && kind < 4.5);
     let is_wax  = (kind > 0.5 && kind < 1.5);
+    let is_metal = kind > 4.5;
 
     // Wrap-diffuse subsurface: softens the terminator past 90° so the
     // shaded side picks up a tinted bleed. Wood gets a tiny amount,
@@ -633,7 +833,18 @@ fn fs_main(
             if (is_wood) {
                 s = s * mix(0.55, 1.15, wood_grain) * (1.0 - wood_pore * 0.85);
             }
-            spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
+            if (is_metal) {
+                // Conductor: Schlick Fresnel against the half-vector with
+                // F0 = base colour. The reflected light then takes on the
+                // metal's tint (no white "plastic" highlight) and swells
+                // toward full reflectivity at glancing angles.
+                let vdh = max(dot(view_dir, h), 0.0);
+                let f0 = mesh.base_color.rgb;
+                let f_metal = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal;
+            } else {
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
+            }
         }
 
         // Clearcoat lobe — Schlick Fresnel against the half-vector,
@@ -655,6 +866,12 @@ fn fs_main(
     // base specular and clearcoat add on top. For wood we Fresnel-fade
     // the diffuse so energy flows into the coat at glancing angles.
     var diffuse_scale = 1.0;
+    if (is_metal) {
+        // Conductors do not diffusely scatter light — almost all of the
+        // response is in the tinted Fresnel spec lobe above. Leave a
+        // sliver of diffuse so unlit-side coins don't read as cutouts.
+        diffuse_scale = 0.08;
+    }
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
         diffuse_scale = 1.0 - f_view * 0.6;

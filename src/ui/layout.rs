@@ -28,6 +28,47 @@ pub struct LayoutResult {
     pub hand_slots: Vec<Rect>,
 }
 
+/// Real-world width of a Japanese mahjong tile, in millimeters. Used as
+/// the anchor for the [`LayoutResult::mm`] / [`LayoutResult::m`] real-unit
+/// helpers — every other physical object in the scene (coins, candles,
+/// dishes, …) can be expressed in true mm/m and we'll convert to world
+/// units via the current hand-slot width. 25mm is roughly a riichi
+/// "small" tile; full-sized tiles are ~26mm but 25 keeps the math clean.
+pub const TILE_WIDTH_MM: f32 = 25.0;
+
+/// Window-width fraction occupied by a single hand-tile slot. Falls out
+/// of the hand layout: the hand strip is `(1 - 2*HAND_X_PAD_RATIO)` of
+/// the window, divided into [`HAND_SIZE`] equal slots. This is also the
+/// scale anchor for [`LayoutResult::mm`] / [`LayoutResult::m`] in scenes
+/// that don't draw a hand strip (shop, pick-blind, start screen).
+pub const HAND_SLOT_W_RATIO: f32 = (1.0 - 2.0 * HAND_X_PAD_RATIO as f32) / HAND_SIZE as f32;
+
+impl LayoutResult {
+    /// Convert a length in **millimeters** to renderer world units. Uses
+    /// the current hand-slot width as the reference for one mahjong tile
+    /// (`TILE_WIDTH_MM`); when the scene has no hand strip the conversion
+    /// falls back to a window-width-derived ratio that matches what the
+    /// gameplay scene's hand tiles *would* be at the same window size,
+    /// so physical object sizing stays consistent across scenes.
+    pub fn mm(&self, n: f32) -> f32 {
+        let tile_w = self
+            .hand_slots
+            .first()
+            .map(|r| r.w)
+            .unwrap_or(self.window_w * HAND_SLOT_W_RATIO);
+        (tile_w / TILE_WIDTH_MM) * n
+    }
+
+    /// Convert a length in **meters** to renderer world units. Just
+    /// `self.mm(n * 1000.0)`; provided as a convenience so the call site
+    /// reads naturally for objects measured in meters (candles, table
+    /// dimensions, …).
+    #[allow(dead_code)]
+    pub fn m(&self, n: f32) -> f32 {
+        self.mm(n * 1000.0)
+    }
+}
+
 /// Score panel / modifier strip / relic strip are proportional to window height.
 const SCORE_H_RATIO: f64 = 0.12; // 12% of window height (72px at 600px)
 const MOD_H_RATIO: f64 = 0.08; //  8% of window height (48px at 600px)
