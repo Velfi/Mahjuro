@@ -81,6 +81,7 @@ impl TooltipState {
         glossary_anchors: &[([f32; 4], &'static str)],
         window_w: f32,
         window_h: f32,
+        ui_scale: f32,
     ) {
         let font = match load_ui_font() {
             Some(f) => f,
@@ -90,7 +91,7 @@ impl TooltipState {
             }
         };
 
-        let scale = (window_w.min(window_h) / 600.0).max(0.5);
+        let scale = (window_w.min(window_h) / 600.0 * ui_scale).max(0.5);
 
         // Filter out button labels and labels that opt out of glossary
         // detection (e.g. yaku cards with their own hover tooltip).

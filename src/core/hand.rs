@@ -255,7 +255,11 @@ pub fn validate_selection_with_rules(
     }
     // Partition into regular tiles and flower wildcards.
     let mut regular: Vec<Tile> = tiles.iter().filter(|t| !t.is_flower()).copied().collect();
-    let mut flower_ids: Vec<u32> = tiles.iter().filter(|t| t.is_flower()).map(|t| t.id).collect();
+    let mut flower_ids: Vec<u32> = tiles
+        .iter()
+        .filter(|t| t.is_flower())
+        .map(|t| t.id)
+        .collect();
     regular.sort();
 
     // Need at least some regular tiles (flowers alone can't form melds).
@@ -512,11 +516,7 @@ fn try_wrap_sequence(
             if let Some(hi_idx) = hi {
                 let set = DetectedSet {
                     kind: SetKind::Sequence,
-                    tile_ids: vec![
-                        remaining[0].id,
-                        remaining[mid_idx].id,
-                        remaining[hi_idx].id,
-                    ],
+                    tile_ids: vec![remaining[0].id, remaining[mid_idx].id, remaining[hi_idx].id],
                 };
                 found.push(set);
                 let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 3);

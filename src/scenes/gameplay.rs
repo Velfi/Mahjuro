@@ -21,7 +21,7 @@ use crate::ui::input::{UiAction, apply_ui_actions};
 use crate::ui::widget::{self, TextStyle};
 
 use super::pause_menu::PauseMenu;
-use super::{ButtonDef, DrawCtx, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
@@ -1274,19 +1274,6 @@ impl SceneBehavior for GameplayScene {
         None
     }
 
-    /// Gameplay is migrated off the legacy `SceneDrawOutput` dual-vec
-    /// model — its draw output flows through `draw_frame` instead, where
-    /// quads, text, and 3D markers all interleave inside a single ordered
-    /// `UiFrame.cmds` list. The trait still requires `draw`, but main.rs
-    /// only calls `draw_frame` and the default `draw_frame` impl is
-    /// overridden here, so this stub is unreachable in normal flow.
-    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
-        unreachable!(
-            "GameplayScene uses draw_frame; the legacy dual-vec draw path is not implemented. \
-             Call SceneBehavior::draw_frame instead."
-        )
-    }
-
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let layout = ctx.layout;
         let run = ctx.run;
@@ -1333,8 +1320,12 @@ impl SceneBehavior for GameplayScene {
         if glossary_open {
             let mut frame = UiFrame::new();
             frame.background(super::BackgroundId::Black);
-            self.glossary
-                .draw_into_frame(&mut frame, layout.window_w, layout.window_h);
+            self.glossary.draw_into_frame(
+                &mut frame,
+                layout.window_w,
+                layout.window_h,
+                ctx.ui_scale,
+            );
             // Click-blocker behind the glossary's own buttons (added last
             // so it never preempts a real button click).
             frame.buttons.push(ButtonDef::scene(
@@ -1352,8 +1343,13 @@ impl SceneBehavior for GameplayScene {
         if journal_open {
             let mut frame = UiFrame::new();
             frame.background(super::BackgroundId::Black);
-            self.journal
-                .draw_into_frame(&mut frame, layout.window_w, layout.window_h, run);
+            self.journal.draw_into_frame(
+                &mut frame,
+                layout.window_w,
+                layout.window_h,
+                ctx.ui_scale,
+                run,
+            );
             frame.buttons.push(ButtonDef::scene(
                 (0.0, 0.0, layout.window_w, layout.window_h),
                 u32::MAX,
@@ -1580,11 +1576,16 @@ impl SceneBehavior for GameplayScene {
         // relic row is rendered in the gameplay scene anymore.
         let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
-        // Bottom button bar.
-        let scale = (layout.window_w.min(layout.window_h)) / 600.0;
-        let btn_w = (120.0 * scale).max(60.0);
-        let btn_h = (32.0 * scale).max(20.0);
-        let btn_gap = 12.0 * scale;
+        // Bottom button bar.  The sort tablets, discard bowl, and bronze
+        // mirror are 3D objects whose visual size comes from the renderer —
+        // the 2D rects here are hit-test anchors and placement guides, so
+        // they use the base resolution scale without the UI scale boost.
+        // Text readability is handled by the typography system separately.
+        let scale = (layout.window_w.min(layout.window_h)) / 600.0 * ctx.ui_scale;
+        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let btn_w = (120.0 * layout_scale).max(60.0);
+        let btn_h = (32.0 * layout_scale).max(20.0);
+        let btn_gap = 12.0 * layout_scale;
         let selected_count = run.selected_count();
         let selection_valid = run.is_selection_valid();
         // The yaku tablet panel keeps its old "4 buttons wide" container so
@@ -1594,9 +1595,9 @@ impl SceneBehavior for GameplayScene {
         // the yaku panel on the table felt, where they read as the
         // physical "throw away" / "play" gestures rather than as buttons
         // jammed into the chrome strip.
-        let container_w = btn_w * 4.0 + btn_gap * 3.0;
+        let container_w = (btn_w * 4.0 + btn_gap * 3.0).min(layout.window_w * 0.92);
         let container_x = (layout.window_w - container_w) * 0.5;
-        let btn_y = layout.window_h - btn_h - (12.0 * scale);
+        let btn_y = layout.window_h - btn_h - (12.0 * layout_scale);
 
         // Bottom row: just the two sort tablets, centered on the screen.
         let sort_container_w = btn_w * 2.0 + btn_gap;
@@ -1617,9 +1618,9 @@ impl SceneBehavior for GameplayScene {
         // anchored to the same vertical band even when the yaku panel is
         // empty (so they don't snap up/down as the player selects tiles
         // and active yaku appear / disappear).
-        let yaku_panel_h = (66.0 * scale).max(48.0);
-        let yaku_panel_gap = 8.0 * scale;
-        let yaku_panel_y = btn_y - yaku_panel_h - yaku_panel_gap;
+        let yaku_panel_h = (66.0 * layout_scale).max(48.0).min(layout.window_h * 0.20);
+        let yaku_panel_gap = 8.0 * layout_scale;
+        let yaku_panel_y = (btn_y - yaku_panel_h - yaku_panel_gap).max(4.0);
         let bowl_diam = (yaku_panel_h * 2.4).min(layout.window_h * 0.18);
         // Inset the bowl + mirror *inside* the yaku panel's horizontal
         // span so they overlap the panel edges instead of floating off in
@@ -1633,8 +1634,9 @@ impl SceneBehavior for GameplayScene {
         // yaku panel height bumps them downstage of the yaku row.
         let bowl_forward_push = yaku_panel_h * 0.55;
         let bowl_cy = yaku_panel_y + yaku_panel_h * 0.5 + bowl_forward_push;
-        let bowl_cx = container_x + bowl_inset - bowl_diam * 0.5;
-        let mirror_cx = container_x + container_w - bowl_inset + bowl_diam * 0.5;
+        let bowl_cx = (container_x + bowl_inset - bowl_diam * 0.5).max(bowl_diam * 0.5 + 4.0);
+        let mirror_cx = (container_x + container_w - bowl_inset + bowl_diam * 0.5)
+            .min(layout.window_w - bowl_diam * 0.5 - 4.0);
         let mirror_cy = bowl_cy;
         // Synthesize square click rects centered on the bowl / mirror.
         // Downstream the placement loop reads `bw, bh` from these rects to
@@ -1732,9 +1734,9 @@ impl SceneBehavior for GameplayScene {
         let mut yaku_tablet_placements: Vec<crate::render::draw_cmd::YakuTabletPlacement> =
             Vec::new();
         if !visible_previews.is_empty() || is_chicken_hand {
-            let panel_h = (66.0 * scale).max(48.0);
-            let panel_gap = 8.0 * scale;
-            let panel_y = btn_y - panel_h - panel_gap;
+            let panel_h = (66.0 * layout_scale).max(48.0).min(layout.window_h * 0.20);
+            let panel_gap = 8.0 * layout_scale;
+            let panel_y = (btn_y - panel_h - panel_gap).max(4.0);
             let panel_w = container_w;
             let panel_x = container_x;
             let tablet_count = if is_chicken_hand {
@@ -1743,7 +1745,7 @@ impl SceneBehavior for GameplayScene {
                 visible_previews.len()
             };
             let n = tablet_count as f32;
-            let card_gap = 6.0 * scale;
+            let card_gap = 6.0 * layout_scale;
             // Cap individual card width to what a full loadout (3 yaku) would
             // get — otherwise a lone active yaku stretches across the entire
             // container, which reads as a UI bug. Single/few yaku stay
@@ -1754,7 +1756,7 @@ impl SceneBehavior for GameplayScene {
             // (matches card width), extents[1] is the thickness above the
             // wood, extents[2] is depth (matches card height into the
             // scene).
-            let tablet_thickness = (8.0 * scale).max(6.0);
+            let tablet_thickness = (8.0 * layout_scale).max(6.0);
             if is_chicken_hand {
                 // Chicken hand: valid meld but no yaku fired. Show a single
                 // tablet with a chicken emoji so the player knows the hand
@@ -1862,6 +1864,7 @@ impl SceneBehavior for GameplayScene {
                 ay,
                 layout.window_w,
                 layout.window_h,
+                ctx.ui_scale,
                 &title,
                 &body,
             );
@@ -1874,6 +1877,7 @@ impl SceneBehavior for GameplayScene {
                 ay,
                 layout.window_w,
                 layout.window_h,
+                ctx.ui_scale,
                 "\u{1F414} Chicken Hand",
                 "A valid hand with no yaku. Scores base chips \u{00D7} 1 mult. \
                  Build toward a yaku to multiply your score.",
@@ -2095,8 +2099,8 @@ impl SceneBehavior for GameplayScene {
         // rather than a third button in the row. Stays inside the window
         // even at narrow widths via a clamp against the right edge.
         let book_cy = rby + rbh * 0.5;
-        let desired_cx = rbx + rbw + (32.0 * scale).max(16.0) + book_w * 0.5;
-        let max_cx = layout.window_w - book_w * 0.5 - (12.0 * scale);
+        let desired_cx = rbx + rbw + (32.0 * layout_scale).max(16.0) + book_w * 0.5;
+        let max_cx = layout.window_w - book_w * 0.5 - (12.0 * layout_scale);
         let book_cx = desired_cx.min(max_cx);
         let book_thickness = (book_h * 0.45).max(8.0);
         wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
@@ -2234,13 +2238,16 @@ impl SceneBehavior for GameplayScene {
             Vec::new();
         let mut talisman_dish_strip: Option<(f32, f32, f32, f32)> = None;
         if consumables.capacity > 0 {
+            // The brass dish is a 3D object — use base resolution scale
+            // so its placement stays stable regardless of UI scale.
             let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
             let slot_w = (140.0 * zscale).max(120.0);
             let slot_h = (56.0 * zscale).max(48.0);
             let gap = (6.0 * zscale).max(3.0);
-            let total_w =
-                slot_w * consumables.capacity as f32 + gap * (consumables.capacity as f32 - 1.0);
-            let strip_x = layout.window_w - total_w - (48.0 * zscale);
+            let total_w = (slot_w * consumables.capacity as f32
+                + gap * (consumables.capacity as f32 - 1.0))
+                .min(layout.window_w * 0.65);
+            let strip_x = (layout.window_w - total_w - (48.0 * zscale)).max(4.0);
             let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
             talisman_dish_strip = Some((strip_x, strip_y, total_w, slot_h));
 
@@ -2424,6 +2431,7 @@ impl SceneBehavior for GameplayScene {
                             fy,
                             layout.window_w,
                             layout.window_h,
+                            ctx.ui_scale,
                             &tooltip_title,
                             &tooltip_body,
                         );
@@ -2436,6 +2444,7 @@ impl SceneBehavior for GameplayScene {
                         fy,
                         layout.window_w,
                         layout.window_h,
+                        ctx.ui_scale,
                         "Consumable Slot",
                         "Empty. Earn Zodiac cards from blind clears or buy Zodiacs and Talismans in the shop. Both share these slots.",
                     );
@@ -2569,6 +2578,9 @@ impl SceneBehavior for GameplayScene {
                     if ty < 4.0 {
                         ty = ay + ah + 6.0 * scale;
                     }
+                    if ty + th > layout.window_h - 4.0 {
+                        ty = (layout.window_h - th - 4.0).max(4.0);
+                    }
                     if tx + tw > layout.window_w - 4.0 {
                         tx = layout.window_w - tw - 4.0;
                     }
@@ -2652,6 +2664,7 @@ impl SceneBehavior for GameplayScene {
             &mut pause_quads,
             &mut pause_text,
             &mut buttons,
+            ctx.ui_scale,
         );
 
         // Fullscreen click-blocker behind the pause menu's own buttons.
@@ -2678,7 +2691,7 @@ impl SceneBehavior for GameplayScene {
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
-        let _relic_placements: Vec<crate::scenes::RelicPlacement> = Vec::new();
+        let _relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
         // `scale_c` is still used by per-candle jitter offsets below; the
         // jitters are positional fudges, not physical mesh sizes, so they
         // stay in pixel space.
@@ -3065,7 +3078,8 @@ impl SceneBehavior for GameplayScene {
                         padding: 0.0,
                         align: TextAlign::Left,
                     };
-                    let body_line_h = typography::size(body_style.tier, layout.window_h);
+                    let body_line_h =
+                        typography::size(body_style.tier, layout.window_h, ctx.ui_scale);
                     let body_step = body_line_h * 1.6;
                     let body_box = body_line_h * 1.8;
                     let body_inner_w = tip_w - pad * 2.0;
@@ -3079,6 +3093,9 @@ impl SceneBehavior for GameplayScene {
                     tip_x = tip_x.clamp(8.0, layout.window_w - tip_w - 8.0);
                     if tip_y < 8.0 {
                         tip_y = ry + rh + 8.0;
+                    }
+                    if tip_y + tip_h > layout.window_h - 8.0 {
+                        tip_y = (layout.window_h - tip_h - 8.0).max(8.0);
                     }
                     let bg = crate::render::theme::color::alpha(
                         crate::render::theme::color::MIDNIGHT,
@@ -3124,6 +3141,7 @@ impl SceneBehavior for GameplayScene {
                         def.description,
                         body_style,
                         layout.window_h,
+                        ctx.ui_scale,
                     );
                 }
             }
@@ -3163,6 +3181,7 @@ impl SceneBehavior for GameplayScene {
                         r[1],
                         layout.window_w,
                         layout.window_h,
+                        ctx.ui_scale,
                         &title,
                         &body,
                     );
@@ -3184,6 +3203,7 @@ impl SceneBehavior for GameplayScene {
                         rect[1],
                         layout.window_w,
                         layout.window_h,
+                        ctx.ui_scale,
                         "Gold",
                         &format!(
                             "${}. Earned from clearing blinds. Spend in the shop on relics, ribbons, talismans, and pack rerolls.",
@@ -3245,6 +3265,7 @@ impl SceneBehavior for GameplayScene {
                         ay,
                         layout.window_w,
                         layout.window_h,
+                        ctx.ui_scale,
                         &title,
                         &body,
                     );
@@ -3258,6 +3279,7 @@ impl SceneBehavior for GameplayScene {
                     dora_rect[1],
                     layout.window_w,
                     layout.window_h,
+                    ctx.ui_scale,
                     "Dora Indicator",
                     "The face-up tile on the brass stand marks the round's bonus. Each tile in your hand matching the dora (the next tile after the indicator) adds extra mult when scored.",
                 );
@@ -4045,6 +4067,7 @@ fn push_tooltip(
     anchor_y: f32,
     window_w: f32,
     window_h: f32,
+    ui_scale: f32,
     title: &str,
     body: &str,
 ) {
@@ -4055,8 +4078,8 @@ fn push_tooltip(
     let tip_w = (window_w * 0.34).clamp(300.0, 500.0);
 
     // Pin font sizes — never let the rasterizer auto-shrink below readable.
-    let title_font = typography::size(typography::BODY, window_h).max(15.0);
-    let body_font = typography::size(typography::CAPTION, window_h).max(13.0);
+    let title_font = typography::size(typography::BODY, window_h, ui_scale).max(15.0);
+    let body_font = typography::size(typography::CAPTION, window_h, ui_scale).max(13.0);
     let title_h = title_font * 1.6;
     let body_line_step = body_font * 1.4;
 
@@ -4073,6 +4096,9 @@ fn push_tooltip(
     tip_x = tip_x.clamp(8.0, window_w - tip_w - 8.0);
     if tip_y < 8.0 {
         tip_y = anchor_y + 8.0;
+    }
+    if tip_y + tip_h > window_h - 8.0 {
+        tip_y = (window_h - tip_h - 8.0).max(8.0);
     }
     let bg = color::alpha(color::MIDNIGHT, 0.96);
     instances.push(GpuInstance {
@@ -4115,5 +4141,6 @@ fn push_tooltip(
             align: TextAlign::Left,
         },
         window_h,
+        ui_scale,
     );
 }

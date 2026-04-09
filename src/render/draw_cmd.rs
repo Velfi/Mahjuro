@@ -104,7 +104,10 @@ pub struct PackPlacement {
     pub half_extents: [f32; 3],
     pub color: [f32; 4],
     pub kind: TilePackKind,
+    /// Rotation around the local X axis in degrees (tilt forward/back).
     pub rotation_x_deg: f32,
+    /// Rotation around the local Y axis in degrees (turn left/right).
+    pub rotation_y_deg: f32,
     /// Optional pick id so hit-testing can identify this pack.
     pub pick_id: Option<u32>,
 }

@@ -6,8 +6,10 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use crate::render::draw_cmd::UiFrame;
+
 use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const PROFILE_COUNT: usize = 3;
 
@@ -41,15 +43,19 @@ impl ProfileSelectScene {
 
     /// Single source of truth for profile card layout — used by both
     /// `update()` (hit-test) and `draw()` (rendering + button registration).
-    fn card_rects(window_w: f32, window_h: f32) -> Vec<[f32; 4]> {
+    fn card_rects(window_w: f32, window_h: f32, ui_scale: f32) -> Vec<[f32; 4]> {
         let w = window_w;
         let h = window_h;
-        let scale = (w.min(h)) / 600.0;
+        let scale = (w.min(h)) / 600.0 * ui_scale;
         let title_h = (48.0 * scale).max(28.0);
         let title_y = h * 0.06;
         let card_w = (260.0 * scale).min(w * 0.8);
-        let card_h = (160.0 * scale).max(100.0);
         let card_gap = (16.0 * scale).max(8.0);
+        // Cap card height so all profiles fit on screen.
+        let avail_h = h * 0.88 - title_y - title_h;
+        let card_h = (160.0 * scale)
+            .max(100.0)
+            .min((avail_h - (PROFILE_COUNT - 1) as f32 * card_gap) / PROFILE_COUNT as f32);
         let total_h = PROFILE_COUNT as f32 * card_h + (PROFILE_COUNT - 1) as f32 * card_gap;
         let start_y = title_y + title_h + (h - title_y - title_h - total_h) * 0.35;
         let card_x = (w - card_w) * 0.5;
@@ -61,8 +67,8 @@ impl ProfileSelectScene {
             .collect()
     }
 
-    fn flat_items(window_w: f32, window_h: f32) -> Vec<FlatItem<PickProfile>> {
-        Self::card_rects(window_w, window_h)
+    fn flat_items(window_w: f32, window_h: f32, ui_scale: f32) -> Vec<FlatItem<PickProfile>> {
+        Self::card_rects(window_w, window_h, ui_scale)
             .into_iter()
             .enumerate()
             .map(|(i, rect)| FlatItem::new(FocusId(i as u32), rect, PickProfile(i)))
@@ -72,7 +78,7 @@ impl ProfileSelectScene {
 
 impl SceneBehavior for ProfileSelectScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items = Self::flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        let items = Self::flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -80,6 +86,9 @@ impl SceneBehavior for ProfileSelectScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
             },
         );
 
@@ -96,22 +105,23 @@ impl SceneBehavior for ProfileSelectScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let scale = (w.min(h)) / 600.0 * ctx.ui_scale;
 
-        let mut instances = vec![GpuInstance {
+        let mut frame = UiFrame::new();
+        let mut buttons = Vec::new();
+
+        frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
             color: color::OBSIDIAN,
-        }];
-        let mut text_labels = Vec::new();
-        let mut buttons = Vec::new();
+        });
 
         // Title.
         let title_h = (48.0 * scale).max(28.0);
         let title_y = h * 0.06;
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "Select Profile".into(),
             color: color::CHAMPAGNE,
@@ -120,7 +130,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         // Profile cards — single source of truth via card_rects().
         let summaries = persistence::all_profile_summaries();
-        let card_rects = Self::card_rects(w, h);
+        let card_rects = Self::card_rects(w, h, ctx.ui_scale);
         let cursor = self.cursor();
 
         for (i, summary) in summaries.iter().enumerate() {
@@ -134,7 +144,7 @@ impl SceneBehavior for ProfileSelectScene {
             } else {
                 color::INDIGO
             };
-            instances.push(GpuInstance {
+            frame.quad(GpuInstance {
                 rect: [card_x, card_y, card_w, card_h],
                 color: bg_color,
             });
@@ -142,7 +152,7 @@ impl SceneBehavior for ProfileSelectScene {
             // Active indicator stripe on left edge.
             if is_active {
                 let stripe_w = 4.0 * scale;
-                instances.push(GpuInstance {
+                frame.quad(GpuInstance {
                     rect: [card_x, card_y, stripe_w, card_h],
                     color: color::JADE,
                 });
@@ -151,11 +161,11 @@ impl SceneBehavior for ProfileSelectScene {
             // Selection highlight border (top and bottom gold lines).
             if is_focused {
                 let border = 2.0 * scale;
-                instances.push(GpuInstance {
+                frame.quad(GpuInstance {
                     rect: [card_x, card_y, card_w, border],
                     color: color::GOLD,
                 });
-                instances.push(GpuInstance {
+                frame.quad(GpuInstance {
                     rect: [card_x, card_y + card_h - border, card_w, border],
                     color: color::GOLD,
                 });
@@ -173,7 +183,7 @@ impl SceneBehavior for ProfileSelectScene {
                 format!("Profile {}", i + 1)
             };
             let header_rect = [card_x + pad_x, card_y + pad_y, card_w - pad_x * 2.0, line_h];
-            text_labels.push(TextLabel {
+            frame.text(TextLabel {
                 rect: header_rect,
                 text: header_text,
                 color: if is_focused {
@@ -190,17 +200,15 @@ impl SceneBehavior for ProfileSelectScene {
                 let line1_y = card_y + pad_y + line_h + pad_y * 0.5;
                 let stat_color = color::MIST;
 
-                // Level.
-                text_labels.push(TextLabel {
+                frame.text(TextLabel {
                     rect: [stat_x, line1_y, stat_w, small_h],
                     text: format!("Level {}", summary.level),
                     color: stat_color,
                     ..Default::default()
                 });
 
-                // Runs completed.
                 let line2_y = line1_y + small_h + pad_y * 0.3;
-                text_labels.push(TextLabel {
+                frame.text(TextLabel {
                     rect: [stat_x, line2_y, stat_w, small_h],
                     text: format!(
                         "{} run{} completed",
@@ -211,19 +219,17 @@ impl SceneBehavior for ProfileSelectScene {
                     ..Default::default()
                 });
 
-                // High score.
                 let line3_y = line2_y + small_h + pad_y * 0.3;
-                text_labels.push(TextLabel {
+                frame.text(TextLabel {
                     rect: [stat_x, line3_y, stat_w, small_h],
                     text: format!("Best score: {}", summary.high_score),
                     color: stat_color,
                     ..Default::default()
                 });
 
-                // Saved game indicator.
                 if summary.has_saved_run {
                     let line4_y = line3_y + small_h + pad_y * 0.3;
-                    text_labels.push(TextLabel {
+                    frame.text(TextLabel {
                         rect: [stat_x, line4_y, stat_w, small_h],
                         text: "Saved game in progress".into(),
                         color: color::JADE,
@@ -231,9 +237,8 @@ impl SceneBehavior for ProfileSelectScene {
                     });
                 }
             } else {
-                // Empty profile.
                 let empty_y = card_y + pad_y + line_h + pad_y;
-                text_labels.push(TextLabel {
+                frame.text(TextLabel {
                     rect: [card_x + pad_x, empty_y, card_w - pad_x * 2.0, small_h],
                     text: "Empty — start a new adventure".into(),
                     color: color::SLATE,
@@ -243,40 +248,21 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         // Single hit-target list shared with update() — no layout drift.
-        let items = Self::flat_items(w, h);
+        let items = Self::flat_items(w, h, ctx.ui_scale);
         self.tree.register_flat_buttons(&items, &mut buttons);
 
         // Hint text at bottom.
         let hint_h = (18.0 * scale).max(12.0);
         let hint_y = h - hint_h - (12.0 * scale);
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Up/Down to browse  |  Enter to select  |  Esc to go back".into(),
             color: color::SLATE,
             ..Default::default()
         });
 
-        SceneDrawOutput {
-            background: Default::default(),
-            tray_instances: vec![],
-            instances,
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels,
-            relic_icons: vec![],
-            buttons,
-            window_title: "Mahjuro — Select Profile".into(),
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
+        frame.buttons = buttons;
+        frame.window_title = "Mahjuro — Select Profile".into();
+        frame
     }
 }

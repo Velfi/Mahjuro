@@ -5,8 +5,10 @@ use std::time::Instant;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 
+use crate::render::draw_cmd::UiFrame;
+
 use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const MIN_DISPLAY_SECS: f32 = 0.5;
 
@@ -44,23 +46,23 @@ impl SceneBehavior for SplashScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let scale = (w.min(h)) / 600.0 * ctx.ui_scale;
+
+        let mut frame = UiFrame::new();
 
         // Dark background.
-        let instances = vec![GpuInstance {
+        frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
             color: color::OBSIDIAN,
-        }];
-
-        let mut text_labels = Vec::new();
+        });
 
         // Title: "MAHJURO" in large capitals.
         let title_h = (120.0 * scale).max(48.0);
         let title_y = h * 0.30;
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "MAHJURO".into(),
             color: color::CHAMPAGNE,
@@ -70,34 +72,14 @@ impl SceneBehavior for SplashScene {
         // Tagline below the title.
         let tagline_h = (28.0 * scale).max(16.0);
         let tagline_y = title_y + title_h + h * 0.04;
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [w * 0.15, tagline_y, w * 0.7, tagline_h],
             text: "Mahjong, reimagined for chaos.".into(),
             color: color::MIST,
             ..Default::default()
         });
 
-        SceneDrawOutput {
-            background: Default::default(),
-            tray_instances: vec![],
-            instances,
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels,
-            relic_icons: vec![],
-            buttons: vec![],
-            window_title: "Mahjuro".into(),
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
+        frame.window_title = "Mahjuro".into();
+        frame
     }
 }

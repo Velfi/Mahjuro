@@ -105,6 +105,7 @@ impl GlossaryOverlay {
         &self,
         window_w: f32,
         window_h: f32,
+        ui_scale: f32,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
@@ -131,7 +132,7 @@ impl GlossaryOverlay {
             color: color::MIDNIGHT,
         });
 
-        let scale = (window_w.min(window_h)) / 600.0;
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
         let panel_w = (window_w * 0.92).min(1200.0 * scale);
         let panel_h = (window_h * 0.94).min(900.0 * scale);
         let panel_x = (window_w - panel_w) * 0.5;
@@ -146,7 +147,7 @@ impl GlossaryOverlay {
         // Title — pinned font_px so it doesn't auto-shrink at narrow windows.
         // Includes the input hints inline so we don't burn a whole row on
         // them.
-        let title_font = typography::size(typography::TITLE, window_h).max(24.0);
+        let title_font = typography::size(typography::TITLE, window_h, ui_scale).max(24.0);
         let title_h = title_font * 1.5;
         let title_y = panel_y + (10.0 * scale);
         text_labels.push(TextLabel {
@@ -159,7 +160,7 @@ impl GlossaryOverlay {
         });
 
         // Compact hint row pinned just below the title.
-        let hint_font = typography::size(typography::CAPTION, window_h).max(13.0);
+        let hint_font = typography::size(typography::CAPTION, window_h, ui_scale).max(13.0);
         let hint_h = hint_font * 1.4;
         let hint_y = title_y + title_h;
         text_labels.push(TextLabel {
@@ -232,11 +233,11 @@ impl GlossaryOverlay {
             })
             .collect();
 
-        let entry_h = entry_height(window_h, scale);
+        let entry_h = entry_height(window_h, scale, ui_scale);
         let entry_gap = 6.0 * scale;
         let row_step = entry_h + entry_gap;
 
-        let heading_h = section_heading_h(window_h, scale);
+        let heading_h = section_heading_h(window_h, scale, ui_scale);
         let entries_top = body_top + heading_h;
         let visible_h = (body_bot - entries_top).max(row_step);
         let visible_rows = ((visible_h / row_step).floor() as usize).max(1);
@@ -263,6 +264,7 @@ impl GlossaryOverlay {
             col_w,
             window_h,
             scale,
+            ui_scale,
         );
         push_section_heading(
             text_labels,
@@ -272,6 +274,7 @@ impl GlossaryOverlay {
             col_w,
             window_h,
             scale,
+            ui_scale,
         );
 
         // Render visible entries plus one extra row for the partial entry
@@ -285,7 +288,17 @@ impl GlossaryOverlay {
                 break;
             }
             let y = entries_top + row as f32 * row_step + frac_offset;
-            push_glossary_entry(text_labels, name, body, left_x, y, col_w, window_h, scale);
+            push_glossary_entry(
+                text_labels,
+                name,
+                body,
+                left_x,
+                y,
+                col_w,
+                window_h,
+                scale,
+                ui_scale,
+            );
         }
 
         // Render right-column entries.
@@ -295,7 +308,17 @@ impl GlossaryOverlay {
                 break;
             }
             let y = entries_top + row as f32 * row_step + frac_offset;
-            push_glossary_entry(text_labels, name, body, right_x, y, col_w, window_h, scale);
+            push_glossary_entry(
+                text_labels,
+                name,
+                body,
+                right_x,
+                y,
+                col_w,
+                window_h,
+                scale,
+                ui_scale,
+            );
         }
 
         // Tiny scroll-position indicator on the panel's right edge — only
@@ -327,7 +350,7 @@ impl GlossaryOverlay {
             [btn_x, btn_y, btn_w, btn_h],
             PanelVariant::Default,
         );
-        let close_font = typography::size(typography::BODY, window_h).max(17.0);
+        let close_font = typography::size(typography::BODY, window_h, ui_scale).max(17.0);
         text_labels.push(TextLabel {
             rect: [btn_x, btn_y, btn_w, btn_h],
             text: "Close".into(),
@@ -362,7 +385,13 @@ impl GlossaryOverlay {
     ///
     /// `frame.buttons` is extended with the glossary's own buttons (close
     /// button + any future glossary controls).
-    pub fn draw_into_frame(&self, frame: &mut UiFrame, window_w: f32, window_h: f32) {
+    pub fn draw_into_frame(
+        &self,
+        frame: &mut UiFrame,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) {
         if !self.open {
             return;
         }
@@ -372,7 +401,9 @@ impl GlossaryOverlay {
         // The legacy draw() begins by clearing each vec — passing fresh
         // empties is a no-op for that step and lets us reuse all the
         // layout/scrolling logic without duplication.
-        self.draw(window_w, window_h, &mut quads, &mut text, &mut btns);
+        self.draw(
+            window_w, window_h, ui_scale, &mut quads, &mut text, &mut btns,
+        );
         frame.quads(quads);
         frame.texts(text);
         frame.buttons.extend(btns);
@@ -426,34 +457,34 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     }
 }
 
-pub(crate) fn section_heading_h(window_h: f32, scale: f32) -> f32 {
-    section_heading_font(window_h) * 1.7 + (6.0 * scale)
+pub(crate) fn section_heading_h(window_h: f32, scale: f32, ui_scale: f32) -> f32 {
+    section_heading_font(window_h, ui_scale) * 1.7 + (6.0 * scale)
 }
 
-fn section_heading_font(window_h: f32) -> f32 {
-    typography::size(typography::HEADING, window_h).max(20.0)
+fn section_heading_font(window_h: f32, ui_scale: f32) -> f32 {
+    typography::size(typography::HEADING, window_h, ui_scale).max(20.0)
 }
 
 /// Total height (name row + body rows + bottom padding) of one glossary
 /// entry. Must match `push_glossary_entry`'s layout exactly so the scroll
 /// machinery in `draw` can compute row positions ahead of time.
-pub(crate) fn entry_height(window_h: f32, scale: f32) -> f32 {
-    let name_font = name_font(window_h);
+pub(crate) fn entry_height(window_h: f32, scale: f32, ui_scale: f32) -> f32 {
+    let name_font = name_font(window_h, ui_scale);
     let name_h = (name_font * 1.5).max(22.0);
-    let body_font = body_font(window_h);
+    let body_font = body_font(window_h, ui_scale);
     let line_step = body_font * 1.35;
     let body_h = line_step * 3.0;
     name_h + body_h + (4.0 * scale)
 }
 
-fn name_font(window_h: f32) -> f32 {
-    typography::size(typography::BODY, window_h).max(17.0)
+fn name_font(window_h: f32, ui_scale: f32) -> f32 {
+    typography::size(typography::BODY, window_h, ui_scale).max(17.0)
 }
 
-fn body_font(window_h: f32) -> f32 {
+fn body_font(window_h: f32, ui_scale: f32) -> f32 {
     // Matches the BODY tier we hand to push_text_block. The min keeps very
     // small windows from crushing the text below ~15px.
-    typography::size(typography::BODY, window_h).max(15.0)
+    typography::size(typography::BODY, window_h, ui_scale).max(15.0)
 }
 
 pub(crate) fn push_section_heading(
@@ -464,8 +495,9 @@ pub(crate) fn push_section_heading(
     w: f32,
     window_h: f32,
     _scale: f32,
+    ui_scale: f32,
 ) {
-    let font = section_heading_font(window_h);
+    let font = section_heading_font(window_h, ui_scale);
     let h = font * 1.7;
     labels.push(TextLabel {
         rect: [x, y, w, h],
@@ -488,8 +520,9 @@ pub(crate) fn push_glossary_entry(
     w: f32,
     window_h: f32,
     _scale: f32,
+    ui_scale: f32,
 ) {
-    let nf = name_font(window_h);
+    let nf = name_font(window_h, ui_scale);
     let name_h = (nf * 1.5).max(22.0);
     labels.push(TextLabel {
         rect: [x, y, w, name_h],
@@ -502,7 +535,7 @@ pub(crate) fn push_glossary_entry(
     // Body: word-wrapped multi-line block at pinned CAPTION size. Reserve
     // enough vertical space for ~3 lines of body — most entries fit in two,
     // longest in three.
-    let bf = body_font(window_h);
+    let bf = body_font(window_h, ui_scale);
     let line_step = bf * 1.4;
     let body_h = line_step * 3.0;
     // BODY tier (not CAPTION) so descriptions render at the same size as
@@ -518,5 +551,6 @@ pub(crate) fn push_glossary_entry(
             align: TextAlign::Left,
         },
         window_h,
+        ui_scale,
     );
 }

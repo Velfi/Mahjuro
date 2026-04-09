@@ -46,6 +46,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
+use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget;
 
 // ─── Identifiers ────────────────────────────────────────────────────────────
@@ -384,6 +385,15 @@ pub struct TreeState {
     /// is `(item id, rect, kind tag)`. Decorations are not cached.
     layout: Vec<LaidOut>,
     last_window: (f32, f32),
+    last_ui_scale: f32,
+    /// Smooth-scroll state for autoscroll when content overflows anchor.
+    scroll: SmoothScroll,
+    /// The pixel offset currently applied to laid-out rects (cached for draw).
+    scroll_offset_px: f32,
+    /// Total content height from the last layout (before scroll).
+    content_height: f32,
+    /// Anchor height from the last layout.
+    anchor_height: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -404,6 +414,11 @@ impl TreeState {
             focused: None,
             layout: Vec::new(),
             last_window: (0.0, 0.0),
+            last_ui_scale: 1.0,
+            scroll: SmoothScroll::new(),
+            scroll_offset_px: 0.0,
+            content_height: 0.0,
+            anchor_height: 0.0,
         }
     }
 
@@ -449,13 +464,15 @@ impl TreeState {
             self.focused = self.layout.first().map(|l| l.id);
         }
 
-        // Mouse hover-follow.
-        let (cx, cy) = input.cursor_pos;
-        for l in &self.layout {
-            let [x, y, w, h] = l.rect;
-            if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
-                self.focused = Some(l.id);
-                break;
+        // Mouse hover-follow (only in cursor mode).
+        if input.input_mode == crate::ui::input::InputMode::Cursor {
+            let (cx, cy) = input.cursor_pos;
+            for l in &self.layout {
+                let [x, y, w, h] = l.rect;
+                if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
+                    self.focused = Some(l.id);
+                    break;
+                }
             }
         }
 
@@ -550,20 +567,36 @@ pub struct TreeInput<'a> {
     pub button_clicks: &'a [u32],
     pub cursor_pos: (f32, f32),
     pub window: (f32, f32),
+    pub ui_scale: f32,
+    pub input_mode: crate::ui::input::InputMode,
+    /// Mouse-wheel / trackpad scroll delta in line units.
+    /// Positive = scroll down. Only used when the tree content overflows
+    /// its anchor rect (autoscroll).
+    pub scroll_lines: f32,
 }
 
 // ─── Layout pass ────────────────────────────────────────────────────────────
 
 /// Walk the tree and compute item rects. Decorations get their rects too but
 /// we don't cache them (they're never hit-tested).
+/// Result of a layout pass, used for autoscroll calculations.
+struct LayoutInfo {
+    rects: Vec<NodeRect>,
+    /// Total natural content height of the root node's children.
+    content_height: f32,
+    /// Height of the anchor rect the content was laid out into.
+    anchor_height: f32,
+}
+
 fn layout_tree<A: Copy>(
     tree: &Tree<A>,
     window: (f32, f32),
+    ui_scale: f32,
     out: &mut Vec<LaidOut>,
-) -> Vec<NodeRect> {
+) -> LayoutInfo {
     out.clear();
     let (w, h) = window;
-    let scale = (w.min(h)) / 600.0;
+    let scale = metrics::scene_scale(w, h, ui_scale);
 
     // Resolve the root anchor. Defaults to centered, narrow column for
     // vertical menus; full screen for everything else.
@@ -581,9 +614,44 @@ fn layout_tree<A: Copy>(
         }
     });
 
+    // Measure the natural content height of the root column for autoscroll.
+    let content_height = root_content_height(&tree.root, anchor[2], h, scale, ui_scale);
+
     let mut rects = Vec::new();
-    layout_node(&tree.root, anchor, scale, h, out, &mut rects);
-    rects
+    layout_node(&tree.root, anchor, scale, h, ui_scale, out, &mut rects);
+    LayoutInfo {
+        rects,
+        content_height,
+        anchor_height: anchor[3],
+    }
+}
+
+/// Compute the natural content height of a root node (including gaps).
+fn root_content_height<A: Copy>(
+    node: &Node<A>,
+    container_w: f32,
+    window_h: f32,
+    scale: f32,
+    ui_scale: f32,
+) -> f32 {
+    match node {
+        Node::Column { gap, children, .. } => {
+            let gap_px = if *gap > 0.0 {
+                *gap
+            } else {
+                (12.0 * scale).max(6.0)
+            };
+            let mut total = 0.0f32;
+            for (i, c) in children.iter().enumerate() {
+                total += child_height(c, container_w, window_h, scale, ui_scale);
+                if i + 1 < children.len() {
+                    total += gap_px;
+                }
+            }
+            total
+        }
+        _ => 0.0, // non-column roots don't autoscroll
+    }
 }
 
 /// Per-node resolved rect, parallel to the tree walk order. Used by `draw`.
@@ -600,11 +668,16 @@ fn natural_item_width(container_w: f32, scale: f32) -> f32 {
     (220.0 * scale).min(container_w)
 }
 
-fn natural_decoration_height(decoration: &Decoration, window_h: f32, scale: f32) -> f32 {
+fn natural_decoration_height(
+    decoration: &Decoration,
+    window_h: f32,
+    scale: f32,
+    ui_scale: f32,
+) -> f32 {
     match decoration {
-        Decoration::Title { tier, .. } => typography::size(*tier, window_h) * 1.2,
-        Decoration::Body { tier, .. } => typography::size(*tier, window_h) * 1.1,
-        Decoration::Hint { tier, .. } => typography::size(*tier, window_h) * 1.1,
+        Decoration::Title { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.2,
+        Decoration::Body { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.1,
+        Decoration::Hint { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.1,
         Decoration::Spacer(px) => *px * scale,
     }
 }
@@ -614,6 +687,7 @@ fn layout_node<A: Copy>(
     rect: [f32; 4],
     scale: f32,
     window_h: f32,
+    ui_scale: f32,
     out: &mut Vec<LaidOut>,
     rects: &mut Vec<NodeRect>,
 ) {
@@ -634,7 +708,7 @@ fn layout_node<A: Copy>(
             // vertically inside the container.
             let mut child_heights = Vec::with_capacity(children.len());
             for c in children {
-                child_heights.push(child_height(c, w, window_h, scale));
+                child_heights.push(child_height(c, w, window_h, scale, ui_scale));
             }
             let total_h: f32 = child_heights.iter().sum::<f32>()
                 + gap_px * (children.len().saturating_sub(1) as f32);
@@ -649,7 +723,15 @@ fn layout_node<A: Copy>(
                     HAlign::Right => x + w - cw,
                     HAlign::Center | HAlign::Stretch => x + (w - cw) * 0.5,
                 };
-                layout_node(child, [cx, cy, cw, *ch], scale, window_h, out, rects);
+                layout_node(
+                    child,
+                    [cx, cy, cw, *ch],
+                    scale,
+                    window_h,
+                    ui_scale,
+                    out,
+                    rects,
+                );
                 cy += ch + gap_px;
             }
         }
@@ -669,7 +751,7 @@ fn layout_node<A: Copy>(
             let cw = ((w - total_gap) / n).max(0.0);
             let mut cx = x;
             for child in children {
-                let ch = child_height(child, cw, window_h, scale).min(h);
+                let ch = child_height(child, cw, window_h, scale, ui_scale).min(h);
                 let cy = match align {
                     VAlign::Top => y,
                     VAlign::Bottom => y + h - ch,
@@ -680,7 +762,15 @@ fn layout_node<A: Copy>(
                 } else {
                     ch
                 };
-                layout_node(child, [cx, cy, cw, final_h], scale, window_h, out, rects);
+                layout_node(
+                    child,
+                    [cx, cy, cw, final_h],
+                    scale,
+                    window_h,
+                    ui_scale,
+                    out,
+                    rects,
+                );
                 cx += cw + gap_px;
             }
         }
@@ -703,7 +793,15 @@ fn layout_node<A: Copy>(
                 let c = i % cols;
                 let cx = x + c as f32 * (cell_w + gx);
                 let cy = y + r as f32 * (cell_h + gy);
-                layout_node(child, [cx, cy, cell_w, cell_h], scale, window_h, out, rects);
+                layout_node(
+                    child,
+                    [cx, cy, cell_w, cell_h],
+                    scale,
+                    window_h,
+                    ui_scale,
+                    out,
+                    rects,
+                );
             }
         }
         Node::Item(item) => {
@@ -727,7 +825,13 @@ fn child_width<A: Copy>(node: &Node<A>, container_w: f32, scale: f32) -> f32 {
     }
 }
 
-fn child_height<A: Copy>(node: &Node<A>, container_w: f32, window_h: f32, scale: f32) -> f32 {
+fn child_height<A: Copy>(
+    node: &Node<A>,
+    container_w: f32,
+    window_h: f32,
+    scale: f32,
+    ui_scale: f32,
+) -> f32 {
     match node {
         Node::Item(item) => match item.size {
             Size::Fixed(_, h) => h,
@@ -735,7 +839,7 @@ fn child_height<A: Copy>(node: &Node<A>, container_w: f32, window_h: f32, scale:
             Size::FracW(f) => container_w * f,
             Size::Auto => natural_item_height(scale),
         },
-        Node::Decoration(d) => natural_decoration_height(d, window_h, scale),
+        Node::Decoration(d) => natural_decoration_height(d, window_h, scale, ui_scale),
         // Containers default to the natural height of their children. We don't
         // recursively measure here because the parent already gave us a rect
         // (anchor or grid cell). Use a sentinel = 0; the parent decides.
@@ -749,7 +853,40 @@ impl TreeState {
     /// Lay out the tree, run input, return the activated action (if any).
     pub fn update<A: Copy>(&mut self, tree: &Tree<A>, input: TreeInput<'_>) -> Option<A> {
         self.last_window = input.window;
-        let _ = layout_tree(tree, input.window, &mut self.layout);
+        self.last_ui_scale = input.ui_scale;
+        let info = layout_tree(tree, input.window, input.ui_scale, &mut self.layout);
+        self.content_height = info.content_height;
+        self.anchor_height = info.anchor_height;
+
+        // ── Autoscroll: apply pixel offset when content overflows ────
+        let overflow = (self.content_height - self.anchor_height).max(0.0);
+        if overflow > 0.0 {
+            // Feed mouse-wheel input into smooth scroll.
+            // SmoothScroll works in "entry units" — we use pixels directly
+            // by treating 1 unit = 1 pixel of scroll.
+            let line_height = if !self.layout.is_empty() {
+                // Use average item height as a scroll step for keyboard nav.
+                self.content_height / self.layout.len() as f32
+            } else {
+                40.0
+            };
+            self.scroll.set_max(overflow.ceil() as u32);
+            if input.scroll_lines.abs() > 0.001 {
+                self.scroll.scroll_by(input.scroll_lines * line_height);
+            }
+            // Clamp scroll target to pixel overflow range.
+            let t = self.scroll.target().clamp(0.0, overflow);
+            self.scroll.set_target(t);
+            self.scroll_offset_px = self.scroll.tick();
+
+            // Shift all laid-out rects up by scroll offset.
+            for l in &mut self.layout {
+                l.rect[1] -= self.scroll_offset_px;
+            }
+        } else {
+            self.scroll_offset_px = 0.0;
+            self.scroll.jump(0.0);
+        }
 
         // Resolve focused id against the latest layout. If it disappeared,
         // fall back to the first item.
@@ -761,13 +898,15 @@ impl TreeState {
             self.focused = self.layout.first().map(|l| l.id);
         }
 
-        // Mouse hover-follow: if cursor is over an item, focus it.
-        let (cx, cy) = input.cursor_pos;
-        for l in &self.layout {
-            let [x, y, w, h] = l.rect;
-            if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
-                self.focused = Some(l.id);
-                break;
+        // Mouse hover-follow: if cursor is over an item, focus it (only in cursor mode).
+        if input.input_mode == crate::ui::input::InputMode::Cursor {
+            let (cx, cy) = input.cursor_pos;
+            for l in &self.layout {
+                let [x, y, w, h] = l.rect;
+                if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
+                    self.focused = Some(l.id);
+                    break;
+                }
             }
         }
 
@@ -782,6 +921,42 @@ impl TreeState {
         for a in input.actions {
             if let Some(action) = self.handle_action(tree, *a) {
                 return Some(action);
+            }
+        }
+
+        // ── Auto-scroll to keep focused item visible ────────────────
+        if overflow > 0.0 {
+            if let Some(fid) = self.focused {
+                if let Some(l) = self.layout.iter().find(|l| l.id == fid) {
+                    // l.rect[1] is already shifted by scroll_offset_px.
+                    // We want the focused item to be within the original
+                    // anchor region. Recover the anchor top from the tree.
+                    let anchor_top = self
+                        .layout
+                        .first()
+                        .map(|first| {
+                            // The first item's unscrolled y minus half the centering gap
+                            // is roughly anchor_top; but simpler: use the tree anchor.
+                            first.rect[1] + self.scroll_offset_px
+                                - ((self.anchor_height - self.content_height) * 0.5).max(0.0)
+                        })
+                        .unwrap_or(0.0);
+                    let anchor_bottom = anchor_top + self.anchor_height;
+                    let item_top = l.rect[1];
+                    let item_bottom = item_top + l.rect[3];
+
+                    if item_top < anchor_top {
+                        // Item above viewport — scroll up.
+                        let delta = anchor_top - item_top;
+                        let t = (self.scroll.target() - delta).max(0.0);
+                        self.scroll.set_target(t);
+                    } else if item_bottom > anchor_bottom {
+                        // Item below viewport — scroll down.
+                        let delta = item_bottom - anchor_bottom;
+                        let t = (self.scroll.target() + delta).min(overflow);
+                        self.scroll.set_target(t);
+                    }
+                }
             }
         }
 
@@ -884,7 +1059,20 @@ impl TreeState {
         // Re-walk the tree using the cached layout. We rebuild the rects in
         // the same order as `update()` did, then draw each node.
         let mut layout_scratch = Vec::with_capacity(self.layout.len());
-        let _ = layout_tree(tree, self.last_window, &mut layout_scratch);
+        let _ = layout_tree(
+            tree,
+            self.last_window,
+            self.last_ui_scale,
+            &mut layout_scratch,
+        );
+
+        // Apply the same scroll offset that update() computed.
+        if self.scroll_offset_px.abs() > 0.001 {
+            for l in &mut layout_scratch {
+                l.rect[1] -= self.scroll_offset_px;
+            }
+        }
+
         // The cache from update() and the cache we just built must match.
         // (They will, because the tree shape is identical.)
         let mut idx = 0;
@@ -896,6 +1084,7 @@ impl TreeState {
             &layout_scratch,
             &mut idx,
             self.last_window,
+            self.last_ui_scale,
         );
     }
 }
@@ -908,13 +1097,23 @@ fn draw_node<A: Copy>(
     layout: &[LaidOut],
     idx: &mut usize,
     window: (f32, f32),
+    ui_scale: f32,
 ) {
     match node {
         Node::Column { children, .. }
         | Node::Row { children, .. }
         | Node::Grid { children, .. } => {
             for c in children {
-                draw_node(c, focused, frame, render_custom, layout, idx, window);
+                draw_node(
+                    c,
+                    focused,
+                    frame,
+                    render_custom,
+                    layout,
+                    idx,
+                    window,
+                    ui_scale,
+                );
             }
         }
         Node::Item(item) => {
@@ -925,7 +1124,15 @@ fn draw_node<A: Copy>(
                 .unwrap_or([0.0, 0.0, 0.0, 0.0]);
             *idx += 1;
             let is_focused = focused == Some(item.id);
-            draw_item(item, rect, is_focused, frame, render_custom, window);
+            draw_item(
+                item,
+                rect,
+                is_focused,
+                frame,
+                render_custom,
+                window,
+                ui_scale,
+            );
         }
         Node::Decoration(d) => {
             // Decorations need their own rect; we recompute it from the
@@ -946,16 +1153,21 @@ fn draw_node<A: Copy>(
             // at a y-position chosen by where we are in the column. For the
             // first migration scenes (start_screen), decorations are always
             // a Title at the top — so we use a window-relative top position.
-            draw_decoration_top(d, frame, window);
+            draw_decoration_top(d, frame, window, ui_scale);
         }
     }
 }
 
-fn draw_decoration_top(d: &Decoration, frame: &mut TreeFrame<'_>, window: (f32, f32)) {
+fn draw_decoration_top(
+    d: &Decoration,
+    frame: &mut TreeFrame<'_>,
+    window: (f32, f32),
+    ui_scale: f32,
+) {
     let (w, h) = window;
     match d {
         Decoration::Title { text, tier, color } => {
-            let th = typography::size(*tier, h);
+            let th = typography::size(*tier, h, ui_scale);
             frame.labels.push(TextLabel {
                 rect: [0.0, h * 0.08, w, th],
                 text: text.clone(),
@@ -964,7 +1176,7 @@ fn draw_decoration_top(d: &Decoration, frame: &mut TreeFrame<'_>, window: (f32, 
             });
         }
         Decoration::Body { text, tier, color } => {
-            let th = typography::size(*tier, h);
+            let th = typography::size(*tier, h, ui_scale);
             frame.labels.push(TextLabel {
                 rect: [0.0, h * 0.16, w, th],
                 text: text.clone(),
@@ -973,8 +1185,8 @@ fn draw_decoration_top(d: &Decoration, frame: &mut TreeFrame<'_>, window: (f32, 
             });
         }
         Decoration::Hint { text, tier, color } => {
-            let th = typography::size(*tier, h);
-            let scale = (w.min(h)) / 600.0;
+            let th = typography::size(*tier, h, ui_scale);
+            let scale = metrics::scene_scale(w, h, ui_scale);
             let hint_y = h - th - (12.0 * scale);
             frame.labels.push(TextLabel {
                 rect: [0.0, hint_y, w, th],
@@ -994,6 +1206,7 @@ fn draw_item<A: Copy>(
     frame: &mut TreeFrame<'_>,
     render_custom: &dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState),
     window: (f32, f32),
+    ui_scale: f32,
 ) {
     let state = if !item.enabled {
         ButtonState::Disabled
@@ -1011,7 +1224,7 @@ fn draw_item<A: Copy>(
     // Draw a gold focus ring around the focused item — the 2D equivalent
     // of the 3D tile outline shell that selected in-game tiles get.
     if focused {
-        let scale = (window.0.min(window.1)) / 600.0;
+        let scale = (window.0.min(window.1)) / 600.0 * ui_scale;
         push_focus_ring(rect, scale, frame.instances);
     }
 

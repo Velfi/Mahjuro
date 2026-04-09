@@ -162,12 +162,13 @@ pub fn push_text_block(
     text: &str,
     style: TextStyle,
     window_h: f32,
+    ui_scale: f32,
 ) {
     let [x, y, w, h] = rect;
     let pad = style.padding;
     let inner_w = (w - 2.0 * pad).max(1.0);
     let inner_h = (h - 2.0 * pad).max(1.0);
-    let line_h = typography::size(style.tier, window_h);
+    let line_h = typography::size(style.tier, window_h, ui_scale);
     // The rasteriser pins font_px directly, so it doesn't depend on the
     // rect's aspect ratio anymore. Use line_h as the pinned font_px.
     let font_px = line_h.max(8.0);

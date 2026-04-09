@@ -334,10 +334,11 @@ impl ModalQueue {
         &self,
         window_w: f32,
         window_h: f32,
+        ui_scale: f32,
     ) -> Option<(Vec<GpuInstance>, Vec<TextLabel>, Vec<ButtonDef>)> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
-        let scale = (window_w.min(window_h)) / 600.0;
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
 
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -354,14 +355,17 @@ impl ModalQueue {
         let card_w = (360.0 * scale).min(window_w * 0.8);
         let title_h = (48.0 * scale).max(28.0);
         let body_lines = modal.body.lines().count().max(1) as f32;
-        let body_h = (body_lines * 24.0 * scale).max(20.0);
         let dismiss_h = (28.0 * scale).max(18.0);
         let padding = (20.0 * scale).max(10.0);
-        let card_h =
-            padding + title_h + padding * 0.5 + body_h + padding * 0.75 + dismiss_h + padding;
+        let chrome_h = padding + title_h + padding * 0.5 + padding * 0.75 + dismiss_h + padding;
+        let max_body_h = window_h * 0.85 - chrome_h;
+        let body_h = (body_lines * 24.0 * scale)
+            .max(20.0)
+            .min(max_body_h.max(20.0));
+        let card_h = chrome_h + body_h;
 
         let card_x = (window_w - card_w) * 0.5;
-        let card_y = (window_h - card_h) * 0.5;
+        let card_y = ((window_h - card_h) * 0.5).max(8.0);
 
         // Border (slightly larger card behind).
         let border = 3.0 * scale;

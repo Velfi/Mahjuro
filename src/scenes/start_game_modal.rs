@@ -5,7 +5,7 @@
 use crate::core::tile::{Suit, Tile};
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
-use crate::render::theme::{ButtonVariant, color, typography};
+use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{
@@ -14,10 +14,9 @@ use crate::ui::widget_tree::{
 
 use super::shop::ShopScene;
 use super::start_screen::StartScreenScene;
-use super::{
-    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition,
-    UpdateCtx,
-};
+use crate::render::draw_cmd::UiFrame;
+
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -46,8 +45,8 @@ impl TileSelectScene {
 
     /// Build the button-only widget tree. Text labels are emitted separately
     /// in `draw()` because `draw_decoration_top` doesn't support column layout.
-    fn build_tree(&self, window_w: f32, window_h: f32) -> Tree<ModalAction> {
-        let scale = (window_w.min(window_h)) / 600.0;
+    fn build_tree(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Tree<ModalAction> {
+        let scale = metrics::scene_scale(window_w, window_h, ui_scale);
         let panel_w = window_w * 0.38;
         let btn_w = (240.0 * scale).min(panel_w * 0.85);
 
@@ -110,11 +109,11 @@ fn preview_tiles() -> Vec<Tile> {
 
 /// Row definitions: (start_index, count) for each row.
 const GRID_ROWS: [(usize, usize); 5] = [
-    (0, 9),   // Characters 1–9
-    (9, 9),   // Bamboos 1–9
-    (18, 9),  // Circles 1–9
-    (27, 7),  // Winds 1–4 + Dragons 1–3
-    (34, 4),  // Flowers 1–4
+    (0, 9),  // Characters 1–9
+    (9, 9),  // Bamboos 1–9
+    (18, 9), // Circles 1–9
+    (27, 7), // Winds 1–4 + Dragons 1–3
+    (34, 4), // Flowers 1–4
 ];
 
 /// Compute 38 screen-space `(x, y, w, h)` slot rects for the tile preview grid.
@@ -164,7 +163,7 @@ impl SceneBehavior for TileSelectScene {
             }
         }
 
-        let tree = self.build_tree(w, h);
+        let tree = self.build_tree(w, h, ctx.ui_scale);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -172,6 +171,9 @@ impl SceneBehavior for TileSelectScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
             },
         );
 
@@ -182,9 +184,10 @@ impl SceneBehavior for TileSelectScene {
         }
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
+        let ui_scale = ctx.ui_scale;
 
         let mut instances: Vec<GpuInstance> = Vec::new();
         let mut text_labels: Vec<TextLabel> = Vec::new();
@@ -192,14 +195,14 @@ impl SceneBehavior for TileSelectScene {
 
         // ── Left panel text labels (manually laid out) ─────────────
         let panel_w = w * 0.38;
-        let scale = (w.min(h)) / 600.0;
+        let scale = metrics::scene_scale(w, h, ui_scale);
         let gap_sm = (16.0 * scale).max(8.0);
         let gap_lg = (28.0 * scale).max(14.0);
 
-        let title_h = typography::size(typography::TITLE, h);
-        let name_h = typography::size(typography::HEADING, h);
-        let bonus_h = typography::size(typography::CAPTION, h);
-        let hint_h = typography::size(typography::MICRO, h);
+        let title_h = typography::size(typography::TITLE, h, ui_scale);
+        let name_h = typography::size(typography::HEADING, h, ui_scale);
+        let bonus_h = typography::size(typography::CAPTION, h, ui_scale);
+        let hint_h = typography::size(typography::MICRO, h, ui_scale);
 
         let text_block_h = title_h + gap_sm + name_h + gap_sm + bonus_h;
         let mut cursor_y = (h * 0.5 - text_block_h) * 0.5 + h * 0.05;
@@ -239,14 +242,14 @@ impl SceneBehavior for TileSelectScene {
         });
 
         // ── Buttons (via widget tree) ──────────────────────────────
-        let tree = self.build_tree(w, h);
-        let mut frame = TreeFrame {
+        let tree = self.build_tree(w, h, ui_scale);
+        let mut tree_frame = TreeFrame {
             instances: &mut instances,
             labels: &mut text_labels,
             buttons: &mut buttons,
             window: (w, h),
         };
-        self.tree.draw(&tree, &mut frame, &noop_render_custom);
+        self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
 
         // ── Tile preview grid on the right ─────────────────────────
         let grid_margin = w * 0.02;
@@ -257,24 +260,25 @@ impl SceneBehavior for TileSelectScene {
         let hand_tiles = preview_tiles();
         let hand_slots = grid_slots(grid_x, grid_y, grid_w, grid_h);
 
-        SceneDrawOutput {
-            background: BackgroundId::Black,
-            instances,
-            hand_tiles,
-            hand_slots,
-            focus: usize::MAX,
-            text_labels,
-            buttons,
-            window_title: "Mahjuro — Choose Tiles".into(),
-            draw_table: true,
-            tile_material_override: Some(self.material),
-            point_lights: vec![PointLight {
-                pos: [w * 0.5, h * 0.05, h * 0.55],
-                radius: h * 1.50,
-                color: [1.00, 0.86, 0.55],
-                intensity: 1.40,
-            }],
-            ..Default::default()
-        }
+        let mut frame = UiFrame::new();
+        frame.background(BackgroundId::Black);
+        frame.table();
+        frame.hand_tile_backdrop();
+        frame.quads(instances);
+        frame.hand_tile_faces();
+        frame.texts(text_labels);
+        frame.hand_tiles = hand_tiles;
+        frame.hand_slots = hand_slots;
+        frame.focus = usize::MAX;
+        frame.tile_material_override = Some(self.material);
+        frame.point_lights = vec![PointLight {
+            pos: [w * 0.5, h * 0.05, h * 0.55],
+            radius: h * 1.50,
+            color: [1.00, 0.86, 0.55],
+            intensity: 1.40,
+        }];
+        frame.buttons = buttons;
+        frame.window_title = "Mahjuro — Choose Tiles".into();
+        frame
     }
 }

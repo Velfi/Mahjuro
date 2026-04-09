@@ -125,8 +125,13 @@ impl DebugVisibilityOverlay {
         }
     }
 
-    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0;
+    fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -315,8 +320,13 @@ impl TuningOverlay {
         *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
     }
 
-    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0;
+    fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -674,8 +684,13 @@ impl SfxTestOverlay {
         false
     }
 
-    fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0;
+    fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -779,6 +794,230 @@ impl SfxTestOverlay {
     }
 }
 
+// ── Camera debug overlay ───────────────────────────────────────────
+// Interactive tuning panel for the 3D camera override. Arrow keys
+// adjust the focused parameter; Enter copies the current settings as
+// a Rust `CameraParams` literal to the system clipboard.
+
+struct CameraDebugOverlay {
+    cursor: usize,
+    eye: [f32; 3],
+    target: [f32; 3],
+    up: [f32; 3],
+    fovy_deg: f32,
+}
+
+impl CameraDebugOverlay {
+    fn new(cam: &render::draw_cmd::CameraParams) -> Self {
+        Self {
+            cursor: 0,
+            eye: cam.eye,
+            target: cam.target,
+            up: cam.up,
+            fovy_deg: cam.fovy_deg,
+        }
+    }
+
+    fn to_camera_params(&self) -> render::draw_cmd::CameraParams {
+        render::draw_cmd::CameraParams {
+            eye: self.eye,
+            target: self.target,
+            up: self.up,
+            fovy_deg: self.fovy_deg,
+        }
+    }
+
+    /// Row labels and current values. Each row edits one float.
+    fn rows(&self) -> Vec<(&'static str, f32)> {
+        vec![
+            ("Eye X", self.eye[0]),
+            ("Eye Y", self.eye[1]),
+            ("Eye Z", self.eye[2]),
+            ("Target X", self.target[0]),
+            ("Target Y", self.target[1]),
+            ("Target Z", self.target[2]),
+            ("FOV (deg)", self.fovy_deg),
+        ]
+    }
+
+    fn row_count(&self) -> usize {
+        7
+    }
+
+    fn adjust(&mut self, delta: f32) {
+        match self.cursor {
+            0 => self.eye[0] += delta,
+            1 => self.eye[1] += delta,
+            2 => self.eye[2] += delta,
+            3 => self.target[0] += delta,
+            4 => self.target[1] += delta,
+            5 => self.target[2] += delta,
+            6 => self.fovy_deg = (self.fovy_deg + delta * 0.1).clamp(5.0, 120.0),
+            _ => {}
+        }
+    }
+
+    /// Returns `true` if the overlay should close.
+    fn update(&mut self, actions: &[UiAction]) -> bool {
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % self.row_count();
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + self.row_count() - 1) % self.row_count();
+                }
+                UiAction::FocusNext => {
+                    self.adjust(10.0);
+                }
+                UiAction::FocusPrev => {
+                    self.adjust(-10.0);
+                }
+                UiAction::Confirm | UiAction::CommitDiscard => {
+                    // Copy to clipboard.
+                    let text = format!(
+                        "CameraParams {{\n    eye: [{:.1}, {:.1}, {:.1}],\n    target: [{:.1}, {:.1}, {:.1}],\n    up: [{:.1}, {:.1}, {:.1}],\n    fovy_deg: {:.1},\n}}",
+                        self.eye[0],
+                        self.eye[1],
+                        self.eye[2],
+                        self.target[0],
+                        self.target[1],
+                        self.target[2],
+                        self.up[0],
+                        self.up[1],
+                        self.up[2],
+                        self.fovy_deg,
+                    );
+                    match arboard::Clipboard::new() {
+                        Ok(mut cb) => {
+                            if let Err(e) = cb.set_text(&text) {
+                                log::error!("[Debug] Clipboard write failed: {e}");
+                            } else {
+                                log::info!("[Debug] Camera params copied to clipboard");
+                            }
+                        }
+                        Err(e) => log::error!("[Debug] Could not open clipboard: {e}"),
+                    }
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let mut instances = Vec::new();
+        let mut labels = Vec::new();
+
+        // Dim background.
+        instances.push(GpuInstance {
+            rect: [0.0, 0.0, window_w, window_h],
+            color: [0.0, 0.0, 0.0, 0.55],
+        });
+
+        let row_h = (36.0 * scale).max(24.0);
+        let row_gap = (6.0 * scale).max(3.0);
+        let title_h = (48.0 * scale).max(28.0);
+        let hint_h = (22.0 * scale).max(14.0);
+        let pad = (16.0 * scale).max(8.0);
+        let rows = self.rows();
+
+        let panel_w = (480.0 * scale).min(window_w * 0.85);
+        let panel_h =
+            pad + title_h + pad + (rows.len() as f32) * (row_h + row_gap) + pad + hint_h + pad;
+        let panel_x = (window_w - panel_w) * 0.5;
+        let panel_y = (window_h - panel_h) * 0.5;
+
+        // Border.
+        let border = 3.0;
+        instances.push(GpuInstance {
+            rect: [
+                panel_x - border,
+                panel_y - border,
+                panel_w + border * 2.0,
+                panel_h + border * 2.0,
+            ],
+            color: [0.55, 0.45, 0.20, 0.85],
+        });
+        // Panel background.
+        instances.push(GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: [0.06, 0.07, 0.14, 0.97],
+        });
+
+        // Title.
+        labels.push(TextLabel {
+            rect: [panel_x, panel_y + pad, panel_w, title_h],
+            text: "Camera Debug".into(),
+            color: [1.0, 0.85, 0.45, 1.0],
+            ..Default::default()
+        });
+
+        // Rows.
+        let rows_y0 = panel_y + pad + title_h + pad;
+        for (i, (name, value)) in rows.iter().enumerate() {
+            let row_y = rows_y0 + i as f32 * (row_h + row_gap);
+            let is_focused = self.cursor == i;
+
+            let bg = if is_focused {
+                [0.30, 0.26, 0.50, 0.95]
+            } else {
+                [0.10, 0.12, 0.20, 0.80]
+            };
+            instances.push(GpuInstance {
+                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
+                color: bg,
+            });
+
+            let tc = if is_focused {
+                [1.0, 0.92, 0.60, 1.0]
+            } else {
+                [0.65, 0.65, 0.78, 0.95]
+            };
+            // Label (left).
+            let name_w = panel_w * 0.45;
+            labels.push(TextLabel {
+                rect: [panel_x + 12.0 * scale, row_y, name_w, row_h],
+                text: name.to_string(),
+                color: tc,
+                ..Default::default()
+            });
+            // Value (right).
+            labels.push(TextLabel {
+                rect: [
+                    panel_x + 12.0 * scale + name_w,
+                    row_y,
+                    panel_w - name_w - 24.0 * scale,
+                    row_h,
+                ],
+                text: format!("{:.1}", value),
+                color: [tc[0] * 0.85, tc[1] * 0.85, tc[2] * 0.85, tc[3] * 0.9],
+                ..Default::default()
+            });
+        }
+
+        // Footer hint.
+        let hint_y = rows_y0 + rows.len() as f32 * (row_h + row_gap) + pad;
+        labels.push(TextLabel {
+            rect: [panel_x, hint_y, panel_w, hint_h],
+            text: "Up/Down: select   Left/Right: adjust   Enter: copy   Esc: close".into(),
+            color: [0.55, 0.55, 0.65, 0.75],
+            ..Default::default()
+        });
+
+        (instances, labels)
+    }
+}
+
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<WgpuRenderer>,
@@ -837,6 +1076,8 @@ struct App {
     ssr_enabled: bool,
     /// Whether HDR output is enabled (persisted in settings, requires restart).
     hdr_enabled: bool,
+    /// User's UI scale preference (persisted in settings).
+    ui_scale: f32,
     /// Previous cursor position for computing cursor velocity.
     #[allow(dead_code)]
     prev_cursor: (f32, f32),
@@ -868,6 +1109,8 @@ struct App {
     tuning_overlay: Option<TuningOverlay>,
     /// Sound effects test overlay (None = closed).
     sfx_test_overlay: Option<SfxTestOverlay>,
+    /// Camera debug overlay (None = closed).
+    camera_debug_overlay: Option<CameraDebugOverlay>,
     /// Round-end events held until the active scoring cascade finishes.
     /// Lets the player watch the winning cascade play out before the
     /// Results / GameOver scene fades in.
@@ -910,6 +1153,7 @@ impl App {
         self.modals.is_active()
             || self.tuning_overlay.is_some()
             || self.sfx_test_overlay.is_some()
+            || self.camera_debug_overlay.is_some()
             || self.debug_visibility_overlay.is_some()
             || self.scene.has_blocking_overlay()
     }
@@ -968,6 +1212,7 @@ impl App {
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
+            ui_scale: settings.ui_scale,
             prev_cursor: (0.0, 0.0),
             show_fps: false,
             hide_tiles: false,
@@ -981,6 +1226,7 @@ impl App {
             cascade_tuning: CascadeTuning::default(),
             tuning_overlay: None,
             sfx_test_overlay: None,
+            camera_debug_overlay: None,
         }
     }
 
@@ -1108,7 +1354,8 @@ impl App {
         // their overlay is up (see e.g. `GameplayScene::draw_frame`).
         let app_overlay_wipe = self.modals.is_active()
             || self.tuning_overlay.is_some()
-            || self.sfx_test_overlay.is_some();
+            || self.sfx_test_overlay.is_some()
+            || self.camera_debug_overlay.is_some();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -1153,6 +1400,7 @@ impl App {
                 hide_blind_plaque: self.hide_blind_plaque,
                 hide_scoring_placard: self.hide_scoring_placard,
             },
+            ui_scale: self.ui_scale,
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -1258,7 +1506,8 @@ impl App {
         let size = win.inner_size();
         self.modals.update();
         if let Some((modal_insts, modal_labels, modal_buttons)) =
-            self.modals.draw(size.width as f32, size.height as f32)
+            self.modals
+                .draw(size.width as f32, size.height as f32, self.ui_scale)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
@@ -1268,7 +1517,8 @@ impl App {
 
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.tuning_overlay {
-            let (tuning_insts, tuning_labels) = overlay.draw(size.width as f32, size.height as f32);
+            let (tuning_insts, tuning_labels) =
+                overlay.draw(size.width as f32, size.height as f32, self.ui_scale);
             frame.quads(tuning_insts);
             frame.texts(tuning_labels);
             self.active_buttons.clear(); // Block scene buttons.
@@ -1276,7 +1526,17 @@ impl App {
 
         // SFX test overlay — on top of modals.
         if let Some(ref overlay) = self.sfx_test_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.ui_scale);
+            frame.quads(insts);
+            frame.texts(lbls);
+            self.active_buttons.clear();
+        }
+
+        // Camera debug overlay — on top of modals.
+        if let Some(ref overlay) = self.camera_debug_overlay {
+            // Override the scene's camera with the debug values.
+            frame.camera_override = Some(overlay.to_camera_params());
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.ui_scale);
             frame.quads(insts);
             frame.texts(lbls);
             self.active_buttons.clear();
@@ -1284,7 +1544,7 @@ impl App {
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug_visibility_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.ui_scale);
             frame.quads(insts);
             frame.texts(lbls);
             self.active_buttons.clear();
@@ -1314,6 +1574,7 @@ impl App {
                 &scene_glossary_anchors,
                 ww,
                 wh,
+                self.ui_scale,
             );
         } else {
             self.tooltips.clear();
@@ -1504,6 +1765,20 @@ impl App {
                 if self.sfx_test_overlay.is_none() {
                     self.sfx_test_overlay = Some(SfxTestOverlay::new());
                     log::info!("[Debug] Opened SFX test overlay");
+                }
+            }
+            DebugAction::OpenCameraDebug => {
+                if self.camera_debug_overlay.is_none() {
+                    // Seed from the current frame's camera override, or a
+                    // sensible default if the active scene doesn't set one.
+                    let default_cam = render::draw_cmd::CameraParams {
+                        eye: [0.0, 600.0, 400.0],
+                        target: [0.0, 0.0, 0.0],
+                        up: [0.0, 1.0, 0.0],
+                        fovy_deg: 45.0,
+                    };
+                    self.camera_debug_overlay = Some(CameraDebugOverlay::new(&default_cam));
+                    log::info!("[Debug] Opened camera debug overlay");
                 }
             }
             DebugAction::ProfileGpu => {
@@ -1817,6 +2092,18 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
+                // 3b'''. If the camera debug overlay is open, intercept input.
+                if let Some(mut overlay) = self.camera_debug_overlay.take() {
+                    let close = overlay.update(&actions);
+                    if !close {
+                        self.camera_debug_overlay = Some(overlay);
+                    } else {
+                        log::info!("[Debug] Closed camera debug overlay");
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
                 // 3b''. If the debug visibility overlay is open, intercept
                 // input. Mirror the toggle state back to App fields each
                 // frame so the gameplay scene + retain filter pick up live
@@ -1903,6 +2190,7 @@ impl ApplicationHandler for App {
                         .unwrap_or(crate::ui::input::InputMode::Cursor),
                     picked_hand_tile: picked_hand_tile_for_update,
                     scroll_lines,
+                    ui_scale: self.ui_scale,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -1935,6 +2223,7 @@ impl ApplicationHandler for App {
                     self.shadows_enabled = opts.shadows_enabled;
                     self.ssr_enabled = opts.ssr_enabled;
                     self.hdr_enabled = opts.hdr_enabled;
+                    self.ui_scale = opts.ui_scale;
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
                     }

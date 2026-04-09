@@ -332,7 +332,11 @@ pub fn score_sets(
     // Hanami relic adds +$3 gold per flower scored.
     {
         let meld_count = sets.len() as i32;
-        let triggers = if ctx.relics.has(RelicId::GardenKeeper) { 2 } else { 1 };
+        let triggers = if ctx.relics.has(RelicId::GardenKeeper) {
+            2
+        } else {
+            1
+        };
         let hanami = ctx.relics.has(RelicId::Hanami);
         for s in sets {
             for &tid in &s.tile_ids {
@@ -413,8 +417,6 @@ pub fn score_sets(
             }
         }
     }
-
-
 
     // Dora: each tile matching a dora face is +25 chips (or +35 with the
     // Dora Crown relic from Patch C).

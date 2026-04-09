@@ -25,10 +25,9 @@ use crate::render::dora_stand_mesh::build_dora_stand_mesh;
 use crate::render::draw_cmd::{
     BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement, CurioCabinetPlacement,
     DishExplicit, DoraStandPlacement, DrawCmd, ExtrudedGlyphPlacement, FallingBonePlacement,
-    MirrorPlacement, OfudaPlacement, PackPlacement, PegBlockPlacement, PlaquePlacement, RelicPlacement,
-    ShowcaseTilePlacement, ShrinePlacement, TalismanPlacement, UiFrame, WallStackPlacement,
-    WoodTabletPlacement,
-    YakuTabletPlacement, ZodiacRibbonPlacement,
+    MirrorPlacement, OfudaPlacement, PackPlacement, PegBlockPlacement, PlaquePlacement,
+    RelicPlacement, ShowcaseTilePlacement, ShrinePlacement, TalismanPlacement, UiFrame,
+    WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement, ZodiacRibbonPlacement,
 };
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
@@ -342,7 +341,7 @@ struct ShowcaseTileGpu {
     decal_texture: wgpu::Texture,
 }
 
-const MAX_SHOWCASE_TILE_SLOTS: usize = 8;
+const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
 
 // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
 //   local X — long face axis  (extent ~1.000) → table-Z (front-back)
@@ -824,6 +823,9 @@ pub enum ShopHit {
     /// when it pushes the dish (e.g. `1` for the relic dish, `2` for the
     /// coin dish).
     Dish(u32),
+    /// Index into the most recent flat list of `TilePackPlacement`s pushed
+    /// this frame (across all `TilePackBatch` cmds).
+    TilePack(u32),
 }
 
 /// What 3D gameplay-scene object the cursor is over this frame.
@@ -1260,7 +1262,14 @@ fn load_pack_textures(
                 },
             ],
         });
-        map.insert(kind, RelicTextureGpu { view, texture: tex, bind_group });
+        map.insert(
+            kind,
+            RelicTextureGpu {
+                view,
+                texture: tex,
+                bind_group,
+            },
+        );
     }
     log::info!("loaded {} pack textures synchronously", map.len());
     map
@@ -1568,8 +1577,14 @@ fn make_showcase_tile_gpu(
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
     let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H);
-    let (decal_texture, decal_view) =
-        upload_rgba_texture(device, queue, "showcase-tile-decal", &rgba, DECAL_W, DECAL_H);
+    let (decal_texture, decal_view) = upload_rgba_texture(
+        device,
+        queue,
+        "showcase-tile-decal",
+        &rgba,
+        DECAL_W,
+        DECAL_H,
+    );
 
     let bind_groups: Vec<wgpu::BindGroup> = primitives
         .iter()
@@ -2687,7 +2702,8 @@ impl WgpuRenderer {
         // Kick off background relic image loading (non-blocking).
         let relic_load_start = Some(Instant::now());
         let relic_rx = Some(spawn_relic_loader());
-        let pack_textures_map = load_pack_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
+        let pack_textures_map =
+            load_pack_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
         // Kick off background image loading (non-blocking).
         let background_load_start = Some(Instant::now());
         let background_rx = Some(spawn_background_loader());
@@ -5469,37 +5485,35 @@ impl WgpuRenderer {
                 // Bind the relic's icon texture into the lit-mesh material
                 // (same approach as zodiac ribbon textures). Skip the rebuild
                 // when this slot already has the right texture bound.
-                let want_tex: Option<RelicId> =
-                    if self.relic_textures.contains_key(&p.relic_id) {
-                        Some(p.relic_id)
-                    } else {
-                        None
-                    };
+                let want_tex: Option<RelicId> = if self.relic_textures.contains_key(&p.relic_id) {
+                    Some(p.relic_id)
+                } else {
+                    None
+                };
                 if self.relic_slot_texture[slot_i] != want_tex {
                     let view: &wgpu::TextureView = match want_tex {
                         Some(rid) => &self.relic_textures[&rid].view,
                         None => &self.lit_mesh_white_view,
                     };
                     let inst = &mut self.relic_instances[slot_i];
-                    inst.bind_group =
-                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("relic-bg-tex"),
-                            layout: &self.lit_mesh_material_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: inst.uniform_buffer.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
-                                },
-                            ],
-                        });
+                    inst.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("relic-bg-tex"),
+                        layout: &self.lit_mesh_material_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: inst.uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                            },
+                        ],
+                    });
                     self.relic_slot_texture[slot_i] = want_tex;
                 }
                 self.last_relic_models.push(model);
@@ -5592,13 +5606,19 @@ impl WgpuRenderer {
                         p.world_pos[1],
                         p.world_pos[2] + p.half_extents[1],
                     );
-                    let rotation = if p.rotation_x_deg != 0.0 {
+                    let rot_x = if p.rotation_x_deg != 0.0 {
                         Mat4::from_rotation_x(p.rotation_x_deg.to_radians())
                     } else {
                         Mat4::IDENTITY
                     };
+                    let rot_y = if p.rotation_y_deg != 0.0 {
+                        Mat4::from_rotation_y(p.rotation_y_deg.to_radians())
+                    } else {
+                        Mat4::IDENTITY
+                    };
                     let model = Mat4::from_translation(center)
-                        * rotation
+                        * rot_y
+                        * rot_x
                         * Mat4::from_scale(glam::Vec3::new(
                             p.half_extents[0] * 2.0,
                             p.half_extents[1] * 2.0,
@@ -5617,12 +5637,12 @@ impl WgpuRenderer {
                         material,
                     );
                     // Bind the pack's art texture.
-                    let want_tex: Option<TilePackKind> =
-                        if self.pack_textures.contains_key(&p.kind) {
-                            Some(p.kind)
-                        } else {
-                            None
-                        };
+                    let want_tex: Option<TilePackKind> = if self.pack_textures.contains_key(&p.kind)
+                    {
+                        Some(p.kind)
+                    } else {
+                        None
+                    };
                     if self.pack_slot_texture[slot] != want_tex {
                         let view: &wgpu::TextureView = match want_tex {
                             Some(k) => &self.pack_textures[&k].view,
@@ -5644,7 +5664,9 @@ impl WgpuRenderer {
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 2,
-                                        resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.tile_sampler,
+                                        ),
                                     },
                                 ],
                             });
@@ -6153,32 +6175,31 @@ impl WgpuRenderer {
         // (given by half-extents and a Y-axis center offset) instead of
         // the full `[-0.5, 0.5]³` unit cube. This produces a much tighter
         // screen rect for flat objects like the river trough and mirror.
-        let project_aabb_rect =
-            |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
-                let corners = [
-                    glam::Vec3::new(-half[0], center_y - half[1], -half[2]),
-                    glam::Vec3::new( half[0], center_y - half[1], -half[2]),
-                    glam::Vec3::new(-half[0], center_y + half[1], -half[2]),
-                    glam::Vec3::new( half[0], center_y + half[1], -half[2]),
-                    glam::Vec3::new(-half[0], center_y - half[1],  half[2]),
-                    glam::Vec3::new( half[0], center_y - half[1],  half[2]),
-                    glam::Vec3::new(-half[0], center_y + half[1],  half[2]),
-                    glam::Vec3::new( half[0], center_y + half[1],  half[2]),
-                ];
-                let mut mn_x = f32::INFINITY;
-                let mut mn_y = f32::INFINITY;
-                let mut mx_x = f32::NEG_INFINITY;
-                let mut mx_y = f32::NEG_INFINITY;
-                for c in corners {
-                    let w = model.transform_point3(c);
-                    let (sx, sy) = project_to_screen(w);
-                    mn_x = mn_x.min(sx);
-                    mn_y = mn_y.min(sy);
-                    mx_x = mx_x.max(sx);
-                    mx_y = mx_y.max(sy);
-                }
-                [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
-            };
+        let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
+            let corners = [
+                glam::Vec3::new(-half[0], center_y - half[1], -half[2]),
+                glam::Vec3::new(half[0], center_y - half[1], -half[2]),
+                glam::Vec3::new(-half[0], center_y + half[1], -half[2]),
+                glam::Vec3::new(half[0], center_y + half[1], -half[2]),
+                glam::Vec3::new(-half[0], center_y - half[1], half[2]),
+                glam::Vec3::new(half[0], center_y - half[1], half[2]),
+                glam::Vec3::new(-half[0], center_y + half[1], half[2]),
+                glam::Vec3::new(half[0], center_y + half[1], half[2]),
+            ];
+            let mut mn_x = f32::INFINITY;
+            let mut mn_y = f32::INFINITY;
+            let mut mx_x = f32::NEG_INFINITY;
+            let mut mx_y = f32::NEG_INFINITY;
+            for c in corners {
+                let w = model.transform_point3(c);
+                let (sx, sy) = project_to_screen(w);
+                mn_x = mn_x.min(sx);
+                mn_y = mn_y.min(sy);
+                mx_x = mx_x.max(sx);
+                mx_y = mx_y.max(sy);
+            }
+            [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
+        };
 
         // Plaques (single instance per cmd).
         //

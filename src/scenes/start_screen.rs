@@ -1,7 +1,7 @@
 //! Start screen — title screen with main menu.
 
 use crate::persistence;
-use crate::render::theme::{ButtonVariant, color, typography};
+use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::widget_tree::{
     self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
@@ -13,7 +13,9 @@ use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
 use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use crate::render::draw_cmd::UiFrame;
+
+use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MainAction {
@@ -44,13 +46,13 @@ impl StartScreenScene {
     }
 
     /// Anchor rect for the menu column.
-    fn menu_anchor(w: f32, h: f32) -> [f32; 4] {
-        let scale = (w.min(h)) / 600.0;
-        let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
+    fn menu_anchor(w: f32, h: f32, ui_scale: f32) -> [f32; 4] {
+        let scale = metrics::scene_scale(w, h, ui_scale);
+        let title_h = (typography::size(typography::DISPLAY, h, ui_scale) * 1.6).max(48.0);
         let title_y = h * 0.08;
-        let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
+        let prof_h = (typography::size(typography::CAPTION, h, ui_scale) * 1.6).max(20.0);
         let header_bottom = title_y + title_h + h * 0.02 + prof_h;
-        let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
+        let hint_h = (typography::size(typography::MICRO, h, ui_scale) * 1.7).max(16.0);
         let bottom_reserve = hint_h + 24.0 * scale;
         let cw = (260.0 * scale).min(w * 0.7);
         let cx = (w - cw) * 0.5;
@@ -115,16 +117,27 @@ impl StartScreenScene {
         Tree::vertical_menu(items)
     }
 
-    fn build_anchored_tree(&self, in_progress: bool, w: f32, h: f32) -> Tree<MainAction> {
+    fn build_anchored_tree(
+        &self,
+        in_progress: bool,
+        w: f32,
+        h: f32,
+        ui_scale: f32,
+    ) -> Tree<MainAction> {
         self.build_tree(in_progress)
-            .with_anchor(Self::menu_anchor(w, h))
+            .with_anchor(Self::menu_anchor(w, h, ui_scale))
     }
 }
 
 impl SceneBehavior for StartScreenScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let in_progress = ctx.run.is_in_progress();
-        let tree = self.build_anchored_tree(in_progress, ctx.layout.window_w, ctx.layout.window_h);
+        let tree = self.build_anchored_tree(
+            in_progress,
+            ctx.layout.window_w,
+            ctx.layout.window_h,
+            ctx.ui_scale,
+        );
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -132,6 +145,9 @@ impl SceneBehavior for StartScreenScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: ctx.scroll_lines,
             },
         );
 
@@ -161,17 +177,18 @@ impl SceneBehavior for StartScreenScene {
         }
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let ui_scale = ctx.ui_scale;
+        let scale = metrics::scene_scale(w, h, ui_scale);
         let in_progress = ctx.game_in_progress;
 
         let mut instances: Vec<GpuInstance> = Vec::new();
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 
-        let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
+        let title_h = (typography::size(typography::DISPLAY, h, ui_scale) * 1.6).max(48.0);
         let title_y = h * 0.08;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
@@ -181,7 +198,7 @@ impl SceneBehavior for StartScreenScene {
         });
 
         let prof_y = title_y + title_h + h * 0.02;
-        let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
+        let prof_h = (typography::size(typography::CAPTION, h, ui_scale) * 1.6).max(20.0);
         let summaries = persistence::all_profile_summaries();
         let active = ctx.active_profile;
         let summary = &summaries[active];
@@ -202,16 +219,16 @@ impl SceneBehavior for StartScreenScene {
             ..Default::default()
         });
 
-        let tree = self.build_anchored_tree(in_progress, w, h);
-        let mut frame = TreeFrame {
+        let tree = self.build_anchored_tree(in_progress, w, h, ui_scale);
+        let mut tree_frame = TreeFrame {
             instances: &mut instances,
             labels: &mut text_labels,
             buttons: &mut buttons,
             window: (w, h),
         };
-        self.tree.draw(&tree, &mut frame, &noop_render_custom);
+        self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
 
-        let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
+        let hint_h = (typography::size(typography::MICRO, h, ui_scale) * 1.7).max(16.0);
         let hint_y = h - hint_h - (12.0 * scale);
         text_labels.push(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
@@ -220,32 +237,18 @@ impl SceneBehavior for StartScreenScene {
             ..Default::default()
         });
 
-        SceneDrawOutput {
-            background: super::BackgroundId::Black,
-            tray_instances: vec![],
-            instances,
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels,
-            relic_icons: vec![],
-            buttons,
-            window_title: "Mahjuro".into(),
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![PointLight {
-                pos: [w * 0.5, h * 0.05, h * 0.55],
-                radius: h * 1.20,
-                color: [1.00, 0.86, 0.55],
-                intensity: 1.40,
-            }],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
+        let mut frame = UiFrame::new();
+        frame.background(BackgroundId::Black);
+        frame.quads(instances);
+        frame.texts(text_labels);
+        frame.point_lights = vec![PointLight {
+            pos: [w * 0.5, h * 0.05, h * 0.55],
+            radius: h * 1.20,
+            color: [1.00, 0.86, 0.55],
+            intensity: 1.40,
+        }];
+        frame.buttons = buttons;
+        frame.window_title = "Mahjuro".into();
+        frame
     }
 }

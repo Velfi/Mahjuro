@@ -173,7 +173,7 @@ impl Wall {
     pub fn dora_faces(&self) -> Vec<(Suit, u8)> {
         self.dora_indicators
             .iter()
-            .filter(|t| t.suit != Suit::Flower)
+            .filter(|t| !matches!(t.suit, Suit::Flower | Suit::Season))
             .map(|t| {
                 let next_rank = match t.suit {
                     Suit::Characters | Suit::Bamboos | Suit::Circles => {
@@ -197,7 +197,7 @@ impl Wall {
                             t.rank + 1
                         }
                     }
-                    Suit::Flower => unreachable!(),
+                    Suit::Flower | Suit::Season => unreachable!(),
                 };
                 (t.suit, next_rank)
             })
