@@ -18,7 +18,7 @@ use crate::core::relic::{RelicId, ScoreContext, all_relic_defs, relic_buy_price}
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets;
 use crate::core::tile::Tile;
-use crate::game::event_bus::EventBus;
+use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
 
@@ -44,7 +44,7 @@ pub struct RunStats {
     /// Subset of `discards_used` that were strategic (vs. random fallback).
     pub strategic_discards: u32,
     /// Final gold balance when the run ended.
-    pub final_gold: u32,
+    pub final_gold: i32,
     /// How many Small/Big blinds the bot chose to skip (banking gold).
     pub blinds_skipped: u32,
     /// How many relics the bot purchased from the shop.
@@ -355,7 +355,11 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
             }
             run.score_selected_tiles(&mut bus);
             stats.plays_used += 1;
-            for _ in bus.drain() {}
+            for ev in bus.drain() {
+                if let GameEvent::RoundComplete { payout, .. } = ev {
+                    run.gold = run.gold.saturating_add(payout.total as i32);
+                }
+            }
             continue;
         }
 
@@ -500,7 +504,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         let mut best: Option<(usize, i32)> = None;
         for (i, &id) in shop.iter().enumerate() {
             let price = relic_buy_price(id);
-            if price > run.gold {
+            if price as i32 > run.gold {
                 continue;
             }
             let mv = relic_marginal_value(run, id);
@@ -515,7 +519,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         let Some((idx, _)) = best else { break };
         let id = shop.remove(idx);
         let price = relic_buy_price(id);
-        run.gold -= price;
+        run.gold -= price as i32;
         run.relics.active.push(id);
         run.recompute_capacities();
         stats.relics_bought += 1;
@@ -601,7 +605,7 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
         // overshoots the target. Skipping doesn't grant a relic and doesn't visit
         // the shop, so it's purely an early-ante optimization.
         if should_skip_blind(&run, blind) {
-            run.gold = run.gold.saturating_add(blind.skip_reward());
+            run.gold = run.gold.saturating_add(blind.skip_reward() as i32);
             run.skip_to_next_blind();
             stats.blinds_skipped += 1;
             continue;

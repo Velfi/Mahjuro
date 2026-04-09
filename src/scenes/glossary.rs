@@ -12,13 +12,12 @@
 //! background. Scrollable: arrow keys / FocusUp/Down step through entries
 //! one at a time so the larger text can stay readable on short windows.
 
-use std::cell::Cell;
-
 use crate::core::yaku::YakuKind;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 use super::ButtonDef;
@@ -31,24 +30,16 @@ pub const GLOSSARY_CLOSE_ID: u32 = 0xF101;
 /// own their PauseMenu.
 pub struct GlossaryOverlay {
     pub open: bool,
-    /// Number of whole entries scrolled past. Stepping in entry units (rather
-    /// than pixels) keeps every visible entry fully on-screen — the renderer
-    /// has no scissor support, so partial entries would draw on top of the
-    /// section headings or close button. `Cell` because `draw` is `&self`
-    /// (the parent scenes' draw methods are immutable) and needs to clamp
-    /// the scroll when the window resizes.
-    scroll_steps: Cell<u32>,
-    /// Updated each `draw` so `handle_input` knows how far it can scroll
-    /// without running off the bottom of the longer column.
-    max_scroll_steps: Cell<u32>,
+    /// Smooth-scrolling state. Steps in entry units; the visual position
+    /// interpolates smoothly toward the target each frame.
+    scroll: SmoothScroll,
 }
 
 impl GlossaryOverlay {
     pub fn new() -> Self {
         Self {
             open: false,
-            scroll_steps: Cell::new(0),
-            max_scroll_steps: Cell::new(0),
+            scroll: SmoothScroll::new(),
         }
     }
 
@@ -58,16 +49,26 @@ impl GlossaryOverlay {
         self.open = !self.open;
         // Always re-open at the top — players expect a fresh read.
         if self.open {
-            self.scroll_steps.set(0);
+            self.scroll.jump(0.0);
         }
     }
 
     /// Process inputs while the overlay is visible. Returns `true` if the
     /// caller should swallow the rest of the frame's input (i.e. the overlay
     /// was open and stayed open or was just closed by an input).
-    pub fn handle_input(&mut self, actions: &[UiAction], button_clicks: &[u32]) -> bool {
+    pub fn handle_input(
+        &mut self,
+        actions: &[UiAction],
+        button_clicks: &[u32],
+        scroll_lines: f32,
+    ) -> bool {
         if !self.open {
             return false;
+        }
+        // Scroll wheel: negative scroll_lines = up, positive = down.
+        // Pass the raw float so trackpad momentum isn't rounded away.
+        if scroll_lines.abs() > 0.001 {
+            self.scroll.scroll_by(-scroll_lines);
         }
         for a in actions {
             match a {
@@ -80,14 +81,10 @@ impl GlossaryOverlay {
                 // Scroll: up/down steps one entry. FocusPrev/FocusNext (left/
                 // right) also scroll so gamepad d-pad horizontal works.
                 UiAction::FocusUp | UiAction::FocusPrev => {
-                    self.scroll_steps
-                        .set(self.scroll_steps.get().saturating_sub(1));
+                    self.scroll.step(-1);
                 }
                 UiAction::FocusDown | UiAction::FocusNext => {
-                    let cur = self.scroll_steps.get();
-                    if cur < self.max_scroll_steps.get() {
-                        self.scroll_steps.set(cur + 1);
-                    }
+                    self.scroll.step(1);
                 }
                 _ => {}
             }
@@ -248,11 +245,13 @@ impl GlossaryOverlay {
         let max_steps = max_entries.saturating_sub(visible_rows) as u32;
         // Persist for handle_input on the next frame, and clamp the current
         // scroll in case the window just got taller.
-        self.max_scroll_steps.set(max_steps);
-        if self.scroll_steps.get() > max_steps {
-            self.scroll_steps.set(max_steps);
-        }
-        let scroll = self.scroll_steps.get() as usize;
+        self.scroll.set_max(max_steps);
+
+        // Advance smooth scroll and derive the integer row offset plus a
+        // fractional pixel shift for the in-between frames.
+        let smooth = self.scroll.tick();
+        let scroll = smooth.floor() as usize;
+        let frac_offset = -(smooth.fract()) * row_step;
 
         // Section headings stay pinned at the top of the body — only the
         // entry rows scroll underneath them.
@@ -275,23 +274,27 @@ impl GlossaryOverlay {
             scale,
         );
 
+        // Render visible entries plus one extra row for the partial entry
+        // sliding in/out during smooth scroll animation.
+        let render_rows = visible_rows + 1;
+
         // Render left-column entries.
         for (i, (name, body)) in entries_left.iter().enumerate().skip(scroll) {
             let row = i - scroll;
-            if row >= visible_rows {
+            if row >= render_rows {
                 break;
             }
-            let y = entries_top + row as f32 * row_step;
+            let y = entries_top + row as f32 * row_step + frac_offset;
             push_glossary_entry(text_labels, name, body, left_x, y, col_w, window_h, scale);
         }
 
         // Render right-column entries.
         for (i, (name, body)) in yaku_entries.iter().enumerate().skip(scroll) {
             let row = i - scroll;
-            if row >= visible_rows {
+            if row >= render_rows {
                 break;
             }
-            let y = entries_top + row as f32 * row_step;
+            let y = entries_top + row as f32 * row_step + frac_offset;
             push_glossary_entry(text_labels, name, body, right_x, y, col_w, window_h, scale);
         }
 
@@ -307,8 +310,7 @@ impl GlossaryOverlay {
                 color: color::OBSIDIAN,
             });
             let thumb_h = (track_h * (visible_rows as f32 / max_entries as f32)).max(12.0 * scale);
-            let thumb_y =
-                track_y + (track_h - thumb_h) * (self.scroll_steps.get() as f32 / max_steps as f32);
+            let thumb_y = track_y + (track_h - thumb_h) * (smooth / max_steps as f32);
             instances.push(GpuInstance {
                 rect: [track_x, thumb_y, track_w, thumb_h],
                 color: color::GOLD,
@@ -381,19 +383,43 @@ impl GlossaryOverlay {
 /// pithy. Long enough to teach, short enough to fit on one line at typical
 /// window sizes.
 pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
+    // Suit emoji match tile_suit_emoji: 🎴 Characters, 🎋 Bamboo, 🔴 Circles.
+    // Honor emoji: 🐉 Dragon, 🌬 Wind.
     match yk {
-        YakuKind::Tanyao => "All tiles 2–8, no honors/terminals",
-        YakuKind::Toitoi => "All triplets/kongs (no sequences)",
-        YakuKind::FullHand => "Complete 14-tile hand (4 melds + pair)",
-        YakuKind::Yakuhai => "Triplet of any dragon or the round wind",
-        YakuKind::Iipeikou => "Two identical sequences in one suit",
-        YakuKind::SanshokuDoujun => "Same sequence in m / s / p suits",
-        YakuKind::Ittsu => "1-2-3, 4-5-6, 7-8-9 in one suit",
-        YakuKind::Honitsu => "One number suit + honors only",
-        YakuKind::Chinitsu => "All one number suit, no honors",
-        YakuKind::Junchan => "Every meld contains a terminal (1/9)",
-        YakuKind::Honroutou => "Only terminals (1/9) and honors",
-        YakuKind::Chiitoitsu => "Seven distinct pairs",
+        YakuKind::Tanyao => {
+            "All tiles 2\u{2013}8, no honors/terminals (e.g. \u{1f3b4}234 \u{1f38b}567 \u{1f534}88)"
+        }
+        YakuKind::Toitoi => {
+            "All triplets/kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
+        }
+        YakuKind::FullHand => "Complete 14-tile hand: 4 melds + 1 pair",
+        YakuKind::Yakuhai => {
+            "Triplet of any dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})"
+        }
+        YakuKind::Iipeikou => {
+            "Two identical sequences in one suit (e.g. \u{1f38b}123 \u{1f38b}123)"
+        }
+        YakuKind::SanshokuDoujun => {
+            "Same sequence in all 3 suits (e.g. \u{1f3b4}456 \u{1f38b}456 \u{1f534}456)"
+        }
+        YakuKind::Ittsu => {
+            "1\u{2013}9 straight in one suit (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789)"
+        }
+        YakuKind::Honitsu => {
+            "One number suit + honors only (e.g. \u{1f38b}234 \u{1f38b}678 \u{1f32c}\u{1f32c}\u{1f32c})"
+        }
+        YakuKind::Chinitsu => {
+            "All one number suit, no honors (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789 \u{1f38b}11)"
+        }
+        YakuKind::Junchan => {
+            "Every meld has a 1 or 9 (e.g. \u{1f38b}123 \u{1f3b4}789 \u{1f534}111 \u{1f38b}99)"
+        }
+        YakuKind::Honroutou => {
+            "Only 1s, 9s, and honors (e.g. \u{1f38b}111 \u{1f3b4}999 \u{1f32c}\u{1f32c}\u{1f32c})"
+        }
+        YakuKind::Chiitoitsu => {
+            "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
+        }
     }
 }
 

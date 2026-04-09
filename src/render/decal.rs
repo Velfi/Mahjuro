@@ -113,6 +113,7 @@ pub fn rasterize_tile_face_decal(
 pub fn rasterize_tablet_label_decal(
     text: &str,
     ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
     width: u32,
     height: u32,
     ink: [f32; 4],
@@ -128,7 +129,15 @@ pub fn rasterize_tablet_label_decal(
     let inner_w = width.saturating_sub(pad_x * 2).max(1);
     let inner_h = height.saturating_sub(pad_y * 2).max(1);
 
-    let band = rasterize_label(font, text, inner_w, inner_h);
+    let band = rasterize_label_styled_with_fallback(
+        font,
+        emoji_font,
+        text,
+        inner_w,
+        inner_h,
+        None,
+        LabelAlign::Center,
+    );
 
     // Soft carved-shadow pass: a slightly darker tint, offset 1px down/right,
     // so the engraving keeps shape under directional lighting.
@@ -153,16 +162,64 @@ pub fn rasterize_tablet_label_decal(
 /// roughly portrait-ish aspect, but the tablet text reads as a single short
 /// line (e.g. "Tanyao"), so we keep the decal landscape and let the shader
 /// stretch it across the face.
-pub fn rasterize_yaku_tablet_decal(name: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
-    rasterize_tablet_label_decal(name, ui_font, 256, 96, [0.42, 0.32, 0.18, 1.0])
+pub fn rasterize_yaku_tablet_decal(
+    name: &str,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+) -> Vec<u8> {
+    rasterize_tablet_label_decal(name, ui_font, emoji_font, 256, 96, [0.42, 0.32, 0.18, 1.0])
 }
 
-/// Convenience wrapper: bright gilt engraving for the wood action tablets.
-/// The procedural lacquered-wood material is dark and busy, so a dark ink
-/// reads as illegible noise — a warm champagne tint pops cleanly against
-/// the grain so labels like "Sort by Suit" stay readable across the table.
+/// Gilded engraving for the wood action tablets. Uses the same three-pass
+/// treatment as the hanging plaques — burnt-umber recess, rich gold body,
+/// pale champagne highlight — so "Sort by Suit" etc. read as carved and
+/// gold-painted lettering rather than flat ink.
 pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>) -> Vec<u8> {
-    rasterize_tablet_label_decal(label, ui_font, 256, 96, [1.00, 0.92, 0.62, 1.0])
+    let width: u32 = 512;
+    let height: u32 = 192;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+    let pad_x = (width as f32 * 0.03) as u32;
+    let pad_y = (height as f32 * 0.06) as u32;
+    let inner_w = width.saturating_sub(pad_x * 2).max(1);
+    let inner_h = height.saturating_sub(pad_y * 2).max(1);
+
+    let band = rasterize_label(font, label, inner_w, inner_h);
+
+    // Three-pass gilded letters — same palette as the hanging score plaques.
+    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92];
+    let gold_base = [0.92_f32, 0.74, 0.28, 1.0];
+    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0];
+
+    // Drop shadow (offset down-right so the recess reads from above).
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        width,
+        pad_x + 2,
+        pad_y + 2,
+        gold_shadow,
+    );
+    // Gold body.
+    blit_tinted(
+        &band, inner_w, inner_h, &mut rgba, width, pad_x, pad_y, gold_base,
+    );
+    // Bright highlight offset up-left so the leaf catches the light.
+    blit_tinted(
+        &band,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        width,
+        pad_x.saturating_sub(1),
+        pad_y.saturating_sub(1),
+        gold_highlight,
+    );
+    rgba
 }
 
 /// Two-line engraved decal for the gameplay scene's hanging score plaque.
@@ -369,184 +426,6 @@ pub fn rasterize_ofuda_decal(
     let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
     stamp(&title_band, title_h, stack_top, &mut rgba);
     stamp(&rule_band, rule_h, stack_top + title_h + gap_h, &mut rgba);
-    rgba
-}
-
-/// Reference height (in texels) for the soroban frame's front-face decal.
-/// The width is computed at draw time from the frame face's world-space
-/// aspect (the soroban is wide, ~3.5:1) so the bilinear sampler maps texels
-/// roughly 1:1 onto the wood and the engraved numerals stay sharp.
-pub const SOROBAN_DECAL_HEIGHT: u32 = 192;
-
-/// Reference height (in texels) for the cartouche front-face decal. The
-/// cartouche is roughly 2.4:1 wide; the renderer derives the actual width
-/// from the cartouche's world aspect at draw time.
-pub const SOROBAN_CARTOUCHE_DECAL_HEIGHT: u32 = 192;
-
-/// Paint the soroban frame's front-face decal: a single big "12 × 3"
-/// numeral pair gilded across the wood face, dead center, with the brass
-/// rails + beads as ambient surrounding flavor. The meld name lives on a
-/// separate cartouche mesh (see `rasterize_soroban_cartouche_decal`).
-///
-/// The decal coordinate system is `[0..w] x [0..h]` mapped onto the +Z face
-/// of the frame mesh (which spans `[-0.5..0.5]` in local x/y). When
-/// `chips` or `mult` is `None` we return a fully-transparent buffer so
-/// the wood face shows through and the rest state reads as a quiet
-/// physical object instead of a stale number.
-///
-/// `chicken_hand` flips the numeral ink from gilded gold → muted grey so
-/// a complete-but-yaku-less hand reads as "structurally legal, scores
-/// nothing" without celebrating it.
-pub fn rasterize_soroban_decal(
-    chips: Option<i32>,
-    mult: Option<f32>,
-    chicken_hand: bool,
-    ui_font: Option<&fontdue::Font>,
-    w: u32,
-    h: u32,
-) -> Vec<u8> {
-    let mut rgba = vec![0u8; (w * h * 4) as usize];
-    let Some(font) = ui_font else {
-        return rgba;
-    };
-    let (Some(chips), Some(mult)) = (chips, mult) else {
-        return rgba;
-    };
-
-    // Format the value pair. Mult is rendered without a trailing zero
-    // when it's a whole number ("3" not "3.0") and with a single decimal
-    // otherwise ("2.5"), matching how Balatro stamps integers vs fractional
-    // multipliers. The × glyph between them is `\u{00d7}` (multiplication
-    // sign) — narrower and more typographically right than ASCII 'x'.
-    let mult_text = if (mult - mult.round()).abs() < 0.05 {
-        format!("{}", mult.round() as i32)
-    } else {
-        format!("{:.1}", mult)
-    };
-    let label = format!("{}  \u{00d7}  {}", chips, mult_text);
-
-    // Numeral band fills most of the face vertically so it reads from
-    // across the table. Horizontal padding leaves room for the rails to
-    // poke past the numerals on either side without colliding with the
-    // engraved digits.
-    let pad_x = (w as f32 * 0.10) as u32;
-    let pad_y = (h as f32 * 0.12) as u32;
-    let inner_w = w.saturating_sub(pad_x * 2).max(1);
-    let inner_h = h.saturating_sub(pad_y * 2).max(1);
-    let chars = label.chars().count().max(1) as f32;
-    let by_h = inner_h as f32 * 0.85;
-    let by_w = inner_w as f32 * 1.5 / chars;
-    let font_px = by_h.min(by_w).max(20.0);
-    let band = rasterize_label_styled(
-        font,
-        &label,
-        inner_w,
-        inner_h,
-        Some(font_px),
-        LabelAlign::Center,
-    );
-
-    // Gilded engraving stack — same three-pass treatment as the score
-    // plaque so the numerals read as gold-leafed engraving on the wood.
-    let (gold_base, gold_highlight, gold_shadow) = if chicken_hand {
-        (
-            [0.55_f32, 0.54, 0.50, 1.0],
-            [0.78_f32, 0.78, 0.74, 1.0],
-            [0.16_f32, 0.16, 0.14, 0.85],
-        )
-    } else {
-        (
-            [0.92_f32, 0.74, 0.28, 1.0],
-            [1.00_f32, 0.96, 0.74, 1.0],
-            [0.18_f32, 0.12, 0.04, 0.92],
-        )
-    };
-    blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x + 3,
-        pad_y + 3,
-        gold_shadow,
-    );
-    blit_tinted(
-        &band, inner_w, inner_h, &mut rgba, w, pad_x, pad_y, gold_base,
-    );
-    blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x.saturating_sub(1),
-        pad_y.saturating_sub(1),
-        gold_highlight,
-    );
-    rgba
-}
-
-/// Paint the cartouche front-face decal: just the meld name, big and
-/// centered, in a single dark-ink engraved pass against the cartouche's
-/// bone material. No background fill — the bone albedo from the mesh's
-/// `Plain` material shows through the transparent corners exactly the
-/// way the plaque/ofuda decals work.
-///
-/// `chicken_hand` flips the ink to a muted slate grey so a complete-
-/// but-yaku-less hand's nameplate reads as "structurally legal, scores
-/// nothing" without the warm sumi-ink celebration.
-pub fn rasterize_soroban_cartouche_decal(
-    meld_name: &str,
-    chicken_hand: bool,
-    ui_font: Option<&fontdue::Font>,
-    w: u32,
-    h: u32,
-) -> Vec<u8> {
-    let mut rgba = vec![0u8; (w * h * 4) as usize];
-    let Some(font) = ui_font else {
-        return rgba;
-    };
-    if meld_name.is_empty() {
-        return rgba;
-    }
-    // The cartouche's brass nubs poke down out of the bottom edge of
-    // the slab, so the visible *face* region of the mesh is the upper
-    // ~80% of the texture. Pad the engraving inside that region.
-    let pad_x = (w as f32 * 0.10) as u32;
-    let pad_y_top = (h as f32 * 0.10) as u32;
-    let pad_y_bot = (h as f32 * 0.18) as u32;
-    let inner_w = w.saturating_sub(pad_x * 2).max(1);
-    let inner_h = h.saturating_sub(pad_y_top + pad_y_bot).max(1);
-    let chars = meld_name.chars().count().max(1) as f32;
-    let by_h = inner_h as f32 * 0.85;
-    let by_w = inner_w as f32 * 1.6 / chars;
-    let font_px = by_h.min(by_w).max(16.0);
-    let band = rasterize_label_styled(
-        font,
-        meld_name,
-        inner_w,
-        inner_h,
-        Some(font_px),
-        LabelAlign::Center,
-    );
-    let ink = if chicken_hand {
-        [0.22_f32, 0.22, 0.24, 1.0]
-    } else {
-        [0.35_f32, 0.20, 0.06, 1.0]
-    };
-    let shadow = [ink[0] * 0.4, ink[1] * 0.4, ink[2] * 0.4, ink[3] * 0.7];
-    blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x + 1,
-        pad_y_top + 1,
-        shadow,
-    );
-    blit_tinted(&band, inner_w, inner_h, &mut rgba, w, pad_x, pad_y_top, ink);
     rgba
 }
 
@@ -949,10 +828,24 @@ pub fn rasterize_label_styled(
     font_px: Option<f32>,
     align: LabelAlign,
 ) -> Vec<u8> {
+    rasterize_label_styled_with_fallback(font, None, text, width, height, font_px, align)
+}
+
+/// Like [`rasterize_label_styled`] but with an optional emoji fallback font.
+/// Characters missing from the primary font are rasterized with the fallback.
+pub fn rasterize_label_styled_with_fallback(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    text: &str,
+    width: u32,
+    height: u32,
+    font_px: Option<f32>,
+    align: LabelAlign,
+) -> Vec<u8> {
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
     if lines.len() > 1 {
-        return rasterize_block(font, &lines, width, height, font_px, align);
+        return rasterize_block(font, emoji_font, &lines, width, height, font_px, align);
     }
 
     // Single-line fast path retains the historical centring behaviour.
@@ -970,7 +863,8 @@ pub fn rasterize_label_styled(
     let glyphs: Vec<GlyphData> = chars
         .iter()
         .map(|&ch| {
-            let (metrics, bitmap) = font.rasterize(ch, font_px);
+            let use_font = pick_font(font, emoji_font, ch);
+            let (metrics, bitmap) = use_font.rasterize(ch, font_px);
             GlyphData { metrics, bitmap }
         })
         .collect();
@@ -1009,6 +903,7 @@ pub fn rasterize_label_styled(
 /// same `font_px` so the paragraph reads as a coherent block.
 fn rasterize_block(
     font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
     lines: &[&str],
     width: u32,
     height: u32,
@@ -1031,8 +926,10 @@ fn rasterize_block(
     let measured: Vec<LineGlyphs> = lines
         .iter()
         .map(|line| {
-            let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> =
-                line.chars().map(|ch| font.rasterize(ch, font_px)).collect();
+            let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> = line
+                .chars()
+                .map(|ch| pick_font(font, emoji_font, ch).rasterize(ch, font_px))
+                .collect();
             let advance: f32 = glyphs.iter().map(|(m, _)| m.advance_width).sum();
             LineGlyphs { glyphs, advance }
         })
@@ -1072,6 +969,22 @@ fn rasterize_block(
     }
 
     rgba
+}
+
+/// Pick the best font for `ch`: use the primary font if it has the glyph,
+/// otherwise fall back to the emoji font (if provided).
+fn pick_font<'a>(
+    primary: &'a fontdue::Font,
+    fallback: Option<&'a fontdue::Font>,
+    ch: char,
+) -> &'a fontdue::Font {
+    if primary.has_glyph(ch) {
+        primary
+    } else if let Some(fb) = fallback {
+        fb
+    } else {
+        primary
+    }
 }
 
 struct GlyphData {

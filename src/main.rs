@@ -796,6 +796,9 @@ struct App {
     /// Scene-defined button click ids fired by mouse clicks since the last
     /// frame; drained into `UpdateCtx::button_clicks` each frame.
     mouse_button_clicks: Vec<u32>,
+    /// Accumulated scroll-wheel delta (in "line" units) since last frame.
+    /// Positive = scroll down, negative = scroll up.
+    scroll_delta: f32,
     /// Button rects from the last draw, for click hit-testing.
     active_buttons: Vec<ButtonDef>,
     scene: Scene,
@@ -830,6 +833,8 @@ struct App {
     /// Whether screen-space reflections on the lacquered floor are enabled
     /// (persisted in settings).
     ssr_enabled: bool,
+    /// Whether HDR output is enabled (persisted in settings, requires restart).
+    hdr_enabled: bool,
     /// Previous cursor position for computing cursor velocity.
     #[allow(dead_code)]
     prev_cursor: (f32, f32),
@@ -938,6 +943,7 @@ impl App {
             last_frame_dt: 1.0 / 60.0,
             mouse_actions: Vec::new(),
             mouse_button_clicks: Vec::new(),
+            scroll_delta: 0.0,
             active_buttons: Vec::new(),
             scene: Scene::Splash(SplashScene::new()),
             progress,
@@ -958,6 +964,7 @@ impl App {
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
+            hdr_enabled: settings.hdr_enabled,
             prev_cursor: (0.0, 0.0),
             show_fps: false,
             hide_tiles: false,
@@ -1021,6 +1028,9 @@ impl App {
         let wh = win_size.height as f32;
         match ev {
             GameEvent::RoundComplete { payout, .. } => {
+                // Apply the gold payout now that the scoring cascade has
+                // finished — kept deferred so the UI doesn't jump early.
+                self.run.gold = self.run.gold.saturating_add(payout.total as i32);
                 self.audio.play_sfx(audio::SfxId::RoundWin);
                 let mut lines = vec![format!(
                     "Score: {} / {}",
@@ -1412,7 +1422,7 @@ impl App {
                 );
             }
             DebugAction::SetGold(amount) => {
-                self.run.gold = amount;
+                self.run.gold = amount as i32;
                 log::info!("[Debug] Set gold to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {
@@ -1549,7 +1559,7 @@ impl ApplicationHandler for App {
         self.window = Some(window.clone());
         log::info!("window created in {:?}", t0.elapsed());
 
-        let renderer = WgpuRenderer::new(window.clone()).expect("wgpu");
+        let renderer = WgpuRenderer::new(window.clone(), self.hdr_enabled).expect("wgpu");
         self.renderer = Some(renderer);
 
         let t0 = Instant::now();
@@ -1638,6 +1648,9 @@ impl ApplicationHandler for App {
                             // beat lands with weight.
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                             self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
+                        }
+                        GameEvent::GoldChanged { .. } => {
+                            self.audio.play_sfx(audio::SfxId::CoinDrop);
                         }
                         ev @ GameEvent::RoundComplete { .. } => {
                             // Hold the win sting + scene transition until the
@@ -1829,6 +1842,7 @@ impl ApplicationHandler for App {
                     .renderer
                     .as_ref()
                     .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
+                let scroll_lines = std::mem::take(&mut self.scroll_delta);
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -1850,6 +1864,7 @@ impl ApplicationHandler for App {
                         .map(|i| i.mode)
                         .unwrap_or(crate::ui::input::InputMode::Cursor),
                     picked_hand_tile: picked_hand_tile_for_update,
+                    scroll_lines,
                 };
                 if let Some(next_scene) = self.scene.update(ctx) {
                     // Start fade-out transition.
@@ -1880,6 +1895,10 @@ impl ApplicationHandler for App {
                     self.gamma = opts.gamma;
                     self.shadows_enabled = opts.shadows_enabled;
                     self.ssr_enabled = opts.ssr_enabled;
+                    self.hdr_enabled = opts.hdr_enabled;
+                    if let Some(ref mut input) = self.input {
+                        input.swap_ab = opts.swap_ab;
+                    }
                 }
 
                 // Handle profile switch request.
@@ -2092,6 +2111,19 @@ impl ApplicationHandler for App {
                     win.request_redraw();
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let lines = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        // Convert pixel delta to approximate line units.
+                        (pos.y as f32) / 40.0
+                    }
+                };
+                self.scroll_delta += lines;
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state == ElementState::Pressed {
                     let mut v = Vec::new();
@@ -2124,6 +2156,7 @@ impl ApplicationHandler for App {
             return;
         }
         let cascade_active = matches!(&self.scene, Scene::Gameplay(g) if g.is_animating());
+        let collection_3d = matches!(&self.scene, Scene::Collection(c) if c.has_3d_tab());
         let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
         let needs_redraw = !self.anim.is_idle()
             || self
@@ -2132,6 +2165,7 @@ impl ApplicationHandler for App {
                 .map(|r| r.is_spinning())
                 .unwrap_or(false)
             || cascade_active
+            || collection_3d
             || transitioning
             || self.modals.needs_redraw()
             || self.smoke_intensity != crate::persistence::SmokeIntensity::Off

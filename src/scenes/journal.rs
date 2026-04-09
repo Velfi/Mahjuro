@@ -64,9 +64,21 @@ impl JournalOverlay {
 
     /// Process inputs while the overlay is visible. Returns `true` if the
     /// caller should swallow the rest of the frame's input.
-    pub fn handle_input(&mut self, actions: &[UiAction], button_clicks: &[u32]) -> bool {
+    pub fn handle_input(
+        &mut self,
+        actions: &[UiAction],
+        button_clicks: &[u32],
+        scroll_lines: f32,
+    ) -> bool {
         if !self.open {
             return false;
+        }
+        // Scroll wheel.
+        if scroll_lines.abs() > 0.001 {
+            let steps = -scroll_lines.round() as i32;
+            let cur = self.scroll_steps.get() as i32;
+            let max = self.max_scroll_steps.get() as i32;
+            self.scroll_steps.set((cur + steps).clamp(0, max) as u32);
         }
         for a in actions {
             match a {

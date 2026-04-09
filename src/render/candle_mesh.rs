@@ -225,4 +225,8 @@ pub struct CandlePlacement {
     /// matching `PointLight`.
     #[allow(dead_code)]
     pub flicker: f32,
+    /// Extra Y-axis scale multiplier applied on top of `scale` so each candle
+    /// can be a slightly different height without changing its width. A value
+    /// of 1.0 means the candle is its normal height.
+    pub height_scale: f32,
 }

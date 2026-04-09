@@ -106,20 +106,6 @@ impl TooltipState {
 
         let text_regions = regions_for_label_refs(&font, &non_button_labels, &[]);
 
-        // Draw underlines under glossary terms in base UI text so the player
-        // can see at a glance which words are hoverable.
-        for region in &text_regions {
-            frame.quad(GpuInstance {
-                rect: [
-                    region.rect[0],
-                    region.rect[1] + region.rect[3] * 0.85,
-                    region.rect[2],
-                    (1.5 * scale).max(1.0),
-                ],
-                color: themec::alpha(themec::CHAMPAGNE, 0.7),
-            });
-        }
-
         let mut base_regions = text_regions;
         // Relic icons are first-class hover regions: hovering an icon shows
         // its name + description like any glossary term.
@@ -456,19 +442,6 @@ fn draw_tooltip_into(entry: &TooltipEntry, frame: &mut UiFrame) {
         rect: [tx + pad, sep_y, tw - pad * 2.0, 1.0],
         color: themec::alpha(themec::ANTIQUE, 0.7),
     });
-
-    // Underlines for hoverable glossary terms (drawn under description text).
-    for region in &entry.word_regions {
-        frame.quad(GpuInstance {
-            rect: [
-                region.rect[0],
-                region.rect[1] + region.rect[3] * 0.85,
-                region.rect[2],
-                1.5,
-            ],
-            color: themec::alpha(themec::CHAMPAGNE, 0.7),
-        });
-    }
 
     // Title.
     frame.text(TextLabel {

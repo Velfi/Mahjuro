@@ -1,13 +1,20 @@
-//! Collection scene — paginated grids of relics, yaku, and rules.
-//! Locked items show a placeholder card with a clue hint.
+//! Collection scene — paginated grids of relics, yaku, rules, talismans, and
+//! zodiacs. Locked items show a placeholder card with a clue hint. Unlocked
+//! talismans and zodiacs render their 3D model tilted and slowly rotating
+//! (Resident-Evil-style item viewer).
+
+use std::time::Instant;
 
 use crate::core::boss::{ALL_BOSSES, FINAL_BOSSES};
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
+use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
+use crate::core::zodiac::ZodiacKind;
+use crate::render::draw_cmd::{CameraParams, TalismanPlacement, UiFrame, ZodiacRibbonPlacement};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::TextAlign;
-use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -30,6 +37,8 @@ impl CollectionAction {
             CollectionAction::SelectTab(Tab::Yaku) => FocusId(2),
             CollectionAction::SelectTab(Tab::Rules) => FocusId(3),
             CollectionAction::SelectTab(Tab::Bosses) => FocusId(4),
+            CollectionAction::SelectTab(Tab::Talismans) => FocusId(5),
+            CollectionAction::SelectTab(Tab::Zodiacs) => FocusId(6),
             CollectionAction::PrevPage => FocusId(10),
             CollectionAction::NextPage => FocusId(11),
             CollectionAction::Back => FocusId(20),
@@ -45,9 +54,18 @@ enum Tab {
     Yaku,
     Rules,
     Bosses,
+    Talismans,
+    Zodiacs,
 }
 
-const TABS: [Tab; 4] = [Tab::Relics, Tab::Yaku, Tab::Rules, Tab::Bosses];
+const TABS: [Tab; 6] = [
+    Tab::Relics,
+    Tab::Yaku,
+    Tab::Rules,
+    Tab::Bosses,
+    Tab::Talismans,
+    Tab::Zodiacs,
+];
 
 // ── Grid card data ──────────────────────────────────────────────────
 
@@ -58,6 +76,10 @@ struct GridCard {
     unlocked: bool,
     relic_id: Option<RelicId>,
     rarity_color: [f32; 4],
+    /// Set on Talismans tab cards so the 3D viewer knows which mesh to show.
+    talisman_kind: Option<TalismanKind>,
+    /// Set on Zodiacs tab cards so the 3D viewer knows which ribbon to show.
+    zodiac_kind: Option<ZodiacKind>,
 }
 
 // ── Scene state ─────────────────────────────────────────────────────
@@ -66,6 +88,9 @@ pub struct CollectionScene {
     tab: Tab,
     page: usize,
     tree: TreeState,
+    /// Wall-clock instant when the scene was created — drives the slow
+    /// turntable rotation of 3D models on the Talismans / Zodiacs tabs.
+    created_at: Instant,
 }
 
 impl CollectionScene {
@@ -74,7 +99,13 @@ impl CollectionScene {
             tab: Tab::Relics,
             page: 0,
             tree: TreeState::new(),
+            created_at: Instant::now(),
         }
+    }
+
+    /// Whether the active tab renders 3D models that need continuous redraws.
+    pub fn has_3d_tab(&self) -> bool {
+        matches!(self.tab, Tab::Talismans | Tab::Zodiacs)
     }
 
     fn page_count(&self, entries: usize, per_page: usize) -> usize {
@@ -101,7 +132,7 @@ impl CollectionScene {
         let tab_total_w = tab_w * tab_count + tab_gap * (tab_count - 1.0);
         let tab_start_x = (w - tab_total_w) * 0.5;
 
-        let mut items = Vec::with_capacity(7);
+        let mut items = Vec::with_capacity(TABS.len() + 3);
         for (i, &t) in TABS.iter().enumerate() {
             let tx = tab_start_x + i as f32 * (tab_w + tab_gap);
             items.push(FlatItem::new(
@@ -204,11 +235,18 @@ impl SceneBehavior for CollectionScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
+        // Legacy fallback — the canonical path is `draw_frame()` below.
+        SceneDrawOutput::default()
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let scale = (w.min(h)) / 600.0;
         let progress = ctx.progress;
+
+        let mut frame = UiFrame::new();
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
@@ -216,7 +254,6 @@ impl SceneBehavior for CollectionScene {
         }];
         let mut text_labels = Vec::new();
         let mut relic_icons = Vec::new();
-        let mut buttons = Vec::new();
 
         // ── Title ───────────────────────────────────────────────────
         let title_font = (24.0 * scale).max(14.0);
@@ -233,13 +270,13 @@ impl SceneBehavior for CollectionScene {
         let tab_font = (13.0 * scale).max(9.0);
         let tab_y = title_y + title_h + h * 0.015;
         let tab_h = text_rect_h(tab_font);
-        let tab_w = (95.0 * scale).min(w * 0.22);
+        let tab_w = (80.0 * scale).min(w * 0.15);
         let tab_gap = (6.0 * scale).max(3.0);
         let tab_count = TABS.len() as f32;
         let tab_total_w = tab_w * tab_count + tab_gap * (tab_count - 1.0);
         let tab_start_x = (w - tab_total_w) * 0.5;
 
-        let tab_names = ["Relics", "Yaku", "Rules", "Bosses"];
+        let tab_names = ["Relics", "Yaku", "Rules", "Bosses", "Talismans", "Zodiacs"];
         for (i, name) in tab_names.iter().enumerate() {
             let tx = tab_start_x + i as f32 * (tab_w + tab_gap);
             let is_active = TABS[i] == self.tab;
@@ -261,8 +298,6 @@ impl SceneBehavior for CollectionScene {
                 },
                 ..Default::default()
             });
-            // Click registration handled by `flat_items()` + `register_flat_buttons`
-            // at the end of draw — same source of truth as update().
         }
 
         // ── Grid area ───────────────────────────────────────────────
@@ -275,12 +310,13 @@ impl SceneBehavior for CollectionScene {
         let margin_x = w * 0.04;
         let grid_w = w - margin_x * 2.0;
 
-        // Card sizing: aim for ~4 columns on relics, ~3 on yaku/rules/bosses.
+        // Card sizing: aim for ~4 columns on relics, ~3 on most, ~2 on
+        // 3D tabs so the models have room to breathe.
         let target_cols: usize = match self.tab {
             Tab::Relics => 4,
-            Tab::Yaku => 3,
-            Tab::Rules => 3,
-            Tab::Bosses => 3,
+            Tab::Talismans => 2,
+            Tab::Zodiacs => 3,
+            _ => 3,
         };
         let card_gap = (8.0 * scale).max(4.0);
         let card_w =
@@ -288,6 +324,7 @@ impl SceneBehavior for CollectionScene {
         let cols = ((grid_w + card_gap) / (card_w + card_gap)).floor().max(1.0) as usize;
         let card_aspect = match self.tab {
             Tab::Relics => 1.35,
+            Tab::Talismans | Tab::Zodiacs => 1.5,
             _ => 1.1,
         };
         let card_h = (card_w * card_aspect).min(grid_h * 0.48);
@@ -300,6 +337,8 @@ impl SceneBehavior for CollectionScene {
             Tab::Yaku => build_yaku_cards(progress),
             Tab::Rules => build_rule_cards(progress),
             Tab::Bosses => build_boss_cards(),
+            Tab::Talismans => build_talisman_cards(),
+            Tab::Zodiacs => build_zodiac_cards(progress),
         };
 
         let total_pages = self.page_count(cards.len(), per_page);
@@ -314,13 +353,77 @@ impl SceneBehavior for CollectionScene {
         let actual_grid_h = rows as f32 * card_h + (rows as f32 - 1.0) * card_gap;
         let grid_y = grid_top + (grid_h - actual_grid_h).max(0.0) * 0.5;
 
+        // ── 3D model placements (Talismans / Zodiacs tabs) ──────────
+        // Slow turntable rotation: ~30°/s yaw, tilted forward ~20° on X.
+        let elapsed = Instant::now()
+            .saturating_duration_since(self.created_at)
+            .as_secs_f32();
+        let turntable_y_deg = (elapsed * 30.0) % 360.0;
+        let tilt_x_deg: f32 = -20.0;
+
+        let mut talisman_placements: Vec<TalismanPlacement> = Vec::new();
+        let mut ribbon_placements: Vec<ZodiacRibbonPlacement> = Vec::new();
+
         for (i, card) in cards.iter().skip(page_start).take(per_page).enumerate() {
             let col = i % cols;
             let row = i / cols;
             let cx = grid_x + col as f32 * (card_w + card_gap);
             let cy = grid_y + row as f32 * (card_h + card_gap);
 
-            if card.unlocked {
+            let has_3d = card.unlocked && matches!(self.tab, Tab::Talismans | Tab::Zodiacs);
+
+            if has_3d {
+                draw_model_card(
+                    cx,
+                    cy,
+                    card_w,
+                    card_h,
+                    scale,
+                    card,
+                    w,
+                    &mut instances,
+                    &mut text_labels,
+                );
+                // Push 3D placement centered in upper card region.
+                // pixel_to_world maps (px, py) → world (px-w/2, world_y, py-h/2).
+                // The top-down camera with 20° FOV sees roughly ±0.53*h in
+                // each axis, so extents of ~0.10*h fill a card nicely.
+                let model_center_x = cx + card_w * 0.5;
+                let model_center_y = cy + card_h * 0.32;
+                let base = h * 0.10;
+                let lift = base * 0.5;
+
+                match self.tab {
+                    Tab::Talismans => {
+                        if let Some(tk) = card.talisman_kind {
+                            talisman_placements.push(TalismanPlacement {
+                                center_pos: [model_center_x, model_center_y, lift],
+                                extents: [base * 1.2, base * 1.7, base * 0.25],
+                                rotation_y_deg: 0.0,
+                                rotation_x_deg: tilt_x_deg,
+                                rotation_z_deg: turntable_y_deg,
+                                color: talisman_tint(tk),
+                                kind: tk,
+                            });
+                        }
+                    }
+                    Tab::Zodiacs => {
+                        if let Some(zk) = card.zodiac_kind {
+                            ribbon_placements.push(ZodiacRibbonPlacement {
+                                anchor_pos: [model_center_x, model_center_y, lift + base * 0.8],
+                                length: base * 2.0,
+                                width: base * 0.9,
+                                rotation_y_deg: 0.0,
+                                rotation_x_deg: tilt_x_deg,
+                                rotation_z_deg: turntable_y_deg,
+                                color: [1.0, 1.0, 1.0, 1.0],
+                                kind: Some(zk),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            } else if card.unlocked {
                 draw_unlocked_card(
                     cx,
                     cy,
@@ -370,7 +473,6 @@ impl SceneBehavior for CollectionScene {
                 color: [1.0, 1.0, 1.0, 0.9],
                 ..Default::default()
             });
-            // Click registration handled by flat_items().
 
             // Page number.
             let page_text = format!("{} / {}", page + 1, total_pages);
@@ -398,7 +500,6 @@ impl SceneBehavior for CollectionScene {
                 color: [1.0, 1.0, 1.0, 0.9],
                 ..Default::default()
             });
-            // Click registration handled by flat_items().
         }
 
         // ── Unlock counter ──────────────────────────────────────────
@@ -422,7 +523,6 @@ impl SceneBehavior for CollectionScene {
         });
 
         // ── Back button ─────────────────────────────────────────────
-        // Top-left corner so it doesn't collide with the centered tab bar.
         let back_w = (70.0 * scale).max(48.0);
         let back_h = (24.0 * scale).max(18.0);
         let back_x = margin_x;
@@ -437,31 +537,54 @@ impl SceneBehavior for CollectionScene {
             color: [0.85, 0.85, 0.95, 1.0],
             ..Default::default()
         });
-        // Single hit-target list shared with update() — single source of truth.
-        let items = self.flat_items(w, h);
-        self.tree.register_flat_buttons(&items, &mut buttons);
 
-        SceneDrawOutput {
-            background: Default::default(),
-            tray_instances: vec![],
-            instances,
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels,
-            relic_icons,
-            buttons,
-            window_title: format!("Mahjuro — Collection ({}/{})", unlocked, total),
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
+        // ── Assemble frame ──────────────────────────────────────────
+        let has_3d_models = !talisman_placements.is_empty() || !ribbon_placements.is_empty();
+        if has_3d_models {
+            // Near-orthographic top-down camera so pixel_to_world positions
+            // map cleanly onto screen space without heavy perspective warp.
+            // Narrow FOV + high eye keeps the 3D models sitting right where
+            // the 2D cards are.
+            frame.camera_override = Some(CameraParams {
+                eye: [0.0, h * 3.0, h * 0.01],
+                target: [0.0, 0.0, h * 0.01],
+                up: [0.0, 0.0, -1.0],
+                fovy_deg: 20.0,
+            });
+            // Point lights illuminate the 3D models like museum spotlights.
+            frame.point_lights = vec![
+                PointLight {
+                    pos: [w * 0.5, h * 0.3, 180.0],
+                    radius: w.max(h) * 1.5,
+                    color: [1.0, 0.95, 0.85],
+                    intensity: 1.6,
+                },
+                // Fill light from below-left so the underside isn't black.
+                PointLight {
+                    pos: [w * 0.3, h * 0.6, 60.0],
+                    radius: w.max(h),
+                    color: [0.6, 0.65, 0.8],
+                    intensity: 0.7,
+                },
+            ];
         }
+        // Card-background quads first, then 3D models on top.
+        frame.quads(instances);
+        if !talisman_placements.is_empty() {
+            frame.talisman_batch(talisman_placements);
+        }
+        if !ribbon_placements.is_empty() {
+            frame.zodiac_batch(ribbon_placements);
+        }
+        frame.texts(text_labels);
+        frame.relic_icons(relic_icons);
+
+        // Single hit-target list shared with update().
+        let items = self.flat_items(w, h);
+        self.tree.register_flat_buttons(&items, &mut frame.buttons);
+
+        frame.window_title = format!("Mahjuro — Collection ({}/{})", unlocked, total);
+        frame
     }
 }
 
@@ -698,6 +821,8 @@ fn build_relic_cards(progress: &crate::core::progression::PlayerProgress) -> Vec
                 unlocked,
                 relic_id: if unlocked { Some(d.id) } else { None },
                 rarity_color: rarity_to_color(d.rarity),
+                talisman_kind: None,
+                zodiac_kind: None,
             }
         })
         .collect()
@@ -728,6 +853,8 @@ fn build_yaku_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<
                 unlocked,
                 relic_id: None,
                 rarity_color: color::TWILIGHT, // indigo accent for yaku
+                talisman_kind: None,
+                zodiac_kind: None,
             }
         })
         .collect()
@@ -747,6 +874,8 @@ fn build_boss_cards() -> Vec<GridCard> {
             unlocked: true,
             relic_id: None,
             rarity_color: def.tier.halo_color(),
+            talisman_kind: None,
+            zodiac_kind: None,
         })
         .collect()
 }
@@ -783,6 +912,8 @@ fn build_rule_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<
                 unlocked,
                 relic_id: None,
                 rarity_color: color::AMBER, // amber accent for rules
+                talisman_kind: None,
+                zodiac_kind: None,
             }
         })
         .collect()
@@ -844,19 +975,41 @@ fn yaku_clue(yk: YakuKind) -> String {
 }
 
 fn yaku_description(yk: YakuKind) -> &'static str {
+    // Suit emoji match tile_suit_emoji: 🎴 Characters, 🎋 Bamboo, 🔴 Circles.
+    // Honor emoji: 🐉 Dragon, 🌬 Wind.
     match yk {
         YakuKind::FullHand => "14 tiles: 4 melds + 1 pair",
-        YakuKind::Toitoi => "All melds are triplets/kongs",
-        YakuKind::Tanyao => "Only numbered tiles rank 2-8",
-        YakuKind::Yakuhai => "Triplet of dragon or round wind",
-        YakuKind::Iipeikou => "Two identical sequences in one suit",
-        YakuKind::SanshokuDoujun => "Same sequence in all three number suits",
-        YakuKind::Ittsu => "1-9 straight in one number suit",
-        YakuKind::Honitsu => "One number suit + honors",
-        YakuKind::Chinitsu => "Single number suit, no honors",
-        YakuKind::Junchan => "Every meld contains a terminal",
-        YakuKind::Honroutou => "Only terminals (1/9) and honors",
-        YakuKind::Chiitoitsu => "Seven distinct pairs",
+        YakuKind::Toitoi => {
+            "All triplets/kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
+        }
+        YakuKind::Tanyao => {
+            "Only tiles rank 2\u{2013}8 (e.g. \u{1f3b4}234 \u{1f38b}567 \u{1f534}88)"
+        }
+        YakuKind::Yakuhai => "Triplet of dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})",
+        YakuKind::Iipeikou => {
+            "Two identical sequences in one suit (e.g. \u{1f38b}123 \u{1f38b}123)"
+        }
+        YakuKind::SanshokuDoujun => {
+            "Same sequence in all 3 suits (e.g. \u{1f3b4}456 \u{1f38b}456 \u{1f534}456)"
+        }
+        YakuKind::Ittsu => {
+            "1\u{2013}9 straight in one suit (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789)"
+        }
+        YakuKind::Honitsu => {
+            "One number suit + honors only (e.g. \u{1f38b}234 \u{1f38b}678 \u{1f32c}\u{1f32c}\u{1f32c})"
+        }
+        YakuKind::Chinitsu => {
+            "All one suit, no honors (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789 \u{1f38b}11)"
+        }
+        YakuKind::Junchan => {
+            "Every meld has a 1 or 9 (e.g. \u{1f38b}123 \u{1f3b4}789 \u{1f534}111 \u{1f38b}99)"
+        }
+        YakuKind::Honroutou => {
+            "Only 1s, 9s, and honors (e.g. \u{1f38b}111 \u{1f3b4}999 \u{1f32c}\u{1f32c}\u{1f32c})"
+        }
+        YakuKind::Chiitoitsu => {
+            "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
+        }
     }
 }
 
@@ -878,4 +1031,142 @@ fn rule_clue(rm: RuleModifier) -> String {
         RuleModifier::RequireHonor => "The Dragon final boss.".into(),
         RuleModifier::CensorRepeats => "The Censor boss.".into(),
     }
+}
+
+// ── Talisman & Zodiac card builders ────────────────────────────────
+
+/// Talismans are always available — they're consumable reference material,
+/// like the Bosses tab.
+fn build_talisman_cards() -> Vec<GridCard> {
+    TalismanKind::all()
+        .iter()
+        .map(|&tk| GridCard {
+            name: tk.name().to_string(),
+            subtitle: tk.description().to_string(),
+            clue: String::new(),
+            unlocked: true,
+            relic_id: None,
+            rarity_color: talisman_accent(tk),
+            talisman_kind: Some(tk),
+            zodiac_kind: None,
+        })
+        .collect()
+}
+
+/// Zodiacs are gated by yaku progression — each zodiac unlocks when its
+/// paired yaku becomes available.
+fn build_zodiac_cards(progress: &crate::core::progression::PlayerProgress) -> Vec<GridCard> {
+    let available_yaku = progress.available_yaku();
+    ZodiacKind::all()
+        .iter()
+        .map(|&zk| {
+            let unlocked = available_yaku.contains(&zk.yaku());
+            GridCard {
+                name: if unlocked {
+                    format!("{} ({})", zk.name(), zk.yaku().name())
+                } else {
+                    "???".into()
+                },
+                subtitle: if unlocked {
+                    format!(
+                        "Levels up {}. +0.5 mult, +20 chips per level.",
+                        zk.yaku().name(),
+                    )
+                } else {
+                    String::new()
+                },
+                clue: if unlocked {
+                    String::new()
+                } else {
+                    zodiac_clue(zk)
+                },
+                unlocked,
+                relic_id: None,
+                rarity_color: color::TWILIGHT,
+                talisman_kind: None,
+                zodiac_kind: if unlocked { Some(zk) } else { None },
+            }
+        })
+        .collect()
+}
+
+fn zodiac_clue(zk: ZodiacKind) -> String {
+    // The zodiac unlocks when its paired yaku does — reuse the yaku clue.
+    yaku_clue(zk.yaku())
+}
+
+/// Thin rarity-bar accent colour per talisman kind — mirrors the gemstone.
+fn talisman_accent(tk: TalismanKind) -> [f32; 4] {
+    match tk {
+        TalismanKind::Jade => [0.30, 0.78, 0.50, 1.0],
+        TalismanKind::Pearl => [0.85, 0.88, 0.95, 1.0],
+        TalismanKind::Gilded => [0.95, 0.78, 0.30, 1.0],
+        TalismanKind::Polychrome => [0.80, 0.40, 0.90, 1.0],
+    }
+}
+
+/// Base colour tint for the 3D talisman model in the collection viewer.
+fn talisman_tint(tk: TalismanKind) -> [f32; 4] {
+    match tk {
+        TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0],
+        TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
+        TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
+        TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
+    }
+}
+
+// ── 3D model card drawing ──────────────────────────────────────────
+
+/// Draw a card that hosts a 3D model in its upper region and text below.
+/// The 3D placement itself is pushed separately by draw_frame; this
+/// function only draws the 2D card background and text labels.
+fn draw_model_card(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
+    card: &GridCard,
+    win_w: f32,
+    instances: &mut Vec<GpuInstance>,
+    labels: &mut Vec<TextLabel>,
+) {
+    // Card background — slightly darker to make the lit 3D model pop.
+    instances.push(GpuInstance {
+        rect: [x, y, w, h],
+        color: [0.08, 0.10, 0.20, 0.92],
+    });
+    // Thin accent bar at top.
+    let accent_h = (3.0 * scale).max(2.0);
+    instances.push(GpuInstance {
+        rect: [x, y, w, accent_h],
+        color: card.rarity_color,
+    });
+
+    let pad = (6.0 * scale).max(3.0);
+    let name_font = (13.0 * scale).max(10.0);
+    let sub_font = (10.0 * scale).max(8.0);
+    let name_rect_h = text_rect_h(name_font);
+    let sub_rect_h = text_rect_h(sub_font);
+
+    // Name sits below the model region (~65% of card height).
+    let name_y = y + h * 0.65;
+    let (nx, nw) = readable_text_rect(x, w, pad, &card.name, name_font, win_w);
+    labels.push(TextLabel {
+        rect: [nx, name_y, nw, name_rect_h],
+        text: card.name.clone(),
+        color: [0.95, 0.9, 0.65, 1.0],
+        ..Default::default()
+    });
+
+    // Description below name.
+    let sub_y = name_y + name_rect_h + pad * 0.3;
+    let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
+    labels.push(TextLabel {
+        rect: [x + pad, sub_y, w - pad * 2.0, sub_h],
+        text: card.subtitle.clone(),
+        color: [0.6, 0.6, 0.7, 0.9],
+        align: TextAlign::Left,
+        ..Default::default()
+    });
 }

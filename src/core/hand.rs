@@ -12,6 +12,7 @@ use crate::core::tile::{Suit, Tile};
 /// description reflects that exact decomposition. Otherwise it falls back to
 /// listing standalone pair/triplet faces (skipping sequences, since unconstrained
 /// sequence search would report overlapping melds).
+#[allow(dead_code)]
 pub fn describe_hand(tiles: &[Tile]) -> String {
     if let Some(sets) = validate_selection(tiles) {
         return describe_sets(tiles, &sets);
@@ -37,6 +38,7 @@ pub fn describe_hand(tiles: &[Tile]) -> String {
 }
 
 /// Render a known decomposition as "4m×2  1-2-3m  7-8-9m".
+#[allow(dead_code)]
 fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
     let mut parts: Vec<String> = Vec::new();
     for s in sets {

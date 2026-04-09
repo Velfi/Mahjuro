@@ -221,6 +221,10 @@ pub struct AppSettings {
     pub shadows_enabled: bool,
     #[serde(default = "default_true")]
     pub ssr_enabled: bool,
+    #[serde(default)]
+    pub hdr_enabled: bool,
+    #[serde(default)]
+    pub swap_ab: bool,
 }
 
 fn default_volume() -> f32 {
@@ -251,6 +255,8 @@ impl Default for AppSettings {
             gamma: 1.0,
             shadows_enabled: true,
             ssr_enabled: true,
+            hdr_enabled: false,
+            swap_ab: false,
         }
     }
 }

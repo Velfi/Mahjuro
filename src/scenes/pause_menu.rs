@@ -181,6 +181,7 @@ impl PauseMenu {
                 ctx.cursor_pos,
                 ctx.layout.window_w,
                 ctx.layout.window_h,
+                ctx.scroll_lines,
             );
             return Some(match result {
                 PauseUpdate::StayPaused | PauseUpdate::Resume => None,
@@ -211,12 +212,20 @@ impl PauseMenu {
         cursor_pos: (f32, f32),
         window_w: f32,
         window_h: f32,
+        scroll_lines: f32,
     ) -> PauseUpdate {
         // If the options sub-overlay is open, all input goes to it. When it
         // signals close, drop back to the pause root rather than resuming
         // the underlying scene — the player explicitly hit Pause.
         if let Some(opts) = self.options_overlay.as_mut() {
-            if opts.update_input(actions, button_clicks, cursor_pos, window_w, window_h) {
+            if opts.update_input(
+                actions,
+                button_clicks,
+                cursor_pos,
+                window_w,
+                window_h,
+                scroll_lines,
+            ) {
                 self.options_overlay = None;
             }
             return PauseUpdate::StayPaused;
