@@ -340,6 +340,44 @@ impl JournalOverlay {
         self.max_scroll_steps.set(0);
         self.scroll_steps.set(0);
 
+        // ── Bonus Flowers legend on the right page's title area ─────
+        // The left page uses the top strip for "Yaku Journal" + hint;
+        // the right page mirrors that space with a compact flower
+        // reference so the player can see each flower's triggered
+        // effect at a glance.
+        {
+            let fl_title_font = typography::size(typography::HEADING, window_h).max(22.0) * 1.25;
+            let fl_title_h = fl_title_font * 1.5;
+            text_labels.push(TextLabel {
+                rect: [right_page_x, page_top, page_inner_w, fl_title_h],
+                text: "Bonus Flowers".into(),
+                color: color::OBSIDIAN,
+                align: TextAlign::Left,
+                font_px: Some(fl_title_font),
+                ..Default::default()
+            });
+            let fl_body_font = typography::size(typography::BODY, window_h).max(16.0) * 1.25;
+            let fl_line_h = fl_body_font * 1.35;
+            let fl_y = page_top + fl_title_h;
+            let flowers: [(&str, &str); 4] = [
+                ("Plum Blossom", "+40 chips"),
+                ("Orchid", "+1.5 mult"),
+                ("Chrysanthemum", "+15 chips per meld"),
+                ("Bamboo", "+$4 gold"),
+            ];
+            for (i, (name, effect)) in flowers.iter().enumerate() {
+                let y = fl_y + i as f32 * fl_line_h;
+                text_labels.push(TextLabel {
+                    rect: [right_page_x, y, page_inner_w, fl_line_h],
+                    text: format!("{name}  —  {effect}"),
+                    color: color::darken(color::OBSIDIAN, 0.15),
+                    align: TextAlign::Left,
+                    font_px: Some(fl_body_font),
+                    ..Default::default()
+                });
+            }
+        }
+
         // Chapter headings — Roman numerals to play up the ledger feel.
         text_labels.push(TextLabel {
             rect: [left_page_x, body_top, page_inner_w, chapter_h],

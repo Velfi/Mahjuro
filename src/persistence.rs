@@ -196,6 +196,62 @@ fn default_tile_preset() -> TilePreset {
     TilePreset::Chinese
 }
 
+/// Tile material / colour scheme. Controls the procedural surface
+/// appearance in the tile shader — ivory+bamboo, plastic, etc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TileMaterial {
+    /// Traditional ivory face on a bamboo body.
+    Bamboo,
+    /// Mint-green plastic with a bright white face (common mass-produced set).
+    Plastic,
+}
+
+impl Default for TileMaterial {
+    fn default() -> Self {
+        Self::Bamboo
+    }
+}
+
+impl TileMaterial {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Bamboo => Self::Plastic,
+            Self::Plastic => Self::Bamboo,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next() // only two variants
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bamboo => "Bamboo & Ivory",
+            Self::Plastic => "Plastic",
+        }
+    }
+
+    pub fn bonus_description(self) -> &'static str {
+        match self {
+            Self::Bamboo => "+1 Hand per round",
+            Self::Plastic => "+1 Discard per round",
+        }
+    }
+
+    /// Material ID passed to the tile shader via `base_color_factor.w`.
+    /// 0.0 = bamboo/ivory (default), 1.0 = plastic.
+    pub fn shader_id(self) -> f32 {
+        match self {
+            Self::Bamboo => 0.0,
+            Self::Plastic => 1.0,
+        }
+    }
+}
+
+fn default_tile_material() -> TileMaterial {
+    TileMaterial::Bamboo
+}
+
 /// Persistent settings (which profile is active, audio prefs, etc.).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -215,6 +271,8 @@ pub struct AppSettings {
     pub smoke_detail: SmokeDetail,
     #[serde(default = "default_tile_preset")]
     pub tile_preset: TilePreset,
+    #[serde(default = "default_tile_material")]
+    pub tile_material: TileMaterial,
     #[serde(default = "default_gamma")]
     pub gamma: f32,
     #[serde(default = "default_true")]
@@ -252,6 +310,7 @@ impl Default for AppSettings {
             smoke_intensity: SmokeIntensity::Subtle,
             smoke_detail: SmokeDetail::Half,
             tile_preset: TilePreset::Chinese,
+            tile_material: TileMaterial::Bamboo,
             gamma: 1.0,
             shadows_enabled: true,
             ssr_enabled: true,

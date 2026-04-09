@@ -25,6 +25,9 @@ pub enum TalismanKind {
     Pearl,
     Gilded,
     Polychrome,
+    /// Destroy any number of tiles from your hand. They are permanently
+    /// removed from the wall for the rest of the run.
+    Kiln,
 }
 
 impl TalismanKind {
@@ -34,6 +37,7 @@ impl TalismanKind {
             TalismanKind::Pearl,
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
+            TalismanKind::Kiln,
         ]
     }
 
@@ -43,6 +47,7 @@ impl TalismanKind {
             TalismanKind::Pearl => "Pearl Talisman",
             TalismanKind::Gilded => "Gilded Talisman",
             TalismanKind::Polychrome => "Polychrome Talisman",
+            TalismanKind::Kiln => "Kiln",
         }
     }
 
@@ -52,24 +57,30 @@ impl TalismanKind {
             TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
             TalismanKind::Pearl => "Every tile in hand: +30 flat chips when scored.",
             TalismanKind::Gilded => "Every tile in hand: +0.5 mult when scored in a meld.",
-            TalismanKind::Polychrome => "Every meld played from this hand gets ×1.2 mult.",
+            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
+            TalismanKind::Kiln => "Destroy any tiles from your hand. They never return.",
         }
     }
 
     /// The enhancement this talisman stamps onto each hand tile.
-    pub fn enhancement(self) -> TileEnhancement {
+    /// Returns `None` for Kiln (which destroys tiles instead of enhancing).
+    pub fn enhancement(self) -> Option<TileEnhancement> {
         match self {
-            TalismanKind::Jade => TileEnhancement::Jade,
-            TalismanKind::Pearl => TileEnhancement::Pearl,
-            TalismanKind::Gilded => TileEnhancement::Gilded,
-            TalismanKind::Polychrome => TileEnhancement::Polychrome,
+            TalismanKind::Jade => Some(TileEnhancement::Jade),
+            TalismanKind::Pearl => Some(TileEnhancement::Pearl),
+            TalismanKind::Gilded => Some(TileEnhancement::Gilded),
+            TalismanKind::Polychrome => Some(TileEnhancement::Polychrome),
+            TalismanKind::Kiln => None,
         }
     }
 
-    /// Flat shop price in gold. Tuned higher than a Zodiac (4g) because the
-    /// effect lands all at once and is more swingy.
-    pub fn shop_price() -> u32 {
-        6
+    /// Flat shop price in gold. Kiln is cheaper because it costs you tiles
+    /// rather than buffing them.
+    pub fn shop_price(self) -> u32 {
+        match self {
+            TalismanKind::Kiln => 5,
+            _ => 6,
+        }
     }
 }
 
@@ -78,7 +89,9 @@ impl TalismanKind {
 /// by the new one (you can re-stamp the hand at will — most-recent wins).
 /// Returns the number of tiles that were stamped.
 pub fn apply_to_hand(hand: &mut [Tile], kind: TalismanKind) -> usize {
-    let enh = kind.enhancement();
+    let Some(enh) = kind.enhancement() else {
+        return 0;
+    };
     for tile in hand.iter_mut() {
         tile.enhancement = Some(enh);
     }
@@ -114,10 +127,17 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_has_unique_enhancement() {
+    fn each_enhancement_kind_has_unique_enhancement() {
         let mut seen = std::collections::HashSet::new();
         for &k in TalismanKind::all() {
-            assert!(seen.insert(k.enhancement()), "duplicate for {:?}", k);
+            if let Some(e) = k.enhancement() {
+                assert!(seen.insert(e), "duplicate for {:?}", k);
+            }
         }
+    }
+
+    #[test]
+    fn kiln_has_no_enhancement() {
+        assert_eq!(TalismanKind::Kiln.enhancement(), None);
     }
 }

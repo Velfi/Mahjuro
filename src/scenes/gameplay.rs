@@ -6,7 +6,6 @@ use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
 use crate::core::yaku::yaku_preview;
 use crate::game::cascade::ScoringCascade;
-use crate::game::run::{STARTING_DISCARDS, STARTING_PLAYS};
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{CascadeTokenKind, DrawCmd, UiFrame};
@@ -240,6 +239,12 @@ pub struct GameplayScene {
     /// camera target so we can see which direction is +X / +Y / +Z while
     /// dialing in placements. Toggled from the native Debug menu.
     debug_show_axes: bool,
+    /// When true, the player is selecting tiles to destroy via the Kiln
+    /// talisman. Tile clicks toggle selection; Confirm destroys the selected
+    /// tiles. Cancel exits without destroying anything.
+    kiln_mode: bool,
+    /// Maximum tiles the player can still select in this Kiln activation.
+    kiln_picks_remaining: usize,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -350,6 +355,8 @@ impl GameplayScene {
             initial_smoke_fill_active: true,
             light_ramp: 0.0,
             debug_show_axes: false,
+            kiln_mode: false,
+            kiln_picks_remaining: 0,
         }
     }
 }
@@ -615,7 +622,7 @@ impl SceneBehavior for GameplayScene {
                         let bone_kind = match step.kind {
                             StepKind::Chips => Some(CascadeTokenKind::Chips),
                             StepKind::Mult => Some(CascadeTokenKind::Mult),
-                            StepKind::Final => None,
+                            StepKind::Gold | StepKind::Final => None,
                         };
                         if let Some(kind) = bone_kind {
                             let ms = ctx.layout.modifier_strip;
@@ -662,6 +669,12 @@ impl SceneBehavior for GameplayScene {
                                     (format!("+{:.1}x", d), d.abs() as f32 * 50.0)
                                 }
                             }
+                            StepKind::Gold => {
+                                // Gold steps show "+$4" in coin color. The
+                                // magnitude is scaled up so the popup reads at
+                                // a similar visual weight to chip/mult popups.
+                                ("+$4".to_string(), 80.0)
+                            }
                             StepKind::Final => (String::new(), 0.0),
                         };
                         if !label.is_empty() {
@@ -669,6 +682,7 @@ impl SceneBehavior for GameplayScene {
                             let source_x = match step.kind {
                                 StepKind::Chips => ms.x + ms.w * 0.30,
                                 StepKind::Mult => ms.x + ms.w * 0.70,
+                                StepKind::Gold => ms.x + ms.w * 0.50,
                                 StepKind::Final => ms.x + ms.w * 0.50,
                             };
                             let source_y = ms.y + ms.h * 0.5;
@@ -762,6 +776,16 @@ impl SceneBehavior for GameplayScene {
                             kind.name(),
                             kind.enhancement()
                         );
+                    }
+                    Some(crate::game::run::ConsumableUseResult::KilnMode) => {
+                        let hand_len = ctx.run.hand.len();
+                        log::info!("Kiln activated — select up to {hand_len} tiles to destroy");
+                        self.kiln_mode = true;
+                        self.kiln_picks_remaining = hand_len;
+                        // Clear current selection so tile clicks start fresh.
+                        for s in ctx.run.selected.iter_mut() {
+                            *s = false;
+                        }
                     }
                     None => {}
                 }
@@ -980,6 +1004,17 @@ impl SceneBehavior for GameplayScene {
                                             kind.enhancement(),
                                         );
                                     }
+                                    crate::game::run::ConsumableUseResult::KilnMode => {
+                                        let hand_len = ctx.run.hand.len();
+                                        log::info!(
+                                            "Kiln activated — select up to {hand_len} tiles to destroy"
+                                        );
+                                        self.kiln_mode = true;
+                                        self.kiln_picks_remaining = hand_len;
+                                        for s in ctx.run.selected.iter_mut() {
+                                            *s = false;
+                                        }
+                                    }
                                 }
                             }
                             // Clear focus so the next press doesn't double-
@@ -1071,6 +1106,53 @@ impl SceneBehavior for GameplayScene {
                 "[debug] world-axes overlay {}",
                 if self.debug_show_axes { "ON" } else { "OFF" }
             );
+        }
+
+        // ── Kiln mode: intercept actions before normal input ─────────
+        // While the Kiln talisman is active, tile clicks toggle selection,
+        // ScoreHand confirms the destruction, and Cancel
+        // aborts without destroying anything. All other actions are
+        // swallowed so the player can't play/discard while the kiln is
+        // active.
+        if self.kiln_mode {
+            for a in &actions_for_scene {
+                match a {
+                    UiAction::ScoreHand => {
+                        let count = ctx.run.selected.iter().filter(|&&s| s).count();
+                        if count > 0 {
+                            let destroyed = ctx.run.destroy_selected_tiles(ctx.bus);
+                            log::info!("Kiln destroyed {} tiles", destroyed);
+                        }
+                        self.kiln_mode = false;
+                        self.kiln_picks_remaining = 0;
+                    }
+                    UiAction::Cancel => {
+                        for s in ctx.run.selected.iter_mut() {
+                            *s = false;
+                        }
+                        self.kiln_mode = false;
+                        self.kiln_picks_remaining = 0;
+                    }
+                    UiAction::Confirm => {
+                        // Toggle the focused hand tile, respecting the
+                        // 3-tile cap.
+                        if let Some(FocusTarget::HandTile(i)) = self.focus {
+                            let idx = i.min(ctx.run.hand.len().saturating_sub(1));
+                            if idx < ctx.run.selected.len() {
+                                if ctx.run.selected[idx] {
+                                    ctx.run.selected[idx] = false;
+                                    self.kiln_picks_remaining += 1;
+                                } else if self.kiln_picks_remaining > 0 {
+                                    ctx.run.selected[idx] = true;
+                                    self.kiln_picks_remaining -= 1;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return None;
         }
 
         // Normal input handling when no cascade is active.
@@ -1301,9 +1383,9 @@ impl SceneBehavior for GameplayScene {
             ),
             ts.scale,
             run.plays_remaining,
-            STARTING_PLAYS,
+            run.mode.starting_plays,
             run.discards_remaining,
-            STARTING_DISCARDS,
+            run.mode.starting_discards,
         );
 
         // Center the hand horizontally when fewer tiles than full slots are present.
@@ -1356,7 +1438,7 @@ impl SceneBehavior for GameplayScene {
         // Shanten meter (Patch A.5): "tiles away from a complete hand" for the
         // best decomposition the player could form by swapping tiles. Shown
         // unconditionally — the design plan calls for it as a baseline UI
-        // affordance, with the Shanten Lens relic providing the chip side.
+        // affordance, with the Shanten Shove relic providing a bonus draw at tenpai.
         let shanten = crate::core::shanten::shanten_estimate(&run.hand);
         let shanten_text = match shanten {
             -1 => "Won".to_string(),
@@ -1384,9 +1466,20 @@ impl SceneBehavior for GameplayScene {
             "{}  ·  R{}  ·  {} / {}",
             blind_label, run.run_number, shown_score, run.target_score,
         );
+        let peek_section = if run.relics.has(crate::core::relic::RelicId::WallPeek) {
+            let peeked = run.wall.peek_next(2);
+            if peeked.is_empty() {
+                String::new()
+            } else {
+                let labels: Vec<String> = peeked.iter().map(|t| t.label()).collect();
+                format!("   Next: {}", labels.join(", "))
+            }
+        } else {
+            String::new()
+        };
         let score_text_bot = format!(
-            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}",
-            run.gold, tiles_left, wind_label, shanten_text, dora_section
+            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}{}",
+            run.gold, tiles_left, wind_label, shanten_text, dora_section, peek_section
         );
         // Captured for the hanging plaque cmd built later in `frame.cmds`.
         // The plaque carries the same two-line payload as a per-instance
@@ -1461,7 +1554,7 @@ impl SceneBehavior for GameplayScene {
                 let pulse_t = ((chip_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
                 cascade_token_placements.push(crate::render::draw_cmd::CascadeTokenPlacement {
                     world_pos: [cx, cy, 4.0],
-                    extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                    extents: [pill_w * 0.5, (pill_h * 0.6 * 0.5).max(4.0), pill_h * 0.5],
                     kind: crate::render::draw_cmd::CascadeTokenKind::Chips,
                     pulse: pulse_t,
                 });
@@ -1475,7 +1568,7 @@ impl SceneBehavior for GameplayScene {
                 let pulse_t = ((mult_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
                 cascade_token_placements.push(crate::render::draw_cmd::CascadeTokenPlacement {
                     world_pos: [cx, cy, 4.0],
-                    extents: [pill_w, (pill_h * 0.6).max(8.0), pill_h],
+                    extents: [pill_w * 0.5, (pill_h * 0.6 * 0.5).max(4.0), pill_h * 0.5],
                     kind: crate::render::draw_cmd::CascadeTokenKind::Mult,
                     pulse: pulse_t,
                 });
@@ -2453,6 +2546,9 @@ impl SceneBehavior for GameplayScene {
                     for (src, body) in &eff.sources {
                         lines.push(format!("{src}: {body}"));
                     }
+                    if let Some(fx) = tile.flower_effect_label() {
+                        lines.push(format!("flower: {fx}"));
+                    }
                     if is_selected {
                         lines.push("selected".to_string());
                     }
@@ -2856,10 +2952,11 @@ impl SceneBehavior for GameplayScene {
                 // Pseudo-random per-relic size variation, deterministic on id.
                 let seed = (rid as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
                 let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
-                let r1 = ((seed >> 16) & 0xFF) as f32 / 255.0;
                 let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
-                let half_x = layout.mm(15.0 + r0 * 5.0);
-                let half_y = layout.mm(11.0 + r1 * 6.0);
+                // Front face (x × y) is square to match 1:1 relic textures.
+                let face = layout.mm(13.0 + r0 * 5.0);
+                let half_x = face;
+                let half_y = face;
                 let half_z = layout.mm(10.0 + r2 * 4.0);
 
                 // Color tracks the relic's rarity tier so similar-rarity
@@ -2910,6 +3007,7 @@ impl SceneBehavior for GameplayScene {
                     color,
                     relic_id: rid,
                     glow,
+                    rotation_x_deg: 0.0,
                 });
             }
         }
@@ -3466,9 +3564,9 @@ impl SceneBehavior for GameplayScene {
                 world_pos: [peg_block_x, peg_block_y, peg_block_lift],
                 extents: [peg_block_w, peg_block_h, peg_block_d],
                 plays_left: run.plays_remaining,
-                plays_max: STARTING_PLAYS,
+                plays_max: run.mode.starting_plays,
                 discards_left: run.discards_remaining,
-                discards_max: STARTING_DISCARDS,
+                discards_max: run.mode.starting_discards,
             });
         }
         // (Score header text is now engraved on the plaque mesh as a

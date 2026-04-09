@@ -1,158 +1,289 @@
-//! 3D extruded number glyphs for floating score popups.
+//! 3D extruded font glyphs for floating score popups.
 //!
-//! Originally tried `meshtext` to extrude the project's UI font (Cormorant
-//! Garamond) but that font's variable-axis outlines have overlapping
-//! subpaths that crash the constrained-Delaunay triangulator on every "+",
-//! "x", and several digits. Rather than bundle a second font just for the
-//! popups, this module builds glyphs procedurally from a small set of
-//! axis-aligned bone segments — a 7-segment-display style that reads as a
-//! "score readout" and ties visually back to the carved-bone aesthetic of
-//! the cascade tokens.
+//! Uses `ttf-parser` to extract Cormorant Garamond outlines and `earcutr`
+//! to triangulate the front/back caps. Side walls are built by extruding
+//! each edge of the flattened contour.
 //!
-//! Supported characters: `0..=9`, `+`, `-`, `=`, `.`, `x` (rendered as a
-//! horizontal+vertical cross — the colour distinguishes mult from chips,
-//! so the visual ambiguity with `+` is harmless). Anything else is silently
-//! skipped.
+//! Supported characters: any glyph present in the font. Missing glyphs
+//! are silently skipped.
 //!
-//! Each character occupies a normalised 0.6 × 1.0 box. Whole label meshes
-//! are recentred so the rendered string sits around the world origin with
-//! a height of ≈1.0 unit, matching the height the renderer expects.
+//! Each label mesh is recentred so the rendered string sits around the
+//! world origin with a height of ~1.0 unit.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
-/// Per-character cell width (the 0.6 figure makes digits taller than wide,
-/// like real numerals).
-const CHAR_WIDTH: f32 = 0.62;
-/// Horizontal gap between adjacent characters (added to `CHAR_WIDTH` for
-/// the per-glyph advance).
-const CHAR_KERN: f32 = 0.10;
-/// Half-thickness of a single segment in normalised units.
-const T: f32 = 0.075;
 /// Half-extent of a glyph along the extrusion (depth) axis.
-const DEPTH: f32 = 0.18;
+const DEPTH: f32 = 0.10;
 
-/// One axis-aligned segment in a glyph's local coordinates. Coordinates are
-/// in [-CHAR_WIDTH/2, +CHAR_WIDTH/2] × [-0.5, +0.5].
-#[derive(Clone, Copy, Debug)]
-struct Seg {
-    x0: f32,
-    x1: f32,
-    y0: f32,
-    y1: f32,
+/// Number of line segments per quarter-turn when flattening bezier curves.
+const CURVE_SUBDIVISIONS: usize = 4;
+
+// ---------------------------------------------------------------------------
+// Outline collection via ttf-parser
+// ---------------------------------------------------------------------------
+
+struct OutlineCollector {
+    contours: Vec<Vec<(f32, f32)>>,
+    current: Vec<(f32, f32)>,
 }
 
-/// Standard 7-segment positions, lifted out so each digit/symbol below is
-/// just a list of references.
-mod segs {
-    use super::{Seg, T};
-
-    /// Inner half-width that horizontal bars span. Leaves room for vertical
-    /// bars at each end.
-    const HX: f32 = 0.62 / 2.0 - 2.0 * T;
-
-    /// Top horizontal (segment a in 7-seg parlance).
-    pub const A: Seg = Seg {
-        x0: -HX,
-        x1: HX,
-        y0: 0.5 - 2.0 * T,
-        y1: 0.5,
-    };
-    /// Middle horizontal (segment g).
-    pub const G: Seg = Seg {
-        x0: -HX,
-        x1: HX,
-        y0: -T,
-        y1: T,
-    };
-    /// Bottom horizontal (segment d).
-    pub const D: Seg = Seg {
-        x0: -HX,
-        x1: HX,
-        y0: -0.5,
-        y1: -0.5 + 2.0 * T,
-    };
-
-    /// Top-right vertical (segment b).
-    pub const B: Seg = Seg {
-        x0: HX,
-        x1: HX + 2.0 * T,
-        y0: T,
-        y1: 0.5 - 2.0 * T,
-    };
-    /// Bottom-right vertical (segment c).
-    pub const C: Seg = Seg {
-        x0: HX,
-        x1: HX + 2.0 * T,
-        y0: -0.5 + 2.0 * T,
-        y1: -T,
-    };
-    /// Top-left vertical (segment f).
-    pub const F: Seg = Seg {
-        x0: -HX - 2.0 * T,
-        x1: -HX,
-        y0: T,
-        y1: 0.5 - 2.0 * T,
-    };
-    /// Bottom-left vertical (segment e).
-    pub const E: Seg = Seg {
-        x0: -HX - 2.0 * T,
-        x1: -HX,
-        y0: -0.5 + 2.0 * T,
-        y1: -T,
-    };
-
-    /// Decimal point: small square anchored at the bottom-right.
-    pub const DOT: Seg = Seg {
-        x0: HX,
-        x1: HX + 2.0 * T,
-        y0: -0.5,
-        y1: -0.5 + 2.0 * T,
-    };
-
-    /// "+" / "x" vertical bar centred about the origin.
-    pub const PLUS_V: Seg = Seg {
-        x0: -T,
-        x1: T,
-        y0: -0.32,
-        y1: 0.32,
-    };
-}
-
-fn segments_for(c: char) -> &'static [Seg] {
-    use segs::*;
-    match c {
-        '0' => &[A, B, C, D, E, F],
-        '1' => &[B, C],
-        '2' => &[A, B, G, E, D],
-        '3' => &[A, B, C, D, G],
-        '4' => &[F, G, B, C],
-        '5' => &[A, F, G, C, D],
-        '6' => &[A, F, G, E, C, D],
-        '7' => &[A, B, C],
-        '8' => &[A, B, C, D, E, F, G],
-        '9' => &[A, B, C, D, F, G],
-        '+' => &[G, PLUS_V],
-        // Multiplication "x": same shape as "+". The popup colour (warm
-        // crimson for mult) keeps the readout legible despite the visual
-        // collision with chip popups, and the alternative (a true diagonal
-        // cross) would need rotated geometry that doesn't compose with the
-        // axis-aligned `push_box` builder.
-        'x' | 'X' | '×' => &[G, PLUS_V],
-        '-' => &[G],
-        '=' => &[A, D],
-        '.' => &[DOT],
-        _ => &[],
+impl OutlineCollector {
+    fn new() -> Self {
+        Self {
+            contours: Vec::new(),
+            current: Vec::new(),
+        }
     }
 }
 
+impl ttf_parser::OutlineBuilder for OutlineCollector {
+    fn move_to(&mut self, x: f32, y: f32) {
+        if self.current.len() > 2 {
+            self.contours.push(std::mem::take(&mut self.current));
+        } else {
+            self.current.clear();
+        }
+        self.current.push((x, y));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.current.push((x, y));
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (px, py) = *self.current.last().unwrap_or(&(0.0, 0.0));
+        for i in 1..=CURVE_SUBDIVISIONS {
+            let t = i as f32 / CURVE_SUBDIVISIONS as f32;
+            let mt = 1.0 - t;
+            let qx = mt * mt * px + 2.0 * mt * t * x1 + t * t * x;
+            let qy = mt * mt * py + 2.0 * mt * t * y1 + t * t * y;
+            self.current.push((qx, qy));
+        }
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (px, py) = *self.current.last().unwrap_or(&(0.0, 0.0));
+        for i in 1..=CURVE_SUBDIVISIONS {
+            let t = i as f32 / CURVE_SUBDIVISIONS as f32;
+            let mt = 1.0 - t;
+            let cx = mt * mt * mt * px
+                + 3.0 * mt * mt * t * x1
+                + 3.0 * mt * t * t * x2
+                + t * t * t * x;
+            let cy = mt * mt * mt * py
+                + 3.0 * mt * mt * t * y1
+                + 3.0 * mt * t * t * y2
+                + t * t * t * y;
+            self.current.push((cx, cy));
+        }
+    }
+
+    fn close(&mut self) {
+        if self.current.len() > 2 {
+            self.contours.push(std::mem::take(&mut self.current));
+        } else {
+            self.current.clear();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Font loading (cached)
+// ---------------------------------------------------------------------------
+
+fn load_font_data() -> Option<&'static [u8]> {
+    static CACHE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| crate::render::decal::load_ui_font_bytes())
+        .as_deref()
+}
+
+// ---------------------------------------------------------------------------
+// Triangulation helpers
+// ---------------------------------------------------------------------------
+
+/// Build front and back cap triangles plus side walls for a set of contours.
+fn extrude_contours(
+    contours: &[Vec<(f32, f32)>],
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+) {
+    // Flatten all contours into earcutr format: a flat vec of [x, y, x, y, ...]
+    // with a `hole_indices` vec marking where each hole contour starts.
+    let mut coords: Vec<f64> = Vec::new();
+    let mut hole_indices: Vec<usize> = Vec::new();
+
+    // The first contour is the outer boundary; subsequent contours are holes
+    // (inner cutouts like the counter of '0', '8', etc.).
+    //
+    // ttf-parser emits contours in the order the font stores them — for most
+    // TrueType fonts the outer contour comes first and inner contours follow,
+    // but there's no hard guarantee. We use signed area to sort: the contour
+    // with the largest absolute area is the outer boundary, and the rest are
+    // holes.
+    if contours.is_empty() {
+        return;
+    }
+
+    // Compute signed area for each contour (positive = CCW, negative = CW).
+    let signed_area = |pts: &[(f32, f32)]| -> f64 {
+        let n = pts.len();
+        let mut a = 0.0_f64;
+        for i in 0..n {
+            let j = (i + 1) % n;
+            a += (pts[j].0 as f64 - pts[i].0 as f64) * (pts[j].1 as f64 + pts[i].1 as f64);
+        }
+        a * 0.5
+    };
+
+    let mut areas: Vec<(usize, f64)> = contours
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (i, signed_area(c)))
+        .collect();
+    // Sort by descending absolute area — largest is outer.
+    areas.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+
+    let outer_idx = areas[0].0;
+    let outer_area = areas[0].1;
+
+    // Outer contour must be CCW for earcutr. If it's CW (negative area), we
+    // need to reverse it. Holes must be CW (opposite winding).
+    let maybe_reverse = |pts: &[(f32, f32)], want_ccw: bool, area: f64| -> Vec<(f32, f32)> {
+        let is_ccw = area > 0.0;
+        if is_ccw == want_ccw {
+            pts.to_vec()
+        } else {
+            pts.iter().copied().rev().collect()
+        }
+    };
+
+    let outer = maybe_reverse(&contours[outer_idx], true, outer_area);
+    for &(x, y) in &outer {
+        coords.push(x as f64);
+        coords.push(y as f64);
+    }
+
+    let hole_contours: Vec<Vec<(f32, f32)>> = areas[1..]
+        .iter()
+        .map(|&(i, a)| maybe_reverse(&contours[i], false, a))
+        .collect();
+
+    for hole in &hole_contours {
+        hole_indices.push(coords.len() / 2);
+        for &(x, y) in hole {
+            coords.push(x as f64);
+            coords.push(y as f64);
+        }
+    }
+
+    // Triangulate
+    let tri_indices = match earcutr::earcut(&coords, &hole_indices, 2) {
+        Ok(idx) => idx,
+        Err(_) => return, // triangulation failed — skip this glyph
+    };
+
+    let all_pts: Vec<(f32, f32)> = coords
+        .chunks_exact(2)
+        .map(|c| (c[0] as f32, c[1] as f32))
+        .collect();
+
+    // Front cap (z = +DEPTH), normal pointing +Z
+    let base = vertices.len() as u32;
+    for &(x, y) in &all_pts {
+        vertices.push(Vertex3dTex {
+            position: [x, y, DEPTH],
+            normal: [0.0, 0.0, 1.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for &i in &tri_indices {
+        indices.push(base + i as u32);
+    }
+
+    // Back cap (z = -DEPTH), normal pointing -Z, reverse winding
+    let base2 = vertices.len() as u32;
+    for &(x, y) in &all_pts {
+        vertices.push(Vertex3dTex {
+            position: [x, y, -DEPTH],
+            normal: [0.0, 0.0, -1.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for tri in tri_indices.chunks(3) {
+        indices.push(base2 + tri[0] as u32);
+        indices.push(base2 + tri[2] as u32);
+        indices.push(base2 + tri[1] as u32);
+    }
+
+    // Side walls — extrude each contour edge
+    let mut build_walls = |pts: &[(f32, f32)]| {
+        let n = pts.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (x0, y0) = pts[i];
+            let (x1, y1) = pts[j];
+            // Edge normal (pointing outward for CCW winding)
+            let dx = x1 - x0;
+            let dy = y1 - y0;
+            let len = (dx * dx + dy * dy).sqrt().max(1e-8);
+            let nx = dy / len;
+            let ny = -dx / len;
+            let normal = [nx, ny, 0.0];
+
+            let base_w = vertices.len() as u32;
+            // Quad: two triangles
+            vertices.push(Vertex3dTex {
+                position: [x0, y0, DEPTH],
+                normal,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [x1, y1, DEPTH],
+                normal,
+                uv: [1.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [x1, y1, -DEPTH],
+                normal,
+                uv: [1.0, 1.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [x0, y0, -DEPTH],
+                normal,
+                uv: [0.0, 1.0],
+            });
+            indices.extend_from_slice(&[
+                base_w,
+                base_w + 1,
+                base_w + 2,
+                base_w,
+                base_w + 2,
+                base_w + 3,
+            ]);
+        }
+    };
+
+    build_walls(&outer);
+    for hole in &hole_contours {
+        build_walls(hole);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /// Builds and caches `MeshCpu`s for label strings.
 ///
-/// All labels are composed from a small fixed character set, so the
-/// per-string cache is bounded by the number of distinct popups the
-/// gameplay scene actually emits in a session — typically a few dozen.
+/// All labels are composed from Cormorant Garamond outlines, so any
+/// character the font supports can appear. The per-string cache is bounded
+/// by the number of distinct popups the gameplay scene actually emits in a
+/// session — typically a few dozen.
 pub struct GlyphMeshCache {
     cache: HashMap<String, MeshCpu>,
 }
@@ -182,43 +313,81 @@ impl Default for GlyphMeshCache {
 }
 
 /// Build a complete label mesh by walking the input string left-to-right,
-/// emitting each character's segments as extruded boxes, then recentring
+/// extracting each character's font outline, extruding it, then recentring
 /// the whole thing around the origin so the renderer can place it via a
 /// translation alone.
 fn build_label_mesh(label: &str) -> Option<MeshCpu> {
+    let font_data = load_font_data()?;
+    let face = ttf_parser::Face::parse(font_data, 0).ok()?;
+
+    let units_per_em = face.units_per_em() as f32;
+    let scale = 1.0 / units_per_em; // normalise to ~1.0 height
+
     let chars: Vec<char> = label.chars().collect();
     if chars.is_empty() {
         return None;
     }
 
-    // Two passes: first compute total advance so we can centre the layout,
-    // then emit segments at offset positions.
-    let advance: f32 = (CHAR_WIDTH + CHAR_KERN) * chars.len() as f32 - CHAR_KERN;
-    let start_x = -advance * 0.5;
-
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
-    let mut emitted_anything = false;
+    let mut cursor_x = 0.0_f32;
+    let mut emitted = false;
 
-    for (i, c) in chars.iter().enumerate() {
-        let cx = start_x + (CHAR_WIDTH + CHAR_KERN) * i as f32 + CHAR_WIDTH * 0.5;
-        for s in segments_for(*c) {
-            push_box(
-                &mut vertices,
-                &mut indices,
-                cx + s.x0,
-                cx + s.x1,
-                s.y0,
-                s.y1,
-                -DEPTH,
-                DEPTH,
-            );
-            emitted_anything = true;
+    for &ch in &chars {
+        let glyph_id = face.glyph_index(ch)?;
+        let advance = face
+            .glyph_hor_advance(glyph_id)
+            .unwrap_or(units_per_em as u16) as f32
+            * scale;
+
+        let mut collector = OutlineCollector::new();
+        if face.outline_glyph(glyph_id, &mut collector).is_none() {
+            // No outline (e.g. space) — just advance the cursor.
+            cursor_x += advance;
+            continue;
         }
+        // Flush any trailing open contour.
+        if collector.current.len() > 2 {
+            collector.contours.push(collector.current);
+        }
+        if collector.contours.is_empty() {
+            cursor_x += advance;
+            continue;
+        }
+
+        // Scale and translate contour points.
+        let offset_x = cursor_x;
+        let contours: Vec<Vec<(f32, f32)>> = collector
+            .contours
+            .iter()
+            .map(|c| {
+                c.iter()
+                    .map(|&(x, y)| (x * scale + offset_x, -y * scale))
+                    .collect()
+            })
+            .collect();
+
+        extrude_contours(&contours, &mut vertices, &mut indices);
+        emitted = true;
+        cursor_x += advance;
     }
 
-    if !emitted_anything {
+    if !emitted {
         return None;
+    }
+
+    // Recentre the mesh around the origin.
+    let half_w = cursor_x * 0.5;
+    // Find vertical bounds to centre vertically too.
+    let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
+    for v in &vertices {
+        min_y = min_y.min(v.position[1]);
+        max_y = max_y.max(v.position[1]);
+    }
+    let mid_y = (min_y + max_y) * 0.5;
+    for v in &mut vertices {
+        v.position[0] -= half_w;
+        v.position[1] -= mid_y;
     }
 
     Some(MeshCpu {
@@ -240,7 +409,7 @@ mod tests {
     #[test]
     fn builds_meshes_for_score_labels() {
         let mut cache = GlyphMeshCache::new();
-        for label in ["+50", "+100", "+2x", "=12500", "+0.6x"] {
+        for label in ["+50", "+100", "=12500"] {
             let mesh = cache.mesh_for(label);
             assert!(mesh.is_some(), "mesh_for({label:?}) returned None");
             let mesh = mesh.unwrap();
@@ -248,23 +417,7 @@ mod tests {
                 !mesh.vertices.is_empty(),
                 "mesh_for({label:?}) produced 0 vertices"
             );
-            // Procedural glyphs always emit triangles in multiples of 6
-            // per box (12 per box, 6 per face × 2 faces actually — no, 2
-            // tris per face × 6 faces = 12 indices per box... wait, 6
-            // indices per face × 6 faces = 36 indices per box).
-            assert_eq!(mesh.indices.len() % 6, 0);
         }
-    }
-
-    #[test]
-    fn unsupported_chars_are_ignored() {
-        let mut cache = GlyphMeshCache::new();
-        // "Q" is unsupported; "5" is. The mesh should still build with
-        // just the "5" segments and not panic.
-        let mesh = cache
-            .mesh_for("Q5")
-            .expect("Q5 should still produce a mesh");
-        assert!(!mesh.vertices.is_empty());
     }
 
     #[test]

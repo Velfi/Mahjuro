@@ -44,6 +44,12 @@ pub enum MaterialKind {
     /// basis so it works regardless of the tablet's world-space orientation
     /// (upright on the wall or laid flat in the tray).
     Talisman = 7,
+    /// Metallic foil wrapping — semi-conductor with thin-film iridescence.
+    /// The bound texture is sampled as full-colour albedo (pack box art),
+    /// overlaid with a view-dependent rainbow sheen that shifts as the
+    /// light sweeps across the surface. Specular is high and tinted by
+    /// the albedo so the foil reads as a reflective metallic wrapper.
+    Foil = 8,
 }
 
 /// Compact per-mesh material parameters.

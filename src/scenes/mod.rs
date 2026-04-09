@@ -13,6 +13,7 @@ pub mod profile_select;
 pub mod shop;
 pub mod solitaire;
 pub mod splash;
+pub mod start_game_modal;
 pub mod start_screen;
 
 pub use collection::CollectionScene;
@@ -24,6 +25,7 @@ pub use profile_select::ProfileSelectScene;
 pub use shop::ShopScene;
 pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
+pub use start_game_modal::TileSelectScene;
 pub use start_screen::StartScreenScene;
 
 use enum_dispatch::enum_dispatch;
@@ -309,6 +311,8 @@ pub struct SceneDrawOutput {
     /// this empty; gameplay populates it for the post-deal "blow it away"
     /// effect.
     pub wind_gusts: Vec<crate::render::draw_cmd::WindGust>,
+    /// Override the tile material for this frame (e.g. tile-select preview).
+    pub tile_material_override: Option<crate::persistence::TileMaterial>,
 }
 
 impl Default for SceneDrawOutput {
@@ -333,6 +337,7 @@ impl Default for SceneDrawOutput {
             relic_placements: Vec::new(),
             draw_table: false,
             wind_gusts: Vec::new(),
+            tile_material_override: None,
         }
     }
 }
@@ -385,6 +390,7 @@ impl SceneDrawOutput {
         frame.departing_indices = self.departing_indices;
         frame.point_lights = self.point_lights;
         frame.wind_gusts = self.wind_gusts;
+        frame.tile_material_override = self.tile_material_override;
         frame.buttons = self.buttons;
         frame.window_title = self.window_title;
         frame
@@ -547,6 +553,7 @@ pub trait SceneBehavior {
 pub enum Scene {
     Splash(SplashScene),
     StartScreen(StartScreenScene),
+    TileSelect(TileSelectScene),
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
     PickBlind(PickBlindScene),

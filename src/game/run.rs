@@ -25,6 +25,9 @@ pub enum ConsumableUseResult {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
+    /// The player activated a Kiln — the gameplay scene should enter tile
+    /// selection mode so the player can pick up to 3 tiles to destroy.
+    KilnMode,
 }
 
 pub const HAND_SIZE: usize = 14;
@@ -136,6 +139,14 @@ pub struct RunState {
     /// (so id 5 is always the same suit+rank, even after a reshuffle).
     #[serde(default)]
     pub tile_enhancements: BTreeMap<u32, TileEnhancement>,
+    /// Tile IDs permanently removed from the wall via the Kiln talisman.
+    /// Filtered out during wall construction each round.
+    #[serde(default)]
+    pub removed_tile_ids: std::collections::HashSet<u32>,
+    /// Tile packs purchased from the shop. Each pack permanently injects
+    /// extra tiles into the wall every round. Append-only.
+    #[serde(default)]
+    pub tile_packs: Vec<crate::core::tile_pack::TilePackKind>,
 }
 
 impl RunState {
@@ -207,6 +218,8 @@ impl RunState {
             honors_scored_this_round: false,
             yaku_times_played: std::collections::HashMap::new(),
             tile_enhancements: BTreeMap::new(),
+            removed_tile_ids: std::collections::HashSet::new(),
+            tile_packs: Vec::new(),
         };
         // Resolve the first ante's boss now so reactive variants are baked
         // in before pick_blind ever reads `upcoming_boss_effect`.
@@ -246,6 +259,11 @@ impl RunState {
         Self::new(GameMode::standard())
     }
 
+    /// Start a new run with the given tile material set.
+    pub fn new_with_material(material: crate::persistence::TileMaterial) -> Self {
+        Self::new(GameMode::with_material(material))
+    }
+
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
     /// their yaku for the run; Talismans stamp their enhancement onto every
     /// tile currently in the player's hand. Returns a [`ConsumableUseResult`]
@@ -260,7 +278,10 @@ impl RunState {
                 Some(ConsumableUseResult::Zodiac { yaku, new_level })
             }
             Consumable::Talisman(t) => {
-                let enh = t.enhancement();
+                if t == crate::core::talisman::TalismanKind::Kiln {
+                    return Some(ConsumableUseResult::KilnMode);
+                }
+                let enh = t.enhancement().expect("non-Kiln talisman has enhancement");
                 // Record the enhancement against each current hand tile's id
                 // so it persists when those tiles get redrawn next round.
                 for tile in &self.hand {
@@ -270,6 +291,50 @@ impl RunState {
                 Some(ConsumableUseResult::Talisman { kind: t })
             }
         }
+    }
+
+    /// Maximum number of tiles that can be removed from the wall via the Kiln.
+    /// The wall needs enough tiles to deal a full hand each round.
+    const MAX_REMOVED_TILES: usize = 56;
+
+    /// Permanently destroy the selected tiles from the hand (Kiln talisman).
+    /// Removed tile IDs are recorded so they never appear in future walls.
+    /// Returns the number of tiles actually destroyed.
+    pub fn destroy_selected_tiles(&mut self, bus: &mut crate::game::event_bus::EventBus) -> usize {
+        let budget = Self::MAX_REMOVED_TILES.saturating_sub(self.removed_tile_ids.len());
+        let mut destroyed = 0usize;
+        let mut kept_hand = Vec::new();
+        let mut kept_sel = Vec::new();
+        for (i, tile) in self.hand.iter().enumerate() {
+            if self.selected[i] && destroyed < budget {
+                self.removed_tile_ids.insert(tile.id);
+                self.tile_enhancements.remove(&tile.id);
+                destroyed += 1;
+            } else {
+                kept_hand.push(*tile);
+                kept_sel.push(false);
+            }
+        }
+        self.hand = kept_hand;
+        self.selected = kept_sel;
+        // Refill hand from the wall.
+        while self.hand.len() < self.mode.hand_size {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+                self.selected.push(false);
+            } else {
+                break;
+            }
+        }
+        self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
+        self.restamp_hand_enhancements();
+        if destroyed > 0 {
+            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed {
+                count: destroyed,
+            });
+        }
+        destroyed
     }
 
     /// Re-stamp every tile in the current hand with whatever enhancement is
@@ -420,6 +485,14 @@ impl RunState {
         let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
+        // Flower gold (Bamboo effect): award immediately so the player sees
+        // the gold counter tick during the cascade.
+        if breakdown.flower_gold > 0 {
+            self.gold = self.gold.saturating_add(breakdown.flower_gold);
+            bus.push(GameEvent::GoldChanged {
+                delta: breakdown.flower_gold,
+            });
+        }
         // Latch the first-FullHand-of-round flag so the Tenpai Bonus only
         // fires once per round.
         let scored_full_hand = breakdown
@@ -710,6 +783,15 @@ impl RunState {
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
         }
+        // Shanten Shove: if the refilled hand is at tenpai, draw 1 bonus tile.
+        if self.relics.has(crate::core::relic::RelicId::ShantenShove)
+            && crate::core::shanten::shanten_estimate(&self.hand) == 0
+        {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+                bus.push(GameEvent::TileDrawn(t));
+            }
+        }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
         // Re-apply persistent enhancements to any newly-drawn tiles.
@@ -747,6 +829,21 @@ impl RunState {
         detect_all_sets(&self.hand).len()
     }
 
+    /// Strip all Overflow-extra tiles from the wall and hand. Call this when
+    /// the Overflow relic is lost mid-round (e.g. boss effect) so the extra
+    /// copies don't linger.
+    pub fn strip_overflow_tiles(&mut self, bus: &mut EventBus) {
+        use crate::core::deck::OVERFLOW_TILE_ID_BASE;
+        self.wall.strip_overflow_tiles();
+        let before = self.hand.len();
+        self.hand.retain(|t| t.id < OVERFLOW_TILE_ID_BASE);
+        if self.hand.len() != before {
+            self.hand.sort();
+            self.selected = vec![false; self.hand.len()];
+            self.refill_hand(bus);
+        }
+    }
+
     /// Add the chosen relic, scale up the base target, and reset for the next round.
     /// The actual target_score is set later by `apply_blind`.
     ///
@@ -778,7 +875,13 @@ impl RunState {
         self.honors_scored_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
-        self.wall = Wall::from_standard_shuffled();
+        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        self.wall = Wall::from_filtered_with_packs(
+            &self.removed_tile_ids,
+            &self.tile_packs,
+            &self.tile_enhancements,
+            overflow,
+        );
         self.hand.clear();
         for _ in 0..self.mode.hand_size {
             if let Some(t) = self.wall.draw() {
@@ -833,7 +936,13 @@ impl RunState {
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.blind = self.upcoming_blind;
-        self.wall = Wall::from_standard_shuffled();
+        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        self.wall = Wall::from_filtered_with_packs(
+            &self.removed_tile_ids,
+            &self.tile_packs,
+            &self.tile_enhancements,
+            overflow,
+        );
         self.hand.clear();
         for _ in 0..self.mode.hand_size {
             if let Some(t) = self.wall.draw() {
@@ -900,6 +1009,7 @@ mod tests {
             target_score: mode.base_target,
             tax_collector_cost: 0,
             tile_enhancements: BTreeMap::new(),
+            removed_tile_ids: std::collections::HashSet::new(),
             upcoming_blind: BlindKind::Small,
             upcoming_boss_effect: None,
             upcoming_boss: None,
@@ -1171,9 +1281,9 @@ mod tests {
         let mut run = test_run();
         let mut bus = bus();
 
-        // Drain the wall almost completely: wall started with 136, 14 already drawn.
-        // Draw remaining 122 tiles to exhaust the wall.
-        for _ in 0..122 {
+        // Drain the wall almost completely: wall started with 140, 14 already drawn.
+        // Draw remaining 126 tiles to exhaust the wall.
+        for _ in 0..126 {
             run.wall.draw();
         }
         assert!(run.wall.draw().is_none()); // wall is empty

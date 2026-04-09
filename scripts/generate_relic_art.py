@@ -178,12 +178,12 @@ RELICS = [
     ),
     # ── 15 new Patch C relics ─────────────────────────────────────────────
     (
-        "shanten_lens",
-        "Shanten Lens",
-        "An antique brass magnifying glass tilted over a single mahjong tile, "
-        "with faint geometric guide lines and a tiny gold reticle drawn across "
-        "the lens. The tile underneath looks slightly self-conscious.",
-        "Brass magnifier, ivory tile, gold reticle lines.",
+        "shanten_shove",
+        "Shanten Shove",
+        "A giant jade hand shoving a mahjong tile across a polished table "
+        "toward a waiting row of tiles. Motion blur on the sliding tile, "
+        "dramatic side-lighting, dust motes in the air.",
+        "Jade hand, sliding tile, motion blur, dust motes.",
     ),
     (
         "wall_peek",

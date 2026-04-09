@@ -44,6 +44,10 @@ pub enum DebugAction {
     /// hit-tested against every known scene object and the matched object's
     /// name is logged. Activating this while already armed disarms it.
     ArmObjectHitTest,
+    /// Reroll the shop stock for free (no gold cost, no cost increment).
+    RerollShop,
+    /// Force-open a random tile pack celebration (free, ignores shop stock).
+    OpenPack,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -115,6 +119,16 @@ impl DebugMenuBar {
         let hit_test_item = MenuItem::new("Object Hit Test", true, None);
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
         let _ = debug_menu.append(&hit_test_item);
+
+        // Free shop reroll (bypasses gold cost).
+        let reroll_item = MenuItem::new("Reroll Shop", true, None);
+        mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
+        let _ = debug_menu.append(&reroll_item);
+
+        // Force-open a tile pack celebration (free).
+        let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
+        mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
+        let _ = debug_menu.append(&open_pack_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

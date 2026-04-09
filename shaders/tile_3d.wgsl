@@ -176,6 +176,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         && in.local_n.y >= abs(in.local_n.x)
         && in.local_n.y >= abs(in.local_n.z);
 
+    // cam.base_color_factor.w encodes the material variant:
+    //   0 = bamboo & ivory (traditional)
+    //   1 = plastic (kelly-green body, bright white face)
+    let mat_id = cam.base_color_factor.w;
+
     // Real mahjong tiles are a thin ivory/bone face layer glued onto a
     // bamboo body — the ivory wraps around the top of the side bevels
     // for a couple of millimetres before the bamboo grain takes over.
@@ -184,7 +189,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Sides that are above the threshold but not the +Y top face become
     // ivory; everything below is bamboo. The bottom (-Y) face has
     // local_n.y < 0 and is excluded so it stays bamboo.
-    let ivory_layer_y: f32 = 0.172; // band starts ~3 mm below the top
+    // Plastic caps are 40% of the slab thickness (top 0.170 of the
+    // 0.424 Y extent → threshold at 0.042).
+    let ivory_layer_y: f32 = mix(0.172, 0.042, clamp(mat_id, 0.0, 1.0));
     let ivory_band_softness: f32 = 0.012; // smooth transition (~1 mm)
     let ivory_band = smoothstep(
         ivory_layer_y - ivory_band_softness,
@@ -192,16 +199,33 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         in.local_pos.y,
     ) * select(0.0, 1.0, in.local_n.y > -0.25);
 
-    // Front face: flat ivory so the decal reads cleanly. Body (bevels and
-    // bottom + ends): procedural bamboo wood-fiber so the tile sides look
-    // like real cane — long parallel fibers on the long sides, darker
-    // cross-section dots on the short ends. The GLB albedo is intentionally
-    // bypassed: its baked UV seams smeared across the tile under our
-    // top-down camera and never matched real bamboo.
+    // ── Bamboo & Ivory (mat 0) ──────────────────────────────────────────
     let ivory = vec3<f32>(0.96, 0.93, 0.84);
     let bamboo = bamboo_albedo(in.local_pos, normalize(in.local_n));
-    let body_rgb = mix(bamboo, ivory, ivory_band);
-    let base_rgb = select(body_rgb, ivory, is_front);
+    let bamboo_body = mix(bamboo, ivory, ivory_band);
+    let bamboo_rgb = select(bamboo_body, ivory, is_front);
+
+    // ── Plastic (mat 1) ─────────────────────────────────────────────────
+    // Translucent kelly-green body with a bright white face cap.
+    // The body colour is saturated green; a depth-dependent lighten
+    // fakes the look of light passing through the translucent plastic,
+    // brighter near the top cap where the slab is thinnest.
+    let plastic_face = vec3<f32>(0.97, 0.97, 0.96);
+    let kelly = vec3<f32>(0.0, 0.35, 0.18);
+    // Depth-fade: fragments closer to the top (higher local_pos.y) are
+    // lighter, simulating light scattering through the translucent body.
+    let depth_t = smoothstep(-0.21, 0.17, in.local_pos.y);
+    let translucent_lighten = vec3<f32>(0.18, 0.22, 0.14) * depth_t;
+    let plastic_body_base = kelly + translucent_lighten;
+    // Faint mould-line variation so the sides aren't a solid slab of colour.
+    let pn = vnoise2(vec2<f32>(in.local_pos.x * 12.0, in.local_pos.z * 12.0));
+    let plastic_body = plastic_body_base * (0.96 + 0.08 * pn);
+    // White cap wraps around the top bevel.
+    let plastic_side = mix(plastic_body, plastic_face, ivory_band);
+    let plastic_rgb = select(plastic_side, plastic_face, is_front);
+
+    // Select material.
+    let base_rgb = mix(bamboo_rgb, plastic_rgb, clamp(mat_id, 0.0, 1.0));
 
     // Project decal UVs from model-space position onto the front face.
     // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
@@ -213,7 +237,32 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let in_uv = decal_uv.x >= 0.0 && decal_uv.x <= 1.0 && decal_uv.y >= 0.0 && decal_uv.y <= 1.0;
     let decal_a = select(0.0, decal.a, is_front && in_uv);
     let decal_rgb = decal.rgb;
-    let rgb = mix(base_rgb, decal_rgb, decal_a);
+
+    // ── Carved-groove engraving (same technique as plaque text) ─────────
+    // Treat decal alpha as a heightmap: 0 = flush ivory/plastic surface,
+    // 1 = bottom of the carved channel. Finite-difference gradient gives
+    // groove-wall normals that catch candlelight from one side and shadow
+    // the other, exactly like CNC-routed tile faces.
+    var carve_dhdu = 0.0;
+    var carve_dhdv = 0.0;
+    if (is_front && in_uv) {
+        let dim_d = vec2<f32>(textureDimensions(decal_tex, 0));
+        let tx = vec2<f32>(1.0 / max(dim_d.x, 1.0), 1.0 / max(dim_d.y, 1.0));
+        let a_l = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(-tx.x, 0.0), 0.0).a;
+        let a_r = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>( tx.x, 0.0), 0.0).a;
+        let a_d = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0, -tx.y), 0.0).a;
+        let a_u = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0,  tx.y), 0.0).a;
+        let carve_bump = 3.0;
+        carve_dhdu = (a_r - a_l) * carve_bump;
+        carve_dhdv = (a_u - a_d) * carve_bump;
+    }
+
+    // Groove-floor darkening: the carved recess is slightly shadowed by
+    // the groove walls before the paint/ink is laid in.
+    let groove = smoothstep(0.05, 0.35, decal_a);
+    var rgb = mix(base_rgb, base_rgb * 0.55, groove);
+    // Composite the decal colour on top of the darkened groove.
+    rgb = mix(rgb, decal_rgb, decal_a);
 
     // ── Point-light pass ────────────────────────────────────────────────
     // Accumulate candle / point-light contributions on top of the base
@@ -225,6 +274,19 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (!front_facing) {
         n_world = -n_world;
     }
+
+    // Apply carved-groove normal perturbation from the decal alpha gradient.
+    // The front face normal is +Y in local space, so the tangent basis is
+    // X/Z — the perturbation tilts the normal sideways along those axes so
+    // groove walls catch the candlelight.
+    let edge_mag = abs(carve_dhdu) + abs(carve_dhdv);
+    if (edge_mag > 0.001) {
+        let perturbed_local = normalize(vec3<f32>(-carve_dhdu, 1.0, -carve_dhdv));
+        let perturbed_world = normalize((cam.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
+        n_world = normalize(mix(n_world, perturbed_world, blend_edge));
+    }
+
     var point_contrib = vec3<f32>(0.0);
     let light_count = lights.count.x;
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {

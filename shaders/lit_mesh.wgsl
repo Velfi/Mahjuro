@@ -487,11 +487,17 @@ fn fs_main(
         // decal composite at the end will lay the engraved glyphs on top.
         albedo = mesh.base_color.rgb;
     }
-    if (kind > 4.5) {
+    if (kind > 4.5 && kind < 5.5) {
         // Metal: the bound texture is a heightmap, not an albedo. Use the
         // raw base colour and let the height contribute later via the
         // normal-perturbation block below.
         albedo = mesh.base_color.rgb;
+    }
+    if (kind > 7.5) {
+        // Foil: the bound texture IS the full-colour pack art; multiply it
+        // with the base colour (typically white) so the art shows through.
+        // The metallic foil sheen is layered on top in the per-light loop.
+        albedo = mesh.base_color.rgb * tex_rgb;
     }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
@@ -784,6 +790,7 @@ fn fs_main(
     let is_wood = (kind > 2.5 && kind < 4.5);
     let is_wax  = (kind > 0.5 && kind < 1.5);
     let is_metal = (kind > 4.5 && kind < 5.5);
+    let is_foil = (kind > 7.5);
 
     // Wrap-diffuse subsurface: softens the terminator past 90° so the
     // shaded side picks up a tinted bleed. Wood gets a tiny amount,
@@ -1043,6 +1050,35 @@ fn fs_main(
             }
         }
 
+        // ── Foil sheen (metallic wrapping with iridescence) ──────────
+        // Combines a tight conductor specular (the foil's mirror) with a
+        // broad thin-film rainbow (the holographic overprint). The albedo
+        // carries the actual pack art; the sheen sits on top.
+        if (is_foil) {
+            let h = normalize(l_dir + view_dir);
+            let nh = max(dot(n, h), 0.0);
+            let vdh = max(dot(view_dir, h), 0.0);
+            let ndv = max(dot(n, view_dir), 0.0);
+            let broad = max(dot(n, l_dir), 0.0);
+            // Conductor Fresnel tinted by the albedo so the foil reflects
+            // the pack art colour at glancing angles.
+            let f0 = albedo * 0.6 + vec3<f32>(0.3);
+            let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
+            let mirror_lobe = pow(nh, 48.0) * 1.2;
+            spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
+            // Holographic thin-film iridescence — rainbow hue shifts with
+            // viewing angle and light direction for a realistic foil look.
+            let film_angle = dot(n, h);
+            let theta = film_angle * 8.0 + ndv * 3.0;
+            let holo_r = 0.5 + 0.5 * cos(theta);
+            let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
+            let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
+            let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
+            let fresnel = 0.15 + 0.55 * pow(1.0 - ndv, 2.0);
+            let holo_lobe = pow(nh, 8.0) * 0.5 + broad * 0.15;
+            sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * holo_lobe * fresnel * holo_tint;
+        }
+
         // Gold-leaf specular lobe on carved decal text. Conductor Fresnel
         // tinted by the gold paint's own colour so the highlight reads as
         // metallic rather than plastic. The lobe is moderately sharp
@@ -1069,6 +1105,12 @@ fn fs_main(
         // response is in the tinted Fresnel spec lobe above. Leave a
         // sliver of diffuse so unlit-side coins don't read as cutouts.
         diffuse_scale = 0.08;
+    }
+    if (is_foil) {
+        // Semi-metallic foil: more diffuse than a pure conductor (the
+        // printed art needs to read) but less than a dielectric. The
+        // specular + sheen carry the foil's shine.
+        diffuse_scale = 0.35;
     }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
@@ -1126,6 +1168,20 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
+    }
+
+    // Foil Fresnel edge tint: rainbow color-shift at grazing angles so
+    // the foil wrapper reads as iridescent even in ambient light.
+    if (is_foil) {
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 1.8) * 0.30;
+        let theta = ndv_view * 6.0 + in.uv.x * 2.0;
+        let holo = vec3<f32>(
+            0.5 + 0.5 * cos(theta),
+            0.5 + 0.5 * cos(theta + 2.094),
+            0.5 + 0.5 * cos(theta + 4.189)
+        );
+        albedo = mix(albedo, holo, rim);
     }
 
     // No directional shadow gating now that there's no directional light;

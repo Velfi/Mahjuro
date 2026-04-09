@@ -140,6 +140,7 @@ impl SceneBehavior for GameOverScene {
             relic_placements: vec![],
             draw_table: false,
             wind_gusts: Vec::new(),
+            tile_material_override: None,
         }
     }
 }

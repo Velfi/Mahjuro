@@ -21,6 +21,7 @@
 
 use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
+use crate::core::tile_pack::TilePackKind;
 use crate::render::candle_mesh::CandlePlacement;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
@@ -88,6 +89,24 @@ pub struct RelicPlacement {
     /// color and emits an additive halo around its projected screen rect.
     /// Zero (the default) means "not glowing" and skips both effects.
     pub glow: f32,
+    /// Rotation around the local X axis in degrees. Positive tilts the top
+    /// of the box backward (away from the camera). Used by the shop scene to
+    /// lean for-sale relics against the back of the cabinet shelf.
+    pub rotation_x_deg: f32,
+}
+
+/// A tile-pack box on the shop shelf. Rendered using the same unit-box mesh
+/// and lit-mesh pipeline as relics, with the pack's art texture wrapped on
+/// every face. `rotation_x_deg` leans the box against the shelf back.
+#[derive(Clone, Copy, Debug)]
+pub struct PackPlacement {
+    pub world_pos: [f32; 3],
+    pub half_extents: [f32; 3],
+    pub color: [f32; 4],
+    pub kind: TilePackKind,
+    pub rotation_x_deg: f32,
+    /// Optional pick id so hit-testing can identify this pack.
+    pub pick_id: Option<u32>,
 }
 
 /// One zodiac/talisman ribbon hanging from an anchor point.
@@ -402,6 +421,27 @@ pub struct ExtrudedGlyphPlacement {
 /// from. The simulation lives in `crate::render::falling_bones` and is
 /// driven by the gameplay scene's cascade reveal events.
 #[derive(Clone, Copy, Debug)]
+/// One tile in a showcase display (pack-opening celebration, etc.).
+/// The scene provides full per-tile 3D transforms each frame — the renderer
+/// just draws what it's told, with no animation state of its own.
+pub struct ShowcaseTilePlacement {
+    /// The tile to display (identity determines the rasterized decal).
+    pub tile: Tile,
+    /// `(pixel_x, pixel_y, world_y_lift)` — same coordinate space as every
+    /// other 3D placement. `pixel_to_world` maps px/py to world xz;
+    /// `world_y_lift` is height above the table plane.
+    pub center_pos: [f32; 3],
+    /// Euler rotation `(rx, ry, rz)` in radians, applied after the standard
+    /// tile basis orientation. `[0, 0, 0]` = default tilted-toward-camera.
+    pub rotation: [f32; 3],
+    /// Uniform scale factor (`1.0` = standard hand-tile size at the given
+    /// pixel footprint). Used for grow-in / shrink animations.
+    pub scale: f32,
+    /// Pixel-space footprint width — controls the physical world size of the
+    /// tile via the active tile-preset ratios (face_long, thickness).
+    pub size_px: f32,
+}
+
 pub struct FallingBonePlacement {
     /// `(pixel_x, pixel_y, world_y)` for the bone's *center*. Pixel x/y
     /// resolve to world xz via `pixel_to_world`; `world_y` is the live
@@ -473,6 +513,9 @@ pub enum DrawCmd {
     /// `lit_mesh_pipeline`, instanced from the renderer's pre-allocated
     /// relic slot pool.
     RelicBatch(Vec<RelicPlacement>),
+    /// Tile-pack boxes rendered on the shop shelf. Uses the same unit-box
+    /// mesh and lit-mesh pipeline as relics, with pack art textures.
+    PackBatch(Vec<PackPlacement>),
     /// Free-standing dish placement (alternative to `Dish` which auto-sizes
     /// from `RelicBatch`). Used by the shop scene to draw multiple dishes at
     /// fixed positions in the same frame.
@@ -509,6 +552,10 @@ pub enum DrawCmd {
     /// their face labels — preserving the existing visual semantics where
     /// tile faces appear on top of overlay panels.
     HandTileFaces,
+    /// Batch of showcase tiles with explicit 3D transforms. Used by the
+    /// pack-opening celebration to display tiles at arbitrary positions
+    /// (not constrained to the table plane like hand tiles).
+    ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
     /// Procedural candle flame (additive blend, animated by globals.time).
@@ -610,6 +657,9 @@ pub struct UiFrame {
     /// help disambiguate world-space directions when iterating on
     /// placements.
     pub debug_axes: bool,
+    /// When `Some`, overrides the tile material for this frame. Used by
+    /// the tile-select scene to preview materials before a run starts.
+    pub tile_material_override: Option<crate::persistence::TileMaterial>,
 
     // ── Non-draw scene metadata ─────────────────────────────────────────
     /// Hit-test rects for clickable buttons (not drawn).
@@ -635,6 +685,7 @@ impl UiFrame {
             wind_gusts: Vec::new(),
             camera_override: None,
             debug_axes: false,
+            tile_material_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
         }
@@ -664,6 +715,9 @@ impl UiFrame {
     }
     pub fn relic_batch(&mut self, placements: Vec<RelicPlacement>) {
         self.cmds.push(DrawCmd::RelicBatch(placements));
+    }
+    pub fn pack_batch(&mut self, placements: Vec<PackPlacement>) {
+        self.cmds.push(DrawCmd::PackBatch(placements));
     }
     pub fn dish_explicit(&mut self, dish: DishExplicit) {
         self.cmds.push(DrawCmd::DishExplicit(dish));
@@ -766,6 +820,7 @@ impl UiFrame {
                 | DrawCmd::CandleBatch(_)
                 | DrawCmd::Dish
                 | DrawCmd::RelicBatch(_)
+                | DrawCmd::PackBatch(_)
                 | DrawCmd::DishExplicit(_)
                 | DrawCmd::CurioCabinet(_)
                 | DrawCmd::ShrineBatch(_)
@@ -785,6 +840,7 @@ impl UiFrame {
                 | DrawCmd::CascadeTokenBatch(_)
                 | DrawCmd::FallingBoneBatch(_)
                 | DrawCmd::ExtrudedGlyphBatch(_)
+                | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::GlossaryAnchor { .. } => {}
             }
         }

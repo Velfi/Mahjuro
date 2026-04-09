@@ -68,6 +68,7 @@ enum Row {
     Smoke,
     SmokeDetail,
     Tile,
+    TileMaterial,
     Shadows,
     Ssr,
     Hdr,
@@ -98,6 +99,7 @@ const ROWS: &[Row] = &[
     Row::Smoke,
     Row::SmokeDetail,
     Row::Tile,
+    Row::TileMaterial,
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
@@ -123,6 +125,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Smoke),
     ContentSlot::Row(Row::SmokeDetail),
     ContentSlot::Row(Row::Tile),
+    ContentSlot::Row(Row::TileMaterial),
     ContentSlot::Header(Section::Rendering),
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
@@ -267,6 +270,7 @@ pub struct OptionsScene {
     pub smoke_intensity: crate::persistence::SmokeIntensity,
     pub smoke_detail: crate::persistence::SmokeDetail,
     pub tile_preset: crate::persistence::TilePreset,
+    pub tile_material: crate::persistence::TileMaterial,
     pub gamma: f32,
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
@@ -288,6 +292,7 @@ impl OptionsScene {
             smoke_intensity: settings.smoke_intensity,
             smoke_detail: settings.smoke_detail,
             tile_preset: settings.tile_preset,
+            tile_material: settings.tile_material,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
@@ -305,6 +310,7 @@ impl OptionsScene {
         settings.smoke_intensity = self.smoke_intensity;
         settings.smoke_detail = self.smoke_detail;
         settings.tile_preset = self.tile_preset;
+        settings.tile_material = self.tile_material;
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
         settings.ssr_enabled = self.ssr_enabled;
@@ -386,6 +392,7 @@ impl OptionsScene {
             Row::Smoke => self.smoke_intensity = self.smoke_intensity.next(),
             Row::SmokeDetail => self.smoke_detail = self.smoke_detail.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
+            Row::TileMaterial => self.tile_material = self.tile_material.next(),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
@@ -407,6 +414,7 @@ impl OptionsScene {
             Row::Smoke => self.smoke_intensity = self.smoke_intensity.prev(),
             Row::SmokeDetail => self.smoke_detail = self.smoke_detail.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
+            Row::TileMaterial => self.tile_material = self.tile_material.prev(),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
@@ -446,6 +454,10 @@ impl OptionsScene {
             }
             Row::Tile => {
                 self.tile_preset = self.tile_preset.next();
+                self.save_settings();
+            }
+            Row::TileMaterial => {
+                self.tile_material = self.tile_material.next();
                 self.save_settings();
             }
             Row::Shadows => {
@@ -906,6 +918,9 @@ impl OptionsScene {
                         format!("Smoke Detail: {}", self.smoke_detail.label())
                     }
                     Row::Tile => format!("Tile Style: {}", self.tile_preset.label()),
+                    Row::TileMaterial => {
+                        format!("Tile Material: {}", self.tile_material.label())
+                    }
                     Row::Shadows => format!(
                         "Shadows: {}",
                         if self.shadows_enabled { "ON" } else { "OFF" }
@@ -982,6 +997,7 @@ impl SceneBehavior for OptionsScene {
             relic_placements: vec![],
             draw_table: false,
             wind_gusts: Vec::new(),
+            tile_material_override: None,
         }
     }
 }

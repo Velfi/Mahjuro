@@ -31,7 +31,7 @@ const YAW_JITTER: f32 = 0.18;
 /// World-units height the popup floats above the table plane while in
 /// flight. The settle phase drifts this slightly upward; the drift phase
 /// keeps it constant.
-const LIFT_BASE: f32 = 90.0;
+const LIFT_BASE: f32 = 450.0;
 const LIFT_DRIFT: f32 = 30.0;
 
 #[derive(Clone, Debug)]
@@ -71,6 +71,7 @@ impl ScorePopupSystem {
         let color = match kind {
             StepKind::Chips => [0.62, 0.78, 1.0, 1.0],
             StepKind::Mult => [1.0, 0.55, 0.55, 1.0],
+            StepKind::Gold => [0.95, 0.78, 0.25, 1.0],
             StepKind::Final => [1.0, 0.92, 0.45, 1.0],
         };
         // Magnitude → scale: log curve so a +5 popup is still readable but
@@ -78,7 +79,7 @@ impl ScorePopupSystem {
         // (the glyph mesh is normalised to height 1.0, so this is the
         // direct world-space character height).
         let mag = magnitude.abs().max(1.0);
-        let scale = 60.0 * (1.0 + (mag.log2() / 8.0).clamp(0.0, 0.8));
+        let scale = 300.0 * (1.0 + (mag.log2() / 8.0).clamp(0.0, 0.8));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
         self.popups.push(ScorePopup {
