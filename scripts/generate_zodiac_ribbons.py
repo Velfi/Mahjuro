@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
 """
-Generate silk-ribbon textures for the 12 Chinese zodiac consumable cards
-in Mahjuro using OpenAI's image generation API.
+Generate three-piece silk-ribbon textures for the 13 zodiac consumable
+cards in Mahjuro using OpenAI's image generation API (Mouse + the 12
+standard).
 
-Each zodiac is sold/used as a long hanging silk ribbon (see
-`build_ribbon_mesh` in src/render/ribbon_mesh.rs and `ZodiacRibbonPlacement`
-in src/render/draw_cmd.rs). The mesh UVs run 0→1 across the width and 0→1
-top→bottom along the length, so the texture is authored as a tall vertical
-strip that fills the frame edge-to-edge — the silk fabric must reach all
-four borders so there is no halo when the texture is sampled.
+Each zodiac ribbon is split into three square tiles so that the ribbon
+mesh can stretch to any length by tiling the middle piece:
+
+    zodiac_<slug>_top.png    — decorative top cap (tassel knot / finial)
+    zodiac_<slug>_mid.png    — repeating middle with the zodiac animal
+    zodiac_<slug>_bot.png    — decorative bottom cap (tassel fringe)
+
+The top and bottom edges of _mid tile seamlessly with themselves (and
+with the caps), so the renderer can repeat _mid N times between the two
+caps for ribbons of any length.
 
 Style direction: "Midnight Gold" — woven silk banners hanging in a curio
-shop. Each ribbon is its own per-zodiac silk color (matching the in-engine
-`consumable_color` palette in src/scenes/shop.rs so the textured ribbons
-read like richer versions of the existing flat tints) with the zodiac
+shop. Each ribbon is its own per-zodiac silk color with the zodiac
 animal embroidered in metallic gold thread, plus subtle gold trim along
 the long edges. No background — the silk IS the background.
-
-Filenames are `zodiac_<animal>.png`, written to assets/textures/, in
-calendar order matching `ZodiacKind::all()` in src/core/zodiac.rs.
 
 Usage:
     pip install openai pillow requests
     export OPENAI_API_KEY="sk-..."
-    python scripts/generate_zodiac_ribbons.py                  # all missing
-    python scripts/generate_zodiac_ribbons.py --force          # regenerate all
-    python scripts/generate_zodiac_ribbons.py --name dragon    # one by slug
-    python scripts/generate_zodiac_ribbons.py --zodiac 5       # one by index
-    python scripts/generate_zodiac_ribbons.py --list           # list all
-    python scripts/generate_zodiac_ribbons.py --dry-run        # prompts only
+    python3 scripts/generate_zodiac_ribbons.py                  # all missing
+    python3 scripts/generate_zodiac_ribbons.py --force          # regenerate all
+    python3 scripts/generate_zodiac_ribbons.py --name dragon    # one by slug
+    python3 scripts/generate_zodiac_ribbons.py --zodiac 5       # one by index
+    python3 scripts/generate_zodiac_ribbons.py --piece mid      # only middles
+    python3 scripts/generate_zodiac_ribbons.py --list           # list all
+    python3 scripts/generate_zodiac_ribbons.py --dry-run        # prompts only
 """
 
 import argparse
@@ -47,47 +48,96 @@ except ImportError:
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "textures"
 
-# Shared style prefix injected into every prompt. The ribbon mesh samples
-# this texture across its full width and length, so the silk fabric MUST
-# fill the entire frame — any background bleed would show as a halo on
-# the hanging ribbon in the shop scene.
-STYLE_PREFIX = (
-    "Texture for a hanging silk ribbon in a 'Midnight Gold' mahjong "
-    "roguelite video game. The image is a TALL VERTICAL STRIP filled "
-    "edge-to-edge with woven silk fabric — the silk reaches all four "
-    "borders of the frame, with NO outer background, NO drop shadow, NO "
-    "vignette, NO floor, NO wall, NO surrounding scene. The texture will "
-    "be wrapped onto a 3D ribbon mesh, so the entire frame must be the "
-    "ribbon itself. "
+# ---------------------------------------------------------------------------
+# Shared style constants
+# ---------------------------------------------------------------------------
+
+# Base style shared by all three pieces. The silk fabric MUST fill the
+# entire frame edge-to-edge — any background bleed shows as a halo on
+# the 3D ribbon mesh.
+STYLE_BASE = (
+    "Texture tile for a hanging silk ribbon in a 'Midnight Gold' mahjong "
+    "roguelite video game. The image is a SQUARE filled edge-to-edge with "
+    "woven silk fabric — the silk reaches all four borders of the frame, "
+    "with NO outer background, NO drop shadow, NO vignette, NO floor, NO "
+    "wall, NO surrounding scene. The texture will be wrapped onto a 3D "
+    "ribbon mesh, so the entire frame must be the ribbon itself. "
     "The silk has a subtle vertical weave grain and a soft satin sheen, "
-    "with a thin metallic gold trim braid running down each long edge. "
-    "Centered on the ribbon, the zodiac animal is rendered as embroidered "
-    "metallic gold thread — clean readable silhouette, slight cartoon "
-    "personality (animal is mildly self-aware, deadpan), bold flat shapes "
-    "with thick darker outlines so it reads from across the room. "
-    "Below the animal, a small abstract gold ornamental flourish (NOT a "
-    "letter, NOT a Chinese character, NOT a number) acts as a tassel "
-    "anchor at the bottom of the ribbon. "
+    "with a thin metallic gold trim braid running down each long (left "
+    "and right) edge. "
     "Flat orthographic front-on view, no perspective, no foreshortening. "
-    "No text, no letters, no numbers, no logos, no borders or frames "
-    "outside the silk itself, no watermarks, no signatures."
+    "No text, no letters, no numbers, no logos, no watermarks, no "
+    "signatures."
 )
 
+# Per-piece style suffixes.
+STYLE_TOP = (
+    "This is the TOP CAP of the ribbon. The top edge has a decorative "
+    "gold tassel knot or finial — an ornate gathered fabric rosette with "
+    "a hanging loop, as if the ribbon is pinned to a wall. The bottom "
+    "edge is plain silk that will tile seamlessly with the middle piece, "
+    "so it must be uninterrupted fabric with no decoration near the "
+    "bottom border. No animal, no embroidery subject — only the knot "
+    "and plain silk."
+)
+
+STYLE_MID = (
+    "This is the MIDDLE piece of the ribbon. Centered in the tile, the "
+    "zodiac animal is rendered as embroidered metallic gold thread — "
+    "clean readable silhouette, slight cartoon personality (animal is "
+    "mildly self-aware, deadpan), bold flat shapes with thick darker "
+    "outlines so it reads from across the room. "
+    "The top and bottom edges are plain uninterrupted silk so this tile "
+    "can repeat vertically and also tile seamlessly with the top and "
+    "bottom cap pieces. No decoration touches the top or bottom border."
+)
+
+STYLE_BOT = (
+    "This is the BOTTOM CAP of the ribbon. The bottom edge tapers to a "
+    "decorative point or V-notch cut, with a small abstract gold "
+    "ornamental flourish (NOT a letter, NOT a Chinese character, NOT a "
+    "number) and delicate gold fringe threads hanging from the tip. The "
+    "top edge is plain silk that will tile seamlessly with the middle "
+    "piece, so it must be uninterrupted fabric with no decoration near "
+    "the top border. No animal, no embroidery subject — only the fringe "
+    "and plain silk."
+)
+
+PIECE_STYLES = {
+    "top": STYLE_TOP,
+    "mid": STYLE_MID,
+    "bot": STYLE_BOT,
+}
+
+ALL_PIECES = ["top", "mid", "bot"]
+
+
+# ---------------------------------------------------------------------------
+# Zodiac definitions
+# ---------------------------------------------------------------------------
 
 # Each tuple: (slug, display_name, animal_visual, silk_palette).
 # Order MUST match ZodiacKind::all() in src/core/zodiac.rs (calendar order:
-# Rat, Ox, Tiger, Rabbit, Dragon, Snake, Horse, Goat, Monkey, Rooster,
-# Dog, Pig). Silk colors echo the per-zodiac palette in `consumable_color`
-# (src/scenes/shop.rs) so the textured ribbons feel like a richer version
-# of the existing flat tint, not a different art set.
+# Mouse, Rat, Ox, Tiger, Rabbit, Dragon, Snake, Horse, Goat, Monkey,
+# Rooster, Dog, Pig — 13 total). Silk colors are creature-appropriate.
 ZODIACS = [
+    (
+        "mouse",
+        "Mouse",
+        "A tiny field mouse seen from above at a slight angle, hunched "
+        "over a single mahjong tile it is clutching in both forepaws. "
+        "Round ears, long thin tail curling into a spiral beneath it, "
+        "delicate whiskers fanning out. Watchful, secretive expression — "
+        "it knows something you don't.",
+        "Warm dusty-grey silk (#b0a89e) with gold embroidery and gold edge trim.",
+    ),
     (
         "rat",
         "Rat",
         "A plump rat in profile, perked up on its hind legs with a long "
         "curling tail and bright button eyes. Faintly clever expression, "
         "as if it just spotted a tile on the floor.",
-        "Warm peach silk (#f59e6b) with gold embroidery and gold edge trim.",
+        "Dark charcoal silk (#4a4a50) with gold embroidery and gold edge trim.",
     ),
     (
         "ox",
@@ -95,8 +145,8 @@ ZODIACS = [
         "A broad-shouldered ox standing in three-quarter view with thick "
         "curved horns, a heavy yoke draped across its neck, and a calm "
         "stoic expression. Stout, dependable silhouette.",
-        "Rich saffron-gold silk (#f2c752) with darker gold embroidery "
-        "and gold edge trim.",
+        "Deep earthen-brown silk (#7a5c3a) with gold embroidery and gold "
+        "edge trim.",
     ),
     (
         "tiger",
@@ -104,7 +154,7 @@ ZODIACS = [
         "A crouching tiger mid-prowl, head low and tail flicking up "
         "behind. Bold stripe pattern stitched in slightly darker gold "
         "thread. Eyes narrowed, mouth set — not snarling, just focused.",
-        "Brick-red silk (#c76b56) with gold embroidery and gold edge trim.",
+        "Burnt-orange silk (#d4792a) with gold embroidery and gold edge trim.",
     ),
     (
         "rabbit",
@@ -112,8 +162,7 @@ ZODIACS = [
         "A round-bodied rabbit sitting upright with long ears tilted "
         "slightly to one side, paws tucked together at the chest. Soft "
         "alert expression. A small crescent moon floats just above one ear.",
-        "Pale jade-green silk (#80c78c) with gold embroidery and gold "
-        "edge trim.",
+        "Soft white silk (#f0ece4) with gold embroidery and gold edge trim.",
     ),
     (
         "dragon",
@@ -122,7 +171,7 @@ ZODIACS = [
         "with flowing whiskers, antler-like horns, and a cloud puff at "
         "its tail. Mouth slightly open in a knowing grin. The most "
         "ornate embroidery on the set.",
-        "Cool sky-indigo silk (#8c9eeb) with gold embroidery and gold "
+        "Imperial crimson silk (#b5262e) with gold embroidery and gold "
         "edge trim.",
     ),
     (
@@ -131,7 +180,7 @@ ZODIACS = [
         "A snake coiled twice into a tall vertical spiral with its head "
         "rising at the top, tongue flicked out. Diamond pattern stitched "
         "down its back in slightly darker gold. Half-lidded clever eyes.",
-        "Mauve silk (#d98cd9) with gold embroidery and gold edge trim.",
+        "Deep jade-green silk (#2e7d4f) with gold embroidery and gold edge trim.",
     ),
     (
         "horse",
@@ -139,7 +188,7 @@ ZODIACS = [
         "A horse mid-gallop in profile with mane and tail streaming "
         "back, front legs lifted off the ground. Spirited, head held "
         "high. Slight wind-streak lines behind it stitched in gold.",
-        "Rose silk (#eb759e) with gold embroidery and gold edge trim.",
+        "Rich chestnut silk (#8b4513) with gold embroidery and gold edge trim.",
     ),
     (
         "goat",
@@ -147,7 +196,7 @@ ZODIACS = [
         "A goat (or ram) standing in profile with curled spiraled horns, "
         "a tufted beard, and a placid sleepy expression. Small flowering "
         "sprig tucked behind one horn.",
-        "Warm straw silk (#e0db8c) with gold embroidery and gold edge trim.",
+        "Creamy wool-white silk (#ede5d0) with gold embroidery and gold edge trim.",
     ),
     (
         "monkey",
@@ -155,7 +204,7 @@ ZODIACS = [
         "A monkey perched in a crouch, one hand raised up holding a small "
         "round peach. Long curled tail swooping down behind it. Mischievous "
         "expression, eyebrows raised.",
-        "Cool teal silk (#73b8c7) with gold embroidery and gold edge trim.",
+        "Warm tawny-gold silk (#c8a04a) with gold embroidery and gold edge trim.",
     ),
     (
         "rooster",
@@ -163,8 +212,7 @@ ZODIACS = [
         "A proud rooster in profile, chest puffed out, tall comb on its "
         "head and long flowing tail feathers arcing behind. Beak slightly "
         "open mid-crow. Confident strut.",
-        "Bright ember-orange silk (#f28052) with gold embroidery and gold "
-        "edge trim.",
+        "Scarlet-red silk (#c23028) with gold embroidery and gold edge trim.",
     ),
     (
         "dog",
@@ -172,8 +220,7 @@ ZODIACS = [
         "A loyal dog sitting upright in three-quarter view with one ear "
         "perked, one slightly flopped, and a small bell on a thin collar. "
         "Tongue out in a friendly relaxed grin.",
-        "Fresh moss-green silk (#9ed96b) with gold embroidery and gold "
-        "edge trim.",
+        "Warm sandy-tan silk (#c4a672) with gold embroidery and gold edge trim.",
     ),
     (
         "pig",
@@ -181,16 +228,28 @@ ZODIACS = [
         "A round contented pig in profile with a curly tail, small "
         "upturned snout, and floppy ears. Eyes closed in a small blissful "
         "smile, as if dreaming about something good.",
-        "Soft lavender silk (#c7a8eb) with gold embroidery and gold "
-        "edge trim.",
+        "Rosy pink silk (#e8a0b4) with gold embroidery and gold edge trim.",
     ),
 ]
 
 
-def build_prompt(visual: str, palette: str) -> str:
-    """Combine the shared style prefix with the per-zodiac description."""
-    return f"{STYLE_PREFIX}\n\nSubject: {visual}\n\nSilk color: {palette}"
+# ---------------------------------------------------------------------------
+# Prompt building
+# ---------------------------------------------------------------------------
 
+def build_prompt(piece: str, visual: str, palette: str) -> str:
+    """Combine style base + piece suffix + per-zodiac description."""
+    piece_style = PIECE_STYLES[piece]
+    parts = [STYLE_BASE, piece_style]
+    if piece == "mid":
+        parts.append(f"Subject: {visual}")
+    parts.append(f"Silk color: {palette}")
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Image generation
+# ---------------------------------------------------------------------------
 
 def generate_image(
     client: OpenAI, prompt: str, output_path: Path, model: str, size: str
@@ -223,9 +282,14 @@ def generate_image(
     print(f"  Saved: {output_path}")
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Mahjuro zodiac ribbon textures via the OpenAI image API"
+        description="Generate Mahjuro zodiac ribbon textures (3-piece) "
+        "via the OpenAI image API"
     )
     parser.add_argument(
         "--zodiac",
@@ -238,6 +302,13 @@ def main() -> None:
         type=str,
         default=None,
         help="Generate only the zodiac with this filename slug (e.g. dragon).",
+    )
+    parser.add_argument(
+        "--piece",
+        type=str,
+        default=None,
+        choices=ALL_PIECES,
+        help="Generate only one piece type: top, mid, or bot.",
     )
     parser.add_argument(
         "--list", action="store_true", help="List all zodiacs and exit."
@@ -261,9 +332,8 @@ def main() -> None:
     parser.add_argument(
         "--size",
         type=str,
-        default="1024x1536",
-        help="Image size — must be a portrait aspect since the ribbon "
-        "mesh is tall and narrow (default: 1024x1536).",
+        default="1024x1024",
+        help="Image size — square tiles (default: 1024x1024).",
     )
     parser.add_argument(
         "--output-dir",
@@ -281,7 +351,7 @@ def main() -> None:
 
     if args.list:
         for i, (slug, name, _, _) in enumerate(ZODIACS, 1):
-            print(f"  {i:2d}. {name:<10s}  (zodiac_{slug}.png)")
+            print(f"  {i:2d}. {name:<10s}  zodiac_{slug}_{{top,mid,bot}}.png")
         return
 
     out_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
@@ -307,6 +377,8 @@ def main() -> None:
     else:
         targets = list(enumerate(ZODIACS))
 
+    pieces = [args.piece] if args.piece else ALL_PIECES
+
     client = None
     if not args.dry_run:
         api_key = os.environ.get("OPENAI_API_KEY")
@@ -318,36 +390,41 @@ def main() -> None:
     generated = 0
     skipped = 0
     failed = 0
+    total_jobs = len(targets) * len(pieces)
 
+    job = 0
     for idx, (slug, name, visual, palette) in targets:
-        prompt = build_prompt(visual, palette)
-        output_path = out_dir / f"zodiac_{slug}.png"
+        for piece in pieces:
+            job += 1
+            output_path = out_dir / f"zodiac_{slug}_{piece}.png"
+            prompt = build_prompt(piece, visual, palette)
 
-        print(f"\n[{idx + 1}/{len(ZODIACS)}] {name}")
+            print(f"\n[{job}/{total_jobs}] {name} ({piece})")
 
-        if args.dry_run:
-            print(f"  Prompt:\n    {prompt}\n")
-            continue
+            if args.dry_run:
+                print(f"  Output: {output_path.name}")
+                print(f"  Prompt:\n    {prompt}\n")
+                continue
 
-        if output_path.exists() and not args.force:
-            print(
-                f"  Skipping (exists): {output_path.name}"
-                "  — use --force to regenerate"
-            )
-            skipped += 1
-            continue
+            if output_path.exists() and not args.force:
+                print(
+                    f"  Skipping (exists): {output_path.name}"
+                    "  — use --force to regenerate"
+                )
+                skipped += 1
+                continue
 
-        try:
-            assert client is not None
-            generate_image(client, prompt, output_path, args.model, args.size)
-            generated += 1
-        except Exception as e:
-            print(f"  Error generating {name}: {e}")
-            failed += 1
-            continue
+            try:
+                assert client is not None
+                generate_image(client, prompt, output_path, args.model, args.size)
+                generated += 1
+            except Exception as e:
+                print(f"  Error generating {name} ({piece}): {e}")
+                failed += 1
+                continue
 
-        if len(targets) > 1:
-            time.sleep(args.delay)
+            if job < total_jobs:
+                time.sleep(args.delay)
 
     print("\nDone.")
     if not args.dry_run:

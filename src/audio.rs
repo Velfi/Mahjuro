@@ -31,6 +31,12 @@ pub enum SfxId {
     CoinDrop,
     RoundWin,
     GameOver,
+    /// Tile pack purchased in the shop.
+    PackBuy,
+    /// Tile pack foil wrapper tearing open.
+    PackOpen,
+    /// Individual tile revealed during pack opening celebration.
+    PackTileReveal,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -52,6 +58,9 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::CoinDrop,
         SfxId::RoundWin,
         SfxId::GameOver,
+        SfxId::PackBuy,
+        SfxId::PackOpen,
+        SfxId::PackTileReveal,
     ]
 }
 
@@ -73,6 +82,10 @@ impl SfxId {
             SfxId::CoinDrop => "kenney_interface-sounds/Audio/drop_002.ogg",
             SfxId::RoundWin => "kenney_music-jingles/Audio/Sax jingles/jingles_SAX16.ogg",
             SfxId::GameOver => "alphix-game-over-417465.mp3",
+            // Placeholder pack sounds — swap for real foils in second pass.
+            SfxId::PackBuy => "kenney_interface-sounds/Audio/confirmation_003.ogg",
+            SfxId::PackOpen => "kenney_interface-sounds/Audio/open_003.ogg",
+            SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
         }
     }
 }

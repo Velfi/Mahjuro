@@ -42,6 +42,16 @@ pub enum GameEvent {
     GameOver {
         final_score: u32,
     },
+    /// Tiles permanently destroyed via the Kiln talisman.
+    TilesDestroyed {
+        count: usize,
+    },
+    /// A tile pack was purchased in the shop.
+    PackBought,
+    /// The pack opening celebration started (foil tearing).
+    PackOpened,
+    /// An individual tile was revealed during pack opening.
+    PackTileRevealed,
 }
 
 #[derive(Default)]

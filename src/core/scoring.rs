@@ -25,6 +25,9 @@ use crate::core::yaku::{YakuKind, detect_yaku, detect_yaku_with_wind};
 pub enum StepKind {
     Chips,
     Mult,
+    /// Gold awarded mid-cascade (e.g. Bamboo flower). Does not affect the
+    /// chips×mult calculation — purely an economy event shown inline.
+    Gold,
     /// The final `chips × mult` multiplication beat.
     Final,
 }
@@ -69,6 +72,9 @@ pub struct ScoreBreakdown {
     pub final_mult: f64,
     /// Final score = `final_chips × final_mult` (floored).
     pub total: i32,
+    /// Gold awarded by flower effects (Bamboo). Applied by the caller, not
+    /// during the chips×mult cascade.
+    pub flower_gold: i32,
 }
 
 // ── Per-meld base bonuses ──────────────────────────────────────────────
@@ -143,6 +149,22 @@ pub fn score_sets(
             steps.push(ScoreStep {
                 source: $source.into(),
                 kind: StepKind::Mult,
+                running_chips: chips,
+                running_mult: mult,
+                running_total: combine(chips, mult),
+            });
+        }};
+    }
+    // Gold steps don't touch chips or mult — they're purely visual cascade
+    // beats that signal an economy event (e.g. Bamboo flower gold).
+    let mut flower_gold: i32 = 0;
+    macro_rules! push_gold {
+        ($source:expr, $delta:expr) => {{
+            let delta: i32 = $delta;
+            flower_gold += delta;
+            steps.push(ScoreStep {
+                source: $source.into(),
+                kind: StepKind::Gold,
                 running_chips: chips,
                 running_mult: mult,
                 running_total: combine(chips, mult),
@@ -298,6 +320,45 @@ pub fn score_sets(
         }
     }
 
+    // ── Phase 2.75: per-flower triggered effects ────────────────────────────
+    //
+    // Each flower tile has a unique effect that fires when scored in a meld:
+    //   F1 Plum Blossom  → +40 chips (safe, reliable)
+    //   F2 Orchid         → +1.5 mult (scales in late game)
+    //   F3 Chrysanthemum  → +15 chips per meld in hand (rewards full hands)
+    //   F4 Bamboo         → +$4 gold (immediate economy)
+    //
+    // Garden Keeper relic causes each effect to fire twice.
+    // Hanami relic adds +$3 gold per flower scored.
+    {
+        let meld_count = sets.len() as i32;
+        let triggers = if ctx.relics.has(RelicId::GardenKeeper) { 2 } else { 1 };
+        let hanami = ctx.relics.has(RelicId::Hanami);
+        for s in sets {
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    continue;
+                };
+                if t.suit != Suit::Flower {
+                    continue;
+                }
+                for trig in 0..triggers {
+                    let suffix = if trig == 1 { " (Garden Keeper)" } else { "" };
+                    match t.rank {
+                        1 => push_chips!(format!("Plum Blossom{suffix}"), 40),
+                        2 => push_mult!(format!("Orchid{suffix}"), 1.5),
+                        3 => push_chips!(format!("Chrysanthemum{suffix}"), 15 * meld_count),
+                        4 => push_gold!(format!("Bamboo{suffix}"), 4),
+                        _ => {}
+                    }
+                }
+                if hanami {
+                    push_gold!("Hanami", 3);
+                }
+            }
+        }
+    }
+
     // ── Phase 3: cross-set chip relics ───────────────────────────────────
 
     // DragonEcho: each dragon triplet/kong copies the base chip value of
@@ -353,15 +414,7 @@ pub fn score_sets(
         }
     }
 
-    // ShantenLens (Patch C): +5 chips per tile in the current decomposition.
-    // The decomposition we have is the actual scoring sets, so we count tiles
-    // in those — exactly the player's intentional choice this turn.
-    if ctx.relics.has(RelicId::ShantenLens) {
-        let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
-        if tile_count > 0 {
-            push_chips!("Shanten Lens", 5 * tile_count);
-        }
-    }
+
 
     // Dora: each tile matching a dora face is +25 chips (or +35 with the
     // Dora Crown relic from Patch C).
@@ -578,6 +631,18 @@ pub fn score_sets(
         push_mult!("No-Seq Bonus (rule)", 3.0);
     }
 
+    // Ikebana: +6 mult when 2+ flowers are scored in the same hand.
+    if ctx.relics.has(RelicId::Ikebana) {
+        let flower_count = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter(|id| tile_by_id(tiles, **id).is_some_and(|t| t.suit == Suit::Flower))
+            .count();
+        if flower_count >= 2 {
+            push_mult!("Ikebana", 6.0);
+        }
+    }
+
     // ── Phase 6: global mult relics ──────────────────────────────────────
 
     if ctx.relics.has(RelicId::MultiplierMaster) {
@@ -629,6 +694,7 @@ pub fn score_sets(
         final_chips,
         final_mult,
         total,
+        flower_gold,
     }
 }
 
@@ -803,11 +869,6 @@ pub fn tile_effective_value(
     if relics.has(RelicId::HonorFury) && matches!(tile.suit, Suit::Wind | Suit::Dragon) {
         out.bonus_chips += 28;
         out.sources.push(("Honor Fury", "+28 chips".into()));
-    }
-    // Shanten Lens: +5 per tile in any scored set.
-    if relics.has(RelicId::ShantenLens) {
-        out.bonus_chips += 5;
-        out.sources.push(("Shanten Lens", "+5 chips".into()));
     }
 
     out

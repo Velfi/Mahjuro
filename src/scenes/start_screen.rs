@@ -1,6 +1,5 @@
 //! Start screen — title screen with main menu.
 
-use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::theme::{ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
@@ -12,8 +11,8 @@ use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
-use super::shop::ShopScene;
 use super::solitaire::SolitaireScene;
+use super::start_game_modal::TileSelectScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,19 +43,13 @@ impl StartScreenScene {
         }
     }
 
-    /// Anchor rect for the menu column. Pushes the menu below the title +
-    /// active-profile summary so they never overlap on short windows, where
-    /// the default vertically-centered anchor would otherwise put the topmost
-    /// button right under the profile line.
+    /// Anchor rect for the menu column.
     fn menu_anchor(w: f32, h: f32) -> [f32; 4] {
         let scale = (w.min(h)) / 600.0;
-        // Mirror the header math in `draw` so the anchor tracks the real
-        // bottom of the title + profile block.
         let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
         let title_y = h * 0.08;
         let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
         let header_bottom = title_y + title_h + h * 0.02 + prof_h;
-        // Reserve room at the bottom for the hint line.
         let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
         let bottom_reserve = hint_h + 24.0 * scale;
         let cw = (260.0 * scale).min(w * 0.7);
@@ -126,11 +119,6 @@ impl StartScreenScene {
         self.build_tree(in_progress)
             .with_anchor(Self::menu_anchor(w, h))
     }
-
-    fn start_game(&self, run: &mut RunState) -> SceneTransition {
-        *run = RunState::new_demo();
-        Some(Scene::Shop(ShopScene::new(run.run_number, &run.relics)))
-    }
 }
 
 impl SceneBehavior for StartScreenScene {
@@ -147,7 +135,6 @@ impl SceneBehavior for StartScreenScene {
             },
         );
 
-        // Esc / cancel quits.
         for a in ctx.actions {
             if matches!(
                 a,
@@ -159,7 +146,7 @@ impl SceneBehavior for StartScreenScene {
 
         match action {
             Some(MainAction::Continue) => Some(Scene::Gameplay(GameplayScene::new())),
-            Some(MainAction::NewGame) => self.start_game(ctx.run),
+            Some(MainAction::NewGame) => Some(Scene::TileSelect(TileSelectScene::new())),
             Some(MainAction::Solitaire) => Some(Scene::Solitaire(SolitaireScene::new())),
             Some(MainAction::Profile) => {
                 Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
@@ -180,19 +167,10 @@ impl SceneBehavior for StartScreenScene {
         let scale = (w.min(h)) / 600.0;
         let in_progress = ctx.game_in_progress;
 
-        // The dark backdrop is drawn via `BackgroundId::Black` (a synthetic
-        // 1×1 texture in the renderer) rather than a fullscreen quad. The
-        // renderer reorders quad ops into a HUD overlay pass that runs
-        // *after* the smoke composite, so a fullscreen quad here would paint
-        // over the smoke. Background ops run in pass A, before the smoke
-        // composite, which is what we want.
         let mut instances: Vec<GpuInstance> = Vec::new();
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 
-        // Title — gold serif display. The rect height is bumped above the
-        // raw `typography::size(...)` so the rasterizer's 0.55-of-rect-height
-        // font sizing lands near the nominal tier size instead of well below.
         let title_h = (typography::size(typography::DISPLAY, h) * 1.6).max(48.0);
         let title_y = h * 0.08;
         text_labels.push(TextLabel {
@@ -202,7 +180,6 @@ impl SceneBehavior for StartScreenScene {
             ..Default::default()
         });
 
-        // Active profile summary below title.
         let prof_y = title_y + title_h + h * 0.02;
         let prof_h = (typography::size(typography::CAPTION, h) * 1.6).max(20.0);
         let summaries = persistence::all_profile_summaries();
@@ -225,8 +202,6 @@ impl SceneBehavior for StartScreenScene {
             ..Default::default()
         });
 
-        // Render the menu via the widget tree (single source of truth for
-        // layout, hit-test, hover, focus, click registration).
         let tree = self.build_anchored_tree(in_progress, w, h);
         let mut frame = TreeFrame {
             instances: &mut instances,
@@ -236,7 +211,6 @@ impl SceneBehavior for StartScreenScene {
         };
         self.tree.draw(&tree, &mut frame, &noop_render_custom);
 
-        // Hint text at bottom.
         let hint_h = (typography::size(typography::MICRO, h) * 1.7).max(16.0);
         let hint_y = h - hint_h - (12.0 * scale);
         text_labels.push(TextLabel {
@@ -261,8 +235,6 @@ impl SceneBehavior for StartScreenScene {
             departing_indices: vec![],
             hint_indices: vec![],
             flame_instances: vec![],
-            // Same warm overhead key light the shop uses — front-and-above,
-            // depth-aware so the smoke pools under it.
             point_lights: vec![PointLight {
                 pos: [w * 0.5, h * 0.05, h * 0.55],
                 radius: h * 1.20,
@@ -273,6 +245,7 @@ impl SceneBehavior for StartScreenScene {
             relic_placements: vec![],
             draw_table: false,
             wind_gusts: Vec::new(),
+            tile_material_override: None,
         }
     }
 }

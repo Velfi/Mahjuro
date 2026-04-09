@@ -24,9 +24,9 @@ pub enum RelicId {
     WildWinds,
     DragonEcho,
     // ── 15 new relics introduced in Patch C ────────────────────────────
-    /// Reveals shanten meter; +5 chips per tile in the current best
-    /// decomposition. Information + a small chip nudge for tile efficiency.
-    ShantenLens,
+    /// When a discard-refill brings the hand to tenpai (shanten 0), draw 1
+    /// extra tile from the wall. Tempo relic — one more chance to complete.
+    ShantenShove,
     /// Reveals the next 2 wall tiles. Pure-info — no scoring effect.
     WallPeek,
     /// Kongs grant +1 play this round and +4 mult when scored.
@@ -62,6 +62,13 @@ pub enum RelicId {
     /// Once per round, swap one yaku in your loadout for another unlocked.
     /// (No active scoring effect — UI hook only.)
     CodexCompass,
+    // ── Flower-synergy relics ──────────────────────────────────────────
+    /// Each flower's triggered effect fires a second time.
+    GardenKeeper,
+    /// Scoring 2+ flowers in one hand grants +6 mult.
+    Ikebana,
+    /// Each flower scored grants +3 gold immediately.
+    Hanami,
 }
 
 impl RelicId {
@@ -85,7 +92,7 @@ impl RelicId {
             RelicId::DragonEcho => "dragon_echo.png",
             // Patch C new relics — placeholder asset names that fall back to
             // the relic's slug. Art for these can come later.
-            RelicId::ShantenLens => "shanten_lens.png",
+            RelicId::ShantenShove => "shanten_shove.png",
             RelicId::WallPeek => "wall_peek.png",
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
@@ -100,6 +107,9 @@ impl RelicId {
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
             RelicId::CodexCompass => "codex_compass.png",
+            RelicId::GardenKeeper => "garden_keeper.png",
+            RelicId::Ikebana => "ikebana.png",
+            RelicId::Hanami => "hanami.png",
         }
     }
 }
@@ -239,9 +249,9 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         },
         // ── New Patch C relics ──────────────────────────────────────────
         RelicDef {
-            id: RelicId::ShantenLens,
-            name: "Shanten Lens",
-            description: "Shanten meter visible; +5 chips per tile in best decomposition",
+            id: RelicId::ShantenShove,
+            name: "Shanten Shove",
+            description: "When a discard brings you to tenpai, draw 1 extra tile from the wall",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
@@ -329,6 +339,25 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             name: "Kong's Blessing",
             description: "Kongs: +120 chips and +2 mult",
             rarity: Rarity::Legendary,
+        },
+        // ── Flower-synergy relics ──────────────────────────────────────
+        RelicDef {
+            id: RelicId::GardenKeeper,
+            name: "Garden Keeper",
+            description: "Flower effects fire twice",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Ikebana,
+            name: "Ikebana",
+            description: "Scoring 2+ flowers in one hand: +6 mult",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::Hanami,
+            name: "Hanami",
+            description: "+$3 gold each time a flower is scored",
+            rarity: Rarity::Common,
         },
         // CodexCompass — disabled because the relic has no scoring effect
         // and the in-round yaku-loadout swap UI doesn't exist. Re-enable

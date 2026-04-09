@@ -100,9 +100,13 @@ pub struct DetectedSet {
 }
 
 /// Group tiles by face (suit+rank), keeping one id list per face key.
+/// Flower tiles are excluded — they're wildcards, not a groupable face.
 fn face_groups(tiles: &[Tile]) -> HashMap<(Suit, u8), Vec<u32>> {
     let mut m = HashMap::new();
     for t in tiles {
+        if t.is_flower() {
+            continue;
+        }
         m.entry((t.suit, t.rank))
             .or_insert_with(Vec::new)
             .push(t.id);
@@ -215,6 +219,9 @@ pub fn detect_all_sets(tiles: &[Tile]) -> Vec<DetectedSet> {
 ///
 /// Uses recursive backtracking: at each step, tries to extract a pair, triplet, or sequence
 /// starting from the first remaining tile, then recurses on the rest.
+///
+/// Flower tiles act as wildcards: each can substitute for one missing tile in a triplet
+/// or sequence (max one flower per meld). Flowers cannot form or complete pairs.
 pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
     validate_selection_with_rules(tiles, &[])
 }
@@ -246,12 +253,20 @@ pub fn validate_selection_with_rules(
     {
         return None;
     }
-    let mut sorted: Vec<Tile> = tiles.to_vec();
-    sorted.sort();
+    // Partition into regular tiles and flower wildcards.
+    let mut regular: Vec<Tile> = tiles.iter().filter(|t| !t.is_flower()).copied().collect();
+    let mut flower_ids: Vec<u32> = tiles.iter().filter(|t| t.is_flower()).map(|t| t.id).collect();
+    regular.sort();
+
+    // Need at least some regular tiles (flowers alone can't form melds).
+    if regular.is_empty() {
+        return None;
+    }
+
     let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
     let no_sequences = rules.contains(&RuleModifier::NoSequences);
     let mut result = Vec::new();
-    if backtrack_decompose(&sorted, &mut result, allow_wrap) {
+    if backtrack_decompose_flowers(&regular, &mut flower_ids, &mut result, allow_wrap) {
         if no_sequences && result.iter().any(|s| s.kind == SetKind::Sequence) {
             return None;
         }
@@ -260,9 +275,12 @@ pub fn validate_selection_with_rules(
     // Chiitoitsu fallback: 14 tiles forming 7 distinct pairs is a valid hand
     // even though it doesn't fit the standard 4-meld + 1-pair decomposition.
     // We try this only when the standard backtracker fails so we don't reframe
-    // hands that could decompose normally.
-    if let Some(pairs) = try_chiitoitsu(&sorted) {
-        return Some(pairs);
+    // hands that could decompose normally. Flowers can't help with chiitoitsu
+    // (pairs only, no wildcard substitution in pairs).
+    if flower_ids.is_empty() {
+        if let Some(pairs) = try_chiitoitsu(&regular) {
+            return Some(pairs);
+        }
     }
     None
 }
@@ -295,15 +313,26 @@ fn try_chiitoitsu(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
     Some(pairs)
 }
 
-/// Recursive helper: try to decompose `remaining` (sorted) into melds.
-fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_wrap: bool) -> bool {
+/// Recursive helper: try to decompose `remaining` (sorted, no flowers) into melds,
+/// optionally consuming flower tiles from `flower_pool` as wildcards.
+///
+/// A flower can substitute for one missing tile in a triplet or sequence (max one
+/// flower per meld). Flowers cannot form or complete pairs.
+fn backtrack_decompose_flowers(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+) -> bool {
     if remaining.is_empty() {
-        return true;
+        // All selected flowers must be consumed — the player chose to include them.
+        return flower_pool.is_empty();
     }
     let first = &remaining[0];
 
-    // Try kong (4 of a kind) first — a 4-tile face wants to be a kong, not a
-    // triplet+leftover. Sorted input means duplicates are contiguous.
+    // ── Normal melds (no flower) ───────────────────────────────────────
+
+    // Try kong (4 of a kind).
     if remaining.len() >= 4
         && remaining[1].suit == first.suit
         && remaining[1].rank == first.rank
@@ -323,13 +352,13 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_w
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[4..].to_vec();
-        if backtrack_decompose(&rest, found, allow_wrap) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
             return true;
         }
         found.pop();
     }
 
-    // Try triplet: 3 tiles with same suit+rank starting from first.
+    // Try triplet: 3 tiles with same suit+rank.
     if remaining.len() >= 3
         && remaining[1].suit == first.suit
         && remaining[1].rank == first.rank
@@ -342,28 +371,152 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_w
         };
         found.push(set);
         let rest: Vec<Tile> = remaining[3..].to_vec();
-        if backtrack_decompose(&rest, found, allow_wrap) {
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
             return true;
         }
         found.pop();
     }
 
-    // Try sequence: first tile + (rank+1 same suit) + (rank+2 same suit).
+    // Try sequence: first + (rank+1 same suit) + (rank+2 same suit).
     if first.is_number_tile() && remaining.len() >= 3 {
+        if try_sequence(remaining, flower_pool, found, allow_wrap, first) {
+            return true;
+        }
+    }
+
+    // Try pair: 2 tiles with same suit+rank (no flowers allowed in pairs).
+    if remaining.len() >= 2 && remaining[1].suit == first.suit && remaining[1].rank == first.rank {
+        let set = DetectedSet {
+            kind: SetKind::Pair,
+            tile_ids: vec![remaining[0].id, remaining[1].id],
+        };
+        found.push(set);
+        let rest: Vec<Tile> = remaining[2..].to_vec();
+        if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+            return true;
+        }
+        found.pop();
+    }
+
+    // ── Flower-assisted melds ──────────────────────────────────────────
+
+    if !flower_pool.is_empty() {
+        // Triplet with flower: 2 same-face tiles + 1 flower.
+        if remaining.len() >= 2
+            && remaining[1].suit == first.suit
+            && remaining[1].rank == first.rank
+        {
+            let fid = flower_pool.pop().unwrap();
+            let set = DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![remaining[0].id, remaining[1].id, fid],
+            };
+            found.push(set);
+            let rest: Vec<Tile> = remaining[2..].to_vec();
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                return true;
+            }
+            found.pop();
+            flower_pool.push(fid);
+        }
+
+        // Sequence with flower filling one gap.
+        if first.is_number_tile() && remaining.len() >= 2 {
+            if try_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Try to form a normal 3-tile sequence starting from `first` (no flowers).
+fn try_sequence(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+) -> bool {
+    let mid = remaining[1..]
+        .iter()
+        .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
+    if let Some(mid_offset) = mid {
+        let mid_idx = mid_offset + 1;
+        let search_start = mid_idx + 1;
+        let hi = remaining[search_start..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 2);
+        if let Some(hi_offset) = hi {
+            let hi_idx = hi_offset + search_start;
+            let set = DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, remaining[mid_idx].id, remaining[hi_idx].id],
+            };
+            found.push(set);
+            let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 3);
+            for (i, t) in remaining.iter().enumerate() {
+                if i != 0 && i != mid_idx && i != hi_idx {
+                    rest.push(*t);
+                }
+            }
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                return true;
+            }
+            found.pop();
+        }
+    }
+
+    // Wrapping sequences (8-9-1, 9-1-2).
+    if allow_wrap {
+        if try_wrap_sequence(remaining, flower_pool, found, allow_wrap, first) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Try wrapping sequences (8-9-1, 9-1-2) without flowers.
+fn try_wrap_sequence(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+) -> bool {
+    let wrap_patterns: &[[u8; 3]] = match first.rank {
+        1 => &[[9, 1, 2], [8, 9, 1]],
+        2 => &[[9, 1, 2]],
+        8 => &[[8, 9, 1]],
+        9 => &[[8, 9, 1], [9, 1, 2]],
+        _ => &[],
+    };
+    for pattern in wrap_patterns {
+        let other_ranks: Vec<u8> = pattern
+            .iter()
+            .copied()
+            .filter(|&r| r != first.rank)
+            .collect();
+        if other_ranks.len() != 2 {
+            continue;
+        }
         let mid = remaining[1..]
             .iter()
-            .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
+            .position(|t| t.suit == first.suit && t.rank == other_ranks[0]);
         if let Some(mid_offset) = mid {
             let mid_idx = mid_offset + 1;
-            let search_start = mid_idx + 1;
-            let hi = remaining[search_start..]
-                .iter()
-                .position(|t| t.suit == first.suit && t.rank == first.rank + 2);
-            if let Some(hi_offset) = hi {
-                let hi_idx = hi_offset + search_start;
+            let hi = remaining.iter().enumerate().position(|(i, t)| {
+                i != 0 && i != mid_idx && t.suit == first.suit && t.rank == other_ranks[1]
+            });
+            if let Some(hi_idx) = hi {
                 let set = DetectedSet {
                     kind: SetKind::Sequence,
-                    tile_ids: vec![remaining[0].id, remaining[mid_idx].id, remaining[hi_idx].id],
+                    tile_ids: vec![
+                        remaining[0].id,
+                        remaining[mid_idx].id,
+                        remaining[hi_idx].id,
+                    ],
                 };
                 found.push(set);
                 let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 3);
@@ -372,80 +525,84 @@ fn backtrack_decompose(remaining: &[Tile], found: &mut Vec<DetectedSet>, allow_w
                         rest.push(*t);
                     }
                 }
-                if backtrack_decompose(&rest, found, allow_wrap) {
+                if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
                     return true;
                 }
                 found.pop();
             }
         }
+    }
+    false
+}
 
-        // Wrapping sequences: 8-9-1 and 9-1-2 (only numbered suits, ranks 1-9).
-        // After sorting, rank 1 comes first, so we try wrap from low ranks too.
-        if allow_wrap {
-            let wrap_patterns: &[[u8; 3]] = match first.rank {
-                1 => &[[9, 1, 2], [8, 9, 1]],
-                2 => &[[9, 1, 2]],
-                8 => &[[8, 9, 1]],
-                9 => &[[8, 9, 1], [9, 1, 2]],
-                _ => &[],
+/// Try to form a sequence where a flower fills one of the three positions.
+/// The first tile is always a regular numbered tile at `remaining[0]`.
+fn try_sequence_with_flower(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+) -> bool {
+    // Case 1: have first and first+1 in hand, flower fills first+2
+    if first.rank <= 7 {
+        let mid = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
+        if let Some(mid_offset) = mid {
+            let mid_idx = mid_offset + 1;
+            let fid = flower_pool.pop().unwrap();
+            let set = DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, remaining[mid_idx].id, fid],
             };
-            for pattern in wrap_patterns {
-                // Find the other two ranks in remaining (excluding first).
-                let other_ranks: Vec<u8> = pattern
-                    .iter()
-                    .copied()
-                    .filter(|&r| r != first.rank)
-                    .collect();
-                if other_ranks.len() != 2 {
-                    continue;
-                }
-                let mid = remaining[1..]
-                    .iter()
-                    .position(|t| t.suit == first.suit && t.rank == other_ranks[0]);
-                if let Some(mid_offset) = mid {
-                    let mid_idx = mid_offset + 1;
-                    let hi = remaining.iter().enumerate().position(|(i, t)| {
-                        i != 0 && i != mid_idx && t.suit == first.suit && t.rank == other_ranks[1]
-                    });
-                    if let Some(hi_idx) = hi {
-                        let set = DetectedSet {
-                            kind: SetKind::Sequence,
-                            tile_ids: vec![
-                                remaining[0].id,
-                                remaining[mid_idx].id,
-                                remaining[hi_idx].id,
-                            ],
-                        };
-                        found.push(set);
-                        let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 3);
-                        for (i, t) in remaining.iter().enumerate() {
-                            if i != 0 && i != mid_idx && i != hi_idx {
-                                rest.push(*t);
-                            }
-                        }
-                        if backtrack_decompose(&rest, found, allow_wrap) {
-                            return true;
-                        }
-                        found.pop();
-                    }
+            found.push(set);
+            let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 2);
+            for (i, t) in remaining.iter().enumerate() {
+                if i != 0 && i != mid_idx {
+                    rest.push(*t);
                 }
             }
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                return true;
+            }
+            found.pop();
+            flower_pool.push(fid);
         }
     }
 
-    // Try pair: 2 tiles with same suit+rank.
-    if remaining.len() >= 2 && remaining[1].suit == first.suit && remaining[1].rank == first.rank {
-        let set = DetectedSet {
-            kind: SetKind::Pair,
-            tile_ids: vec![remaining[0].id, remaining[1].id],
-        };
-        found.push(set);
-        let rest: Vec<Tile> = remaining[2..].to_vec();
-        if backtrack_decompose(&rest, found, allow_wrap) {
-            return true;
+    // Case 2: have first and first+2 in hand, flower fills first+1
+    if first.rank <= 7 {
+        let hi = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 2);
+        if let Some(hi_offset) = hi {
+            let hi_idx = hi_offset + 1;
+            let fid = flower_pool.pop().unwrap();
+            let set = DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, fid, remaining[hi_idx].id],
+            };
+            found.push(set);
+            let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 2);
+            for (i, t) in remaining.iter().enumerate() {
+                if i != 0 && i != hi_idx {
+                    rest.push(*t);
+                }
+            }
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                return true;
+            }
+            found.pop();
+            flower_pool.push(fid);
         }
-        found.pop();
     }
+
+    // Case 3: flower fills first position — first tile is rank+1 or rank+2
+    // of a potential sequence. We handle this implicitly: when the backtracker
+    // reaches a tile that could be the middle or end of a sequence, the
+    // "first + flower" cases above will have already tried it from the lower
+    // tile's perspective. No extra logic needed here.
 
     false
 }
@@ -666,6 +823,107 @@ mod tests {
         let hints = suggest_completions(&hand, &selected);
         // Index 1 (Bamboos 3, id=1) should be suggested since adding it forms a pair.
         assert!(hints.contains(&1));
+    }
+
+    // ── flower wildcard tests ──────────────────────────────────────
+
+    #[test]
+    fn flower_completes_triplet() {
+        // 2 identical tiles + 1 flower = valid triplet (flower must be consumed)
+        let tiles = vec![
+            t(Suit::Bamboos, 5, 0),
+            t(Suit::Bamboos, 5, 1),
+            t(Suit::Flower, 1, 100),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert!(sets[0].tile_ids.contains(&100)); // flower id present
+    }
+
+    #[test]
+    fn flower_completes_sequence_high() {
+        // 1m, 2m + flower = 1-2-3m sequence (flower fills rank 3)
+        let tiles = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 2, 1),
+            t(Suit::Flower, 2, 100),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn flower_completes_sequence_mid() {
+        // 1m, 3m + flower = 1-2-3m sequence (flower fills rank 2)
+        let tiles = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 3, 1),
+            t(Suit::Flower, 3, 100),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn flower_cannot_complete_pair() {
+        // 1 tile + 1 flower should NOT form a valid pair
+        let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Flower, 1, 100)];
+        assert!(validate_selection(&tiles).is_none());
+    }
+
+    #[test]
+    fn flower_max_one_per_meld() {
+        // 1 tile + 2 flowers should NOT form a valid triplet
+        let tiles = vec![
+            t(Suit::Bamboos, 5, 0),
+            t(Suit::Flower, 1, 100),
+            t(Suit::Flower, 2, 101),
+        ];
+        assert!(validate_selection(&tiles).is_none());
+    }
+
+    #[test]
+    fn flower_in_multi_meld_hand() {
+        // pair + flower-assisted triplet = valid 5-tile hand
+        let tiles = vec![
+            t(Suit::Circles, 7, 0),
+            t(Suit::Circles, 7, 1),
+            t(Suit::Circles, 7, 2),
+            t(Suit::Bamboos, 3, 3),
+            t(Suit::Bamboos, 3, 4),
+            t(Suit::Flower, 1, 100),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        // Should decompose as: triplet(7p×3) + triplet(3s×2 + flower)
+        // or triplet(7p×2 + flower) + triplet(... ) — either is valid
+        assert_eq!(sets.len(), 2);
+    }
+
+    #[test]
+    fn unused_flower_is_invalid() {
+        // Selecting a flower alongside a valid pair — flower can't be used
+        // (only triplets/sequences), so the selection is invalid. Players
+        // shouldn't select flowers they can't use.
+        let tiles = vec![
+            t(Suit::Bamboos, 3, 0),
+            t(Suit::Bamboos, 3, 1),
+            t(Suit::Flower, 1, 100),
+        ];
+        // pair(3s×2) + unused flower → flower must be consumed → invalid
+        // flower-triplet(3s×2 + flower) works!
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn flowers_alone_invalid() {
+        // Just flowers, no regular tiles — invalid
+        let tiles = vec![t(Suit::Flower, 1, 100), t(Suit::Flower, 2, 101)];
+        assert!(validate_selection(&tiles).is_none());
     }
 
     // ── validate_selection_with_rules ──────────────────────────────

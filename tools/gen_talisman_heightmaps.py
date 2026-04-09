@@ -258,6 +258,53 @@ def gen_polychrome(us, vs, masks):
 
 
 # ---------------------------------------------------------------------------
+# Kiln -- cracked clay surface with a central flame motif
+# ---------------------------------------------------------------------------
+
+def gen_kiln(us, vs, masks):
+    """Cracked kiln surface: radial cracks from centre, baked-clay texture."""
+    pixels = []
+    for i in range(len(us)):
+        u, v, mask = us[i], vs[i], masks[i]
+        d = oct_dist(u, v)
+        r = math.hypot(u, v)
+        angle = math.atan2(v, u)
+
+        # -- Outer border: single raised rim.
+        border = smoothstep(0.85, 0.82, d) - smoothstep(0.78, 0.75, d)
+
+        # -- Radial cracks emanating from centre (8 spokes, slightly wobbly).
+        spoke_count = 8
+        spoke_angle = angle * spoke_count / (2.0 * math.pi)
+        spoke_frac = abs(spoke_angle - round(spoke_angle))
+        crack_width = smoothstep(0.06, 0.02, spoke_frac)
+        crack_depth = crack_width * smoothstep(0.15, 0.70, r) * smoothstep(0.82, 0.60, r)
+
+        # -- Central flame: elongated upward teardrop.
+        flame_u = u * 1.6
+        flame_v = (v + 0.15) * 1.3
+        flame_r = math.hypot(flame_u, flame_v)
+        flame_mask = smoothstep(0.45, 0.30, flame_r)
+        # Taper the top: narrower above centre.
+        if flame_v < 0:
+            flame_mask *= smoothstep(0.35, 0.15, abs(flame_u) - flame_v * 0.3)
+        flame = flame_mask * 0.22
+
+        # -- Baked-clay grain: high-freq noise approximation.
+        grain = math.sin(u * 31.7 + v * 17.3) * math.sin(v * 23.1 - u * 11.9)
+        grain = grain * 0.04 * smoothstep(0.88, 0.40, d)
+
+        h = MID
+        h += border * 0.18
+        h -= crack_depth * 0.16
+        h += flame
+        h += grain
+
+        pixels.append(MID + (h - MID) * mask)
+    return pixels
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -270,6 +317,7 @@ def main():
         ("talisman_pearl.png",      gen_pearl),
         ("talisman_gilded.png",     gen_gilded),
         ("talisman_polychrome.png", gen_polychrome),
+        ("talisman_kiln.png",       gen_kiln),
     ]
 
     for filename, gen_fn in generators:

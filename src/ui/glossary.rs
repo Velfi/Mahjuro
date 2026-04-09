@@ -58,6 +58,16 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
         aliases: &["dragon"],
         description: "Honor tiles: Red (Chun), Green (Hatsu), White (Haku).",
     },
+    GlossaryEntry {
+        term: "Flowers",
+        aliases: &["flower", "bonus tile", "bonus tiles"],
+        description: "Rare wildcard tiles (Plum, Orchid, Chrysanthemum, Bamboo). \
+                      Each substitutes for one missing tile in a triplet or \
+                      sequence (max one per meld, cannot complete pairs). Each \
+                      flower grants a unique effect when scored: Plum +40 chips, \
+                      Orchid +1.5 mult, Chrysanthemum +15 chips per meld, \
+                      Bamboo +$4 gold.",
+    },
     // ── Melds / set types ────────────────────────────────────────────
     GlossaryEntry {
         term: "Meld",

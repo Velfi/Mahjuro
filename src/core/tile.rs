@@ -4,12 +4,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Suit {
-    // Ordered: numbered suits first, then honors.
+    // Ordered: numbered suits first, then honors, then bonus.
     Characters,
     Bamboos,
     Circles,
     Wind,
     Dragon,
+    /// Bonus flower tiles (ranks 1–4). Rare wildcards that can substitute for
+    /// one missing tile in a triplet or sequence (max one flower per meld).
+    Flower,
 }
 
 /// A talisman-applied enhancement attached to an individual tile. The
@@ -95,6 +98,11 @@ impl Tile {
         matches!(self.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
     }
 
+    /// Returns `true` for bonus flower tiles.
+    pub fn is_flower(&self) -> bool {
+        self.suit == Suit::Flower
+    }
+
     /// Short display label, e.g. "3m", "7s", "East", "Red".
     pub fn label(&self) -> String {
         match self.suit {
@@ -114,6 +122,7 @@ impl Tile {
             Suit::Characters => format!("{}m", self.rank),
             Suit::Bamboos => format!("{}s", self.rank),
             Suit::Circles => format!("{}p", self.rank),
+            Suit::Flower => format!("F{}", self.rank),
         }
     }
 
@@ -137,6 +146,13 @@ impl Tile {
                 3 => "White Dragon (Haku)".into(),
                 _ => format!("Dragon {}", self.rank),
             },
+            Suit::Flower => match self.rank {
+                1 => "Plum Blossom".into(),
+                2 => "Orchid".into(),
+                3 => "Chrysanthemum".into(),
+                4 => "Bamboo".into(),
+                _ => format!("Flower {}", self.rank),
+            },
         }
     }
 
@@ -147,6 +163,7 @@ impl Tile {
     pub fn category(&self) -> &'static str {
         match self.suit {
             Suit::Wind | Suit::Dragon => "honor",
+            Suit::Flower => "bonus",
             Suit::Characters | Suit::Bamboos | Suit::Circles => {
                 if self.rank == 1 || self.rank == 9 {
                     "terminal"
@@ -157,6 +174,21 @@ impl Tile {
         }
     }
 
+    /// One-line description of this flower's triggered scoring effect, or
+    /// `None` for non-flower tiles. Suitable for tooltips and tile info.
+    pub fn flower_effect_label(&self) -> Option<&'static str> {
+        if self.suit != Suit::Flower {
+            return None;
+        }
+        Some(match self.rank {
+            1 => "+40 chips",
+            2 => "+1.5 mult",
+            3 => "+15 chips per meld",
+            4 => "+$4 gold",
+            _ => return None,
+        })
+    }
+
     /// Base point value of a single tile face: numbered tiles are worth their
     /// rank (1–9), honors (winds & dragons) are flat 12. The honor pump (was 10)
     /// gives Yakuhai/Honitsu/Honroutou builds enough early-game traction to be
@@ -165,6 +197,8 @@ impl Tile {
         match self.suit {
             Suit::Characters | Suit::Bamboos | Suit::Circles => self.rank as u32,
             Suit::Wind | Suit::Dragon => 12,
+            // Flower wildcards contribute no chip value — their power is structural.
+            Suit::Flower => 0,
         }
     }
 
@@ -185,6 +219,8 @@ impl Tile {
                 3 => [0.90, 0.88, 0.82, 1.0], // ivory white
                 _ => [0.60, 0.20, 0.70, 1.0], // fallback (shouldn't happen)
             },
+            // Flowers — warm pink, reads as "special bonus" at a glance.
+            Suit::Flower => [0.90, 0.45, 0.55, 1.0],
         }
     }
 }

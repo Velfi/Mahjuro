@@ -362,11 +362,13 @@ fn is_yakuhai(tiles: &[Tile], sets: &[DetectedSet], round_wind: Option<u8>) -> b
         })
 }
 
-/// Tanyao (formerly `AllSimples`): every tile is a numbered suit with rank
-/// 2–8. Requires ≥ 5 tiles so a single tile or pair doesn't trivially qualify.
+/// Tanyao (formerly `AllSimples`): every non-flower tile is a numbered suit
+/// with rank 2–8. Requires ≥ 5 non-flower tiles so a single tile or pair
+/// doesn't trivially qualify. Flowers are neutral — they don't break Tanyao.
 fn is_tanyao(tiles: &[Tile]) -> bool {
-    tiles.len() >= 5
-        && tiles
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    regular.len() >= 5
+        && regular
             .iter()
             .all(|t| t.is_number_tile() && t.rank >= 2 && t.rank <= 8)
 }
@@ -478,28 +480,31 @@ fn is_ittsu(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
         .any(|lows| lows.contains(&1) && lows.contains(&4) && lows.contains(&7))
 }
 
-/// Chinitsu: every tile in a single number suit, no honors. ≥ 5 tiles to
-/// avoid trivially firing on a bare meld.
+/// Chinitsu: every non-flower tile in a single number suit, no honors. ≥ 5
+/// non-flower tiles to avoid trivially firing on a bare meld. Flowers are
+/// neutral — they don't introduce a second suit.
 fn is_chinitsu(tiles: &[Tile]) -> bool {
-    if tiles.len() < 5 {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    if regular.len() < 5 {
         return false;
     }
-    let suit = tiles[0].suit;
+    let suit = regular[0].suit;
     if !matches!(suit, Suit::Characters | Suit::Bamboos | Suit::Circles) {
         return false;
     }
-    tiles.iter().all(|t| t.suit == suit)
+    regular.iter().all(|t| t.suit == suit)
 }
 
-/// Honitsu: tiles consist of one number suit + honors only (with at least
-/// one honor — otherwise it's just Chinitsu).
+/// Honitsu: non-flower tiles consist of one number suit + honors only (with
+/// at least one honor — otherwise it's just Chinitsu). Flowers are neutral.
 fn is_honitsu(tiles: &[Tile]) -> bool {
-    if tiles.len() < 5 {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    if regular.len() < 5 {
         return false;
     }
     let mut number_suit: Option<Suit> = None;
     let mut has_honor = false;
-    for t in tiles {
+    for t in &regular {
         match t.suit {
             Suit::Wind | Suit::Dragon => has_honor = true,
             s => {
@@ -518,13 +523,13 @@ fn is_honitsu(tiles: &[Tile]) -> bool {
 
 /// Junchan: every meld contains at least one terminal (1 or 9) and the pair
 /// is also a terminal pair. Honors disqualify (that's Honroutou's territory).
-/// Requires ≥ 5 tiles and ≥ 2 sets so a bare terminal triplet can't trivially
-/// claim it.
+/// Requires ≥ 5 non-flower tiles and ≥ 2 sets. Flowers are neutral.
 fn is_junchan(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
-    if tiles.len() < 5 || sets.len() < 2 {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    if regular.len() < 5 || sets.len() < 2 {
         return false;
     }
-    if tiles
+    if regular
         .iter()
         .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
     {
@@ -538,12 +543,14 @@ fn is_junchan(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
     })
 }
 
-/// Honroutou: every tile is a terminal (1/9) or an honor (no 2-8 numbers).
+/// Honroutou: every non-flower tile is a terminal (1/9) or an honor (no 2-8
+/// numbers). Flowers are neutral.
 fn is_honroutou(tiles: &[Tile]) -> bool {
-    if tiles.len() < 5 {
+    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
+    if regular.len() < 5 {
         return false;
     }
-    tiles.iter().all(|t| match t.suit {
+    regular.iter().all(|t| match t.suit {
         Suit::Wind | Suit::Dragon => true,
         _ => t.rank == 1 || t.rank == 9,
     })
@@ -551,11 +558,26 @@ fn is_honroutou(tiles: &[Tile]) -> bool {
 
 /// A complete hand: 4 melds + 1 pair. Kongs count as a meld even though they
 /// are 4 tiles each, so a single-kong hand has 15 tiles total instead of the
-/// usual 14. Two kongs → 16 tiles, etc. We accept 14 + 1 per kong.
+/// usual 14. Two kongs → 16 tiles, etc. Flower tiles in melds count toward
+/// the total (they substitute for regular tiles), plus unused flowers are
+/// allowed as extras.
 fn is_full_hand(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
     let kongs = sets.iter().filter(|s| s.kind == SetKind::Kong).count();
-    let expected_len = 14 + kongs;
-    if tiles.len() != expected_len {
+    // Count tiles that are part of melds (includes flower substitutes).
+    let tiles_in_sets: usize = sets.iter().map(|s| s.tile_ids.len()).sum();
+    // The remaining tiles should be unused flowers.
+    let flower_count = tiles.iter().filter(|t| t.is_flower()).count();
+    let flowers_in_sets = sets
+        .iter()
+        .flat_map(|s| &s.tile_ids)
+        .filter(|id| tiles.iter().any(|t| t.id == **id && t.is_flower()))
+        .count();
+    let unused_flowers = flower_count - flowers_in_sets;
+    let expected_set_tiles = 14 + kongs;
+    if tiles_in_sets != expected_set_tiles {
+        return false;
+    }
+    if tiles.len() != expected_set_tiles + unused_flowers {
         return false;
     }
     let melds = sets

@@ -23,6 +23,7 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, PanelVariant};
+use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::gameplay::GameplayScene;
@@ -271,35 +272,24 @@ impl PickBlindLayout {
         let panel_y = h - panel_h - panel_pad;
         let info_panel_rect = [panel_x, panel_y, panel_w, panel_h];
 
-        // ── 3D Play / Skip altars FLANKING the upcoming shrine ──────
-        // The two altars sit immediately to the left and right of the
-        // currently-upcoming shrine on the floor plane, so the eye can
-        // read "this shrine, with these two choices beside it" as one
-        // compositional unit. They move with the upcoming shrine —
-        // when the player advances to Big Blind they'll appear flanking
-        // the middle shrine, etc. They're pulled slightly forward in
-        // pixel-y to sit on the visible floor pool in front of the
-        // shrine row, giving a clear triangular grouping.
+        // ── 3D Play / Skip altars BELOW the upcoming shrine ─────────
+        // The two altars sit side by side below the upcoming shrine's
+        // base, centered on its horizontal position. They move with the
+        // upcoming shrine — when the player advances to Big Blind
+        // they'll appear below the middle shrine, etc.
         let (up_px, _up_py) = shrine_anchors_px[upcoming_idx];
-        let up_ext = shrine_extents[upcoming_idx];
-        let altar_row_y = row_y + h * 0.08;
-        // Horizontal offset: half the upcoming shrine's footprint plus
-        // half the altar dish width plus a small gap, so the altars
-        // sit visibly outside the shrine's silhouette.
+        let _up_ext = shrine_extents[upcoming_idx];
+        let altar_row_y = row_y + h * 0.16;
         // Brass altar dishes — small offering trays (~9mm rim height).
-        // Width and depth stay layout-relative so they scale with the
-        // shrine row at any resolution.
         let play_dish_extents = [h * 0.12, layout.mm(9.0), h * 0.06];
         let skip_dish_extents = [h * 0.10, layout.mm(8.0), h * 0.055];
-        let gap = h * 0.04;
-        let play_offset = up_ext[0] * 0.55 + play_dish_extents[0] * 0.6 + gap;
-        let skip_offset = up_ext[0] * 0.55 + skip_dish_extents[0] * 0.6 + gap;
-        // Clamp altar X positions so neither runs off-screen for the
-        // boss shrine (which sits at w*0.80).
-        let play_x = (up_px - play_offset)
+        // Side-by-side gap between the two dishes, centered under shrine.
+        // Generous spacing so they don't collide on small screens.
+        let inner_gap = (h * 0.12).max(80.0);
+        let play_x = (up_px - inner_gap * 0.5 - play_dish_extents[0] * 0.5)
             .max(play_dish_extents[0] * 0.5 + 16.0)
             .min(w - play_dish_extents[0] * 0.5 - 16.0);
-        let skip_x = (up_px + skip_offset)
+        let skip_x = (up_px + inner_gap * 0.5 + skip_dish_extents[0] * 0.5)
             .max(skip_dish_extents[0] * 0.5 + 16.0)
             .min(w - skip_dish_extents[0] * 0.5 - 16.0);
         let play_dish_anchor_px = (play_x, altar_row_y);
@@ -879,9 +869,10 @@ impl SceneBehavior for PickBlindScene {
             let lx = (cx - altar_label_w * 0.5)
                 .max(8.0)
                 .min(w - altar_label_w - 8.0);
-            // Stack the two lines just above the projected dish top.
+            // Stack the two lines below the projected dish bottom so they
+            // aren't occluded by the shrine base geometry.
             let stack_h = altar_label_h + altar_caption_h + 2.0;
-            let ly = (rect[1] - stack_h - 6.0).max(8.0);
+            let ly = (rect[1] + rect[3] + 30.0).min(h - stack_h - 8.0);
             texts.push(TextLabel {
                 rect: [lx, ly, altar_label_w, altar_label_h],
                 text: title.to_string(),
@@ -919,13 +910,13 @@ impl SceneBehavior for PickBlindScene {
             &mut texts,
         );
 
+        let skip_anchor_rect = projected_skip.unwrap_or_else(|| {
+            let (sdx, sdy) = layout.skip_dish_anchor_px;
+            let est_w = layout.skip_dish_extents[0] * 0.8;
+            let est_h = layout.skip_dish_extents[2] * 0.8;
+            [sdx - est_w * 0.5, sdy - est_h * 0.5, est_w, est_h]
+        });
         if can_skip {
-            let skip_anchor_rect = projected_skip.unwrap_or_else(|| {
-                let (sdx, sdy) = layout.skip_dish_anchor_px;
-                let est_w = layout.skip_dish_extents[0] * 0.8;
-                let est_h = layout.skip_dish_extents[2] * 0.8;
-                [sdx - est_w * 0.5, sdy - est_h * 0.5, est_w, est_h]
-            });
             push_altar_caption(
                 skip_anchor_rect,
                 &format!("Skip  +{}g", skip_reward),
@@ -937,6 +928,18 @@ impl SceneBehavior for PickBlindScene {
         }
 
         let scale = (w.min(h)) / 600.0;
+
+        // ── Gold outline around the focused altar ────────────────────
+        // A chunky gold border (3× the normal focus ring thickness)
+        // around whichever altar is currently selected so the player
+        // can immediately read which action they're about to confirm.
+        let big_ring_scale = scale * 3.0;
+        if play_focused_label {
+            push_focus_ring(play_anchor_rect, big_ring_scale, &mut quads);
+        }
+        if skip_focused_label && can_skip {
+            push_focus_ring(skip_anchor_rect, big_ring_scale, &mut quads);
+        }
 
         // Register focus-tree click targets for PlayBlind + SkipBlind.
         let items = Self::flat_items(

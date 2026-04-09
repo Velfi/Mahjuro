@@ -9,5 +9,6 @@ pub mod scoring;
 pub mod shanten;
 pub mod talisman;
 pub mod tile;
+pub mod tile_pack;
 pub mod yaku;
 pub mod zodiac;

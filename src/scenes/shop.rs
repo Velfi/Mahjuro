@@ -15,16 +15,21 @@
 use rand::RngExt;
 use rand::seq::SliceRandom;
 
+use std::time::Instant;
+
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
     Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price, relic_sell_price,
 };
 use crate::core::talisman::TalismanKind;
+use crate::core::tile::Tile;
+use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::render::curio_cabinet_mesh::{NICHE_COLS, NICHE_ROWS, niche_centers_local};
 use crate::render::draw_cmd::{
-    CameraParams, CoinPlacement, CurioCabinetPlacement, DishExplicit, PlaquePlacement,
-    RelicPlacement, TalismanPlacement, UiFrame, ZodiacRibbonPlacement,
+    CameraParams, CoinPlacement, CurioCabinetPlacement, DishExplicit, PackPlacement,
+    PlaquePlacement, RelicPlacement, ShowcaseTilePlacement, TalismanPlacement, UiFrame,
+    ZodiacRibbonPlacement,
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
@@ -46,6 +51,10 @@ enum ShopAction {
     BuyConsumable(usize),
     /// Sell the consumable at this index in `run.consumables.items`.
     SellConsumable(usize),
+    /// Use the consumable at this index in `run.consumables.items`.
+    /// Currently only zodiacs can be used from the shop (levels up a yaku).
+    UseConsumable(usize),
+    BuyPack,
     #[allow(dead_code)]
     Reroll,
 }
@@ -69,6 +78,8 @@ enum ShopFocus {
     /// Pick id of a foreground dish — relic dish, coin dish, or journal
     /// book. Matches `ShopHit::Dish(id)`.
     Dish(u32),
+    /// The for-sale tile pack (if any).
+    Pack,
     /// The 2D "Next Round" button at the bottom of the screen.
     NextRound,
     /// The 2D "Reroll" button at the bottom of the screen.
@@ -94,6 +105,7 @@ impl ShopFocus {
             Self::Ribbon(i) => Some(ShopHit::Ribbon(i)),
             Self::Talisman(i) => Some(ShopHit::Talisman(i)),
             Self::Dish(id) => Some(ShopHit::Dish(id)),
+            Self::Pack => Some(ShopHit::Dish(PICK_TILE_PACK)),
             Self::NextRound | Self::Reroll => None,
         }
     }
@@ -145,7 +157,7 @@ fn shop_action_for_hit(
                         count += 1;
                     }
                 }
-                inv_idx.map(ShopAction::SellConsumable)
+                inv_idx.map(ShopAction::UseConsumable)
             }
         }
         ShopHit::Talisman(i) => {
@@ -174,6 +186,7 @@ fn shop_action_for_hit(
                 inv_idx.map(ShopAction::SellConsumable)
             }
         }
+        ShopHit::Dish(id) if id == PICK_TILE_PACK => Some(ShopAction::BuyPack),
         ShopHit::Dish(_) => None,
     }
 }
@@ -182,12 +195,18 @@ fn shop_action_for_hit(
 /// Pulled out of the inline click-dispatch code so the focus model's
 /// `Confirm` path can fire the same action handlers without
 /// duplication.
+///
+/// Returns `Some(PackCelebration)` when a tile pack was just purchased
+/// so the caller can show the opening celebration overlay before
+/// resuming normal shop interaction.
 fn apply_shop_action(
     action: ShopAction,
     items: &mut Vec<ShopItem>,
     consumable_items: &mut Vec<ConsumableShopItem>,
+    pack_item: &mut Option<TilePackShopItem>,
     run: &mut crate::game::run::RunState,
-) {
+    bus: &mut crate::game::event_bus::EventBus,
+) -> Option<PackCelebration> {
     match action {
         ShopAction::BuyCard(idx) => {
             if idx < items.len() {
@@ -230,11 +249,48 @@ fn apply_shop_action(
                 run.gold = run.gold.saturating_add(refund as i32);
             }
         }
+        ShopAction::UseConsumable(idx) => {
+            if idx < run.consumables.items.len() {
+                if let Consumable::Zodiac(_) = run.consumables.items[idx] {
+                    run.use_consumable(idx);
+                }
+            }
+        }
+        ShopAction::BuyPack => {
+            if let Some(ref mut pack) = *pack_item {
+                if !pack.sold {
+                    let price = pack.kind.shop_price();
+                    if run.gold >= price as i32 {
+                        run.gold -= price as i32;
+                        // Generate the tiles that will enter the wall.
+                        use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE};
+                        let pack_idx = run.tile_packs.len();
+                        let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
+                        let mut tiles = pack.kind.generate_tiles(start_id);
+                        // Stamp pre-enhancements (e.g. Polychrome) before
+                        // pushing the pack so IDs are deterministic.
+                        if let Some(enh) = pack.kind.pre_enhancement() {
+                            for t in &mut tiles {
+                                run.tile_enhancements.insert(t.id, enh);
+                                t.enhancement = Some(enh);
+                            }
+                        }
+                        run.tile_packs.push(pack.kind);
+                        pack.sold = true;
+                        bus.push(crate::game::event_bus::GameEvent::PackBought);
+                        let kind = pack.kind;
+                        let name = pack.kind.name();
+                        return Some(PackCelebration::new(tiles, name, kind));
+                    }
+                }
+            }
+            return None;
+        }
         // Reroll is handled directly in ShopScene::update() because it
-        // needs `&mut self` to regenerate stock — this arm is unreachable
-        // but keeps the match exhaustive.
+        // needs `&mut self` — this arm keeps the match exhaustive.
         ShopAction::Reroll => {}
     }
+    None
 }
 
 /// Refund when selling a consumable — half buy price, minimum 1 gold,
@@ -242,7 +298,7 @@ fn apply_shop_action(
 fn consumable_sell_price(c: Consumable) -> u32 {
     let buy = match c {
         Consumable::Zodiac(_) => ZodiacKind::shop_price(),
-        Consumable::Talisman(_) => TalismanKind::shop_price(),
+        Consumable::Talisman(t) => t.shop_price(),
     };
     (buy / 2).max(1)
 }
@@ -269,7 +325,7 @@ impl ConsumableShopItem {
     fn price(&self) -> u32 {
         match self.consumable {
             Consumable::Zodiac(_) => ZodiacKind::shop_price(),
-            Consumable::Talisman(_) => TalismanKind::shop_price(),
+            Consumable::Talisman(t) => t.shop_price(),
         }
     }
     fn name(&self) -> String {
@@ -290,10 +346,94 @@ impl ConsumableShopItem {
     }
 }
 
+/// A purchasable tile pack in the shop.
+struct TilePackShopItem {
+    kind: TilePackKind,
+    sold: bool,
+}
+
+/// Which phase the pack celebration is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CelebPhase {
+    /// Show the pack box up close; wait for player click to open.
+    Closeup,
+    /// Tiles flying out and arranging in a row.
+    Reveal,
+}
+
+/// Tile-pack opening celebration overlay. Blocks shop input while active
+/// and shows the acquired tiles flying out of the pack one by one, then
+/// arranging themselves in a readable row.
+struct PackCelebration {
+    /// The tiles acquired from this pack (with enhancements already stamped).
+    tiles: Vec<Tile>,
+    /// Pack name for the header label.
+    pack_name: &'static str,
+    /// Which pack kind this is (for rendering the box texture).
+    pack_kind: TilePackKind,
+    /// Current phase of the celebration.
+    phase: CelebPhase,
+    /// Wall-clock time the *reveal* phase started (after closeup).
+    started_at: Instant,
+    /// Whether the player has dismissed the celebration (confirm/click).
+    dismissed: bool,
+    /// Number of tiles whose reveal sound has already been fired.
+    revealed_count: usize,
+}
+
+impl PackCelebration {
+    /// Total seconds for all tiles to have arrived in their final positions.
+    /// Each tile gets a staggered start: tile *i* begins at `i * STAGGER`.
+    const STAGGER: f32 = 0.18;
+    /// Duration of a single tile's flight from the pack to its slot.
+    const TILE_FLY_SECS: f32 = 0.35;
+    /// Extra pause after the last tile lands before the "press to continue"
+    /// prompt appears.
+    const SETTLE_SECS: f32 = 0.20;
+
+    fn new(tiles: Vec<Tile>, pack_name: &'static str, pack_kind: TilePackKind) -> Self {
+        Self {
+            tiles,
+            pack_name,
+            pack_kind,
+            phase: CelebPhase::Closeup,
+            // Will be reset when transitioning to Reveal.
+            started_at: Instant::now(),
+            dismissed: false,
+            revealed_count: 0,
+        }
+    }
+
+    /// Total animation duration (all tiles landed + settle pause).
+    fn total_duration(&self) -> f32 {
+        let n = self.tiles.len().max(1) as f32;
+        (n - 1.0) * Self::STAGGER + Self::TILE_FLY_SECS + Self::SETTLE_SECS
+    }
+
+    /// Elapsed seconds since the celebration started.
+    fn elapsed(&self) -> f32 {
+        Instant::now()
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32()
+    }
+
+    /// True once all tiles have landed and the settle pause is over.
+    fn fully_settled(&self) -> bool {
+        self.elapsed() >= self.total_duration()
+    }
+
+    /// Per-tile animation progress: 0.0 = hasn't started, 1.0 = landed.
+    fn tile_progress(&self, idx: usize) -> f32 {
+        let t = self.elapsed() - idx as f32 * Self::STAGGER;
+        (t / Self::TILE_FLY_SECS).clamp(0.0, 1.0)
+    }
+}
+
 pub struct ShopScene {
     pub came_from_round: u32,
     items: Vec<ShopItem>,
     consumable_items: Vec<ConsumableShopItem>,
+    pack_item: Option<TilePackShopItem>,
     /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
     /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
     reroll_cost: u32,
@@ -309,6 +449,8 @@ pub struct ShopScene {
     /// gameplay scene's identical mechanism. Wrapped in a `RefCell` because
     /// `draw_frame` takes `&self` but needs to update this stash.
     last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
+    /// Active tile-pack opening celebration, if any.
+    pack_celebration: Option<PackCelebration>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -334,10 +476,18 @@ const PICK_COIN_DISH: u32 = 2;
 /// dish-shaped until proper book art lands, but the click target is
 /// what matters here.
 const PICK_JOURNAL_BOOK: u32 = 3;
+/// Pick id for the for-sale tile pack on the shop shelf.
+const PICK_TILE_PACK: u32 = 4;
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
-fn generate_shop_stock(relics: &RelicState) -> (Vec<ShopItem>, Vec<ConsumableShopItem>) {
+fn generate_shop_stock(
+    relics: &RelicState,
+) -> (
+    Vec<ShopItem>,
+    Vec<ConsumableShopItem>,
+    Option<TilePackShopItem>,
+) {
     let mut rng = rand::rng();
 
     const MAX_RIBBONS: usize = 3;
@@ -419,23 +569,34 @@ fn generate_shop_stock(relics: &RelicState) -> (Vec<ShopItem>, Vec<ConsumableSho
         .collect();
     consumable_items.shuffle(&mut rng);
 
-    (items, consumable_items)
+    // Always offer a tile pack.
+    let pack_item = {
+        let mut pack_pool: Vec<TilePackKind> = TilePackKind::all().to_vec();
+        pack_pool.shuffle(&mut rng);
+        pack_pool
+            .first()
+            .map(|&kind| TilePackShopItem { kind, sold: false })
+    };
+
+    (items, consumable_items, pack_item)
 }
 
 impl ShopScene {
     pub fn new(came_from_round: u32, relics: &RelicState) -> Self {
-        let (items, consumable_items) = generate_shop_stock(relics);
+        let (items, consumable_items, pack_item) = generate_shop_stock(relics);
 
         Self {
             came_from_round,
             items,
             consumable_items,
+            pack_item,
             reroll_cost: REROLL_BASE_COST,
             pause_menu: PauseMenu::new(),
             glossary: super::glossary::GlossaryOverlay::new(),
             journal: super::journal::JournalOverlay::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
+            pack_celebration: None,
         }
     }
 
@@ -443,10 +604,39 @@ impl ShopScene {
     fn reroll(&mut self, run: &mut crate::game::run::RunState) {
         run.gold -= self.reroll_cost as i32;
         self.reroll_cost += REROLL_COST_INCREMENT;
-        let (items, consumable_items) = generate_shop_stock(&run.relics);
+        let (items, consumable_items, pack_item) = generate_shop_stock(&run.relics);
         self.items = items;
         self.consumable_items = consumable_items;
+        self.pack_item = pack_item;
         self.focus = None;
+    }
+
+    /// Debug-only: reroll stock without deducting gold or incrementing cost.
+    pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
+        let (items, consumable_items, pack_item) = generate_shop_stock(&run.relics);
+        self.items = items;
+        self.consumable_items = consumable_items;
+        self.pack_item = pack_item;
+        self.focus = None;
+    }
+
+    /// Debug-only: open a random tile pack celebration without purchasing.
+    pub fn debug_open_pack(&mut self, run: &mut crate::game::run::RunState) {
+        use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE, TilePackKind};
+        let mut rng = rand::rng();
+        let all = TilePackKind::all();
+        let kind = all[rand::RngExt::random_range(&mut rng, 0..all.len())];
+        let pack_idx = run.tile_packs.len();
+        let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
+        let mut tiles = kind.generate_tiles(start_id);
+        if let Some(enh) = kind.pre_enhancement() {
+            for t in &mut tiles {
+                run.tile_enhancements.insert(t.id, enh);
+                t.enhancement = Some(enh);
+            }
+        }
+        run.tile_packs.push(kind);
+        self.pack_celebration = Some(PackCelebration::new(tiles, kind.name(), kind));
     }
 }
 
@@ -478,6 +668,9 @@ struct ShopLayout {
     coin_dish_extents: [f32; 3],
     // ── Owned-relic positions inside the relic dish ──
     owned_relic_count: usize,
+    // ── For-sale tile pack (in cabinet, below ribbons) ──
+    pack_center_px: (f32, f32, f32),
+    pack_extents: [f32; 3],
     // ── Owned consumable row (flat tray on the inventory shelf) ──
     consumable_row_center_px: (f32, f32, f32),
     consumable_row_extents: [f32; 3],
@@ -607,6 +800,18 @@ impl ShopLayout {
         let ribbon_width = h * 0.085;
         let ribbon_length = ribbon_width * 1.5;
 
+        // ── For-sale tile pack: right side of the cabinet, below ribbons ─
+        // Centered horizontally in the ribbon area, sitting on the lower
+        // shelf of the cabinet so it reads as a boxed product on display.
+        let right_lx0 = crate::render::curio_cabinet_mesh::DIVIDER_X + 0.0125;
+        let right_lx1 = 0.5 - 0.04;
+        let pack_local_x = (right_lx0 + right_lx1) * 0.5;
+        let pack_px = cabinet_pixel_x + pack_local_x * cabinet_extents[0];
+        let pack_py = cabinet_front_py - cabinet_extents[2] * 0.30;
+        let pack_wy = cabinet_world_y - cabinet_extents[1] * 0.20;
+        let pack_center_px = (pack_px, pack_py, pack_wy);
+        let pack_extents = [cabinet_extents[0] * 0.06, 22.0, cabinet_extents[1] * 0.10];
+
         // ── Inventory shelf (bottom band) ────────────────────────────────
         // The bottom ~25% of the screen is the player's inventory shelf:
         // a single tray broken into three sub-zones — owned relics on the
@@ -663,6 +868,8 @@ impl ShopLayout {
             ribbon_count: n_ribbons,
             ribbon_length,
             ribbon_width,
+            pack_center_px,
+            pack_extents,
             relic_dish_center_px,
             relic_dish_extents,
             coin_dish_center_px,
@@ -722,11 +929,12 @@ fn rarity_color(rarity: Rarity) -> [f32; 4] {
 fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
     let seed = (id as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
     let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
-    let r1 = ((seed >> 16) & 0xFF) as f32 / 255.0;
     let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
+    // Front face (x × y) is square to match the 1:1 relic textures.
+    let face = base * (0.65 + r0 * 0.45);
     [
-        base * (0.65 + r0 * 0.45),
-        base * (0.65 + r1 * 0.45),
+        face,
+        face,
         base * (0.55 + r2 * 0.40),
     ]
 }
@@ -760,6 +968,7 @@ fn consumable_color(c: Consumable) -> [f32; 4] {
             TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0], // pearl white
             TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0], // gold
             TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0], // iridescent violet
+            TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0], // kiln orange-red
         },
     }
 }
@@ -845,7 +1054,10 @@ impl SceneBehavior for ShopScene {
     }
 
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused || self.glossary.open || self.journal.open
+        self.pause_menu.paused
+            || self.glossary.open
+            || self.journal.open
+            || self.pack_celebration.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -875,6 +1087,45 @@ impl SceneBehavior for ShopScene {
         if self.journal.open {
             self.journal
                 .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
+            return None;
+        }
+
+        // Tile-pack opening celebration — swallow all input until
+        // the player dismisses it with Confirm or any click.
+        if let Some(ref mut celeb) = self.pack_celebration {
+            let has_input = ctx.actions.iter().any(|a| {
+                matches!(
+                    a,
+                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
+                )
+            }) || !ctx.button_clicks.is_empty();
+
+            match celeb.phase {
+                CelebPhase::Closeup => {
+                    // Wait for player click/confirm to tear open the pack.
+                    if has_input {
+                        celeb.phase = CelebPhase::Reveal;
+                        celeb.started_at = Instant::now();
+                        ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
+                    }
+                }
+                CelebPhase::Reveal => {
+                    // Fire a sound event for each newly-revealed tile.
+                    let n = celeb.tiles.len();
+                    while celeb.revealed_count < n
+                        && celeb.tile_progress(celeb.revealed_count) > 0.0
+                    {
+                        ctx.bus
+                            .push(crate::game::event_bus::GameEvent::PackTileRevealed);
+                        celeb.revealed_count += 1;
+                    }
+                    let dominated = celeb.fully_settled() || celeb.dismissed;
+                    if dominated && has_input {
+                        self.pack_celebration = None;
+                        return None;
+                    }
+                }
+            }
             return None;
         }
 
@@ -969,12 +1220,17 @@ impl SceneBehavior for ShopScene {
                         if let Some(action) =
                             shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
                         {
-                            apply_shop_action(
+                            let celeb = apply_shop_action(
                                 action,
                                 &mut self.items,
                                 &mut self.consumable_items,
+                                &mut self.pack_item,
                                 ctx.run,
+                                ctx.bus,
                             );
+                            if celeb.is_some() {
+                                self.pack_celebration = celeb;
+                            }
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             // Journal book: same toggle as the click path.
                             self.journal.toggle();
@@ -1027,7 +1283,17 @@ impl SceneBehavior for ShopScene {
             if let Some(action) =
                 shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
             {
-                apply_shop_action(action, &mut self.items, &mut self.consumable_items, ctx.run);
+                let celeb = apply_shop_action(
+                    action,
+                    &mut self.items,
+                    &mut self.consumable_items,
+                    &mut self.pack_item,
+                    ctx.run,
+                    ctx.bus,
+                );
+                if celeb.is_some() {
+                    self.pack_celebration = celeb;
+                }
             }
             return None;
         }
@@ -1120,6 +1386,26 @@ impl SceneBehavior for ShopScene {
             pick_id: Some(PICK_JOURNAL_BOOK),
         });
 
+        // Tile pack — displayed in the cabinet, leaning against the back
+        // of the shelf with its textured front face visible.
+        if let Some(ref pack) = self.pack_item {
+            if !pack.sold {
+                let ext = layout.pack_extents;
+                frame.pack_batch(vec![PackPlacement {
+                    world_pos: [
+                        layout.pack_center_px.0,
+                        layout.pack_center_px.1,
+                        layout.pack_center_px.2,
+                    ],
+                    half_extents: [ext[0] * 0.5, ext[1] * 0.5, ext[2] * 0.5],
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: pack.kind,
+                    rotation_x_deg: 20.0,
+                    pick_id: Some(PICK_TILE_PACK),
+                }]);
+            }
+        }
+
         // ── Relic batch: for-sale relics in cabinet niches, then owned ─
         // relics in the foreground dish. The order matters: pick_shop_object
         // returns indices into a flat list, so we partition with the
@@ -1147,6 +1433,7 @@ impl SceneBehavior for ShopScene {
                 color: col,
                 relic_id: item.relic,
                 glow: 0.0,
+                rotation_x_deg: 0.0,
             });
         }
         let owned_base = layout.relic_dish_extents[0] * 0.09;
@@ -1164,6 +1451,7 @@ impl SceneBehavior for ShopScene {
                 color: rarity_color(rarity),
                 relic_id: rid,
                 glow: 0.0,
+                rotation_x_deg: 0.0,
             });
         }
         if !relic_placements.is_empty() {
@@ -1697,7 +1985,7 @@ impl SceneBehavior for ShopScene {
                         (
                             item.name(),
                             item.description(),
-                            format!("Sell {}g", consumable_sell_price(c)),
+                            "Use".to_string(),
                             color::CHAMPAGNE,
                         )
                     } else {
@@ -1775,6 +2063,27 @@ impl SceneBehavior for ShopScene {
                     "Open".to_string(),
                     color::CHAMPAGNE,
                 ),
+                ShopHit::Dish(id) if id == PICK_TILE_PACK => {
+                    if let Some(ref pack) = self.pack_item {
+                        let price = pack.kind.shop_price();
+                        let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
+                        let cta = if pack.sold {
+                            "SOLD".to_string()
+                        } else if can_afford {
+                            format!("Buy {}g", price)
+                        } else {
+                            format!("Need {}g", price as i32 - ctx.run.gold)
+                        };
+                        (
+                            pack.kind.name().to_string(),
+                            pack.kind.description().to_string(),
+                            cta,
+                            color::CHAMPAGNE,
+                        )
+                    } else {
+                        (String::new(), String::new(), String::new(), color::SLATE)
+                    }
+                }
                 ShopHit::Dish(_) => (
                     "Relic dish".to_string(),
                     "Hover an owned relic to sell it".to_string(),
@@ -2026,6 +2335,117 @@ impl SceneBehavior for ShopScene {
         // Push 2D layers onto the frame after all 3D content.
         frame.quads(quads);
         frame.texts(texts);
+
+        // ── Tile-pack opening celebration overlay ─────────────────────
+        if let Some(ref celeb) = self.pack_celebration {
+            let n = celeb.tiles.len();
+            // Semi-transparent dimmer over the whole shop.
+            frame.quad(GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.0, 0.0, 0.0, 0.72],
+            });
+
+            // Title: pack name — above the content area.
+            let title_font = (h * 0.045).max(28.0);
+            let title_y = h * 0.18;
+            frame.text(TextLabel {
+                text: celeb.pack_name.to_string(),
+                rect: [0.0, title_y, w, title_font * 1.5],
+                font_px: Some(title_font),
+                color: color::CHAMPAGNE,
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+
+            match celeb.phase {
+                CelebPhase::Closeup => {
+                    // ── Closeup: large pack box centered on screen ────
+                    // Rendered via PackPlacement so it gets the foil
+                    // material + texture.
+                    let box_h = h * 0.28;
+                    let box_w = box_h; // square front face
+                    let box_d = box_h * 0.25;
+                    frame.pack_batch(vec![PackPlacement {
+                        world_pos: [w * 0.5, h * 0.45, h * 0.28],
+                        half_extents: [box_w * 0.5, box_h * 0.5, box_d * 0.5],
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: celeb.pack_kind,
+                        rotation_x_deg: 15.0,
+                        pick_id: None,
+                    }]);
+
+                    // "Click to open" prompt at the bottom.
+                    let prompt_font = (h * 0.028).max(18.0);
+                    let prompt_y = h * 0.88;
+                    let t = celeb.started_at.elapsed().as_secs_f32();
+                    let pulse_alpha = 0.5 + 0.5 * (t * 3.0).sin();
+                    frame.text(TextLabel {
+                        text: "Click or press confirm to open".to_string(),
+                        rect: [0.0, prompt_y, w, prompt_font * 1.5],
+                        font_px: Some(prompt_font),
+                        color: [1.0, 1.0, 1.0, pulse_alpha],
+                        align: TextAlign::Center,
+                        ..Default::default()
+                    });
+                }
+                CelebPhase::Reveal => {
+                    // ── Reveal: tiles flying out into a row ───────────
+                    let tile_size = h * 0.13;
+                    let gap = tile_size * 0.25;
+                    let total_w = n as f32 * tile_size + (n.saturating_sub(1)) as f32 * gap;
+                    let row_x0 = (w - total_w) * 0.5;
+                    let row_py = h * 0.55;
+                    let row_lift = h * 0.22;
+                    let src_px = w * 0.5;
+                    let src_py = h * 0.35;
+                    let src_lift = row_lift + h * 0.15;
+
+                    let mut placements = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let t = celeb.tile_progress(i);
+                        let ease = 1.0 - (1.0 - t).powi(3);
+
+                        let dest_px = row_x0 + i as f32 * (tile_size + gap) + tile_size * 0.5;
+                        let px = src_px + (dest_px - src_px) * ease;
+                        let py = src_py + (row_py - src_py) * ease;
+                        let lift = src_lift + (row_lift - src_lift) * ease;
+                        let scale = 0.3 + 0.7 * ease;
+
+                        placements.push(ShowcaseTilePlacement {
+                            tile: celeb.tiles[i].clone(),
+                            center_pos: [px, py, lift],
+                            rotation: [60.0_f32.to_radians(), 0.0, 0.0],
+                            scale,
+                            size_px: tile_size,
+                        });
+                    }
+
+                    frame.cmds.push(
+                        crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(placements),
+                    );
+
+                    // Dismiss prompt — pinned near the bottom.
+                    if celeb.fully_settled() {
+                        let prompt_font = (h * 0.028).max(18.0);
+                        let prompt_y = h * 0.88;
+                        let pulse_alpha = 0.5 + 0.5 * ((celeb.elapsed() * 3.0).sin());
+                        frame.text(TextLabel {
+                            text: "Click or press confirm to continue".to_string(),
+                            rect: [0.0, prompt_y, w, prompt_font * 1.5],
+                            font_px: Some(prompt_font),
+                            color: [1.0, 1.0, 1.0, pulse_alpha],
+                            align: TextAlign::Center,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+
+            // Block all shop buttons so clicks go to the celebration.
+            buttons.clear();
+            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), SHOP_3D_HIT_ID));
+        }
+
         frame.buttons = buttons;
         frame.window_title = format!(
             "Mahjuro — Shop (Round {}) — Gold: {}",

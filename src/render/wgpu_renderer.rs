@@ -12,6 +12,7 @@ use winit::window::Window;
 
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, Tile};
+use crate::core::tile_pack::TilePackKind;
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
 use crate::render::candle_mesh::{CandlePlacement, build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
@@ -24,8 +25,9 @@ use crate::render::dora_stand_mesh::build_dora_stand_mesh;
 use crate::render::draw_cmd::{
     BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement, CurioCabinetPlacement,
     DishExplicit, DoraStandPlacement, DrawCmd, ExtrudedGlyphPlacement, FallingBonePlacement,
-    MirrorPlacement, OfudaPlacement, PegBlockPlacement, PlaquePlacement, RelicPlacement,
-    ShrinePlacement, TalismanPlacement, UiFrame, WallStackPlacement, WoodTabletPlacement,
+    MirrorPlacement, OfudaPlacement, PackPlacement, PegBlockPlacement, PlaquePlacement, RelicPlacement,
+    ShowcaseTilePlacement, ShrinePlacement, TalismanPlacement, UiFrame, WallStackPlacement,
+    WoodTabletPlacement,
     YakuTabletPlacement, ZodiacRibbonPlacement,
 };
 use crate::render::lit_mesh::{
@@ -327,6 +329,21 @@ struct HandTileGpu {
     decal_texture: wgpu::Texture,
 }
 
+/// Simplified `HandTileGpu` for showcase tiles (pack celebration, etc.).
+/// No outline buffers, no text metadata — display only.
+struct ShowcaseTileGpu {
+    uniform_buffer: wgpu::Buffer,
+    bind_groups: Vec<wgpu::BindGroup>,
+    shadow_uniform_buffer: wgpu::Buffer,
+    shadow_bind_group: wgpu::BindGroup,
+    /// Cache key to skip re-rasterisation when the tile hasn't changed.
+    tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>),
+    #[allow(dead_code)]
+    decal_texture: wgpu::Texture,
+}
+
+const MAX_SHOWCASE_TILE_SLOTS: usize = 8;
+
 // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
 //   local X — long face axis  (extent ~1.000) → table-Z (front-back)
 //   local Y — thickness        (extent ~0.424) → world Y (up off table)
@@ -433,6 +450,10 @@ pub struct WgpuRenderer {
     tile_base_color_factor: [f32; 4],
     /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
     hand_tiles: Vec<HandTileGpu>,
+    /// Per-showcase-tile GPU resources (pack celebration, etc.). Grown on
+    /// demand up to `MAX_SHOWCASE_TILE_SLOTS`; decals re-rasterised only
+    /// when the tile identity changes.
+    showcase_tiles: Vec<ShowcaseTileGpu>,
     #[allow(dead_code)]
     vertex_buffer: wgpu::Buffer,
     #[allow(dead_code)]
@@ -497,6 +518,8 @@ pub struct WgpuRenderer {
     relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
     /// Wall-clock start of the relic load pipeline (spawn → last GPU upload).
     relic_load_start: Option<Instant>,
+    /// Cached tile-pack box art textures, keyed by `TilePackKind`.
+    pack_textures: HashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.
     background_textures: HashMap<BackgroundId, BackgroundTextureGpu>,
     /// Receives decoded background image data from the background loader thread.
@@ -592,6 +615,15 @@ pub struct WgpuRenderer {
     /// Per-relic-placeholder world-space model matrices captured each frame
     /// for `pick_shop_object` raycasting.
     last_relic_models: Vec<Mat4>,
+    /// Currently bound relic texture per slot. `Some(id)` means that slot's
+    /// bind group already points at the texture for `id`; `None` means the
+    /// flat-white fallback. Avoids rebuilding bind groups every frame.
+    relic_slot_texture: Vec<Option<RelicId>>,
+    /// Pre-allocated per-pack instances (same mesh + pipeline as relics).
+    pack_instances: Vec<LitMeshInstance>,
+    pack_slot_texture: Vec<Option<TilePackKind>>,
+    /// Projected screen rects for pack hit-testing.
+    last_projected_pack_rects: Vec<([f32; 4], Option<u32>)>,
     // ── Shop scene meshes (curio cabinet + ribbons + talismans + coins) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
@@ -628,7 +660,7 @@ pub struct WgpuRenderer {
     /// 2D labels above the visible shrine bodies.
     last_projected_shrine_rects: Vec<[f32; 4]>,
     /// Per-explicit-dish instances (shop scene). Indexed sequentially by
-    /// `DishExplicit` placement order; truncated at `MAX_AUX_DISH_SLOTS`.
+    /// `DishExplicit` placement order; grown on demand.
     aux_dish_instances: Vec<LitMeshInstance>,
     /// Per-ribbon screen-space rects projected this frame. Parallel with
     /// the order ribbons were drawn.
@@ -833,7 +865,6 @@ pub const MAX_TALISMAN_SLOTS: usize = 8;
 pub const MAX_COIN_SLOTS: usize = 64;
 /// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
 /// the relic dish and the coin dish).
-pub const MAX_AUX_DISH_SLOTS: usize = 4;
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
 /// Big, Boss). Truncated silently.
 pub const MAX_SHRINE_SLOTS: usize = 4;
@@ -875,7 +906,10 @@ pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 32;
 struct RelicTextureGpu {
     #[allow(dead_code)]
     texture: wgpu::Texture,
+    /// Bind group for the 2D image pipeline (collection screen).
     bind_group: wgpu::BindGroup,
+    /// Texture view for binding into lit-mesh material bind groups (3D boxes).
+    view: wgpu::TextureView,
 }
 
 /// Decoded relic image data sent from the background loader thread.
@@ -1134,7 +1168,7 @@ fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
     let defs: Vec<(RelicId, &'static str, String)> = all_relic_defs()
         .iter()
         .map(|d| {
-            let asset_path = format!("relics/{}", d.id.asset_filename());
+            let asset_path = format!("textures/relics/{}", d.id.asset_filename());
             (d.id, d.name, asset_path)
         })
         .collect();
@@ -1183,6 +1217,53 @@ fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
         .expect("failed to spawn relic-loader thread");
 
     rx
+}
+
+/// Load tile-pack box art textures synchronously at init. There are at most 7
+/// packs and only a handful have art, so the blocking decode is trivial.
+fn load_pack_textures(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    text_layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+) -> HashMap<TilePackKind, RelicTextureGpu> {
+    let mut map = HashMap::new();
+    for &kind in TilePackKind::all() {
+        let asset_path = format!("textures/packs/{}", kind.asset_filename());
+        let bytes = match crate::asset_path::get(&asset_path) {
+            Some(file) => file.data.to_vec(),
+            None => {
+                log::debug!("pack texture not found (optional): {asset_path}");
+                continue;
+            }
+        };
+        let img = match image::load_from_memory(&bytes) {
+            Ok(img) => img.into_rgba8(),
+            Err(e) => {
+                log::warn!("failed to decode pack texture {asset_path}: {e}");
+                continue;
+            }
+        };
+        let (w, h) = img.dimensions();
+        let (tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(kind.name()),
+            layout: text_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        map.insert(kind, RelicTextureGpu { view, texture: tex, bind_group });
+    }
+    log::info!("loaded {} pack textures synchronously", map.len());
+    map
 }
 
 /// Spawn a background thread that decodes all background PNGs and sends the RGBA
@@ -1457,6 +1538,90 @@ fn make_hand_tile_gpu(
         symbol,
         suit_emoji,
         suit_color,
+        decal_texture,
+    }
+}
+
+fn make_showcase_tile_gpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    shadow_caster_layout: &wgpu::BindGroupLayout,
+    primitives: &[TilePrimitiveGpu],
+    sampler: &wgpu::Sampler,
+    base_color_factor: [f32; 4],
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+    tile: &Tile,
+) -> ShowcaseTileGpu {
+    let identity = Mat4::IDENTITY;
+    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("showcase-tile-cam"),
+        contents: bytemuck::bytes_of(&CameraUniform {
+            view_proj: identity.to_cols_array(),
+            model: identity.to_cols_array(),
+            base_color_factor,
+        }),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    const DECAL_W: u32 = 192;
+    const DECAL_H: u32 = 256;
+    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H);
+    let (decal_texture, decal_view) =
+        upload_rgba_texture(device, queue, "showcase-tile-decal", &rgba, DECAL_W, DECAL_H);
+
+    let bind_groups: Vec<wgpu::BindGroup> = primitives
+        .iter()
+        .map(|prim| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("showcase-tile-bg"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&decal_view),
+                    },
+                ],
+            })
+        })
+        .collect();
+
+    let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("showcase-tile-shadow-uniform"),
+        contents: bytemuck::bytes_of(&ShadowCasterUniform {
+            light_view_proj: identity.to_cols_array(),
+            model: identity.to_cols_array(),
+        }),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("showcase-tile-shadow-bg"),
+        layout: shadow_caster_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: shadow_uniform_buffer.as_entire_binding(),
+        }],
+    });
+
+    ShowcaseTileGpu {
+        uniform_buffer,
+        bind_groups,
+        shadow_uniform_buffer,
+        shadow_bind_group,
+        tile_id: (tile.suit, tile.rank, tile.enhancement),
         decal_texture,
     }
 }
@@ -2522,6 +2687,7 @@ impl WgpuRenderer {
         // Kick off background relic image loading (non-blocking).
         let relic_load_start = Some(Instant::now());
         let relic_rx = Some(spawn_relic_loader());
+        let pack_textures_map = load_pack_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
         // Kick off background image loading (non-blocking).
         let background_load_start = Some(Instant::now());
         let background_rx = Some(spawn_background_loader());
@@ -2622,6 +2788,16 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
+        let mut pack_instances: Vec<LitMeshInstance> = Vec::with_capacity(4);
+        for _ in 0..4 {
+            pack_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &tile_sampler,
+            ));
+        }
         let (ribbon_zodiac_textures, ribbon_zodiac_views) =
             load_zodiac_ribbon_textures(&device, &queue);
         let mut ribbon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_RIBBON_SLOTS);
@@ -2661,6 +2837,7 @@ impl WgpuRenderer {
             ("textures/talisman_pearl.png", "talisman-pearl-hm"),
             ("textures/talisman_gilded.png", "talisman-gilded-hm"),
             ("textures/talisman_polychrome.png", "talisman-polychrome-hm"),
+            ("textures/talisman_kiln.png", "talisman-kiln-hm"),
         ];
         let mut talisman_height_textures: Vec<wgpu::Texture> = Vec::new();
         let mut talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
@@ -2697,16 +2874,7 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
-        let mut aux_dish_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_AUX_DISH_SLOTS);
-        for _ in 0..MAX_AUX_DISH_SLOTS {
-            aux_dish_instances.push(LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_white_view,
-                &tile_sampler,
-            ));
-        }
+        let aux_dish_instances: Vec<LitMeshInstance> = Vec::new();
 
         // ── Skeuomorphic gameplay HUD slot pools (phase 1) ─────────────
         let make_pool = |n: usize| -> Vec<LitMeshInstance> {
@@ -2789,6 +2957,7 @@ impl WgpuRenderer {
             tile_primitives,
             tile_base_color_factor,
             hand_tiles: Vec::new(),
+            showcase_tiles: Vec::new(),
             vertex_buffer,
             index_buffer,
             text_pipeline,
@@ -2810,6 +2979,10 @@ impl WgpuRenderer {
             last_pick_camera: None,
             last_projected_relic_rects: Vec::new(),
             last_relic_models: Vec::new(),
+            relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
+            pack_instances,
+            pack_slot_texture: vec![None; 4],
+            last_projected_pack_rects: Vec::new(),
             ribbon_mesh,
             talisman_mesh,
             coin_mesh,
@@ -2875,6 +3048,7 @@ impl WgpuRenderer {
             relic_textures: HashMap::new(),
             relic_rx,
             relic_load_start,
+            pack_textures: pack_textures_map,
             background_textures: HashMap::new(),
             background_rx,
             background_load_start,
@@ -2971,6 +3145,7 @@ impl WgpuRenderer {
                     self.relic_textures.insert(
                         img.id,
                         RelicTextureGpu {
+                            view,
                             texture: tex,
                             bind_group,
                         },
@@ -3433,6 +3608,17 @@ impl WgpuRenderer {
                 continue;
             }
             consider(ShopHit::Dish(*pid), t_enter);
+        }
+
+        // Pack boxes — 2D projected rect hit test (packs are few, so a
+        // simple screen-space check is sufficient).
+        for (rect, pick_id) in &self.last_projected_pack_rects {
+            let Some(pid) = pick_id else { continue };
+            let [rx, ry, rw, rh] = *rect;
+            if cursor_x >= rx && cursor_x <= rx + rw && cursor_y >= ry && cursor_y <= ry + rh {
+                // Use a small t value so nearby 3D picks can still win.
+                consider(ShopHit::Dish(*pid), 0.5);
+            }
         }
 
         best.map(|(h, _)| h)
@@ -3901,12 +4087,17 @@ impl WgpuRenderer {
         smoke_intensity: crate::persistence::SmokeIntensity,
         smoke_detail: crate::persistence::SmokeDetail,
         tile_preset: crate::persistence::TilePreset,
+        tile_material: crate::persistence::TileMaterial,
         draw_settle_speed: f32,
         sort_settle_speed: f32,
         gamma: f32,
         shadows_enabled: bool,
         ssr_enabled: bool,
     ) -> anyhow::Result<()> {
+        // Encode the tile material choice into base_color_factor.w so the
+        // tile_3d shader can branch on it (0 = bamboo, 1 = plastic, …).
+        self.tile_base_color_factor[3] = tile_material.shader_id();
+
         let hand_slots: &[(f32, f32, f32, f32)] = &frame.hand_slots;
         let focus = frame.focus;
         let selected: &[bool] = &frame.selected_tiles;
@@ -4749,6 +4940,7 @@ impl WgpuRenderer {
             Table,
             Dish,
             RelicBatch(usize),    // index into `relic_batches`
+            PackBatch(usize),     // index into `pack_batches`
             CandleBatch(usize),   // index into `candle_batches`
             DishExplicit(usize),  // index into `aux_dish_cmds`
             CurioCabinet, // single instance — only the most-recent CurioCabinet cmd is drawn
@@ -4776,6 +4968,7 @@ impl WgpuRenderer {
             CascadeTokenBatch(usize),  // index into `cascade_token_batches`
             FallingBoneBatch(usize),   // index into `falling_bone_batches`
             ExtrudedGlyphBatch(usize), // index into `extruded_glyph_batches`
+            ShowcaseTileBatch(usize),  // index into `showcase_tile_batches`
         }
 
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
@@ -4784,6 +4977,7 @@ impl WgpuRenderer {
         let mut relic_draws: Vec<RelicDraw> = Vec::new();
         let mut candle_batches: Vec<&[CandlePlacement]> = Vec::new();
         let mut relic_batches: Vec<&[RelicPlacement]> = Vec::new();
+        let mut pack_batches: Vec<&[PackPlacement]> = Vec::new();
         let mut ribbon_batches: Vec<&[ZodiacRibbonPlacement]> = Vec::new();
         let mut talisman_batches: Vec<&[TalismanPlacement]> = Vec::new();
         let mut coin_batches: Vec<&[CoinPlacement]> = Vec::new();
@@ -4803,6 +4997,7 @@ impl WgpuRenderer {
         let mut cascade_token_batches: Vec<&[CascadeTokenPlacement]> = Vec::new();
         let mut falling_bone_batches: Vec<&[FallingBonePlacement]> = Vec::new();
         let mut extruded_glyph_batches: Vec<&[ExtrudedGlyphPlacement]> = Vec::new();
+        let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
 
         let mut i = 0;
@@ -4830,6 +5025,12 @@ impl WgpuRenderer {
                     let idx = relic_batches.len();
                     relic_batches.push(placements.as_slice());
                     ops.push(RenderOp::RelicBatch(idx));
+                    i += 1;
+                }
+                DrawCmd::PackBatch(placements) => {
+                    let idx = pack_batches.len();
+                    pack_batches.push(placements.as_slice());
+                    ops.push(RenderOp::PackBatch(idx));
                     i += 1;
                 }
                 DrawCmd::DishExplicit(d) => {
@@ -5045,6 +5246,12 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
+                DrawCmd::ShowcaseTileBatch(placements) => {
+                    let idx = showcase_tile_batches.len();
+                    showcase_tile_batches.push(placements.as_slice());
+                    ops.push(RenderOp::ShowcaseTileBatch(idx));
+                    i += 1;
+                }
                 DrawCmd::GlossaryAnchor { .. } => {
                     // Pure metadata for the tooltip overlay; no draw work.
                     i += 1;
@@ -5219,7 +5426,13 @@ impl WgpuRenderer {
                     p.world_pos[1],
                     p.world_pos[2] + p.half_extents[1],
                 );
+                let rotation = if p.rotation_x_deg != 0.0 {
+                    Mat4::from_rotation_x(p.rotation_x_deg.to_radians())
+                } else {
+                    Mat4::IDENTITY
+                };
                 let model = Mat4::from_translation(center)
+                    * rotation
                     * Mat4::from_scale(glam::Vec3::new(
                         p.half_extents[0] * 2.0,
                         p.half_extents[1] * 2.0,
@@ -5253,6 +5466,42 @@ impl WgpuRenderer {
                     model,
                     material,
                 );
+                // Bind the relic's icon texture into the lit-mesh material
+                // (same approach as zodiac ribbon textures). Skip the rebuild
+                // when this slot already has the right texture bound.
+                let want_tex: Option<RelicId> =
+                    if self.relic_textures.contains_key(&p.relic_id) {
+                        Some(p.relic_id)
+                    } else {
+                        None
+                    };
+                if self.relic_slot_texture[slot_i] != want_tex {
+                    let view: &wgpu::TextureView = match want_tex {
+                        Some(rid) => &self.relic_textures[&rid].view,
+                        None => &self.lit_mesh_white_view,
+                    };
+                    let inst = &mut self.relic_instances[slot_i];
+                    inst.bind_group =
+                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("relic-bg-tex"),
+                            layout: &self.lit_mesh_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: inst.uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                                },
+                            ],
+                        });
+                    self.relic_slot_texture[slot_i] = want_tex;
+                }
                 self.last_relic_models.push(model);
                 self.last_debug_pickables
                     .push(("Relic", model, glam::Vec3::splat(0.5), 0.0));
@@ -5329,6 +5578,110 @@ impl WgpuRenderer {
             }
         }
 
+        // ── Pack placeholders (same mesh + pipeline as relics) ──────────
+        self.last_projected_pack_rects.clear();
+        {
+            let mut slot: usize = 0;
+            for batch in &pack_batches {
+                for p in batch.iter() {
+                    if slot >= self.pack_instances.len() {
+                        break;
+                    }
+                    let center = pixel_to_world(
+                        p.world_pos[0],
+                        p.world_pos[1],
+                        p.world_pos[2] + p.half_extents[1],
+                    );
+                    let rotation = if p.rotation_x_deg != 0.0 {
+                        Mat4::from_rotation_x(p.rotation_x_deg.to_radians())
+                    } else {
+                        Mat4::IDENTITY
+                    };
+                    let model = Mat4::from_translation(center)
+                        * rotation
+                        * Mat4::from_scale(glam::Vec3::new(
+                            p.half_extents[0] * 2.0,
+                            p.half_extents[1] * 2.0,
+                            p.half_extents[2] * 2.0,
+                        ));
+                    let material = MaterialParams {
+                        kind: MaterialKind::Foil,
+                        base_color: p.color,
+                        specular_strength: 0.70,
+                        specular_power: 48.0,
+                    };
+                    self.pack_instances[slot].write_uniform(
+                        &self.queue,
+                        view_proj_arr,
+                        model,
+                        material,
+                    );
+                    // Bind the pack's art texture.
+                    let want_tex: Option<TilePackKind> =
+                        if self.pack_textures.contains_key(&p.kind) {
+                            Some(p.kind)
+                        } else {
+                            None
+                        };
+                    if self.pack_slot_texture[slot] != want_tex {
+                        let view: &wgpu::TextureView = match want_tex {
+                            Some(k) => &self.pack_textures[&k].view,
+                            None => &self.lit_mesh_white_view,
+                        };
+                        let inst = &mut self.pack_instances[slot];
+                        inst.bind_group =
+                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("pack-bg-tex"),
+                                layout: &self.lit_mesh_material_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: inst.uniform_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::TextureView(view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                                    },
+                                ],
+                            });
+                        self.pack_slot_texture[slot] = want_tex;
+                    }
+                    // Project screen rect for hit-testing.
+                    let hx = p.half_extents[0];
+                    let hy = p.half_extents[1];
+                    let hz = p.half_extents[2];
+                    let corners = [
+                        glam::Vec3::new(-hx, -hy, -hz),
+                        glam::Vec3::new(hx, -hy, -hz),
+                        glam::Vec3::new(-hx, hy, -hz),
+                        glam::Vec3::new(hx, hy, -hz),
+                        glam::Vec3::new(-hx, -hy, hz),
+                        glam::Vec3::new(hx, -hy, hz),
+                        glam::Vec3::new(-hx, hy, hz),
+                        glam::Vec3::new(hx, hy, hz),
+                    ];
+                    let mut mn_x = f32::INFINITY;
+                    let mut mn_y = f32::INFINITY;
+                    let mut mx_x = f32::NEG_INFINITY;
+                    let mut mx_y = f32::NEG_INFINITY;
+                    for c in corners {
+                        let world = center + c;
+                        let (sx, sy) = project_to_screen(world);
+                        mn_x = mn_x.min(sx);
+                        mn_y = mn_y.min(sy);
+                        mx_x = mx_x.max(sx);
+                        mx_y = mx_y.max(sy);
+                    }
+                    self.last_projected_pack_rects
+                        .push(([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y], p.pick_id));
+                    slot += 1;
+                }
+            }
+        }
         // Dish: only sized when there are relics to hold. The dish is a
         // wide low box (width × thin height × depth in world units).
         let needs_dish = ops.iter().any(|o| matches!(o, RenderOp::Dish));
@@ -5457,13 +5810,22 @@ impl WgpuRenderer {
             }
         }
 
-        // ── Auxiliary dishes (shop scene: relic dish + coin dish) ──────
+        // ── Auxiliary dishes (shop scene) ─────────────────────────────
+        // Grow the GPU instance pool when more dishes are emitted than
+        // previously allocated, so adding a new DishExplicit call can
+        // never silently vanish.
         self.last_aux_dish_rects.clear();
         self.last_aux_dish_aabbs.clear();
+        while self.aux_dish_instances.len() < aux_dish_cmds.len() {
+            self.aux_dish_instances.push(LitMeshInstance::new(
+                &self.device,
+                &self.lit_mesh_material_layout,
+                &self.shadow_caster_layout,
+                &self.lit_mesh_white_view,
+                &self.tile_sampler,
+            ));
+        }
         for (slot_i, d) in aux_dish_cmds.iter().enumerate() {
-            if slot_i >= MAX_AUX_DISH_SLOTS {
-                break;
-            }
             let center = pixel_to_world(
                 d.center_pos[0],
                 d.center_pos[1],
@@ -5502,6 +5864,11 @@ impl WgpuRenderer {
             self.last_aux_dish_rects
                 .push((d.pick_id, [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]));
             self.last_aux_dish_aabbs.push((center, half));
+        }
+        // Append pack projected rects so tooltip anchoring and focus nav
+        // pick them up via the existing `aux_dish_rects` path.
+        for (rect, pick_id) in &self.last_projected_pack_rects {
+            self.last_aux_dish_rects.push((*pick_id, *rect));
         }
 
         // ── Ribbon batches (shop scene) ────────────────────────────────
@@ -5781,6 +6148,37 @@ impl WgpuRenderer {
             }
             [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
         };
+
+        // Like `project_unit_cube_rect` but projects the actual mesh AABB
+        // (given by half-extents and a Y-axis center offset) instead of
+        // the full `[-0.5, 0.5]³` unit cube. This produces a much tighter
+        // screen rect for flat objects like the river trough and mirror.
+        let project_aabb_rect =
+            |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
+                let corners = [
+                    glam::Vec3::new(-half[0], center_y - half[1], -half[2]),
+                    glam::Vec3::new( half[0], center_y - half[1], -half[2]),
+                    glam::Vec3::new(-half[0], center_y + half[1], -half[2]),
+                    glam::Vec3::new( half[0], center_y + half[1], -half[2]),
+                    glam::Vec3::new(-half[0], center_y - half[1],  half[2]),
+                    glam::Vec3::new( half[0], center_y - half[1],  half[2]),
+                    glam::Vec3::new(-half[0], center_y + half[1],  half[2]),
+                    glam::Vec3::new( half[0], center_y + half[1],  half[2]),
+                ];
+                let mut mn_x = f32::INFINITY;
+                let mut mn_y = f32::INFINITY;
+                let mut mx_x = f32::NEG_INFINITY;
+                let mut mx_y = f32::NEG_INFINITY;
+                for c in corners {
+                    let w = model.transform_point3(c);
+                    let (sx, sy) = project_to_screen(w);
+                    mn_x = mn_x.min(sx);
+                    mn_y = mn_y.min(sy);
+                    mx_x = mx_x.max(sx);
+                    mx_y = mx_y.max(sy);
+                }
+                [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
+            };
 
         // Plaques (single instance per cmd).
         //
@@ -6115,7 +6513,11 @@ impl WgpuRenderer {
                 self.bowl_mesh.default_material,
             );
             if slot_i == 0 {
-                self.last_projected_bowl_rect = Some(project_unit_cube_rect(model));
+                self.last_projected_bowl_rect = Some(project_aabb_rect(
+                    model,
+                    BOWL_LOCAL_HALF,
+                    BOWL_LOCAL_CENTER_Y,
+                ));
                 self.last_bowl_model = Some(model);
             }
             self.last_debug_pickables.push((
@@ -6159,7 +6561,11 @@ impl WgpuRenderer {
                 self.mirror_mesh.default_material,
             );
             if slot_i == 0 {
-                self.last_projected_mirror_rect = Some(project_unit_cube_rect(model));
+                self.last_projected_mirror_rect = Some(project_aabb_rect(
+                    model,
+                    MIRROR_LOCAL_HALF,
+                    MIRROR_LOCAL_CENTER_Y,
+                ));
                 self.last_mirror_model = Some(model);
             }
             self.last_debug_pickables.push((
@@ -6461,7 +6867,7 @@ impl WgpuRenderer {
                 let center = pixel_to_world(g.world_pos[0], g.world_pos[1], g.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(g.rotation_y)
-                    * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2 + g.rotation_x)
+                    * Mat4::from_rotation_x(-std::f32::consts::PI + g.rotation_x)
                     * Mat4::from_scale(glam::Vec3::splat(g.scale));
                 // Pack the emissive boost into specular_strength so the
                 // shader brightens the popup without needing a new uniform
@@ -6790,9 +7196,6 @@ impl WgpuRenderer {
         }
         // Auxiliary dish shadow casters.
         for (slot_i, d) in aux_dish_cmds.iter().enumerate() {
-            if slot_i >= MAX_AUX_DISH_SLOTS {
-                break;
-            }
             let center = pixel_to_world(
                 d.center_pos[0],
                 d.center_pos[1],
@@ -6922,6 +7325,116 @@ impl WgpuRenderer {
                         model: model.to_cols_array(),
                     }),
                 );
+            }
+        }
+
+        // ── Showcase tile GPU resources + uniforms ────────────────────────
+        // Grow or update the pool so each tile in every ShowcaseTileBatch has
+        // a ready-to-draw ShowcaseTileGpu slot with the correct decal and
+        // up-to-date model matrix.
+        {
+            let total_showcase: usize = showcase_tile_batches
+                .iter()
+                .map(|b| b.len())
+                .sum::<usize>()
+                .min(MAX_SHOWCASE_TILE_SLOTS);
+
+            // Ensure we have enough slots.
+            while self.showcase_tiles.len() < total_showcase {
+                // Placeholder — will be rebuilt immediately below if tile_id
+                // doesn't match, but we need *something* to hold the GPU
+                // resources. Use the first tile from the first batch.
+                let placeholder_tile = showcase_tile_batches
+                    .iter()
+                    .flat_map(|b| b.iter())
+                    .next()
+                    .map(|p| &p.tile);
+                if let Some(tile) = placeholder_tile {
+                    let stg = make_showcase_tile_gpu(
+                        &self.device,
+                        &self.queue,
+                        &self.tile_material_layout,
+                        &self.shadow_caster_layout,
+                        &self.tile_primitives,
+                        &self.tile_sampler,
+                        self.tile_base_color_factor,
+                        self.ui_font.as_ref(),
+                        self.emoji_font.as_ref(),
+                        tile,
+                    );
+                    self.showcase_tiles.push(stg);
+                } else {
+                    break;
+                }
+            }
+
+            let mut slot_cursor = 0usize;
+            for batch in &showcase_tile_batches {
+                for p in batch.iter() {
+                    if slot_cursor >= MAX_SHOWCASE_TILE_SLOTS {
+                        break;
+                    }
+                    let wanted_id = (p.tile.suit, p.tile.rank, p.tile.enhancement);
+                    // Re-rasterise decal if the tile identity changed.
+                    if self.showcase_tiles[slot_cursor].tile_id != wanted_id {
+                        self.showcase_tiles[slot_cursor] = make_showcase_tile_gpu(
+                            &self.device,
+                            &self.queue,
+                            &self.tile_material_layout,
+                            &self.shadow_caster_layout,
+                            &self.tile_primitives,
+                            &self.tile_sampler,
+                            self.tile_base_color_factor,
+                            self.ui_font.as_ref(),
+                            self.emoji_font.as_ref(),
+                            &p.tile,
+                        );
+                    }
+
+                    // Build model matrix from the placement's explicit 3D transform.
+                    let center = pixel_to_world(p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+                    let tile_short_px = p.size_px * 0.85;
+                    let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
+                    let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();
+                    let scale = glam::Vec3::new(
+                        tile_long_px / LOCAL_X_EXTENT,
+                        tile_thickness_px / LOCAL_Y_EXTENT,
+                        tile_short_px / LOCAL_Z_EXTENT,
+                    ) * p.scale;
+
+                    let rotation = Mat4::from_euler(
+                        glam::EulerRot::XYZ,
+                        p.rotation[0],
+                        p.rotation[1],
+                        p.rotation[2],
+                    );
+
+                    let model = Mat4::from_translation(center)
+                        * rotation
+                        * tile_basis
+                        * Mat4::from_scale(scale);
+
+                    let stg = &self.showcase_tiles[slot_cursor];
+                    self.queue.write_buffer(
+                        &stg.uniform_buffer,
+                        0,
+                        bytemuck::bytes_of(&CameraUniform {
+                            view_proj: view_proj_arr,
+                            model: model.to_cols_array(),
+                            base_color_factor: self.tile_base_color_factor,
+                        }),
+                    );
+                    self.queue.write_buffer(
+                        &stg.shadow_uniform_buffer,
+                        0,
+                        bytemuck::bytes_of(&ShadowCasterUniform {
+                            light_view_proj: light_view_proj_arr,
+                            model: model.to_cols_array(),
+                        }),
+                    );
+
+                    slot_cursor += 1;
+                }
             }
         }
 
@@ -7177,7 +7690,7 @@ impl WgpuRenderer {
 
             // Auxiliary dishes (shop).
             {
-                let n_aux = aux_dish_cmds.len().min(MAX_AUX_DISH_SLOTS);
+                let n_aux = aux_dish_cmds.len();
                 if n_aux > 0 {
                     shadow_pass.set_vertex_buffer(0, self.dish_mesh.vertex_buffer.slice(..));
                     shadow_pass.set_index_buffer(
@@ -7275,6 +7788,27 @@ impl WgpuRenderer {
                         continue;
                     };
                     shadow_pass.set_bind_group(0, &htg.shadow_bind_group, &[]);
+                    for prim in &self.tile_primitives {
+                        shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                        shadow_pass.set_index_buffer(
+                            prim.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        shadow_pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                    }
+                }
+
+                // Showcase tiles — same mesh, separate GPU resource pool.
+                let total_showcase: usize = showcase_tile_batches
+                    .iter()
+                    .map(|b| b.len())
+                    .sum::<usize>()
+                    .min(MAX_SHOWCASE_TILE_SLOTS);
+                for slot_i in 0..total_showcase {
+                    let Some(stg) = self.showcase_tiles.get(slot_i) else {
+                        break;
+                    };
+                    shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
                     for prim in &self.tile_primitives {
                         shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                         shadow_pass.set_index_buffer(
@@ -7429,8 +7963,32 @@ impl WgpuRenderer {
                         pass.draw_indexed(0..6, 0, 0..relic_glows.len() as u32);
                     }
                 }
+                RenderOp::PackBatch(batch_idx) => {
+                    let batch = pack_batches[*batch_idx];
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.relic_box_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    let mut start_slot = 0usize;
+                    for prev in 0..*batch_idx {
+                        start_slot += pack_batches[prev].len();
+                    }
+                    for (i, _) in batch.iter().enumerate() {
+                        let slot_i = start_slot + i;
+                        let Some(inst) = self.pack_instances.get(slot_i) else {
+                            break;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                    }
+                }
                 RenderOp::DishExplicit(idx) => {
-                    if *idx < self.aux_dish_instances.len() && *idx < MAX_AUX_DISH_SLOTS {
+                    if *idx < self.aux_dish_instances.len() {
                         pass.set_pipeline(&self.lit_mesh_pipeline);
                         pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
                         pass.set_bind_group(0, &self.aux_dish_instances[*idx].bind_group, &[]);
@@ -7833,6 +8391,41 @@ impl WgpuRenderer {
                         );
                         pass.set_bind_group(0, &inst.bind_group, &[]);
                         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                    }
+                }
+                RenderOp::ShowcaseTileBatch(batch_idx) => {
+                    if !self.tile_primitives.is_empty() {
+                        let batch = showcase_tile_batches[*batch_idx];
+                        if !batch.is_empty() {
+                            pass.set_pipeline(&self.tile_pipeline);
+                            pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                            pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                            let mut start_slot = 0usize;
+                            for prev in 0..*batch_idx {
+                                start_slot += showcase_tile_batches[prev].len();
+                            }
+                            for (i, _) in batch.iter().enumerate() {
+                                let slot_i = start_slot + i;
+                                if slot_i >= MAX_SHOWCASE_TILE_SLOTS {
+                                    break;
+                                }
+                                let Some(stg) = self.showcase_tiles.get(slot_i) else {
+                                    break;
+                                };
+                                for (pi, prim) in self.tile_primitives.iter().enumerate() {
+                                    let Some(bg) = stg.bind_groups.get(pi) else {
+                                        continue;
+                                    };
+                                    pass.set_bind_group(0, bg, &[]);
+                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                                    pass.set_index_buffer(
+                                        prim.index_buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                                }
+                            }
+                        }
                     }
                 }
                 RenderOp::HandTileBackdrop => {

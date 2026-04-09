@@ -826,6 +826,8 @@ struct App {
     smoke_detail: crate::persistence::SmokeDetail,
     /// Mahjong tile size preset (persisted in settings).
     tile_preset: crate::persistence::TilePreset,
+    /// Tile material / colour scheme (persisted in settings).
+    tile_material: crate::persistence::TileMaterial,
     /// Display gamma correction exponent (persisted in settings).
     gamma: f32,
     /// Whether realtime shadows are enabled (persisted in settings).
@@ -961,6 +963,7 @@ impl App {
             smoke_intensity: settings.smoke_intensity,
             smoke_detail: settings.smoke_detail,
             tile_preset: settings.tile_preset,
+            tile_material: settings.tile_material,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
@@ -1381,11 +1384,21 @@ impl App {
         let draw_settle_speed = 8.0 * (500.0 / self.cascade_tuning.draw_settle_ms.max(1) as f32);
         let sort_settle_speed = 10.0 * (400.0 / self.cascade_tuning.sort_settle_ms.max(1) as f32);
 
+        // When a run is active, use its tile material (gameplay choice);
+        // otherwise fall back to the options-screen cosmetic setting.
+        let active_material = frame.tile_material_override.unwrap_or_else(|| {
+            if self.run.is_in_progress() {
+                self.run.mode.tile_material
+            } else {
+                self.tile_material
+            }
+        });
         if let Err(e) = renderer.render(
             &frame,
             self.smoke_intensity,
             self.smoke_detail,
             self.tile_preset,
+            active_material,
             draw_settle_speed,
             sort_settle_speed,
             self.gamma,
@@ -1522,6 +1535,22 @@ impl App {
                     );
                 } else {
                     log::info!("[Debug] Object hit test disarmed");
+                }
+            }
+            DebugAction::RerollShop => {
+                if let Scene::Shop(shop) = &mut self.scene {
+                    shop.debug_reroll(&self.run);
+                    log::info!("[Debug] Rerolled shop stock (free)");
+                } else {
+                    log::warn!("[Debug] Reroll Shop ignored — not in shop scene");
+                }
+            }
+            DebugAction::OpenPack => {
+                if let Scene::Shop(shop) = &mut self.scene {
+                    shop.debug_open_pack(&mut self.run);
+                    log::info!("[Debug] Opened tile pack celebration");
+                } else {
+                    log::warn!("[Debug] Open Pack ignored — not in shop scene");
                 }
             }
             DebugAction::SetBoss(kind) => {
@@ -1662,6 +1691,15 @@ impl ApplicationHandler for App {
                             // Same as RoundComplete: hold until the final
                             // cascade has finished animating.
                             self.deferred_round_end = Some(ev);
+                        }
+                        GameEvent::PackBought => {
+                            self.audio.play_sfx(audio::SfxId::PackBuy);
+                        }
+                        GameEvent::PackOpened => {
+                            self.audio.play_sfx(audio::SfxId::PackOpen);
+                        }
+                        GameEvent::PackTileRevealed => {
+                            self.audio.play_sfx(audio::SfxId::PackTileReveal);
                         }
                         other => log::info!("event: {other:?}"),
                     }
@@ -1892,6 +1930,7 @@ impl ApplicationHandler for App {
                     self.smoke_intensity = opts.smoke_intensity;
                     self.smoke_detail = opts.smoke_detail;
                     self.tile_preset = opts.tile_preset;
+                    self.tile_material = opts.tile_material;
                     self.gamma = opts.gamma;
                     self.shadows_enabled = opts.shadows_enabled;
                     self.ssr_enabled = opts.ssr_enabled;

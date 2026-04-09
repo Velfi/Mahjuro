@@ -44,6 +44,7 @@
 use crate::render::theme::{self, ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
+use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::widget;
 
@@ -924,7 +925,7 @@ fn draw_node<A: Copy>(
                 .unwrap_or([0.0, 0.0, 0.0, 0.0]);
             *idx += 1;
             let is_focused = focused == Some(item.id);
-            draw_item(item, rect, is_focused, frame, render_custom);
+            draw_item(item, rect, is_focused, frame, render_custom, window);
         }
         Node::Decoration(d) => {
             // Decorations need their own rect; we recompute it from the
@@ -992,6 +993,7 @@ fn draw_item<A: Copy>(
     focused: bool,
     frame: &mut TreeFrame<'_>,
     render_custom: &dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState),
+    window: (f32, f32),
 ) {
     let state = if !item.enabled {
         ButtonState::Disabled
@@ -1005,6 +1007,13 @@ fn draw_item<A: Copy>(
     } else {
         FocusState::Rest
     };
+
+    // Draw a gold focus ring around the focused item — the 2D equivalent
+    // of the 3D tile outline shell that selected in-game tiles get.
+    if focused {
+        let scale = (window.0.min(window.1)) / 600.0;
+        push_focus_ring(rect, scale, frame.instances);
+    }
 
     match &item.kind {
         ItemKind::Button { label, variant, .. } => {

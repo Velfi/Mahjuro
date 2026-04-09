@@ -154,7 +154,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::MultiplierMaster,
                 RelicId::GreenLuck,
                 RelicId::QuickDraw,
-                RelicId::ShantenLens,
+                RelicId::ShantenShove,
             ],
             rules: vec![],
         },

@@ -939,7 +939,7 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::DragonEcho => "Resonates with adjacent sets.".into(),
         RelicId::RedDragonRage => "Fury of the red dragon.".into(),
         // ── Patch C new relics ──
-        RelicId::ShantenLens => "Sees the path to completion.".into(),
+        RelicId::ShantenShove => "One last push toward tenpai.".into(),
         RelicId::WallPeek => "Glimpses what's coming.".into(),
         RelicId::KanDrum => "Beats louder for every kong.".into(),
         RelicId::DoraCrown => "Crown of indicators.".into(),
@@ -954,6 +954,10 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::EightTreasures => "A complete hand pulls a Zodiac from the air.".into(),
         RelicId::KongsBlessing => "Kongs blessed with a pair's power.".into(),
         RelicId::CodexCompass => "Reshape your loadout mid-round.".into(),
+        // ── Flower-synergy relics ──
+        RelicId::GardenKeeper => "Tends the garden with double care.".into(),
+        RelicId::Ikebana => "Art in arranging many flowers.".into(),
+        RelicId::Hanami => "Gold blooms under the blossoms.".into(),
     }
 }
 
@@ -1106,6 +1110,7 @@ fn talisman_accent(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Pearl => [0.85, 0.88, 0.95, 1.0],
         TalismanKind::Gilded => [0.95, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.80, 0.40, 0.90, 1.0],
+        TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
     }
 }
 
@@ -1116,6 +1121,7 @@ fn talisman_tint(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
         TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
+        TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
     }
 }
 

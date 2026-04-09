@@ -56,7 +56,7 @@ pub fn push_panel_colored(
 /// Standard border thickness for a rect — small enough to look like an
 /// inlay, large enough to be visible at low resolutions.
 fn border_thickness(rect: [f32; 4]) -> f32 {
-    (rect[3] * 0.025).clamp(1.0, 3.0)
+    (rect[3] * 0.018).clamp(1.0, 2.0)
 }
 
 /// Draw a 4-quad inset border around the inside of `rect`.
