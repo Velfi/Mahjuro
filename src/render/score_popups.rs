@@ -94,9 +94,8 @@ impl ScorePopupSystem {
 
     /// Advance the system; despawn any popups whose lifetime has elapsed.
     pub fn update(&mut self, now: Instant) {
-        self.popups.retain(|p| {
-            now.saturating_duration_since(p.born_at).as_secs_f32() < LIFETIME
-        });
+        self.popups
+            .retain(|p| now.saturating_duration_since(p.born_at).as_secs_f32() < LIFETIME);
     }
 
     /// Drop every popup immediately. Called when the cascade ends or is
@@ -129,14 +128,12 @@ impl ScorePopupSystem {
                     let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.25;
                     (s, 1.0, 0.0, 0.0)
                 } else if t < T_SETTLE_END {
-                    let local =
-                        (t - T_BIRTH_END) / (T_SETTLE_END - T_BIRTH_END);
+                    let local = (t - T_BIRTH_END) / (T_SETTLE_END - T_BIRTH_END);
                     // Relax 1.25 → 1.0
                     let s = 1.25 + (1.0 - 1.25) * local;
                     (s, 1.0, 0.0, LIFT_DRIFT * local)
                 } else if t < T_DRIFT_END {
-                    let local =
-                        (t - T_SETTLE_END) / (T_DRIFT_END - T_SETTLE_END);
+                    let local = (t - T_SETTLE_END) / (T_DRIFT_END - T_SETTLE_END);
                     // Ease-in-cubic: accelerates toward the score panel.
                     let pt = local * local * local;
                     (1.0, 1.0, pt, LIFT_DRIFT)

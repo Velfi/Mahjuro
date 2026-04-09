@@ -549,13 +549,12 @@ impl RunState {
             let base_reward = self.blind.clear_reward();
             let unused_play_bonus = self.plays_remaining;
             let interest = (self.gold / 5).min(5);
-            let green_luck_bonus = if self.relics.has(RelicId::GreenLuck)
-                && !self.honors_scored_this_round
-            {
-                4
-            } else {
-                0
-            };
+            let green_luck_bonus =
+                if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
+                    4
+                } else {
+                    0
+                };
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
