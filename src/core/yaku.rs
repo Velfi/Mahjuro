@@ -8,7 +8,7 @@ use crate::core::tile::{Suit, Tile};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum YakuKind {
     /// All tiles are 2–8 of a number suit (no terminals or honors). Tied to
-    /// the Rat zodiac.
+    /// the Monkey zodiac.
     Tanyao,
     /// All melds are triplets (or kongs) — no sequences. Tied to the Ox zodiac.
     Toitoi,
@@ -25,12 +25,12 @@ pub enum YakuKind {
     /// zodiac.
     SanshokuDoujun,
     /// 1-9 straight in one number suit (3 sequences: 1-2-3, 4-5-6, 7-8-9).
-    /// Tied to the Monkey zodiac.
+    /// Tied to the Snake zodiac.
     Ittsu,
     /// One number suit + honors only (no other number suits). Tied to the
-    /// Rooster zodiac.
+    /// Mouse zodiac.
     Honitsu,
-    /// Single number suit, no honors. Tied to the Snake zodiac.
+    /// Single number suit, no honors. Tied to the Rat zodiac.
     Chinitsu,
     /// Every meld contains a terminal (rank 1 or 9). Tied to the Goat zodiac.
     Junchan,
@@ -39,6 +39,10 @@ pub enum YakuKind {
     Honroutou,
     /// Seven distinct pairs (alternate hand shape). Tied to the Pig zodiac.
     Chiitoitsu,
+    /// A structurally valid hand that triggers no other yaku. Scores base
+    /// chips × 1 mult — legal, but worth very little. Tied to the Rooster
+    /// zodiac.
+    ChickenHand,
 }
 
 impl YakuKind {
@@ -66,6 +70,7 @@ impl YakuKind {
             YakuKind::Junchan => 4.0,
             YakuKind::Honroutou => 4.0,
             YakuKind::Chiitoitsu => 4.0,
+            YakuKind::ChickenHand => 0.0,
         }
     }
 
@@ -91,6 +96,7 @@ impl YakuKind {
             YakuKind::Junchan => 50,
             YakuKind::Honroutou => 40,
             YakuKind::Chiitoitsu => 50,
+            YakuKind::ChickenHand => 0,
         }
     }
 
@@ -133,10 +139,11 @@ impl YakuKind {
             YakuKind::Junchan => "Junchan",
             YakuKind::Honroutou => "Honroutou",
             YakuKind::Chiitoitsu => "Chiitoitsu",
+            YakuKind::ChickenHand => "Chicken Hand",
         }
     }
 
-    /// All 12 canonical yaku, in display order.
+    /// All 13 yaku, in display order.
     pub fn all() -> &'static [YakuKind] {
         &[
             YakuKind::Tanyao,
@@ -151,6 +158,7 @@ impl YakuKind {
             YakuKind::Honitsu,
             YakuKind::Yakuhai,
             YakuKind::Chiitoitsu,
+            YakuKind::ChickenHand,
         ]
     }
 }
@@ -248,7 +256,8 @@ pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> 
                 | YakuKind::Chinitsu
                 | YakuKind::Junchan
                 | YakuKind::Honroutou
-                | YakuKind::Chiitoitsu => {
+                | YakuKind::Chiitoitsu
+                | YakuKind::ChickenHand => {
                     if active {
                         1.0
                     } else {

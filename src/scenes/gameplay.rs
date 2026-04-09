@@ -3925,6 +3925,9 @@ fn yaku_card_shape_text(yk: crate::core::yaku::YakuKind) -> &'static str {
         YakuKind::Chiitoitsu => {
             "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
         }
+        YakuKind::ChickenHand => {
+            "Valid hand with no yaku \u{2014} scores base chips \u{00d7} 1 mult"
+        }
     }
 }
 

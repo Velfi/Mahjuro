@@ -27,6 +27,7 @@ use crate::core::yaku::YakuKind;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZodiacKind {
+    Mouse,
     Rat,
     Ox,
     Tiger,
@@ -42,9 +43,10 @@ pub enum ZodiacKind {
 }
 
 impl ZodiacKind {
-    /// All 12 zodiacs in calendar order.
+    /// All 13 zodiacs in calendar order (Mouse precedes Rat).
     pub fn all() -> &'static [ZodiacKind] {
         &[
+            ZodiacKind::Mouse,
             ZodiacKind::Rat,
             ZodiacKind::Ox,
             ZodiacKind::Tiger,
@@ -63,6 +65,7 @@ impl ZodiacKind {
     /// English display name.
     pub fn name(self) -> &'static str {
         match self {
+            ZodiacKind::Mouse => "Mouse",
             ZodiacKind::Rat => "Rat",
             ZodiacKind::Ox => "Ox",
             ZodiacKind::Tiger => "Tiger",
@@ -83,16 +86,17 @@ impl ZodiacKind {
     /// each pairing.
     pub fn yaku(self) -> YakuKind {
         match self {
-            ZodiacKind::Rat => YakuKind::Tanyao,
+            ZodiacKind::Mouse => YakuKind::Honitsu,
+            ZodiacKind::Rat => YakuKind::Chinitsu,
             ZodiacKind::Ox => YakuKind::Toitoi,
             ZodiacKind::Tiger => YakuKind::Honroutou,
             ZodiacKind::Rabbit => YakuKind::Iipeikou,
             ZodiacKind::Dragon => YakuKind::FullHand,
-            ZodiacKind::Snake => YakuKind::Chinitsu,
+            ZodiacKind::Snake => YakuKind::Ittsu,
             ZodiacKind::Horse => YakuKind::SanshokuDoujun,
             ZodiacKind::Goat => YakuKind::Junchan,
-            ZodiacKind::Monkey => YakuKind::Ittsu,
-            ZodiacKind::Rooster => YakuKind::Honitsu,
+            ZodiacKind::Monkey => YakuKind::Tanyao,
+            ZodiacKind::Rooster => YakuKind::ChickenHand,
             ZodiacKind::Dog => YakuKind::Yakuhai,
             ZodiacKind::Pig => YakuKind::Chiitoitsu,
         }
@@ -103,6 +107,7 @@ impl ZodiacKind {
     /// `scripts/generate_zodiac_ribbons.py`.
     pub fn slug(self) -> &'static str {
         match self {
+            ZodiacKind::Mouse => "mouse",
             ZodiacKind::Rat => "rat",
             ZodiacKind::Ox => "ox",
             ZodiacKind::Tiger => "tiger",
