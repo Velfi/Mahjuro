@@ -28,9 +28,7 @@ use crate::render::draw_cmd::{
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
-use crate::ui::focus_nav::{
-    FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring,
-};
+use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, PanelVariant, TextStyle};
 
@@ -126,9 +124,7 @@ fn shop_action_for_hit(
             let zodiac_for_sale: Vec<usize> = consumable_items
                 .iter()
                 .enumerate()
-                .filter_map(|(idx, c)| {
-                    matches!(c.consumable, Consumable::Zodiac(_)).then_some(idx)
-                })
+                .filter_map(|(idx, c)| matches!(c.consumable, Consumable::Zodiac(_)).then_some(idx))
                 .collect();
             if i < zodiac_for_sale.len() {
                 Some(ShopAction::BuyConsumable(zodiac_for_sale[i]))
@@ -945,12 +941,9 @@ impl SceneBehavior for ShopScene {
                         return Some(Scene::PickBlind(PickBlindScene::new()));
                     }
                     if let Some(hit) = focus.to_hit() {
-                        if let Some(action) = shop_action_for_hit(
-                            hit,
-                            &self.items,
-                            &self.consumable_items,
-                            ctx.run,
-                        ) {
+                        if let Some(action) =
+                            shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
+                        {
                             apply_shop_action(
                                 action,
                                 &mut self.items,
@@ -1005,12 +998,7 @@ impl SceneBehavior for ShopScene {
             if let Some(action) =
                 shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
             {
-                apply_shop_action(
-                    action,
-                    &mut self.items,
-                    &mut self.consumable_items,
-                    ctx.run,
-                );
+                apply_shop_action(action, &mut self.items, &mut self.consumable_items, ctx.run);
             }
             return None;
         }

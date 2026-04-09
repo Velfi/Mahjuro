@@ -110,15 +110,7 @@ pub fn build_river_mesh() -> MeshCpu {
     //    surface animation on.
     let wx = inner_x - 0.005;
     let wz = inner_z - 0.005;
-    push_water_quad(
-        &mut vertices,
-        &mut indices,
-        -wx,
-        wx,
-        WATER_Y,
-        -wz,
-        wz,
-    );
+    push_water_quad(&mut vertices, &mut indices, -wx, wx, WATER_Y, -wz, wz);
 
     MeshCpu {
         vertices,

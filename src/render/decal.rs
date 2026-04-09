@@ -221,7 +221,9 @@ pub fn rasterize_plaque_decal(
     // Tight band heights: ~1.15× font_px gives just enough room for ascender
     // + descender without leaving a gap that puffs the line spacing.
     let top_h = ((top_px * 1.15) as u32).min(inner_h).max(1);
-    let bot_h = ((bot_px * 1.15) as u32).min(inner_h - top_h.min(inner_h - 1)).max(1);
+    let bot_h = ((bot_px * 1.15) as u32)
+        .min(inner_h - top_h.min(inner_h - 1))
+        .max(1);
 
     let top_band =
         rasterize_label_styled(font, top, inner_w, top_h, Some(top_px), LabelAlign::Center);
@@ -237,7 +239,16 @@ pub fn rasterize_plaque_decal(
 
     let gild = |band: &[u8], band_h: u32, y_off: u32, rgba: &mut Vec<u8>| {
         // Drop shadow first (offset down-right so the recess reads from above).
-        blit_tinted(band, inner_w, band_h, rgba, w, pad_x + 3, y_off + 3, gold_shadow);
+        blit_tinted(
+            band,
+            inner_w,
+            band_h,
+            rgba,
+            w,
+            pad_x + 3,
+            y_off + 3,
+            gold_shadow,
+        );
         // Gold body.
         blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, gold_base);
         // Bright highlight offset up-left so the leaf catches the light.
@@ -315,9 +326,7 @@ pub fn rasterize_ofuda_decal(
     // Rule: word-wrap on a rough character budget per line so the body
     // reads as 2–3 stacked lines. The wrapped block gets the remaining
     // vertical room after the title and gap.
-    let rule_h = inner_h
-        .saturating_sub(title_h + gap_h)
-        .max(1);
+    let rule_h = inner_h.saturating_sub(title_h + gap_h).max(1);
     // Aim for ~3 lines of body copy at maximum (most boss rules wrap to 1–2),
     // with a tall clamp ceiling so short rules render at full size and fill
     // the paper face rather than floating as thin strokes after the bilinear
@@ -463,14 +472,7 @@ pub fn rasterize_soroban_decal(
         gold_shadow,
     );
     blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x,
-        pad_y,
-        gold_base,
+        &band, inner_w, inner_h, &mut rgba, w, pad_x, pad_y, gold_base,
     );
     blit_tinted(
         &band,
@@ -544,16 +546,7 @@ pub fn rasterize_soroban_cartouche_decal(
         pad_y_top + 1,
         shadow,
     );
-    blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x,
-        pad_y_top,
-        ink,
-    );
+    blit_tinted(&band, inner_w, inner_h, &mut rgba, w, pad_x, pad_y_top, ink);
     rgba
 }
 

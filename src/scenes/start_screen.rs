@@ -123,7 +123,8 @@ impl StartScreenScene {
     }
 
     fn build_anchored_tree(&self, in_progress: bool, w: f32, h: f32) -> Tree<MainAction> {
-        self.build_tree(in_progress).with_anchor(Self::menu_anchor(w, h))
+        self.build_tree(in_progress)
+            .with_anchor(Self::menu_anchor(w, h))
     }
 
     fn start_game(&self, run: &mut RunState) -> SceneTransition {

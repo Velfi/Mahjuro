@@ -1028,27 +1028,17 @@ impl App {
                 )];
                 lines.push(format!("Base reward  +${}", payout.base_reward));
                 if payout.unused_play_bonus > 0 {
-                    lines.push(format!(
-                        "Unused plays  +${}",
-                        payout.unused_play_bonus
-                    ));
+                    lines.push(format!("Unused plays  +${}", payout.unused_play_bonus));
                 }
                 if payout.interest > 0 {
                     lines.push(format!("Interest  +${}", payout.interest));
                 }
                 if payout.green_luck_bonus > 0 {
-                    lines.push(format!(
-                        "Green Luck  +${}",
-                        payout.green_luck_bonus
-                    ));
+                    lines.push(format!("Green Luck  +${}", payout.green_luck_bonus));
                 }
                 lines.push(format!("Total  +${}", payout.total));
-                let modal = Modal::new(
-                    "Round Complete!",
-                    lines.join("\n"),
-                    ModalTheme::Success,
-                )
-                .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
+                let modal = Modal::new("Round Complete!", lines.join("\n"), ModalTheme::Success)
+                    .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                 self.modals.push(modal);
                 let final_score = self.run.round_score;
                 let target = self.run.target_score;
@@ -1356,9 +1346,7 @@ impl App {
             let hide_inv = self.hide_inventory;
             frame.cmds.retain(|c| {
                 use crate::render::draw_cmd::DrawCmd;
-                if hide_tiles
-                    && matches!(c, DrawCmd::HandTileBackdrop | DrawCmd::HandTileFaces)
-                {
+                if hide_tiles && matches!(c, DrawCmd::HandTileBackdrop | DrawCmd::HandTileFaces) {
                     return false;
                 }
                 if hide_inv

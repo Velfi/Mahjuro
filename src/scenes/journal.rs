@@ -169,7 +169,12 @@ impl JournalOverlay {
             let off = (3 - i) as f32 * (2.0 * scale);
             let cream = color::darken(color::PARCHMENT, 0.18 - i as f32 * 0.04);
             instances.push(GpuInstance {
-                rect: [book_x - off, book_y - off, book_w + off * 2.0, book_h + off * 2.0],
+                rect: [
+                    book_x - off,
+                    book_y - off,
+                    book_w + off * 2.0,
+                    book_h + off * 2.0,
+                ],
                 color: cream,
             });
         }
@@ -275,10 +280,7 @@ impl JournalOverlay {
                 let mult = yk.mult_bonus_at(lvl);
                 let chip = yk.chip_bonus_at(lvl);
                 let plays = run.yaku_times_played.get(&yk).copied().unwrap_or(0);
-                let stats = format!(
-                    "Lv {}   +{} m / +{} c   {}×",
-                    lvl, mult, chip, plays,
-                );
+                let stats = format!("Lv {}   +{} m / +{} c   {}×", lvl, mult, chip, plays,);
                 (yk.name().to_string(), stats, yaku_shape_text(yk))
             })
             .collect();
@@ -424,13 +426,27 @@ impl JournalOverlay {
         for (i, (name, stats, shape)) in left_entries.iter().enumerate() {
             let y = entries_top + i as f32 * row_step;
             push_entry(
-                text_labels, instances, name, stats, shape, left_page_x, y, page_inner_w,
+                text_labels,
+                instances,
+                name,
+                stats,
+                shape,
+                left_page_x,
+                y,
+                page_inner_w,
             );
         }
         for (i, (name, stats, shape)) in right_entries.iter().enumerate() {
             let y = entries_top + i as f32 * row_step;
             push_entry(
-                text_labels, instances, name, stats, shape, right_page_x, y, page_inner_w,
+                text_labels,
+                instances,
+                name,
+                stats,
+                shape,
+                right_page_x,
+                y,
+                page_inner_w,
             );
         }
 
@@ -441,7 +457,12 @@ impl JournalOverlay {
         let seal_x = book_x + (book_w - seal_d) * 0.5;
         let seal_y = book_y + book_h - seal_d - (6.0 * scale);
         instances.push(GpuInstance {
-            rect: [seal_x - (2.0 * scale), seal_y - (2.0 * scale), seal_d + (4.0 * scale), seal_d + (4.0 * scale)],
+            rect: [
+                seal_x - (2.0 * scale),
+                seal_y - (2.0 * scale),
+                seal_d + (4.0 * scale),
+                seal_d + (4.0 * scale),
+            ],
             color: color::ANTIQUE,
         });
         instances.push(GpuInstance {

@@ -54,26 +54,71 @@ mod segs {
     const HX: f32 = 0.62 / 2.0 - 2.0 * T;
 
     /// Top horizontal (segment a in 7-seg parlance).
-    pub const A: Seg = Seg { x0: -HX, x1: HX, y0: 0.5 - 2.0 * T, y1: 0.5 };
+    pub const A: Seg = Seg {
+        x0: -HX,
+        x1: HX,
+        y0: 0.5 - 2.0 * T,
+        y1: 0.5,
+    };
     /// Middle horizontal (segment g).
-    pub const G: Seg = Seg { x0: -HX, x1: HX, y0: -T, y1: T };
+    pub const G: Seg = Seg {
+        x0: -HX,
+        x1: HX,
+        y0: -T,
+        y1: T,
+    };
     /// Bottom horizontal (segment d).
-    pub const D: Seg = Seg { x0: -HX, x1: HX, y0: -0.5, y1: -0.5 + 2.0 * T };
+    pub const D: Seg = Seg {
+        x0: -HX,
+        x1: HX,
+        y0: -0.5,
+        y1: -0.5 + 2.0 * T,
+    };
 
     /// Top-right vertical (segment b).
-    pub const B: Seg = Seg { x0: HX, x1: HX + 2.0 * T, y0: T, y1: 0.5 - 2.0 * T };
+    pub const B: Seg = Seg {
+        x0: HX,
+        x1: HX + 2.0 * T,
+        y0: T,
+        y1: 0.5 - 2.0 * T,
+    };
     /// Bottom-right vertical (segment c).
-    pub const C: Seg = Seg { x0: HX, x1: HX + 2.0 * T, y0: -0.5 + 2.0 * T, y1: -T };
+    pub const C: Seg = Seg {
+        x0: HX,
+        x1: HX + 2.0 * T,
+        y0: -0.5 + 2.0 * T,
+        y1: -T,
+    };
     /// Top-left vertical (segment f).
-    pub const F: Seg = Seg { x0: -HX - 2.0 * T, x1: -HX, y0: T, y1: 0.5 - 2.0 * T };
+    pub const F: Seg = Seg {
+        x0: -HX - 2.0 * T,
+        x1: -HX,
+        y0: T,
+        y1: 0.5 - 2.0 * T,
+    };
     /// Bottom-left vertical (segment e).
-    pub const E: Seg = Seg { x0: -HX - 2.0 * T, x1: -HX, y0: -0.5 + 2.0 * T, y1: -T };
+    pub const E: Seg = Seg {
+        x0: -HX - 2.0 * T,
+        x1: -HX,
+        y0: -0.5 + 2.0 * T,
+        y1: -T,
+    };
 
     /// Decimal point: small square anchored at the bottom-right.
-    pub const DOT: Seg = Seg { x0: HX, x1: HX + 2.0 * T, y0: -0.5, y1: -0.5 + 2.0 * T };
+    pub const DOT: Seg = Seg {
+        x0: HX,
+        x1: HX + 2.0 * T,
+        y0: -0.5,
+        y1: -0.5 + 2.0 * T,
+    };
 
     /// "+" / "x" vertical bar centred about the origin.
-    pub const PLUS_V: Seg = Seg { x0: -T, x1: T, y0: -0.32, y1: 0.32 };
+    pub const PLUS_V: Seg = Seg {
+        x0: -T,
+        x1: T,
+        y0: -0.32,
+        y1: 0.32,
+    };
 }
 
 fn segments_for(c: char) -> &'static [Seg] {
@@ -216,7 +261,9 @@ mod tests {
         let mut cache = GlyphMeshCache::new();
         // "Q" is unsupported; "5" is. The mesh should still build with
         // just the "5" segments and not panic.
-        let mesh = cache.mesh_for("Q5").expect("Q5 should still produce a mesh");
+        let mesh = cache
+            .mesh_for("Q5")
+            .expect("Q5 should still produce a mesh");
         assert!(!mesh.vertices.is_empty());
     }
 

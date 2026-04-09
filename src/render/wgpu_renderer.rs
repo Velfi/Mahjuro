@@ -13,10 +13,6 @@ use winit::window::Window;
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, Tile};
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
-use crate::render::river_mesh::{
-    RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
-    build_river_mesh,
-};
 use crate::render::candle_mesh::{CandlePlacement, build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::curio_cabinet_mesh::build_curio_cabinet_mesh;
@@ -32,24 +28,28 @@ use crate::render::draw_cmd::{
     ShrinePlacement, SorobanPlacement, TalismanPlacement, UiFrame, WallStackPlacement,
     WoodTabletPlacement, YakuTabletPlacement, ZodiacRibbonPlacement,
 };
-use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
     create_shadow_caster_layout, create_shadow_sample_layout,
 };
+use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::peg_block_mesh::build_peg_block_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
-use crate::render::soroban_mesh::{
-    build_soroban_cartouche_mesh, build_soroban_chip_bead_mesh, build_soroban_frame_mesh,
-    build_soroban_mult_bead_mesh, build_soroban_rod_mesh, chip_bead_x, mult_bead_x,
-    CARTOUCHE_OFFSET_Y, CARTOUCHE_OFFSET_Z, CHIP_BEAD_COUNT, CHIP_RAIL_Y, MULT_BEAD_COUNT,
-    MULT_RAIL_Y, RAIL_Z,
-};
 use crate::render::relic_dish::{build_dish_mesh, build_unit_box_mesh};
 use crate::render::ribbon_mesh::build_ribbon_mesh;
+use crate::render::river_mesh::{
+    RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
+    build_river_mesh,
+};
 use crate::render::shrine_mesh::build_shrine_mesh;
+use crate::render::soroban_mesh::{
+    CARTOUCHE_OFFSET_Y, CARTOUCHE_OFFSET_Z, CHIP_BEAD_COUNT, CHIP_RAIL_Y, MULT_BEAD_COUNT,
+    MULT_RAIL_Y, RAIL_Z, build_soroban_cartouche_mesh, build_soroban_chip_bead_mesh,
+    build_soroban_frame_mesh, build_soroban_mult_bead_mesh, build_soroban_rod_mesh, chip_bead_x,
+    mult_bead_x,
+};
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
@@ -1026,7 +1026,12 @@ fn load_coin_heightmap(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> (wgpu::Texture, wgpu::TextureView) {
-    load_metal_heightmap(device, queue, "textures/coin_heightmap.png", "coin-heightmap")
+    load_metal_heightmap(
+        device,
+        queue,
+        "textures/coin_heightmap.png",
+        "coin-heightmap",
+    )
 }
 
 /// Decode the embedded bronze mirror heightmap PNG and upload it as a
@@ -1083,14 +1088,7 @@ fn load_metal_heightmap(
         }
         Err(e) => {
             log::warn!("failed to decode {label}: {e} — using flat fallback");
-            upload_rgba_texture_linear(
-                device,
-                queue,
-                flat_label,
-                &[128, 128, 128, 255],
-                1,
-                1,
-            )
+            upload_rgba_texture_linear(device, queue, flat_label, &[128, 128, 128, 255], 1, 1)
         }
     }
 }
@@ -1201,13 +1199,10 @@ fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
 fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
     let (tx, rx) = mpsc::channel();
 
-    let backgrounds: Vec<(BackgroundId, &'static str)> = [
-        BackgroundId::Menu,
-        BackgroundId::Score,
-    ]
-    .iter()
-    .filter_map(|id| id.asset_path().map(|p| (*id, p)))
-    .collect();
+    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::Menu, BackgroundId::Score]
+        .iter()
+        .filter_map(|id| id.asset_path().map(|p| (*id, p)))
+        .collect();
 
     std::thread::Builder::new()
         .name("bg-loader".into())
@@ -2558,8 +2553,7 @@ impl WgpuRenderer {
         // lit-mesh draws sharing a parent transform.
         let soroban_frame_mesh =
             LitMeshGpu::new(&device, &build_soroban_frame_mesh(), "soroban-frame");
-        let soroban_rod_mesh =
-            LitMeshGpu::new(&device, &build_soroban_rod_mesh(), "soroban-rod");
+        let soroban_rod_mesh = LitMeshGpu::new(&device, &build_soroban_rod_mesh(), "soroban-rod");
         let soroban_chip_bead_mesh = LitMeshGpu::new(
             &device,
             &build_soroban_chip_bead_mesh(),
@@ -4538,12 +4532,10 @@ impl WgpuRenderer {
                 let mid_x = (start_cx + dep.river_target.0) * 0.5;
                 let mid_y = start_cy.min(dep.river_target.1) - 110.0;
                 let one_u = 1.0 - u;
-                let bx = one_u * one_u * start_cx
-                    + 2.0 * one_u * u * mid_x
-                    + u * u * dep.river_target.0;
-                let by = one_u * one_u * start_cy
-                    + 2.0 * one_u * u * mid_y
-                    + u * u * dep.river_target.1;
+                let bx =
+                    one_u * one_u * start_cx + 2.0 * one_u * u * mid_x + u * u * dep.river_target.0;
+                let by =
+                    one_u * one_u * start_cy + 2.0 * one_u * u * mid_y + u * u * dep.river_target.1;
                 // Slight shrink during the arc — the tile reads as
                 // moving away from the camera as it falls into the
                 // recessed water surface.
@@ -4757,18 +4749,18 @@ impl WgpuRenderer {
             HandTileFaces,
             FluidSmoke,
             // Skeuomorphic gameplay HUD (phase 1).
-            Plaque(usize),            // index into `plaque_cmds`
-            Ofuda(usize),             // index into `ofuda_cmds`
-            YakuTabletBatch(usize),   // index into `yaku_tablet_batches`
-            WoodTabletBatch(usize),   // index into `wood_tablet_batches`
-            Bowl(usize),              // index into `bowl_cmds`
-            Mirror(usize),            // index into `mirror_cmds`
-            PegBlock(usize),          // index into `peg_block_cmds`
-            WallStack(usize),         // index into `wall_stack_cmds`
-            DoraStand(usize),         // index into `dora_stand_cmds`
-            Soroban(usize),           // index into `soroban_cmds`
-            CascadeTokenBatch(usize), // index into `cascade_token_batches`
-            FallingBoneBatch(usize),  // index into `falling_bone_batches`
+            Plaque(usize),             // index into `plaque_cmds`
+            Ofuda(usize),              // index into `ofuda_cmds`
+            YakuTabletBatch(usize),    // index into `yaku_tablet_batches`
+            WoodTabletBatch(usize),    // index into `wood_tablet_batches`
+            Bowl(usize),               // index into `bowl_cmds`
+            Mirror(usize),             // index into `mirror_cmds`
+            PegBlock(usize),           // index into `peg_block_cmds`
+            WallStack(usize),          // index into `wall_stack_cmds`
+            DoraStand(usize),          // index into `dora_stand_cmds`
+            Soroban(usize),            // index into `soroban_cmds`
+            CascadeTokenBatch(usize),  // index into `cascade_token_batches`
+            FallingBoneBatch(usize),   // index into `falling_bone_batches`
             ExtrudedGlyphBatch(usize), // index into `extruded_glyph_batches`
         }
 
@@ -5250,12 +5242,8 @@ impl WgpuRenderer {
                     material,
                 );
                 self.last_relic_models.push(model);
-                self.last_debug_pickables.push((
-                    "Relic",
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push(("Relic", model, glam::Vec3::splat(0.5), 0.0));
 
                 // Project the box's 8 world corners to screen and take the
                 // bounding rect — gives a 2D hit-test region the scene
@@ -5565,25 +5553,24 @@ impl WgpuRenderer {
                         None => &self.lit_mesh_white_view,
                     };
                     let inst = &mut self.ribbon_instances[slot_i];
-                    inst.bind_group =
-                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("ribbon-bg-zodiac"),
-                            layout: &self.lit_mesh_material_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: inst.uniform_buffer.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
-                                },
-                            ],
-                        });
+                    inst.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("ribbon-bg-zodiac"),
+                        layout: &self.lit_mesh_material_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: inst.uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                            },
+                        ],
+                    });
                     self.ribbon_slot_zodiac[slot_i] = want_zod;
                 }
                 self.ribbon_instances[slot_i].write_uniform(
@@ -5800,10 +5787,8 @@ impl WgpuRenderer {
                 // derive the width from `extents[0] / extents[1]`, clamped
                 // so we never blow GPU memory on extreme aspect windows.
                 let decal_h = crate::render::decal::PLAQUE_DECAL_HEIGHT;
-                let face_aspect =
-                    (p.extents[0] / p.extents[1].max(1.0)).clamp(0.5, 12.0);
-                let decal_w = ((decal_h as f32 * face_aspect).round() as u32)
-                    .clamp(256, 4096);
+                let face_aspect = (p.extents[0] / p.extents[1].max(1.0)).clamp(0.5, 12.0);
+                let decal_w = ((decal_h as f32 * face_aspect).round() as u32).clamp(256, 4096);
                 let combined = format!("{}\n{}", p.top_text, p.bot_text);
                 let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
                 let inst = &mut self.plaque_instances[slot_i];
@@ -5860,13 +5845,13 @@ impl WgpuRenderer {
                 .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             // Plaque local AABB is the unit cube (push_box convention).
             // Slot 0 is the blind plaque, slot 1 is the scoring placard.
-            let name = if slot_i == 0 { "BlindPlaque" } else { "ScoringPlacard" };
-            self.last_debug_pickables.push((
-                name,
-                model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
+            let name = if slot_i == 0 {
+                "BlindPlaque"
+            } else {
+                "ScoringPlacard"
+            };
+            self.last_debug_pickables
+                .push((name, model, glam::Vec3::splat(0.5), 0.0));
         }
 
         // Ofuda (single instance per cmd). The paper hangs upright on the
@@ -5895,10 +5880,8 @@ impl WgpuRenderer {
                 // extents[1]`. Clamp the aspect so a degenerate face can't
                 // request a runaway texture allocation.
                 let decal_h = crate::render::decal::OFUDA_DECAL_LONG_EDGE;
-                let face_aspect =
-                    (p.extents[0] / p.extents[1].max(1.0)).clamp(0.1, 4.0);
-                let decal_w = ((decal_h as f32 * face_aspect).round() as u32)
-                    .clamp(128, 4096);
+                let face_aspect = (p.extents[0] / p.extents[1].max(1.0)).clamp(0.1, 4.0);
+                let decal_w = ((decal_h as f32 * face_aspect).round() as u32).clamp(128, 4096);
                 let combined = format!("{}\n{}", p.title, p.rule);
                 let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
                 let inst = &mut self.ofuda_instances[slot_i];
@@ -5929,12 +5912,8 @@ impl WgpuRenderer {
                 self.ofuda_mesh.default_material,
                 has_decal_text,
             );
-            self.last_debug_pickables.push((
-                "BossOfuda",
-                model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
+            self.last_debug_pickables
+                .push(("BossOfuda", model, glam::Vec3::splat(0.5), 0.0));
         }
 
         // Yaku tablet batches.
@@ -5994,12 +5973,8 @@ impl WgpuRenderer {
                 self.last_projected_yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_yaku_tablet_models.push(model);
-                self.last_debug_pickables.push((
-                    "YakuTablet",
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push(("YakuTablet", model, glam::Vec3::splat(0.5), 0.0));
             }
         }
 
@@ -6058,12 +6033,8 @@ impl WgpuRenderer {
                     2 => "WoodTablet[Journal]",
                     _ => "WoodTablet",
                 };
-                self.last_debug_pickables.push((
-                    name,
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push((name, model, glam::Vec3::splat(0.5), 0.0));
             }
         }
 
@@ -6114,11 +6085,7 @@ impl WgpuRenderer {
             self.last_debug_pickables.push((
                 "DiscardBowl",
                 model,
-                glam::Vec3::new(
-                    BOWL_LOCAL_HALF[0],
-                    BOWL_LOCAL_HALF[1],
-                    BOWL_LOCAL_HALF[2],
-                ),
+                glam::Vec3::new(BOWL_LOCAL_HALF[0], BOWL_LOCAL_HALF[1], BOWL_LOCAL_HALF[2]),
                 BOWL_LOCAL_CENTER_Y,
             ));
         }
@@ -6192,12 +6159,8 @@ impl WgpuRenderer {
                 block_model,
                 self.peg_block_mesh.default_material,
             );
-            self.last_debug_pickables.push((
-                "PegBlock",
-                block_model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
+            self.last_debug_pickables
+                .push(("PegBlock", block_model, glam::Vec3::splat(0.5), 0.0));
 
             // Project the two half-blocks (plays group on the left, discards
             // group on the right) into screen-space rects so the gameplay
@@ -6216,8 +6179,7 @@ impl WgpuRenderer {
                     p.world_pos[1],
                     p.world_pos[2] + p.extents[1] * 0.5,
                 );
-                let half_scale =
-                    glam::Vec3::new(half_w, p.extents[1], p.extents[2]);
+                let half_scale = glam::Vec3::new(half_w, p.extents[1], p.extents[2]);
                 let plays_model =
                     Mat4::from_translation(plays_center) * Mat4::from_scale(half_scale);
                 let discards_model =
@@ -6357,12 +6319,8 @@ impl WgpuRenderer {
                     model,
                     material,
                 );
-                self.last_debug_pickables.push((
-                    "WallTile",
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push(("WallTile", model, glam::Vec3::splat(0.5), 0.0));
                 wall_tile_slot_cursor += 1;
             }
         }
@@ -6385,12 +6343,8 @@ impl WgpuRenderer {
                 model,
                 self.dora_stand_mesh.default_material,
             );
-            self.last_debug_pickables.push((
-                "DoraStand",
-                model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
+            self.last_debug_pickables
+                .push(("DoraStand", model, glam::Vec3::splat(0.5), 0.0));
         }
 
         // Soroban meld pills. Each cmd populates 1 frame instance + 2 rod
@@ -6479,12 +6433,8 @@ impl WgpuRenderer {
                 self.soroban_frame_mesh.default_material,
                 has_decal_text,
             );
-            self.last_debug_pickables.push((
-                "SorobanFrame",
-                parent,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
+            self.last_debug_pickables
+                .push(("SorobanFrame", parent, glam::Vec3::splat(0.5), 0.0));
 
             // ── Rods (chip rail + mult rail) ──
             // The rod mesh spans the full rail X in frame-local coords,
@@ -6598,9 +6548,7 @@ impl WgpuRenderer {
             let cartouche_has_decal = !s.meld_name.is_empty();
             if cartouche_has_decal {
                 let inst = &mut self.soroban_cartouche_instances[slot_i];
-                if inst.decal_texture.is_none()
-                    || inst.decal_label_hash != cartouche_label_hash
-                {
+                if inst.decal_texture.is_none() || inst.decal_label_hash != cartouche_label_hash {
                     let rgba = crate::render::decal::rasterize_soroban_cartouche_decal(
                         &s.meld_name,
                         s.chicken_hand,
@@ -6669,12 +6617,8 @@ impl WgpuRenderer {
                     CascadeTokenKind::Chips => "CascadeToken[Chips]",
                     CascadeTokenKind::Mult => "CascadeToken[Mult]",
                 };
-                self.last_debug_pickables.push((
-                    name,
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push((name, model, glam::Vec3::splat(0.5), 0.0));
             }
         }
 
@@ -6713,12 +6657,8 @@ impl WgpuRenderer {
                     model,
                     material,
                 );
-                self.last_debug_pickables.push((
-                    "FallingBone",
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push(("FallingBone", model, glam::Vec3::splat(0.5), 0.0));
             }
         }
 
@@ -6757,12 +6697,8 @@ impl WgpuRenderer {
                     model,
                     material,
                 );
-                self.last_debug_pickables.push((
-                    "ScorePopup",
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
+                self.last_debug_pickables
+                    .push(("ScorePopup", model, glam::Vec3::splat(0.5), 0.0));
             }
         }
 
@@ -8048,10 +7984,7 @@ impl WgpuRenderer {
                     // Frame.
                     if let Some(inst) = self.soroban_frame_instances.get(*slot_i) {
                         pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.set_vertex_buffer(
-                            0,
-                            self.soroban_frame_mesh.vertex_buffer.slice(..),
-                        );
+                        pass.set_vertex_buffer(0, self.soroban_frame_mesh.vertex_buffer.slice(..));
                         pass.set_index_buffer(
                             self.soroban_frame_mesh.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint32,
@@ -8075,10 +8008,7 @@ impl WgpuRenderer {
                     }
 
                     // Chip beads.
-                    pass.set_vertex_buffer(
-                        0,
-                        self.soroban_chip_bead_mesh.vertex_buffer.slice(..),
-                    );
+                    pass.set_vertex_buffer(0, self.soroban_chip_bead_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         self.soroban_chip_bead_mesh.index_buffer.slice(..),
                         wgpu::IndexFormat::Uint32,
@@ -8089,18 +8019,11 @@ impl WgpuRenderer {
                             break;
                         };
                         pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(
-                            0..self.soroban_chip_bead_mesh.index_count,
-                            0,
-                            0..1,
-                        );
+                        pass.draw_indexed(0..self.soroban_chip_bead_mesh.index_count, 0, 0..1);
                     }
 
                     // Mult beads.
-                    pass.set_vertex_buffer(
-                        0,
-                        self.soroban_mult_bead_mesh.vertex_buffer.slice(..),
-                    );
+                    pass.set_vertex_buffer(0, self.soroban_mult_bead_mesh.vertex_buffer.slice(..));
                     pass.set_index_buffer(
                         self.soroban_mult_bead_mesh.index_buffer.slice(..),
                         wgpu::IndexFormat::Uint32,
@@ -8111,11 +8034,7 @@ impl WgpuRenderer {
                             break;
                         };
                         pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(
-                            0..self.soroban_mult_bead_mesh.index_count,
-                            0,
-                            0..1,
-                        );
+                        pass.draw_indexed(0..self.soroban_mult_bead_mesh.index_count, 0, 0..1);
                     }
 
                     // Cartouche (bone nameplate hanging above the pill).
@@ -8129,11 +8048,7 @@ impl WgpuRenderer {
                             self.soroban_cartouche_mesh.index_buffer.slice(..),
                             wgpu::IndexFormat::Uint32,
                         );
-                        pass.draw_indexed(
-                            0..self.soroban_cartouche_mesh.index_count,
-                            0,
-                            0..1,
-                        );
+                        pass.draw_indexed(0..self.soroban_cartouche_mesh.index_count, 0, 0..1);
                     }
                 }
                 RenderOp::CascadeTokenBatch(batch_idx) => {

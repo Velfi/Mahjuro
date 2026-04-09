@@ -98,9 +98,7 @@ enum FocusTarget {
     Dora,
 }
 
-use crate::ui::focus_nav::{
-    FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring,
-};
+use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
 
 const ALL_BUTTONS: [GameplayButton; 5] = [
     GameplayButton::SortSuit,
@@ -1700,14 +1698,18 @@ impl SceneBehavior for GameplayScene {
                     pick,
                     Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(1)),
                 ),
-                2 => matches!(
-                    pick,
-                    Some(crate::render::wgpu_renderer::GameplayPick::DiscardBowl),
-                ) || focused_btn == Some(GameplayButton::Discard),
-                3 => matches!(
-                    pick,
-                    Some(crate::render::wgpu_renderer::GameplayPick::BronzeMirror),
-                ) || focused_btn == Some(GameplayButton::Play),
+                2 => {
+                    matches!(
+                        pick,
+                        Some(crate::render::wgpu_renderer::GameplayPick::DiscardBowl),
+                    ) || focused_btn == Some(GameplayButton::Discard)
+                }
+                3 => {
+                    matches!(
+                        pick,
+                        Some(crate::render::wgpu_renderer::GameplayPick::BronzeMirror),
+                    ) || focused_btn == Some(GameplayButton::Play)
+                }
                 _ => false,
             };
             // The per-button focus highlight is gone — the unified focus
@@ -1747,12 +1749,7 @@ impl SceneBehavior for GameplayScene {
                     {
                         let label_h = (r[3] * 0.22).max(18.0);
                         hover_text.push(TextLabel {
-                            rect: [
-                                r[0],
-                                r[1] + r[3] * 0.5 - label_h * 0.5,
-                                r[2],
-                                label_h,
-                            ],
+                            rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
                             text: label.to_string(),
                             color: [1.0, 0.84, 0.40, 1.0],
                             align: TextAlign::Center,
@@ -1793,12 +1790,7 @@ impl SceneBehavior for GameplayScene {
                     if let Some(r) = ctx.projected_bowl_rect.filter(|_| hovered) {
                         let label_h = (r[3] * 0.22).max(18.0);
                         hover_text.push(TextLabel {
-                            rect: [
-                                r[0],
-                                r[1] + r[3] * 0.5 - label_h * 0.5,
-                                r[2],
-                                label_h,
-                            ],
+                            rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
                             text: "Discard tiles".to_string(),
                             color: [1.0, 0.84, 0.40, 1.0],
                             align: TextAlign::Center,
@@ -1828,12 +1820,7 @@ impl SceneBehavior for GameplayScene {
                     if let Some(r) = ctx.projected_mirror_rect.filter(|_| hovered) {
                         let label_h = (r[3] * 0.22).max(18.0);
                         hover_text.push(TextLabel {
-                            rect: [
-                                r[0],
-                                r[1] + r[3] * 0.5 - label_h * 0.5,
-                                r[2],
-                                label_h,
-                            ],
+                            rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
                             text: "Play hand".to_string(),
                             color: [1.0, 0.84, 0.40, 1.0],
                             align: TextAlign::Center,
@@ -1907,12 +1894,7 @@ impl SceneBehavior for GameplayScene {
         {
             let label_h = (r[3] * 0.22).max(18.0);
             hover_text.push(TextLabel {
-                rect: [
-                    r[0],
-                    r[1] + r[3] * 0.5 - label_h * 0.5,
-                    r[2],
-                    label_h,
-                ],
+                rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
                 text: "Journal".to_string(),
                 color: [1.0, 0.84, 0.40, 1.0],
                 align: TextAlign::Center,
@@ -1954,12 +1936,7 @@ impl SceneBehavior for GameplayScene {
             let dora_y = layout.window_h * 0.22;
             let dora_w = layout.mm(30.0);
             let dora_h = layout.mm(40.0);
-            [
-                dora_x - dora_w * 0.5,
-                dora_y - dora_h * 0.5,
-                dora_w,
-                dora_h,
-            ]
+            [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
         };
 
         let coin_pile_rect: Option<[f32; 4]> = if run.gold > 0 {
@@ -2514,8 +2491,7 @@ impl SceneBehavior for GameplayScene {
             ),
             // Score panel right
             (
-                (sp.x + sp.w + candle_w + edge_pad)
-                    .min(layout.window_w - candle_w * 0.5 - 4.0),
+                (sp.x + sp.w + candle_w + edge_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
                 sp.y + sp.h * 0.5 - back_z_push,
             ),
             // Hand strip left — far outboard and recessed behind the strip
@@ -3000,15 +2976,10 @@ impl SceneBehavior for GameplayScene {
                         },
                     );
                     let (ax, ay) = match ctx.projected_yaku_tablet_rects.get(i).copied() {
-                        Some([px, py, pw, _ph])
-                            if pw > 0.0 && px.is_finite() && py.is_finite() =>
-                        {
+                        Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
                             (px + pw * 0.5, py)
                         }
-                        _ => (
-                            layout.window_w * 0.5,
-                            layout.window_h * 0.5,
-                        ),
+                        _ => (layout.window_w * 0.5, layout.window_h * 0.5),
                     };
                     push_tooltip(
                         &mut hover_quads,
@@ -3587,7 +3558,11 @@ impl SceneBehavior for GameplayScene {
             frame.dish_explicit(crate::render::draw_cmd::DishExplicit {
                 center_pos: [sx + sw * 0.5, sy + sh * 0.5, 0.0],
                 // Brass tray rim ~10mm tall — small decorative dish.
-                extents: [sw + dish_pad_x * 2.0, layout.mm(10.0), sh + dish_pad_y * 2.0],
+                extents: [
+                    sw + dish_pad_x * 2.0,
+                    layout.mm(10.0),
+                    sh + dish_pad_y * 2.0,
+                ],
                 pick_id: Some(PICK_CONSUMABLE_DISH),
             });
             if !ribbon_dish_placements.is_empty() {
@@ -3676,16 +3651,15 @@ impl SceneBehavior for GameplayScene {
             // than seeding from `coin_count`) means new coins drop into
             // the existing pile instead of reshuffling the whole stack
             // when gold ticks up.
-            use rand::{RngExt, SeedableRng};
             use rand::rngs::StdRng;
+            use rand::{RngExt, SeedableRng};
             let mut rng = StdRng::seed_from_u64(0xC01_C0FFEE);
             for _ in 0..coin_count {
                 let mut best: Option<(f32, f32, f32, f32)> = None;
                 for _ in 0..CANDIDATES_PER_COIN {
                     let lx = rng.random_range(-scatter_half..scatter_half);
                     let lz = rng.random_range(-scatter_half..scatter_half);
-                    let rot_y =
-                        rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
+                    let rot_y = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
                     let mut support_y = dish_rim;
                     for (ox, oz, top_y) in &placed {
                         let ddx = lx - ox;
