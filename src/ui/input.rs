@@ -61,10 +61,13 @@ pub struct InputState {
     pub last_cursor: (f32, f32),
     pub mode: InputMode,
     pub drag: Option<DragState>,
+    /// When true, gamepad South (A) and East (B) are swapped.
+    pub swap_ab: bool,
 }
 
 impl InputState {
     pub fn new() -> anyhow::Result<Self> {
+        let settings = crate::persistence::load_settings();
         Ok(Self {
             gilrs: Gilrs::new().ok(),
             focus_slot: 0,
@@ -72,6 +75,7 @@ impl InputState {
             last_cursor: (0.0, 0.0),
             mode: InputMode::Cursor,
             drag: None,
+            swap_ab: settings.swap_ab,
         })
     }
 
@@ -89,8 +93,16 @@ impl InputState {
         while let Some(GilEvent { event, .. }) = gilrs.next_event() {
             use gilrs::EventType::*;
             match event {
-                ButtonPressed(Button::South, _) => actions.push(UiAction::Confirm),
-                ButtonPressed(Button::East, _) => actions.push(UiAction::Cancel),
+                ButtonPressed(Button::South, _) => actions.push(if self.swap_ab {
+                    UiAction::Cancel
+                } else {
+                    UiAction::Confirm
+                }),
+                ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
+                    UiAction::Confirm
+                } else {
+                    UiAction::Cancel
+                }),
                 ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::ScoreHand),
                 ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::CommitDiscard),
                 ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),

@@ -128,6 +128,7 @@ pub struct ScoringCascade {
 }
 
 /// What the UI should display for the current cascade frame.
+#[allow(dead_code)]
 pub struct CascadeFrame {
     /// The displayed round score (ticking up).
     pub displayed_score: u32,

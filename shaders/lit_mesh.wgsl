@@ -8,6 +8,7 @@
 //   2.0 = wick      — dark, no specular
 //   3.0 = lacquered wood — procedural ring grain + Blinn-Phong specular
 //   5.0 = metal     — tinted-Fresnel conductor (gold coins)
+//   7.0 = talisman  — dielectric with heightmap normal perturbation (jade tablets)
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -96,61 +97,27 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
     if (n == 0u) {
         return 1.0;
     }
-    // Disc radius in world units. The candles in this scene are about
-    // 30–40 units across; treating the flame as a ~3-unit disc gives a
-    // believable soft penumbra without making the shadow vanish entirely.
-    let disc_radius = 3.0;
-    // Per-fragment IGN-derived rotation so each pixel sees a different
-    // tap orientation. Two octaves of IGN — one rotates the rosette,
-    // the other phase-shifts the radii — keeps the pattern incoherent
-    // across both axes for any tile alignment.
-    let rot = ign(frag_xy) * 6.2831853;
-    let rad_phase = ign(frag_xy + vec2<f32>(37.0, 91.0));
-    let cos_r = cos(rot);
-    let sin_r = sin(rot);
 
-    // Four taps in a rotated rosette around the candle center, in the
-    // table plane (XZ — world Y is the vertical axis here). The base
-    // pattern is a 4-vertex square scaled by `rad_phase` so adjacent
-    // pixels also vary in disc coverage, not just orientation.
-    let r0 = disc_radius * mix(0.55, 1.0, rad_phase);
-    var visible = 0.0;
-    let taps = array<vec2<f32>, 4>(
-        vec2<f32>( 1.0,  0.0),
-        vec2<f32>( 0.0,  1.0),
-        vec2<f32>(-1.0,  0.0),
-        vec2<f32>( 0.0, -1.0),
-    );
-    for (var ti: i32 = 0; ti < 4; ti = ti + 1) {
-        let base = taps[ti] * r0;
-        let off = vec2<f32>(
-            base.x * cos_r - base.y * sin_r,
-            base.x * sin_r + base.y * cos_r,
-        );
-        let lp = light_pos + vec3<f32>(off.x, 0.0, off.y);
-        let dir = frag_pos - lp;
-        let safe = dir + vec3<f32>(1e-6, 1e-6, 1e-6);
-        let inv = vec3<f32>(1.0) / safe;
-        // Iterate the constant slot count and skip empty slots via the
-        // sentinel half-extent. Looping on a uniform `n` was unreliable —
-        // some naga versions appeared to fold the bound to 1, which is
-        // why earlier builds only ever produced a single tile shadow.
-        var blocked = false;
-        for (var k: u32 = 0u; k < 16u; k = k + 1u) {
-            let h = occluders.boxes[k].half_extents.xyz;
-            if (h.x <= 0.0) {
-                continue;
-            }
-            let c = occluders.boxes[k].center.xyz;
-            if (segment_hits_aabb(lp, inv, c, h)) {
-                blocked = true;
-            }
-        }
-        if (!blocked) {
-            visible = visible + 1.0;
+    // Single center ray from the candle to the fragment. This replaces
+    // the previous 4-tap rotated rosette (4× cheaper) at the cost of
+    // harder shadow edges. The IGN jitter offsets the ray slightly in
+    // the table plane so adjacent pixels don't alias identically.
+    let jitter_r = 1.5;
+    let rot = ign(frag_xy) * 6.2831853;
+    let off = vec2<f32>(cos(rot), sin(rot)) * jitter_r;
+    let lp = light_pos + vec3<f32>(off.x, 0.0, off.y);
+    let dir = frag_pos - lp;
+    let safe = dir + vec3<f32>(1e-6, 1e-6, 1e-6);
+    let inv = vec3<f32>(1.0) / safe;
+
+    for (var k: u32 = 0u; k < n; k = k + 1u) {
+        let c = occluders.boxes[k].center.xyz;
+        let h = occluders.boxes[k].half_extents.xyz;
+        if (segment_hits_aabb(lp, inv, c, h)) {
+            return 0.0;
         }
     }
-    return visible * 0.25;
+    return 1.0;
 }
 
 // ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
@@ -508,10 +475,11 @@ fn fs_main(
     let tex_sample = textureSample(albedo_tex, albedo_samp, in.uv);
     let tex_rgb = tex_sample.rgb;
     // material_params.w doubles as a "this instance has an engraved decal"
-    // flag. When >0.5 the texture is treated as a transparent overlay
-    // (engraved label) composited *over* the procedural base material rather
-    // than multiplied with it. The yaku/wood tablet pass sets this flag.
-    let has_decal = mesh.material_params.w > 0.5;
+    // flag for non-talisman materials. When >0.5 the texture is treated as
+    // a transparent overlay (engraved label) composited *over* the procedural
+    // base material rather than multiplied with it. For talismans (kind>6.5),
+    // .w carries the sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome).
+    let has_decal = mesh.material_params.w > 0.5 && kind < 6.5;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -545,8 +513,55 @@ fn fs_main(
         wood_grain = w.grain;
         wood_pore = w.pore;
     }
+    // ── Carved & gold-leafed decal compositing ───────────────────────
+    // Where the decal has alpha, the text is treated as gold paint sitting
+    // inside a shallow carved channel. We perturb the surface normal at
+    // alpha edges so the channel walls catch and shadow the candlelight,
+    // darken the groove floor, then lay the gold colour on top. A metallic
+    // specular boost is stored for the lighting loop below.
+    var decal_metallic = 0.0;
+    var decal_f0 = vec3<f32>(0.0);
+    // Alpha-gradient samples for normal perturbation — hoisted so they're
+    // visible to both the albedo-composite block and the normal block.
+    var decal_dhdu = 0.0;
+    var decal_dhdv = 0.0;
     if (has_decal) {
-        albedo = mix(albedo, tex_rgb, tex_sample.a);
+        let da = tex_sample.a;
+
+        // Finite-difference normal perturbation from the decal alpha field.
+        // The alpha acts as a heightmap: 0 = flush wood surface, 1 = bottom
+        // of the carved channel. Edges where alpha changes rapidly become
+        // the groove walls, catching light from one side and shadowing the
+        // other — exactly how CNC-routed or chisel-cut lettering reads
+        // under raking light.
+        let dim_d = vec2<f32>(textureDimensions(albedo_tex, 0));
+        let tx = vec2<f32>(1.0 / max(dim_d.x, 1.0), 1.0 / max(dim_d.y, 1.0));
+        let a_l = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(-tx.x, 0.0), 0.0).a;
+        let a_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( tx.x, 0.0), 0.0).a;
+        let a_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -tx.y), 0.0).a;
+        let a_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  tx.y), 0.0).a;
+        let carve_bump = 3.5;
+        decal_dhdu = (a_r - a_l) * carve_bump;
+        decal_dhdv = (a_u - a_d) * carve_bump;
+
+        // Groove-floor darkening: inside the carved channel the wood is
+        // slightly shadowed by the groove walls — this reads as the dark
+        // recess before the gold paint is laid in. Smoothstep avoids
+        // touching fragments outside the glyph boundary.
+        let groove = smoothstep(0.05, 0.35, da);
+        albedo = mix(albedo, albedo * 0.55, groove);
+
+        // Composite the gold paint *inside* the groove. Full alpha paints
+        // the gold body; semi-transparent edges blend into the darkened
+        // groove for a natural transition.
+        albedo = mix(albedo, tex_rgb, da);
+
+        // Gold leaf is a conductor — its specular response is tinted by the
+        // paint's own colour (no white plastic highlight). Store the F0 and
+        // a metallic flag so the lighting loop picks up a gold Fresnel lobe
+        // on these fragments only.
+        decal_metallic = smoothstep(0.15, 0.50, da);
+        decal_f0 = tex_rgb * vec3<f32>(1.05, 0.92, 0.65);
     }
 
     // Candle-only lighting: there is no ambient floor and no directional
@@ -556,6 +571,25 @@ fn fs_main(
     var n = normalize(in.world_n);
     if (!front_facing) {
         n = -n;
+    }
+
+    // Apply carved-groove normal perturbation from the decal alpha gradient.
+    // The derivatives were computed above; here we push the flat-face normal
+    // sideways so the groove walls catch the candlelight. The perturbation
+    // is in tangent space (UV-aligned), re-oriented into world space via the
+    // model matrix's upper 3×3 (plaques/tablets only translate + uniformly
+    // scale, so this is exact). Fades to zero outside the glyph boundary.
+    if (has_decal) {
+        let edge_mag = abs(decal_dhdu) + abs(decal_dhdv);
+        if (edge_mag > 0.001) {
+            let perturbed_local = normalize(vec3<f32>(-decal_dhdu, 1.0, -decal_dhdv));
+            let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+            // Blend based on edge strength so flat-alpha interiors keep
+            // their original normal (the paint surface inside the groove
+            // is still flat — only the walls tilt).
+            let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
+            n = normalize(mix(n, perturbed_world, blend_edge));
+        }
     }
 
     // ── Discard-river material ─────────────────────────────────────────
@@ -670,7 +704,7 @@ fn fs_main(
     // and bottom of the coin) and rotate the normal toward the gradient.
     // Only flat-ish faces are perturbed — the rim's UVs wrap once around
     // the cylinder and the gradient there would be meaningless.
-    if (kind > 4.5) {
+    if (kind > 4.5 && kind < 5.5) {
         let face_flat = abs(n.y);
         if (face_flat > 0.6) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
@@ -700,6 +734,36 @@ fn fs_main(
             n = normalize(mix(n, n_face, blend));
         }
     }
+
+    // ── Talisman heightmap perturbation ──────────────────────────────────
+    // Same finite-difference approach as metal, but uses screen-space
+    // derivatives to build the tangent frame so it works regardless of
+    // the tablet's orientation (upright on the wall or laid flat in the
+    // tray). Only the flat front/back faces are perturbed — detected via
+    // local_pos.z proximity to the half-thickness (±0.09).
+    if (kind > 6.5) {
+        let face_flat = abs(abs(in.local_pos.z) - 0.09);
+        if (face_flat < 0.02) {
+            let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
+            let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+            let h_l = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r;
+            let h_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
+            let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
+            let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
+            // Bump strength tuned for shallow carved relief on jade.
+            let bump = 3.0;
+            let dhdu = (h_r - h_l) * bump;
+            let dhdv = (h_u - h_d) * bump;
+            // Screen-space derivative tangent basis: works for any
+            // orientation without needing explicit tangent attributes.
+            let dp_dx = dpdx(in.world_pos);
+            let dp_dy = dpdy(in.world_pos);
+            let tangent = normalize(dp_dx);
+            let bitangent = normalize(cross(n, tangent));
+            let perturbed = normalize(n - tangent * dhdu - bitangent * dhdv);
+            n = perturbed;
+        }
+    }
     var rgb = vec3<f32>(0.0);
 
     // ── Point-light pass ─────────────────────────────────────────────────
@@ -708,9 +772,10 @@ fn fs_main(
     // clearcoat lobe (lacquered wood).
     var lit = vec3<f32>(0.0);          // diffuse-band light (multiplied by albedo)
     var sss_acc = vec3<f32>(0.0);      // wrap-diffuse subsurface (front-lit)
-    var wax_back_acc = vec3<f32>(0.0); // wax back-transmission (Penner-style)
+    var back_acc = vec3<f32>(0.0); // wax back-transmission (Penner-style)
     var spec_acc = vec3<f32>(0.0);     // base specular accumulator
     var coat_acc = vec3<f32>(0.0);     // clearcoat accumulator (white, untinted)
+    var sheen_acc = vec3<f32>(0.0);    // talisman sheen accumulator
 
     let cam_pos = vec3<f32>(0.0, 0.0, 4000.0); // approximate; only direction matters
     let view_dir = normalize(cam_pos - in.world_pos);
@@ -718,7 +783,7 @@ fn fs_main(
 
     let is_wood = (kind > 2.5 && kind < 4.5);
     let is_wax  = (kind > 0.5 && kind < 1.5);
-    let is_metal = kind > 4.5;
+    let is_metal = (kind > 4.5 && kind < 5.5);
 
     // Wrap-diffuse subsurface: softens the terminator past 90° so the
     // shaded side picks up a tinted bleed. Wood gets a tiny amount,
@@ -735,33 +800,84 @@ fn fs_main(
         wrap = 0.55;
         sss_strength = 0.55;
         sss_tint = vec3<f32>(1.00, 0.78, 0.42);
+    } else if (kind > 6.5) {
+        // Talisman SSS: per-kind tint so each material scatters light
+        // through its surface with the right hue. The sub-kind index
+        // lives in material_params.w (0=jade, 1=pearl, 2=gilded, 3=poly).
+        let talisman_sub = mesh.material_params.w;
+        wrap = 0.45;
+        sss_strength = 0.40;
+        if (talisman_sub < 0.5) {
+            // Jade: warm green transmission.
+            sss_tint = vec3<f32>(0.55, 0.92, 0.60);
+        } else if (talisman_sub < 1.5) {
+            // Pearl: cool pink-white glow.
+            sss_tint = vec3<f32>(0.90, 0.85, 0.95);
+            sss_strength = 0.30;
+        } else if (talisman_sub < 2.5) {
+            // Gilded: warm amber transmission.
+            sss_tint = vec3<f32>(0.95, 0.80, 0.40);
+            sss_strength = 0.20;
+        } else {
+            // Polychrome: cool violet-pink glow.
+            sss_tint = vec3<f32>(0.75, 0.55, 0.95);
+            sss_strength = 0.30;
+        }
     }
 
-    // ── Wax back-transmission (Penner SSS) tunables ─────────────────
+    // ── Back-transmission (Penner SSS) tunables ──────────────────────
     // The classic cheap translucency model: the effective light
     // direction is bent toward the surface normal by `distortion`,
     // then we measure how much of that bent light vector points
     // *toward* the camera (i.e. through the back of the object).
     // The result is heavily concentrated on the silhouette of an
     // object that is back-lit, exactly where real wax glows.
-    let wax_distortion = 0.45;
-    let wax_back_power = 4.0;
-    let wax_back_scale = select(0.0, 1.4, is_wax);
-    let wax_tint = vec3<f32>(1.00, 0.72, 0.32);
+    // Jade uses the same model — nephrite/jadeite tablets are thin
+    // enough that back-lit edges glow with a warm green.
+    let is_talisman = (kind > 6.5);
+    let back_distortion = 0.45;
+    let back_power = select(4.0, 6.0, is_talisman); // jade is denser, tighter lobe
+    var back_scale = 0.0;
+    var back_tint = vec3<f32>(0.0);
+    if (is_wax) {
+        back_scale = 1.4;
+        back_tint = vec3<f32>(1.00, 0.72, 0.32);
+    } else if (is_talisman) {
+        let talisman_sub_bt = mesh.material_params.w;
+        back_scale = 0.9;
+        if (talisman_sub_bt < 0.5) {
+            back_tint = vec3<f32>(0.50, 0.88, 0.55); // jade green
+        } else if (talisman_sub_bt < 1.5) {
+            back_tint = vec3<f32>(0.88, 0.82, 0.92); // pearl pink-white
+        } else if (talisman_sub_bt < 2.5) {
+            back_tint = vec3<f32>(0.92, 0.75, 0.35); // gilded amber
+            back_scale = 0.5; // metal is less translucent
+        } else {
+            back_tint = vec3<f32>(0.70, 0.50, 0.90); // polychrome violet
+        }
+    }
 
-    // Thickness proxy from local geometry. The candle mesh is built
-    // with the wax body running from y≈0 (base) to y≈0.555 (wax pool
-    // around the wick). Thinness is high near the top of the votive
-    // (the rim flare and the wax pool itself are thin slabs of wax)
-    // and at silhouette edges (where the camera sees a glancing slice
-    // of wax). Both are the places real candle wax glows from inside.
-    var wax_thinness = 0.0;
+    // Thickness proxy from local geometry. For wax: high near the top
+    // of the votive and at silhouette edges. For jade: the tablet is a
+    // thin flat slab, so thinness is driven by the silhouette edge
+    // angle (where the camera sees through a thin cross-section of
+    // stone) and slightly by the rim faces (which are geometrically
+    // thinner than the flat faces).
+    var back_thinness = 0.0;
     if (is_wax) {
         let height01 = clamp(in.local_pos.y / 0.56, 0.0, 1.0);
         let edge = 1.0 - max(dot(n, view_dir), 0.0);
         let top_thin = smoothstep(0.30, 0.92, height01);
         let edge_thin = pow(edge, 2.0);
-        wax_thinness = clamp(top_thin * 0.85 + edge_thin * 0.65, 0.0, 1.6);
+        back_thinness = clamp(top_thin * 0.85 + edge_thin * 0.65, 0.0, 1.6);
+    } else if (is_talisman) {
+        // Silhouette edge: camera sees through a thin slice of jade.
+        let edge = 1.0 - max(dot(n, view_dir), 0.0);
+        let edge_thin = pow(edge, 2.5);
+        // Rim faces (local_pos.z near 0, between front/back) are
+        // geometrically thinner cross-sections of the tablet.
+        let rim_thin = 1.0 - smoothstep(0.0, 0.06, abs(in.local_pos.z));
+        back_thinness = clamp(edge_thin * 0.8 + rim_thin * 0.4, 0.0, 1.2);
     }
 
     // Clearcoat tunables. F0 = 0.04 (dielectric ~IOR 1.5). The coat is
@@ -783,6 +899,12 @@ fn fs_main(
         let dist = length(to_light);
         let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
         let atten = t * t;
+        // Skip lights whose attenuation has fallen to zero — no point
+        // computing occlusion, diffuse, specular, or SSS for a light
+        // that contributes nothing.
+        if (atten < 0.001) {
+            continue;
+        }
         let l_dir = to_light / max(dist, 0.0001);
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
@@ -814,11 +936,11 @@ fn fs_main(
         // the back of the wax). The term peaks when a candle is
         // back-lit by another candle's flame and you see its near
         // side glow — exactly the look real wax has in a dim room.
-        if (wax_back_scale > 0.001) {
-            let lt = normalize(l_dir + n * wax_distortion);
-            let back = pow(max(dot(view_dir, -lt), 0.0), wax_back_power);
-            wax_back_acc = wax_back_acc
-                + lc * intensity * atten * back * wax_thinness * wax_back_scale * cand_vis;
+        if (back_scale > 0.001) {
+            let lt = normalize(l_dir + n * back_distortion);
+            let back = pow(max(dot(view_dir, -lt), 0.0), back_power);
+            back_acc = back_acc
+                + lc * intensity * atten * back * back_thinness * back_scale * cand_vis;
         }
 
         if (spec_strength > 0.001) {
@@ -860,6 +982,82 @@ fn fs_main(
             let coat = d * f_schlick * coat_strength * (1.0 - wood_pore * 0.6);
             coat_acc = coat_acc + lc * intensity * atten * coat * cand_vis;
         }
+
+        // ── Talisman sheen lobes ──────────────────────────────────────
+        // Per-kind view-dependent sheen layered on top of the base
+        // dielectric specular. Broad lobes so the effect is visible
+        // across the whole tablet, not just at perfect mirror angles.
+        //   Jade (0)    — subtle waxy green luster
+        //   Pearl (1)   — soft pearlescent pink/blue color shift
+        //   Gilded (2)  — warm metallic gold Fresnel
+        //   Polychrome (3) — holographic thin-film rainbow
+        if (is_talisman) {
+            let h = normalize(l_dir + view_dir);
+            let nh = max(dot(n, h), 0.0);
+            let vdh = max(dot(view_dir, h), 0.0);
+            let ndv = max(dot(n, view_dir), 0.0);
+            let tsk = mesh.material_params.w;
+            // Broad wrap term: the diffuse half-vector alignment catches
+            // light from a wide arc, not just the mirror direction.
+            let broad = max(dot(n, l_dir), 0.0);
+
+            if (tsk < 0.5) {
+                // Jade: waxy vitreous luster. A broad green-tinted
+                // sheen that strengthens at grazing angles.
+                let fresnel = 0.08 + 0.30 * pow(1.0 - ndv, 2.5);
+                let lobe = pow(nh, 12.0) * 0.6 + broad * 0.15;
+                let tint = vec3<f32>(0.55, 0.95, 0.65);
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * tint;
+            } else if (tsk < 1.5) {
+                // Pearl: pearlescent nacre with pink-to-blue shift
+                // driven by viewing angle.
+                let fresnel = 0.10 + 0.50 * pow(1.0 - ndv, 3.0);
+                let phase = ndv * 3.14159;
+                let pearl_tint = vec3<f32>(
+                    0.95 + 0.05 * cos(phase),
+                    0.85 + 0.10 * cos(phase + 1.2),
+                    0.90 + 0.10 * cos(phase + 2.8)
+                );
+                let lobe = pow(nh, 16.0) * 0.7 + broad * 0.20;
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * pearl_tint;
+            } else if (tsk < 2.5) {
+                // Gilded: metallic gold conductor — Schlick Fresnel
+                // tinted by the gold base so highlights read warm.
+                let f0 = vec3<f32>(0.95, 0.75, 0.30);
+                let f_gold = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
+                let lobe = pow(nh, 24.0) * 0.8 + broad * 0.15;
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * f_gold;
+            } else {
+                // Polychrome: holographic thin-film iridescence —
+                // rainbow hue driven by the normal-to-half angle
+                // so the spectrum shifts as the light sweeps across.
+                let film_angle = dot(n, h);
+                let theta = film_angle * 6.0 + ndv * 2.0;
+                let holo_r = 0.5 + 0.5 * cos(theta);
+                let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
+                let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
+                let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
+                let fresnel = 0.12 + 0.60 * pow(1.0 - ndv, 2.5);
+                let lobe = pow(nh, 10.0) * 0.8 + broad * 0.25;
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * holo_tint;
+            }
+        }
+
+        // Gold-leaf specular lobe on carved decal text. Conductor Fresnel
+        // tinted by the gold paint's own colour so the highlight reads as
+        // metallic rather than plastic. The lobe is moderately sharp
+        // (power 180) — real gold leaf is smoother than raw wood but
+        // rougher than mirror-polished metal, and a too-tight highlight
+        // vanishes at typical viewing distances. Only fires on fragments
+        // where decal_metallic > 0.
+        if (decal_metallic > 0.001) {
+            let h = normalize(l_dir + view_dir);
+            let nh = max(dot(n, h), 0.0);
+            let vdh = max(dot(view_dir, h), 0.0);
+            let f_gold = decal_f0 + (vec3<f32>(1.0) - decal_f0) * pow(1.0 - vdh, 5.0);
+            let gold_spec = pow(nh, 180.0) * 1.2 * decal_metallic;
+            spec_acc = spec_acc + lc * intensity * atten * gold_spec * cand_vis * f_gold;
+        }
     }
 
     // Compose: diffuse light multiplies albedo; sss adds a tinted glow;
@@ -871,6 +1069,12 @@ fn fs_main(
         // response is in the tinted Fresnel spec lobe above. Leave a
         // sliver of diffuse so unlit-side coins don't read as cutouts.
         diffuse_scale = 0.08;
+    }
+    // Gold-painted fragments inside carved decals are conductors: almost
+    // all energy goes into the tinted Fresnel spec lobe, very little
+    // diffuse. Lerp the diffuse scale down so gold reads as metallic.
+    if (decal_metallic > 0.001) {
+        diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
@@ -884,6 +1088,46 @@ fn fs_main(
         // ratio between channels so the chroma stays warm.
         lit = lit / (vec3<f32>(1.0) + lit * 0.55);
     }
+    // ── Talisman Fresnel albedo tint ───────────────────────────────
+    // View-dependent color shift baked into the surface albedo so it
+    // reads as a material property (always visible), not just a specular
+    // highlight that depends on perfect light alignment.
+    if (is_talisman) {
+        let tsk_comp = mesh.material_params.w;
+        let edge = 1.0 - ndv_view;
+        if (tsk_comp < 0.5) {
+            // Jade: edges brighten toward a cooler, lighter green.
+            let rim = pow(edge, 2.0) * 0.25;
+            albedo = mix(albedo, vec3<f32>(0.6, 1.0, 0.75), rim);
+        } else if (tsk_comp < 1.5) {
+            // Pearl: edges shift toward soft pink/blue iridescence.
+            let rim = pow(edge, 1.8) * 0.35;
+            let phase = ndv_view * 3.14159;
+            let pearl_edge = vec3<f32>(
+                0.98 + 0.02 * cos(phase),
+                0.88 + 0.06 * cos(phase + 1.5),
+                0.95 + 0.05 * cos(phase + 3.0)
+            );
+            albedo = mix(albedo, pearl_edge, rim);
+        } else if (tsk_comp < 2.5) {
+            // Gilded: edges brighten toward white-gold (metallic sheen).
+            let rim = pow(edge, 2.0) * 0.30;
+            albedo = mix(albedo, vec3<f32>(1.0, 0.92, 0.65), rim);
+        } else {
+            // Polychrome: rainbow Fresnel shifts the surface hue at
+            // edges, giving a holographic color-change visible from
+            // any lighting angle.
+            let rim = pow(edge, 1.5) * 0.45;
+            let theta = ndv_view * 8.0;
+            let holo = vec3<f32>(
+                0.5 + 0.5 * cos(theta),
+                0.5 + 0.5 * cos(theta + 2.094),
+                0.5 + 0.5 * cos(theta + 4.189)
+            );
+            albedo = mix(albedo, holo, rim);
+        }
+    }
+
     // No directional shadow gating now that there's no directional light;
     // analytic candle AABB occlusion (`cand_vis` above) already darkens
     // fragments shadowed from the wicks themselves.
@@ -987,9 +1231,10 @@ fn fs_main(
     rgb = rgb
         + albedo * lit_shadowed * diffuse_scale
         + sss_acc * sss_tint
-        + wax_back_acc * wax_tint
+        + back_acc * back_tint
         + spec_final
-        + coat_final;
+        + coat_final
+        + sheen_acc;
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(rgb, vec3<f32>(inv_g));

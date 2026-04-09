@@ -3,6 +3,7 @@ pub mod glossary;
 pub mod input;
 pub mod layout;
 pub mod modal;
+pub mod smooth_scroll;
 pub mod tooltip;
 pub mod widget;
 pub mod widget_tree;

@@ -640,12 +640,19 @@ pub fn score_sets(
 ///
 /// Relic contributions, rule modifiers, dora hits, and chain effects are
 /// intentionally excluded so the cascade still has surprises to reveal.
-#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct ScorePreview {
     pub chips: i32,
     pub mult: f64,
+    /// Yaku detected in the current selection (filtered to available pool).
+    pub detected_yaku: Vec<YakuKind>,
+    /// Estimated total score = `chips × mult` (floored). Excludes relics and
+    /// rules so the cascade still has surprises.
+    pub estimated_total: i32,
 }
 
+#[allow(dead_code)]
 pub fn preview_score(
     tiles: &[Tile],
     sets: &[DetectedSet],
@@ -673,7 +680,13 @@ pub fn preview_score(
     for y in &visible_yaku {
         mult += y.mult_bonus();
     }
-    ScorePreview { chips, mult }
+    let estimated_total = combine(chips, mult);
+    ScorePreview {
+        chips,
+        mult,
+        detected_yaku: visible_yaku,
+        estimated_total,
+    }
 }
 
 /// Format an absolute mult value for the final beat display.

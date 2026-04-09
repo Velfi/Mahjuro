@@ -36,6 +36,14 @@ pub enum MaterialKind {
     /// otherwise the fragment is treated as dark stone. Reads `extras.y`
     /// from the point-light buffer for an animated time uniform.
     Water = 6,
+    /// Jade-tablet talisman: dielectric material (like Plain) with a
+    /// heightmap-driven normal perturbation on the flat faces. The bound
+    /// texture is treated as a grayscale heightfield — the shader samples
+    /// finite differences and perturbs the surface normal so carved motifs
+    /// catch the candle highlights. Uses screen-space derivative tangent
+    /// basis so it works regardless of the tablet's world-space orientation
+    /// (upright on the wall or laid flat in the tray).
+    Talisman = 7,
 }
 
 /// Compact per-mesh material parameters.
@@ -300,6 +308,36 @@ impl LitMeshInstance {
         });
     }
 
+    /// Rebind the material bind group with an externally-owned texture view.
+    /// Used by the talisman pass to swap heightmap textures per-instance
+    /// without uploading new pixel data every frame.
+    pub fn rebind_texture(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) {
+        self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-mesh-bg-rebind"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+    }
+
     /// Write the per-instance shadow caster uniform with the current
     /// frame's light view-projection and the instance's model matrix.
     #[allow(dead_code)]
@@ -338,6 +376,27 @@ impl LitMeshInstance {
         material: MaterialParams,
         has_decal: bool,
     ) {
+        self.write_uniform_raw_w(
+            queue,
+            view_proj,
+            model,
+            material,
+            if has_decal { 1.0 } else { 0.0 },
+        );
+    }
+
+    /// Lowest-level uniform write: caller supplies the raw `f32` that lands
+    /// in `material_params.w`. Talisman rendering uses this to pass the
+    /// sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome) so the
+    /// shader can select per-kind sheen effects.
+    pub fn write_uniform_raw_w(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: [f32; 16],
+        model: glam::Mat4,
+        material: MaterialParams,
+        params_w: f32,
+    ) {
         let u = MeshUniform {
             view_proj,
             model: model.to_cols_array(),
@@ -346,7 +405,7 @@ impl LitMeshInstance {
                 material.kind as u32 as f32,
                 material.specular_strength,
                 material.specular_power,
-                if has_decal { 1.0 } else { 0.0 },
+                params_w,
             ],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));

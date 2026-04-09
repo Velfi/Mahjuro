@@ -110,6 +110,9 @@ pub struct ZodiacRibbonPlacement {
     /// Pitch rotation about world X around the anchor, in degrees. Used by
     /// the inventory fan to drape ribbons forward toward the camera.
     pub rotation_x_deg: f32,
+    /// Roll rotation about world Z around the anchor, in degrees. Used by
+    /// the collection viewer's top-down camera for a turntable spin.
+    pub rotation_z_deg: f32,
     /// Linear-space RGBA tint. When `kind` is `Some`, this is multiplied
     /// against the silk texture (use white to show the texture unmodified;
     /// drop alpha to dim sold ribbons).
@@ -134,8 +137,13 @@ pub struct TalismanPlacement {
     /// the tablet face-up on the table (long axis flat, face normal
     /// rotated from +Z to +Y).
     pub rotation_x_deg: f32,
+    /// Roll rotation about world Z in degrees. Used by the collection
+    /// viewer's top-down camera for a turntable spin.
+    pub rotation_z_deg: f32,
     /// Linear-space RGBA tint.
     pub color: [f32; 4],
+    /// Which talisman variant — determines the heightmap motif.
+    pub kind: crate::core::talisman::TalismanKind,
 }
 
 /// One physical gold coin sitting in (or on) the coin dish.
@@ -257,50 +265,6 @@ pub struct WoodTabletPlacement {
     pub hover: f32,
     /// True if the action is currently disabled (e.g. no tiles selected).
     pub disabled: bool,
-}
-
-/// Live "meld pill" — a soroban-styled readout floating above the player's
-/// current tile selection. The renderer composes one of these from the
-/// frame mesh + two brass rods + N beads in `soroban_mesh.rs`, sliding the
-/// beads along the rails based on `chip_fill` / `mult_fill` and engraving
-/// the meld name on the inset bone tag via a per-instance decal texture.
-///
-/// Mahjuro's analogue of Balatro's hand-name + chips×mult pill: present
-/// every frame, reactive on every tile toggle, never modal.
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct SorobanPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the soroban frame's *center*.
-    pub center_pos: [f32; 3],
-    /// Width × height × thickness in world units. The mesh is authored in
-    /// `-0.5..+0.5` local space so a per-instance scale matrix sizes it.
-    pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees (0 = facing the camera).
-    pub rotation_y_deg: f32,
-    /// Pitch rotation about world X in degrees. Positive values lift the
-    /// top edge of the pill toward the camera so the +Z front face
-    /// presents more directly to the player instead of catching the
-    /// gameplay camera at an oblique table-grazing angle.
-    pub rotation_x_deg: f32,
-    /// Meld name engraved on the inset bone tag (e.g. "Pung", "Chow",
-    /// "Pair", "Chicken Hand", or empty for the rest state).
-    pub meld_name: String,
-    /// Chip rail fill in `0.0..=1.0`. Drives bead positions on the upper rail.
-    pub chip_fill: f32,
-    /// Mult rail fill in `0.0..=1.0`. Drives bead positions on the lower rail.
-    pub mult_fill: f32,
-    /// Raw chips value to engrave on the frame face (left of the ×).
-    /// `None` produces no numerals (rest state). The numerals are the
-    /// primary readout — beads are ambient counting flavor.
-    pub chips_value: Option<i32>,
-    /// Raw mult value to engrave on the frame face (right of the ×).
-    /// Pairs with `chips_value`; both must be `Some` for the decal to
-    /// render numerals.
-    pub mult_value: Option<f32>,
-    /// True when the current selection forms a complete-but-yaku-less hand.
-    /// The renderer paints the tag in muted grey instead of gold to signal
-    /// "structurally legal, scores nothing" without celebrating it.
-    pub chicken_hand: bool,
 }
 
 /// The discard bowl. Click target = drop selected tile in.
@@ -571,11 +535,11 @@ pub enum DrawCmd {
     #[allow(dead_code)]
     PegBlock(PegBlockPlacement),
     /// The wall stack (facedown tiles at the back of the table).
+    #[allow(dead_code)]
     WallStack(WallStackPlacement),
     /// The dora indicator stand.
+    #[allow(dead_code)]
     DoraStand(DoraStandPlacement),
-    /// Live meld pill (soroban-styled readout) above the tile selection.
-    Soroban(SorobanPlacement),
     /// Engraved bone scoring tokens that pop in during a cascade. Reuses
     /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
     CascadeTokenBatch(Vec<CascadeTokenPlacement>),
@@ -618,6 +582,15 @@ pub struct UiFrame {
     /// Active point lights this frame. Uploaded to the tile pipeline so the
     /// 3D hand-tile shader can apply candle / spot illumination.
     pub point_lights: Vec<PointLight>,
+    /// How many of the leading entries in `point_lights` are candle lights
+    /// (as opposed to hint lights, spot lights, etc.). The volumetric flame
+    /// emission in the lightbake shader only fires for the first
+    /// `candle_light_count` lights.
+    pub candle_light_count: u32,
+    /// Candle flame height in world units (derived from mm via `Layout::mm`).
+    /// Passed to the volumetric lightbake shader so the analytic flame
+    /// envelope is physically sized.
+    pub flame_height_world: f32,
     /// Mouse cursor position in pixel coordinates, if the scene tracks one.
     /// The renderer projects this onto the table plane and feeds it into the
     /// volumetric smoke sim as a continuous wind impulse.
@@ -656,6 +629,8 @@ impl UiFrame {
             hint_indices: Vec::new(),
             departing_indices: Vec::new(),
             point_lights: Vec::new(),
+            candle_light_count: 0,
+            flame_height_world: 0.0,
             cursor_pos: None,
             wind_gusts: Vec::new(),
             camera_override: None,
@@ -730,14 +705,13 @@ impl UiFrame {
     pub fn peg_block(&mut self, p: PegBlockPlacement) {
         self.cmds.push(DrawCmd::PegBlock(p));
     }
+    #[allow(dead_code)]
     pub fn wall_stack(&mut self, p: WallStackPlacement) {
         self.cmds.push(DrawCmd::WallStack(p));
     }
+    #[allow(dead_code)]
     pub fn dora_stand(&mut self, p: DoraStandPlacement) {
         self.cmds.push(DrawCmd::DoraStand(p));
-    }
-    pub fn soroban(&mut self, p: SorobanPlacement) {
-        self.cmds.push(DrawCmd::Soroban(p));
     }
     pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
         self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
@@ -808,7 +782,6 @@ impl UiFrame {
                 | DrawCmd::PegBlock(_)
                 | DrawCmd::WallStack(_)
                 | DrawCmd::DoraStand(_)
-                | DrawCmd::Soroban(_)
                 | DrawCmd::CascadeTokenBatch(_)
                 | DrawCmd::FallingBoneBatch(_)
                 | DrawCmd::ExtrudedGlyphBatch(_)

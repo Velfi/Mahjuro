@@ -380,7 +380,7 @@ impl SceneBehavior for PickBlindScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip {
                 let reward = upcoming.skip_reward();
-                ctx.run.gold = ctx.run.gold.saturating_add(reward);
+                ctx.run.gold = ctx.run.gold.saturating_add(reward as i32);
                 ctx.run.skip_to_next_blind();
                 return Some(Scene::PickBlind(PickBlindScene::new()));
             }
@@ -389,7 +389,7 @@ impl SceneBehavior for PickBlindScene {
         match action {
             Some(BlindAction::SkipBlind) if can_skip => {
                 let reward = upcoming.skip_reward();
-                ctx.run.gold = ctx.run.gold.saturating_add(reward);
+                ctx.run.gold = ctx.run.gold.saturating_add(reward as i32);
                 ctx.run.skip_to_next_blind();
                 Some(Scene::PickBlind(PickBlindScene::new()))
             }

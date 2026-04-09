@@ -27,6 +27,10 @@ pub enum GameEvent {
     ScoreStepRevealed {
         index: usize,
     },
+    /// Gold amount changed (coins flying into/out of dish).
+    GoldChanged {
+        delta: i32,
+    },
     /// A scoring cascade just transitioned into its final-total beat.
     /// Fires once per cascade, on the frame the transition happens.
     ScoreCascadeFinal,

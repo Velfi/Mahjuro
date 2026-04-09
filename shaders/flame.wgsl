@@ -9,7 +9,7 @@
 //               fragment shader uses it to lean the flame, smear the noise
 //               and pump up the flicker so candles visibly react to the
 //               post-deal "blow" gust and any future wind impulses.
-//   color.b   — unused (reserved); leave at 1.0
+//   color.b   — brightness multiplier [0,1]; 1.0 = full, 0.0 = invisible
 //   color.a   — per-instance phase offset in [0,1]; randomises noise + flicker
 //               so neighbouring candles don't beat in sync.
 //
@@ -32,6 +32,7 @@ struct VsOut {
     @location(0) uv: vec2<f32>,
     @location(1) wind: vec2<f32>,
     @location(2) phase: f32,
+    @location(3) brightness: f32,
 };
 
 @vertex
@@ -49,6 +50,7 @@ fn vs_main(
     out.uv = corner;
     out.wind = color.xy;
     out.phase = color.a;
+    out.brightness = color.b;
     return out;
 }
 
@@ -61,7 +63,7 @@ fn hash21(p: vec2<f32>) -> f32 {
 fn vnoise(p: vec2<f32>) -> f32 {
     let i = floor(p);
     let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
     let a = hash21(i + vec2<f32>(0.0, 0.0));
     let b = hash21(i + vec2<f32>(1.0, 0.0));
     let c = hash21(i + vec2<f32>(0.0, 1.0));
@@ -127,7 +129,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let dx_norm = abs(cx + lateral_wobble) - (half_width + n * 0.16 * cy_squash);
 
     // Soft outer mask — clamp the negative-distance region to alpha.
-    let outer = clamp(-dx_norm * 9.0, 0.0, 1.0);
+    let outer = smoothstep(0.0, 0.12, -dx_norm);
 
     // ── Inner volumetric layer ──────────────────────────────────────
     // A second smaller flame INSIDE the first, sampled with a
@@ -141,7 +143,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     );
     let n2 = fbm(n2_uv) - 0.5;
     let dx_inner = abs(cx) - (inner_half + n2 * 0.04);
-    let inner = clamp(-dx_inner * 14.0, 0.0, 1.0);
+    let inner = smoothstep(0.0, 0.08, -dx_inner);
 
     // Vertical envelope: cup the base (so the wick joint reads dark),
     // peak low, fade to a point at the tip.
@@ -194,6 +196,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // saturated cores still pop on the bright wood table; the alpha
     // term keeps the silhouette soft.
     let inv_g = 1.0 / max(globals.gamma, 0.01);
-    let out_rgb = pow(rgb * alpha * 1.6, vec3<f32>(inv_g));
-    return vec4<f32>(out_rgb, alpha);
+    let out_rgb = pow(rgb * alpha * 1.6, vec3<f32>(inv_g)) * in.brightness;
+    return vec4<f32>(out_rgb, alpha * in.brightness);
 }

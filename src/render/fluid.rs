@@ -85,6 +85,9 @@ struct VolumeCameraGpu {
     grid_max: [f32; 4],
     /// x=max_alpha, y=step_count (as f32), z=light_strength, w=ambient
     params: [f32; 4],
+    /// x=render mode: 0=both smoke+flames, 1=smoke only, 2=flames only.
+    /// yzw unused (padding for std140 alignment).
+    mode: [f32; 4],
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -135,6 +138,15 @@ pub struct FluidSim {
     fluid_uniforms_buf: wgpu::Buffer,
     injection_buf: wgpu::Buffer,
     cam_buf: wgpu::Buffer,
+
+    /// Tiny staging buffers for toggling the render mode via
+    /// `encoder.copy_buffer_to_buffer` (avoids `queue.write_buffer`
+    /// batching, which would collapse both writes into the last value).
+    /// Debug-only: used by the smoke-only profiling sub-pass.
+    #[cfg(debug_assertions)]
+    mode_buf_smoke_only: wgpu::Buffer,
+    #[cfg(debug_assertions)]
+    mode_buf_default: wgpu::Buffer,
 
     // Compute pipelines.
     inject_pipeline: wgpu::ComputePipeline,
@@ -301,8 +313,21 @@ impl FluidSim {
                 grid_min: [-100.0, 0.0, -100.0, 0.0],
                 grid_max: [100.0, 60.0, 100.0, 0.0],
                 params: [0.5, 36.0, 1.5, 0.1],
+                mode: [0.0; 4],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        #[cfg(debug_assertions)]
+        let mode_buf_smoke_only = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("fluid3-mode-smoke-only"),
+            contents: bytemuck::cast_slice(&[1.0f32, 0.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        #[cfg(debug_assertions)]
+        let mode_buf_default = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("fluid3-mode-default"),
+            contents: bytemuck::cast_slice(&[0.0f32, 0.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::COPY_SRC,
         });
 
         // ── Shader modules ─────────────────────────────────────────────
@@ -561,8 +586,29 @@ impl FluidSim {
                     },
                     count: None,
                 },
-                // (Lighting moved to a per-voxel compute bake — the
-                // raymarch no longer reads the point lights buffer.)
+                // 4: point lights (for SDF candle flame emission)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // 5: velocity-density 3D texture (for flame wind sampling
+                // via textureLoad — non-filterable since we don't use a sampler)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -640,6 +686,17 @@ impl FluidSim {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // 2: scene depth texture for bilateral upsampling
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
             ],
         });
         let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -710,6 +767,10 @@ impl FluidSim {
             fluid_uniforms_buf,
             injection_buf,
             cam_buf,
+            #[cfg(debug_assertions)]
+            mode_buf_smoke_only,
+            #[cfg(debug_assertions)]
+            mode_buf_default,
             inject_pipeline,
             advect_pipeline,
             divergence_pipeline,
@@ -755,7 +816,12 @@ impl FluidSim {
     /// screen resolution. Cheap to call every frame — does nothing when the
     /// existing target already matches the requested size and detail level.
     /// Also rebuilds the composite bind group so it points at the new view.
-    pub fn set_detail(&mut self, device: &wgpu::Device, detail: SmokeDetail) {
+    pub fn set_detail(
+        &mut self,
+        device: &wgpu::Device,
+        detail: SmokeDetail,
+        depth_view: &wgpu::TextureView,
+    ) {
         let div = detail.divisor().max(1);
         let target_w = (self.screen_w as u32 / div).max(1);
         let target_h = (self.screen_h as u32 / div).max(1);
@@ -793,6 +859,7 @@ impl FluidSim {
             entries: &[
                 bge(0, wgpu::BindingResource::TextureView(&view)),
                 bge(1, wgpu::BindingResource::Sampler(&self.composite_sampler)),
+                bge(2, wgpu::BindingResource::TextureView(depth_view)),
             ],
         }));
         self.offscreen_texture = Some(texture);
@@ -800,12 +867,6 @@ impl FluidSim {
         self.offscreen_w = target_w;
         self.offscreen_h = target_h;
         self.current_detail = Some(detail);
-        log::info!(
-            "[FluidSim] smoke offscreen target → {}x{} ({})",
-            target_w,
-            target_h,
-            detail.label()
-        );
     }
 
     /// Project the smoke grid AABB into the offscreen target's pixel space
@@ -1081,10 +1142,6 @@ impl FluidSim {
         depth_view: &wgpu::TextureView,
         point_lights_buffer: &wgpu::Buffer,
     ) {
-        // Volume raymarch reads pre-lit smoke from `lit_density_view` —
-        // the per-step lighting loop has been hoisted into a per-voxel
-        // compute bake (see `shaders/fluid3_lightbake.wgsl`), so the
-        // lights buffer no longer appears in this layout.
         self.render_bg = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fluid3-render-bg"),
             layout: &self.render_layout,
@@ -1096,6 +1153,8 @@ impl FluidSim {
                 ),
                 bge(2, wgpu::BindingResource::Sampler(&self.linear_sampler)),
                 bge(3, wgpu::BindingResource::TextureView(depth_view)),
+                bge(4, point_lights_buffer.as_entire_binding()),
+                bge(5, wgpu::BindingResource::TextureView(&self.vd_view[0])),
             ],
         }));
         // Lightbake reads vd[0], writes lit_density, and references the
@@ -1143,8 +1202,23 @@ impl FluidSim {
                 grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
                 grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
                 params: [max_alpha, step_count, light_strength, ambient],
+                mode: [0.0, 0.0, 0.0, 0.0],
             }),
         );
+    }
+
+    /// Copy a pre-baked render mode into the camera uniform via the command
+    /// encoder. Unlike `queue.write_buffer`, this takes effect at the correct
+    /// point in the GPU command stream (between recorded render passes).
+    #[cfg(debug_assertions)]
+    pub fn set_render_mode_encoder(&self, encoder: &mut wgpu::CommandEncoder, smoke_only: bool) {
+        let src = if smoke_only {
+            &self.mode_buf_smoke_only
+        } else {
+            &self.mode_buf_default
+        };
+        let offset = std::mem::offset_of!(VolumeCameraGpu, mode) as u64;
+        encoder.copy_buffer_to_buffer(src, 0, &self.cam_buf, offset, 16);
     }
 
     /// Render the volumetric raymarch into the offscreen smoke target. Begins

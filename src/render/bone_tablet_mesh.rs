@@ -23,20 +23,23 @@ pub fn build_bone_tablet_mesh() -> MeshCpu {
 
     push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
 
-    // The +Y face is the third face emitted by `push_box` (index 2). Each
-    // face writes 4 vertices, so the top face occupies vertices 8..12. The
-    // corner order pushed for +Y is:
-    //   v8 = (x0, y1, z0)   "back-left"
-    //   v9 = (x0, y1, z1)   "front-left"
-    //   v10 = (x1, y1, z1)  "front-right"
-    //   v11 = (x1, y1, z0)  "back-right"
-    // Default UVs map u→+Z, v→-X. We want u→+X, v→+Z (text runs along the
-    // long horizontal axis when viewed from the camera) — that's a 90° CCW
-    // rotation around +Y of the original UV mapping.
-    vertices[8].uv = [0.0, 0.0]; // back-left  → top-left of texture
-    vertices[9].uv = [0.0, 1.0]; // front-left → bottom-left of texture
-    vertices[10].uv = [1.0, 1.0]; // front-right → bottom-right of texture
-    vertices[11].uv = [1.0, 0.0]; // back-right → top-right of texture
+    // Zero out UVs on every face except +Y so the decal (transparent
+    // background) only appears on the top face. push_box emits 4 verts
+    // per face in order: +X(0-3), -X(4-7), +Y(8-11), -Y(12-15),
+    // +Z(16-19), -Z(20-23).
+    for i in (0..24).filter(|i| !(8..12).contains(i)) {
+        vertices[i].uv = [0.0, 0.0];
+    }
+    // Rotate the +Y face UVs 90° CCW so the engraved label reads along
+    // the long screen-X axis. Corner order for +Y:
+    //   v8 = (x0, y1, z0)  back-left   → top-left of texture
+    //   v9 = (x0, y1, z1)  front-left  → bottom-left
+    //   v10 = (x1, y1, z1) front-right → bottom-right
+    //   v11 = (x1, y1, z0) back-right  → top-right
+    vertices[8].uv = [0.0, 0.0];
+    vertices[9].uv = [0.0, 1.0];
+    vertices[10].uv = [1.0, 1.0];
+    vertices[11].uv = [1.0, 0.0];
 
     MeshCpu {
         vertices,

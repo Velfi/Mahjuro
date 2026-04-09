@@ -18,12 +18,18 @@
 
 use std::sync::{Arc, Mutex};
 
-const NUM_PASSES: usize = 4;
+const NUM_PASSES: usize = 5;
 const NUM_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
 const TIMESTAMP_BYTES: u64 = 8;
 const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
 
-const PASS_LABELS: [&str; NUM_PASSES] = ["shadow", "main", "smoke-offscreen", "post-smoke"];
+const PASS_LABELS: [&str; NUM_PASSES] = [
+    "shadow",
+    "main",
+    "smoke-offscreen",
+    "post-smoke",
+    "smoke-only",
+];
 
 /// Per-pass timestamp slot indices into the shared query set.
 #[derive(Copy, Clone)]
@@ -32,6 +38,8 @@ pub enum PassSlot {
     Main = 1,
     SmokeOffscreen = 2,
     PostSmoke = 3,
+    /// Smoke-only (no flames) timing pass, used to derive flame cost.
+    SmokeOnly = 4,
 }
 
 pub struct GpuProfiler {
@@ -49,6 +57,9 @@ pub struct GpuProfiler {
     sampling: bool,
     frames_remaining: u32,
     total_frames: u32,
+    /// Swapchain resolution at capture start, logged in the report.
+    capture_width: u32,
+    capture_height: u32,
     /// Per-pass accumulated GPU time in milliseconds.
     accum_ms: [f64; NUM_PASSES],
     /// Number of frames each pass actually ran during the session (some
@@ -91,6 +102,8 @@ impl GpuProfiler {
             sampling: false,
             frames_remaining: 0,
             total_frames: 0,
+            capture_width: 0,
+            capture_height: 0,
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [false; NUM_PASSES],
@@ -107,6 +120,8 @@ impl GpuProfiler {
             sampling: false,
             frames_remaining: 0,
             total_frames: 0,
+            capture_width: 0,
+            capture_height: 0,
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [false; NUM_PASSES],
@@ -116,7 +131,7 @@ impl GpuProfiler {
     /// Begin sampling for the next `frames` rendered frames. No-op (with a
     /// warning) when the device doesn't support timestamp queries or when a
     /// session is already in flight.
-    pub fn start(&mut self, frames: u32) {
+    pub fn start(&mut self, frames: u32, width: u32, height: u32) {
         if !self.enabled {
             log::warn!(
                 "[GpuProfiler] TIMESTAMP_QUERY not supported by this adapter; cannot profile"
@@ -131,6 +146,8 @@ impl GpuProfiler {
         self.sampling = true;
         self.frames_remaining = frames;
         self.total_frames = frames;
+        self.capture_width = width;
+        self.capture_height = height;
         self.accum_ms = [0.0; NUM_PASSES];
         self.pass_frame_counts = [0; NUM_PASSES];
         self.last_frame_passes = [false; NUM_PASSES];
@@ -158,6 +175,33 @@ impl GpuProfiler {
             beginning_of_pass_write_index: Some(begin),
             end_of_pass_write_index: Some(begin + 1),
         })
+    }
+
+    /// Write a standalone timestamp into the command encoder for the given
+    /// pass slot. Use this instead of `pass_writes` when render-pass-level
+    /// `timestamp_writes` don't produce reliable end-of-pass values (e.g.
+    /// the last pass in an encoder on Metal).
+    ///
+    /// Requires `Features::TIMESTAMP_QUERY_INSIDE_ENCODERS` — not available
+    /// on all Metal adapters. Currently unused; kept behind `#[allow(dead_code)]`
+    /// for future use.
+    #[allow(dead_code)]
+    pub fn write_timestamp(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        slot: PassSlot,
+        is_end: bool,
+    ) {
+        if !self.sampling {
+            return;
+        }
+        let Some(qs) = self.query_set.as_ref() else {
+            return;
+        };
+        let idx = slot as usize;
+        self.last_frame_passes[idx] = true;
+        let query_idx = (idx * 2) as u32 + u32::from(is_end);
+        encoder.write_timestamp(qs, query_idx);
     }
 
     /// Called once per frame after all passes have been encoded but before
@@ -212,9 +256,8 @@ impl GpuProfiler {
                     }
                     let begin = raw[i * 2];
                     let end = raw[i * 2 + 1];
-                    // Guard against wraparound or empty passes that wrote
-                    // zeros (shouldn't happen, but cheap to check).
-                    if end <= begin {
+                    // Guard against wraparound or unwritten queries (both 0).
+                    if end < begin || (begin == 0 && end == 0) {
                         continue;
                     }
                     let ticks = end - begin;
@@ -246,8 +289,10 @@ impl GpuProfiler {
 
     fn report(&self) {
         log::info!(
-            "[GpuProfiler] === GPU pass timings averaged over {} frames ===",
-            self.total_frames
+            "[GpuProfiler] === GPU pass timings averaged over {} frames ({}×{}) ===",
+            self.total_frames,
+            self.capture_width,
+            self.capture_height
         );
         let mut total = 0.0_f64;
         for (i, label) in PASS_LABELS.iter().enumerate() {
@@ -259,6 +304,22 @@ impl GpuProfiler {
             let avg = self.accum_ms[i] / frames as f64;
             total += avg;
             log::info!("[GpuProfiler]   {label:<12} {avg:>7.3} ms  ({frames} frames)");
+        }
+        // Derive flame cost = smoke-offscreen (combined) − smoke-only.
+        let smoke_combined_frames = self.pass_frame_counts[PassSlot::SmokeOffscreen as usize];
+        let smoke_only_frames = self.pass_frame_counts[PassSlot::SmokeOnly as usize];
+        if smoke_combined_frames > 0 && smoke_only_frames > 0 {
+            let combined_avg =
+                self.accum_ms[PassSlot::SmokeOffscreen as usize] / smoke_combined_frames as f64;
+            let smoke_avg = self.accum_ms[PassSlot::SmokeOnly as usize] / smoke_only_frames as f64;
+            let flame_avg = (combined_avg - smoke_avg).max(0.0);
+            log::info!(
+                "[GpuProfiler]   {:<12} {:>7.3} ms  (derived: smoke-offscreen − smoke-only)",
+                "flames",
+                flame_avg
+            );
+            // Exclude smoke-only from the total — it's a redundant timing pass.
+            total -= self.accum_ms[PassSlot::SmokeOnly as usize] / smoke_only_frames as f64;
         }
         log::info!(
             "[GpuProfiler]   {:<12} {total:>7.3} ms (sum of averages)",

@@ -49,7 +49,7 @@ pub struct RunState {
     pub ante: u32,
     pub plays_remaining: u32,
     pub discards_remaining: u32,
-    pub gold: u32,
+    pub gold: i32,
     pub blind: BlindKind,
     /// Next blind the player will face in the Small→Big→Boss cycle.
     pub upcoming_blind: BlindKind,
@@ -175,7 +175,7 @@ impl RunState {
             ante: 1,
             plays_remaining: mode.starting_plays,
             discards_remaining: mode.starting_discards,
-            gold: mode.starting_gold,
+            gold: mode.starting_gold as i32,
             blind: BlindKind::Small,
             upcoming_blind: BlindKind::Small,
             last_breakdown: None,
@@ -186,7 +186,10 @@ impl RunState {
             joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
-            consumables: crate::core::consumable::ConsumableInventory::default(),
+            consumables: crate::core::consumable::ConsumableInventory {
+                items: Vec::new(),
+                capacity: mode.consumable_capacity,
+            },
             yaku_loadout: vec![
                 crate::core::yaku::YakuKind::Tanyao,
                 crate::core::yaku::YakuKind::Toitoi,
@@ -307,12 +310,11 @@ impl RunState {
 
     /// Recompute consumable inventory capacity and yaku-loadout capacity from
     /// currently-owned relics. Idempotent — call after any relic add/remove.
-    /// The inventory is shared between Zodiacs and Talismans, so the slot
-    /// count starts at 3 (was 2 when only Zodiacs occupied it) to leave the
-    /// player room to mix consumable types.
+    /// The inventory is shared between Zodiacs and Talismans; the base
+    /// capacity comes from `GameMode::consumable_capacity` (default 2).
     /// (Patch C: ZodiacPouch +1, LunarAlmanac +1, YakuScholar loadout +1.)
     pub fn recompute_capacities(&mut self) {
-        let mut consumable_cap = 3usize;
+        let mut consumable_cap = self.mode.consumable_capacity;
         if self.relics.has(RelicId::ZodiacPouch) {
             consumable_cap += 1;
         }
@@ -331,7 +333,7 @@ impl RunState {
 
     /// Whether a run is in progress (not a fresh/default state).
     pub fn is_in_progress(&self) -> bool {
-        self.round_score > 0 || self.run_number > 1 || self.gold != self.mode.starting_gold
+        self.round_score > 0 || self.run_number > 1 || self.gold != self.mode.starting_gold as i32
     }
 
     /// True once the player has defeated the Boss of the final ante.
@@ -548,7 +550,7 @@ impl RunState {
             // past the target.
             let base_reward = self.blind.clear_reward();
             let unused_play_bonus = self.plays_remaining;
-            let interest = (self.gold / 5).min(5);
+            let interest = (self.gold.max(0) as u32 / 5).min(5);
             let green_luck_bonus =
                 if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
                     4
@@ -559,7 +561,9 @@ impl RunState {
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
                 .saturating_add(green_luck_bonus);
-            self.gold = self.gold.saturating_add(gold_earned);
+            // Gold payout is deferred — applied in handle_round_end_event()
+            // after the scoring cascade finishes, so the UI doesn't show the
+            // new balance while the animation is still playing.
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
                 payout: crate::game::event_bus::RoundPayout {
@@ -581,6 +585,7 @@ impl RunState {
     /// Mystery-preserving score preview for the current selection.
     /// Returns `None` if the selection is empty or doesn't decompose into melds.
     /// Honors wildcard relics so the preview matches what an actual play would score.
+    #[allow(dead_code)]
     pub fn preview_selection(&self) -> Option<ScorePreview> {
         if self.selected_count() == 0 {
             return None;
@@ -876,7 +881,7 @@ mod tests {
             discards_remaining: mode.starting_discards,
             full_hand_played_this_round: false,
             gold_cost_per_play: 0,
-            gold: mode.starting_gold,
+            gold: mode.starting_gold as i32,
             hand,
             joker_used: false,
             last_breakdown: None,

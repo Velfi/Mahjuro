@@ -212,9 +212,10 @@ fn tempest_play(run: &mut RunState) {
 }
 
 fn tribute_play(run: &mut RunState) {
-    // Tax fires after the play has resolved. Saturate at 0; we don't gate
-    // future plays on having gold so the player can still finish the round.
-    run.gold = run.gold.saturating_sub(run.gold_cost_per_play);
+    // Tax fires after the play has resolved. Gold is allowed to go negative
+    // during boss rounds — the player can still finish the round but will
+    // need to earn it back in the shop/payout phase.
+    run.gold -= run.gold_cost_per_play as i32;
 }
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────
@@ -274,7 +275,7 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
 /// reveal means a player who spends gold down before the boss blind can't
 /// escape — the price was set when the ante began.
 fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
-    let cost = (run.gold / 10).clamp(2, 8);
+    let cost = (run.gold.max(0) as u32 / 10).clamp(2, 8);
     run.tax_collector_cost = cost;
     ResolvedBossEffect {
         rule_pushes: vec![],

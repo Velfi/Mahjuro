@@ -353,7 +353,8 @@ impl ModalQueue {
         // Modal card dimensions.
         let card_w = (360.0 * scale).min(window_w * 0.8);
         let title_h = (48.0 * scale).max(28.0);
-        let body_h = (36.0 * scale).max(20.0);
+        let body_lines = modal.body.lines().count().max(1) as f32;
+        let body_h = (body_lines * 24.0 * scale).max(20.0);
         let dismiss_h = (28.0 * scale).max(18.0);
         let padding = (20.0 * scale).max(10.0);
         let card_h =

@@ -46,6 +46,8 @@ enum ShopAction {
     BuyConsumable(usize),
     /// Sell the consumable at this index in `run.consumables.items`.
     SellConsumable(usize),
+    #[allow(dead_code)]
+    Reroll,
 }
 
 /// Every shop element a controller / keyboard player can navigate to.
@@ -69,6 +71,8 @@ enum ShopFocus {
     Dish(u32),
     /// The 2D "Next Round" button at the bottom of the screen.
     NextRound,
+    /// The 2D "Reroll" button at the bottom of the screen.
+    Reroll,
 }
 
 impl ShopFocus {
@@ -90,7 +94,7 @@ impl ShopFocus {
             Self::Ribbon(i) => Some(ShopHit::Ribbon(i)),
             Self::Talisman(i) => Some(ShopHit::Talisman(i)),
             Self::Dish(id) => Some(ShopHit::Dish(id)),
-            Self::NextRound => None,
+            Self::NextRound | Self::Reroll => None,
         }
     }
 }
@@ -188,10 +192,10 @@ fn apply_shop_action(
         ShopAction::BuyCard(idx) => {
             if idx < items.len() {
                 let item = &items[idx];
-                if !item.sold && run.gold >= item.price && !run.relics.is_full() {
+                if !item.sold && run.gold >= item.price as i32 && !run.relics.is_full() {
                     let price = item.price;
                     let relic = item.relic;
-                    run.gold -= price;
+                    run.gold -= price as i32;
                     run.relics.active.push(relic);
                     run.recompute_capacities();
                     items.remove(idx);
@@ -203,16 +207,16 @@ fn apply_shop_action(
                 let rid = run.relics.active[idx];
                 let refund = relic_sell_price(rid);
                 run.relics.active.remove(idx);
-                run.gold = run.gold.saturating_add(refund);
+                run.gold = run.gold.saturating_add(refund as i32);
             }
         }
         ShopAction::BuyConsumable(idx) => {
             if idx < consumable_items.len() {
                 let item = &consumable_items[idx];
                 let price = item.price();
-                if !item.sold && run.gold >= price && !run.consumables.is_full() {
+                if !item.sold && run.gold >= price as i32 && !run.consumables.is_full() {
                     let consumable = item.consumable;
-                    run.gold -= price;
+                    run.gold -= price as i32;
                     run.consumables.items.push(consumable);
                     consumable_items.remove(idx);
                 }
@@ -223,9 +227,13 @@ fn apply_shop_action(
                 let c = run.consumables.items[idx];
                 let refund = consumable_sell_price(c);
                 run.consumables.items.remove(idx);
-                run.gold = run.gold.saturating_add(refund);
+                run.gold = run.gold.saturating_add(refund as i32);
             }
         }
+        // Reroll is handled directly in ShopScene::update() because it
+        // needs `&mut self` to regenerate stock — this arm is unreachable
+        // but keeps the match exhaustive.
+        ShopAction::Reroll => {}
     }
 }
 
@@ -269,10 +277,14 @@ impl ConsumableShopItem {
     }
     fn description(&self) -> String {
         match self.consumable {
-            Consumable::Zodiac(z) => format!(
-                "Levels {} for the rest of the run (+0.5 mult, +20 chips per level).",
-                z.yaku().name()
-            ),
+            Consumable::Zodiac(z) => {
+                let yk = z.yaku();
+                format!(
+                    "Levels {} for the rest of the run (+0.5 mult, +20 chips per level). {}",
+                    yk.name(),
+                    super::glossary::yaku_shape_text(yk),
+                )
+            }
             Consumable::Talisman(t) => t.description().to_string(),
         }
     }
@@ -282,6 +294,9 @@ pub struct ShopScene {
     pub came_from_round: u32,
     items: Vec<ShopItem>,
     consumable_items: Vec<ConsumableShopItem>,
+    /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
+    /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
+    reroll_cost: u32,
     pause_menu: PauseMenu,
     glossary: super::glossary::GlossaryOverlay,
     journal: super::journal::JournalOverlay,
@@ -303,6 +318,12 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// Click id for the Next Round 2D button.
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
+/// Click id for the Reroll 2D button.
+const SHOP_REROLL_ID: u32 = 0x9400;
+/// Base gold cost for the first shop reroll.
+const REROLL_BASE_COST: u32 = 5;
+/// How much the reroll cost increases per use within a single shop visit.
+const REROLL_COST_INCREMENT: u32 = 5;
 /// Pick id for the foreground relic dish.
 const PICK_RELIC_DISH: u32 = 1;
 /// Pick id for the coin dish.
@@ -314,121 +335,118 @@ const PICK_COIN_DISH: u32 = 2;
 /// what matters here.
 const PICK_JOURNAL_BOOK: u32 = 3;
 
+/// Generate randomized shop stock (relics + consumables) from the player's
+/// unowned-relic pool. Shared between initial shop creation and rerolls.
+fn generate_shop_stock(relics: &RelicState) -> (Vec<ShopItem>, Vec<ConsumableShopItem>) {
+    let mut rng = rand::rng();
+
+    const MAX_RIBBONS: usize = 3;
+    let max_relics = NICHE_COLS * NICHE_ROWS;
+
+    let mut n_relics = rng.random_range(0..=max_relics);
+    let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
+    let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
+    if n_zodiacs + n_talismans > MAX_RIBBONS {
+        while n_zodiacs + n_talismans > MAX_RIBBONS {
+            if n_zodiacs >= n_talismans {
+                n_zodiacs -= 1;
+            } else {
+                n_talismans -= 1;
+            }
+        }
+    }
+    while n_relics + n_zodiacs + n_talismans < 2 {
+        let relics_room = n_relics < max_relics;
+        let ribbons_room = n_zodiacs + n_talismans < MAX_RIBBONS;
+        let zodiacs_room = ribbons_room && n_zodiacs < MAX_RIBBONS;
+        let talismans_room = ribbons_room && n_talismans < MAX_RIBBONS;
+        let mut choices: Vec<u8> = Vec::with_capacity(3);
+        if relics_room {
+            choices.push(0);
+        }
+        if zodiacs_room {
+            choices.push(1);
+        }
+        if talismans_room {
+            choices.push(2);
+        }
+        if choices.is_empty() {
+            break;
+        }
+        match choices[rng.random_range(0..choices.len())] {
+            0 => n_relics += 1,
+            1 => n_zodiacs += 1,
+            _ => n_talismans += 1,
+        }
+    }
+
+    let defs = all_relic_defs();
+    let mut relic_pool: Vec<&_> = defs.iter().filter(|d| !relics.has(d.id)).collect();
+    relic_pool.shuffle(&mut rng);
+    let items: Vec<ShopItem> = relic_pool
+        .into_iter()
+        .take(n_relics)
+        .map(|d| ShopItem {
+            relic: d.id,
+            name: d.name,
+            description: d.description,
+            rarity: d.rarity,
+            price: relic_price(d.id),
+            sold: false,
+        })
+        .collect();
+
+    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().iter().copied().collect();
+    zodiac_pool.shuffle(&mut rng);
+    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
+    talisman_pool.shuffle(&mut rng);
+    let mut consumable_items: Vec<ConsumableShopItem> = zodiac_pool
+        .into_iter()
+        .take(n_zodiacs)
+        .map(|z| ConsumableShopItem {
+            consumable: Consumable::Zodiac(z),
+            sold: false,
+        })
+        .chain(
+            talisman_pool
+                .into_iter()
+                .take(n_talismans)
+                .map(|t| ConsumableShopItem {
+                    consumable: Consumable::Talisman(t),
+                    sold: false,
+                }),
+        )
+        .collect();
+    consumable_items.shuffle(&mut rng);
+
+    (items, consumable_items)
+}
+
 impl ShopScene {
     pub fn new(came_from_round: u32, relics: &RelicState) -> Self {
-        let mut rng = rand::rng();
-
-        // Randomize stock independently per shop visit. The cabinet has
-        // NICHE_COLS*NICHE_ROWS relic compartments and ~MAX_RIBBONS ribbon
-        // anchors; we pick how many of each kind to actually offer this
-        // visit so the shop's mix varies (sometimes only relics, sometimes
-        // only consumables, sometimes a small handful of each).
-        const MAX_RIBBONS: usize = 3;
-        let max_relics = NICHE_COLS * NICHE_ROWS;
-
-        // For each category, roll 0..=cap with a slight bias toward
-        // having *some* of each so the shop usually feels stocked.
-        // Zodiacs and talismans both floor at 1 so the consumable wall is
-        // never empty — players were complaining the shop "had no zodiacs"
-        // because the previous 0..=MAX roll left it empty too often.
-        let mut n_relics = rng.random_range(0..=max_relics);
-        let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
-        let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
-        // Cap total ribbons across both consumable types so we don't
-        // overflow the cabinet's right half.
-        if n_zodiacs + n_talismans > MAX_RIBBONS {
-            // Trim from whichever is larger.
-            while n_zodiacs + n_talismans > MAX_RIBBONS {
-                if n_zodiacs >= n_talismans {
-                    n_zodiacs -= 1;
-                } else {
-                    n_talismans -= 1;
-                }
-            }
-        }
-        // Floor: shop must always offer at least 2 items total. Bump the
-        // smallest category until we have ≥ 2, respecting per-category caps
-        // and the combined ribbon cap.
-        while n_relics + n_zodiacs + n_talismans < 2 {
-            // Pick a category that still has room.
-            let relics_room = n_relics < max_relics;
-            let ribbons_room = n_zodiacs + n_talismans < MAX_RIBBONS;
-            let zodiacs_room = ribbons_room && n_zodiacs < MAX_RIBBONS;
-            let talismans_room = ribbons_room && n_talismans < MAX_RIBBONS;
-            let mut choices: Vec<u8> = Vec::with_capacity(3);
-            if relics_room {
-                choices.push(0);
-            }
-            if zodiacs_room {
-                choices.push(1);
-            }
-            if talismans_room {
-                choices.push(2);
-            }
-            if choices.is_empty() {
-                break;
-            }
-            match choices[rng.random_range(0..choices.len())] {
-                0 => n_relics += 1,
-                1 => n_zodiacs += 1,
-                _ => n_talismans += 1,
-            }
-        }
-
-        // Build the relic stock from the player's unowned-relic pool.
-        let defs = all_relic_defs();
-        let mut relic_pool: Vec<&_> = defs.iter().filter(|d| !relics.has(d.id)).collect();
-        relic_pool.shuffle(&mut rng);
-        let items: Vec<ShopItem> = relic_pool
-            .into_iter()
-            .take(n_relics)
-            .map(|d| ShopItem {
-                relic: d.id,
-                name: d.name,
-                description: d.description,
-                rarity: d.rarity,
-                price: relic_price(d.id),
-                sold: false,
-            })
-            .collect();
-
-        // Build the consumable stock as separate zodiac + talisman picks
-        // so the rolled counts are honored exactly.
-        let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().iter().copied().collect();
-        zodiac_pool.shuffle(&mut rng);
-        let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
-        talisman_pool.shuffle(&mut rng);
-        let mut consumable_items: Vec<ConsumableShopItem> = zodiac_pool
-            .into_iter()
-            .take(n_zodiacs)
-            .map(|z| ConsumableShopItem {
-                consumable: Consumable::Zodiac(z),
-                sold: false,
-            })
-            .chain(
-                talisman_pool
-                    .into_iter()
-                    .take(n_talismans)
-                    .map(|t| ConsumableShopItem {
-                        consumable: Consumable::Talisman(t),
-                        sold: false,
-                    }),
-            )
-            .collect();
-        // Shuffle so zodiacs and talismans interleave on the wall instead
-        // of always grouping zodiacs first.
-        consumable_items.shuffle(&mut rng);
+        let (items, consumable_items) = generate_shop_stock(relics);
 
         Self {
             came_from_round,
             items,
             consumable_items,
+            reroll_cost: REROLL_BASE_COST,
             pause_menu: PauseMenu::new(),
             glossary: super::glossary::GlossaryOverlay::new(),
             journal: super::journal::JournalOverlay::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// Replace all unsold stock with fresh random items and bump the cost.
+    fn reroll(&mut self, run: &mut crate::game::run::RunState) {
+        run.gold -= self.reroll_cost as i32;
+        self.reroll_cost += REROLL_COST_INCREMENT;
+        let (items, consumable_items) = generate_shop_stock(&run.relics);
+        self.items = items;
+        self.consumable_items = consumable_items;
+        self.focus = None;
     }
 }
 
@@ -846,7 +864,8 @@ impl SceneBehavior for ShopScene {
                 }
             }
         } else {
-            self.glossary.handle_input(ctx.actions, ctx.button_clicks);
+            self.glossary
+                .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
             return None;
         }
 
@@ -854,7 +873,8 @@ impl SceneBehavior for ShopScene {
         // the counter (routed via the 3D-hit dispatcher below as
         // `ShopHit::Dish(PICK_JOURNAL_BOOK)`).
         if self.journal.open {
-            self.journal.handle_input(ctx.actions, ctx.button_clicks);
+            self.journal
+                .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
             return None;
         }
 
@@ -940,6 +960,11 @@ impl SceneBehavior for ShopScene {
                     if matches!(focus, ShopFocus::NextRound) {
                         return Some(Scene::PickBlind(PickBlindScene::new()));
                     }
+                    if matches!(focus, ShopFocus::Reroll) && ctx.run.gold >= self.reroll_cost as i32
+                    {
+                        self.reroll(ctx.run);
+                        continue;
+                    }
                     if let Some(hit) = focus.to_hit() {
                         if let Some(action) =
                             shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
@@ -976,6 +1001,10 @@ impl SceneBehavior for ShopScene {
         for &cid in ctx.button_clicks {
             if cid == SHOP_NEXT_ROUND_ID {
                 return Some(Scene::PickBlind(PickBlindScene::new()));
+            }
+            if cid == SHOP_REROLL_ID && ctx.run.gold >= self.reroll_cost as i32 {
+                self.reroll(ctx.run);
+                return None;
             }
         }
 
@@ -1120,7 +1149,7 @@ impl SceneBehavior for ShopScene {
                 glow: 0.0,
             });
         }
-        let owned_base = 14.0_f32;
+        let owned_base = layout.relic_dish_extents[0] * 0.09;
         for (i, &rid) in ctx.run.relics.active.iter().enumerate() {
             let (px, py, wy) = layout.owned_relic_pos(i);
             let rarity = all_relic_defs()
@@ -1171,11 +1200,12 @@ impl SceneBehavior for ShopScene {
                         width: layout.ribbon_width,
                         rotation_y_deg: 0.0,
                         rotation_x_deg: 0.0,
+                        rotation_z_deg: 0.0,
                         color: [1.0, 1.0, 1.0, alpha],
                         kind: Some(z),
                     });
                 }
-                Consumable::Talisman(_) => {
+                Consumable::Talisman(tk) => {
                     // Talismans hover at the vertical mid-point of the
                     // ribbon row so they read as part of the same wall row.
                     talisman_placements.push(TalismanPlacement {
@@ -1187,7 +1217,9 @@ impl SceneBehavior for ShopScene {
                         ],
                         rotation_y_deg: 0.0,
                         rotation_x_deg: 0.0,
+                        rotation_z_deg: 0.0,
                         color: col,
+                        kind: tk,
                     });
                 }
             }
@@ -1210,11 +1242,12 @@ impl SceneBehavior for ShopScene {
                         rotation_y_deg: 0.0,
                         // Lay flat (face up) in the tray.
                         rotation_x_deg: -90.0,
+                        rotation_z_deg: 0.0,
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: Some(*z),
                     });
                 }
-                Consumable::Talisman(_) => {
+                Consumable::Talisman(tk) => {
                     talisman_placements.push(TalismanPlacement {
                         center_pos: [ax, ay, awy - layout.consumable_length * 0.4],
                         extents: [
@@ -1225,7 +1258,9 @@ impl SceneBehavior for ShopScene {
                         rotation_y_deg: 0.0,
                         // Lay flat in the tray (face up).
                         rotation_x_deg: -90.0,
+                        rotation_z_deg: 0.0,
                         color: consumable_color(*c),
+                        kind: *tk,
                     });
                 }
             }
@@ -1239,12 +1274,12 @@ impl SceneBehavior for ShopScene {
 
         // ── Coin pile inside the coin dish ─────────────────────────────
         let coins = coin_pile_layout(
-            ctx.run.gold,
+            ctx.run.gold.max(0) as u32,
             layout.coin_dish_center_px,
             layout.coin_dish_extents,
             // Stable per-gold-count seed so the pile doesn't reshuffle each
             // frame.
-            ctx.run.gold.wrapping_add(0xC01F).max(1),
+            (ctx.run.gold.max(0) as u32).wrapping_add(0xC01F).max(1),
         );
         if !coins.is_empty() {
             frame.coin_batch(coins);
@@ -1563,15 +1598,16 @@ impl SceneBehavior for ShopScene {
             let (title, subtitle, cta, cta_color) = match hit {
                 ShopHit::Relic(i) if i < n_for_sale_relics => {
                     let item = &self.items[i];
-                    let can_afford =
-                        ctx.run.gold >= item.price && !ctx.run.relics.is_full() && !item.sold;
+                    let can_afford = ctx.run.gold >= item.price as i32
+                        && !ctx.run.relics.is_full()
+                        && !item.sold;
                     let cta = if item.sold {
                         "SOLD".to_string()
                     } else if !can_afford {
                         if ctx.run.relics.is_full() {
                             "Relics full".to_string()
                         } else {
-                            format!("Need {}g", item.price - ctx.run.gold)
+                            format!("Need {}g", item.price as i32 - ctx.run.gold)
                         }
                     } else {
                         format!("Buy {}g", item.price)
@@ -1613,15 +1649,16 @@ impl SceneBehavior for ShopScene {
                     if let Some(slot_i) = nth_consumable_of_kind(true, i) {
                         let item = &self.consumable_items[slot_i];
                         let price = item.price();
-                        let can_afford =
-                            ctx.run.gold >= price && !ctx.run.consumables.is_full() && !item.sold;
+                        let can_afford = ctx.run.gold >= price as i32
+                            && !ctx.run.consumables.is_full()
+                            && !item.sold;
                         let cta = if item.sold {
                             "SOLD".to_string()
                         } else if !can_afford {
                             if ctx.run.consumables.is_full() {
                                 "Inventory full".to_string()
                             } else {
-                                format!("Need {}g", price - ctx.run.gold)
+                                format!("Need {}g", price as i32 - ctx.run.gold)
                             }
                         } else {
                             format!("Buy {}g", price)
@@ -1671,15 +1708,16 @@ impl SceneBehavior for ShopScene {
                     if let Some(slot_i) = nth_consumable_of_kind(false, i) {
                         let item = &self.consumable_items[slot_i];
                         let price = item.price();
-                        let can_afford =
-                            ctx.run.gold >= price && !ctx.run.consumables.is_full() && !item.sold;
+                        let can_afford = ctx.run.gold >= price as i32
+                            && !ctx.run.consumables.is_full()
+                            && !item.sold;
                         let cta = if item.sold {
                             "SOLD".to_string()
                         } else if !can_afford {
                             if ctx.run.consumables.is_full() {
                                 "Inventory full".to_string()
                             } else {
-                                format!("Need {}g", price - ctx.run.gold)
+                                format!("Need {}g", price as i32 - ctx.run.gold)
                             }
                         } else {
                             format!("Buy {}g", price)
@@ -1832,12 +1870,42 @@ impl SceneBehavior for ShopScene {
             }
         }
 
-        // ── Next Round button (always-visible, 2D) ─────────────────────
+        // ── Reroll + Next Round buttons (always-visible, 2D) ──────────
         let scale = (w.min(h)) / 600.0;
         let btn_w = (180.0 * scale).max(120.0);
         let btn_h = (44.0 * scale).max(28.0);
-        let btn_x = (w - btn_w) * 0.5;
+        let btn_gap = 12.0 * scale;
+        let total_w = btn_w * 2.0 + btn_gap;
+        let left_x = (w - total_w) * 0.5;
         let btn_y = h - btn_h - (16.0 * scale);
+
+        // Reroll button (left).
+        let reroll_affordable = ctx.run.gold >= self.reroll_cost as i32;
+        let reroll_state = if reroll_affordable {
+            ButtonState::Rest
+        } else {
+            ButtonState::Disabled
+        };
+        let reroll_label = format!("Restock ${}g", self.reroll_cost);
+        widget::push_button(
+            &mut quads,
+            &mut texts,
+            &mut buttons,
+            [left_x, btn_y, btn_w, btn_h],
+            &reroll_label,
+            ButtonVariant::Default,
+            reroll_state,
+            UiAction::Cancel, // placeholder — replaced below
+        );
+        buttons.pop();
+        buttons.push(ButtonDef::scene(
+            (left_x, btn_y, btn_w, btn_h),
+            SHOP_REROLL_ID,
+        ));
+        let reroll_rect: [f32; 4] = [left_x, btn_y, btn_w, btn_h];
+
+        // Next Round button (right).
+        let btn_x = left_x + btn_w + btn_gap;
         widget::push_button(
             &mut quads,
             &mut texts,
@@ -1894,6 +1962,7 @@ impl SceneBehavior for ShopScene {
                 }
             }
         }
+        focus_rect_graph.push((ShopFocus::Reroll, reroll_rect));
         focus_rect_graph.push((ShopFocus::NextRound, next_round_rect));
 
         // Push the brass focus ring on top of the 2D HUD layer so it

@@ -48,6 +48,7 @@ use crate::ui::layout::{LayoutResult, Rect};
 pub struct DebugVisibility {
     pub hide_candles: bool,
     pub hide_blind_plaque: bool,
+    #[allow(dead_code)]
     pub hide_scoring_placard: bool,
 }
 
@@ -123,6 +124,9 @@ pub struct UpdateCtx<'a> {
     /// `DrawCtx::picked_hand_tile` so scenes can sync cursor → focus during
     /// `update()` without going back to the renderer.
     pub picked_hand_tile: Option<usize>,
+    /// Accumulated scroll-wheel delta this frame in line units.
+    /// Negative = scroll up (content moves down), positive = scroll down.
+    pub scroll_lines: f32,
 }
 
 /// Everything a scene's `draw()` may need.

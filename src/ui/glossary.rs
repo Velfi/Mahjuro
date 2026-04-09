@@ -107,6 +107,14 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
         aliases: &["plays"],
         description: "Score a valid meld from your hand. 4 plays per round.",
     },
+    GlossaryEntry {
+        term: "Chicken Hand",
+        aliases: &["chicken"],
+        description: "A structurally valid meld or hand that triggers no \
+                      yaku. It scores base chips × 1 mult — legal, but \
+                      worth very little. Build toward a yaku to multiply \
+                      your score.",
+    },
     // ── Meta-game ────────────────────────────────────────────────────
     GlossaryEntry {
         term: "Blind",
@@ -156,77 +164,81 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
     GlossaryEntry {
         term: "Tanyao",
         aliases: &["all simples"],
-        description: "Yaku: all simples. Use only number tiles ranked 2–8 \
-                      — no terminals (1 or 9) and no honors. +2 mult, \
-                      +30 chips.",
+        description: "Yaku: all simples. Use only number tiles ranked \
+                      2\u{2013}8 \u{2014} no terminals (1 or 9) and no \
+                      honors (e.g. \u{1f3b4}234 \u{1f38b}567 \u{1f534}88). \
+                      +2 mult, +30 chips.",
     },
     GlossaryEntry {
         term: "Toitoi",
         aliases: &["all triplets"],
-        description: "Yaku: every meld is a triplet (or kong). Build only \
-                      triplets and a pair — no sequences allowed. +4 mult, \
-                      +50 chips.",
+        description: "Yaku: every meld is a triplet (or kong) \u{2014} no \
+                      sequences allowed (e.g. \u{1f3b4}222 \u{1f38b}555 \
+                      \u{1f534}999). +4 mult, +50 chips.",
     },
     GlossaryEntry {
         term: "Yakuhai",
         aliases: &["value tiles"],
         description: "Yaku: a triplet (or kong) of any dragon, or of the \
-                      current round wind. Collect three matching honor \
-                      tiles. +3 mult, +40 chips.",
+                      current round wind (e.g. \u{1f409}\u{1f409}\u{1f409}). \
+                      +3 mult, +40 chips.",
     },
     GlossaryEntry {
         term: "Iipeikou",
         aliases: &["pure double sequence"],
         description: "Yaku: two identical sequences in the same suit \
-                      (e.g. 2-3-4 bamboo + 2-3-4 bamboo). +3 mult, \
-                      +40 chips.",
+                      (e.g. \u{1f38b}123 \u{1f38b}123). +3 mult, +40 chips.",
     },
     GlossaryEntry {
         term: "Sanshoku",
         aliases: &["three colour straight"],
         description: "Yaku: the same number sequence in all three number \
-                      suits (e.g. 4-5-6 in characters, bamboo, and \
-                      circles). +4 mult, +50 chips.",
+                      suits (e.g. \u{1f3b4}456 \u{1f38b}456 \u{1f534}456). \
+                      +4 mult, +50 chips.",
     },
     GlossaryEntry {
         term: "Ittsu",
         aliases: &["pure straight"],
-        description: "Yaku: a 1–9 run in one number suit, built from three \
-                      sequences: 1-2-3, 4-5-6, and 7-8-9. +4 mult, \
-                      +50 chips.",
+        description: "Yaku: a 1\u{2013}9 run in one number suit, built \
+                      from three sequences (e.g. \u{1f38b}123 \u{1f38b}456 \
+                      \u{1f38b}789). +4 mult, +50 chips.",
     },
     GlossaryEntry {
         term: "Honitsu",
         aliases: &["half flush"],
-        description: "Yaku: one number suit plus honors only — no other \
-                      number suits in the hand. +4 mult, +50 chips.",
+        description: "Yaku: one number suit plus honors only \u{2014} no \
+                      other number suits (e.g. \u{1f38b}234 \u{1f38b}678 \
+                      \u{1f32c}\u{1f32c}\u{1f32c}). +4 mult, +50 chips.",
     },
     GlossaryEntry {
         term: "Chinitsu",
         aliases: &["full flush", "flush"],
         description: "Yaku: a single number suit with no honors. Every \
-                      tile shares the same suit. +6 mult, +80 chips.",
+                      tile shares the same suit (e.g. \u{1f38b}123 \u{1f38b}456 \
+                      \u{1f38b}789 \u{1f38b}11). +6 mult, +80 chips.",
     },
     GlossaryEntry {
         term: "Junchan",
         aliases: &["terminal in each set"],
         description: "Yaku: every meld contains a terminal (rank 1 or 9). \
-                      Sequences must be 1-2-3 or 7-8-9; pairs and triplets \
-                      must be of 1s or 9s. No honors. +4 mult, +50 chips.",
+                      Sequences must be 1-2-3 or 7-8-9 (e.g. \u{1f38b}123 \
+                      \u{1f3b4}789 \u{1f534}111 \u{1f38b}99). +4 mult, \
+                      +50 chips.",
     },
     GlossaryEntry {
         term: "Honroutou",
         aliases: &["all terminals and honors"],
         description: "Yaku: every tile is either a terminal (1 or 9) or \
-                      an honor. No simples anywhere in the hand. +4 mult, \
-                      +40 chips.",
+                      an honor (e.g. \u{1f38b}111 \u{1f3b4}999 \
+                      \u{1f32c}\u{1f32c}\u{1f32c}). +4 mult, +40 chips.",
     },
     GlossaryEntry {
         term: "Chiitoitsu",
         aliases: &["seven pairs"],
-        description: "Yaku: an alternate hand shape — seven distinct \
-                      pairs, no melds. Each pair must be a different tile. \
-                      +4 mult, +50 chips.",
+        description: "Yaku: an alternate hand shape \u{2014} seven distinct \
+                      pairs, no melds (e.g. \u{1f3b4}11 \u{1f3b4}33 \
+                      \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \
+                      \u{1f32c}\u{1f32c}). +4 mult, +50 chips.",
     },
 ];
 

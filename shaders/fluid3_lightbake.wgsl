@@ -45,6 +45,7 @@ struct VolumeCamera {
     // x=max_alpha, y=step_count, z=light_strength, w=ambient.
     // We only consume z and w here.
     params:        vec4<f32>,
+    mode:          vec4<f32>,
 };
 
 struct PointLight {

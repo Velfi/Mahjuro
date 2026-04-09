@@ -4,7 +4,7 @@
 //! Earlier patches gave Zodiacs their own [`crate::core::zodiac::ZodiacInventory`].
 //! Talismans share that slot space rather than getting a parallel inventory,
 //! so the player chooses how to spend a finite consumable budget each round.
-//! Capacity is set by the run (default 2, expandable via relics).
+//! Capacity is set by the game mode (default 2, expandable via relics).
 
 use serde::{Deserialize, Serialize};
 
@@ -38,12 +38,11 @@ pub struct ConsumableInventory {
 
 impl Default for ConsumableInventory {
     fn default() -> Self {
-        // 3 base slots since the inventory is shared between Zodiacs and
-        // Talismans — the player needs room to carry both types. Pouch /
-        // Almanac relics push this up via `RunState::recompute_capacities`.
+        // 2 base slots — matches `GameMode::standard().consumable_capacity`.
+        // Pouch / Almanac relics push this up via `recompute_capacities`.
         Self {
             items: Vec::new(),
-            capacity: 3,
+            capacity: 2,
         }
     }
 }

@@ -17,10 +17,16 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
 
     push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
 
+    // Zero out UVs on every face except +Y so the decal (transparent
+    // background) only appears on the top face. push_box emits 4 verts
+    // per face in order: +X(0-3), -X(4-7), +Y(8-11), -Y(12-15),
+    // +Z(16-19), -Z(20-23).
+    for i in (0..24).filter(|i| !(8..12).contains(i)) {
+        vertices[i].uv = [0.0, 0.0];
+    }
     // Rotate the +Y face UVs 90° CCW around UP so the engraved label
-    // texture (256×96 landscape) reads along the long screen-X axis instead
-    // of the short local-Z axis. See `bone_tablet_mesh.rs` for the corner
-    // index map — both meshes use the same `push_box` layout.
+    // texture (landscape) reads along the long screen-X axis instead
+    // of the short local-Z axis.
     vertices[8].uv = [0.0, 0.0];
     vertices[9].uv = [0.0, 1.0];
     vertices[10].uv = [1.0, 1.0];
@@ -30,7 +36,7 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::LacqueredWood,
+            kind: MaterialKind::LacqueredWoodFlat,
             base_color: [1.0, 1.0, 1.0, 1.0], // procedural wood
             specular_strength: 0.55,
             specular_power: 96.0,

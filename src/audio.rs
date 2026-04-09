@@ -28,6 +28,7 @@ pub enum SfxId {
     ScoreFinal,
     RelicPickup,
     InvalidAction,
+    CoinDrop,
     RoundWin,
     GameOver,
 }
@@ -48,6 +49,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::ScoreFinal,
         SfxId::RelicPickup,
         SfxId::InvalidAction,
+        SfxId::CoinDrop,
         SfxId::RoundWin,
         SfxId::GameOver,
     ]
@@ -68,6 +70,7 @@ impl SfxId {
             SfxId::ScoreFinal => "kenney_interface-sounds/Audio/confirmation_002.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
             SfxId::InvalidAction => "kenney_interface-sounds/Audio/drop_003.ogg",
+            SfxId::CoinDrop => "kenney_interface-sounds/Audio/drop_002.ogg",
             SfxId::RoundWin => "kenney_music-jingles/Audio/Sax jingles/jingles_SAX16.ogg",
             SfxId::GameOver => "alphix-game-over-417465.mp3",
         }
