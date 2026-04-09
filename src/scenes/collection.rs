@@ -20,7 +20,7 @@ use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CollectionAction {
@@ -117,8 +117,8 @@ impl CollectionScene {
 
     /// Single source of truth for tab/footer/back rects. Returns the flat
     /// item list shared by update() (hit-test) and draw() (button registration).
-    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<CollectionAction>> {
-        let scale = (w.min(h)) / 600.0;
+    fn flat_items(&self, w: f32, h: f32, ui_scale: f32) -> Vec<FlatItem<CollectionAction>> {
+        let scale = (w.min(h)) / 600.0 * ui_scale;
         let title_font = (24.0 * scale).max(14.0);
         let title_h = text_rect_h(title_font);
         let title_y = h * 0.02;
@@ -178,7 +178,7 @@ impl CollectionScene {
 
 impl SceneBehavior for CollectionScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -186,6 +186,9 @@ impl SceneBehavior for CollectionScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
             },
         );
 
@@ -235,15 +238,11 @@ impl SceneBehavior for CollectionScene {
         None
     }
 
-    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
-        // Legacy fallback — the canonical path is `draw_frame()` below.
-        SceneDrawOutput::default()
-    }
-
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let ui_scale = ctx.ui_scale;
+        let scale = (w.min(h)) / 600.0 * ui_scale;
         let progress = ctx.progress;
 
         let mut frame = UiFrame::new();
@@ -436,6 +435,7 @@ impl SceneBehavior for CollectionScene {
                     &mut instances,
                     &mut text_labels,
                     &mut relic_icons,
+                    ui_scale,
                 );
             } else {
                 draw_locked_card(
@@ -580,7 +580,7 @@ impl SceneBehavior for CollectionScene {
         frame.relic_icons(relic_icons);
 
         // Single hit-target list shared with update().
-        let items = self.flat_items(w, h);
+        let items = self.flat_items(w, h, ui_scale);
         self.tree.register_flat_buttons(&items, &mut frame.buttons);
 
         frame.window_title = format!("Mahjuro — Collection ({}/{})", unlocked, total);
@@ -614,6 +614,7 @@ fn draw_unlocked_card(
     instances: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,
     icons: &mut Vec<RelicIcon>,
+    ui_scale: f32,
 ) {
     // Card background.
     instances.push(GpuInstance {
@@ -671,6 +672,7 @@ fn draw_unlocked_card(
                 align: TextAlign::Left,
             },
             win_h,
+            ui_scale,
         );
     } else {
         // Non-relic card (yaku / rule): no icon, text layout only.
@@ -696,6 +698,7 @@ fn draw_unlocked_card(
                 align: TextAlign::Left,
             },
             win_h,
+            ui_scale,
         );
     }
 }

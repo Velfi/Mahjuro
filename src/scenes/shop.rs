@@ -31,7 +31,7 @@ use crate::render::draw_cmd::{
     PlaquePlacement, RelicPlacement, ShowcaseTilePlacement, TalismanPlacement, UiFrame,
     ZodiacRibbonPlacement,
 };
-use crate::render::theme::{ButtonState, ButtonVariant, color, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
@@ -39,10 +39,7 @@ use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
-use super::{
-    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition,
-    UpdateCtx,
-};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShopAction {
@@ -78,8 +75,8 @@ enum ShopFocus {
     /// Pick id of a foreground dish — relic dish, coin dish, or journal
     /// book. Matches `ShopHit::Dish(id)`.
     Dish(u32),
-    /// The for-sale tile pack (if any).
-    Pack,
+    /// The for-sale tile packs (if any).
+    Pack(u32),
     /// The 2D "Next Round" button at the bottom of the screen.
     NextRound,
     /// The 2D "Reroll" button at the bottom of the screen.
@@ -93,6 +90,7 @@ impl ShopFocus {
             ShopHit::Ribbon(i) => Self::Ribbon(i),
             ShopHit::Talisman(i) => Self::Talisman(i),
             ShopHit::Dish(id) => Self::Dish(id),
+            ShopHit::TilePack(id) => Self::Pack(id),
         }
     }
     /// The equivalent [`ShopHit`] for the variants that have one — i.e.
@@ -105,7 +103,7 @@ impl ShopFocus {
             Self::Ribbon(i) => Some(ShopHit::Ribbon(i)),
             Self::Talisman(i) => Some(ShopHit::Talisman(i)),
             Self::Dish(id) => Some(ShopHit::Dish(id)),
-            Self::Pack => Some(ShopHit::Dish(PICK_TILE_PACK)),
+            Self::Pack(id) => Some(ShopHit::TilePack(id)),
             Self::NextRound | Self::Reroll => None,
         }
     }
@@ -188,6 +186,7 @@ fn shop_action_for_hit(
         }
         ShopHit::Dish(id) if id == PICK_TILE_PACK => Some(ShopAction::BuyPack),
         ShopHit::Dish(_) => None,
+        ShopHit::TilePack(_) => Some(ShopAction::BuyPack),
     }
 }
 
@@ -807,10 +806,17 @@ impl ShopLayout {
         let right_lx1 = 0.5 - 0.04;
         let pack_local_x = (right_lx0 + right_lx1) * 0.5;
         let pack_px = cabinet_pixel_x + pack_local_x * cabinet_extents[0];
-        let pack_py = cabinet_front_py - cabinet_extents[2] * 0.30;
+        // Push the pack against the back wall so it leans naturally.
+        let pack_py = cabinet_front_py - cabinet_extents[2] * 0.60;
         let pack_wy = cabinet_world_y - cabinet_extents[1] * 0.20;
         let pack_center_px = (pack_px, pack_py, pack_wy);
-        let pack_extents = [cabinet_extents[0] * 0.06, 22.0, cabinet_extents[1] * 0.10];
+        // Pack proportions: wide front face (x × y), thin depth (z).
+        // Like a real trading card pack displayed the long way.
+        let pack_extents = [
+            cabinet_extents[0] * 0.10,
+            cabinet_extents[1] * 0.12,
+            cabinet_extents[0] * 0.02,
+        ];
 
         // ── Inventory shelf (bottom band) ────────────────────────────────
         // The bottom ~25% of the screen is the player's inventory shelf:
@@ -932,11 +938,7 @@ fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
     let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
     // Front face (x × y) is square to match the 1:1 relic textures.
     let face = base * (0.65 + r0 * 0.45);
-    [
-        face,
-        face,
-        base * (0.55 + r2 * 0.40),
-    ]
+    [face, face, base * (0.55 + r2 * 0.40)]
 }
 
 /// Color the i-th consumable's ribbon. Zodiacs use a palette indexed by
@@ -1301,14 +1303,10 @@ impl SceneBehavior for ShopScene {
         None
     }
 
-    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
-        // Legacy fallback — the canonical path is `draw_frame()` below.
-        SceneDrawOutput::default()
-    }
-
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
+        let ui_scale = ctx.ui_scale;
         let n_for_sale_ribbons = self.consumable_items.len();
         let n_owned_relics = ctx.run.relics.active.len();
         let n_fan = ctx.run.consumables.items.len();
@@ -1401,6 +1399,7 @@ impl SceneBehavior for ShopScene {
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: pack.kind,
                     rotation_x_deg: 20.0,
+                    rotation_y_deg: 0.0,
                     pick_id: Some(PICK_TILE_PACK),
                 }]);
             }
@@ -1776,6 +1775,18 @@ impl SceneBehavior for ShopScene {
                         intensity: 2.50,
                     });
                 }
+                ShopHit::TilePack(_) => {
+                    point_lights.push(PointLight {
+                        pos: [
+                            layout.pack_center_px.0,
+                            layout.pack_center_px.1 - 30.0,
+                            layout.pack_center_px.2 + 60.0,
+                        ],
+                        radius: 180.0,
+                        color: [1.00, 0.92, 0.70],
+                        intensity: 3.20,
+                    });
+                }
             }
         }
         frame.point_lights = point_lights;
@@ -1877,7 +1888,7 @@ impl SceneBehavior for ShopScene {
                 ShopHit::Relic(i) => ctx.projected_relic_rects.get(i).copied(),
                 ShopHit::Ribbon(i) => ctx.projected_ribbon_rects.get(i).copied(),
                 ShopHit::Talisman(i) => ctx.projected_talisman_rects.get(i).copied(),
-                ShopHit::Dish(id) => ctx
+                ShopHit::Dish(id) | ShopHit::TilePack(id) => ctx
                     .aux_dish_rects
                     .iter()
                     .find_map(|(pid, r)| if *pid == Some(id) { Some(*r) } else { None }),
@@ -2090,6 +2101,34 @@ impl SceneBehavior for ShopScene {
                     String::new(),
                     color::SLATE,
                 ),
+                ShopHit::TilePack(_id) => {
+                    if let Some(ref pack) = self.pack_item {
+                        let price = pack.kind.shop_price();
+                        let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
+                        let cta = if pack.sold {
+                            "SOLD".to_string()
+                        } else if can_afford {
+                            format!("Buy {}g", price)
+                        } else {
+                            format!("{}g (not enough gold)", price)
+                        };
+                        let col = if pack.sold {
+                            color::SLATE
+                        } else if can_afford {
+                            color::CHAMPAGNE
+                        } else {
+                            color::SLATE
+                        };
+                        (
+                            pack.kind.name().to_string(),
+                            pack.kind.description().to_string(),
+                            cta,
+                            col,
+                        )
+                    } else {
+                        (String::new(), String::new(), String::new(), color::SLATE)
+                    }
+                }
             };
             if !title.is_empty() {
                 if let Some(rect) = tooltip_anchor {
@@ -2097,9 +2136,9 @@ impl SceneBehavior for ShopScene {
                     // Pin font sizes explicitly (don't let the rasterizer
                     // auto-shrink) so they match what the typography tiers
                     // are supposed to produce at this window height.
-                    let title_font = typography::size(typography::TITLE, h).max(22.0);
-                    let body_font = typography::size(typography::BODY, h).max(16.0);
-                    let cta_font = typography::size(typography::HEADING, h).max(20.0);
+                    let title_font = typography::size(typography::TITLE, h, ui_scale).max(22.0);
+                    let body_font = typography::size(typography::BODY, h, ui_scale).max(16.0);
+                    let cta_font = typography::size(typography::HEADING, h, ui_scale).max(20.0);
                     let title_h = title_font * 1.4;
                     let cta_h = cta_font * 1.5;
                     let body_line_step = body_font * 1.4;
@@ -2158,6 +2197,7 @@ impl SceneBehavior for ShopScene {
                             align: TextAlign::Left,
                         },
                         h,
+                        ui_scale,
                     );
                     // CTA — bottom-right.
                     if !cta.is_empty() {
@@ -2180,7 +2220,7 @@ impl SceneBehavior for ShopScene {
         }
 
         // ── Reroll + Next Round buttons (always-visible, 2D) ──────────
-        let scale = (w.min(h)) / 600.0;
+        let scale = metrics::scene_scale(w, h, ui_scale);
         let btn_w = (180.0 * scale).max(120.0);
         let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = 12.0 * scale;
@@ -2267,7 +2307,11 @@ impl SceneBehavior for ShopScene {
         for (pid, r) in ctx.aux_dish_rects.iter() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 if let Some(id) = pid {
-                    focus_rect_graph.push((ShopFocus::Dish(*id), *r));
+                    if *id == PICK_TILE_PACK {
+                        focus_rect_graph.push((ShopFocus::Pack(*id), *r));
+                    } else {
+                        focus_rect_graph.push((ShopFocus::Dish(*id), *r));
+                    }
                 }
             }
         }
@@ -2309,7 +2353,7 @@ impl SceneBehavior for ShopScene {
             buttons.clear();
         }
         self.pause_menu
-            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons);
+            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons, ui_scale);
         // Fullscreen click-blocker behind the pause menu's own buttons so
         // missed clicks become no-ops instead of falling through.
         if self.pause_menu.paused {
@@ -2318,7 +2362,7 @@ impl SceneBehavior for ShopScene {
 
         // Glossary overlay (drawn last so it covers everything).
         self.glossary
-            .draw(w, h, &mut quads, &mut texts, &mut buttons);
+            .draw(w, h, ui_scale, &mut quads, &mut texts, &mut buttons);
         if self.glossary.open {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
@@ -2326,8 +2370,15 @@ impl SceneBehavior for ShopScene {
         // Yaku Journal overlay — drawn after the glossary so opening
         // both at once would let the journal win, mirroring the
         // glossary-vs-pause precedence.
-        self.journal
-            .draw(w, h, ctx.run, &mut quads, &mut texts, &mut buttons);
+        self.journal.draw(
+            w,
+            h,
+            ui_scale,
+            ctx.run,
+            &mut quads,
+            &mut texts,
+            &mut buttons,
+        );
         if self.journal.open {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
@@ -2361,16 +2412,24 @@ impl SceneBehavior for ShopScene {
                 CelebPhase::Closeup => {
                     // ── Closeup: large pack box centered on screen ────
                     // Rendered via PackPlacement so it gets the foil
-                    // material + texture.
+                    // material + texture. Gently bobs in place.
                     let box_h = h * 0.28;
                     let box_w = box_h; // square front face
                     let box_d = box_h * 0.25;
+                    let t = celeb.started_at.elapsed().as_secs_f32();
+                    // Calm, slow bob using incommensurate frequencies so
+                    // the motion feels organic, not mechanical.
+                    let bob_x = (t * 0.7).sin() * h * 0.008;
+                    let bob_y = (t * 0.5).sin() * h * 0.006;
+                    let bob_rx = (t * 0.6).sin() * 2.5; // degrees
+                    let bob_ry = (t * 0.8).cos() * 3.0; // degrees
                     frame.pack_batch(vec![PackPlacement {
-                        world_pos: [w * 0.5, h * 0.45, h * 0.28],
+                        world_pos: [w * 0.5 + bob_x, h * 0.45, h * 0.28 + bob_y],
                         half_extents: [box_w * 0.5, box_h * 0.5, box_d * 0.5],
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: celeb.pack_kind,
-                        rotation_x_deg: 15.0,
+                        rotation_x_deg: bob_rx,
+                        rotation_y_deg: bob_ry,
                         pick_id: None,
                     }]);
 
@@ -2420,9 +2479,11 @@ impl SceneBehavior for ShopScene {
                         });
                     }
 
-                    frame.cmds.push(
-                        crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(placements),
-                    );
+                    frame
+                        .cmds
+                        .push(crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(
+                            placements,
+                        ));
 
                     // Dismiss prompt — pinned near the bottom.
                     if celeb.fully_settled() {

@@ -35,6 +35,7 @@ pub enum DebugAction {
     ToggleWorldAxes,
     OpenTuning,
     OpenSfxTest,
+    OpenCameraDebug,
     BlowWindGust,
     /// Capture GPU pass timings averaged over the next 100 rendered frames
     /// and log the result. Only meaningful on backends that support
@@ -100,6 +101,11 @@ impl DebugMenuBar {
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
         let _ = debug_menu.append(&sfx_item);
+
+        // Camera debug overlay.
+        let camera_item = MenuItem::new("Camera Debug...", true, None);
+        mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
+        let _ = debug_menu.append(&camera_item);
 
         // Spawn a strong wind gust at the candle row so the flame's
         // wind reaction is observable on demand. Mirrors pressing `B`

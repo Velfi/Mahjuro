@@ -19,19 +19,16 @@ use crate::core::rules::BlindKind;
 use crate::render::draw_cmd::{
     CameraParams, CoinPlacement, DishExplicit, ShrinePlacement, UiFrame,
 };
-use crate::render::theme::{color, typography};
+use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
+use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, PanelVariant};
-use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::gameplay::GameplayScene;
 use super::pause_menu::PauseMenu;
-use super::{
-    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition,
-    UpdateCtx,
-};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 /// `pick_id` for the play altar `DishExplicit`. Used to look up its
 /// projected screen rect in `ctx.aux_dish_rects` for label placement.
@@ -364,6 +361,9 @@ impl SceneBehavior for PickBlindScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
             },
         );
 
@@ -391,14 +391,10 @@ impl SceneBehavior for PickBlindScene {
         }
     }
 
-    fn draw(&self, _ctx: DrawCtx<'_>) -> SceneDrawOutput {
-        // Legacy fallback — the canonical path is `draw_frame()` below.
-        SceneDrawOutput::default()
-    }
-
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
+        let ui_scale = ctx.ui_scale;
 
         let upcoming = ctx.run.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
@@ -667,8 +663,8 @@ impl SceneBehavior for PickBlindScene {
         // The boss shrine gets two extra lines: its rule description
         // (e.g. "Hand size -1") and its tier label (e.g. "[Soft]").
         // Other shrines just show their name.
-        let title_h = typography::size(typography::HEADING, h) * 1.4;
-        let desc_h = typography::size(typography::CAPTION, h) * 1.4;
+        let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
+        let desc_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
         let base_target = ctx.run.base_target;
         for (i, &blind) in blinds.iter().enumerate() {
             let state = shrine_state(i, upcoming_idx);
@@ -760,8 +756,8 @@ impl SceneBehavior for PickBlindScene {
         let panel_inner_x = panel_rect[0] + panel_pad;
         let panel_inner_y = panel_rect[1] + panel_pad;
         let panel_inner_w = panel_rect[2] - panel_pad * 2.0;
-        let title_h = typography::size(typography::HEADING, h) * 1.6;
-        let line_h = typography::size(typography::CAPTION, h) * 1.6;
+        let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.6;
+        let line_h = typography::size(typography::CAPTION, h, ui_scale) * 1.6;
 
         // Title: upcoming blind name + ante header
         let title_text = if upcoming == BlindKind::Boss {
@@ -854,8 +850,8 @@ impl SceneBehavior for PickBlindScene {
         }
 
         let altar_label_w = (w * 0.16).clamp(160.0, 240.0);
-        let altar_label_h = typography::size(typography::HEADING, h) * 1.4;
-        let altar_caption_h = typography::size(typography::CAPTION, h) * 1.4;
+        let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
+        let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
 
         // Helper: stack a two-line label (title + caption) above a
         // projected screen rect, clamped to the window bounds.
@@ -927,7 +923,7 @@ impl SceneBehavior for PickBlindScene {
             );
         }
 
-        let scale = (w.min(h)) / 600.0;
+        let scale = metrics::scene_scale(w, h, ui_scale);
 
         // ── Gold outline around the focused altar ────────────────────
         // A chunky gold border (3× the normal focus ring thickness)
@@ -957,7 +953,7 @@ impl SceneBehavior for PickBlindScene {
             buttons.clear();
         }
         self.pause_menu
-            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons);
+            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons, ui_scale);
         if self.pause_menu.paused {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }

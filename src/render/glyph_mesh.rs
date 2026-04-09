@@ -70,14 +70,10 @@ impl ttf_parser::OutlineBuilder for OutlineCollector {
         for i in 1..=CURVE_SUBDIVISIONS {
             let t = i as f32 / CURVE_SUBDIVISIONS as f32;
             let mt = 1.0 - t;
-            let cx = mt * mt * mt * px
-                + 3.0 * mt * mt * t * x1
-                + 3.0 * mt * t * t * x2
-                + t * t * t * x;
-            let cy = mt * mt * mt * py
-                + 3.0 * mt * mt * t * y1
-                + 3.0 * mt * t * t * y2
-                + t * t * t * y;
+            let cx =
+                mt * mt * mt * px + 3.0 * mt * mt * t * x1 + 3.0 * mt * t * t * x2 + t * t * t * x;
+            let cy =
+                mt * mt * mt * py + 3.0 * mt * mt * t * y1 + 3.0 * mt * t * t * y2 + t * t * t * y;
             self.current.push((cx, cy));
         }
     }
@@ -146,7 +142,11 @@ fn extrude_contours(
         .map(|(i, c)| (i, signed_area(c)))
         .collect();
     // Sort by descending absolute area — largest is outer.
-    areas.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    areas.sort_by(|a, b| {
+        b.1.abs()
+            .partial_cmp(&a.1.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let outer_idx = areas[0].0;
     let outer_area = areas[0].1;

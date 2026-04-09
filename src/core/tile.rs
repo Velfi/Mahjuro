@@ -13,6 +13,9 @@ pub enum Suit {
     /// Bonus flower tiles (ranks 1–4). Rare wildcards that can substitute for
     /// one missing tile in a triplet or sequence (max one flower per meld).
     Flower,
+    /// Bonus season tiles (ranks 1–4: Spring, Summer, Autumn, Winter).
+    /// Used only in solitaire mode; not part of the main game deck.
+    Season,
 }
 
 /// A talisman-applied enhancement attached to an individual tile. The
@@ -123,6 +126,7 @@ impl Tile {
             Suit::Bamboos => format!("{}s", self.rank),
             Suit::Circles => format!("{}p", self.rank),
             Suit::Flower => format!("F{}", self.rank),
+            Suit::Season => format!("S{}", self.rank),
         }
     }
 
@@ -153,6 +157,13 @@ impl Tile {
                 4 => "Bamboo".into(),
                 _ => format!("Flower {}", self.rank),
             },
+            Suit::Season => match self.rank {
+                1 => "Spring".into(),
+                2 => "Summer".into(),
+                3 => "Autumn".into(),
+                4 => "Winter".into(),
+                _ => format!("Season {}", self.rank),
+            },
         }
     }
 
@@ -163,7 +174,7 @@ impl Tile {
     pub fn category(&self) -> &'static str {
         match self.suit {
             Suit::Wind | Suit::Dragon => "honor",
-            Suit::Flower => "bonus",
+            Suit::Flower | Suit::Season => "bonus",
             Suit::Characters | Suit::Bamboos | Suit::Circles => {
                 if self.rank == 1 || self.rank == 9 {
                     "terminal"
@@ -198,7 +209,7 @@ impl Tile {
             Suit::Characters | Suit::Bamboos | Suit::Circles => self.rank as u32,
             Suit::Wind | Suit::Dragon => 12,
             // Flower wildcards contribute no chip value — their power is structural.
-            Suit::Flower => 0,
+            Suit::Flower | Suit::Season => 0,
         }
     }
 
@@ -221,6 +232,8 @@ impl Tile {
             },
             // Flowers — warm pink, reads as "special bonus" at a glance.
             Suit::Flower => [0.90, 0.45, 0.55, 1.0],
+            // Seasons — cool teal, distinct from flowers.
+            Suit::Season => [0.30, 0.70, 0.65, 1.0],
         }
     }
 }

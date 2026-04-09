@@ -110,10 +110,11 @@ pub mod color {
 /// ```
 pub mod typography {
     /// Base unit derived from window height. ~18px at 600px tall, ~30px at
-    /// 1080p. Other tiers are ratios of this.
-    pub fn base(window_h: f32) -> f32 {
-        // Linear-ish scaling clamped to a sane range.
-        (window_h * 0.028).clamp(14.0, 36.0)
+    /// 1080p. Other tiers are ratios of this. The `ui_scale` multiplier
+    /// (from the player's Visual settings) boosts the result for TV / couch
+    /// viewing — it also raises the upper clamp so 4K screens benefit.
+    pub fn base(window_h: f32, ui_scale: f32) -> f32 {
+        (window_h * 0.028).clamp(14.0, 36.0 * ui_scale) * ui_scale
     }
 
     /// Hero numerals: score panel display number. ~3x base.
@@ -130,8 +131,8 @@ pub mod typography {
     pub const MICRO: f32 = 0.7;
 
     /// Compute the absolute pixel height for a tier at a given window height.
-    pub fn size(tier: f32, window_h: f32) -> f32 {
-        tier * base(window_h)
+    pub fn size(tier: f32, window_h: f32, ui_scale: f32) -> f32 {
+        tier * base(window_h, ui_scale)
     }
 }
 
@@ -149,6 +150,12 @@ pub mod metrics {
     pub const BORDER_INSET: f32 = 0.0025;
     /// Standard gap between stacked menu buttons.
     pub const BUTTON_GAP: f32 = 0.022;
+
+    /// Scene layout scale factor incorporating the user's UI scale preference.
+    /// Replaces the common `(w.min(h) / 600.0)` pattern.
+    pub fn scene_scale(w: f32, h: f32, ui_scale: f32) -> f32 {
+        (w.min(h) / 600.0) * ui_scale
+    }
 }
 
 /// Visual variant for a button — drives which color set it draws with.

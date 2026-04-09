@@ -5,8 +5,10 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use crate::render::draw_cmd::UiFrame;
+
 use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx};
+use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DismissAction;
@@ -53,6 +55,9 @@ impl SceneBehavior for GameOverScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
+                ui_scale: ctx.ui_scale,
+                input_mode: ctx.input_mode,
+                scroll_lines: 0.0,
             },
         );
         if action.is_some() {
@@ -62,10 +67,9 @@ impl SceneBehavior for GameOverScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let bg_color = color::OBSIDIAN;
         let headline = if self.won { "VICTORY" } else { "DEFEAT" };
         let headline_color = if self.won {
             color::CHAMPAGNE
@@ -78,18 +82,40 @@ impl SceneBehavior for GameOverScene {
             format!("{} / {}", self.final_score, self.target_score)
         };
 
-        // Three stacked labels: headline, score line, hint.
         let headline_rect = [w * 0.1, h * 0.32, w * 0.8, h * 0.18];
         let subtitle_rect = [w * 0.1, h * 0.50, w * 0.8, h * 0.10];
         let hint_rect = [w * 0.1, h * 0.62, w * 0.8, h * 0.06];
 
-        // Whole-screen click target — registered via the tree so click ids
-        // route back through update().
         let items = self.flat_items(w, h);
         let mut buttons = Vec::new();
         self.tree.register_flat_buttons(&items, &mut buttons);
 
-        let title = if self.won {
+        let mut frame = UiFrame::new();
+        frame.quad(GpuInstance {
+            rect: [0.0, 0.0, w, h],
+            color: color::OBSIDIAN,
+        });
+        frame.text(TextLabel {
+            rect: headline_rect,
+            text: headline.to_string(),
+            color: headline_color,
+            ..Default::default()
+        });
+        frame.text(TextLabel {
+            rect: subtitle_rect,
+            text: subtitle,
+            color: color::PARCHMENT,
+            ..Default::default()
+        });
+        frame.text(TextLabel {
+            rect: hint_rect,
+            text: "Press Enter to continue".to_string(),
+            color: color::MIST,
+            ..Default::default()
+        });
+
+        frame.buttons = buttons;
+        frame.window_title = if self.won {
             "Victory! — Final ante cleared — Press Enter to continue".to_string()
         } else {
             format!(
@@ -97,50 +123,6 @@ impl SceneBehavior for GameOverScene {
                 self.final_score, self.target_score
             )
         };
-
-        SceneDrawOutput {
-            background: Default::default(),
-            tray_instances: vec![],
-            instances: vec![GpuInstance {
-                rect: [0.0, 0.0, w, h],
-                color: bg_color,
-            }],
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels: vec![
-                TextLabel {
-                    rect: headline_rect,
-                    text: headline.to_string(),
-                    color: headline_color,
-                    ..Default::default()
-                },
-                TextLabel {
-                    rect: subtitle_rect,
-                    text: subtitle,
-                    color: color::PARCHMENT,
-                    ..Default::default()
-                },
-                TextLabel {
-                    rect: hint_rect,
-                    text: "Press Enter to continue".to_string(),
-                    color: color::MIST,
-                    ..Default::default()
-                },
-            ],
-            relic_icons: vec![],
-            buttons,
-            window_title: title,
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
+        frame
     }
 }

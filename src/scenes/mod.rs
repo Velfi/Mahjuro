@@ -31,13 +31,12 @@ pub use start_screen::StartScreenScene;
 use enum_dispatch::enum_dispatch;
 
 use crate::core::relic::{RelicId, RelicState};
-use crate::core::tile::Tile;
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
-use crate::render::draw_cmd::{RelicPlacement, UiFrame};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
+use crate::render::draw_cmd::UiFrame;
+use crate::render::wgpu_renderer::GpuInstance;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::layout::{LayoutResult, Rect};
 
@@ -129,6 +128,9 @@ pub struct UpdateCtx<'a> {
     /// Accumulated scroll-wheel delta this frame in line units.
     /// Negative = scroll up (content moves down), positive = scroll down.
     pub scroll_lines: f32,
+    /// User's UI scale preference (1.0 = default). Thread through to
+    /// `typography::size()` and `metrics::scene_scale()`.
+    pub ui_scale: f32,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -207,6 +209,8 @@ pub struct DrawCtx<'a> {
     /// Debug visibility toggles set from the in-game debug visibility modal.
     /// Scenes consult these to skip pushing specific element draw cmds.
     pub debug_visibility: DebugVisibility,
+    /// User's UI scale preference (1.0 = default).
+    pub ui_scale: f32,
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -251,152 +255,6 @@ impl ButtonDef {
     }
 }
 
-/// What a scene returns from `draw()`.
-///
-/// This is a *transitional* shape: scenes still hand the main loop separate
-/// `instances` / `text_labels` / `relic_icons` vecs, plus hand tile state.
-/// The main loop converts this into a `UiFrame` (a single ordered command
-/// list) before calling the renderer. Over time, scenes can migrate to
-/// pushing into a `UiFrame` directly via [`SceneDrawOutput::into_frame_with`]
-/// — the resulting frame's command order *is* the z-order, with no hidden
-/// stages.
-pub struct SceneDrawOutput {
-    /// Background image to render behind everything else.
-    pub background: BackgroundId,
-    /// 2D quads drawn *before* the 3D hand tile backdrop. Used by scenes that
-    /// want a "tray" or "slot pocket" visual to sit underneath the hand tiles
-    /// — pushing these via `instances` would land *after* the tile bodies in
-    /// frame order and overdraw them.
-    pub tray_instances: Vec<GpuInstance>,
-    pub instances: Vec<GpuInstance>,
-    /// Tiles to render in the hand strip (empty = no hand tiles).
-    pub hand_tiles: Vec<Tile>,
-    /// Screen-space `(x, y, w, h)` rects for each hand tile; parallel with `hand_tiles`.
-    pub hand_slots: Vec<(f32, f32, f32, f32)>,
-    /// Index of the focused tile within `hand_tiles`.
-    pub focus: usize,
-    /// Which hand tiles are selected for discard (parallel with `hand_tiles`).
-    pub selected_tiles: Vec<bool>,
-    /// Text labels drawn on top of UI panels.
-    pub text_labels: Vec<TextLabel>,
-    /// Relic icons drawn as textured quads.
-    pub relic_icons: Vec<RelicIcon>,
-    /// Clickable buttons overlaid on the scene.
-    pub buttons: Vec<ButtonDef>,
-    pub window_title: String,
-    /// Hand tile indices that should animate departing this frame (discard/score).
-    pub departing_indices: Vec<usize>,
-    /// Hand tile indices that should show a directional light hint.
-    pub hint_indices: Vec<usize>,
-    /// Procedural flame quads (rendered with the additive flame pipeline).
-    /// Each instance's `color.a` carries a per-flame phase offset in [0,1].
-    /// Most scenes leave this empty; gameplay populates it for candle flames.
-    pub flame_instances: Vec<GpuInstance>,
-    /// Point lights for this frame, fed to the 3D tile shader. Most scenes
-    /// leave this empty; gameplay populates it for candle flames.
-    pub point_lights: Vec<PointLight>,
-    /// 3D candle placements drawn via the lit-mesh pipeline. Most scenes
-    /// leave this empty; gameplay populates it.
-    pub candles: Vec<crate::render::candle_mesh::CandlePlacement>,
-    /// Physical relic placeholders sitting on the table dish. Empty for
-    /// scenes that don't show the dish (most non-gameplay scenes). When
-    /// non-empty, the renderer also draws the dish underneath.
-    pub relic_placements: Vec<RelicPlacement>,
-    /// Whether to draw the procedural lacquered-wood table backplane behind
-    /// the 3D scene. Set by gameplay-style scenes that want a physical
-    /// surface under the floating tiles.
-    pub draw_table: bool,
-    /// Wind impulses to inject into the volumetric smoke sim this frame.
-    /// Forwarded verbatim onto the resulting `UiFrame`. Most scenes leave
-    /// this empty; gameplay populates it for the post-deal "blow it away"
-    /// effect.
-    pub wind_gusts: Vec<crate::render::draw_cmd::WindGust>,
-    /// Override the tile material for this frame (e.g. tile-select preview).
-    pub tile_material_override: Option<crate::persistence::TileMaterial>,
-}
-
-impl Default for SceneDrawOutput {
-    fn default() -> Self {
-        Self {
-            background: BackgroundId::None,
-            tray_instances: Vec::new(),
-            instances: Vec::new(),
-            hand_tiles: Vec::new(),
-            hand_slots: Vec::new(),
-            focus: 0,
-            selected_tiles: Vec::new(),
-            text_labels: Vec::new(),
-            relic_icons: Vec::new(),
-            buttons: Vec::new(),
-            window_title: String::new(),
-            departing_indices: Vec::new(),
-            hint_indices: Vec::new(),
-            flame_instances: Vec::new(),
-            point_lights: Vec::new(),
-            candles: Vec::new(),
-            relic_placements: Vec::new(),
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
-    }
-}
-
-impl SceneDrawOutput {
-    /// Build the bones of a `UiFrame` from this scene output, in the canonical
-    /// order: background → hand-tile backdrop → fluid smoke → scene quads →
-    /// hand-tile faces → scene text → relic icons. The caller is expected to
-    /// then push any modal / tooltip / debug overlay cmds at the end of the
-    /// returned frame's `cmds` (so they render on top of everything).
-    pub fn into_frame(self) -> UiFrame {
-        let mut frame = UiFrame::new();
-        frame.background(self.background);
-        // Wood-table backplane sits behind everything 3D so the tiles and
-        // candles read as floating just above its surface.
-        if self.draw_table {
-            frame.table();
-        }
-        // Tray quads sit between the table and the hand-tile bodies so the
-        // 3D tiles read as floating *on* a recessed pocket rather than above
-        // the bare table surface.
-        frame.quads(self.tray_instances);
-        frame.hand_tile_backdrop();
-        // Candle meshes after the hand tiles so the per-candle point lights
-        // (which are part of the same pass via group 1) still apply.
-        if !self.candles.is_empty() {
-            frame.candles(self.candles);
-        }
-        // Physical relic dish + placeholders. The dish auto-sizes around the
-        // batch in the renderer, so we always push them as a pair.
-        if !self.relic_placements.is_empty() {
-            frame.dish();
-            frame.relic_batch(self.relic_placements);
-        }
-        // Flames belong to the 3D candle scene — push them *before* the
-        // 2D scene quads so any UI panel (score, buttons, tooltips) draws
-        // on top instead of the additive flame bleeding through.
-        frame.flames(self.flame_instances);
-        frame.fluid_smoke();
-        frame.quads(self.instances);
-        frame.hand_tile_faces();
-        frame.texts(self.text_labels);
-        frame.relic_icons(self.relic_icons);
-
-        frame.hand_tiles = self.hand_tiles;
-        frame.hand_slots = self.hand_slots;
-        frame.focus = self.focus;
-        frame.selected_tiles = self.selected_tiles;
-        frame.hint_indices = self.hint_indices;
-        frame.departing_indices = self.departing_indices;
-        frame.point_lights = self.point_lights;
-        frame.wind_gusts = self.wind_gusts;
-        frame.tile_material_override = self.tile_material_override;
-        frame.buttons = self.buttons;
-        frame.window_title = self.window_title;
-        frame
-    }
-}
-
 /// Screen rect of relic badge slot `slot_idx` inside the relic strip.
 /// Single source of truth for badge layout — used by `relic_row` and by
 /// scenes that need to hit-test or highlight a specific badge.
@@ -405,8 +263,9 @@ pub fn relic_badge_rect(
     window_w: f32,
     max_slots: usize,
     slot_idx: usize,
+    ui_scale: f32,
 ) -> (f32, f32, f32, f32) {
-    let scale = window_w / 600.0;
+    let scale = window_w / 600.0 * ui_scale;
     let badge_w = (window_w / max_slots.max(1) as f32).min(160.0 * scale);
     let total_w = badge_w * max_slots as f32;
     let start_x = (window_w - total_w) * 0.5;
@@ -434,6 +293,7 @@ pub fn relic_glow_overlays(
     window_w: f32,
     now: std::time::Instant,
     lifetime: std::time::Duration,
+    ui_scale: f32,
 ) -> Vec<GpuInstance> {
     if glow_starts.is_empty() {
         return Vec::new();
@@ -455,7 +315,7 @@ pub fn relic_glow_overlays(
         // Quadratic falloff: bright at start, soft tail.
         let t = (1.0 - age / lifetime_s).clamp(0.0, 1.0);
         let alpha = (t * t * 0.85).clamp(0.0, 0.85);
-        let (rx, ry, rw, rh) = relic_badge_rect(strip, window_w, total_slots, slot_idx);
+        let (rx, ry, rw, rh) = relic_badge_rect(strip, window_w, total_slots, slot_idx, ui_scale);
         // Bloom rect: slightly larger than the badge so the glow appears to
         // spill outward. Use the gold accent so it reads as "this fired".
         let pad = (rh * 0.18).max(2.0);
@@ -494,28 +354,11 @@ pub trait SceneBehavior {
     /// Advance scene state by one frame. Returns `Some(next)` to transition.
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition;
 
-    /// Build the draw output for this frame.
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput;
-
     /// Build the canonical `UiFrame` for this scene's frame.
     ///
-    /// **This is the new canonical scene draw API.** It returns a single
-    /// ordered `UiFrame.cmds` list where push order *is* z-order, so quads
-    /// and text labels interleave correctly. Scenes that need fine-grained
-    /// z-control between background panels and text on top of them
-    /// (notably the gameplay HUD with its hover tooltips) should override
-    /// this method directly and push into `UiFrame` in canonical order.
-    ///
-    /// The default impl forwards to the legacy [`Self::draw`] +
-    /// [`SceneDrawOutput::into_frame`] path, which flushes ALL quads, then
-    /// hand-tile faces, then ALL text. That ordering is fine for simple
-    /// scenes (start screen, splash, options, game over, …) but breaks any
-    /// scene where a quad must sit *above* a text label (e.g. tooltip
-    /// panels). Migrated scenes override this method and either don't
-    /// implement `draw` at all or leave it as `unimplemented!()`.
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
-        self.draw(ctx).into_frame()
-    }
+    /// Returns a single ordered `UiFrame.cmds` list where push order *is*
+    /// z-order, so quads and text labels interleave correctly.
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame;
 
     /// Whether the scene has a *modal-like internal overlay* currently up
     /// (pause menu, glossary, embedded options sub-screen, scoring cascade,

@@ -1060,22 +1060,23 @@ fn fs_main(
             let vdh = max(dot(view_dir, h), 0.0);
             let ndv = max(dot(n, view_dir), 0.0);
             let broad = max(dot(n, l_dir), 0.0);
-            // Conductor Fresnel tinted by the albedo so the foil reflects
-            // the pack art colour at glancing angles.
-            let f0 = albedo * 0.6 + vec3<f32>(0.3);
+            // Silver conductor Fresnel — real foil wrappers have a neutral
+            // metallic sheen regardless of the printed art underneath.
+            let f0 = vec3<f32>(0.75) + albedo * 0.1;
             let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
-            let mirror_lobe = pow(nh, 48.0) * 1.2;
+            let mirror_lobe = pow(nh, 48.0) * 1.6;
             spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
-            // Holographic thin-film iridescence — rainbow hue shifts with
-            // viewing angle and light direction for a realistic foil look.
+            // Holographic thin-film iridescence — subtle rainbow shimmer
+            // layered over the dominant mirror specular. Kept gentle so the
+            // foil reads as shiny metallic wrapping, not a green-tinted mess.
             let film_angle = dot(n, h);
             let theta = film_angle * 8.0 + ndv * 3.0;
             let holo_r = 0.5 + 0.5 * cos(theta);
             let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
             let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
             let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
-            let fresnel = 0.15 + 0.55 * pow(1.0 - ndv, 2.0);
-            let holo_lobe = pow(nh, 8.0) * 0.5 + broad * 0.15;
+            let fresnel = 0.05 + 0.35 * pow(1.0 - ndv, 3.0);
+            let holo_lobe = pow(nh, 12.0) * 0.35;
             sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * holo_lobe * fresnel * holo_tint;
         }
 
@@ -1110,7 +1111,7 @@ fn fs_main(
         // Semi-metallic foil: more diffuse than a pure conductor (the
         // printed art needs to read) but less than a dielectric. The
         // specular + sheen carry the foil's shine.
-        diffuse_scale = 0.35;
+        diffuse_scale = 0.45;
     }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
@@ -1170,11 +1171,11 @@ fn fs_main(
         }
     }
 
-    // Foil Fresnel edge tint: rainbow color-shift at grazing angles so
-    // the foil wrapper reads as iridescent even in ambient light.
+    // Foil Fresnel edge tint: subtle rainbow color-shift at grazing
+    // angles so the wrapper catches a hint of iridescence in ambient.
     if (is_foil) {
         let edge = 1.0 - ndv_view;
-        let rim = pow(edge, 1.8) * 0.30;
+        let rim = pow(edge, 2.5) * 0.15;
         let theta = ndv_view * 6.0 + in.uv.x * 2.0;
         let holo = vec3<f32>(
             0.5 + 0.5 * cos(theta),

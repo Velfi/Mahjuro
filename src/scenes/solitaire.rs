@@ -8,13 +8,12 @@
 //! least one open side (no left or no right neighbor on its own layer).
 
 use crate::core::tile::{Suit, Tile};
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 
 use super::start_screen::StartScreenScene;
-use super::{
-    ButtonDef, DrawCtx, Scene, SceneBehavior, SceneDrawOutput, SceneTransition, UpdateCtx,
-};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Layout definition ──────────────────────────────────────────────
 
@@ -55,21 +54,11 @@ impl Face {
         }
     }
 
-    fn label(self) -> String {
+    fn to_tile(self, id: u32) -> Tile {
         match self {
-            Face::Standard(suit, rank) => Tile::new(suit, rank, 0).label(),
-            Face::Flower(n) => format!("F{}", n),
-            Face::Season(n) => format!("S{}", n),
-        }
-    }
-
-    fn color(self) -> [f32; 4] {
-        match self {
-            Face::Standard(suit, rank) => Tile::new(suit, rank, 0).suit_color(),
-            // Bonus tiles: warm pink (flowers) and cool teal (seasons), distinct
-            // from the five suit colors so they read as "special" at a glance.
-            Face::Flower(_) => [0.90, 0.45, 0.55, 1.0],
-            Face::Season(_) => [0.30, 0.70, 0.65, 1.0],
+            Face::Standard(suit, rank) => Tile::new(suit, rank, id),
+            Face::Flower(n) => Tile::new(Suit::Flower, n, id),
+            Face::Season(n) => Tile::new(Suit::Season, n, id),
         }
     }
 }
@@ -286,37 +275,70 @@ impl SceneBehavior for SolitaireScene {
         None
     }
 
-    fn draw(&self, ctx: DrawCtx<'_>) -> SceneDrawOutput {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let scale = (w.min(h)) / 600.0 * ctx.ui_scale;
 
-        let mut instances = vec![GpuInstance {
+        let mut frame = UiFrame::new();
+
+        // ── Paper/linen background ────────────────────────────────
+        frame.background(BackgroundId::Menu);
+        frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.04, 0.05, 0.08, 1.0],
-        }];
-        let mut text_labels = Vec::new();
+            color: [0.92, 0.89, 0.82, 1.0], // warm parchment
+        });
+
+        // Top-down-ish camera so the board reads as a flat layout with
+        // visible 3D stacking between layers.
+        frame.camera_override = Some(CameraParams {
+            eye: [0.0, h * 1.75, h * 0.25],
+            target: [0.0, h * -0.39, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fovy_deg: 45.0,
+        });
+
+        // Bright, broad overhead lights — the tile shader has no ambient,
+        // so without these the 3D tiles would be pitch black. Lights must
+        // be close to the tile plane (world_y ≈ layer heights) with a
+        // radius large enough to cover the board plus vertical distance.
+        let light_y = h * 0.20; // just above the top layer
+        for &(lx, ly) in &[
+            (w * 0.25, h * 0.30),
+            (w * 0.75, h * 0.30),
+            (w * 0.50, h * 0.50),
+            (w * 0.25, h * 0.70),
+            (w * 0.75, h * 0.70),
+        ] {
+            frame.point_lights.push(PointLight {
+                pos: [lx, ly, light_y],
+                radius: h * 1.2,
+                color: [1.0, 0.97, 0.90], // warm daylight
+                intensity: 2.2,
+            });
+        }
+
         let mut buttons = Vec::new();
 
-        // Header.
+        // ── Header ────────────────────────────────────────────────
         let title_h = (28.0 * scale).max(18.0);
         let title_y = h * 0.02;
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: "Mahjong Solitaire".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: [0.25, 0.22, 0.18, 1.0], // dark ink
             ..Default::default()
         });
         let score_h = (18.0 * scale).max(12.0);
         let score_y = title_y + title_h + h * 0.005;
         let remaining = self.slots.iter().filter(|s| s.face.is_some()).count();
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, score_y, w, score_h],
             text: format!(
                 "Pairs: {}   |   Tiles left: {}",
                 self.pairs_matched, remaining
             ),
-            color: [0.6, 0.6, 0.7, 0.9],
+            color: [0.45, 0.42, 0.38, 0.9], // muted warm gray
             ..Default::default()
         });
 
@@ -327,118 +349,58 @@ impl SceneBehavior for SolitaireScene {
         let board_w = w * 0.96;
         let board_x = (w - board_w) * 0.5;
 
-        let max_layer = (LAYERS_COUNT - 1) as f32;
-        // Bigger offset so stacking is unmistakable and sliver visibility from
-        // below tiles is minimal.
-        let layer_dx = -6.0 * scale;
-        let layer_dy = -9.0 * scale;
-        let extra_w = max_layer * layer_dx.abs();
-        let extra_h = max_layer * layer_dy.abs();
-
-        // Tile size — fit grid into board using the canonical Chinese
-        // mahjong face aspect (30 mm × 20 mm = 1.50 long/short, per
-        // Wikipedia). The 3D hand tiles in the main game can be reshaped
-        // via the Tile Style option; the 2D solitaire board sticks with
-        // the standard so the grid stays compact and readable.
-        let cell_w_by_w = (board_w - extra_w) / GRID_COLS as f32;
-        let cell_h_by_h = (board_h - extra_h) / GRID_ROWS as f32;
-        let target_aspect = 1.50;
+        // Tile size — fit grid into the board area. No 2D layer offset
+        // needed; the 3D world_y_lift handles stacking visually.
+        let cell_w = board_w / GRID_COLS as f32;
+        let cell_h = board_h / GRID_ROWS as f32;
+        let target_aspect = 1.50; // canonical Chinese mahjong 30×20 mm
         let (tile_w, tile_h) = {
-            let by_w = (cell_w_by_w, cell_w_by_w * target_aspect);
-            let by_h = (cell_h_by_h / target_aspect, cell_h_by_h);
-            if by_w.1 <= cell_h_by_h { by_w } else { by_h }
+            let by_w = (cell_w, cell_w * target_aspect);
+            let by_h = (cell_h / target_aspect, cell_h);
+            if by_w.1 <= cell_h { by_w } else { by_h }
         };
 
-        let used_w = tile_w * GRID_COLS as f32 + extra_w;
-        let used_h = tile_h * GRID_ROWS as f32 + extra_h;
-        // Leave room on the right for the upper-layer leftward shift.
-        let origin_x = board_x + (board_w - used_w) * 0.5 + extra_w;
-        let origin_y = board_top + (board_h - used_h) * 0.5 + extra_h;
+        let used_w = tile_w * GRID_COLS as f32;
+        let used_h = tile_h * GRID_ROWS as f32;
+        let origin_x = board_x + (board_w - used_w) * 0.5;
+        let origin_y = board_top + (board_h - used_h) * 0.5;
 
-        // Draw layers in order so upper layers fully cover lower ones (except
-        // for the bevel sliver). For each tile we still draw a face quad, but
-        // we only emit a text label when nothing is stacked on top.
+        // World-space height per layer for 3D stacking.
+        let layer_lift = h * 0.04;
+
+        // ── Build 3D tile placements ──────────────────────────────
         let mut order: Vec<usize> = (0..self.slots.len()).collect();
         order.sort_by_key(|&i| self.slots[i].layer);
+
+        let mut placements = Vec::new();
 
         for i in order {
             let slot = self.slots[i];
             let Some(face) = slot.face else { continue };
-            let layer_off_x = slot.layer as f32 * layer_dx;
-            let layer_off_y = slot.layer as f32 * layer_dy;
-            let x = origin_x + slot.col as f32 * tile_w + layer_off_x;
-            let y = origin_y + slot.row as f32 * tile_h + layer_off_y;
+
+            let px = origin_x + slot.col as f32 * tile_w + tile_w * 0.5;
+            let py = origin_y + slot.row as f32 * tile_h + tile_h * 0.5;
+            let lift = slot.layer as f32 * layer_lift;
             let free = self.is_free(i);
-            let covered = self.covered_by_top(i);
-            let is_selected = self.selected == Some(i);
 
-            // Drop shadow / bevel — drawn slightly larger and offset to give
-            // the tile a 3D edge.
-            let bevel = (3.0 * scale).max(2.0);
-            instances.push(GpuInstance {
-                rect: [x + bevel, y + bevel, tile_w, tile_h],
-                color: [0.02, 0.02, 0.04, 0.85],
-            });
-            // Tile face.
-            let face_color = if is_selected {
-                [1.0, 0.92, 0.45, 1.0]
-            } else if free {
-                [0.95, 0.92, 0.85, 1.0]
-            } else if covered {
-                // Covered tiles get a slightly darker face so the visible
-                // sliver beneath the upper tile reads as "underneath".
-                [0.78, 0.74, 0.65, 1.0]
-            } else {
-                [0.82, 0.78, 0.70, 1.0]
-            };
-            instances.push(GpuInstance {
-                rect: [x, y, tile_w, tile_h],
-                color: face_color,
+            placements.push(ShowcaseTilePlacement {
+                tile: face.to_tile(i as u32),
+                center_pos: [px, py, lift],
+                rotation: [0.0, 0.0, 0.0],
+                scale: 1.0,
+                size_px: tile_w,
             });
 
-            // Inner accent stripe (suit-tinted).
-            let inner = (2.0 * scale).max(1.0);
-            let mut tint = face.color();
-            if !free {
-                tint[0] *= 0.55;
-                tint[1] *= 0.55;
-                tint[2] *= 0.55;
-            }
-            instances.push(GpuInstance {
-                rect: [
-                    x + inner,
-                    y + inner,
-                    tile_w - inner * 2.0,
-                    (1.5 * scale).max(1.0),
-                ],
-                color: tint,
-            });
-
-            // Only emit a text label when the top of the tile is fully visible.
-            // This prevents lower-layer labels from bleeding through upper
-            // tiles in the separate text rendering pass.
-            if !covered {
-                let label_h = tile_h * 0.55;
-                let label_y = y + (tile_h - label_h) * 0.5;
-                let label_color = if free {
-                    let mut c = face.color();
-                    c[3] = 1.0;
-                    c
-                } else {
-                    [0.30, 0.30, 0.35, 0.9]
-                };
-                text_labels.push(TextLabel {
-                    rect: [x, label_y, tile_w, label_h],
-                    text: face.label(),
-                    color: label_color,
-                    ..Default::default()
-                });
-            }
-
+            // Hit-test button for free tiles.
             if free && self.finished.is_none() {
-                buttons.push(ButtonDef::scene((x, y, tile_w, tile_h), i as u32));
+                buttons.push(ButtonDef::scene(
+                    (px - tile_w * 0.5, py - tile_h * 0.5, tile_w, tile_h),
+                    i as u32,
+                ));
             }
         }
+
+        frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
 
         // ── Footer buttons ────────────────────────────────────────
         let btn_h = (28.0 * scale).max(20.0);
@@ -446,27 +408,27 @@ impl SceneBehavior for SolitaireScene {
         let btn_y = h - btn_h - h * 0.025;
 
         let back_x = w * 0.04;
-        instances.push(GpuInstance {
+        frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: [0.55, 0.20, 0.20, 0.95],
+            color: [0.60, 0.30, 0.25, 0.90], // muted red-brown
         });
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "< Back".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: [1.0, 0.97, 0.92, 1.0],
             ..Default::default()
         });
         buttons.push(ButtonDef::scene((back_x, btn_y, btn_w, btn_h), CLICK_BACK));
 
         let new_x = w - btn_w - w * 0.04;
-        instances.push(GpuInstance {
+        frame.quad(GpuInstance {
             rect: [new_x, btn_y, btn_w, btn_h],
-            color: [0.20, 0.55, 0.30, 0.95],
+            color: [0.35, 0.55, 0.35, 0.90], // sage green
         });
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [new_x, btn_y, btn_w, btn_h],
             text: "New Deal".into(),
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: [1.0, 0.97, 0.92, 1.0],
             ..Default::default()
         });
         buttons.push(ButtonDef::scene(
@@ -476,10 +438,10 @@ impl SceneBehavior for SolitaireScene {
 
         let hint_h = (14.0 * scale).max(10.0);
         let hint_y = btn_y - hint_h - (4.0 * scale);
-        text_labels.push(TextLabel {
+        frame.text(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Match pairs of identical free tiles.   Esc: back".into(),
-            color: [0.4, 0.4, 0.5, 0.8],
+            color: [0.50, 0.48, 0.42, 0.7], // warm medium gray
             ..Default::default()
         });
 
@@ -489,11 +451,11 @@ impl SceneBehavior for SolitaireScene {
             let banner_h = (110.0 * scale).max(64.0);
             let bx = (w - banner_w) * 0.5;
             let by = (h - banner_h) * 0.5;
-            instances.push(GpuInstance {
+            frame.quad(GpuInstance {
                 rect: [bx - 4.0, by - 4.0, banner_w + 8.0, banner_h + 8.0],
                 color: [0.85, 0.75, 0.20, 0.90],
             });
-            instances.push(GpuInstance {
+            frame.quad(GpuInstance {
                 rect: [bx, by, banner_w, banner_h],
                 color: [0.08, 0.10, 0.18, 0.97],
             });
@@ -502,14 +464,14 @@ impl SceneBehavior for SolitaireScene {
                 Finished::Stuck => ("No Moves", "No matching free pairs remain."),
             };
             let title_font = (24.0 * scale).max(16.0);
-            text_labels.push(TextLabel {
+            frame.text(TextLabel {
                 rect: [bx, by + banner_h * 0.18, banner_w, title_font],
                 text: title.into(),
                 color: [1.0, 0.95, 0.7, 1.0],
                 ..Default::default()
             });
             let sub_font = (14.0 * scale).max(10.0);
-            text_labels.push(TextLabel {
+            frame.text(TextLabel {
                 rect: [bx, by + banner_h * 0.55, banner_w, sub_font],
                 text: subtitle.into(),
                 color: [0.85, 0.85, 0.95, 1.0],
@@ -517,32 +479,11 @@ impl SceneBehavior for SolitaireScene {
             });
         }
 
-        SceneDrawOutput {
-            background: super::BackgroundId::Menu,
-            tray_instances: vec![],
-            instances,
-            hand_tiles: vec![],
-            hand_slots: vec![],
-            focus: 0,
-            selected_tiles: vec![],
-            text_labels,
-            relic_icons: vec![],
-            buttons,
-            window_title: format!("Mahjuro — Solitaire ({} pairs)", self.pairs_matched),
-            departing_indices: vec![],
-            hint_indices: vec![],
-            flame_instances: vec![],
-            point_lights: vec![],
-            candles: vec![],
-            relic_placements: vec![],
-            draw_table: false,
-            wind_gusts: Vec::new(),
-            tile_material_override: None,
-        }
+        frame.buttons = buttons;
+        frame.window_title = format!("Mahjuro — Solitaire ({} pairs)", self.pairs_matched);
+        frame
     }
 }
-
-const LAYERS_COUNT: usize = 5;
 
 // ── Helpers ────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
 use crate::game::run::RunState;
-use crate::render::theme::{ButtonVariant, color, typography};
+use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{
@@ -92,17 +92,21 @@ impl PauseMenu {
         self.options_overlay.as_ref()
     }
 
-    fn build_tree(&self, window_w: f32, window_h: f32) -> Tree<PauseAction> {
-        let scale = (window_w.min(window_h)) / 600.0;
+    fn build_tree(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Tree<PauseAction> {
+        let scale = metrics::scene_scale(window_w, window_h, ui_scale);
         let btn_w = (220.0 * scale).min(window_w * 0.55);
-        let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = (12.0 * scale).max(6.0);
-        let count = 6;
-        let total_menu_h = count as f32 * btn_h + (count as f32 - 1.0) * btn_gap;
-        let title_h = typography::size(typography::TITLE, window_h);
+        let count = 6_f32;
+        let title_h = typography::size(typography::TITLE, window_h, ui_scale);
         let title_gap = (24.0 * scale).max(10.0);
+        // Cap button height so the full menu fits on screen.
+        let max_menu_h = window_h * 0.88 - title_h - title_gap;
+        let btn_h = (44.0 * scale)
+            .max(28.0)
+            .min((max_menu_h - (count - 1.0) * btn_gap) / count);
+        let total_menu_h = count * btn_h + (count - 1.0) * btn_gap;
         let block_h = title_h + title_gap + total_menu_h;
-        let start_y = (window_h - block_h) * 0.5;
+        let start_y = ((window_h - block_h) * 0.5).max(8.0);
         let menu_y = start_y + title_h + title_gap;
         let menu_x = (window_w - btn_w) * 0.5;
 
@@ -182,6 +186,8 @@ impl PauseMenu {
                 ctx.layout.window_w,
                 ctx.layout.window_h,
                 ctx.scroll_lines,
+                ctx.ui_scale,
+                ctx.input_mode,
             );
             return Some(match result {
                 PauseUpdate::StayPaused | PauseUpdate::Resume => None,
@@ -213,6 +219,8 @@ impl PauseMenu {
         window_w: f32,
         window_h: f32,
         scroll_lines: f32,
+        ui_scale: f32,
+        input_mode: crate::ui::input::InputMode,
     ) -> PauseUpdate {
         // If the options sub-overlay is open, all input goes to it. When it
         // signals close, drop back to the pause root rather than resuming
@@ -239,7 +247,7 @@ impl PauseMenu {
             }
         }
 
-        let tree = self.build_tree(window_w, window_h);
+        let tree = self.build_tree(window_w, window_h, ui_scale);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -247,6 +255,9 @@ impl PauseMenu {
                 button_clicks,
                 cursor_pos,
                 window: (window_w, window_h),
+                ui_scale,
+                input_mode,
+                scroll_lines: 0.0,
             },
         );
         match action {
@@ -293,6 +304,7 @@ impl PauseMenu {
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
+        ui_scale: f32,
     ) {
         if !self.paused {
             return;
@@ -312,14 +324,17 @@ impl PauseMenu {
         }
 
         // Title — gold serif, centered just above the menu block.
-        let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = (12.0 * scale).max(6.0);
         let count = 5.0;
-        let total_menu_h = count * btn_h + (count - 1.0) * btn_gap;
-        let title_h = typography::size(typography::TITLE, window_h);
+        let title_h = typography::size(typography::TITLE, window_h, ui_scale);
         let title_gap = (24.0 * scale).max(10.0);
+        let max_menu_h = window_h * 0.88 - title_h - title_gap;
+        let btn_h = (44.0 * scale)
+            .max(28.0)
+            .min((max_menu_h - (count - 1.0) * btn_gap) / count);
+        let total_menu_h = count * btn_h + (count - 1.0) * btn_gap;
         let block_h = title_h + title_gap + total_menu_h;
-        let title_y = (window_h - block_h) * 0.5;
+        let title_y = ((window_h - block_h) * 0.5).max(8.0);
         text_labels.push(TextLabel {
             rect: [0.0, title_y, window_w, title_h],
             text: "PAUSED".into(),
@@ -328,7 +343,7 @@ impl PauseMenu {
         });
 
         // Menu via the widget tree.
-        let tree = self.build_tree(window_w, window_h);
+        let tree = self.build_tree(window_w, window_h, ui_scale);
         let mut frame = TreeFrame {
             instances,
             labels: text_labels,

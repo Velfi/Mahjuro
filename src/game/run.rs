@@ -31,8 +31,6 @@ pub enum ConsumableUseResult {
 }
 
 pub const HAND_SIZE: usize = 14;
-pub const STARTING_PLAYS: u32 = 4;
-pub const STARTING_DISCARDS: u32 = 4;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
 pub const FINAL_ANTE: u32 = 8;
 
@@ -330,9 +328,7 @@ impl RunState {
         self.selected = vec![false; self.hand.len()];
         self.restamp_hand_enhancements();
         if destroyed > 0 {
-            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed {
-                count: destroyed,
-            });
+            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed { count: destroyed });
         }
         destroyed
     }
@@ -829,21 +825,6 @@ impl RunState {
         detect_all_sets(&self.hand).len()
     }
 
-    /// Strip all Overflow-extra tiles from the wall and hand. Call this when
-    /// the Overflow relic is lost mid-round (e.g. boss effect) so the extra
-    /// copies don't linger.
-    pub fn strip_overflow_tiles(&mut self, bus: &mut EventBus) {
-        use crate::core::deck::OVERFLOW_TILE_ID_BASE;
-        self.wall.strip_overflow_tiles();
-        let before = self.hand.len();
-        self.hand.retain(|t| t.id < OVERFLOW_TILE_ID_BASE);
-        if self.hand.len() != before {
-            self.hand.sort();
-            self.selected = vec![false; self.hand.len()];
-            self.refill_hand(bus);
-        }
-    }
-
     /// Add the chosen relic, scale up the base target, and reset for the next round.
     /// The actual target_score is set later by `apply_blind`.
     ///
@@ -961,7 +942,12 @@ mod tests {
     use super::*;
     use crate::core::deck::build_wall;
 
-    /// Create a RunState with a deterministic (unshuffled) wall for predictable tests.
+    /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
+    const STARTING_PLAYS: u32 = 5;
+    /// Standard mode starting discards (Bamboo: 4 base + 0 bonus).
+    const STARTING_DISCARDS: u32 = 4;
+
+    // Create a RunState with a deterministic (unshuffled) wall for predictable tests.
     fn test_run() -> RunState {
         let tiles = build_wall(); // deterministic order: Char 1-9, Bam 1-9, Cir 1-9, Winds, Dragons
         let mut wall = Wall::from_unshuffled(tiles);
@@ -1021,6 +1007,7 @@ mod tests {
                 crate::core::yaku::YakuKind::Chinitsu,
             ],
             yaku_loadout_capacity: 3,
+            tile_packs: vec![],
         }
     }
 

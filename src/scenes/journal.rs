@@ -131,6 +131,7 @@ impl JournalOverlay {
         &self,
         window_w: f32,
         window_h: f32,
+        ui_scale: f32,
         run: &RunState,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
@@ -152,7 +153,7 @@ impl JournalOverlay {
             color: color::OBSIDIAN,
         });
 
-        let scale = (window_w.min(window_h)) / 600.0;
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
         // Fill almost the entire window — the journal is meant to be
         // *the* thing the player is looking at, and the extra space
         // lets every yaku entry breathe at a readable font size.
@@ -257,7 +258,7 @@ impl JournalOverlay {
         // sits left-aligned on the left page only; the right page's
         // top edge is left clear so its first entry sits high on the
         // page (the two columns intentionally don't align at the top).
-        let title_font = typography::size(typography::TITLE, window_h).max(34.0) * 1.25;
+        let title_font = typography::size(typography::TITLE, window_h, ui_scale).max(34.0) * 1.25;
         let title_h = title_font * 1.4;
         let title_y = page_top;
         text_labels.push(TextLabel {
@@ -268,7 +269,7 @@ impl JournalOverlay {
             font_px: Some(title_font),
             ..Default::default()
         });
-        let hint_font = typography::size(typography::BODY, window_h).max(16.0) * 1.25;
+        let hint_font = typography::size(typography::BODY, window_h, ui_scale).max(16.0) * 1.25;
         let hint_h = hint_font * 1.4;
         let hint_y = title_y + title_h;
         text_labels.push(TextLabel {
@@ -302,7 +303,8 @@ impl JournalOverlay {
         let close_reserve = (88.0 * scale).max(72.0);
         let body_top = hint_y + hint_h + (14.0 * scale);
         let body_bot = page_bot - close_reserve;
-        let chapter_font = typography::size(typography::HEADING, window_h).max(26.0) * 1.25;
+        let chapter_font =
+            typography::size(typography::HEADING, window_h, ui_scale).max(26.0) * 1.25;
         let chapter_h = chapter_font * 1.5;
         let entries_top = body_top + chapter_h + (12.0 * scale);
 
@@ -327,11 +329,11 @@ impl JournalOverlay {
         // also let the fonts breathe upward when the window is large —
         // we cap each font at a fraction of the row height so a 4K
         // window doesn't end up with 60-px text.
-        let name_font = (typography::size(typography::HEADING, window_h)
+        let name_font = (typography::size(typography::HEADING, window_h, ui_scale)
             .max(22.0)
             .min(entry_h * 0.42))
             * 1.25;
-        let body_font = (typography::size(typography::BODY, window_h)
+        let body_font = (typography::size(typography::BODY, window_h, ui_scale)
             .max(18.0)
             .min(entry_h * 0.34))
             * 1.25;
@@ -346,7 +348,8 @@ impl JournalOverlay {
         // reference so the player can see each flower's triggered
         // effect at a glance.
         {
-            let fl_title_font = typography::size(typography::HEADING, window_h).max(22.0) * 1.25;
+            let fl_title_font =
+                typography::size(typography::HEADING, window_h, ui_scale).max(22.0) * 1.25;
             let fl_title_h = fl_title_font * 1.5;
             text_labels.push(TextLabel {
                 rect: [right_page_x, page_top, page_inner_w, fl_title_h],
@@ -356,7 +359,8 @@ impl JournalOverlay {
                 font_px: Some(fl_title_font),
                 ..Default::default()
             });
-            let fl_body_font = typography::size(typography::BODY, window_h).max(16.0) * 1.25;
+            let fl_body_font =
+                typography::size(typography::BODY, window_h, ui_scale).max(16.0) * 1.25;
             let fl_line_h = fl_body_font * 1.35;
             let fl_y = page_top + fl_title_h;
             let flowers: [(&str, &str); 4] = [
@@ -528,7 +532,7 @@ impl JournalOverlay {
             ],
             color: color::darken(color::BRASS, 0.15),
         });
-        let close_font = typography::size(typography::BODY, window_h).max(16.0) * 1.25;
+        let close_font = typography::size(typography::BODY, window_h, ui_scale).max(16.0) * 1.25;
         text_labels.push(TextLabel {
             rect: [seal_x, seal_y, seal_d, seal_d],
             text: "Close".into(),
@@ -551,6 +555,7 @@ impl JournalOverlay {
         frame: &mut UiFrame,
         window_w: f32,
         window_h: f32,
+        ui_scale: f32,
         run: &RunState,
     ) {
         if !self.open {
@@ -559,7 +564,9 @@ impl JournalOverlay {
         let mut quads: Vec<GpuInstance> = Vec::new();
         let mut text: Vec<TextLabel> = Vec::new();
         let mut btns: Vec<ButtonDef> = Vec::new();
-        self.draw(window_w, window_h, run, &mut quads, &mut text, &mut btns);
+        self.draw(
+            window_w, window_h, ui_scale, run, &mut quads, &mut text, &mut btns,
+        );
         frame.quads(quads);
         frame.texts(text);
         frame.buttons.extend(btns);

@@ -39,11 +39,19 @@ pub fn tile_short_label(tile: &Tile) -> String {
         }
         .to_string(),
         Suit::Flower => match tile.rank {
-            1 => "梅",  // plum
-            2 => "蘭",  // orchid
-            3 => "菊",  // chrysanthemum
-            4 => "竹",  // bamboo
+            1 => "梅", // plum
+            2 => "蘭", // orchid
+            3 => "菊", // chrysanthemum
+            4 => "竹", // bamboo
             _ => "✿",
+        }
+        .to_string(),
+        Suit::Season => match tile.rank {
+            1 => "春", // spring
+            2 => "夏", // summer
+            3 => "秋", // autumn
+            4 => "冬", // winter
+            _ => "☀",
         }
         .to_string(),
     }
@@ -58,6 +66,7 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
         Suit::Wind => "\u{1F32C}",       // 🌬 wind face
         Suit::Dragon => "\u{1F409}",     // 🐉 dragon
         Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
+        Suit::Season => "\u{1F342}",     // 🍂 fallen leaf
     }
 }
 
@@ -139,8 +148,8 @@ fn blit_flower_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
     };
 
     // Decode PNG and alpha-blend onto the destination buffer.
-    let Ok(decoder) = image::ImageReader::new(std::io::Cursor::new(file.data.as_ref()))
-        .with_guessed_format()
+    let Ok(decoder) =
+        image::ImageReader::new(std::io::Cursor::new(file.data.as_ref())).with_guessed_format()
     else {
         blit_flower_fallback(dst, dst_w, dst_h, rank);
         return;
@@ -162,8 +171,8 @@ fn blit_flower_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
         let out_a = sa + da * (1.0 - sa);
         if out_a > 0.0 {
             for c in 0..3 {
-                dst[di + c] = ((src_px[c] as f32 * sa + dst[di + c] as f32 * da * (1.0 - sa))
-                    / out_a) as u8;
+                dst[di + c] =
+                    ((src_px[c] as f32 * sa + dst[di + c] as f32 * da * (1.0 - sa)) / out_a) as u8;
             }
             dst[di + 3] = (out_a * 255.0) as u8;
         }
@@ -185,10 +194,9 @@ fn blit_flower_fallback(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
     if let Some(font_data) = crate::asset_path::get("NotoSansSC-Regular.ttf")
         .or_else(|| crate::asset_path::get("font.ttf"))
     {
-        if let Ok(font) = fontdue::Font::from_bytes(
-            font_data.data.as_ref(),
-            fontdue::FontSettings::default(),
-        ) {
+        if let Ok(font) =
+            fontdue::Font::from_bytes(font_data.data.as_ref(), fontdue::FontSettings::default())
+        {
             let band = rasterize_label(&font, label, dst_w, dst_h);
             blit_tinted(&band, dst_w, dst_h, dst, dst_w, 0, 0, color);
         }
