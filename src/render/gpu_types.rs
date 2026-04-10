@@ -1,3 +1,8 @@
+//! GPU type definitions extracted from `wgpu_renderer.rs`.
+//! Not yet wired in — `wgpu_renderer.rs` still defines its own copies.
+//! Suppress dead-code warnings until the migration is complete.
+#![allow(dead_code)]
+
 use glam::Mat4;
 
 use crate::core::relic::RelicId;
@@ -405,9 +410,9 @@ pub enum GameplayPick {
 /// match the size of the `relic_instances` slot pool below; the renderer
 /// silently truncates batches longer than this.
 pub const MAX_RELIC_SLOTS: usize = 16;
-/// Maximum number of zodiac/talisman ribbons rendered per frame (across all
-/// `ZodiacBatch` cmds). Truncated silently.
-pub const MAX_RIBBON_SLOTS: usize = 16;
+/// Maximum number of zodiac/talisman ribbon *draw slots* per frame (across all
+/// `ZodiacBatch` cmds). Each textured ribbon uses up to 3 slots (top/mid/bot).
+pub const MAX_RIBBON_SLOTS: usize = 48;
 /// Maximum number of talisman tablets rendered per frame.
 pub const MAX_TALISMAN_SLOTS: usize = 8;
 /// Maximum number of physical coins rendered per frame (across all

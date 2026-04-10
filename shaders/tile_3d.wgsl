@@ -287,7 +287,18 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         n_world = normalize(mix(n_world, perturbed_world, blend_edge));
     }
 
+    // Enhancement kind from base_color_factor.z:
+    //   0 = none, 1 = jade, 2 = pearl, 3 = gilded, 4 = polychrome.
+    let enh = cam.base_color_factor.z;
+    let has_enh = enh > 0.5;
+
+    // Approximate camera direction for fresnel/view-dependent effects.
+    let cam_pos = vec3<f32>(0.0, 0.0, 4000.0);
+    let view_dir = normalize(cam_pos - in.world_pos);
+    let ndv_global = max(dot(n_world, view_dir), 0.0);
+
     var point_contrib = vec3<f32>(0.0);
+    var sheen_acc = vec3<f32>(0.0);
     let light_count = lights.count.x;
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {
         let lp = lights.lights[i].pos.xyz;
@@ -304,12 +315,93 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // (matches how a real candle bounces off the table around a tile).
         let lambert = 0.35 + 0.65 * nl;
         point_contrib = point_contrib + lc * intensity * atten * lambert;
+
+        // ── Enhancement sheen lobes ────────────────────────────────────
+        // Fresnel-masked specular highlights per enhancement type, matching
+        // the talisman material language: jade luster, pearl nacre, gold
+        // conductor, polychrome holographic.
+        if (has_enh) {
+            let h = normalize(l_dir + view_dir);
+            let nh = max(dot(n_world, h), 0.0);
+            let vdh = max(dot(view_dir, h), 0.0);
+            let ndv = max(dot(n_world, view_dir), 0.0);
+            let broad = nl;
+
+            if (enh < 1.5) {
+                // Jade: waxy vitreous green luster.
+                let fresnel = 0.06 + 0.25 * pow(1.0 - ndv, 2.5);
+                let lobe = pow(nh, 14.0) * 0.5 + broad * 0.10;
+                let tint = vec3<f32>(0.50, 0.92, 0.60);
+                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * tint;
+            } else if (enh < 2.5) {
+                // Pearl: pearlescent nacre with pink-to-blue color shift.
+                let fresnel = 0.08 + 0.40 * pow(1.0 - ndv, 3.0);
+                let phase = ndv * 3.14159;
+                let pearl_tint = vec3<f32>(
+                    0.95 + 0.05 * cos(phase),
+                    0.85 + 0.15 * cos(phase + 1.8),
+                    0.90 + 0.10 * cos(phase + 2.8)
+                );
+                let lobe = pow(nh, 18.0) * 0.6 + broad * 0.15;
+                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * pearl_tint;
+            } else if (enh < 3.5) {
+                // Gilded: metallic gold conductor — Schlick Fresnel tinted
+                // by gold base so highlights read warm.
+                let f0 = vec3<f32>(0.95, 0.75, 0.30);
+                let f_gold = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
+                let lobe = pow(nh, 24.0) * 0.9 + broad * 0.08;
+                sheen_acc = sheen_acc + lc * intensity * atten * lobe * f_gold;
+            } else {
+                // Polychrome: holographic thin-film rainbow driven by
+                // viewing angle + surface position.
+                let theta = ndv * 6.2832 + dot(in.local_pos, vec3<f32>(8.0, 8.0, 8.0));
+                let holo_r = 0.5 + 0.5 * cos(theta);
+                let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
+                let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
+                let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
+                let fresnel = 0.10 + 0.50 * pow(1.0 - ndv, 2.5);
+                let lobe = pow(nh, 12.0) * 0.7 + broad * 0.18;
+                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * holo_tint;
+            }
+        }
+    }
+
+    // ── Enhancement fresnel albedo tint ─────────────────────────────────
+    // View-dependent color shift baked into the surface so it reads as a
+    // material property (always visible), not just a specular highlight.
+    if (has_enh) {
+        let edge = 1.0 - ndv_global;
+        if (enh < 1.5) {
+            // Jade: subtle green rim glow.
+            let rim = pow(edge, 2.5) * 0.20;
+            rgb = mix(rgb, vec3<f32>(0.45, 0.95, 0.55), rim);
+        } else if (enh < 2.5) {
+            // Pearl: cool iridescent white-pink shift at edges.
+            let rim = pow(edge, 2.0) * 0.25;
+            let phase = ndv_global * 3.14159;
+            let pearl = vec3<f32>(0.95, 0.88 + 0.08 * cos(phase), 0.95);
+            rgb = mix(rgb, pearl, rim);
+        } else if (enh < 3.5) {
+            // Gilded: warm gold rim.
+            let rim = pow(edge, 2.0) * 0.25;
+            rgb = mix(rgb, vec3<f32>(1.0, 0.90, 0.60), rim);
+        } else {
+            // Polychrome: rainbow fresnel shifts surface hue at edges.
+            let rim = pow(edge, 1.5) * 0.35;
+            let theta = ndv_global * 6.2832 + dot(in.local_pos, vec3<f32>(4.0, 4.0, 4.0));
+            let holo = vec3<f32>(
+                0.5 + 0.5 * cos(theta),
+                0.5 + 0.5 * cos(theta + 2.094),
+                0.5 + 0.5 * cos(theta + 4.189)
+            );
+            rgb = mix(rgb, holo, rim);
+        }
     }
 
     // Candle-only composition: tile albedo modulated purely by the
     // accumulated point-light contribution. No directional shadow
     // attenuation — the wicks are the only lights in the scene.
-    let lit_rgb = rgb * point_contrib;
+    let lit_rgb = rgb * point_contrib + sheen_acc;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
     return vec4<f32>(out_rgb, 1.0);

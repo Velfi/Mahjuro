@@ -369,8 +369,9 @@ impl SceneBehavior for PickBlindScene {
 
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip {
-                let reward = upcoming.skip_reward();
-                ctx.run.gold = ctx.run.gold.saturating_add(reward as i32);
+                if let Some(tag) = ctx.run.tag_for_blind(upcoming) {
+                    ctx.run.apply_tag(tag);
+                }
                 ctx.run.skip_to_next_blind();
                 return Some(Scene::PickBlind(PickBlindScene::new()));
             }
@@ -378,8 +379,9 @@ impl SceneBehavior for PickBlindScene {
 
         match action {
             Some(BlindAction::SkipBlind) if can_skip => {
-                let reward = upcoming.skip_reward();
-                ctx.run.gold = ctx.run.gold.saturating_add(reward as i32);
+                if let Some(tag) = ctx.run.tag_for_blind(upcoming) {
+                    ctx.run.apply_tag(tag);
+                }
                 ctx.run.skip_to_next_blind();
                 Some(Scene::PickBlind(PickBlindScene::new()))
             }
@@ -444,7 +446,7 @@ impl SceneBehavior for PickBlindScene {
                 (ShrineState::Future, _) => stone_mid,
                 (ShrineState::Upcoming, BlindKind::Boss) => ctx
                     .run
-                    .upcoming_boss
+                    .boss.upcoming
                     .map(|k| blend_with_stone(k.tier().halo_color(), 0.45))
                     .unwrap_or(stone_light),
                 (ShrineState::Upcoming, _) => stone_light,
@@ -486,7 +488,7 @@ impl SceneBehavior for PickBlindScene {
         // begin). Skip is on the RIGHT and holds a small pile of coins
         // (the tribute reward for walking away). Both reuse the shop's
         // existing dish + coin meshes.
-        let skip_reward = upcoming.skip_reward();
+        let skip_tag = ctx.run.tag_for_blind(upcoming);
         let (play_px, play_py) = layout.play_dish_anchor_px;
         let play_dext = layout.play_dish_extents;
         frame.dish_explicit(DishExplicit {
@@ -512,29 +514,20 @@ impl SceneBehavior for PickBlindScene {
                 extents: skip_dext,
                 pick_id: Some(PICK_SKIP_DISH),
             });
-            // Small spread of coins matching the reward (capped at 5).
-            let mut coins: Vec<CoinPlacement> = Vec::new();
-            let n_coins = (skip_reward as usize).clamp(1, 5);
-            let coin_radius = 7.0_f32;
-            let coin_thickness = 3.0_f32;
+            // Single token on the skip dish, tinted by tag rarity.
             let dish_top_y = skip_dext[1] + 2.0;
-            for i in 0..n_coins {
-                let t = if n_coins <= 1 {
-                    0.0
-                } else {
-                    (i as f32 / (n_coins as f32 - 1.0)) - 0.5
-                };
-                let off_x = t * skip_dext[0] * 0.45;
-                let off_z = ((i % 2) as f32 - 0.5) * 6.0;
-                coins.push(CoinPlacement {
-                    world_pos: [skip_px + off_x, skip_py + off_z, dish_top_y],
-                    rotation_y: (i as f32) * 0.7,
-                    radius: coin_radius,
-                    thickness: coin_thickness,
-                    color: [1.00, 0.78, 0.30, 1.0],
-                });
-            }
-            frame.coin_batch(coins);
+            let tag_color = match skip_tag.map(|t| t.rarity()) {
+                Some(crate::core::tag::TagRarity::Rare) => [1.00, 0.84, 0.30, 1.0], // gold
+                Some(crate::core::tag::TagRarity::Uncommon) => [0.55, 0.85, 0.55, 1.0], // jade
+                _ => [0.82, 0.82, 0.88, 1.0], // silver
+            };
+            frame.coin_batch(vec![CoinPlacement {
+                world_pos: [skip_px, skip_py, dish_top_y],
+                rotation_y: 0.4,
+                radius: 12.0,
+                thickness: 4.5,
+                color: tag_color,
+            }]);
         }
 
         // ── Lighting: temple hall at night ────────────────────────────
@@ -678,7 +671,7 @@ impl SceneBehavior for PickBlindScene {
 
             // Use projected shrine rect when available; fall back to
             // a small estimate around the pixel anchor on first frame.
-            let projected = ctx.projected_shrine_rects.get(i).copied();
+            let projected = ctx.proj.shrine_rects.get(i).copied();
             let anchor_rect = projected.unwrap_or_else(|| {
                 let (px, py) = layout.shrine_pixel_anchor(i);
                 let ext = layout.shrine_extents(i);
@@ -692,14 +685,14 @@ impl SceneBehavior for PickBlindScene {
             // Other shrines: just the name.
             let title_text: String = if blind == BlindKind::Boss {
                 ctx.run
-                    .upcoming_boss
+                    .boss.upcoming
                     .map(|k| k.def().name.to_string())
                     .unwrap_or_else(|| "Boss Blind".to_string())
             } else {
                 blind.name().to_string()
             };
 
-            let total_stack_h = if blind == BlindKind::Boss && ctx.run.upcoming_boss.is_some() {
+            let total_stack_h = if blind == BlindKind::Boss && ctx.run.boss.upcoming.is_some() {
                 title_h + desc_h * 2.0 + 4.0
             } else {
                 title_h
@@ -717,7 +710,7 @@ impl SceneBehavior for PickBlindScene {
             });
 
             if blind == BlindKind::Boss {
-                if let Some(kind) = ctx.run.upcoming_boss {
+                if let Some(kind) = ctx.run.boss.upcoming {
                     let def = kind.def();
                     // Reactive bosses (Mirror, Tax Collector) override
                     // the static description with the variant chosen
@@ -725,7 +718,7 @@ impl SceneBehavior for PickBlindScene {
                     // rule before they ever fight it.
                     let description: &str = ctx
                         .run
-                        .upcoming_boss_effect
+                        .boss.effect
                         .as_ref()
                         .and_then(|e| e.description_override.as_deref())
                         .unwrap_or(def.description);
@@ -762,7 +755,7 @@ impl SceneBehavior for PickBlindScene {
         // Title: upcoming blind name + ante header
         let title_text = if upcoming == BlindKind::Boss {
             ctx.run
-                .upcoming_boss
+                .boss.upcoming
                 .map(|k| k.def().name.to_string())
                 .unwrap_or_else(|| "Boss Blind".to_string())
         } else {
@@ -797,11 +790,11 @@ impl SceneBehavior for PickBlindScene {
 
         // Boss-only rule description + tier on the next line.
         if upcoming == BlindKind::Boss {
-            if let Some(kind) = ctx.run.upcoming_boss {
+            if let Some(kind) = ctx.run.boss.upcoming {
                 let def = kind.def();
                 let description: &str = ctx
                     .run
-                    .upcoming_boss_effect
+                    .boss.effect
                     .as_ref()
                     .and_then(|e| e.description_override.as_deref())
                     .unwrap_or(def.description);
@@ -830,11 +823,11 @@ impl SceneBehavior for PickBlindScene {
         let play_focused_label = self.play_focused();
         let skip_focused_label = self.skip_focused();
 
-        let projected_play = ctx
+        let projected_play = ctx.proj
             .aux_dish_rects
             .iter()
             .find_map(|(pid, r)| (*pid == Some(PICK_PLAY_DISH)).then_some(*r));
-        let projected_skip = ctx
+        let projected_skip = ctx.proj
             .aux_dish_rects
             .iter()
             .find_map(|(pid, r)| (*pid == Some(PICK_SKIP_DISH)).then_some(*r));
@@ -849,9 +842,9 @@ impl SceneBehavior for PickBlindScene {
             self.last_skip_rect.set(Some(r));
         }
 
-        let altar_label_w = (w * 0.16).clamp(160.0, 240.0);
-        let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
-        let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
+        let altar_label_w = (w * 0.28).clamp(240.0, 420.0);
+        let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 2.4;
+        let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 2.4;
 
         // Helper: stack a two-line label (title + caption) above a
         // projected screen rect, clamped to the window bounds.
@@ -913,14 +906,58 @@ impl SceneBehavior for PickBlindScene {
             [sdx - est_w * 0.5, sdy - est_h * 0.5, est_w, est_h]
         });
         if can_skip {
-            push_altar_caption(
-                skip_anchor_rect,
-                &format!("Skip  +{}g", skip_reward),
-                "Tribute · Esc",
-                skip_focused_label,
-                false,
-                &mut texts,
-            );
+            if let Some(tag) = skip_tag {
+                // Three-line stack: "Skip" (heading), tag name, tag description.
+                let cx = skip_anchor_rect[0] + skip_anchor_rect[2] * 0.5;
+                let lx = (cx - altar_label_w * 0.5)
+                    .max(8.0)
+                    .min(w - altar_label_w - 8.0);
+                let stack_h = altar_label_h + altar_caption_h * 2.0 + 4.0;
+                let ly = (skip_anchor_rect[1] + skip_anchor_rect[3] + 30.0)
+                    .min(h - stack_h - 8.0);
+                let title_color = if skip_focused_label {
+                    color::CHAMPAGNE
+                } else {
+                    color::PARCHMENT
+                };
+                let sub_color = if skip_focused_label {
+                    color::GOLD
+                } else {
+                    color::MIST
+                };
+                texts.push(TextLabel {
+                    rect: [lx, ly, altar_label_w, altar_label_h],
+                    text: "Skip".to_string(),
+                    color: title_color,
+                    ..Default::default()
+                });
+                texts.push(TextLabel {
+                    rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
+                    text: tag.name().to_string(),
+                    color: sub_color,
+                    ..Default::default()
+                });
+                texts.push(TextLabel {
+                    rect: [
+                        lx,
+                        ly + altar_label_h + altar_caption_h + 4.0,
+                        altar_label_w,
+                        altar_caption_h,
+                    ],
+                    text: tag.description().to_string(),
+                    color: sub_color,
+                    ..Default::default()
+                });
+            } else {
+                push_altar_caption(
+                    skip_anchor_rect,
+                    "Skip",
+                    "Tribute · Esc",
+                    skip_focused_label,
+                    false,
+                    &mut texts,
+                );
+            }
         }
 
         let scale = metrics::scene_scale(w, h, ui_scale);

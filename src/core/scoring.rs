@@ -128,6 +128,29 @@ pub fn score_sets(
     let middle_tiles_zero = rules.contains(&RuleModifier::MiddleTilesZero);
     let censor_repeats = rules.contains(&RuleModifier::CensorRepeats);
 
+    // Mirror Tile copies the relic immediately AFTER it in inventory.
+    // Shadow Hand copies the FIRST relic in inventory.
+    // Both cause the copied relic to fire twice (owned + copy).
+    let mirrored: Option<RelicId> = if ctx.relics.has(RelicId::MirrorTile) {
+        ctx.relics.relic_after(RelicId::MirrorTile)
+    } else {
+        None
+    };
+    let shadowed: Option<RelicId> = if ctx.relics.has(RelicId::ShadowHand) {
+        ctx.relics.active.first().filter(|&&id| id != RelicId::ShadowHand).copied()
+    } else {
+        None
+    };
+    let has = |id: RelicId| -> bool {
+        ctx.relics.has(id) || mirrored == Some(id) || shadowed == Some(id)
+    };
+    let count = |id: RelicId| -> u32 {
+        let owned = ctx.relics.has(id) as u32;
+        let mirror = (mirrored == Some(id)) as u32;
+        let shadow = (shadowed == Some(id)) as u32;
+        owned + mirror + shadow
+    };
+
     // Tiny helpers that mutate `chips`/`mult` in-place and emit a cascade step.
     macro_rules! push_chips {
         ($source:expr, $delta:expr) => {{
@@ -208,10 +231,10 @@ pub fn score_sets(
     //
     // Walk the sets and apply relics that grant flat chip bonuses to specific
     // melds or tile faces. Order matters only for cascade readability.
-    let has_triplet_boost = ctx.relics.has(RelicId::TripletBoost);
-    let has_sequence_surge = ctx.relics.has(RelicId::SequenceSurge);
-    let has_pair_power = ctx.relics.has(RelicId::PairPower);
-    let has_honor_fury = ctx.relics.has(RelicId::HonorFury);
+    let has_triplet_boost = has(RelicId::TripletBoost);
+    let has_sequence_surge = has(RelicId::SequenceSurge);
+    let has_pair_power = has(RelicId::PairPower);
+    let has_honor_fury = has(RelicId::HonorFury);
 
     for s in sets {
         // Per-meld-kind chip relics. Kongs count as triplets here so the
@@ -227,7 +250,7 @@ pub fn score_sets(
         // KongsBlessing chip side: Kongs are rare enough that the relic
         // needs to feel like jackpot loot when one finally lands. The
         // mult side fires in Phase 5 alongside KanDrum.
-        if matches!(s.kind, SetKind::Kong) && ctx.relics.has(RelicId::KongsBlessing) {
+        if matches!(s.kind, SetKind::Kong) && has(RelicId::KongsBlessing) {
             push_chips!("Kong's Blessing", 120);
         }
 
@@ -245,6 +268,46 @@ pub fn score_sets(
         }
     }
 
+    // Suit-specific chip relics: Jade Serpent (Bamboos), Ink Brush
+    // (Characters), Pearl Diver (Circles). Same per-tile pattern as Honor Fury.
+    let has_jade_serpent = has(RelicId::JadeSerpent);
+    let has_ink_brush = has(RelicId::InkBrush);
+    let has_pearl_diver = has(RelicId::PearlDiver);
+    let has_edge_runner = has(RelicId::EdgeRunner);
+    let has_low_tide = has(RelicId::LowTide);
+    if has_jade_serpent || has_ink_brush || has_pearl_diver || has_edge_runner || has_low_tide {
+        for s in sets {
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    continue;
+                };
+                if has_jade_serpent && t.suit == Suit::Bamboos {
+                    push_chips!("Jade Serpent", 8);
+                }
+                if has_ink_brush && t.suit == Suit::Characters {
+                    push_chips!("Ink Brush", 8);
+                }
+                if has_pearl_diver && t.suit == Suit::Circles {
+                    push_chips!("Pearl Diver", 8);
+                }
+                // Edge Runner: terminal tiles (rank 1 or 9) in numbered suits.
+                if has_edge_runner
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && (t.rank == 1 || t.rank == 9)
+                {
+                    push_chips!("Edge Runner", 12);
+                }
+                // Low Tide: tiles ranked 1–3 in numbered suits.
+                if has_low_tide
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && t.rank <= 3
+                {
+                    push_chips!("Low Tide", 6);
+                }
+            }
+        }
+    }
+
     // PairDoubleScore rule: every pair gets +30 chips on top of its base.
     // (Replaces the old "double the pair's contribution" — easier to balance
     // when the chip pile is larger.)
@@ -252,6 +315,96 @@ pub fn score_sets(
         let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
         if pair_count > 0 {
             push_chips!("Pair Double (rule)", 30 * pair_count);
+        }
+    }
+
+    // Tile Polisher: apply accumulated per-tile chip bonus from previous
+    // plays. Every tile that has ever been scored gains +3 chips for the
+    // rest of the run; the counter lives in ScoreContext::tile_polisher_bonus.
+    if has(RelicId::TilePolisher) && ctx.tile_polisher_bonus > 0 {
+        push_chips!("Tile Polisher", ctx.tile_polisher_bonus);
+    }
+
+    // Last Breath: on the player's final play of the round, retrigger all
+    // scored tiles — each tile contributes its point value a second time.
+    if has(RelicId::LastBreath) && ctx.is_final_play {
+        let mut retrigger_chips = 0i32;
+        for s in sets {
+            for &tid in &s.tile_ids {
+                if let Some(t) = tile_by_id(tiles, tid) {
+                    retrigger_chips += t.point_value() as i32;
+                }
+            }
+        }
+        if retrigger_chips > 0 {
+            push_chips!("Last Breath", retrigger_chips);
+        }
+    }
+
+    // Leading Tile: retrigger the first tile in each scored set.
+    if has(RelicId::LeadingTile) {
+        let mut retrigger = 0i32;
+        for s in sets {
+            if let Some(t) = s.tile_ids.first().and_then(|id| tile_by_id(tiles, *id)) {
+                retrigger += t.point_value() as i32;
+            }
+        }
+        if retrigger > 0 {
+            push_chips!("Leading Tile", retrigger);
+        }
+    }
+
+    // Low Echo: retrigger tiles ranked 1-4 in scored sets.
+    if has(RelicId::LowEcho) {
+        let mut retrigger = 0i32;
+        for s in sets {
+            for &tid in &s.tile_ids {
+                if let Some(t) = tile_by_id(tiles, tid) {
+                    if matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank <= 4 {
+                        retrigger += t.point_value() as i32;
+                    }
+                }
+            }
+        }
+        if retrigger > 0 {
+            push_chips!("Low Echo", retrigger);
+        }
+    }
+
+    // Tea Ceremony: retrigger ALL scored tiles (while charges remain).
+    // Charges are tracked in relic_counters; destroyed at 0 in run.rs.
+    if has(RelicId::TeaCeremony) {
+        let charges = ctx.relic_counters.get(&RelicId::TeaCeremony).copied().unwrap_or(0);
+        if charges > 0 {
+            let mut retrigger = 0i32;
+            for s in sets {
+                for &tid in &s.tile_ids {
+                    if let Some(t) = tile_by_id(tiles, tid) {
+                        retrigger += t.point_value() as i32;
+                    }
+                }
+            }
+            if retrigger > 0 {
+                push_chips!("Tea Ceremony", retrigger);
+            }
+        }
+    }
+
+    // Ghost Hand: tiles NOT in the scored sets each grant +2 chips.
+    if has(RelicId::GhostHand) && ctx.unscored_hand_tiles > 0 {
+        push_chips!("Ghost Hand", 2 * ctx.unscored_hand_tiles as i32);
+    }
+
+    // River Runner: accumulated permanent chip bonus from sequences.
+    if has(RelicId::RiverRunner) && ctx.river_runner_bonus > 0 {
+        push_chips!("River Runner", ctx.river_runner_bonus);
+    }
+
+    // Melting Ice: current chip bonus (decremented each play in run.rs).
+    if has(RelicId::MeltingIce) {
+        let ice_chips = ctx.relic_counters.get(&RelicId::MeltingIce).copied().unwrap_or(0);
+        if ice_chips > 0 {
+            push_chips!("Melting Ice", ice_chips);
         }
     }
 
@@ -332,12 +485,12 @@ pub fn score_sets(
     // Hanami relic adds +$3 gold per flower scored.
     {
         let meld_count = sets.len() as i32;
-        let triggers = if ctx.relics.has(RelicId::GardenKeeper) {
+        let triggers = if has(RelicId::GardenKeeper) {
             2
         } else {
             1
         };
-        let hanami = ctx.relics.has(RelicId::Hanami);
+        let hanami = has(RelicId::Hanami);
         for s in sets {
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -370,7 +523,7 @@ pub fn score_sets(
     // original constraint but it made the relic punishingly positional —
     // dropping it lets a single dragon triplet echo the whole rest of the
     // hand, which finally feels Legendary.
-    if ctx.relics.has(RelicId::DragonEcho) {
+    if has(RelicId::DragonEcho) {
         // Pre-compute every set's base chip contribution so the inner loop
         // is O(n) instead of O(n²).
         let set_bases: Vec<i32> = sets
@@ -427,7 +580,7 @@ pub fn score_sets(
             .count() as i32;
         if dora_count > 0 {
             // Use a custom step so we can label "Dora ×N" instead of the source name.
-            let per_dora = if ctx.relics.has(RelicId::DoraCrown) {
+            let per_dora = if has(RelicId::DoraCrown) {
                 35
             } else {
                 25
@@ -497,7 +650,7 @@ pub fn score_sets(
     if scored_full_hand && ctx.first_full_hand_of_round {
         let scale = (4i32 - ctx.plays_used as i32).max(1);
         let mut bonus = 50 * scale;
-        if ctx.relics.has(RelicId::TenpaiTalisman) {
+        if has(RelicId::TenpaiTalisman) {
             bonus *= 2;
         }
         push_chips!("Tenpai Bonus", bonus);
@@ -505,7 +658,7 @@ pub fn score_sets(
 
     // ── Phase 5: per-set mult relics ─────────────────────────────────────
 
-    if ctx.relics.has(RelicId::RedDragonRage) {
+    if has(RelicId::RedDragonRage) {
         for s in sets {
             if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
                 continue;
@@ -525,7 +678,7 @@ pub fn score_sets(
         }
     }
 
-    if ctx.relics.has(RelicId::WhiteSilence) {
+    if has(RelicId::WhiteSilence) {
         for s in sets {
             if s.kind != SetKind::Pair {
                 continue;
@@ -542,7 +695,7 @@ pub fn score_sets(
     }
 
     // SequenceSurge mult side (Patch C retune): +0.5 mult per sequence.
-    if ctx.relics.has(RelicId::SequenceSurge) {
+    if has(RelicId::SequenceSurge) {
         let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
         if seq_count > 0 {
             push_mult!("Sequence Surge", 0.5 * seq_count as f64);
@@ -551,7 +704,7 @@ pub fn score_sets(
 
     // PairPower mult side (Patch C retune): +1 mult per pair. Stacks with
     // chiitoitsu hands for the cleanest possible Pig zodiac build.
-    if ctx.relics.has(RelicId::PairPower) {
+    if has(RelicId::PairPower) {
         let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
         if pair_count > 0 {
             push_mult!("Pair Power", pair_count as f64);
@@ -560,7 +713,7 @@ pub fn score_sets(
 
     // KanDrum (Patch C): +4 mult per Kong. The +1 play side fires in
     // `score_selected_tiles` (run.rs).
-    if ctx.relics.has(RelicId::KanDrum) {
+    if has(RelicId::KanDrum) {
         let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
         if kong_count > 0 {
             push_mult!("Kan Drum", 4.0 * kong_count as f64);
@@ -570,7 +723,7 @@ pub fn score_sets(
     // KongsBlessing mult side: +2 mult per Kong. Pairs with the +120 chips
     // in Phase 2. The chip side fires alongside Triplet Boost / Pair Power
     // because it's a per-meld-kind chip relic; this is the mult half.
-    if ctx.relics.has(RelicId::KongsBlessing) {
+    if has(RelicId::KongsBlessing) {
         let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
         if kong_count > 0 {
             push_mult!("Kong's Blessing", 2.0 * kong_count as f64);
@@ -593,7 +746,7 @@ pub fn score_sets(
     // RoundCompass (Patch C): when the player triplets/kongs the *round wind*,
     // grant +6 mult on top of the existing Yakuhai bonus. Only fires for the
     // wind matching the ante's round wind, not for dragons.
-    if ctx.relics.has(RelicId::RoundCompass) {
+    if has(RelicId::RoundCompass) {
         if let Some(wind) = ctx.round_wind {
             for s in sets {
                 if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
@@ -634,7 +787,7 @@ pub fn score_sets(
     }
 
     // Ikebana: +6 mult when 2+ flowers are scored in the same hand.
-    if ctx.relics.has(RelicId::Ikebana) {
+    if has(RelicId::Ikebana) {
         let flower_count = sets
             .iter()
             .flat_map(|s| &s.tile_ids)
@@ -645,9 +798,31 @@ pub fn score_sets(
         }
     }
 
+    // Lucky Seven: rank-7 tiles in scored sets grant +1.5 mult each.
+    if has(RelicId::LuckySeven) {
+        let count = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .filter(|t| {
+                matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank == 7
+            })
+            .count();
+        if count > 0 {
+            push_mult!("Lucky Seven", 1.5 * count as f64);
+        }
+    }
+
+    // Paper Lantern: flat +6 mult. High reward, fragile — 1-in-5 chance to
+    // burn at round end (handled in run.rs advance_round).
+    // MirrorTile doubling: fires once per copy (1 or 2).
+    for _ in 0..count(RelicId::PaperLantern) {
+        push_mult!("Paper Lantern", 6.0);
+    }
+
     // ── Phase 6: global mult relics ──────────────────────────────────────
 
-    if ctx.relics.has(RelicId::MultiplierMaster) {
+    if has(RelicId::MultiplierMaster) {
         // +0.5 mult per relic owned. Caps at +2.5 with a full 5-slot
         // inventory, which is a real swing for a Rare. (Earlier Patch C
         // tuning had this at +0.3 — too weak once dead-stub relics were
@@ -658,8 +833,119 @@ pub fn score_sets(
         }
     }
 
-    if ctx.relics.has(RelicId::ChainReaction) && ctx.scored_last_turn {
+    if has(RelicId::ChainReaction) && ctx.scored_last_turn {
         push_mult!("Chain Reaction", 4.0);
+    }
+
+    // Closed Gate: +4 mult when every scored tile is a terminal (rank 1/9)
+    // or an honor (Wind/Dragon). Rewards honroutou-style hands.
+    if has(RelicId::ClosedGate) {
+        let all_terminal_or_honor = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .all(|t| {
+                matches!(t.suit, Suit::Wind | Suit::Dragon)
+                    || (matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                        && (t.rank == 1 || t.rank == 9))
+            });
+        if all_terminal_or_honor {
+            push_mult!("Closed Gate", 4.0);
+        }
+    }
+
+    // Gold Furnace: +1 mult per 5 gold held, max +4.
+    if has(RelicId::GoldFurnace) {
+        let bonus = (ctx.gold.max(0) as f64 / 5.0).floor().min(4.0);
+        if bonus > 0.0 {
+            push_mult!("Gold Furnace", bonus);
+        }
+    }
+
+    // Snowball: +0.1 mult per 100 total score earned this run, max +5.
+    if has(RelicId::Snowball) {
+        let bonus = (ctx.total_score as f64 / 100.0 * 0.1).min(5.0);
+        if bonus > 0.0 {
+            push_mult!("Snowball", bonus);
+        }
+    }
+
+    // Momentum: +0.5 mult per play already used this round.
+    if has(RelicId::Momentum) && ctx.plays_used > 0 {
+        push_mult!("Momentum", 0.5 * ctx.plays_used as f64);
+    }
+
+    // Minimalist: playing exactly one set that is a pair grants +4 mult.
+    if has(RelicId::Minimalist)
+        && sets.len() == 1
+        && sets[0].kind == SetKind::Pair
+    {
+        push_mult!("Minimalist", 4.0);
+    }
+
+    // Turtle Shell: +50 chips if mult is still below 3.0 after all bonuses.
+    // Safety-net relic that naturally falls off as the player acquires mult.
+    if has(RelicId::TurtleShell) && mult < 3.0 {
+        push_chips!("Turtle Shell", 50);
+    }
+
+    // Silk Thread: current mult bonus (decremented each discard in run.rs).
+    if has(RelicId::SilkThread) {
+        // Stored as ×10 to avoid float drift. 40 → 4.0 mult.
+        let thread_mult = ctx.relic_counters.get(&RelicId::SilkThread).copied().unwrap_or(0);
+        if thread_mult > 0 {
+            push_mult!("Silk Thread", thread_mult as f64 / 10.0);
+        }
+    }
+
+    // Clean Streak: +0.5 mult per consecutive play without honor tiles.
+    if has(RelicId::CleanStreak) {
+        let streak = ctx.relic_counters.get(&RelicId::CleanStreak).copied().unwrap_or(0);
+        if streak > 0 {
+            push_mult!("Clean Streak", 0.5 * streak as f64);
+        }
+    }
+
+    // Obsession: +0.3 mult per round without most-used yaku.
+    if has(RelicId::Obsession) {
+        let rounds = ctx.relic_counters.get(&RelicId::Obsession).copied().unwrap_or(0);
+        if rounds > 0 {
+            push_mult!("Obsession", 0.3 * rounds as f64);
+        }
+    }
+
+    // Bonfire: +0.4 mult per relic sold this run (resets on boss).
+    if has(RelicId::Bonfire) {
+        let sold = ctx.relic_counters.get(&RelicId::Bonfire).copied().unwrap_or(0);
+        if sold > 0 {
+            push_mult!("Bonfire", 0.4 * sold as f64);
+        }
+    }
+
+    // Empty Frame: +1.5 mult per empty relic slot.
+    if has(RelicId::EmptyFrame) {
+        let empty = ctx.relics.max_slots.saturating_sub(ctx.relics.active.len());
+        if empty > 0 {
+            push_mult!("Empty Frame", 1.5 * empty as f64);
+        }
+    }
+
+    // Cracked Tile: +0 to +8 mult (random per play).
+    if has(RelicId::CrackedTile) {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let bonus: f64 = rng.random_range(0.0..=8.0);
+        if bonus > 0.0 {
+            push_mult!("Cracked Tile", (bonus * 10.0).floor() / 10.0);
+        }
+    }
+
+    // Ritual Blade permanent mult (accumulated via relic_counters).
+    if has(RelicId::RitualBlade) {
+        let perm_mult = ctx.relic_counters.get(&RelicId::RitualBlade).copied().unwrap_or(0);
+        if perm_mult > 0 {
+            push_mult!("Ritual Blade", perm_mult as f64 / 10.0);
+        }
     }
 
     // ── Phase 6.5: Riichi multiplier ────────────────────────────────────
@@ -673,6 +959,67 @@ pub fn score_sets(
         // We add (current_mult) so the running total doubles cleanly.
         let delta = mult;
         push_mult!("Riichi", delta);
+    }
+
+    // Way of Purity: ×2.5 mult if every scored tile belongs to a single
+    // numbered suit (Bamboos, Characters, or Circles). Chinitsu reward.
+    if has(RelicId::WayOfPurity) {
+        let numbered_suits: Vec<Suit> = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .map(|t| t.suit)
+            .filter(|s| matches!(s, Suit::Bamboos | Suit::Characters | Suit::Circles))
+            .collect();
+        if !numbered_suits.is_empty() {
+            let first = numbered_suits[0];
+            let all_same = numbered_suits.iter().all(|&s| s == first)
+                && sets
+                    .iter()
+                    .flat_map(|s| &s.tile_ids)
+                    .filter_map(|id| tile_by_id(tiles, *id))
+                    .all(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles));
+            if all_same {
+                // ×2.5 = add 1.5 × current mult.
+                let delta = mult * 1.5;
+                push_mult!("Way of Purity", delta);
+            }
+        }
+    }
+
+    // Way of Pairs: ×2 mult if every scored set is a pair.
+    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Pair) {
+        let delta = mult;
+        push_mult!("Way of Pairs", delta);
+    }
+
+    // Way of Triplets: ×2.5 mult if every scored set is a triplet/kong.
+    if has(RelicId::WayOfTriplets)
+        && !sets.is_empty()
+        && sets.iter().all(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+    {
+        let delta = mult * 1.5;
+        push_mult!("Way of Triplets", delta);
+    }
+
+    // Way of Sequences: ×2 mult if every scored set is a sequence.
+    if has(RelicId::WayOfSequences) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Sequence) {
+        let delta = mult;
+        push_mult!("Way of Sequences", delta);
+    }
+
+    // Iron Lantern: ×2 mult (Paper Lantern's evolved form). Nearly
+    // indestructible (1-in-1000 per round, handled in run.rs).
+    for _ in 0..count(RelicId::IronLantern) {
+        let delta = mult;
+        push_mult!("Iron Lantern", delta);
+    }
+
+    // Glass Cannon: double the running mult (same ×2 pattern as Riichi).
+    // The play-count penalty is applied in run.rs at round reset.
+    for _ in 0..count(RelicId::GlassCannon) {
+        let delta = mult;
+        push_mult!("Glass Cannon", delta);
     }
 
     // ── Phase 7: final multiplication beat ───────────────────────────────
@@ -896,6 +1243,13 @@ mod tests {
             yaku_levels: None,
             yaku_loadout: vec![],
             played_yaku_this_round: vec![],
+            gold: 0,
+            total_score: 0,
+            is_final_play: false,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            unscored_hand_tiles: 0,
+            river_runner_bonus: 0,
         }
     }
 
@@ -1036,6 +1390,13 @@ mod tests {
             yaku_levels: None,
             yaku_loadout: vec![crate::core::yaku::YakuKind::Chinitsu],
             played_yaku_this_round: vec![],
+            gold: 0,
+            total_score: 0,
+            is_final_play: false,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            unscored_hand_tiles: 0,
+            river_runner_bonus: 0,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Off-loadout: Ittsu (4 mult, 50 chips) → halved to (2 mult, 25 chips).
@@ -1089,6 +1450,13 @@ mod tests {
             yaku_levels: Some(levels),
             yaku_loadout: vec![],
             played_yaku_this_round: vec![],
+            gold: 0,
+            total_score: 0,
+            is_final_play: false,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            unscored_hand_tiles: 0,
+            river_runner_bonus: 0,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Verify Toitoi step exists with expected chip & mult deltas.
@@ -1357,6 +1725,13 @@ mod tests {
             yaku_levels: None,
             yaku_loadout: vec![],
             played_yaku_this_round: vec![],
+            gold: 0,
+            total_score: 0,
+            is_final_play: false,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            unscored_hand_tiles: 0,
+            river_runner_bonus: 0,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // 3 dora tiles × 25 (Patch A retune, was 20) = +75 chips

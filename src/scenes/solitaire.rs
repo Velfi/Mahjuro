@@ -291,9 +291,13 @@ impl SceneBehavior for SolitaireScene {
 
         // Top-down-ish camera so the board reads as a flat layout with
         // visible 3D stacking between layers.
+        // Scale camera to viewport so the board fills the screen at any
+        // resolution.  The fixed values looked right at ~1200px height;
+        // scale proportionally from that reference.
+        let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
-            eye: [0.0, h * 1.75, h * 0.25],
-            target: [0.0, h * -0.39, 0.0],
+            eye: [0.0, 2040.0 * cam_scale, 200.0 * cam_scale],
+            target: [0.0, 0.0, 50.0 * cam_scale],
             up: [0.0, 1.0, 0.0],
             fovy_deg: 45.0,
         });

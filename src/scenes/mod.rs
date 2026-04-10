@@ -4,8 +4,8 @@
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
-pub mod glossary;
 pub mod journal;
+pub mod meld_guide;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
@@ -19,6 +19,7 @@ pub mod start_screen;
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
+pub use meld_guide::MeldGuideScene;
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
@@ -142,72 +143,16 @@ pub struct DrawCtx<'a> {
     pub active_profile: usize,
     /// Whether a game run is currently in progress (for resume/restart UI).
     pub game_in_progress: bool,
-    /// Per-hand-tile screen-space rects from the previous frame's perspective
-    /// projection (renderer-side). Empty before the first draw. Scenes that
-    /// want to anchor 2D HUD elements (hover tooltips, etc.) to the actual
-    /// visible 3D tile should look the index up here and fall back to the
-    /// layout slot rect if not found.
-    pub projected_hand_rects: &'a [(usize, [f32; 4])],
-    /// Per-relic-placeholder screen-space rects from the previous frame's
-    /// perspective projection — analogous to `projected_hand_rects` but for
-    /// the physical relic boxes sitting in the dish. Empty before the first
-    /// frame the dish is drawn.
-    pub projected_relic_rects: &'a [[f32; 4]],
-    /// Per-ribbon screen-space rects from the previous frame's perspective
-    /// projection. Empty unless the shop scene is active.
-    pub projected_ribbon_rects: &'a [[f32; 4]],
-    /// Per-talisman screen-space rects from the previous frame's perspective
-    /// projection. Empty unless the shop scene is active.
-    pub projected_talisman_rects: &'a [[f32; 4]],
-    /// Per-plaque screen-space rects from the previous frame's perspective
-    /// projection. Each entry is the projected face of one `frame.plaque(...)`
-    /// call, in cmd order. Used by scenes to overlay 2D text aligned with
-    /// the rendered plaque.
-    pub projected_plaque_rects: &'a [[f32; 4]],
-    /// Per-yaku-tablet screen-space rects from the previous frame's
-    /// perspective projection. Indexed in `YakuTabletBatch` placement order.
-    /// **Tooltip anchor only** — hover hit-testing is driven by
-    /// `picked_gameplay_object` (raycast against precomputed local AABBs).
-    /// The projected rect is still useful so the tooltip can snap to the
-    /// *visible* on-screen position of the tablet.
-    pub projected_yaku_tablet_rects: &'a [[f32; 4]],
-    /// Screen-space rect of the discard river (the legacy "bowl" slot)
-    /// from the previous frame, if drawn. Used by the gameplay scene to
-    /// anchor floating overlay text to the river's actual visible
-    /// position rather than its synthesized layout hit rect.
-    pub projected_bowl_rect: Option<[f32; 4]>,
-    /// Screen-space rect of the bronze mirror from the previous frame, if
-    /// drawn. Same role as `projected_bowl_rect` for the Play action.
-    pub projected_mirror_rect: Option<[f32; 4]>,
-    /// Per-wood-tablet projected screen rects from the previous frame, in
-    /// `WoodTabletPlacement` push order: `[0]` = sort suit, `[1]` = sort
-    /// rank, `[2]` = journal book. Used by the gameplay scene to anchor
-    /// floating overlay text to the visible tablet positions.
-    pub projected_wood_tablet_rects: &'a [[f32; 4]],
+    /// All per-frame projected screen-space rects from the renderer.
+    pub proj: &'a crate::render::wgpu_renderer::ProjectionCache,
     /// Result of `pick_gameplay_object` — the topmost yaku tablet, wood
     /// action tablet, or discard bowl the cursor is over this frame, if
-    /// any. The gameplay scene reads this for hover state instead of
-    /// screen-rect hit-testing the projected AABBs.
+    /// any.
     pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
-    /// Per-shrine screen-space rects from the previous frame's perspective
-    /// projection. Indexed in `ShrineBatch` placement order. Used by the
-    /// pick-blind scene to anchor floating labels above each shrine.
-    pub projected_shrine_rects: &'a [[f32; 4]],
-    /// Auxiliary dish screen rects from the previous frame, paired with
-    /// their `pick_id`. Used by the shop scene to anchor 2D tooltips above
-    /// the relic dish + coin dish.
-    pub aux_dish_rects: &'a [(Option<u32>, [f32; 4])],
     /// Result of `pick_shop_object` — the topmost shop object the cursor is
-    /// over this frame, if any. Used by the shop scene for hover routing.
+    /// over this frame, if any.
     pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
-    /// Screen-space rects for the gameplay scene's counter peg block:
-    /// `[0]` = plays/hands group (left half), `[1]` = discards group (right
-    /// half). Each is `Some` only when the renderer drew a peg block last
-    /// frame. Used by the gameplay scene's unified focus system to hit-test
-    /// the pegs and anchor focus highlights / info tooltips on them.
-    pub projected_peg_rects: &'a [Option<[f32; 4]>; 2],
     /// Debug visibility toggles set from the in-game debug visibility modal.
-    /// Scenes consult these to skip pushing specific element draw cmds.
     pub debug_visibility: DebugVisibility,
     /// User's UI scale preference (1.0 = default).
     pub ui_scale: f32,
@@ -402,6 +347,7 @@ pub enum Scene {
     PickBlind(PickBlindScene),
     Gameplay(GameplayScene),
     GameOver(GameOverScene),
+    MeldGuide(MeldGuideScene),
     Options(OptionsScene),
     Collection(CollectionScene),
     Solitaire(SolitaireScene),

@@ -15,6 +15,39 @@ use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
 
+/// Boss-blind state for the current run.  Extracted from `RunState` so
+/// boss-specific logic has a single owner.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BossState {
+    /// Bosses still available for this run, drawn without replacement.
+    pub pool_remaining: Vec<BossKind>,
+    /// The boss for the current ante.
+    pub upcoming: Option<BossKind>,
+    /// Resolved effect for `upcoming`, rebuilt from the kind on load.
+    #[serde(skip)]
+    pub effect: Option<crate::core::boss::ResolvedBossEffect>,
+    /// Per-round hand-size delta from boss effects.
+    pub bonus_hand_size: i32,
+    /// Gold cost charged after each successful play (set by The Tribute).
+    pub gold_cost_per_play: u32,
+    /// Per-play cost baked in by The Tax Collector at reveal time.
+    #[serde(default)]
+    pub tax_collector_cost: u32,
+}
+
+impl Default for BossState {
+    fn default() -> Self {
+        Self {
+            pool_remaining: Vec::new(),
+            upcoming: None,
+            effect: None,
+            bonus_hand_size: 0,
+            gold_cost_per_play: 0,
+            tax_collector_cost: 0,
+        }
+    }
+}
+
 /// Result of consuming a slot from the shared consumable inventory.
 #[derive(Clone, Copy, Debug)]
 pub enum ConsumableUseResult {
@@ -87,33 +120,8 @@ pub struct RunState {
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
     // ── Boss blind state ─────────────────────────────────────────────────
-    /// Bosses still available for this run, in randomized order. Drawn
-    /// without replacement so each ante's boss is distinct.
-    pub boss_pool_remaining: Vec<BossKind>,
-    /// The boss for the current ante (rolled at ante boundary, before the
-    /// player even sees the Small/Big screens). Lets `pick_blind` preview
-    /// the upcoming fight.
-    pub upcoming_boss: Option<BossKind>,
-    /// Resolved effect for `upcoming_boss`, built when the boss is rolled
-    /// (in `resolve_upcoming_boss`). For static bosses this is just a
-    /// `ResolvedBossEffect::from_static` wrapper; for reactive bosses
-    /// (Mirror, TaxCollector) it captures the variant chosen at reveal time.
-    /// `apply_blind` / `score_selected_tiles` read hooks from here instead
-    /// of the static def so reactive variants land at the right moment.
-    /// Skipped by serde — rebuilt from `upcoming_boss` on load.
-    #[serde(skip)]
-    pub upcoming_boss_effect: Option<crate::core::boss::ResolvedBossEffect>,
-    /// Per-round hand-size delta from boss effects (e.g. The Whisper sets
-    /// this to -1). Reset by `advance_round` and `skip_to_next_blind`.
-    pub bonus_hand_size: i32,
-    /// Gold cost charged after each successful play, set by The Tribute. 0
-    /// outside that boss's round.
-    pub gold_cost_per_play: u32,
-    /// Per-play cost baked in by The Tax Collector at reveal time. Read by
-    /// `tax_collector_apply` to set `gold_cost_per_play` once the boss
-    /// blind starts. 0 unless the current ante's boss is Tax Collector.
-    #[serde(default)]
-    pub tax_collector_cost: u32,
+    #[serde(flatten)]
+    pub boss: BossState,
     /// Yaku detected on prior plays in this round. Used by The Censor to
     /// halve repeat-yaku contributions. Reset on round start.
     #[serde(skip)]
@@ -124,6 +132,9 @@ pub struct RunState {
     /// `advance_round` and `skip_to_next_blind`.
     #[serde(skip)]
     pub honors_scored_this_round: bool,
+    /// Cumulative score earned across the entire run (for Snowball relic).
+    #[serde(default)]
+    pub total_score_earned: u64,
     /// Per-yaku cumulative play counter for the entire run. Powers the
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
@@ -145,6 +156,54 @@ pub struct RunState {
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
     pub tile_packs: Vec<crate::core::tile_pack::TilePackKind>,
+
+    // ── Skip-reward tags ──────────────────────────────────────────────
+    /// Tag assigned to the Small blind this ante.
+    #[serde(default)]
+    pub small_blind_tag: Option<crate::core::tag::TagKind>,
+    /// Tag assigned to the Big blind this ante.
+    #[serde(default)]
+    pub big_blind_tag: Option<crate::core::tag::TagKind>,
+    /// Tag-granted: next shop's first reroll is free.
+    #[serde(default)]
+    pub tag_free_reroll: bool,
+    /// Tag-granted: one random relic in the next shop costs 0.
+    #[serde(default)]
+    pub tag_patron_gift: bool,
+    /// Tag-granted: next shop stocks 2 extra relics.
+    #[serde(default)]
+    pub tag_rich_stock: bool,
+    /// Tag-granted bonus plays for the next round.
+    #[serde(default)]
+    pub tag_bonus_plays: u32,
+    /// Tag-granted bonus discards for the next round.
+    #[serde(default)]
+    pub tag_bonus_discards: u32,
+    /// Tag-granted bonus hand size for the next round.
+    #[serde(default)]
+    pub tag_bonus_hand_size: i32,
+    /// Permanent per-tile chip bonus accumulated by the Tile Polisher
+    /// relic. Each scored tile adds +3 to this counter for the rest of
+    /// the run. Applied in Phase 2 of scoring.
+    #[serde(default)]
+    pub tile_polisher_bonus: i32,
+    /// Per-relic mutable counters. Key is RelicId, value meaning depends
+    /// on the relic:
+    ///   CleanStreak  → consecutive plays without honor tiles
+    ///   Obsession    → rounds without most-used yaku
+    ///   Bonfire      → relics sold this run
+    ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
+    ///   SilkThread   → remaining mult ×10 (starts 40, -3 per discard)
+    ///   NestEgg      → rounds held (sell value grows)
+    ///   TeaCeremony  → plays remaining before destruction
+    ///   PhantomRelic → rounds held
+    ///   RitualBlade  → permanent mult bonus ×10
+    #[serde(default)]
+    pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
+    /// Permanent chip bonus from River Runner relic. Each scored sequence
+    /// adds +20 chips permanently.
+    #[serde(default)]
+    pub river_runner_bonus: i32,
 }
 
 impl RunState {
@@ -206,19 +265,35 @@ impl RunState {
             ],
             yaku_loadout_capacity: 3,
             mode,
-            boss_pool_remaining,
-            upcoming_boss,
-            upcoming_boss_effect: None,
-            bonus_hand_size: 0,
-            gold_cost_per_play: 0,
-            tax_collector_cost: 0,
+            boss: BossState {
+                pool_remaining: boss_pool_remaining,
+                upcoming: upcoming_boss,
+                effect: None,
+                bonus_hand_size: 0,
+                gold_cost_per_play: 0,
+                tax_collector_cost: 0,
+            },
             played_yaku_this_round: Vec::new(),
             honors_scored_this_round: false,
+            total_score_earned: 0,
             yaku_times_played: std::collections::HashMap::new(),
             tile_enhancements: BTreeMap::new(),
             removed_tile_ids: std::collections::HashSet::new(),
             tile_packs: Vec::new(),
+            small_blind_tag: None,
+            big_blind_tag: None,
+            tag_free_reroll: false,
+            tag_patron_gift: false,
+            tag_rich_stock: false,
+            tag_bonus_plays: 0,
+            tag_bonus_discards: 0,
+            tag_bonus_hand_size: 0,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            river_runner_bonus: 0,
         };
+        // Roll skip-reward tags for ante 1.
+        state.roll_ante_tags();
         // Resolve the first ante's boss now so reactive variants are baked
         // in before pick_blind ever reads `upcoming_boss_effect`.
         state.resolve_upcoming_boss();
@@ -237,9 +312,9 @@ impl RunState {
     pub fn resolve_upcoming_boss(&mut self) {
         use crate::core::boss::ResolvedBossEffect;
         // Reset any reactive scratch — the new boss may not need it.
-        self.tax_collector_cost = 0;
-        let Some(kind) = self.upcoming_boss else {
-            self.upcoming_boss_effect = None;
+        self.boss.tax_collector_cost = 0;
+        let Some(kind) = self.boss.upcoming else {
+            self.boss.effect = None;
             return;
         };
         let def = kind.def();
@@ -249,7 +324,7 @@ impl RunState {
             Some(hook) => hook(self),
             None => ResolvedBossEffect::from_static(&def.effect),
         };
-        self.upcoming_boss_effect = Some(effect);
+        self.boss.effect = Some(effect);
     }
 
     /// Convenience constructor using the standard game mode.
@@ -414,7 +489,7 @@ impl RunState {
             // Read from the resolved effect (built at reveal time) so reactive
             // bosses' chosen variants land correctly. Take/restore to dodge
             // the &mut self conflict when calling on_apply.
-            if let Some(eff) = self.upcoming_boss_effect.take() {
+            if let Some(eff) = self.boss.effect.take() {
                 for &m in &eff.rule_pushes {
                     if !self.round_rules.contains(&m) {
                         self.round_rules.push(m);
@@ -423,13 +498,25 @@ impl RunState {
                 if let Some(hook) = eff.on_apply {
                     hook(self);
                 }
-                self.upcoming_boss_effect = Some(eff);
+                self.boss.effect = Some(eff);
             }
         }
         // ReducedPlays modifier reduces plays from 4 to 3.
         if self.round_rules.contains(&RuleModifier::ReducedPlays) {
             self.plays_remaining = self.plays_remaining.min(3);
         }
+        // Consume tag-granted gameplay bonuses from a prior skip.
+        if self.tag_bonus_plays > 0 {
+            self.plays_remaining += self.tag_bonus_plays;
+            self.tag_bonus_plays = 0;
+        }
+        if self.tag_bonus_discards > 0 {
+            self.discards_remaining += self.tag_bonus_discards;
+            self.tag_bonus_discards = 0;
+        }
+        // tag_bonus_hand_size is consumed by the hand-draw loop in
+        // advance_round / skip_to_next_blind — not here, since the hand is
+        // already dealt by the time apply_blind runs.
     }
 
     /// Score the currently-selected tiles as a played hand.
@@ -477,10 +564,71 @@ impl RunState {
             yaku_levels: Some(self.yaku_levels.clone()),
             yaku_loadout: self.yaku_loadout.clone(),
             played_yaku_this_round: self.played_yaku_this_round.clone(),
+            gold: self.gold,
+            total_score: self.total_score_earned,
+            is_final_play: self.plays_remaining == 1,
+            tile_polisher_bonus: self.tile_polisher_bonus,
+            relic_counters: self.relic_counters.clone(),
+            unscored_hand_tiles: self.hand.len().saturating_sub(selected_tiles.len()),
+            river_runner_bonus: self.river_runner_bonus,
         };
         let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
+        self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
+        // Tile Polisher: every scored tile permanently gains +3 chips for
+        // the rest of the run. Count tiles across all scored sets.
+        if self.relics.has(RelicId::TilePolisher) {
+            let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
+            self.tile_polisher_bonus += 3 * tile_count;
+        }
+        // River Runner: +20 permanent chips per sequence scored.
+        if self.relics.has(RelicId::RiverRunner) {
+            let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+            self.river_runner_bonus += 20 * seq_count;
+        }
+        // Melting Ice: -8 chips per play. Destroy at 0.
+        if self.relics.has(RelicId::MeltingIce) {
+            let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
+            *v = (*v - 8).max(0);
+            if *v == 0 {
+                self.relics.active.retain(|&r| r != RelicId::MeltingIce);
+                self.relic_counters.remove(&RelicId::MeltingIce);
+            }
+        }
+        // Tea Ceremony: -1 charge per play. Destroy at 0.
+        if self.relics.has(RelicId::TeaCeremony) {
+            let v = self.relic_counters.entry(RelicId::TeaCeremony).or_insert(3);
+            *v -= 1;
+            if *v <= 0 {
+                self.relics.active.retain(|&r| r != RelicId::TeaCeremony);
+                self.relic_counters.remove(&RelicId::TeaCeremony);
+            }
+        }
+        // Clean Streak: increment on plays without honors, reset on honors.
+        if self.relics.has(RelicId::CleanStreak) {
+            let has_honors = scoring_tiles
+                .iter()
+                .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
+            let v = self.relic_counters.entry(RelicId::CleanStreak).or_insert(0);
+            if has_honors {
+                *v = 0;
+            } else {
+                *v += 1;
+            }
+        }
+        // Star Tile: 1-in-4 chance to level up a scored yaku.
+        if self.relics.has(RelicId::StarTile) && !breakdown.detected_yaku.is_empty() {
+            use rand::seq::IndexedRandom;
+            use rand::RngExt;
+            let mut rng = rand::rng();
+            let prob = if self.relics.has(RelicId::FortunesFavor) { 2 } else { 1 };
+            if rng.random_ratio(prob, 4) {
+                if let Some(&y) = breakdown.detected_yaku.choose(&mut rng) {
+                    let _new_level = self.yaku_levels.level_up(y);
+                }
+            }
+        }
         // Flower gold (Bamboo effect): award immediately so the player sees
         // the gold counter tick during the cascade.
         if breakdown.flower_gold > 0 {
@@ -601,11 +749,11 @@ impl RunState {
         // active during boss blinds — checked via `upcoming_boss` because
         // `apply_blind` is what set this run's boss.
         if self.blind == BlindKind::Boss {
-            if let Some(eff) = self.upcoming_boss_effect.take() {
+            if let Some(eff) = self.boss.effect.take() {
                 if let Some(hook) = eff.on_play {
                     hook(self);
                 }
-                self.upcoming_boss_effect = Some(eff);
+                self.boss.effect = Some(eff);
             }
         }
 
@@ -626,10 +774,27 @@ impl RunState {
                 } else {
                     0
                 };
+            // Gold Idol: +3 gold at round end.
+            let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) { 3u32 } else { 0 };
+            // Jade Abacus: +1 interest per 4 gold held (max +4).
+            let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
+                (self.gold.max(0) as u32 / 4).min(4)
+            } else {
+                0
+            };
+            // Patience: +2 gold per unused discard.
+            let patience_bonus = if self.relics.has(RelicId::Patience) {
+                2 * self.discards_remaining
+            } else {
+                0
+            };
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
-                .saturating_add(green_luck_bonus);
+                .saturating_add(green_luck_bonus)
+                .saturating_add(gold_idol_bonus)
+                .saturating_add(jade_abacus_bonus)
+                .saturating_add(patience_bonus);
             // Gold payout is deferred — applied in handle_round_end_event()
             // after the scoring cascade finishes, so the UI doesn't show the
             // new balance while the animation is still playing.
@@ -687,7 +852,7 @@ impl RunState {
 
     /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
     /// Returns the decomposition and the (possibly modified) tiles used for scoring.
-    fn try_validate_with_wildcards(&self, tiles: &[Tile]) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    pub fn try_validate_with_wildcards(&self, tiles: &[Tile]) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &self.round_rules) {
             return Some((sets, tiles.to_vec()));
@@ -766,6 +931,17 @@ impl RunState {
         }
         self.discards_remaining -= 1;
         self.selected = vec![false; self.hand.len()];
+
+        // Silk Thread: -0.3 mult (stored as -3 in ×10 units) per discard.
+        if self.relics.has(RelicId::SilkThread) {
+            let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
+            *v = (*v - 3).max(0);
+            if *v == 0 {
+                self.relics.active.retain(|&r| r != RelicId::SilkThread);
+                self.relic_counters.remove(&RelicId::SilkThread);
+            }
+        }
+
         count
     }
 
@@ -833,6 +1009,57 @@ impl RunState {
     /// We only grow `base_target` when the player defeats the Boss and rolls into the
     /// next ante; within an ante, the base stays put.
     pub fn advance_round(&mut self) {
+        // Fortune's Favor halves destruction chances (doubles survival).
+        let fortunes = self.relics.has(RelicId::FortunesFavor);
+        // Paper Lantern: 1-in-5 chance to burn up at round end. When it
+        // burns, it's replaced in-place by Iron Lantern.
+        // Fortune's Favor: 1-in-10 instead.
+        if self.relics.has(RelicId::PaperLantern) {
+            use rand::RngExt;
+            let mut rng = rand::rng();
+            let denom = if fortunes { 10 } else { 5 };
+            if rng.random_ratio(1, denom) {
+                if let Some(pos) = self.relics.active.iter().position(|&r| r == RelicId::PaperLantern) {
+                    self.relics.active[pos] = RelicId::IronLantern;
+                }
+            }
+        }
+        // Iron Lantern: 1-in-1000 chance to shatter at round end.
+        // Fortune's Favor: 1-in-2000.
+        if self.relics.has(RelicId::IronLantern) {
+            use rand::RngExt;
+            let mut rng = rand::rng();
+            let denom = if fortunes { 2000 } else { 1000 };
+            if rng.random_ratio(1, denom) {
+                self.relics.active.retain(|&r| r != RelicId::IronLantern);
+            }
+        }
+        // Nest Egg: increment rounds held (affects sell value).
+        if self.relics.has(RelicId::NestEgg) {
+            *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
+        }
+        // Phantom Relic: increment rounds held.
+        if self.relics.has(RelicId::PhantomRelic) {
+            *self.relic_counters.entry(RelicId::PhantomRelic).or_insert(0) += 1;
+        }
+        // Obsession: check if the player's most-used yaku was NOT scored
+        // this round. If so, increment the counter.
+        if self.relics.has(RelicId::Obsession) {
+            let top_yaku = self
+                .yaku_times_played
+                .iter()
+                .max_by_key(|(_, count)| **count)
+                .map(|(&y, _)| y);
+            if let Some(top) = top_yaku {
+                if !self.played_yaku_this_round.contains(&top) {
+                    *self.relic_counters.entry(RelicId::Obsession).or_insert(0) += 1;
+                } else {
+                    // Reset on use — rewards variety, not just avoidance.
+                    self.relic_counters.insert(RelicId::Obsession, 0);
+                }
+            }
+        }
+
         // Defeating the Boss completes an ante and scales the base for the next one.
         let was_boss = self.blind == BlindKind::Boss;
         if was_boss {
@@ -844,14 +1071,20 @@ impl RunState {
         self.target_score = self.base_target; // will be overridden by apply_blind
         self.round_rules.clear();
         self.plays_remaining = self.mode.starting_plays;
+        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
+            self.plays_remaining += 1;
+        }
+        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
+            self.plays_remaining = self.plays_remaining.saturating_sub(1);
+        }
         self.discards_remaining = self.mode.starting_discards;
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.quickdraw_used = false;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
-        self.bonus_hand_size = 0;
-        self.gold_cost_per_play = 0;
+        self.boss.bonus_hand_size = 0;
+        self.boss.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
@@ -864,7 +1097,9 @@ impl RunState {
             overflow,
         );
         self.hand.clear();
-        for _ in 0..self.mode.hand_size {
+        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
+        self.tag_bonus_hand_size = 0;
+        for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
             }
@@ -879,17 +1114,21 @@ impl RunState {
         // without replacement from the regular pool.
         if was_boss {
             let mut rng = rand::rng();
-            self.upcoming_boss = if self.ante == FINAL_ANTE {
+            self.boss.upcoming = if self.ante == FINAL_ANTE {
                 Some(boss::pick_final(&mut rng))
             } else if self.ante > FINAL_ANTE {
                 None
             } else {
-                boss::pick_for_ante(&mut self.boss_pool_remaining, self.ante, &mut rng)
+                boss::pick_for_ante(&mut self.boss.pool_remaining, self.ante, &mut rng)
             };
             // Bake the resolved effect now so reactive bosses see the
             // post-shop run state of the *outgoing* ante (their reveal
             // moment) and pick_blind shows the chosen variant immediately.
             self.resolve_upcoming_boss();
+            // Roll fresh skip-reward tags for the new ante and clear any
+            // unconsumed tag modifiers from the previous ante.
+            self.roll_ante_tags();
+            self.clear_tag_modifiers();
         }
     }
 
@@ -905,6 +1144,12 @@ impl RunState {
         self.target_score = self.base_target;
         self.round_rules.clear();
         self.plays_remaining = self.mode.starting_plays;
+        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
+            self.plays_remaining += 1;
+        }
+        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
+            self.plays_remaining = self.plays_remaining.saturating_sub(1);
+        }
         self.discards_remaining = self.mode.starting_discards;
         self.last_breakdown = None;
         self.scored_last_turn = false;
@@ -912,8 +1157,8 @@ impl RunState {
         self.joker_used = false;
         // Reset per-round boss-effect state. The ante's `upcoming_boss` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.
-        self.bonus_hand_size = 0;
-        self.gold_cost_per_play = 0;
+        self.boss.bonus_hand_size = 0;
+        self.boss.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.blind = self.upcoming_blind;
@@ -925,7 +1170,9 @@ impl RunState {
             overflow,
         );
         self.hand.clear();
-        for _ in 0..self.mode.hand_size {
+        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
+        self.tag_bonus_hand_size = 0;
+        for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
             }
@@ -934,6 +1181,103 @@ impl RunState {
         self.selected = vec![false; self.hand.len()];
         // Re-apply persistent enhancements to the newly-dealt hand.
         self.restamp_hand_enhancements();
+    }
+
+    // ── Skip-reward tags ──────────────────────────────────────────────
+
+    /// Roll fresh tags for the Small and Big blinds of the current ante.
+    pub fn roll_ante_tags(&mut self) {
+        use crate::core::tag::roll_tag;
+        let small = roll_tag(self.ante, None);
+        let big = roll_tag(self.ante, Some(small));
+        self.small_blind_tag = Some(small);
+        self.big_blind_tag = Some(big);
+    }
+
+    /// Return the tag assigned to the given blind, if any.
+    pub fn tag_for_blind(&self, blind: BlindKind) -> Option<crate::core::tag::TagKind> {
+        match blind {
+            BlindKind::Small => self.small_blind_tag,
+            BlindKind::Big => self.big_blind_tag,
+            BlindKind::Boss => None,
+        }
+    }
+
+    /// Apply a skip-reward tag's effect. Returns a short description for UI feedback.
+    pub fn apply_tag(&mut self, tag: crate::core::tag::TagKind) -> &'static str {
+        use crate::core::tag::TagKind;
+        match tag {
+            TagKind::GoldIngot => {
+                self.gold = self.gold.saturating_add(8);
+                "+8 gold"
+            }
+            TagKind::TreasureChest => {
+                self.gold = self.gold.saturating_add(20);
+                "+20 gold"
+            }
+            TagKind::FreeReroll => {
+                self.tag_free_reroll = true;
+                "Free reroll"
+            }
+            TagKind::PatronGift => {
+                self.tag_patron_gift = true;
+                "Free relic"
+            }
+            TagKind::RichStock => {
+                self.tag_rich_stock = true;
+                "+2 shop relics"
+            }
+            TagKind::ZodiacBlessing => {
+                use crate::core::consumable::Consumable;
+                use crate::core::zodiac::ZodiacKind;
+                use rand::seq::IndexedRandom;
+                let all = ZodiacKind::all();
+                let mut rng = rand::rng();
+                if let Some(&z) = all.choose(&mut rng) {
+                    if !self.consumables.try_push(Consumable::Zodiac(z)) {
+                        self.gold = self.gold.saturating_add(4);
+                        return "+4 gold (full)";
+                    }
+                }
+                "Zodiac gained"
+            }
+            TagKind::RelicOffering => {
+                use crate::core::relic::all_relic_defs;
+                use rand::seq::SliceRandom;
+                let defs = all_relic_defs();
+                let mut pool: Vec<_> = defs.iter().filter(|d| !self.relics.has(d.id)).collect();
+                if pool.is_empty() || self.relics.is_full() {
+                    self.gold = self.gold.saturating_add(6);
+                    return "+6 gold (full)";
+                }
+                let mut rng = rand::rng();
+                pool.shuffle(&mut rng);
+                self.relics.active.push(pool[0].id);
+                "Relic gained"
+            }
+            TagKind::BonusPlay => {
+                self.tag_bonus_plays += 1;
+                "+1 play"
+            }
+            TagKind::BonusDiscard => {
+                self.tag_bonus_discards += 1;
+                "+1 discard"
+            }
+            TagKind::WideHand => {
+                self.tag_bonus_hand_size += 2;
+                "+2 hand size"
+            }
+        }
+    }
+
+    /// Clear transient tag modifier flags (safety net for ante boundaries).
+    fn clear_tag_modifiers(&mut self) {
+        self.tag_free_reroll = false;
+        self.tag_patron_gift = false;
+        self.tag_rich_stock = false;
+        self.tag_bonus_plays = 0;
+        self.tag_bonus_discards = 0;
+        self.tag_bonus_hand_size = 0;
     }
 }
 
@@ -970,12 +1314,10 @@ mod tests {
             available_yaku: vec![],
             base_target: mode.base_target,
             blind: BlindKind::Small,
-            bonus_hand_size: 0,
-            boss_pool_remaining: vec![],
+            boss: BossState::default(),
             consumables: crate::core::consumable::ConsumableInventory::default(),
             discards_remaining: mode.starting_discards,
             full_hand_played_this_round: false,
-            gold_cost_per_play: 0,
             gold: mode.starting_gold as i32,
             hand,
             joker_used: false,
@@ -993,12 +1335,9 @@ mod tests {
             scored_last_turn: false,
             selected,
             target_score: mode.base_target,
-            tax_collector_cost: 0,
             tile_enhancements: BTreeMap::new(),
             removed_tile_ids: std::collections::HashSet::new(),
             upcoming_blind: BlindKind::Small,
-            upcoming_boss_effect: None,
-            upcoming_boss: None,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
             yaku_loadout: vec![
@@ -1008,6 +1347,18 @@ mod tests {
             ],
             yaku_loadout_capacity: 3,
             tile_packs: vec![],
+            total_score_earned: 0,
+            small_blind_tag: None,
+            big_blind_tag: None,
+            tag_free_reroll: false,
+            tag_patron_gift: false,
+            tag_rich_stock: false,
+            tag_bonus_plays: 0,
+            tag_bonus_discards: 0,
+            tag_bonus_hand_size: 0,
+            tile_polisher_bonus: 0,
+            relic_counters: BTreeMap::new(),
+            river_runner_bonus: 0,
         }
     }
 

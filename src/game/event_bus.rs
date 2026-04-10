@@ -52,6 +52,13 @@ pub enum GameEvent {
     PackOpened,
     /// An individual tile was revealed during pack opening.
     PackTileRevealed,
+    /// A zodiac ribbon close-up celebration started (shop).
+    ZodiacReveal,
+    /// A zodiac was consumed and levelled up a yaku.
+    ZodiacLevelUp,
+    /// A single hand scored at least the entire blind target — candles
+    /// flare up and sparks fly.
+    CandleFlare,
 }
 
 #[derive(Default)]

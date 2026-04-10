@@ -35,19 +35,23 @@ except ImportError:
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "relics"
 
-# Shared style prefix injected into every prompt. Tuned to "Midnight Gold":
-# cool indigo backdrop + warm gold rim, bold flat cartoon icons that match
-# the existing relic art voice while sitting cleanly on the game's background.
+# Shared style prefix injected into every prompt. Tuned to match the existing
+# relic art: vintage 1/72 scale model kit box art. Moody oil-painting style,
+# surreal industrial/military subjects, aged cardboard framing, fictional
+# manufacturer branding in mixed German/Russian/Japanese.
 STYLE_PREFIX = (
-    "Square icon for a mahjong roguelite video game in a 'Midnight Gold' art "
-    "direction. Bold flat colors with thick black outlines, 2-4 accent colors, "
-    "slight cartoon personality (objects look mildly self-aware, deadpan). "
-    "Subject is centered with a clean readable silhouette. "
-    "Background is a soft deep-indigo radial vignette (#0a1422 core fading to "
-    "near-black at the corners) with a warm gold rim-light glow behind the "
-    "subject — NOT a sepia or khaki backdrop. "
-    "No text, no letters, no numbers, no logos, no borders or frames. "
-    "Painted as a single icon, not on a card."
+    "Square image styled as the box lid of a vintage 1/72 scale plastic model "
+    "kit from a fictional Eastern-European or Japanese manufacturer, circa "
+    "1978. Painted in a moody realistic oil-painting illustration style with "
+    "muted, desaturated colors — olive, ochre, teal, rust, dark amber. "
+    "The subject is a surreal machine, vehicle, or apparatus painted as if it "
+    "were a real buildable scale model — dramatic but plausible, slightly "
+    "uncanny. Aged cardboard border with a fictional manufacturer logo in one "
+    "corner (cycle between 'ZELKUBO WERKE', 'DRAVUNA-KAI', 'KORVASHI', "
+    "'MEKHARI ATELIER'), a '1/72' scale marking, and a product name in mixed "
+    "German/Russian/Japanese script. The overall feel is nostalgic, mysterious, "
+    "and slightly absurd — like finding a strange model kit at a flea market "
+    "that you can't quite identify."
 )
 
 
@@ -58,246 +62,389 @@ RELICS = [
     (
         "triplet_boost",
         "Triplet Boost",
-        "Three identical ivory mahjong tiles stacked and bound together with a "
-        "gold ribbon, the top tile peering out with a slightly nervous expression. "
-        "A bold gold multiplication cross hovers above the stack.",
-        "Ivory tiles, gold ribbon and cross, deep indigo backdrop.",
+        "A heavy triple-barreled siege mortar on a wheeled wooden carriage, "
+        "three stubby barrels bundled together with iron bands. Parked on "
+        "muddy cobblestones, dusk sky behind. Baroque-era field weapon feel.",
+        "Dark iron barrels, warm brown carriage, ochre mud, amber dusk sky.",
     ),
     (
         "sequence_surge",
         "Sequence Surge",
-        "Three mahjong tiles numbered 1-2-3 riding a forked gold lightning bolt "
-        "like a surfboard. The middle tile looks bored and unimpressed; the "
-        "outer two are wide-eyed.",
-        "Ivory tiles, bright gold lightning, indigo sky.",
+        "A sleek experimental monorail car on a single elevated rail, three "
+        "carriages linked nose to tail, speeding through a foggy valley. "
+        "Streamlined 1960s futurism, motion blur on the landscape.",
+        "Silver monorail, teal fog, olive hillside, rust rail supports.",
     ),
     (
         "pair_power",
         "Pair Power",
-        "Two ivory mahjong tiles aggressively fist-bumping. Gold impact lines "
-        "and a small spark burst radiate from the contact point. Both tiles "
-        "wear matching tiny red sweatbands.",
-        "Ivory tiles, red sweatbands, gold impact burst.",
+        "Two identical compact steam tractors facing each other, connected "
+        "by a heavy tow chain under tension. Both are straining, smokestacks "
+        "puffing. A muddy field stretches behind them.",
+        "Dark green tractors, black smoke, rust chain, ochre mud.",
     ),
     (
         "honor_fury",
         "Honor Fury",
-        "A single mahjong honor tile with an angry furrowed expression, gold "
-        "steam jetting from its top, tiny crack lines splintering from its base. "
-        "It is mid-yell.",
-        "Ivory tile face, dark red character glyph, gold steam.",
+        "A ceremonial bronze temple bell on a heavy timber frame, mid-strike "
+        "from a suspended log ram. Visible shockwave rings emanate from the "
+        "bell. Mountain monastery setting, overcast sky.",
+        "Oxidized bronze bell, dark timber, grey shockwaves, slate sky.",
     ),
     (
         "red_dragon_rage",
         "Red Dragon Rage",
-        "A red mahjong dragon tile completely engulfed in stylized flames, "
-        "calmly sipping from a tiny teacup with its eyes closed. 'This is fine' "
-        "energy. The flames curl upward in flat shapes.",
-        "Crimson dragon glyph, orange and gold flames, ivory teacup.",
+        "A deep-red experimental rocket sled on a desert salt flat rail, "
+        "exhaust flame blasting from twin rear nozzles. Heat shimmer warps "
+        "the horizon. Ground-level perspective.",
+        "Crimson fuselage, orange exhaust, bleached desert, pale sky.",
     ),
     (
         "green_luck",
         "Green Luck",
-        "A four-leaf clover where one leaf is clearly wilting and patched up "
-        "with a strip of beige tape. The clover has a deadpan face. A small "
-        "gold coin floats next to it with a plus sign.",
-        "Green clover, beige tape, gold coin.",
+        "A dented olive-green Volkswagen Beetle parked alone in a field of "
+        "wild grass, one headlight out, a four-leaf clover decal on the door. "
+        "Late afternoon golden light. Quietly lucky.",
+        "Olive green car, golden grass, warm amber light.",
     ),
     (
         "white_silence",
         "White Silence",
-        "A white mahjong dragon tile (blank face) wearing oversized matte-black "
-        "noise-canceling headphones, eyes closed in serene bliss. Tiny pale "
-        "blue snowflakes drift around it.",
-        "Ivory tile, matte black headphones, pale blue snowflakes.",
+        "A white single-engine biplane parked on a frozen lake, engine off, "
+        "propeller still. Perfect silence. Pale overcast sky reflected in "
+        "glassy ice. No footprints, no tracks.",
+        "Cream white fuselage, pale blue ice, flat grey sky.",
     ),
     (
         "joker_tile",
         "Joker Tile",
-        "An ivory mahjong tile wearing a comically oversized fake black "
-        "mustache and a tilted tiny red jester hat with a gold bell. A single "
-        "gold question mark on its face.",
-        "Ivory tile, black mustache, red hat, gold bell and question mark.",
+        "A peculiar multi-purpose utility vehicle with mismatched parts — "
+        "half truck cab, half boat hull, with a crane arm and a small radar "
+        "dish. Parked in a junkyard. It shouldn't work but clearly does.",
+        "Mismatched rust, olive, and primer grey panels, amber junkyard.",
     ),
     (
         "overflow",
         "Overflow",
-        "A wooden bucket tipped sideways with mahjong tiles cascading out in "
-        "an arc. The bucket has a small exasperated face on its side. A few "
-        "tiles in the air still have surprised expressions.",
-        "Warm brown bucket, ivory tiles, indigo backdrop.",
+        "A massive cylindrical grain silo with its top hatch blown open, "
+        "grain cascading down the sides in golden streams. A small conveyor "
+        "belt feeds more in at the base. Industrial farmland setting.",
+        "Weathered steel silo, golden grain, olive fields, overcast sky.",
     ),
     (
         "quick_draw",
         "Quick Draw",
-        "A single mahjong tile dressed as a cowboy — tan ten-gallon hat, "
-        "leather holster belt — mid-quickdraw with a tile in each tiny hand. "
-        "A small dust puff at its base.",
-        "Tan hat, brown holster, ivory tile, sandy dust.",
+        "A spring-loaded naval torpedo launcher on a destroyer deck, the "
+        "torpedo half-ejected in a freeze-frame moment. Spray of seawater "
+        "caught mid-splash. Dramatic side lighting.",
+        "Dark steel launcher, brass torpedo, teal ocean spray, grey deck.",
     ),
     (
         "chain_reaction",
         "Chain Reaction",
-        "A line of ivory mahjong tiles toppling like dominoes. The first tile "
-        "leans back with arms crossed, smug, watching the chain fall. Small "
-        "gold star bursts at each impact point.",
-        "Ivory tiles, gold impact stars, indigo shadow.",
+        "A row of large industrial dominoes — concrete blocks — toppling in "
+        "sequence down a factory floor. The first has already fallen, the "
+        "last still stands. Dust clouds at each impact point.",
+        "Grey concrete blocks, rust floor, amber dust, industrial lighting.",
     ),
     (
         "multiplier_master",
         "Multiplier Master",
-        "A single mahjong tile wearing a black square graduation cap with a "
-        "gold tassel and tiny round spectacles, holding a small dark green "
-        "chalkboard covered in white multiplication crosses. Looks tired but "
-        "proud.",
-        "Black cap, gold tassel, green chalkboard, ivory tile.",
+        "A tall lattice radio transmission tower on a hilltop, concentric "
+        "signal rings radiating outward into a hazy sky. A small control "
+        "shed at the base with a single lit window. Remote, powerful.",
+        "Dark steel lattice, teal signal rings, olive hill, amber window.",
     ),
     (
         "set_magnet",
         "Set Magnet",
-        "A classic red and silver horseshoe magnet crackling with gold energy "
-        "arcs, pulling a startled ivory mahjong tile through the air toward it. "
-        "Motion lines trail behind the tile.",
-        "Red and silver magnet, gold arcs, ivory tile.",
+        "A massive electromagnetic crane in a rail yard, its circular magnet "
+        "dangling a cluster of steel beams and scrap. A freight train waits "
+        "on adjacent tracks. Industrial scale, afternoon haze.",
+        "Dark crane arm, rust-orange magnet, steel blue scrap, ochre haze.",
     ),
     (
         "wild_winds",
         "Wild Winds",
-        "Four mahjong wind tiles caught spinning in a small swirling vortex, "
-        "their directional symbols blurred mid-swap. All four tiles have "
-        "spiral-eye expressions.",
-        "Indigo vortex, ivory tiles, gold motion lines.",
+        "A small weather station on an exposed coastal cliff, four spinning "
+        "anemometer cups blurred by violent wind. The instrument mast bends "
+        "slightly. Storm clouds roll in from the sea.",
+        "Steel grey mast, spinning chrome cups, dark teal sea, slate clouds.",
     ),
     (
         "dragon_echo",
         "Dragon Echo",
-        "A red dragon mahjong tile shouting toward the right edge of the "
-        "frame, with three progressively smaller and more faded copies of "
-        "itself bouncing back as echoes. Tiny gold sound notes float around.",
-        "Crimson dragon, faded red echoes, gold notes.",
+        "A large parabolic acoustic mirror — a concrete listening dish — on "
+        "a coastal bluff, aimed out to sea. Three progressively fainter "
+        "echo-wave arcs visible in the misty air before it.",
+        "Pale concrete dish, teal mist, amber echo arcs, grey-green bluff.",
     ),
     # ── 15 new Patch C relics ─────────────────────────────────────────────
     (
         "shanten_shove",
         "Shanten Shove",
-        "A giant jade hand shoving a mahjong tile across a polished table "
-        "toward a waiting row of tiles. Motion blur on the sliding tile, "
-        "dramatic side-lighting, dust motes in the air.",
-        "Jade hand, sliding tile, motion blur, dust motes.",
+        "A hydraulic ram piston mounted on a factory floor, its chrome shaft "
+        "extended mid-push against a heavy steel block. Oil gleams on the "
+        "mechanism. Industrial precision, dramatic side-lighting.",
+        "Chrome piston, dark steel block, amber oil sheen, concrete floor.",
     ),
     (
         "wall_peek",
         "Wall Peek",
-        "A stack of mahjong tiles forming a small wall. Two tiles in the "
-        "middle have been pushed forward slightly, revealing a single curious "
-        "eye peeking through the gap from behind the wall.",
-        "Ivory wall, single dark peeking eye, gold highlight.",
+        "A military periscope protruding from a concrete bunker slit, its "
+        "twin mirrors catching a sliver of the landscape outside. Overgrown "
+        "vegetation creeps over the bunker roof.",
+        "Brass periscope tube, grey concrete, olive vegetation, pale sky.",
     ),
     (
         "kan_drum",
         "Kan Drum",
-        "A short, wide taiko-style drum with a deep red body and gold rim, "
-        "four ivory mahjong tiles arranged in a square on top of the drumhead. "
-        "Two crossed wooden mallets float above. Small impact rings ripple out.",
-        "Crimson drum body, gold rim, ivory tiles, brown mallets.",
+        "A large ceremonial taiko drum on a lacquered stand, four thick "
+        "drumsticks arranged in a square on the drumhead. The drum body "
+        "is deep red with brass tack rivets. Temple courtyard setting.",
+        "Crimson drum body, brass rivets, dark lacquer stand, stone court.",
     ),
     (
         "dora_crown",
         "Dora Crown",
-        "A small ornate gold crown with five points, a single faceted red gem "
-        "set in the center, resting at a slight tilt on top of one ivory "
-        "mahjong tile. Tiny gold sparkles drift up.",
-        "Gold crown, red gem, ivory tile.",
+        "An ornate brass astrolabe on a velvet-lined display stand, its "
+        "interlocking rings set with a single red glass cabochon at the apex. "
+        "A dim collector's study, leather-bound books in background.",
+        "Patina brass rings, crimson cabochon, dark velvet, amber lamplight.",
     ),
     (
         "riichi_stick",
         "Riichi Stick",
-        "A traditional white riichi betting stick laid horizontally, with a "
-        "single bright red dot in its center, a faint gold glow underneath. "
-        "Two tiny gold tassels dangle from one end.",
-        "White stick, red dot, gold tassels and glow.",
+        "A single ivory baton with a red enamel inlay stripe, resting on a "
+        "felt-lined presentation case. Brass clasps on the case. Museum "
+        "artifact lighting — single spot from above.",
+        "Ivory baton, crimson enamel, dark green felt, brass clasps.",
     ),
     (
         "tenpai_talisman",
         "Tenpai Talisman",
-        "A vertical paper ofuda talisman strip with a thick red border and a "
-        "single bold gold seal stamp in the middle (abstract sigil shape, NOT "
-        "a real character). A short red string hangs from the top.",
-        "Cream paper, red border, gold sigil seal.",
+        "A tall narrow signal semaphore arm at a rail junction, locked in the "
+        "'clear' position. A single red lantern glows at the pivot. Iron "
+        "lattice post, gravel rail bed, dusk sky.",
+        "Iron post, crimson lantern, rust semaphore arm, amber dusk.",
     ),
     (
         "river_eraser",
         "River Eraser",
-        "A pink rubber eraser with a deadpan face, mid-erase, sweeping a "
-        "trail of three ghostly fading mahjong tiles into nothing. Tiny eraser "
-        "shavings curl off behind it.",
-        "Pink eraser, ivory fading tiles, grey shavings.",
+        "A canal lock with its gates half-open, water draining rapidly from "
+        "the chamber. The receding waterline leaves dark wet marks on the "
+        "stone walls. A small control house sits atop.",
+        "Dark stone walls, teal draining water, rust gates, grey sky.",
     ),
     (
         "furiten_ward",
         "Furiten Ward",
-        "A small round shield with a thick gold rim and a deep indigo face, "
-        "stamped with an abstract gold barrier sigil. A faint translucent "
-        "force-field bubble surrounds it. A single red mahjong tile is "
-        "deflecting off the shield.",
-        "Gold-rimmed shield, indigo face, red tile, gold sigil.",
+        "A medieval pavise shield — tall and rectangular — planted upright in "
+        "muddy ground. Its face bears an abstract ward sigil in faded gold "
+        "paint. Two crossbow bolts are embedded in it, deflected.",
+        "Weathered wood shield, faded gold sigil, rust bolts, ochre mud.",
     ),
     (
         "round_compass",
         "Round Compass",
-        "A small ornate brass compass with four cardinal points labeled by "
-        "tiny mahjong wind tiles instead of letters. The needle is a stylized "
-        "red dragon arrow pointing east. Closed lid hangs to the side.",
-        "Brass compass body, ivory wind tiles, red needle.",
+        "A large ship's binnacle compass on a teak pedestal, its brass gimbal "
+        "housing a compass card with ornate wind-rose points. The needle "
+        "points firmly east. Teak deck planking beneath.",
+        "Polished brass housing, cream compass card, warm teak wood.",
     ),
     (
         "zodiac_pouch",
         "Zodiac Pouch",
-        "A small drawstring leather pouch with a gold zodiac star sigil "
-        "embroidered on the front, slightly open at the top with a single "
-        "glowing card edge poking out. A gold cord ties the neck.",
-        "Brown leather pouch, gold sigil and cord, glowing card edge.",
+        "A leather map case — cylindrical, with a brass cap and shoulder "
+        "strap — standing upright with a rolled star chart peeking from the "
+        "top. A brass zodiac dial is embossed on the side.",
+        "Brown leather, brass cap and dial, cream chart edge, olive strap.",
     ),
     (
         "lunar_almanac",
         "Lunar Almanac",
-        "An old leather-bound book lying open. The two visible pages show "
-        "abstract crescent moon phases and tiny constellation dots in gold "
-        "ink. A small gold ribbon bookmark hangs from the spine.",
-        "Indigo leather, cream pages, gold moons and stars.",
+        "A thick leather-bound nautical almanac lying open on a chart table, "
+        "its pages showing printed lunar phase tables and tide charts. A "
+        "brass divider compass rests across the gutter.",
+        "Dark leather cover, cream pages, brass dividers, amber lamplight.",
     ),
     (
         "yaku_scholar",
         "Yaku Scholar",
-        "A single mahjong tile wearing a tiny scholar's mortarboard cap with "
-        "a red tassel, holding up a small scroll with one hand. Wears tiny "
-        "round wire glasses. Earnest expression.",
-        "Black cap, red tassel, cream scroll, ivory tile.",
+        "A small portable field desk — folding mahogany box opened to reveal "
+        "ink wells, nibs, and a half-written report. A pair of wire-rimmed "
+        "spectacles rests on the paper. Campaign tent backdrop.",
+        "Mahogany desk, brass ink wells, cream paper, olive canvas tent.",
     ),
     (
         "eight_treasures",
         "Eight Treasures",
-        "An open ornate gold-rimmed treasure chest overflowing with mahjong "
-        "tiles and gold coins, a few zodiac star tokens floating up out of it "
-        "with little sparkle trails. The chest has a tiny smug face on its "
-        "lock.",
-        "Gold-rimmed chest, ivory tiles, gold coins, indigo interior glow.",
+        "An ornate reliquary chest — dark wood with gold filigree — cracked "
+        "open to reveal a warm amber glow from within. Eight small objects "
+        "are barely visible inside. Cathedral crypt setting.",
+        "Dark wood chest, gold filigree, warm amber interior glow, stone.",
     ),
     (
         "kongs_blessing",
         "Kong's Blessing",
-        "Four ivory mahjong tiles arranged in a tight square formation, "
-        "wreathed by a soft halo of gold light. A pair of small folded hands "
-        "in a blessing gesture hovers above the tiles. Reverent, calm.",
-        "Ivory tiles, gold halo, warm cream hands.",
+        "Four identical artillery shells standing upright in a wooden crate, "
+        "perfectly aligned, with a thin halo of light around the group. A "
+        "quartermaster's storage room, shelves of supplies behind.",
+        "Brass shells, raw wood crate, amber halo, olive-drab shelving.",
     ),
     (
         "codex_compass",
         "Codex Compass",
-        "A small open book with a brass compass embedded into the right page, "
-        "the needle pointing diagonally up. The left page shows abstract "
-        "swirling gold sigils. A red ribbon bookmark trails out the bottom.",
-        "Indigo book, brass compass, gold sigils, red ribbon.",
+        "A field surveyor's theodolite on a wooden tripod, its brass telescope "
+        "pointing at an angle, with a leather-bound logbook open at the base. "
+        "Mountain pass landscape, low clouds.",
+        "Brass theodolite, dark wood tripod, cream logbook, slate mountains.",
+    ),
+    # ── Flower-synergy relics ────────────────────────────────────────────
+    (
+        "garden_keeper",
+        "Garden Keeper",
+        "A squat cast-iron greenhouse heater with ornate legs, its chimney "
+        "puffing gentle steam. Through the glass panes behind it, tropical "
+        "plants press against the fogged glass. Victorian botanical garden.",
+        "Dark iron heater, teal glass panes, green foliage, amber steam.",
+    ),
+    (
+        "ikebana",
+        "Ikebana",
+        "A ceramic kiln — dome-shaped, brick-built — with its firing door "
+        "slightly ajar, revealing a warm orange glow inside. Two finished "
+        "vases cool on a rack beside it. Rural Japanese pottery workshop.",
+        "Rust brick kiln, orange interior glow, cream vases, earth tones.",
+    ),
+    (
+        "hanami",
+        "Hanami",
+        "A small wooden vendor's cart under a canopy of cherry blossom "
+        "branches, petals drifting onto stacked wooden boxes of goods. "
+        "Gold-painted price placards lean against the boxes. Spring market.",
+        "Warm wood cart, pink petals, gold placards, soft daylight.",
+    ),
+    # ── 15 new relics ────────────────────────────────────────────────────
+    (
+        "jade_serpent",
+        "Jade Serpent",
+        "A narrow armored train car painted dark jade green, with a coiled "
+        "serpent insignia on the side. It sits on overgrown tracks in dense "
+        "bamboo forest. Vines wrap the undercarriage. Forgotten but intact.",
+        "Jade green armor plating, dark bamboo, rust tracks, grey-green vines.",
+    ),
+    (
+        "ink_brush",
+        "Ink Brush",
+        "A mechanical printing press — the hand-cranked flatbed type — with "
+        "a sheet of paper mid-feed showing freshly stamped characters still "
+        "glistening wet. Ink rollers gleam. Dim workshop lighting.",
+        "Black iron press, dark ink rollers, cream paper, amber lamplight.",
+    ),
+    (
+        "pearl_diver",
+        "Pearl Diver",
+        "A brass diving helmet — the classic round deep-sea type with small "
+        "viewports — sitting on a dock piling, air hose coiled beside it. "
+        "Harbour water below, diving barge in background.",
+        "Patina brass helmet, dark rubber hose, teal harbour water.",
+    ),
+    (
+        "low_tide",
+        "Low Tide",
+        "A small coastal survey boat resting on its keel on exposed tidal "
+        "mud flats, the waterline far away. Measuring stakes driven into the "
+        "mud at intervals. Flat grey estuary light.",
+        "Dark hull on brown mud, white measuring stakes, grey flat light.",
+    ),
+    (
+        "merchants_eye",
+        "Merchant's Eye",
+        "A jeweler's loupe mounted on a small brass articulating arm, clamped "
+        "to a watchmaker's bench. Under the lens, the internal gears of a "
+        "pocket watch are magnified. Tools scattered around.",
+        "Brass loupe and arm, steel gears, dark wood bench, amber light.",
+    ),
+    (
+        "edge_runner",
+        "Edge Runner",
+        "A narrow-gauge mining locomotive on a precarious cliff-side rail, "
+        "the track barely wider than the wheels. Sheer rock face on one side, "
+        "deep gorge on the other. Dramatic vertigo perspective.",
+        "Dark iron locomotive, rust narrow rail, grey cliff, teal gorge.",
+    ),
+    (
+        "lucky_seven",
+        "Lucky Seven",
+        "A vintage slot machine — the three-reel mechanical type — showing "
+        "triple sevens in the window. A single brass lever on the side. "
+        "Sitting alone on a green baize table in a dim room.",
+        "Chrome and brass machine, cherry-red sevens, green baize, dim amber.",
+    ),
+    (
+        "momentum",
+        "Momentum",
+        "A Newton's cradle — five steel balls on wire frames — captured at "
+        "the moment of impact, the end ball swinging out with motion blur. "
+        "Sits on a polished mahogany desk. Executive office setting.",
+        "Chrome steel balls, dark wire frame, warm mahogany, amber light.",
+    ),
+    (
+        "minimalist",
+        "Minimalist",
+        "A single-room concrete observation post on a flat empty plain — "
+        "just a slit window and a steel door, nothing else. Perfectly "
+        "geometric. Vast empty sky. Extreme negative space.",
+        "Raw concrete, steel door, flat ochre plain, enormous pale sky.",
+    ),
+    (
+        "turtle_shell",
+        "Turtle Shell",
+        "A compact armored personnel carrier with an unusually domed, "
+        "turtle-like hull and small viewports. Parked behind a sandbag wall, "
+        "hatches sealed. Defensive posture, not built for speed.",
+        "Olive-drab domed hull, dark viewports, tan sandbags, grey sky.",
+    ),
+    (
+        "closed_gate",
+        "Closed Gate",
+        "A heavy blast door in a concrete dam wall — circular, submarine-"
+        "style, with a spoked locking wheel. Fully sealed. Water stains "
+        "streak the concrete above. Industrial, impassable.",
+        "Steel blast door, raw concrete, rust water stains, amber light.",
+    ),
+    (
+        "gold_furnace",
+        "Gold Furnace",
+        "A small cupellation furnace — brick-built, dome-topped — with its "
+        "front grate open showing a crucible of molten gold inside, glowing "
+        "intensely. Tongs and ingot molds nearby. Assay office setting.",
+        "Red brick furnace, bright gold molten glow, dark iron tools.",
+    ),
+    (
+        "snowball",
+        "Snowball",
+        "A large steel ball-bearing rolling down a factory ramp, picking up "
+        "smaller ball-bearings that stick to it magnetically as it goes. "
+        "Growing noticeably larger toward the bottom. Assembly-line setting.",
+        "Chrome steel ball, smaller bearings, grey ramp, industrial green.",
+    ),
+    (
+        "second_wind",
+        "Second Wind",
+        "A wind-up tin toy soldier with its key being turned for a second "
+        "time — hand visible on the key. The soldier is mid-march, one "
+        "foot forward. Scuffed paint shows it's been wound before.",
+        "Olive tin soldier, brass wind-up key, scuffed paint, wood floor.",
+    ),
+    (
+        "glass_cannon",
+        "Glass Cannon",
+        "A field howitzer made entirely of blown glass — barrel, carriage, "
+        "wheels — beautiful but visibly fragile, hairline cracks catching "
+        "the light. An oversized brass shell sits beside it, ready to load.",
+        "Translucent blue-tinted glass, brass shell, hairline crack glints.",
     ),
 ]
 

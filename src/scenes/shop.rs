@@ -31,6 +31,8 @@ use crate::render::draw_cmd::{
     PlaquePlacement, RelicPlacement, ShowcaseTilePlacement, TalismanPlacement, UiFrame,
     ZodiacRibbonPlacement,
 };
+use crate::render::particles::ParticleSystem;
+use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
@@ -45,7 +47,8 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 enum ShopAction {
     BuyCard(usize),
     SellRelic(usize),
-    BuyConsumable(usize),
+    BuyZodiac(usize),
+    BuyTalisman(usize),
     /// Sell the consumable at this index in `run.consumables.items`.
     SellConsumable(usize),
     /// Use the consumable at this index in `run.consumables.items`.
@@ -54,6 +57,10 @@ enum ShopAction {
     BuyPack,
     #[allow(dead_code)]
     Reroll,
+    /// Swap an owned relic one slot to the left.
+    MoveRelicLeft(usize),
+    /// Swap an owned relic one slot to the right.
+    MoveRelicRight(usize),
 }
 
 /// Every shop element a controller / keyboard player can navigate to.
@@ -118,7 +125,8 @@ impl ShopFocus {
 fn shop_action_for_hit(
     hit: ShopHit,
     items: &[ShopItem],
-    consumable_items: &[ConsumableShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
     run: &crate::game::run::RunState,
 ) -> Option<ShopAction> {
     let n_for_sale = items.len();
@@ -131,19 +139,10 @@ fn shop_action_for_hit(
             }
         }
         ShopHit::Ribbon(i) => {
-            // Ribbon hits index into the for-sale-zodiacs-then-owned-
-            // zodiacs flat list. Walk consumable_items in order, take
-            // the i-th zodiac. The for-sale section emits Buy; the
-            // owned-fan section emits Sell.
-            let zodiac_for_sale: Vec<usize> = consumable_items
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, c)| matches!(c.consumable, Consumable::Zodiac(_)).then_some(idx))
-                .collect();
-            if i < zodiac_for_sale.len() {
-                Some(ShopAction::BuyConsumable(zodiac_for_sale[i]))
+            if i < zodiac_items.len() {
+                Some(ShopAction::BuyZodiac(i))
             } else {
-                let oi = i - zodiac_for_sale.len();
+                let oi = i - zodiac_items.len();
                 let mut count = 0usize;
                 let mut inv_idx = None;
                 for (idx, c) in run.consumables.items.iter().enumerate() {
@@ -159,17 +158,10 @@ fn shop_action_for_hit(
             }
         }
         ShopHit::Talisman(i) => {
-            let talisman_for_sale: Vec<usize> = consumable_items
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, c)| {
-                    matches!(c.consumable, Consumable::Talisman(_)).then_some(idx)
-                })
-                .collect();
-            if i < talisman_for_sale.len() {
-                Some(ShopAction::BuyConsumable(talisman_for_sale[i]))
+            if i < talisman_items.len() {
+                Some(ShopAction::BuyTalisman(i))
             } else {
-                let oi = i - talisman_for_sale.len();
+                let oi = i - talisman_items.len();
                 let mut count = 0usize;
                 let mut inv_idx = None;
                 for (idx, c) in run.consumables.items.iter().enumerate() {
@@ -190,22 +182,35 @@ fn shop_action_for_hit(
     }
 }
 
+/// Result of applying a shop action — tells the caller what visual
+/// feedback to show.
+enum ShopActionResult {
+    /// Nothing special to show.
+    None,
+    /// A tile pack was purchased — show the opening celebration.
+    PackCelebration(PackCelebration),
+    /// A zodiac was purchased and instantly applied — show the close-up
+    /// celebration overlay, then the level-up popup.
+    ZodiacApplied {
+        zodiac_kind: ZodiacKind,
+        yaku_name: &'static str,
+        new_level: u32,
+    },
+}
+
 /// Apply a `ShopAction` to the shop's stock + the player's run state.
 /// Pulled out of the inline click-dispatch code so the focus model's
 /// `Confirm` path can fire the same action handlers without
 /// duplication.
-///
-/// Returns `Some(PackCelebration)` when a tile pack was just purchased
-/// so the caller can show the opening celebration overlay before
-/// resuming normal shop interaction.
 fn apply_shop_action(
     action: ShopAction,
     items: &mut Vec<ShopItem>,
-    consumable_items: &mut Vec<ConsumableShopItem>,
+    zodiac_items: &mut Vec<ConsumableShopItem>,
+    talisman_items: &mut Vec<ConsumableShopItem>,
     pack_item: &mut Option<TilePackShopItem>,
     run: &mut crate::game::run::RunState,
     bus: &mut crate::game::event_bus::EventBus,
-) -> Option<PackCelebration> {
+) -> ShopActionResult {
     match action {
         ShopAction::BuyCard(idx) => {
             if idx < items.len() {
@@ -215,6 +220,13 @@ fn apply_shop_action(
                     let relic = item.relic;
                     run.gold -= price as i32;
                     run.relics.active.push(relic);
+                    // Initialize counters for stateful relics.
+                    match relic {
+                        RelicId::MeltingIce => { run.relic_counters.insert(RelicId::MeltingIce, 80); }
+                        RelicId::SilkThread => { run.relic_counters.insert(RelicId::SilkThread, 40); }
+                        RelicId::TeaCeremony => { run.relic_counters.insert(RelicId::TeaCeremony, 3); }
+                        _ => {}
+                    }
                     run.recompute_capacities();
                     items.remove(idx);
                 }
@@ -223,20 +235,94 @@ fn apply_shop_action(
         ShopAction::SellRelic(idx) => {
             if idx < run.relics.active.len() {
                 let rid = run.relics.active[idx];
-                let refund = relic_sell_price(rid);
+                let mut refund = relic_sell_price(rid);
+                // Smoke Bomb: sell to skip the upcoming boss blind.
+                if rid == RelicId::SmokeBomb && run.upcoming_blind == crate::core::rules::BlindKind::Boss {
+                    run.relics.active.remove(idx);
+                    // Skip boss — advance the ante without playing.
+                    run.ante += 1;
+                    run.base_target = (run.base_target as f32 * run.mode.target_scaling) as u32;
+                    run.upcoming_blind = crate::core::rules::BlindKind::Small;
+                    return ShopActionResult::None;
+                }
+                // Nest Egg: sell value grows by +2 per round held.
+                if rid == RelicId::NestEgg {
+                    let rounds = run.relic_counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
+                    refund = refund.saturating_add(2 * rounds as u32);
+                }
+                // Phantom Relic: after 3 rounds, selling duplicates a
+                // random owned relic instead of giving gold.
+                if rid == RelicId::PhantomRelic {
+                    let rounds = run.relic_counters.get(&RelicId::PhantomRelic).copied().unwrap_or(0);
+                    run.relics.active.remove(idx);
+                    run.relic_counters.remove(&RelicId::PhantomRelic);
+                    if rounds >= 3 && !run.relics.is_full() {
+                        use rand::seq::IndexedRandom;
+                        let mut rng = rand::rng();
+                        if let Some(&dupe) = run.relics.active.choose(&mut rng) {
+                            run.relics.active.push(dupe);
+                        }
+                    } else {
+                        run.gold = run.gold.saturating_add(refund as i32);
+                    }
+                    return ShopActionResult::None;
+                }
+                // Ritual Blade: destroy the relic to the right and gain
+                // permanent mult equal to double its sell value.
+                if rid == RelicId::RitualBlade && idx + 1 < run.relics.active.len() {
+                    let victim_id = run.relics.active[idx + 1];
+                    let victim_value = relic_sell_price(victim_id) as i32;
+                    // Remove victim first (it's at idx+1), then blade (at idx).
+                    run.relics.active.remove(idx + 1);
+                    run.relics.active.remove(idx);
+                    // Store permanent mult as ×10 integer.
+                    *run.relic_counters.entry(RelicId::RitualBlade).or_insert(0) += victim_value * 2 * 10;
+                    return ShopActionResult::None;
+                }
                 run.relics.active.remove(idx);
                 run.gold = run.gold.saturating_add(refund as i32);
+                // Bonfire: track relic sales for mult bonus.
+                *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
             }
         }
-        ShopAction::BuyConsumable(idx) => {
-            if idx < consumable_items.len() {
-                let item = &consumable_items[idx];
+        ShopAction::MoveRelicLeft(idx) => {
+            if idx > 0 {
+                run.relics.swap_relics(idx, idx - 1);
+            }
+        }
+        ShopAction::MoveRelicRight(idx) => {
+            if idx + 1 < run.relics.active.len() {
+                run.relics.swap_relics(idx, idx + 1);
+            }
+        }
+        ShopAction::BuyZodiac(idx) => {
+            if idx < zodiac_items.len() {
+                let item = &zodiac_items[idx];
+                let price = item.price();
+                if !item.sold && run.gold >= price as i32 {
+                    if let Consumable::Zodiac(z) = item.consumable {
+                        run.gold -= price as i32;
+                        let yaku = z.yaku();
+                        let new_level = run.yaku_levels.level_up(yaku);
+                        zodiac_items.remove(idx);
+                        return ShopActionResult::ZodiacApplied {
+                            zodiac_kind: z,
+                            yaku_name: yaku.name(),
+                            new_level,
+                        };
+                    }
+                }
+            }
+        }
+        ShopAction::BuyTalisman(idx) => {
+            if idx < talisman_items.len() {
+                let item = &talisman_items[idx];
                 let price = item.price();
                 if !item.sold && run.gold >= price as i32 && !run.consumables.is_full() {
                     let consumable = item.consumable;
                     run.gold -= price as i32;
                     run.consumables.items.push(consumable);
-                    consumable_items.remove(idx);
+                    talisman_items.remove(idx);
                 }
             }
         }
@@ -250,8 +336,16 @@ fn apply_shop_action(
         }
         ShopAction::UseConsumable(idx) => {
             if idx < run.consumables.items.len() {
-                if let Consumable::Zodiac(_) = run.consumables.items[idx] {
-                    run.use_consumable(idx);
+                if let Consumable::Zodiac(z) = run.consumables.items[idx] {
+                    if let Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) =
+                        run.use_consumable(idx)
+                    {
+                        return ShopActionResult::ZodiacApplied {
+                            zodiac_kind: z,
+                            yaku_name: yaku.name(),
+                            new_level,
+                        };
+                    }
                 }
             }
         }
@@ -279,17 +373,19 @@ fn apply_shop_action(
                         bus.push(crate::game::event_bus::GameEvent::PackBought);
                         let kind = pack.kind;
                         let name = pack.kind.name();
-                        return Some(PackCelebration::new(tiles, name, kind));
+                        return ShopActionResult::PackCelebration(PackCelebration::new(
+                            tiles, name, kind,
+                        ));
                     }
                 }
             }
-            return None;
+            return ShopActionResult::None;
         }
         // Reroll is handled directly in ShopScene::update() because it
         // needs `&mut self` — this arm keeps the match exhaustive.
         ShopAction::Reroll => {}
     }
-    None
+    ShopActionResult::None
 }
 
 /// Refund when selling a consumable — half buy price, minimum 1 gold,
@@ -337,7 +433,7 @@ impl ConsumableShopItem {
                 format!(
                     "Levels {} for the rest of the run (+0.5 mult, +20 chips per level). {}",
                     yk.name(),
-                    super::glossary::yaku_shape_text(yk),
+                    super::meld_guide::yaku_shape_text(yk),
                 )
             }
             Consumable::Talisman(t) => t.description().to_string(),
@@ -428,16 +524,52 @@ impl PackCelebration {
     }
 }
 
+/// Zodiac ribbon close-up celebration: shows the purchased ribbon front
+/// and center with a sinusoidal snake/sway animation before dismissing
+/// into the yaku level-up popup.
+struct ZodiacCelebration {
+    kind: ZodiacKind,
+    yaku_name: &'static str,
+    new_level: u32,
+    started_at: Instant,
+    dismissed: bool,
+}
+
+impl ZodiacCelebration {
+    /// Total close-up duration before auto-dismissing (seconds).
+    const DURATION: f32 = 2.0;
+
+    fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
+        Self {
+            kind,
+            yaku_name,
+            new_level,
+            started_at: Instant::now(),
+            dismissed: false,
+        }
+    }
+
+    fn elapsed(&self) -> f32 {
+        Instant::now()
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32()
+    }
+
+    fn is_done(&self) -> bool {
+        self.dismissed || self.elapsed() >= Self::DURATION
+    }
+}
+
 pub struct ShopScene {
     pub came_from_round: u32,
     items: Vec<ShopItem>,
-    consumable_items: Vec<ConsumableShopItem>,
+    zodiac_items: Vec<ConsumableShopItem>,
+    talisman_items: Vec<ConsumableShopItem>,
     pack_item: Option<TilePackShopItem>,
     /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
     /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
     reroll_cost: u32,
     pause_menu: PauseMenu,
-    glossary: super::glossary::GlossaryOverlay,
     journal: super::journal::JournalOverlay,
     /// Currently focused shop element. `None` until the player presses a
     /// directional input or moves the cursor over a shop object.
@@ -450,6 +582,15 @@ pub struct ShopScene {
     last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
     /// Active tile-pack opening celebration, if any.
     pack_celebration: Option<PackCelebration>,
+    /// Active zodiac ribbon close-up celebration, if any.
+    zodiac_celebration: Option<ZodiacCelebration>,
+    /// Floating 3D text popups for zodiac level-up feedback.
+    score_popups: ScorePopupSystem,
+    /// Particle burst effects for zodiac level-up feedback.
+    particles: ParticleSystem,
+    /// Timestamp of the previous frame — used to compute `dt` for
+    /// particle and popup animation.
+    last_frame: Instant,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -482,25 +623,27 @@ const PICK_TILE_PACK: u32 = 4;
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
 fn generate_shop_stock(
     relics: &RelicState,
+    extra_relics: usize,
 ) -> (
     Vec<ShopItem>,
+    Vec<ConsumableShopItem>,
     Vec<ConsumableShopItem>,
     Option<TilePackShopItem>,
 ) {
     let mut rng = rand::rng();
 
-    const MAX_RIBBONS: usize = 3;
+    const MAX_RIBBONS: usize = 4;
     let max_relics = NICHE_COLS * NICHE_ROWS;
 
-    let mut n_relics = rng.random_range(0..=max_relics);
+    let mut n_relics = rng.random_range(0..=max_relics) + extra_relics;
     let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
     let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
     if n_zodiacs + n_talismans > MAX_RIBBONS {
         while n_zodiacs + n_talismans > MAX_RIBBONS {
-            if n_zodiacs >= n_talismans {
-                n_zodiacs -= 1;
-            } else {
+            if n_talismans >= n_zodiacs {
                 n_talismans -= 1;
+            } else {
+                n_zodiacs -= 1;
             }
         }
     }
@@ -530,7 +673,13 @@ fn generate_shop_stock(
     }
 
     let defs = all_relic_defs();
-    let mut relic_pool: Vec<&_> = defs.iter().filter(|d| !relics.has(d.id)).collect();
+    // Some relics are never offered in the shop — they only appear via
+    // special means (transformation, duplication, etc.).
+    let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
+    let mut relic_pool: Vec<&_> = defs
+        .iter()
+        .filter(|d| !relics.has(d.id) && !shop_excluded.contains(&d.id))
+        .collect();
     relic_pool.shuffle(&mut rng);
     let items: Vec<ShopItem> = relic_pool
         .into_iter()
@@ -540,7 +689,13 @@ fn generate_shop_stock(
             name: d.name,
             description: d.description,
             rarity: d.rarity,
-            price: relic_price(d.id),
+            price: {
+                let mut p = relic_price(d.id);
+                if relics.has(RelicId::MerchantsEye) {
+                    p = p.saturating_sub(1).max(1);
+                }
+                p
+            },
             sold: false,
         })
         .collect();
@@ -549,24 +704,22 @@ fn generate_shop_stock(
     zodiac_pool.shuffle(&mut rng);
     let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
     talisman_pool.shuffle(&mut rng);
-    let mut consumable_items: Vec<ConsumableShopItem> = zodiac_pool
+    let zodiac_items: Vec<ConsumableShopItem> = zodiac_pool
         .into_iter()
         .take(n_zodiacs)
         .map(|z| ConsumableShopItem {
             consumable: Consumable::Zodiac(z),
             sold: false,
         })
-        .chain(
-            talisman_pool
-                .into_iter()
-                .take(n_talismans)
-                .map(|t| ConsumableShopItem {
-                    consumable: Consumable::Talisman(t),
-                    sold: false,
-                }),
-        )
         .collect();
-    consumable_items.shuffle(&mut rng);
+    let talisman_items: Vec<ConsumableShopItem> = talisman_pool
+        .into_iter()
+        .take(n_talismans)
+        .map(|t| ConsumableShopItem {
+            consumable: Consumable::Talisman(t),
+            sold: false,
+        })
+        .collect();
 
     // Always offer a tile pack.
     let pack_item = {
@@ -577,25 +730,101 @@ fn generate_shop_stock(
             .map(|&kind| TilePackShopItem { kind, sold: false })
     };
 
-    (items, consumable_items, pack_item)
+    (items, zodiac_items, talisman_items, pack_item)
 }
 
 impl ShopScene {
-    pub fn new(came_from_round: u32, relics: &RelicState) -> Self {
-        let (items, consumable_items, pack_item) = generate_shop_stock(relics);
+    pub fn new(came_from_round: u32, run: &mut crate::game::run::RunState) -> Self {
+        let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
+        let (mut items, zodiac_items, talisman_items, pack_item) =
+            generate_shop_stock(&run.relics, extra_relics);
+
+        // PatronGift: zero out one random relic's price.
+        if run.tag_patron_gift && !items.is_empty() {
+            use rand::prelude::IndexedMutRandom;
+            let mut rng = rand::rng();
+            if let Some(item) = items.choose_mut(&mut rng) {
+                item.price = 0;
+            }
+        }
+
+        let reroll_cost = if run.tag_free_reroll {
+            0
+        } else {
+            REROLL_BASE_COST
+        };
+
+        // Clear consumed tag flags.
+        run.tag_free_reroll = false;
+        run.tag_patron_gift = false;
+        run.tag_rich_stock = false;
 
         Self {
             came_from_round,
             items,
-            consumable_items,
+            zodiac_items,
+            talisman_items,
             pack_item,
-            reroll_cost: REROLL_BASE_COST,
+            reroll_cost,
             pause_menu: PauseMenu::new(),
-            glossary: super::glossary::GlossaryOverlay::new(),
             journal: super::journal::JournalOverlay::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             pack_celebration: None,
+            zodiac_celebration: None,
+            score_popups: ScorePopupSystem::new(),
+            particles: ParticleSystem::new(),
+            last_frame: Instant::now(),
+        }
+    }
+
+    /// Route a `ShopActionResult` to the appropriate visual feedback.
+    fn handle_shop_action_result(
+        &mut self,
+        result: ShopActionResult,
+        _cursor_pos: (f32, f32),
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        match result {
+            ShopActionResult::None => {}
+            ShopActionResult::PackCelebration(celeb) => {
+                self.pack_celebration = Some(celeb);
+            }
+            ShopActionResult::ZodiacApplied {
+                zodiac_kind,
+                yaku_name,
+                new_level,
+            } => {
+                self.zodiac_celebration =
+                    Some(ZodiacCelebration::new(zodiac_kind, yaku_name, new_level));
+                bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
+            }
+        }
+    }
+
+    /// Spawn the yaku level-up popup + particle burst at the center of the
+    /// screen. Called when a zodiac celebration finishes (either by timeout
+    /// or player dismiss).
+    fn finish_zodiac_celebration(
+        &mut self,
+        w: f32,
+        h: f32,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        if let Some(celeb) = self.zodiac_celebration.take() {
+            bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
+            let label = format!("{} Lv.{}", celeb.yaku_name, celeb.new_level);
+            let center = (w * 0.5, h * 0.45);
+            let dest = (center.0, center.1 - 200.0);
+            self.score_popups.spawn(
+                label,
+                center,
+                dest,
+                crate::core::scoring::StepKind::Gold,
+                celeb.new_level as f32,
+            );
+            self.particles
+                .emit(center.0, center.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
         }
     }
 
@@ -603,18 +832,20 @@ impl ShopScene {
     fn reroll(&mut self, run: &mut crate::game::run::RunState) {
         run.gold -= self.reroll_cost as i32;
         self.reroll_cost += REROLL_COST_INCREMENT;
-        let (items, consumable_items, pack_item) = generate_shop_stock(&run.relics);
+        let (items, zodiac_items, talisman_items, pack_item) = generate_shop_stock(&run.relics, 0);
         self.items = items;
-        self.consumable_items = consumable_items;
+        self.zodiac_items = zodiac_items;
+        self.talisman_items = talisman_items;
         self.pack_item = pack_item;
         self.focus = None;
     }
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
-        let (items, consumable_items, pack_item) = generate_shop_stock(&run.relics);
+        let (items, zodiac_items, talisman_items, pack_item) = generate_shop_stock(&run.relics, 0);
         self.items = items;
-        self.consumable_items = consumable_items;
+        self.zodiac_items = zodiac_items;
+        self.talisman_items = talisman_items;
         self.pack_item = pack_item;
         self.focus = None;
     }
@@ -655,11 +886,15 @@ struct ShopLayout {
     // ── For-sale relic niches (in pixel space, world_y = base height) ──
     niche_centers_px: [(f32, f32, f32); NICHE_COLS * NICHE_ROWS],
     niche_count: usize,
-    // ── For-sale ribbon anchors ──
+    // ── For-sale zodiac ribbon anchors (upper-right cabinet zone) ──
     ribbon_anchors_px: [(f32, f32, f32); 8],
     ribbon_count: usize,
     ribbon_length: f32,
     ribbon_width: f32,
+    // ── For-sale talisman anchors (lower-right cabinet zone, below shelf divider) ──
+    talisman_anchors_px: [(f32, f32, f32); 4],
+    talisman_anchor_count: usize,
+    talisman_wall_width: f32,
     // ── Foreground dishes ──
     relic_dish_center_px: (f32, f32, f32),
     relic_dish_extents: [f32; 3],
@@ -670,7 +905,7 @@ struct ShopLayout {
     // ── For-sale tile pack (in cabinet, below ribbons) ──
     pack_center_px: (f32, f32, f32),
     pack_extents: [f32; 3],
-    // ── Owned consumable row (flat tray on the inventory shelf) ──
+    // ── Owned consumable row (shared tray on the inventory shelf) ──
     consumable_row_center_px: (f32, f32, f32),
     consumable_row_extents: [f32; 3],
     consumable_count: usize,
@@ -682,9 +917,10 @@ impl ShopLayout {
     fn build(
         layout: &crate::ui::layout::LayoutResult,
         n_for_sale: usize,
-        n_for_sale_ribbons: usize,
+        n_for_sale_zodiacs: usize,
+        n_for_sale_talismans: usize,
         n_owned_relics: usize,
-        n_fan: usize,
+        n_owned_consumables: usize,
     ) -> Self {
         let w = layout.window_w;
         let h = layout.window_h;
@@ -749,7 +985,7 @@ impl ShopLayout {
         // ribbon area runs from just-past-the-divider out to the inner
         // edge of the right frame strip.
         let mut ribbon_anchors_px: [(f32, f32, f32); 8] = [(0.0, 0.0, 0.0); 8];
-        let n_ribbons = n_for_sale_ribbons.min(8);
+        let n_ribbons = n_for_sale_zodiacs.min(8);
         if n_ribbons > 0 {
             // Inner-right-area bounds in local-x (matches curio_cabinet_mesh).
             let right_lx0 = crate::render::curio_cabinet_mesh::DIVIDER_X + 0.0125;
@@ -784,20 +1020,47 @@ impl ShopLayout {
                 ribbon_anchors_px[i] = (x, pin_pixel_y, pin_world_y);
             }
         }
-        // Hanging zodiac/talisman ribbons — sized layout-relative (not mm)
-        // so they hold their visual weight inside the (also layout-relative)
-        // cabinet at every resolution. Earlier we used mm-based dimensions,
-        // which made ribbons read as postage stamps lost on a wide back wall
-        // at high-DPI. Talisman extents derive from `ribbon_width`, so they
-        // scale automatically.
-        //
-        // Width drives the rendered ribbon size now that the renderer fits
-        // textured ribbons to the silk texture's natural 2:3 aspect (length =
-        // width × 1.5). `ribbon_length` stays as the upper bound the
-        // aspect-fit clamps against, so adjusting just `ribbon_width` is
-        // enough to resize the wall ribbons proportionally.
+        // Hanging zodiac ribbons — sized layout-relative (not mm) so they
+        // hold their visual weight inside the (also layout-relative) cabinet
+        // at every resolution.
         let ribbon_width = h * 0.085;
         let ribbon_length = ribbon_width * 1.5;
+
+        // ── For-sale talisman anchors: below the shelf divider ──────────
+        // The cabinet mesh has a physical shelf at RIGHT_SHELF_Y that
+        // separates the upper zodiac zone from the lower talisman zone.
+        // Talismans are spread horizontally across the same right-side
+        // area as zodiacs, but pinned below the shelf.
+        let mut talisman_anchors_px: [(f32, f32, f32); 4] = [(0.0, 0.0, 0.0); 4];
+        let n_talisman_anchors = n_for_sale_talismans.min(4);
+        let talisman_wall_width = ribbon_width;
+        if n_talisman_anchors > 0 {
+            let right_lx0 = crate::render::curio_cabinet_mesh::DIVIDER_X + 0.0125;
+            let right_lx1 = 0.5 - 0.04;
+            let right_inner_w = right_lx1 - right_lx0;
+            let right_x0 =
+                cabinet_pixel_x + (right_lx0 + right_inner_w * 0.25) * cabinet_extents[0];
+            let right_x1 =
+                cabinet_pixel_x + (right_lx0 + right_inner_w * 0.78) * cabinet_extents[0];
+            let avail = right_x1 - right_x0;
+            let step = if n_talisman_anchors > 1 {
+                avail / (n_talisman_anchors as f32 - 1.0)
+            } else {
+                0.0
+            };
+            // Pin below the shelf divider, centered in the lower zone.
+            let talisman_pin_world_y = cabinet_world_y
+                + (crate::render::curio_cabinet_mesh::RIGHT_SHELF_Y - 0.14) * cabinet_extents[1];
+            let talisman_pin_pixel_y = cabinet_front_py + cabinet_extents[2] * 0.05;
+            for i in 0..n_talisman_anchors {
+                let x = if n_talisman_anchors == 1 {
+                    (right_x0 + right_x1) * 0.5
+                } else {
+                    right_x0 + step * i as f32
+                };
+                talisman_anchors_px[i] = (x, talisman_pin_pixel_y, talisman_pin_world_y);
+            }
+        }
 
         // ── For-sale tile pack: right side of the cabinet, below ribbons ─
         // Centered horizontally in the ribbon area, sitting on the lower
@@ -813,8 +1076,8 @@ impl ShopLayout {
         // Pack proportions: wide front face (x × y), thin depth (z).
         // Like a real trading card pack displayed the long way.
         let pack_extents = [
-            cabinet_extents[0] * 0.10,
-            cabinet_extents[1] * 0.12,
+            cabinet_extents[0] * 0.07,
+            cabinet_extents[1] * 0.18,
             cabinet_extents[0] * 0.02,
         ];
 
@@ -840,25 +1103,14 @@ impl ShopLayout {
         // Relic tray spans 16%–44% w → center at 30% w, half-width 14% w.
         let relic_dish_center_px = (w * 0.30, shelf_y, 0.0);
         let relic_dish_extents = [w * 0.14, dish_rim, h * 0.10];
-        // Consumable tray spans 48%–68% w → center at 58% w, half-width 10% w.
+        // Consumable tray: owned zodiac ribbons + talisman tablets laid flat.
         let consumable_row_center_px = (w * 0.58, shelf_y, 0.0);
         let consumable_row_extents = [w * 0.10, dish_rim, h * 0.10];
-        // Coin dish — sits just right of the consumable tray as the
-        // rightmost item on the shelf. 71.5%–80.5% w.
+        // Coin dish — sits just right of the consumable tray.
         let coin_dish_center_px = (w * 0.76, shelf_y, 0.0);
         let coin_dish_extents = [w * 0.045, dish_rim, h * 0.07];
 
-        // ── Owned consumables: flat row in the consumable tray ───────────
-        // Laid flat (face-up) like the relic tray, no radial fan. The
-        // ribbon length must fit inside the tray's z-extent (h*0.10) once
-        // rotated -90° about X, otherwise the back end of the ribbon (and
-        // the talisman center, which sits at `awy - length*0.4`) sinks
-        // below the tray surface and reads as "items submerged in wood."
-        // Owned-consumable face plates laid flat in the tray. Width drives
-        // the visible size; the renderer enforces a 2:3 aspect when a
-        // zodiac silk texture is bound, so we set length = width × 1.5
-        // here to match (talisman tablets reuse `consumable_width` for
-        // their footprint, so this also keeps tablet proportions sensible).
+        // ── Owned consumable sizing ─────────────────────────────────────
         let consumable_width = layout.mm(9.0);
         let consumable_length = consumable_width * 1.5;
 
@@ -874,6 +1126,9 @@ impl ShopLayout {
             ribbon_count: n_ribbons,
             ribbon_length,
             ribbon_width,
+            talisman_anchors_px,
+            talisman_anchor_count: n_talisman_anchors,
+            talisman_wall_width,
             pack_center_px,
             pack_extents,
             relic_dish_center_px,
@@ -883,7 +1138,7 @@ impl ShopLayout {
             owned_relic_count: n_owned_relics,
             consumable_row_center_px,
             consumable_row_extents,
-            consumable_count: n_fan,
+            consumable_count: n_owned_consumables,
             consumable_length,
             consumable_width,
         }
@@ -902,17 +1157,13 @@ impl ShopLayout {
     }
 
     /// Center pixel coords + base world_y of the i-th owned consumable
-    /// laid flat in the consumable tray. Single row, evenly spaced across
-    /// the tray width — capped at 8 items by the caller.
+    /// laid flat in the consumable tray. Single row, evenly spaced.
     fn consumable_pos(&self, idx: usize) -> (f32, f32, f32) {
         let n = self.consumable_count.max(1) as f32;
         let row_w = self.consumable_row_extents[0] * 0.85;
         let start_x = self.consumable_row_center_px.0 - row_w * 0.5 + (row_w / n) * 0.5;
         let px = start_x + (row_w / n) * idx as f32;
         let py = self.consumable_row_center_px.1;
-        // Lift the anchor well above the tray top so that talismans
-        // (centered at `awy - length*0.4`) and the back end of laid-flat
-        // ribbons stay above the wood instead of clipping into it.
         let wy = self.consumable_row_extents[1] * 0.5 + self.consumable_length * 0.5 + 6.0;
         (px, py, wy)
     }
@@ -1057,30 +1308,28 @@ impl SceneBehavior for ShopScene {
 
     fn has_blocking_overlay(&self) -> bool {
         self.pause_menu.paused
-            || self.glossary.open
             || self.journal.open
             || self.pack_celebration.is_some()
+            || self.zodiac_celebration.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
-        // Glossary overlay (cross-input help).
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        self.particles.update(dt);
+        self.score_popups.update(now);
+
+        // Help action opens the Meld Guide scene.
         for &cid in ctx.button_clicks {
             if cid == SHOP_HELP_BADGE_ID {
-                self.glossary.toggle();
-                return None;
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
         }
-        if !self.glossary.open {
-            for a in ctx.actions {
-                if matches!(a, UiAction::Help) {
-                    self.glossary.toggle();
-                    return None;
-                }
+        for a in ctx.actions {
+            if matches!(a, UiAction::Help) {
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
-        } else {
-            self.glossary
-                .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
-            return None;
         }
 
         // Yaku Journal overlay — opened by clicking the Journal book on
@@ -1131,11 +1380,31 @@ impl SceneBehavior for ShopScene {
             return None;
         }
 
+        // Zodiac ribbon close-up celebration — swallow input until
+        // the player dismisses or the timer expires.
+        if let Some(ref mut celeb) = self.zodiac_celebration {
+            let has_input = ctx.actions.iter().any(|a| {
+                matches!(
+                    a,
+                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
+                )
+            }) || !ctx.button_clicks.is_empty();
+            if has_input {
+                celeb.dismissed = true;
+            }
+            if celeb.is_done() {
+                let w = ctx.layout.window_w;
+                let h = ctx.layout.window_h;
+                self.finish_zodiac_celebration(w, h, ctx.bus);
+            }
+            return None;
+        }
+
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // Drain a one-shot glossary request from the pause menu.
-            if self.pause_menu.take_glossary_request() {
-                self.glossary.toggle();
+            // Drain a meld guide request from the pause menu.
+            if self.pause_menu.take_meld_guide_request() {
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
             return t;
         }
@@ -1204,6 +1473,37 @@ impl SceneBehavior for ShopScene {
                 }
                 continue;
             }
+            // Shoulder buttons: when focused on an owned relic, shift it
+            // left/right in the inventory. Matters for Mirror Tile ordering.
+            if matches!(a, UiAction::NavigateHudNext | UiAction::NavigateHudPrev) {
+                if let Some(ShopFocus::Relic(i)) = self.focus {
+                    let n_for_sale = self.items.len();
+                    if i >= n_for_sale {
+                        let owned_idx = i - n_for_sale;
+                        let action = if matches!(a, UiAction::NavigateHudNext) {
+                            ShopAction::MoveRelicRight(owned_idx)
+                        } else {
+                            ShopAction::MoveRelicLeft(owned_idx)
+                        };
+                        let _result = apply_shop_action(
+                            action,
+                            &mut self.items,
+                            &mut self.zodiac_items,
+                            &mut self.talisman_items,
+                            &mut self.pack_item,
+                            ctx.run,
+                            ctx.bus,
+                        );
+                        // Update focus to follow the moved relic.
+                        if matches!(a, UiAction::NavigateHudNext) && owned_idx + 1 < ctx.run.relics.active.len() {
+                            self.focus = Some(ShopFocus::Relic(n_for_sale + owned_idx + 1));
+                        } else if matches!(a, UiAction::NavigateHudPrev) && owned_idx > 0 {
+                            self.focus = Some(ShopFocus::Relic(n_for_sale + owned_idx - 1));
+                        }
+                    }
+                }
+                continue;
+            }
             // Confirm: route by focused element. NextRound advances the
             // run; everything else fires the same action the click
             // dispatcher below would have fired for an equivalent mouse
@@ -1220,19 +1520,18 @@ impl SceneBehavior for ShopScene {
                     }
                     if let Some(hit) = focus.to_hit() {
                         if let Some(action) =
-                            shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
+                            shop_action_for_hit(hit, &self.items, &self.zodiac_items, &self.talisman_items, ctx.run)
                         {
-                            let celeb = apply_shop_action(
+                            let result = apply_shop_action(
                                 action,
                                 &mut self.items,
-                                &mut self.consumable_items,
+                                &mut self.zodiac_items,
+                                &mut self.talisman_items,
                                 &mut self.pack_item,
                                 ctx.run,
                                 ctx.bus,
                             );
-                            if celeb.is_some() {
-                                self.pack_celebration = celeb;
-                            }
+                            self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             // Journal book: same toggle as the click path.
                             self.journal.toggle();
@@ -1283,19 +1582,18 @@ impl SceneBehavior for ShopScene {
                 return None;
             }
             if let Some(action) =
-                shop_action_for_hit(hit, &self.items, &self.consumable_items, ctx.run)
+                shop_action_for_hit(hit, &self.items, &self.zodiac_items, &self.talisman_items, ctx.run)
             {
-                let celeb = apply_shop_action(
+                let result = apply_shop_action(
                     action,
                     &mut self.items,
-                    &mut self.consumable_items,
+                    &mut self.zodiac_items,
+                    &mut self.talisman_items,
                     &mut self.pack_item,
                     ctx.run,
                     ctx.bus,
                 );
-                if celeb.is_some() {
-                    self.pack_celebration = celeb;
-                }
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
             }
             return None;
         }
@@ -1307,15 +1605,17 @@ impl SceneBehavior for ShopScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
-        let n_for_sale_ribbons = self.consumable_items.len();
+        let n_for_sale_zodiacs = self.zodiac_items.len();
+        let n_for_sale_talismans = self.talisman_items.len();
         let n_owned_relics = ctx.run.relics.active.len();
-        let n_fan = ctx.run.consumables.items.len();
+        let n_owned_consumables = ctx.run.consumables.items.len();
         let layout = ShopLayout::build(
             ctx.layout,
             self.items.len(),
-            n_for_sale_ribbons,
+            n_for_sale_zodiacs,
+            n_for_sale_talismans,
             n_owned_relics,
-            n_fan,
+            n_owned_consumables,
         );
 
         let mut frame = UiFrame::new();
@@ -1349,8 +1649,7 @@ impl SceneBehavior for ShopScene {
             extents: layout.relic_dish_extents,
             pick_id: Some(PICK_RELIC_DISH),
         });
-        // Consumable tray — same visual language as the relic dish, just
-        // a second compartment of the inventory shelf.
+        // Consumable tray — owned zodiac ribbons + talisman tablets.
         frame.dish_explicit(DishExplicit {
             center_pos: [
                 layout.consumable_row_center_px.0,
@@ -1358,8 +1657,6 @@ impl SceneBehavior for ShopScene {
                 layout.consumable_row_center_px.2,
             ],
             extents: layout.consumable_row_extents,
-            // No pick id — clicking individual consumables hits the
-            // ribbon/talisman pick paths, not the tray itself.
             pick_id: None,
         });
         frame.dish_explicit(DishExplicit {
@@ -1398,7 +1695,7 @@ impl SceneBehavior for ShopScene {
                     half_extents: [ext[0] * 0.5, ext[1] * 0.5, ext[2] * 0.5],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: pack.kind,
-                    rotation_x_deg: 20.0,
+                    rotation_x_deg: -5.0,
                     rotation_y_deg: 0.0,
                     pick_id: Some(PICK_TILE_PACK),
                 }]);
@@ -1457,16 +1754,15 @@ impl SceneBehavior for ShopScene {
             frame.relic_batch(relic_placements);
         }
 
-        // ── Consumable batches: zodiacs are silken ribbons, talismans are
-        //    jade octagonal tablets. Each kind gets its own batch (and so
-        //    its own pick path), but they share the same wall slot anchor
-        //    positions to keep the layout simple.
+        // ── Consumable batches: zodiacs are silken ribbons (upper-right
+        //    cabinet zone), talismans are jade octagonal tablets (lower-
+        //    right cabinet zone, below the shelf divider). Each gets its
+        //    own batch, pick path, and dedicated wall/tray positions.
         let mut ribbon_placements: Vec<ZodiacRibbonPlacement> = Vec::new();
         let mut talisman_placements: Vec<TalismanPlacement> = Vec::new();
-        // For-sale: walk consumable_items, route each to its kind. Wall
-        // slot is allocated by item index in self.consumable_items so
-        // each item has a stable on-wall position.
-        for (i, item) in self.consumable_items.iter().enumerate() {
+
+        // For-sale zodiacs: upper-right cabinet wall.
+        for (i, item) in self.zodiac_items.iter().enumerate() {
             if i >= layout.ribbon_count {
                 break;
             }
@@ -1475,46 +1771,47 @@ impl SceneBehavior for ShopScene {
             if item.sold {
                 col[3] = 0.30;
             }
-            match item.consumable {
-                Consumable::Zodiac(z) => {
-                    // Textured ribbons: white base so the silk texture
-                    // shows through unmodified, but keep the per-item alpha
-                    // (sold = 0.30) so spent slots dim out.
-                    let alpha = col[3];
-                    ribbon_placements.push(ZodiacRibbonPlacement {
-                        anchor_pos: [ax, ay, awy],
-                        length: layout.ribbon_length,
-                        width: layout.ribbon_width,
-                        rotation_y_deg: 0.0,
-                        rotation_x_deg: 0.0,
-                        rotation_z_deg: 0.0,
-                        color: [1.0, 1.0, 1.0, alpha],
-                        kind: Some(z),
-                    });
-                }
-                Consumable::Talisman(tk) => {
-                    // Talismans hover at the vertical mid-point of the
-                    // ribbon row so they read as part of the same wall row.
-                    talisman_placements.push(TalismanPlacement {
-                        center_pos: [ax, ay, awy - layout.ribbon_length * 0.5],
-                        extents: [
-                            layout.ribbon_width * 1.4,
-                            layout.ribbon_width * 2.0,
-                            layout.ribbon_width * 0.35,
-                        ],
-                        rotation_y_deg: 0.0,
-                        rotation_x_deg: 0.0,
-                        rotation_z_deg: 0.0,
-                        color: col,
-                        kind: tk,
-                    });
-                }
+            let alpha = col[3];
+            ribbon_placements.push(ZodiacRibbonPlacement {
+                anchor_pos: [ax, ay, awy],
+                length: layout.ribbon_length,
+                width: layout.ribbon_width,
+                rotation_y_deg: 0.0,
+                rotation_x_deg: 0.0,
+                rotation_z_deg: 0.0,
+                color: [1.0, 1.0, 1.0, alpha],
+                kind: if let Consumable::Zodiac(z) = item.consumable { Some(z) } else { None },
+            });
+        }
+
+        // For-sale talismans: lower-right cabinet wall (below shelf divider).
+        for (i, item) in self.talisman_items.iter().enumerate() {
+            if i >= layout.talisman_anchor_count {
+                break;
+            }
+            let (ax, ay, awy) = layout.talisman_anchors_px[i];
+            let mut col = consumable_color(item.consumable);
+            if item.sold {
+                col[3] = 0.30;
+            }
+            if let Consumable::Talisman(tk) = item.consumable {
+                talisman_placements.push(TalismanPlacement {
+                    center_pos: [ax, ay, awy],
+                    extents: [
+                        layout.talisman_wall_width * 1.4,
+                        layout.talisman_wall_width * 2.0,
+                        layout.talisman_wall_width * 0.35,
+                    ],
+                    rotation_y_deg: 0.0,
+                    rotation_x_deg: 0.0,
+                    rotation_z_deg: 0.0,
+                    color: col,
+                    kind: tk,
+                });
             }
         }
-        // Owned consumables: flat row in the consumable tray. Both
-        // zodiac ribbons and talisman tablets lay face-up in the same
-        // tray so they parse as one inventory section. Capped at 8 items
-        // by `consumable_count` (the caller enforces the cap).
+
+        // Owned consumables: flat row in the shared consumable tray.
         for (i, c) in ctx.run.consumables.items.iter().enumerate() {
             if i >= layout.consumable_count {
                 break;
@@ -1527,7 +1824,6 @@ impl SceneBehavior for ShopScene {
                         length: layout.consumable_length,
                         width: layout.consumable_width,
                         rotation_y_deg: 0.0,
-                        // Lay flat (face up) in the tray.
                         rotation_x_deg: -90.0,
                         rotation_z_deg: 0.0,
                         color: [1.0, 1.0, 1.0, 1.0],
@@ -1543,7 +1839,6 @@ impl SceneBehavior for ShopScene {
                             layout.consumable_width * 0.35,
                         ],
                         rotation_y_deg: 0.0,
-                        // Lay flat in the tray (face up).
                         rotation_x_deg: -90.0,
                         rotation_z_deg: 0.0,
                         color: consumable_color(*c),
@@ -1552,6 +1847,7 @@ impl SceneBehavior for ShopScene {
                 }
             }
         }
+
         if !ribbon_placements.is_empty() {
             frame.zodiac_batch(ribbon_placements);
         }
@@ -1682,42 +1978,51 @@ impl SceneBehavior for ShopScene {
             // spotlight placement. Walks the same partition the renderer
             // uses (for-sale-of-kind, then owned-of-kind) to find which
             // wall slot or fan position to light up.
-            let consumable_anchor = |is_zodiac: bool, hit_idx: usize| -> Option<(f32, f32, f32)> {
-                let mut for_sale_count = 0usize;
-                for (slot_i, item) in self.consumable_items.iter().enumerate() {
-                    let matches = match item.consumable {
-                        Consumable::Zodiac(_) => is_zodiac,
-                        Consumable::Talisman(_) => !is_zodiac,
-                    };
-                    if !matches {
-                        continue;
+            let zodiac_anchor = |hit_idx: usize| -> Option<(f32, f32, f32)> {
+                let n_for_sale = self.zodiac_items.len();
+                if hit_idx < n_for_sale {
+                    if hit_idx < layout.ribbon_count {
+                        return Some(layout.ribbon_anchors_px[hit_idx]);
                     }
-                    if for_sale_count == hit_idx {
-                        if slot_i < layout.ribbon_count {
-                            return Some(layout.ribbon_anchors_px[slot_i]);
-                        }
-                        return None;
-                    }
-                    for_sale_count += 1;
+                    return None;
                 }
-                // Owned-tray section.
-                let owned_target = hit_idx - for_sale_count;
-                let mut owned_count = 0usize;
+                // Owned zodiac: find its position in the shared consumable tray.
+                let owned_target = hit_idx - n_for_sale;
+                let mut count = 0usize;
                 for (row_i, c) in ctx.run.consumables.items.iter().enumerate() {
-                    let matches = match c {
-                        Consumable::Zodiac(_) => is_zodiac,
-                        Consumable::Talisman(_) => !is_zodiac,
-                    };
-                    if !matches {
-                        continue;
-                    }
-                    if owned_count == owned_target {
-                        if row_i < layout.consumable_count {
-                            return Some(layout.consumable_pos(row_i));
+                    if matches!(c, Consumable::Zodiac(_)) {
+                        if count == owned_target {
+                            if row_i < layout.consumable_count {
+                                return Some(layout.consumable_pos(row_i));
+                            }
+                            return None;
                         }
-                        return None;
+                        count += 1;
                     }
-                    owned_count += 1;
+                }
+                None
+            };
+            let talisman_anchor = |hit_idx: usize| -> Option<(f32, f32, f32)> {
+                let n_for_sale = self.talisman_items.len();
+                if hit_idx < n_for_sale {
+                    if hit_idx < layout.talisman_anchor_count {
+                        return Some(layout.talisman_anchors_px[hit_idx]);
+                    }
+                    return None;
+                }
+                // Owned talisman: find its position in the shared consumable tray.
+                let owned_target = hit_idx - n_for_sale;
+                let mut count = 0usize;
+                for (row_i, c) in ctx.run.consumables.items.iter().enumerate() {
+                    if matches!(c, Consumable::Talisman(_)) {
+                        if count == owned_target {
+                            if row_i < layout.consumable_count {
+                                return Some(layout.consumable_pos(row_i));
+                            }
+                            return None;
+                        }
+                        count += 1;
+                    }
                 }
                 None
             };
@@ -1741,7 +2046,7 @@ impl SceneBehavior for ShopScene {
                     });
                 }
                 ShopHit::Ribbon(i) => {
-                    if let Some((px, py, wy)) = consumable_anchor(true, i) {
+                    if let Some((px, py, wy)) = zodiac_anchor(i) {
                         point_lights.push(PointLight {
                             pos: [px, py + 40.0, wy - layout.ribbon_length * 0.4],
                             radius: 200.0,
@@ -1751,9 +2056,9 @@ impl SceneBehavior for ShopScene {
                     }
                 }
                 ShopHit::Talisman(i) => {
-                    if let Some((px, py, wy)) = consumable_anchor(false, i) {
+                    if let Some((px, py, wy)) = talisman_anchor(i) {
                         point_lights.push(PointLight {
-                            pos: [px, py + 30.0, wy - layout.ribbon_length * 0.5],
+                            pos: [px, py + 30.0, wy + 40.0],
                             radius: 180.0,
                             color: [0.78, 1.00, 0.82],
                             intensity: 3.20,
@@ -1816,15 +2121,11 @@ impl SceneBehavior for ShopScene {
         // Previous-frame projection of the plaque face (1-frame lag,
         // same pattern as relic/ribbon rects). Empty on the first frame
         // — fall back to a centered estimate so the title still appears.
-        let plaque_screen = ctx
-            .projected_plaque_rects
-            .first()
-            .copied()
-            .unwrap_or_else(|| {
-                let est_w = w * 0.30;
-                let est_h = h * 0.08;
-                [(w - est_w) * 0.5, h * 0.05, est_w, est_h]
-            });
+        let plaque_screen = ctx.proj.plaque_rects.first().copied().unwrap_or_else(|| {
+            let est_w = w * 0.30;
+            let est_h = h * 0.08;
+            [(w - est_w) * 0.5, h * 0.05, est_w, est_h]
+        });
         // Suspension cords from ceiling to the projected chain-nub
         // positions on the top edge of the plaque rect.
         let cord_inset = plaque_screen[2] * 0.12;
@@ -1853,42 +2154,15 @@ impl SceneBehavior for ShopScene {
         // Tooltip on the hovered object.
         if let Some(hit) = hover {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
-            // Helper: walk consumable_items and find the i-th item of the
-            // requested kind (zodiac or talisman). Same partition rule the
-            // renderer uses to assign hit indices.
-            let nth_consumable_of_kind = |is_zodiac: bool, hit_idx: usize| -> Option<usize> {
-                let mut count = 0usize;
-                for (slot_i, item) in self.consumable_items.iter().enumerate() {
-                    let matches = match item.consumable {
-                        Consumable::Zodiac(_) => is_zodiac,
-                        Consumable::Talisman(_) => !is_zodiac,
-                    };
-                    if !matches {
-                        continue;
-                    }
-                    if count == hit_idx {
-                        return Some(slot_i);
-                    }
-                    count += 1;
-                }
-                None
-            };
-            let n_for_sale_zodiacs = self
-                .consumable_items
-                .iter()
-                .filter(|c| matches!(c.consumable, Consumable::Zodiac(_)))
-                .count();
-            let n_for_sale_talismans = self
-                .consumable_items
-                .iter()
-                .filter(|c| matches!(c.consumable, Consumable::Talisman(_)))
-                .count();
+            let n_for_sale_zodiacs = self.zodiac_items.len();
+            let n_for_sale_talismans = self.talisman_items.len();
             // Look up the projected screen rect from the renderer.
             let tooltip_anchor: Option<[f32; 4]> = match hit {
-                ShopHit::Relic(i) => ctx.projected_relic_rects.get(i).copied(),
-                ShopHit::Ribbon(i) => ctx.projected_ribbon_rects.get(i).copied(),
-                ShopHit::Talisman(i) => ctx.projected_talisman_rects.get(i).copied(),
+                ShopHit::Relic(i) => ctx.proj.relic_rects.get(i).copied(),
+                ShopHit::Ribbon(i) => ctx.proj.ribbon_rects.get(i).copied(),
+                ShopHit::Talisman(i) => ctx.proj.talisman_rects.get(i).copied(),
                 ShopHit::Dish(id) | ShopHit::TilePack(id) => ctx
+                    .proj
                     .aux_dish_rects
                     .iter()
                     .find_map(|(pid, r)| if *pid == Some(id) { Some(*r) } else { None }),
@@ -1945,34 +2219,24 @@ impl SceneBehavior for ShopScene {
                     }
                 }
                 ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
-                    if let Some(slot_i) = nth_consumable_of_kind(true, i) {
-                        let item = &self.consumable_items[slot_i];
-                        let price = item.price();
-                        let can_afford = ctx.run.gold >= price as i32
-                            && !ctx.run.consumables.is_full()
-                            && !item.sold;
-                        let cta = if item.sold {
-                            "SOLD".to_string()
-                        } else if !can_afford {
-                            if ctx.run.consumables.is_full() {
-                                "Inventory full".to_string()
-                            } else {
-                                format!("Need {}g", price as i32 - ctx.run.gold)
-                            }
-                        } else {
-                            format!("Buy {}g", price)
-                        };
-                        let col = if item.sold {
-                            color::SLATE
-                        } else if can_afford {
-                            color::GOLD
-                        } else {
-                            color::RUBY
-                        };
-                        (item.name(), item.description(), cta, col)
+                    let item = &self.zodiac_items[i];
+                    let price = item.price();
+                    let can_afford = ctx.run.gold >= price as i32 && !item.sold;
+                    let cta = if item.sold {
+                        "SOLD".to_string()
+                    } else if !can_afford {
+                        format!("Need {}g", price as i32 - ctx.run.gold)
                     } else {
-                        (String::new(), String::new(), String::new(), color::SLATE)
-                    }
+                        format!("Buy {}g", price)
+                    };
+                    let col = if item.sold {
+                        color::SLATE
+                    } else if can_afford {
+                        color::GOLD
+                    } else {
+                        color::RUBY
+                    };
+                    (item.name(), item.description(), cta, col)
                 }
                 ShopHit::Ribbon(i) => {
                     // Owned zodiac in the fan.
@@ -2004,34 +2268,30 @@ impl SceneBehavior for ShopScene {
                     }
                 }
                 ShopHit::Talisman(i) if i < n_for_sale_talismans => {
-                    if let Some(slot_i) = nth_consumable_of_kind(false, i) {
-                        let item = &self.consumable_items[slot_i];
-                        let price = item.price();
-                        let can_afford = ctx.run.gold >= price as i32
-                            && !ctx.run.consumables.is_full()
-                            && !item.sold;
-                        let cta = if item.sold {
-                            "SOLD".to_string()
-                        } else if !can_afford {
-                            if ctx.run.consumables.is_full() {
-                                "Inventory full".to_string()
-                            } else {
-                                format!("Need {}g", price as i32 - ctx.run.gold)
-                            }
+                    let item = &self.talisman_items[i];
+                    let price = item.price();
+                    let can_afford = ctx.run.gold >= price as i32
+                        && !ctx.run.consumables.is_full()
+                        && !item.sold;
+                    let cta = if item.sold {
+                        "SOLD".to_string()
+                    } else if !can_afford {
+                        if ctx.run.consumables.is_full() {
+                            "Inventory full".to_string()
                         } else {
-                            format!("Buy {}g", price)
-                        };
-                        let col = if item.sold {
-                            color::SLATE
-                        } else if can_afford {
-                            color::GOLD
-                        } else {
-                            color::RUBY
-                        };
-                        (item.name(), item.description(), cta, col)
+                            format!("Need {}g", price as i32 - ctx.run.gold)
+                        }
                     } else {
-                        (String::new(), String::new(), String::new(), color::SLATE)
-                    }
+                        format!("Buy {}g", price)
+                    };
+                    let col = if item.sold {
+                        color::SLATE
+                    } else if can_afford {
+                        color::GOLD
+                    } else {
+                        color::RUBY
+                    };
+                    (item.name(), item.description(), cta, col)
                 }
                 ShopHit::Talisman(i) => {
                     // Owned talisman in the fan.
@@ -2289,22 +2549,22 @@ impl SceneBehavior for ShopScene {
         //   - Dishes: `aux_dish_rects` paired with their pick id
         //   - Next Round: the 2D button rect we just computed above
         let mut focus_rect_graph: Vec<(ShopFocus, [f32; 4])> = Vec::new();
-        for (i, r) in ctx.projected_relic_rects.iter().enumerate() {
+        for (i, r) in ctx.proj.relic_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 focus_rect_graph.push((ShopFocus::Relic(i), *r));
             }
         }
-        for (i, r) in ctx.projected_ribbon_rects.iter().enumerate() {
+        for (i, r) in ctx.proj.ribbon_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 focus_rect_graph.push((ShopFocus::Ribbon(i), *r));
             }
         }
-        for (i, r) in ctx.projected_talisman_rects.iter().enumerate() {
+        for (i, r) in ctx.proj.talisman_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 focus_rect_graph.push((ShopFocus::Talisman(i), *r));
             }
         }
-        for (pid, r) in ctx.aux_dish_rects.iter() {
+        for (pid, r) in ctx.proj.aux_dish_rects.iter() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 if let Some(id) = pid {
                     if *id == PICK_TILE_PACK {
@@ -2321,7 +2581,7 @@ impl SceneBehavior for ShopScene {
         // Push the brass focus ring on top of the 2D HUD layer so it
         // sits above the cabinet wood and dishes. Skipped during pause /
         // overlay states because the overlay's own buttons take focus.
-        if !self.pause_menu.paused && !self.glossary.open && !self.journal.open {
+        if !self.pause_menu.paused && !self.journal.open {
             if let Some(target) = self.focus {
                 let rect_lookup = focus_rect_graph
                     .iter()
@@ -2360,16 +2620,7 @@ impl SceneBehavior for ShopScene {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
 
-        // Glossary overlay (drawn last so it covers everything).
-        self.glossary
-            .draw(w, h, ui_scale, &mut quads, &mut texts, &mut buttons);
-        if self.glossary.open {
-            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
-        }
-
-        // Yaku Journal overlay — drawn after the glossary so opening
-        // both at once would let the journal win, mirroring the
-        // glossary-vs-pause precedence.
+        // Yaku Journal overlay (drawn last so it covers everything).
         self.journal.draw(
             w,
             h,
@@ -2386,6 +2637,75 @@ impl SceneBehavior for ShopScene {
         // Push 2D layers onto the frame after all 3D content.
         frame.quads(quads);
         frame.texts(texts);
+
+        // ── Zodiac ribbon close-up celebration overlay ──────────────
+        if let Some(ref celeb) = self.zodiac_celebration {
+            // Semi-transparent dimmer.
+            frame.quad(GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.0, 0.0, 0.0, 0.72],
+            });
+
+            let t = celeb.elapsed();
+            // Ribbon dimensions — large and centered.
+            let ribbon_w = h * 0.12;
+            let ribbon_l = h * 0.55;
+            let cx = w * 0.5;
+            let cy = h * 0.40;
+            let lift = h * 0.35;
+
+            // ── Snake / sway animation ──────────────────────────────
+            // Primary sway: slow sinusoidal yaw oscillation.
+            let sway_yaw = (t * 1.8).sin() * 12.0; // degrees
+            // Secondary roll: faster, smaller, phase-offset from yaw
+            // so the ribbon traces an organic figure-eight path.
+            let sway_roll = (t * 2.5 + 0.7).sin() * 6.0; // degrees
+            // Gentle forward tilt so the face catches the light.
+            let tilt = 8.0 + (t * 1.2).sin() * 3.0; // degrees
+
+            // Fade-in: quick opacity ramp over the first 0.3s.
+            let alpha = (t / 0.3).clamp(0.0, 1.0);
+
+            frame.zodiac_batch(vec![ZodiacRibbonPlacement {
+                anchor_pos: [cx, cy, lift],
+                length: ribbon_l,
+                width: ribbon_w,
+                rotation_y_deg: sway_yaw,
+                rotation_x_deg: tilt,
+                rotation_z_deg: sway_roll,
+                color: [1.0, 1.0, 1.0, alpha],
+                kind: Some(celeb.kind),
+            }]);
+
+            // Title: yaku name above the ribbon.
+            let title_font = (h * 0.04).max(24.0);
+            let title_y = h * 0.10;
+            frame.text(TextLabel {
+                text: format!("{} Lv.{}", celeb.yaku_name, celeb.new_level),
+                rect: [0.0, title_y, w, title_font * 1.5],
+                font_px: Some(title_font),
+                color: [0.95, 0.78, 0.25, alpha],
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+
+            // Dismiss prompt — pulsing at the bottom.
+            let prompt_font = (h * 0.028).max(18.0);
+            let prompt_y = h * 0.88;
+            let pulse_alpha = alpha * (0.5 + 0.5 * (t * 3.0).sin());
+            frame.text(TextLabel {
+                text: "Click or press confirm to continue".to_string(),
+                rect: [0.0, prompt_y, w, prompt_font * 1.5],
+                font_px: Some(prompt_font),
+                color: [1.0, 1.0, 1.0, pulse_alpha],
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+
+            // Block all shop buttons so clicks go to the celebration.
+            buttons.clear();
+            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), SHOP_3D_HIT_ID));
+        }
 
         // ── Tile-pack opening celebration overlay ─────────────────────
         if let Some(ref celeb) = self.pack_celebration {
@@ -2505,6 +2825,16 @@ impl SceneBehavior for ShopScene {
             // Block all shop buttons so clicks go to the celebration.
             buttons.clear();
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), SHOP_3D_HIT_ID));
+        }
+
+        // Zodiac level-up feedback: floating text + particles.
+        let now = Instant::now();
+        let glyph_placements = self.score_popups.placements(now);
+        if !glyph_placements.is_empty() {
+            frame.extruded_glyph_batch(glyph_placements);
+        }
+        for (rect, color) in self.particles.instances() {
+            frame.quad(GpuInstance { rect, color });
         }
 
         frame.buttons = buttons;

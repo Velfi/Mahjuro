@@ -11,6 +11,7 @@ use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
+use super::meld_guide::MeldGuideScene;
 use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
 use crate::render::draw_cmd::UiFrame;
@@ -22,6 +23,7 @@ enum MainAction {
     Continue,
     NewGame,
     Solitaire,
+    MeldGuide,
     Profile,
     Collection,
     Options,
@@ -88,6 +90,12 @@ impl StartScreenScene {
             MainAction::Solitaire.id(),
             "Solitaire",
             MainAction::Solitaire,
+            ButtonVariant::Default,
+        ));
+        items.push(wt::button_id(
+            MainAction::MeldGuide.id(),
+            "Meld Guide",
+            MainAction::MeldGuide,
             ButtonVariant::Default,
         ));
         items.push(wt::button_id(
@@ -164,6 +172,7 @@ impl SceneBehavior for StartScreenScene {
             Some(MainAction::Continue) => Some(Scene::Gameplay(GameplayScene::new())),
             Some(MainAction::NewGame) => Some(Scene::TileSelect(TileSelectScene::new())),
             Some(MainAction::Solitaire) => Some(Scene::Solitaire(SolitaireScene::new())),
+            Some(MainAction::MeldGuide) => Some(Scene::MeldGuide(MeldGuideScene::new(false))),
             Some(MainAction::Profile) => {
                 Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()))
             }
@@ -247,6 +256,7 @@ impl SceneBehavior for StartScreenScene {
             color: [1.00, 0.86, 0.55],
             intensity: 1.40,
         }];
+        frame.fluid_smoke();
         frame.buttons = buttons;
         frame.window_title = "Mahjuro".into();
         frame

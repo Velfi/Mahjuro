@@ -12,8 +12,8 @@
 //
 //   Old per fragment: 28 steps × 8 lights = 224 light-evals × 2M pixels
 //                   = ~450M evals per frame
-//   New per voxel:    1 eval × 8 lights × 96·48·96 cells
-//                   = ~3.5M evals per frame (~130× fewer)
+//   New per voxel:    1 eval × 8 lights × 64·32·64 cells
+//                   = ~1.0M evals per frame (~450× fewer)
 //
 // Voxel-rate lighting is correct here because:
 //   1. The per-voxel size (~2 world units) is much smaller than the

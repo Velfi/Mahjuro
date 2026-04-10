@@ -1,5 +1,8 @@
 pub mod animation;
 pub mod bone_tablet_mesh;
+
+pub mod gpu_types;
+pub mod texture_upload;
 pub mod candle_mesh;
 pub mod coin_mesh;
 pub mod curio_cabinet_mesh;

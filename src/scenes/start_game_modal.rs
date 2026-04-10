@@ -77,7 +77,7 @@ impl TileSelectScene {
 
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
         *run = RunState::new_with_material(self.material);
-        Some(Scene::Shop(ShopScene::new(run.run_number, &run.relics)))
+        Some(Scene::Shop(ShopScene::new(run.run_number, run)))
     }
 }
 
@@ -199,10 +199,10 @@ impl SceneBehavior for TileSelectScene {
         let gap_sm = (16.0 * scale).max(8.0);
         let gap_lg = (28.0 * scale).max(14.0);
 
-        let title_h = typography::size(typography::TITLE, h, ui_scale);
-        let name_h = typography::size(typography::HEADING, h, ui_scale);
-        let bonus_h = typography::size(typography::CAPTION, h, ui_scale);
-        let hint_h = typography::size(typography::MICRO, h, ui_scale);
+        let title_h = typography::size(2.25, h, ui_scale);
+        let name_h = typography::size(typography::TITLE, h, ui_scale);
+        let bonus_h = typography::size(typography::HEADING, h, ui_scale);
+        let hint_h = typography::size(typography::CAPTION, h, ui_scale);
 
         let text_block_h = title_h + gap_sm + name_h + gap_sm + bonus_h;
         let mut cursor_y = (h * 0.5 - text_block_h) * 0.5 + h * 0.05;
@@ -277,6 +277,7 @@ impl SceneBehavior for TileSelectScene {
             color: [1.00, 0.86, 0.55],
             intensity: 1.40,
         }];
+        frame.fluid_smoke();
         frame.buttons = buttons;
         frame.window_title = "Mahjuro — Choose Tiles".into();
         frame

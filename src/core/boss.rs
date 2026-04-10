@@ -183,7 +183,7 @@ fn drought_apply(run: &mut RunState) {
 fn whisper_apply(run: &mut RunState) {
     // Shrink the hand by 1 for the whole round. The bonus_hand_size delta is
     // honored by `refill_hand` and the `score_selected_tiles` draw target.
-    run.bonus_hand_size -= 1;
+    run.boss.bonus_hand_size -= 1;
     while run.hand.len() > effective_hand_size(run) {
         run.hand.pop();
     }
@@ -198,7 +198,7 @@ fn veil_apply(run: &mut RunState) {
 }
 
 fn tribute_apply(run: &mut RunState) {
-    run.gold_cost_per_play = 1;
+    run.boss.gold_cost_per_play = 1;
 }
 
 fn famine_apply(run: &mut RunState) {
@@ -215,7 +215,7 @@ fn tribute_play(run: &mut RunState) {
     // Tax fires after the play has resolved. Gold is allowed to go negative
     // during boss rounds — the player can still finish the round but will
     // need to earn it back in the shop/payout phase.
-    run.gold -= run.gold_cost_per_play as i32;
+    run.gold -= run.boss.gold_cost_per_play as i32;
 }
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────
@@ -276,7 +276,7 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
 /// escape — the price was set when the ante began.
 fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
     let cost = (run.gold.max(0) as u32 / 10).clamp(2, 8);
-    run.tax_collector_cost = cost;
+    run.boss.tax_collector_cost = cost;
     ResolvedBossEffect {
         rule_pushes: vec![],
         on_apply: Some(tax_collector_apply),
@@ -288,14 +288,14 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
 fn tax_collector_apply(run: &mut RunState) {
     // The cost was stashed on RunState by `tax_collector_reveal`. Mirror
     // Tribute's path: set gold_cost_per_play and let `tribute_play` drain it.
-    run.gold_cost_per_play = run.tax_collector_cost;
+    run.boss.gold_cost_per_play = run.boss.tax_collector_cost;
 }
 
 /// Effective hand size after applying any per-round bonus_hand_size delta.
 /// Clamped to a sane minimum so a stacked debuff can't reduce the hand to 0.
 pub fn effective_hand_size(run: &RunState) -> usize {
     let base = crate::game::run::HAND_SIZE as i32;
-    let adjusted = base + run.bonus_hand_size;
+    let adjusted = base + run.boss.bonus_hand_size;
     adjusted.max(8) as usize
 }
 

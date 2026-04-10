@@ -48,6 +48,17 @@ impl TileEnhancement {
         }
     }
 
+    /// Numeric ID passed to the tile_3d shader via `base_color_factor.z`.
+    /// 0 = no enhancement (used by `Option::map_or`), 1–4 = Jade/Pearl/Gilded/Polychrome.
+    pub fn shader_id(self) -> f32 {
+        match self {
+            TileEnhancement::Jade => 1.0,
+            TileEnhancement::Pearl => 2.0,
+            TileEnhancement::Gilded => 3.0,
+            TileEnhancement::Polychrome => 4.0,
+        }
+    }
+
     /// Distinct accent colour used by tile renderers to mark an enhanced tile
     /// (border / corner gem). Each variant gets a clearly different hue so the
     /// player can tell at a glance which talisman is on a hand.

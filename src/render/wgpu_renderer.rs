@@ -397,6 +397,26 @@ struct DepartingTile {
     lifetime: f32,
 }
 
+/// Per-frame projected screen-space rects for every 3D element category.
+/// Written during rendering, read one-frame-stale by scenes via
+/// `DrawCtx` to anchor 2D overlays to visible 3D positions.
+#[derive(Default)]
+pub struct ProjectionCache {
+    pub hand_rects: Vec<(usize, [f32; 4])>,
+    pub relic_rects: Vec<[f32; 4]>,
+    pub pack_rects: Vec<([f32; 4], Option<u32>)>,
+    pub shrine_rects: Vec<[f32; 4]>,
+    pub ribbon_rects: Vec<[f32; 4]>,
+    pub talisman_rects: Vec<[f32; 4]>,
+    pub plaque_rects: Vec<[f32; 4]>,
+    pub peg_rects: [Option<[f32; 4]>; 2],
+    pub yaku_tablet_rects: Vec<[f32; 4]>,
+    pub wood_tablet_rects: Vec<[f32; 4]>,
+    pub bowl_rect: Option<[f32; 4]>,
+    pub mirror_rect: Option<[f32; 4]>,
+    pub aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
+}
+
 pub struct WgpuRenderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -447,6 +467,9 @@ pub struct WgpuRenderer {
     tile_primitives: Vec<TilePrimitiveGpu>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
+    /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
+    /// decals are loaded from `assets/sets/<name>/` instead of rasterized.
+    tile_set: Option<String>,
     /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
     hand_tiles: Vec<HandTileGpu>,
     /// Per-showcase-tile GPU resources (pack celebration, etc.). Grown on
@@ -481,12 +504,8 @@ pub struct WgpuRenderer {
     departing_tiles: Vec<DepartingTile>,
     /// Hand slots from the previous frame, used for departure animation positioning.
     prev_hand_slots: Vec<(f32, f32, f32, f32)>,
-    /// Per-tile screen-space rects after the perspective projection, captured
-    /// at the end of the previous frame. Indexed by hand position. Used by
-    /// the scene layer (one frame stale) so hover tooltips and other 2D HUD
-    /// overlays can anchor to the actual visible tile rather than its flat
-    /// layout slot.
-    last_projected_hand_rects: Vec<(usize, [f32; 4])>,
+    /// All per-frame projected screen-space rects for 3D elements.
+    pub proj: ProjectionCache,
     /// Per-hand-tile world-space model matrices captured at the end of the
     /// previous frame. Combined with `last_pick_camera`, these let
     /// `pick_hand_tile` cast a world ray through the cursor and intersect it
@@ -607,10 +626,6 @@ pub struct WgpuRenderer {
     /// Pre-allocated per-relic-placeholder instances. Sized at startup to
     /// match `MAX_RELIC_SLOTS`; indexed by placement order each frame.
     relic_instances: Vec<LitMeshInstance>,
-    /// Per-relic-placeholder screen-space rects projected from this frame's
-    /// view_proj. Indexed parallel with the most recent `RelicBatch` cmd
-    /// (one entry per placement). Empty when no relics are on screen.
-    last_projected_relic_rects: Vec<[f32; 4]>,
     /// Per-relic-placeholder world-space model matrices captured each frame
     /// for `pick_shop_object` raycasting.
     last_relic_models: Vec<Mat4>,
@@ -621,8 +636,6 @@ pub struct WgpuRenderer {
     /// Pre-allocated per-pack instances (same mesh + pipeline as relics).
     pack_instances: Vec<LitMeshInstance>,
     pack_slot_texture: Vec<Option<TilePackKind>>,
-    /// Projected screen rects for pack hit-testing.
-    last_projected_pack_rects: Vec<([f32; 4], Option<u32>)>,
     // ── Shop scene meshes (curio cabinet + ribbons + talismans + coins) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
@@ -630,19 +643,16 @@ pub struct WgpuRenderer {
     cabinet_mesh: LitMeshGpu,
     /// Procedural shrine mesh used by the pick-blind scene.
     shrine_mesh: LitMeshGpu,
-    /// Per-ribbon instances (shop scene). Indexed sequentially by
-    /// `ZodiacBatch` placement order; truncated at `MAX_RIBBON_SLOTS`.
+    /// Per-ribbon draw-slot instances (shop scene). Each textured ribbon uses
+    /// up to 3 slots (top/mid/bot); untextured ribbons use 1. Truncated at
+    /// `MAX_RIBBON_SLOTS`.
     ribbon_instances: Vec<LitMeshInstance>,
-    /// Currently bound zodiac texture per ribbon slot. Used to skip
-    /// rebuilding the bind group when nothing has changed since last frame.
-    /// `Some(idx)` is an index into `ribbon_zodiac_views`; `None` means the
-    /// flat-white fallback texture is bound.
-    ribbon_slot_zodiac: Vec<Option<u8>>,
-    /// One silk texture per zodiac, in `ZodiacKind::all()` order. Held alive
-    /// by their textures so the views remain valid for the bind groups.
-    #[allow(dead_code)]
-    ribbon_zodiac_textures: Vec<wgpu::Texture>,
-    ribbon_zodiac_views: Vec<wgpu::TextureView>,
+    /// Currently bound zodiac texture per ribbon slot. `Some((zodiac_idx, part))`
+    /// where part is 0=top, 1=mid, 2=bot. `None` means the flat-white
+    /// fallback is bound. Used to skip redundant bind-group rebuilds.
+    ribbon_slot_zodiac: Vec<Option<(u8, u8)>>,
+    /// Three-part zodiac silk textures (top/mid/bot per zodiac).
+    ribbon_zodiac_tex: crate::render::texture_upload::ZodiacRibbonTextures,
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
     talisman_instances: Vec<LitMeshInstance>,
@@ -654,37 +664,27 @@ pub struct WgpuRenderer {
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
     /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
     shrine_instances: Vec<LitMeshInstance>,
-    /// Per-shrine screen-space rects projected this frame. Indexed in
-    /// `ShrineBatch` placement order. Used by `pick_blind` to anchor
-    /// 2D labels above the visible shrine bodies.
-    last_projected_shrine_rects: Vec<[f32; 4]>,
     /// Per-explicit-dish instances (shop scene). Indexed sequentially by
     /// `DishExplicit` placement order; grown on demand.
     aux_dish_instances: Vec<LitMeshInstance>,
-    /// Per-ribbon screen-space rects projected this frame. Parallel with
-    /// the order ribbons were drawn.
-    last_projected_ribbon_rects: Vec<[f32; 4]>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
     last_ribbon_models: Vec<Mat4>,
-    /// Per-talisman screen-space rects projected this frame.
-    last_projected_talisman_rects: Vec<[f32; 4]>,
+    /// Total number of ribbon draw-slots populated this frame (across all
+    /// `ZodiacBatch` cmds). Used by the shadow pass.
+    last_ribbon_slot_count: usize,
+    /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
+    /// is how many draw-slots that batch consumed (2-3 per textured ribbon,
+    /// 1 per untextured).
+    last_ribbon_batch_slot_counts: Vec<usize>,
     /// Per-talisman world-space model matrices for `pick_shop_object`.
     last_talisman_models: Vec<Mat4>,
     /// Cabinet world AABB ((center, half_extents)) and screen rect for the
     /// current frame. Used so the shop scene can position the back-wall
     /// hover spotlight without re-deriving world coords.
     last_cabinet_world_aabb: Option<(glam::Vec3, glam::Vec3)>,
-    /// One entry per `DishExplicit` cmd this frame, in cmd order: pick id +
-    /// projected screen rect.
-    last_aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
     /// World-space `(center, half_extents)` parallel with
     /// `last_aux_dish_rects`, used by `pick_shop_object` for AABB raycasts.
     last_aux_dish_aabbs: Vec<(glam::Vec3, glam::Vec3)>,
-    /// Per-plaque screen-space rects projected this frame, parallel with
-    /// the cmd-order list of `Plaque` draws. Scenes use these to position
-    /// the 2D text overlay (blind name + round number) on top of the
-    /// rendered plaque face.
-    last_projected_plaque_rects: Vec<[f32; 4]>,
 
     // ── Skeuomorphic gameplay HUD meshes (phase 1 infrastructure) ──────
     plaque_mesh: LitMeshGpu,
@@ -702,13 +702,6 @@ pub struct WgpuRenderer {
     bowl_instances: Vec<LitMeshInstance>,
     mirror_instances: Vec<LitMeshInstance>,
     peg_block_instances: Vec<LitMeshInstance>,
-    /// Screen-space rects for the two halves of the peg block (plays group on
-    /// the left, discards group on the right). Indexed: `[0]` = plays/hands,
-    /// `[1]` = discards. `None` when no peg block is on screen this frame.
-    /// Mirrors the `projected_*_rects` family — used by the gameplay scene's
-    /// keyboard/controller focus system to anchor focus highlights and
-    /// tooltips on the counter pegs.
-    last_projected_peg_rects: [Option<[f32; 4]>; 2],
     /// Per-peg cylinder instances. The peg cylinders reuse `coin_mesh`
     /// (geometry) but get their own slot pool so they don't compete with the
     /// shop scene's coin pile for slots.
@@ -743,15 +736,6 @@ pub struct WgpuRenderer {
     /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
     /// and stretch each instance into a thin colored bar.
     debug_axes_instances: Vec<LitMeshInstance>,
-    /// Per-yaku-tablet screen-space rects projected this frame. Parallel with
-    /// the order tablets were drawn. Used for hit-testing in phase 3.
-    last_projected_yaku_tablet_rects: Vec<[f32; 4]>,
-    /// Per-wood-tablet screen-space rects (sort + play action buttons).
-    last_projected_wood_tablet_rects: Vec<[f32; 4]>,
-    /// Discard bowl projected screen rect this frame, if drawn.
-    last_projected_bowl_rect: Option<[f32; 4]>,
-    /// Bronze mirror projected screen rect this frame, if drawn.
-    last_projected_mirror_rect: Option<[f32; 4]>,
     /// Per-yaku-tablet world-space model matrices for `pick_gameplay_object`.
     /// Parallel with `last_projected_yaku_tablet_rects`.
     last_yaku_tablet_models: Vec<Mat4>,
@@ -856,9 +840,10 @@ pub enum GameplayPick {
 /// match the size of the `relic_instances` slot pool below; the renderer
 /// silently truncates batches longer than this.
 pub const MAX_RELIC_SLOTS: usize = 16;
-/// Maximum number of zodiac/talisman ribbons rendered per frame (across all
-/// `ZodiacBatch` cmds). Truncated silently.
-pub const MAX_RIBBON_SLOTS: usize = 16;
+/// Maximum number of zodiac/talisman ribbon *draw slots* per frame (across all
+/// `ZodiacBatch` cmds). Each textured ribbon uses up to 3 slots (top/mid/bot
+/// caps), so 16 logical ribbons × 3 = 48. Truncated silently.
+pub const MAX_RIBBON_SLOTS: usize = 48;
 /// Maximum number of talisman tablets rendered per frame.
 pub const MAX_TALISMAN_SLOTS: usize = 8;
 /// Maximum number of physical coins rendered per frame (across all
@@ -1120,42 +1105,12 @@ fn load_metal_heightmap(
     }
 }
 
-/// Decode the 12 zodiac silk ribbon PNGs and upload them as sRGB textures.
-/// One texture per `ZodiacKind` in `ZodiacKind::all()` order. Each missing
-/// or undecodeable file falls back to a flat 1×1 white texture so the slot
-/// still renders (just untextured) instead of crashing.
+/// Load the three-part zodiac silk ribbon textures (top/mid/bot per zodiac).
 fn load_zodiac_ribbon_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> (Vec<wgpu::Texture>, Vec<wgpu::TextureView>) {
-    use crate::core::zodiac::ZodiacKind;
-    let zodiacs = ZodiacKind::all();
-    let mut textures = Vec::with_capacity(zodiacs.len());
-    let mut views = Vec::with_capacity(zodiacs.len());
-    for &z in zodiacs {
-        let path = format!("textures/zodiac_{}.png", z.slug());
-        let label = format!("zodiac-ribbon-{}", z.slug());
-        let (tex, view) = match crate::asset_path::get(&path) {
-            Some(file) => match image::load_from_memory(&file.data) {
-                Ok(img) => {
-                    let rgba = img.into_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    upload_rgba_texture(device, queue, &label, &rgba.into_raw(), w, h)
-                }
-                Err(e) => {
-                    log::warn!("failed to decode {label}: {e} — using flat white fallback");
-                    upload_rgba_texture(device, queue, &label, &[255, 255, 255, 255], 1, 1)
-                }
-            },
-            None => {
-                log::warn!("zodiac ribbon texture missing at {path} — using flat white fallback");
-                upload_rgba_texture(device, queue, &label, &[255, 255, 255, 255], 1, 1)
-            }
-        };
-        textures.push(tex);
-        views.push(view);
-    }
-    (textures, views)
+) -> crate::render::texture_upload::ZodiacRibbonTextures {
+    crate::render::texture_upload::load_zodiac_ribbon_textures(device, queue)
 }
 
 /// Spawn a background thread that decodes all relic PNGs and sends the RGBA
@@ -1424,6 +1379,7 @@ fn make_hand_tile_gpu(
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
+    tile_set: Option<&str>,
 ) -> HandTileGpu {
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1442,7 +1398,7 @@ fn make_hand_tile_gpu(
     // stretching doesn't distort the rasterised glyphs.
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H);
+    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set);
     let (decal_texture, decal_view) =
         upload_rgba_texture(device, queue, "hand-tile-decal", &rgba, DECAL_W, DECAL_H);
 
@@ -1562,6 +1518,7 @@ fn make_showcase_tile_gpu(
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
+    tile_set: Option<&str>,
 ) -> ShowcaseTileGpu {
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1576,7 +1533,7 @@ fn make_showcase_tile_gpu(
 
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H);
+    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set);
     let (decal_texture, decal_view) = upload_rgba_texture(
         device,
         queue,
@@ -2814,8 +2771,7 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
-        let (ribbon_zodiac_textures, ribbon_zodiac_views) =
-            load_zodiac_ribbon_textures(&device, &queue);
+        let ribbon_zodiac_tex = load_zodiac_ribbon_textures(&device, &queue);
         let mut ribbon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_RIBBON_SLOTS);
         for _ in 0..MAX_RIBBON_SLOTS {
             ribbon_instances.push(LitMeshInstance::new(
@@ -2826,7 +2782,7 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
-        let ribbon_slot_zodiac: Vec<Option<u8>> = vec![None; MAX_RIBBON_SLOTS];
+        let ribbon_slot_zodiac: Vec<Option<(u8, u8)>> = vec![None; MAX_RIBBON_SLOTS];
         // Coin face heightmap (Chinese cash-coin engraving). Bound at slot 1
         // of every shop-pile coin instance; the metal branch in lit_mesh.wgsl
         // samples it as a heightfield to perturb the coin's surface normal so
@@ -2972,6 +2928,7 @@ impl WgpuRenderer {
             tile_sampler,
             tile_primitives,
             tile_base_color_factor,
+            tile_set: Some("original".to_string()),
             hand_tiles: Vec::new(),
             showcase_tiles: Vec::new(),
             vertex_buffer,
@@ -2990,15 +2947,13 @@ impl WgpuRenderer {
             tile_uids: Vec::new(),
             departing_tiles: Vec::new(),
             prev_hand_slots: Vec::new(),
-            last_projected_hand_rects: Vec::new(),
+            proj: ProjectionCache::default(),
             last_pick_models: Vec::new(),
             last_pick_camera: None,
-            last_projected_relic_rects: Vec::new(),
             last_relic_models: Vec::new(),
             relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
             pack_instances,
             pack_slot_texture: vec![None; 4],
-            last_projected_pack_rects: Vec::new(),
             ribbon_mesh,
             talisman_mesh,
             coin_mesh,
@@ -3006,22 +2961,18 @@ impl WgpuRenderer {
             shrine_mesh,
             ribbon_instances,
             ribbon_slot_zodiac,
-            ribbon_zodiac_textures,
-            ribbon_zodiac_views,
+            ribbon_zodiac_tex,
             talisman_instances,
             coin_instances,
             cabinet_instance,
             shrine_instances,
-            last_projected_shrine_rects: Vec::new(),
             aux_dish_instances,
-            last_projected_ribbon_rects: Vec::new(),
             last_ribbon_models: Vec::new(),
-            last_projected_talisman_rects: Vec::new(),
+            last_ribbon_slot_count: 0,
+            last_ribbon_batch_slot_counts: Vec::new(),
             last_talisman_models: Vec::new(),
             last_cabinet_world_aabb: None,
-            last_aux_dish_rects: Vec::new(),
             last_aux_dish_aabbs: Vec::new(),
-            last_projected_plaque_rects: Vec::new(),
             plaque_mesh,
             ofuda_mesh,
             bone_tablet_mesh,
@@ -3037,7 +2988,6 @@ impl WgpuRenderer {
             bowl_instances,
             mirror_instances,
             peg_block_instances,
-            last_projected_peg_rects: [None, None],
             peg_instances,
             wall_tile_instances,
             dora_stand_instances,
@@ -3047,10 +2997,6 @@ impl WgpuRenderer {
             glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache::new(),
             extruded_glyph_meshes: HashMap::new(),
             debug_axes_instances,
-            last_projected_yaku_tablet_rects: Vec::new(),
-            last_projected_wood_tablet_rects: Vec::new(),
-            last_projected_bowl_rect: None,
-            last_projected_mirror_rect: None,
             last_yaku_tablet_models: Vec::new(),
             last_wood_tablet_models: Vec::new(),
             last_bowl_model: None,
@@ -3277,10 +3223,10 @@ impl WgpuRenderer {
 
     /// Per-hand-tile screen-space rects after the perspective projection,
     /// captured at the end of the previous frame. Indexed by hand position.
-    /// Empty before the first frame is drawn — callers should fall back to
-    /// the flat layout slot rects in that case.
-    pub fn projected_hand_rects(&self) -> &[(usize, [f32; 4])] {
-        &self.last_projected_hand_rects
+    /// Borrow the entire projection cache for bulk access (e.g. building
+    /// `DrawCtx`).
+    pub fn projections(&self) -> &ProjectionCache {
+        &self.proj
     }
 
     /// Cast a ray from the camera through the cursor (in physical pixels,
@@ -3379,83 +3325,6 @@ impl WgpuRenderer {
         best.map(|(i, _)| i)
     }
 
-    pub fn projected_relic_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_relic_rects
-    }
-
-    /// Screen-space rects for the two halves of the gameplay scene's counter
-    /// peg block: index 0 is the plays/hands group (left half), index 1 is
-    /// the discards group (right half). Each is `Some` only when a peg block
-    /// was drawn this frame. Used by the gameplay scene's focus system to
-    /// hit-test cursor hover and anchor focus highlights on the pegs.
-    pub fn projected_peg_rects(&self) -> &[Option<[f32; 4]>; 2] {
-        &self.last_projected_peg_rects
-    }
-
-    pub fn projected_ribbon_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_ribbon_rects
-    }
-
-    pub fn projected_talisman_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_talisman_rects
-    }
-
-    pub fn projected_plaque_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_plaque_rects
-    }
-
-    /// Per-yaku-tablet projected screen rects from the previous frame's
-    /// perspective projection. Indexed in the order placements were pushed
-    /// via `YakuTabletBatch`. The gameplay scene uses these to hover-test
-    /// the bone yaku tablets where they actually appear on screen instead
-    /// of where their pre-projection input rect lives.
-    pub fn projected_yaku_tablet_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_yaku_tablet_rects
-    }
-
-    /// Screen-space rect of the discard river (the legacy "bowl" slot)
-    /// from the previous frame's perspective projection. `None` until the
-    /// renderer has drawn it at least once. Scenes that want to anchor a
-    /// 2D HUD overlay to the river's *visible* on-screen position should
-    /// read this rather than re-deriving it from the layout slot — the
-    /// projected rect already accounts for the camera tilt + perspective
-    /// distortion the layout-space hit rect has no idea about.
-    pub fn projected_bowl_rect(&self) -> Option<[f32; 4]> {
-        self.last_projected_bowl_rect
-    }
-
-    /// Screen-space rect of the bronze mirror from the previous frame's
-    /// perspective projection. Same one-frame-stale snapshot pattern as
-    /// `projected_bowl_rect`.
-    pub fn projected_mirror_rect(&self) -> Option<[f32; 4]> {
-        self.last_projected_mirror_rect
-    }
-
-    /// Per-wood-tablet projected screen rects from the previous frame.
-    /// Indexed in the order tablets were pushed via `WoodTabletPlacement`
-    /// — currently `[0]` = sort suit, `[1]` = sort rank, `[2]` = journal
-    /// book. Used by the gameplay scene to anchor floating overlay text
-    /// to the actual visible tablet positions instead of the synthesized
-    /// layout hit rects.
-    pub fn projected_wood_tablet_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_wood_tablet_rects
-    }
-
-    /// Per-shrine projected screen rects from the most recent frame.
-    /// Indexed in the order shrines were pushed via `ShrineBatch`. The
-    /// pick-blind scene uses these to anchor floating labels above
-    /// each shrine without re-projecting the perspective transform.
-    pub fn projected_shrine_rects(&self) -> &[[f32; 4]] {
-        &self.last_projected_shrine_rects
-    }
-
-    /// Auxiliary dish screen rects from the most recent frame, paired with
-    /// their `pick_id`. The shop scene uses these to anchor 2D tooltips
-    /// above the relic dish + coin dish.
-    pub fn aux_dish_rects(&self) -> &[(Option<u32>, [f32; 4])] {
-        &self.last_aux_dish_rects
-    }
-
     /// Cast a ray from the camera through the cursor and return the closest
     /// shop object hit. Uses the same one-frame-stale snapshot pattern as
     /// `pick_hand_tile`.
@@ -3464,7 +3333,7 @@ impl WgpuRenderer {
         if self.last_relic_models.is_empty()
             && self.last_ribbon_models.is_empty()
             && self.last_talisman_models.is_empty()
-            && self.last_aux_dish_rects.is_empty()
+            && self.proj.aux_dish_rects.is_empty()
         {
             return None;
         }
@@ -3562,7 +3431,7 @@ impl WgpuRenderer {
             }
         }
         // Auxiliary dishes (world-space AABB picks).
-        for (i, (id, _rect)) in self.last_aux_dish_rects.iter().enumerate() {
+        for (i, (id, _rect)) in self.proj.aux_dish_rects.iter().enumerate() {
             let Some(pid) = id else { continue };
             let Some((center, half)) = self.last_aux_dish_aabbs.get(i) else {
                 continue;
@@ -3628,7 +3497,7 @@ impl WgpuRenderer {
 
         // Pack boxes — 2D projected rect hit test (packs are few, so a
         // simple screen-space check is sufficient).
-        for (rect, pick_id) in &self.last_projected_pack_rects {
+        for (rect, pick_id) in &self.proj.pack_rects {
             let Some(pid) = pick_id else { continue };
             let [rx, ry, rw, rh] = *rect;
             if cursor_x >= rx && cursor_x <= rx + rw && cursor_y >= ry && cursor_y <= ry + rh {
@@ -3926,6 +3795,7 @@ impl WgpuRenderer {
                 self.ui_font.as_ref(),
                 self.emoji_font.as_ref(),
                 tile,
+                self.tile_set.as_deref(),
             );
             if i < self.hand_tiles.len() {
                 self.hand_tiles[i] = htg;
@@ -3965,7 +3835,7 @@ impl WgpuRenderer {
         // the renderer hasn't drawn one yet (e.g. very first frame after a
         // scene transition) fall back to a point off-screen above the
         // hand so the tile still arcs out of view instead of stalling.
-        let river_rect = self.last_projected_bowl_rect;
+        let river_rect = self.proj.bowl_rect;
         let (river_cx, river_cy) = river_rect
             .map(|r| (r[0] + r[2] * 0.5, r[1] + r[3] * 0.5))
             .unwrap_or((self.size.width as f32 * 0.5, -100.0));
@@ -4090,6 +3960,16 @@ impl WgpuRenderer {
         // Depth view was just recreated — the volumetric smoke pass needs a
         // fresh bind group that points at the new view.
         self.fluid_render_bg_dirty = true;
+    }
+
+    /// Clear the volumetric smoke field and reset per-tile velocity tracking
+    /// so the next scene starts with a clean atmosphere.
+    pub fn clear_smoke(&mut self) {
+        if let Some(ref mut fluid) = self.fluid {
+            fluid.clear();
+        }
+        self.prev_tile_world.clear();
+        self.prev_cursor_world = None;
     }
 
     /// Render one frame.
@@ -4481,7 +4361,7 @@ impl WgpuRenderer {
         );
 
         {
-            for (i, _htg) in self.hand_tiles.iter().enumerate() {
+            for (i, htg) in self.hand_tiles.iter().enumerate() {
                 let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
                     continue;
                 };
@@ -4660,6 +4540,10 @@ impl WgpuRenderer {
                         tile_thickness_px / LOCAL_Y_EXTENT, // local Y → world Y (thickness)
                         tile_short_px / LOCAL_Z_EXTENT, // local Z (short) → world X (left-right)
                     );
+                    // Pack enhancement kind into .z so the tile shader can
+                    // apply fresnel-masked sheen effects per-enhancement.
+                    let mut bcf = self.tile_base_color_factor;
+                    bcf[2] = htg.tile_id.2.map_or(0.0, |e| e.shader_id());
                     // When this tile is selected, also write an inflated
                     // model matrix into the outline shell uniform so the
                     // outline pipeline draws a slightly larger version of
@@ -4679,7 +4563,7 @@ impl WgpuRenderer {
                             bytemuck::bytes_of(&CameraUniform {
                                 view_proj: view_proj_arr,
                                 model: outline_model.to_cols_array(),
-                                base_color_factor: self.tile_base_color_factor,
+                                base_color_factor: bcf,
                             }),
                         );
                     }
@@ -4696,7 +4580,7 @@ impl WgpuRenderer {
                         bytemuck::bytes_of(&CameraUniform {
                             view_proj: view_proj_arr,
                             model: model.to_cols_array(),
-                            base_color_factor: self.tile_base_color_factor,
+                            base_color_factor: bcf,
                         }),
                     );
                 }
@@ -4706,7 +4590,7 @@ impl WgpuRenderer {
         // Snapshot the projected tile rects for the next frame's scene draw
         // (used by hover tooltips and any other 2D HUD that needs to anchor
         // to the actual visible tile).
-        self.last_projected_hand_rects = tile_3d_rects.clone();
+        self.proj.hand_rects = tile_3d_rects.clone();
         self.last_pick_models = tile_pick_models.clone();
         self.last_pick_camera = Some(PickCamera {
             inv_view_proj: view_proj.inverse(),
@@ -5426,7 +5310,7 @@ impl WgpuRenderer {
         // turn each into a per-instance model matrix (translate + scale)
         // and project the resulting world-space bounding box back to
         // screen space so the scene layer can hit-test next frame.
-        self.last_projected_relic_rects.clear();
+        self.proj.relic_rects.clear();
         self.last_relic_models.clear();
         let mut dish_bounds: Option<(f32, f32, f32, f32)> = None;
         let mut relic_slot_cursor: usize = 0;
@@ -5548,7 +5432,7 @@ impl WgpuRenderer {
                     mx_x = mx_x.max(sx);
                     mx_y = mx_y.max(sy);
                 }
-                self.last_projected_relic_rects
+                self.proj.relic_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
 
                 // Activation halo: enqueue a champagne radial bloom around
@@ -5593,7 +5477,7 @@ impl WgpuRenderer {
         }
 
         // ── Pack placeholders (same mesh + pipeline as relics) ──────────
-        self.last_projected_pack_rects.clear();
+        self.proj.pack_rects.clear();
         {
             let mut slot: usize = 0;
             for batch in &pack_batches {
@@ -5698,7 +5582,7 @@ impl WgpuRenderer {
                         mx_x = mx_x.max(sx);
                         mx_y = mx_y.max(sy);
                     }
-                    self.last_projected_pack_rects
+                    self.proj.pack_rects
                         .push(([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y], p.pick_id));
                     slot += 1;
                 }
@@ -5747,7 +5631,7 @@ impl WgpuRenderer {
         // a per-instance scale by `extents` sizes Small/Big/Boss
         // independently. `world_pos` is the *base center*, so we lift the
         // model up by half the height to put the plinth on the ground.
-        self.last_projected_shrine_rects.clear();
+        self.proj.shrine_rects.clear();
         {
             let mut shrine_cursor: usize = 0;
             for batch in &shrine_batches {
@@ -5791,7 +5675,7 @@ impl WgpuRenderer {
                             }
                         }
                     }
-                    self.last_projected_shrine_rects
+                    self.proj.shrine_rects
                         .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
                     // Glow gently brightens the shrine's tint so the
                     // upcoming shrine reads as the active choice at
@@ -5836,7 +5720,7 @@ impl WgpuRenderer {
         // Grow the GPU instance pool when more dishes are emitted than
         // previously allocated, so adding a new DishExplicit call can
         // never silently vanish.
-        self.last_aux_dish_rects.clear();
+        self.proj.aux_dish_rects.clear();
         self.last_aux_dish_aabbs.clear();
         while self.aux_dish_instances.len() < aux_dish_cmds.len() {
             self.aux_dish_instances.push(LitMeshInstance::new(
@@ -5883,108 +5767,148 @@ impl WgpuRenderer {
                     }
                 }
             }
-            self.last_aux_dish_rects
+            self.proj.aux_dish_rects
                 .push((d.pick_id, [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]));
             self.last_aux_dish_aabbs.push((center, half));
         }
         // Append pack projected rects so tooltip anchoring and focus nav
         // pick them up via the existing `aux_dish_rects` path.
-        for (rect, pick_id) in &self.last_projected_pack_rects {
-            self.last_aux_dish_rects.push((*pick_id, *rect));
+        for (rect, pick_id) in &self.proj.pack_rects {
+            self.proj.aux_dish_rects.push((*pick_id, *rect));
         }
 
         // ── Ribbon batches (shop scene) ────────────────────────────────
-        self.last_projected_ribbon_rects.clear();
+        // Each textured ribbon uses up to 3 draw slots (top cap, tileable
+        // middle, bottom cap) so its length is independent of texture aspect.
+        // Untextured (plain) ribbons still use a single slot.
+        self.proj.ribbon_rects.clear();
         self.last_ribbon_models.clear();
+        self.last_ribbon_batch_slot_counts.clear();
         let mut ribbon_slot_cursor: usize = 0;
         for batch in &ribbon_batches {
+            let batch_start = ribbon_slot_cursor;
             for r in batch.iter() {
                 if ribbon_slot_cursor >= MAX_RIBBON_SLOTS {
                     break;
                 }
-                let slot_i = ribbon_slot_cursor;
-                ribbon_slot_cursor += 1;
                 let anchor = pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
-                // The ribbon mesh hangs from local origin downward
-                // (y ∈ [-1, 0]), with x ∈ [-0.5, 0.5] (width). Build:
-                // T(anchor) * Ry * Rx * S(width, length, width*0.15).
-                //
-                // When a zodiac silk texture is bound, force the rendered
-                // length:width to match the texture's natural 1024×1536
-                // aspect (length = width × 1.5). Otherwise the embroidered
-                // animal gets squashed/stretched vertically when the
-                // requested length doesn't match the texture aspect. The
-                // requested `length` still acts as an upper bound — if the
-                // caller asks for a short ribbon we shrink the width to fit.
-                const RIBBON_TEX_ASPECT: f32 = 1.5; // length / width
-                let (eff_w, eff_l) = if r.kind.is_some() {
-                    let from_width = r.width * RIBBON_TEX_ASPECT;
-                    if from_width <= r.length {
-                        (r.width, from_width)
-                    } else {
-                        (r.length / RIBBON_TEX_ASPECT, r.length)
-                    }
-                } else {
-                    (r.width, r.length)
-                };
-                let model = Mat4::from_translation(anchor)
+                let eff_w = r.width;
+                let eff_l = r.length;
+                let depth = eff_w * 0.15;
+                let base_transform = Mat4::from_translation(anchor)
                     * Mat4::from_rotation_z(r.rotation_z_deg.to_radians())
                     * Mat4::from_rotation_y(r.rotation_y_deg.to_radians())
-                    * Mat4::from_rotation_x(r.rotation_x_deg.to_radians())
-                    * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, eff_w * 0.15));
+                    * Mat4::from_rotation_x(r.rotation_x_deg.to_radians());
                 let material = MaterialParams {
                     kind: MaterialKind::Plain,
                     base_color: r.color,
                     specular_strength: 0.25,
                     specular_power: 16.0,
                 };
-                // Swap the per-instance albedo binding to the requested
-                // zodiac silk texture (or back to flat white if `kind` is
-                // `None`). Skip the rebuild when nothing changed since
-                // last frame — bind groups are immutable so we'd otherwise
-                // churn one per slot per frame.
-                let want_zod: Option<u8> = r.kind.map(|z| {
+
+                let zod_idx: Option<u8> = r.kind.map(|z| {
                     crate::core::zodiac::ZodiacKind::all()
                         .iter()
                         .position(|kk| *kk == z)
                         .unwrap_or(0) as u8
                 });
-                if self.ribbon_slot_zodiac[slot_i] != want_zod {
-                    let view: &wgpu::TextureView = match want_zod {
-                        Some(idx) => &self.ribbon_zodiac_views[idx as usize],
-                        None => &self.lit_mesh_white_view,
-                    };
-                    let inst = &mut self.ribbon_instances[slot_i];
-                    inst.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("ribbon-bg-zodiac"),
-                        layout: &self.lit_mesh_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: inst.uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
-                            },
-                        ],
-                    });
-                    self.ribbon_slot_zodiac[slot_i] = want_zod;
-                }
-                self.ribbon_instances[slot_i].write_uniform(
-                    &self.queue,
-                    view_proj_arr,
-                    model,
-                    material,
-                );
-                self.last_ribbon_models.push(model);
 
-                // Project the ribbon's local AABB (corners of its mesh
-                // bounds) to screen for the tooltip anchor + click hover.
+                // Helper: bind a texture to a ribbon slot and write its uniform.
+                let mut emit_slot = |slot_i: usize, model: Mat4, want: Option<(u8, u8)>| {
+                    if self.ribbon_slot_zodiac[slot_i] != want {
+                        let view: &wgpu::TextureView = match want {
+                            Some((idx, 0)) => &self.ribbon_zodiac_tex.top_views[idx as usize],
+                            Some((idx, 1)) => &self.ribbon_zodiac_tex.mid_views[idx as usize],
+                            Some((idx, _)) => &self.ribbon_zodiac_tex.bot_views[idx as usize],
+                            None => &self.lit_mesh_white_view,
+                        };
+                        let inst = &mut self.ribbon_instances[slot_i];
+                        inst.bind_group =
+                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("ribbon-bg-zodiac"),
+                                layout: &self.lit_mesh_material_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: inst.uniform_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::TextureView(view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.tile_sampler,
+                                        ),
+                                    },
+                                ],
+                            });
+                        self.ribbon_slot_zodiac[slot_i] = want;
+                    }
+                    self.ribbon_instances[slot_i].write_uniform(
+                        &self.queue,
+                        view_proj_arr,
+                        model,
+                        material,
+                    );
+                };
+
+                if let Some(idx) = zod_idx {
+                    // Textured ribbon — three parts: top cap, tileable mid, bot cap.
+                    // Each cap is a fixed fraction of the ribbon width so
+                    // the middle section is always visible, even on short
+                    // ribbons. Clamp when the ribbon is extremely short.
+                    let nominal_cap = eff_w * 0.33;
+                    let cap_h = if eff_l < 2.0 * nominal_cap {
+                        eff_l / 2.0
+                    } else {
+                        nominal_cap
+                    };
+                    let mid_h = (eff_l - 2.0 * cap_h).max(0.0);
+                    let slots_needed = if mid_h > 0.0 { 3 } else { 2 };
+                    if ribbon_slot_cursor + slots_needed > MAX_RIBBON_SLOTS {
+                        break;
+                    }
+
+                    // Top cap
+                    let top_model = base_transform
+                        * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                    emit_slot(ribbon_slot_cursor, top_model, Some((idx, 0)));
+                    ribbon_slot_cursor += 1;
+
+                    // Middle (stretches to fill remaining length)
+                    if mid_h > 0.0 {
+                        let mid_model = base_transform
+                            * Mat4::from_translation(glam::Vec3::new(0.0, -cap_h, 0.0))
+                            * Mat4::from_scale(glam::Vec3::new(eff_w, mid_h, depth));
+                        emit_slot(ribbon_slot_cursor, mid_model, Some((idx, 1)));
+                        ribbon_slot_cursor += 1;
+                    }
+
+                    // Bottom cap
+                    let bot_model = base_transform
+                        * Mat4::from_translation(glam::Vec3::new(0.0, -(cap_h + mid_h), 0.0))
+                        * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                    emit_slot(ribbon_slot_cursor, bot_model, Some((idx, 2)));
+                    ribbon_slot_cursor += 1;
+
+                    // For pick-testing, store the full-ribbon model matrix.
+                    let full_model = base_transform
+                        * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                    self.last_ribbon_models.push(full_model);
+                } else {
+                    // Untextured (plain) ribbon — single slot, same as before.
+                    let model = base_transform
+                        * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                    emit_slot(ribbon_slot_cursor, model, None);
+                    ribbon_slot_cursor += 1;
+                    self.last_ribbon_models.push(model);
+                }
+
+                // Project the ribbon's full AABB to screen for tooltip/click.
+                let full_model = base_transform
+                    * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
                 let local_corners = [
                     glam::Vec3::new(-0.5, -1.0, -0.05),
                     glam::Vec3::new(0.5, -1.0, -0.05),
@@ -6000,20 +5924,23 @@ impl WgpuRenderer {
                 let mut mx_x = f32::NEG_INFINITY;
                 let mut mx_y = f32::NEG_INFINITY;
                 for c in local_corners {
-                    let w_pt = model.transform_point3(c);
+                    let w_pt = full_model.transform_point3(c);
                     let (sx, sy) = project_to_screen(w_pt);
                     mn_x = mn_x.min(sx);
                     mn_y = mn_y.min(sy);
                     mx_x = mx_x.max(sx);
                     mx_y = mx_y.max(sy);
                 }
-                self.last_projected_ribbon_rects
+                self.proj.ribbon_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             }
+            self.last_ribbon_batch_slot_counts
+                .push(ribbon_slot_cursor - batch_start);
         }
+        self.last_ribbon_slot_count = ribbon_slot_cursor;
 
         // ── Talisman batches (shop scene) ──────────────────────────────
-        self.last_projected_talisman_rects.clear();
+        self.proj.talisman_rects.clear();
         self.last_talisman_models.clear();
         let mut talisman_slot_cursor: usize = 0;
         for batch in &talisman_batches {
@@ -6090,7 +6017,7 @@ impl WgpuRenderer {
                     mx_x = mx_x.max(psx);
                     mx_y = mx_y.max(psy);
                 }
-                self.last_projected_talisman_rects
+                self.proj.talisman_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             }
         }
@@ -6134,10 +6061,10 @@ impl WgpuRenderer {
         // own slot pool above; per-frame we walk the cmds, write the
         // per-instance uniform, and (where the scene needs it for hit
         // testing in later phases) project the AABB to a screen-space rect.
-        self.last_projected_yaku_tablet_rects.clear();
-        self.last_projected_wood_tablet_rects.clear();
-        self.last_projected_bowl_rect = None;
-        self.last_projected_mirror_rect = None;
+        self.proj.yaku_tablet_rects.clear();
+        self.proj.wood_tablet_rects.clear();
+        self.proj.bowl_rect = None;
+        self.proj.mirror_rect = None;
         self.last_yaku_tablet_models.clear();
         self.last_wood_tablet_models.clear();
         self.last_bowl_model = None;
@@ -6211,7 +6138,7 @@ impl WgpuRenderer {
         // reads as a flat panel rather than a thin sliver hovering above
         // the back of the table.
         let plaque_tilt_x = 0.0_f32.to_radians();
-        self.last_projected_plaque_rects.clear();
+        self.proj.plaque_rects.clear();
         for (slot_i, p) in plaque_cmds.iter().enumerate() {
             if slot_i >= MAX_PLAQUE_SLOTS {
                 break;
@@ -6289,7 +6216,7 @@ impl WgpuRenderer {
                 mx_x = mx_x.max(sx);
                 mx_y = mx_y.max(sy);
             }
-            self.last_projected_plaque_rects
+            self.proj.plaque_rects
                 .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             // Plaque local AABB is the unit cube (push_box convention).
             // Slot 0 is the blind plaque, slot 1 is the scoring placard.
@@ -6419,7 +6346,7 @@ impl WgpuRenderer {
                     inst.decal_label_hash = label_hash;
                 }
                 inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, material, true);
-                self.last_projected_yaku_tablet_rects
+                self.proj.yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_yaku_tablet_models.push(model);
                 self.last_debug_pickables
@@ -6476,7 +6403,7 @@ impl WgpuRenderer {
                     self.wood_tablet_mesh.default_material,
                     true,
                 );
-                self.last_projected_wood_tablet_rects
+                self.proj.wood_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_wood_tablet_models.push(model);
                 // 0 = sort suit, 1 = sort rank, 2 = yaku journal book.
@@ -6534,7 +6461,7 @@ impl WgpuRenderer {
                 self.bowl_mesh.default_material,
             );
             if slot_i == 0 {
-                self.last_projected_bowl_rect = Some(project_aabb_rect(
+                self.proj.bowl_rect = Some(project_aabb_rect(
                     model,
                     BOWL_LOCAL_HALF,
                     BOWL_LOCAL_CENTER_Y,
@@ -6582,7 +6509,7 @@ impl WgpuRenderer {
                 self.mirror_mesh.default_material,
             );
             if slot_i == 0 {
-                self.last_projected_mirror_rect = Some(project_aabb_rect(
+                self.proj.mirror_rect = Some(project_aabb_rect(
                     model,
                     MIRROR_LOCAL_HALF,
                     MIRROR_LOCAL_CENTER_Y,
@@ -6602,7 +6529,7 @@ impl WgpuRenderer {
         }
 
         // Peg blocks: one wood block + N peg cylinders per cmd.
-        self.last_projected_peg_rects = [None, None];
+        self.proj.peg_rects = [None, None];
         let mut peg_slot_cursor: usize = 0;
         for (slot_i, p) in peg_block_cmds.iter().enumerate() {
             if slot_i >= MAX_PEG_BLOCK_SLOTS {
@@ -6649,8 +6576,8 @@ impl WgpuRenderer {
                     Mat4::from_translation(plays_center) * Mat4::from_scale(plays_scale);
                 let discards_model =
                     Mat4::from_translation(discards_center) * Mat4::from_scale(disc_scale);
-                self.last_projected_peg_rects[0] = Some(project_unit_cube_rect(plays_model));
-                self.last_projected_peg_rects[1] = Some(project_unit_cube_rect(discards_model));
+                self.proj.peg_rects[0] = Some(project_unit_cube_rect(plays_model));
+                self.proj.peg_rects[1] = Some(project_unit_cube_rect(discards_model));
             }
 
             let plays_color: [f32; 4] = [0.42, 0.82, 0.55, 1.0];
@@ -6937,10 +6864,10 @@ impl WgpuRenderer {
             // Grid bounds: a box roughly enclosing the table + headroom for
             // candle plumes. Matches the world space defined by pixel_to_world
             // (table at y=0, x ∈ ±w/2, z ∈ ±h/2).
-            let half_w = w * 0.55;
-            let half_z = h * 0.55;
-            let grid_min = glam::Vec3::new(-half_w, -8.0, -half_z);
-            let grid_max = glam::Vec3::new(half_w, h * 0.55, half_z);
+            let half_w = w * 0.75;
+            let half_z = h * 0.75;
+            let grid_min = glam::Vec3::new(-half_w, -12.0, -half_z);
+            let grid_max = glam::Vec3::new(half_w, h * 0.75, half_z);
             fluid.set_grid_bounds(grid_min, grid_max);
 
             // Candle plume impulses — walk this frame's draw commands and
@@ -7230,7 +7157,8 @@ impl WgpuRenderer {
                 model,
             );
         }
-        // Ribbon shadow casters.
+        // Ribbon shadow casters — mirrors the 3-slot-per-ribbon logic from
+        // the main pass so shadow silhouettes match the visible geometry.
         {
             let mut ribbon_shadow_cursor: usize = 0;
             for batch in &ribbon_batches {
@@ -7238,32 +7166,65 @@ impl WgpuRenderer {
                     if ribbon_shadow_cursor >= MAX_RIBBON_SLOTS {
                         break;
                     }
-                    let slot_i = ribbon_shadow_cursor;
-                    ribbon_shadow_cursor += 1;
-                    let anchor = pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
-                    // Mirror the texture-aspect adjustment from the main
-                    // pass so the shadow caster matches the visible mesh.
-                    const RIBBON_TEX_ASPECT: f32 = 1.5;
-                    let (eff_w, eff_l) = if r.kind.is_some() {
-                        let from_width = r.width * RIBBON_TEX_ASPECT;
-                        if from_width <= r.length {
-                            (r.width, from_width)
-                        } else {
-                            (r.length / RIBBON_TEX_ASPECT, r.length)
-                        }
-                    } else {
-                        (r.width, r.length)
-                    };
-                    let model = Mat4::from_translation(anchor)
+                    let anchor =
+                        pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
+                    let eff_w = r.width;
+                    let eff_l = r.length;
+                    let depth = eff_w * 0.15;
+                    let base_transform = Mat4::from_translation(anchor)
                         * Mat4::from_rotation_z(r.rotation_z_deg.to_radians())
                         * Mat4::from_rotation_y(r.rotation_y_deg.to_radians())
-                        * Mat4::from_rotation_x(r.rotation_x_deg.to_radians())
-                        * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, eff_w * 0.15));
-                    self.ribbon_instances[slot_i].write_shadow_uniform(
-                        &self.queue,
-                        light_view_proj_arr,
-                        model,
-                    );
+                        * Mat4::from_rotation_x(r.rotation_x_deg.to_radians());
+
+                    if r.kind.is_some() {
+                        let nominal_cap = eff_w * 0.33;
+                        let cap_h = if eff_l < 2.0 * nominal_cap {
+                            eff_l / 2.0
+                        } else {
+                            nominal_cap
+                        };
+                        let mid_h = (eff_l - 2.0 * cap_h).max(0.0);
+                        let slots_needed = if mid_h > 0.0 { 3 } else { 2 };
+                        if ribbon_shadow_cursor + slots_needed > MAX_RIBBON_SLOTS {
+                            break;
+                        }
+                        // Top cap
+                        let top_model = base_transform
+                            * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                        self.ribbon_instances[ribbon_shadow_cursor]
+                            .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
+                        ribbon_shadow_cursor += 1;
+                        // Middle
+                        if mid_h > 0.0 {
+                            let mid_model = base_transform
+                                * Mat4::from_translation(glam::Vec3::new(0.0, -cap_h, 0.0))
+                                * Mat4::from_scale(glam::Vec3::new(eff_w, mid_h, depth));
+                            self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(
+                                    &self.queue,
+                                    light_view_proj_arr,
+                                    mid_model,
+                                );
+                            ribbon_shadow_cursor += 1;
+                        }
+                        // Bottom cap
+                        let bot_model = base_transform
+                            * Mat4::from_translation(glam::Vec3::new(
+                                0.0,
+                                -(cap_h + mid_h),
+                                0.0,
+                            ))
+                            * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                        self.ribbon_instances[ribbon_shadow_cursor]
+                            .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);
+                        ribbon_shadow_cursor += 1;
+                    } else {
+                        let model = base_transform
+                            * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                        self.ribbon_instances[ribbon_shadow_cursor]
+                            .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                        ribbon_shadow_cursor += 1;
+                    }
                 }
             }
         }
@@ -7382,6 +7343,7 @@ impl WgpuRenderer {
                         self.ui_font.as_ref(),
                         self.emoji_font.as_ref(),
                         tile,
+                        self.tile_set.as_deref(),
                     );
                     self.showcase_tiles.push(stg);
                 } else {
@@ -7409,6 +7371,7 @@ impl WgpuRenderer {
                             self.ui_font.as_ref(),
                             self.emoji_font.as_ref(),
                             &p.tile,
+                            self.tile_set.as_deref(),
                         );
                     }
 
@@ -7436,13 +7399,15 @@ impl WgpuRenderer {
                         * Mat4::from_scale(scale);
 
                     let stg = &self.showcase_tiles[slot_cursor];
+                    let mut sc_bcf = self.tile_base_color_factor;
+                    sc_bcf[2] = p.tile.enhancement.map_or(0.0, |e| e.shader_id());
                     self.queue.write_buffer(
                         &stg.uniform_buffer,
                         0,
                         bytemuck::bytes_of(&CameraUniform {
                             view_proj: view_proj_arr,
                             model: model.to_cols_array(),
-                            base_color_factor: self.tile_base_color_factor,
+                            base_color_factor: sc_bcf,
                         }),
                     );
                     self.queue.write_buffer(
@@ -7731,11 +7696,7 @@ impl WgpuRenderer {
 
             // Ribbons (shop).
             {
-                let total_ribbons = ribbon_batches
-                    .iter()
-                    .map(|b| b.len())
-                    .sum::<usize>()
-                    .min(MAX_RIBBON_SLOTS);
+                let total_ribbons = self.last_ribbon_slot_count;
                 if total_ribbons > 0 {
                     shadow_pass.set_vertex_buffer(0, self.ribbon_mesh.vertex_buffer.slice(..));
                     shadow_pass.set_index_buffer(
@@ -8061,7 +8022,6 @@ impl WgpuRenderer {
                     }
                 }
                 RenderOp::ZodiacBatch(batch_idx) => {
-                    let batch = ribbon_batches[*batch_idx];
                     pass.set_pipeline(&self.lit_mesh_pipeline);
                     pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
                     pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
@@ -8073,9 +8033,18 @@ impl WgpuRenderer {
                     );
                     let mut start_slot = 0usize;
                     for prev in 0..*batch_idx {
-                        start_slot += ribbon_batches[prev].len();
+                        start_slot += self
+                            .last_ribbon_batch_slot_counts
+                            .get(prev)
+                            .copied()
+                            .unwrap_or(0);
                     }
-                    for (i, _) in batch.iter().enumerate() {
+                    let slot_count = self
+                        .last_ribbon_batch_slot_counts
+                        .get(*batch_idx)
+                        .copied()
+                        .unwrap_or(0);
+                    for i in 0..slot_count {
                         let slot_i = start_slot + i;
                         let Some(inst) = self.ribbon_instances.get(slot_i) else {
                             break;
