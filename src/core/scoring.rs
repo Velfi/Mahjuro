@@ -117,6 +117,29 @@ pub fn score_sets(
     ctx: &ScoreContext<'_>,
     rules: &[RuleModifier],
 ) -> ScoreBreakdown {
+    score_sets_inner(tiles, sets, ctx, rules, None)
+}
+
+/// Like `score_sets`, but accepts pre-substitution tiles so that
+/// suit-composition yaku (honitsu, chinitsu, tanyao, …) are checked against
+/// the player's actual selection, not the wildcard-resolved version.
+pub fn score_sets_with_original(
+    tiles: &[Tile],
+    sets: &[DetectedSet],
+    ctx: &ScoreContext<'_>,
+    rules: &[RuleModifier],
+    original_tiles: &[Tile],
+) -> ScoreBreakdown {
+    score_sets_inner(tiles, sets, ctx, rules, Some(original_tiles))
+}
+
+fn score_sets_inner(
+    tiles: &[Tile],
+    sets: &[DetectedSet],
+    ctx: &ScoreContext<'_>,
+    rules: &[RuleModifier],
+    original_tiles: Option<&[Tile]>,
+) -> ScoreBreakdown {
     let mut steps: Vec<ScoreStep> = Vec::new();
     // chips starts at base_chips (computed below); mult starts at the
     // identity ×1 so the cascade reads as +N mult / +N mult / ... .
@@ -608,7 +631,7 @@ pub fn score_sets(
 
     // ── Phase 4: yaku → mult ─────────────────────────────────────────────
 
-    let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round_wind);
+    let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round_wind, original_tiles);
     let detected_yaku: Vec<YakuKind> = if ctx.available_yaku.is_empty() {
         all_yaku
     } else {
@@ -1158,6 +1181,7 @@ pub fn preview_score(
     tiles: &[Tile],
     sets: &[DetectedSet],
     available_yaku: &[YakuKind],
+    original_tiles: Option<&[Tile]>,
 ) -> ScorePreview {
     let mut chips: i32 = 0;
     for s in sets {
@@ -1168,7 +1192,7 @@ pub fn preview_score(
             }
         }
     }
-    let all_yaku = detect_yaku(tiles, sets);
+    let all_yaku = detect_yaku_with_wind(tiles, sets, None, original_tiles);
     let visible_yaku: Vec<YakuKind> = if available_yaku.is_empty() {
         all_yaku
     } else {

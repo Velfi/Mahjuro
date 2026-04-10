@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::hand::{DetectedSet, SetKind, validate_selection};
 use crate::core::tile::{Suit, Tile};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum YakuKind {
     /// All tiles are 2–8 of a number suit (no terminals or honors). Tied to
     /// the Monkey zodiac.
@@ -232,17 +232,17 @@ pub fn yaku_preview(
     round_wind: Option<u8>,
     wildcard_result: Option<(&[DetectedSet], &[Tile])>,
 ) -> Vec<YakuPreview> {
-    let (sets_opt, effective_tiles) = match wildcard_result {
-        Some((sets, resolved)) => (Some(sets.to_vec()), resolved),
+    let (sets_opt, effective_tiles, original) = match wildcard_result {
+        Some((sets, resolved)) => (Some(sets.to_vec()), resolved, Some(tiles)),
         None => {
             // No wildcard context — fall back to plain validation.
             let v = validate_selection(tiles);
             // We need to return a reference to `tiles` in both arms, so
             // store the owned vec alongside the slice we actually iterate.
-            return yaku_preview_inner(tiles, &v, available, round_wind);
+            return yaku_preview_inner(tiles, &v, available, round_wind, None);
         }
     };
-    yaku_preview_inner(effective_tiles, &sets_opt, available, round_wind)
+    yaku_preview_inner(effective_tiles, &sets_opt, available, round_wind, original)
 }
 
 fn yaku_preview_inner(
@@ -250,9 +250,10 @@ fn yaku_preview_inner(
     sets_opt: &Option<Vec<DetectedSet>>,
     available: &[YakuKind],
     round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuPreview> {
     let active_yaku: Vec<YakuKind> = match sets_opt {
-        Some(s) => detect_yaku_with_wind(tiles, s, round_wind),
+        Some(s) => detect_yaku_with_wind(tiles, s, round_wind, original_tiles),
         None => Vec::new(),
     };
 
@@ -351,23 +352,33 @@ fn yaku_preview_inner(
 /// riichi state, river state). For Yakuhai's round-wind branch, use
 /// `detect_yaku_with_wind`.
 pub fn detect_yaku(tiles: &[Tile], sets: &[DetectedSet]) -> Vec<YakuKind> {
-    detect_yaku_with_wind(tiles, sets, None)
+    detect_yaku_with_wind(tiles, sets, None, None)
 }
 
 /// Like `detect_yaku`, but also fires Yakuhai when a triplet/kong matches the
 /// supplied `round_wind` (1=East, 2=South, 3=West, 4=North). Dragon triplets
 /// always count regardless of `round_wind`.
+///
+/// `original_tiles` — when wildcard substitution (JokerTile / WildWinds) has
+/// modified tiles to make valid melds, pass the *pre-substitution* tiles here
+/// so that suit-composition yaku (honitsu, chinitsu, tanyao, honroutou) are
+/// checked against what the player actually selected, not the resolved faces.
 pub fn detect_yaku_with_wind(
     tiles: &[Tile],
     sets: &[DetectedSet],
     round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuKind> {
+    // Suit/rank composition checks use original (pre-substitution) tiles so
+    // that wildcard relics can't fabricate yaku the player's real hand
+    // doesn't have (e.g. JokerTile turning a mixed-suit hand into honitsu).
+    let composition = original_tiles.unwrap_or(tiles);
     let mut found = Vec::new();
 
     if is_toitoi(sets) {
         found.push(YakuKind::Toitoi);
     }
-    if is_tanyao(tiles) {
+    if is_tanyao(composition) {
         found.push(YakuKind::Tanyao);
     }
     if is_full_hand(tiles, sets) {
@@ -388,16 +399,16 @@ pub fn detect_yaku_with_wind(
     if is_ittsu(sets, tiles) {
         found.push(YakuKind::Ittsu);
     }
-    if is_chinitsu(tiles) {
+    if is_chinitsu(composition) {
         found.push(YakuKind::Chinitsu);
     }
-    if is_honitsu(tiles) {
+    if is_honitsu(composition) {
         found.push(YakuKind::Honitsu);
     }
-    if is_junchan(sets, tiles) {
+    if is_junchan(sets, composition) {
         found.push(YakuKind::Junchan);
     }
-    if is_honroutou(tiles) {
+    if is_honroutou(composition) {
         found.push(YakuKind::Honroutou);
     }
 
@@ -1061,7 +1072,7 @@ mod tests {
             tile_ids: vec![0, 1, 2],
         }];
         assert!(detect_yaku(&tiles, &sets).contains(&YakuKind::Yakuhai));
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1)).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None).contains(&YakuKind::Yakuhai));
     }
 
     #[test]
@@ -1079,9 +1090,9 @@ mod tests {
         // Without wind context, wind triplets don't fire.
         assert!(!detect_yaku(&tiles, &sets).contains(&YakuKind::Yakuhai));
         // With matching round wind, fires.
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1)).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None).contains(&YakuKind::Yakuhai));
         // With non-matching round wind, doesn't fire.
-        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(2)).contains(&YakuKind::Yakuhai));
+        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(2), None).contains(&YakuKind::Yakuhai));
     }
 
     #[test]
