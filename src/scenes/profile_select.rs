@@ -16,15 +16,28 @@ const PROFILE_COUNT: usize = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PickProfile(usize);
 
+/// Confirmation sub-state for profile deletion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfirmDelete {
+    /// No delete pending.
+    None,
+    /// Waiting for confirmation to delete profile at this index.
+    Pending(usize),
+}
+
 pub struct ProfileSelectScene {
     tree: TreeState,
+    confirm_delete: ConfirmDelete,
 }
 
 impl ProfileSelectScene {
     pub fn new(active_profile: usize) -> Self {
         let mut tree = TreeState::new();
         tree.set_focus(FocusId(active_profile.min(PROFILE_COUNT - 1) as u32));
-        Self { tree }
+        Self {
+            tree,
+            confirm_delete: ConfirmDelete::None,
+        }
     }
 
     /// Create with cursor pre-set to the currently active profile from settings.
@@ -78,6 +91,26 @@ impl ProfileSelectScene {
 
 impl SceneBehavior for ProfileSelectScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        // ── Confirmation dialog sub-state ──────────────────────────────
+        if let ConfirmDelete::Pending(del_idx) = self.confirm_delete {
+            for a in ctx.actions {
+                match a {
+                    UiAction::Confirm => {
+                        *ctx.delete_profile = Some(del_idx);
+                        self.confirm_delete = ConfirmDelete::None;
+                        return None;
+                    }
+                    UiAction::Cancel | UiAction::Pause | UiAction::Delete => {
+                        self.confirm_delete = ConfirmDelete::None;
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
+            return None;
+        }
+
+        // ── Normal profile selection ───────────────────────────────────
         let items = Self::flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
         let action = self.tree.update_flat(
             &items,
@@ -95,6 +128,13 @@ impl SceneBehavior for ProfileSelectScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
                 return Some(Scene::StartScreen(StartScreenScene::new()));
+            }
+            if matches!(a, UiAction::Delete) {
+                let idx = self.cursor();
+                if persistence::profile_exists(idx) {
+                    self.confirm_delete = ConfirmDelete::Pending(idx);
+                    return None;
+                }
             }
         }
 
@@ -251,12 +291,74 @@ impl SceneBehavior for ProfileSelectScene {
         let items = Self::flat_items(w, h, ctx.ui_scale);
         self.tree.register_flat_buttons(&items, &mut buttons);
 
+        // ── Confirmation overlay ───────────────────────────────────────
+        if let ConfirmDelete::Pending(del_idx) = self.confirm_delete {
+            // Dim the background.
+            frame.quad(GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.0, 0.0, 0.0, 0.6],
+            });
+
+            let dialog_w = (300.0 * scale).min(w * 0.85);
+            let dialog_h = (120.0 * scale).max(80.0);
+            let dialog_x = (w - dialog_w) * 0.5;
+            let dialog_y = (h - dialog_h) * 0.5;
+
+            // Dialog background.
+            frame.quad(GpuInstance {
+                rect: [dialog_x, dialog_y, dialog_w, dialog_h],
+                color: color::OBSIDIAN,
+            });
+            // Border.
+            let b = 2.0 * scale;
+            frame.quad(GpuInstance {
+                rect: [dialog_x, dialog_y, dialog_w, b],
+                color: color::RUBY,
+            });
+            frame.quad(GpuInstance {
+                rect: [dialog_x, dialog_y + dialog_h - b, dialog_w, b],
+                color: color::RUBY,
+            });
+
+            let msg_h = (24.0 * scale).max(16.0);
+            let msg_y = dialog_y + dialog_h * 0.25;
+            frame.text(TextLabel {
+                rect: [dialog_x, msg_y, dialog_w, msg_h],
+                text: format!("Delete Profile {}?", del_idx + 1),
+                color: color::CHAMPAGNE,
+                ..Default::default()
+            });
+
+            let hint_h = (16.0 * scale).max(11.0);
+            let hint_y = dialog_y + dialog_h * 0.55;
+            frame.text(TextLabel {
+                rect: [dialog_x, hint_y, dialog_w, hint_h],
+                text: "All progress will be lost.".into(),
+                color: color::MIST,
+                ..Default::default()
+            });
+
+            let btn_h = (16.0 * scale).max(11.0);
+            let btn_y = dialog_y + dialog_h * 0.78;
+            frame.text(TextLabel {
+                rect: [dialog_x, btn_y, dialog_w, btn_h],
+                text: "Enter to confirm  |  Esc to cancel".into(),
+                color: color::SLATE,
+                ..Default::default()
+            });
+        }
+
         // Hint text at bottom.
         let hint_h = (18.0 * scale).max(12.0);
         let hint_y = h - hint_h - (12.0 * scale);
+        let hint_text = if self.confirm_delete != ConfirmDelete::None {
+            ""
+        } else {
+            "Up/Down to browse  |  Enter to select  |  X to delete  |  Esc to go back"
+        };
         frame.text(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
-            text: "Up/Down to browse  |  Enter to select  |  Esc to go back".into(),
+            text: hint_text.into(),
             color: color::SLATE,
             ..Default::default()
         });

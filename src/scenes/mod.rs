@@ -15,6 +15,7 @@ pub mod solitaire;
 pub mod splash;
 pub mod start_game_modal;
 pub mod start_screen;
+pub mod tutorial_overlay;
 
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
@@ -102,6 +103,8 @@ pub struct UpdateCtx<'a> {
     pub quit_requested: &'a mut bool,
     /// Set to switch the active profile (index 0–2).
     pub switch_profile: &'a mut Option<usize>,
+    /// Set to delete a profile slot (index 0–2). Handled after scene update.
+    pub delete_profile: &'a mut Option<usize>,
     /// Current mouse cursor position in window coordinates.
     pub cursor_pos: (f32, f32),
     /// `true` once all background asset loading has completed.
@@ -132,6 +135,9 @@ pub struct UpdateCtx<'a> {
     /// User's UI scale preference (1.0 = default). Thread through to
     /// `typography::size()` and `metrics::scene_scale()`.
     pub ui_scale: f32,
+    /// Whether the player should be offered the tutorial (first run, tutorial
+    /// not yet completed). Read by the start screen and tile-select scenes.
+    pub tutorial_eligible: bool,
 }
 
 /// Everything a scene's `draw()` may need.

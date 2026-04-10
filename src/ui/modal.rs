@@ -13,30 +13,36 @@ use crate::ui::input::UiAction;
 pub enum ModalTheme {
     /// Gold/warm — level up, round win.
     Success,
+    /// Cool indigo — informational (e.g. update available).
+    Info,
 }
 
 impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.12, 0.14, 0.08, 0.95],
+            ModalTheme::Info => [0.08, 0.10, 0.18, 0.95],
         }
     }
 
     fn border_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.85, 0.75, 0.2, 0.9],
+            ModalTheme::Info => [0.4, 0.5, 0.85, 0.9],
         }
     }
 
     fn title_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [1.0, 0.92, 0.4, 1.0],
+            ModalTheme::Info => [0.7, 0.8, 1.0, 1.0],
         }
     }
 
     fn body_color(&self) -> [f32; 4] {
         match self {
             ModalTheme::Success => [0.9, 0.88, 0.7, 1.0],
+            ModalTheme::Info => [0.85, 0.88, 0.95, 1.0],
         }
     }
 }

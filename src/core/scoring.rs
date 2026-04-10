@@ -75,6 +75,9 @@ pub struct ScoreBreakdown {
     /// Gold awarded by flower effects (Bamboo). Applied by the caller, not
     /// during the chips×mult cascade.
     pub flower_gold: i32,
+    /// Set kinds that were scored (for tutorial milestone detection).
+    #[allow(dead_code)]
+    pub scored_set_kinds: Vec<crate::core::hand::SetKind>,
 }
 
 // ── Per-meld base bonuses ──────────────────────────────────────────────
@@ -137,7 +140,11 @@ pub fn score_sets(
         None
     };
     let shadowed: Option<RelicId> = if ctx.relics.has(RelicId::ShadowHand) {
-        ctx.relics.active.first().filter(|&&id| id != RelicId::ShadowHand).copied()
+        ctx.relics
+            .active
+            .first()
+            .filter(|&&id| id != RelicId::ShadowHand)
+            .copied()
     } else {
         None
     };
@@ -360,7 +367,9 @@ pub fn score_sets(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid) {
-                    if matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank <= 4 {
+                    if matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                        && t.rank <= 4
+                    {
                         retrigger += t.point_value() as i32;
                     }
                 }
@@ -374,7 +383,11 @@ pub fn score_sets(
     // Tea Ceremony: retrigger ALL scored tiles (while charges remain).
     // Charges are tracked in relic_counters; destroyed at 0 in run.rs.
     if has(RelicId::TeaCeremony) {
-        let charges = ctx.relic_counters.get(&RelicId::TeaCeremony).copied().unwrap_or(0);
+        let charges = ctx
+            .relic_counters
+            .get(&RelicId::TeaCeremony)
+            .copied()
+            .unwrap_or(0);
         if charges > 0 {
             let mut retrigger = 0i32;
             for s in sets {
@@ -402,7 +415,11 @@ pub fn score_sets(
 
     // Melting Ice: current chip bonus (decremented each play in run.rs).
     if has(RelicId::MeltingIce) {
-        let ice_chips = ctx.relic_counters.get(&RelicId::MeltingIce).copied().unwrap_or(0);
+        let ice_chips = ctx
+            .relic_counters
+            .get(&RelicId::MeltingIce)
+            .copied()
+            .unwrap_or(0);
         if ice_chips > 0 {
             push_chips!("Melting Ice", ice_chips);
         }
@@ -485,11 +502,7 @@ pub fn score_sets(
     // Hanami relic adds +$3 gold per flower scored.
     {
         let meld_count = sets.len() as i32;
-        let triggers = if has(RelicId::GardenKeeper) {
-            2
-        } else {
-            1
-        };
+        let triggers = if has(RelicId::GardenKeeper) { 2 } else { 1 };
         let hanami = has(RelicId::Hanami);
         for s in sets {
             for &tid in &s.tile_ids {
@@ -580,11 +593,7 @@ pub fn score_sets(
             .count() as i32;
         if dora_count > 0 {
             // Use a custom step so we can label "Dora ×N" instead of the source name.
-            let per_dora = if has(RelicId::DoraCrown) {
-                35
-            } else {
-                25
-            };
+            let per_dora = if has(RelicId::DoraCrown) { 35 } else { 25 };
             let delta = per_dora * dora_count;
             chips += delta;
             steps.push(ScoreStep {
@@ -876,10 +885,7 @@ pub fn score_sets(
     }
 
     // Minimalist: playing exactly one set that is a pair grants +4 mult.
-    if has(RelicId::Minimalist)
-        && sets.len() == 1
-        && sets[0].kind == SetKind::Pair
-    {
+    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == SetKind::Pair {
         push_mult!("Minimalist", 4.0);
     }
 
@@ -892,7 +898,11 @@ pub fn score_sets(
     // Silk Thread: current mult bonus (decremented each discard in run.rs).
     if has(RelicId::SilkThread) {
         // Stored as ×10 to avoid float drift. 40 → 4.0 mult.
-        let thread_mult = ctx.relic_counters.get(&RelicId::SilkThread).copied().unwrap_or(0);
+        let thread_mult = ctx
+            .relic_counters
+            .get(&RelicId::SilkThread)
+            .copied()
+            .unwrap_or(0);
         if thread_mult > 0 {
             push_mult!("Silk Thread", thread_mult as f64 / 10.0);
         }
@@ -900,7 +910,11 @@ pub fn score_sets(
 
     // Clean Streak: +0.5 mult per consecutive play without honor tiles.
     if has(RelicId::CleanStreak) {
-        let streak = ctx.relic_counters.get(&RelicId::CleanStreak).copied().unwrap_or(0);
+        let streak = ctx
+            .relic_counters
+            .get(&RelicId::CleanStreak)
+            .copied()
+            .unwrap_or(0);
         if streak > 0 {
             push_mult!("Clean Streak", 0.5 * streak as f64);
         }
@@ -908,7 +922,11 @@ pub fn score_sets(
 
     // Obsession: +0.3 mult per round without most-used yaku.
     if has(RelicId::Obsession) {
-        let rounds = ctx.relic_counters.get(&RelicId::Obsession).copied().unwrap_or(0);
+        let rounds = ctx
+            .relic_counters
+            .get(&RelicId::Obsession)
+            .copied()
+            .unwrap_or(0);
         if rounds > 0 {
             push_mult!("Obsession", 0.3 * rounds as f64);
         }
@@ -916,7 +934,11 @@ pub fn score_sets(
 
     // Bonfire: +0.4 mult per relic sold this run (resets on boss).
     if has(RelicId::Bonfire) {
-        let sold = ctx.relic_counters.get(&RelicId::Bonfire).copied().unwrap_or(0);
+        let sold = ctx
+            .relic_counters
+            .get(&RelicId::Bonfire)
+            .copied()
+            .unwrap_or(0);
         if sold > 0 {
             push_mult!("Bonfire", 0.4 * sold as f64);
         }
@@ -942,7 +964,11 @@ pub fn score_sets(
 
     // Ritual Blade permanent mult (accumulated via relic_counters).
     if has(RelicId::RitualBlade) {
-        let perm_mult = ctx.relic_counters.get(&RelicId::RitualBlade).copied().unwrap_or(0);
+        let perm_mult = ctx
+            .relic_counters
+            .get(&RelicId::RitualBlade)
+            .copied()
+            .unwrap_or(0);
         if perm_mult > 0 {
             push_mult!("Ritual Blade", perm_mult as f64 / 10.0);
         }
@@ -988,7 +1014,8 @@ pub fn score_sets(
     }
 
     // Way of Pairs: ×2 mult if every scored set is a pair.
-    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Pair) {
+    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Pair)
+    {
         let delta = mult;
         push_mult!("Way of Pairs", delta);
     }
@@ -996,14 +1023,19 @@ pub fn score_sets(
     // Way of Triplets: ×2.5 mult if every scored set is a triplet/kong.
     if has(RelicId::WayOfTriplets)
         && !sets.is_empty()
-        && sets.iter().all(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+        && sets
+            .iter()
+            .all(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
     {
         let delta = mult * 1.5;
         push_mult!("Way of Triplets", delta);
     }
 
     // Way of Sequences: ×2 mult if every scored set is a sequence.
-    if has(RelicId::WayOfSequences) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Sequence) {
+    if has(RelicId::WayOfSequences)
+        && !sets.is_empty()
+        && sets.iter().all(|s| s.kind == SetKind::Sequence)
+    {
         let delta = mult;
         push_mult!("Way of Sequences", delta);
     }
@@ -1044,6 +1076,7 @@ pub fn score_sets(
         final_mult,
         total,
         flower_gold,
+        scored_set_kinds: sets.iter().map(|s| s.kind).collect(),
     }
 }
 

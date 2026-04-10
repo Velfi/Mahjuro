@@ -22,6 +22,9 @@ pub struct PlayerProgress {
     /// Extra starting relics at run start.
     #[serde(default)]
     pub starting_relic_slots: u32,
+    /// Whether the player has completed (or skipped) the tutorial.
+    #[serde(default)]
+    pub tutorial_completed: bool,
 }
 
 impl PlayerProgress {
@@ -33,6 +36,7 @@ impl PlayerProgress {
             runs_completed: 0,
             bonus_plays: 0,
             starting_relic_slots: 0,
+            tutorial_completed: false,
         }
     }
 

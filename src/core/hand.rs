@@ -467,7 +467,9 @@ fn backtrack_decompose_flowers(
             && remaining[1].suit == first.suit
             && remaining[1].rank == first.rank
         {
-            let fid = flower_pool.pop().expect("flower pool exhausted mid-backtrack");
+            let fid = flower_pool
+                .pop()
+                .expect("flower pool exhausted mid-backtrack");
             let set = DetectedSet {
                 kind: SetKind::Triplet,
                 tile_ids: vec![remaining[0].id, remaining[1].id, fid],
@@ -608,7 +610,9 @@ fn try_sequence_with_flower(
             .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
         if let Some(mid_offset) = mid {
             let mid_idx = mid_offset + 1;
-            let fid = flower_pool.pop().expect("flower pool exhausted mid-backtrack");
+            let fid = flower_pool
+                .pop()
+                .expect("flower pool exhausted mid-backtrack");
             let set = DetectedSet {
                 kind: SetKind::Sequence,
                 tile_ids: vec![remaining[0].id, remaining[mid_idx].id, fid],
@@ -635,7 +639,9 @@ fn try_sequence_with_flower(
             .position(|t| t.suit == first.suit && t.rank == first.rank + 2);
         if let Some(hi_offset) = hi {
             let hi_idx = hi_offset + 1;
-            let fid = flower_pool.pop().expect("flower pool exhausted mid-backtrack");
+            let fid = flower_pool
+                .pop()
+                .expect("flower pool exhausted mid-backtrack");
             let set = DetectedSet {
                 kind: SetKind::Sequence,
                 tile_ids: vec![remaining[0].id, fid, remaining[hi_idx].id],

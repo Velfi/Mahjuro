@@ -1,8 +1,6 @@
 pub mod animation;
 pub mod bone_tablet_mesh;
 
-pub mod gpu_types;
-pub mod texture_upload;
 pub mod candle_mesh;
 pub mod coin_mesh;
 pub mod curio_cabinet_mesh;
@@ -14,6 +12,7 @@ pub mod fluid;
 pub mod flying_coins;
 pub mod glyph_mesh;
 pub mod gpu_profiler;
+pub mod gpu_types;
 pub mod lit_mesh;
 pub mod mirror_mesh;
 pub mod ofuda_mesh;
@@ -27,6 +26,7 @@ pub mod score_popups;
 pub mod shrine_mesh;
 pub mod table_mesh;
 pub mod talisman_mesh;
+pub mod texture_upload;
 pub mod theme;
 pub mod tile_glb;
 pub mod wgpu_renderer;

@@ -12,6 +12,7 @@ mod persistence;
 mod render;
 mod scenes;
 mod ui;
+mod update_check;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,6 +29,7 @@ use render::animation::AnimationController;
 use render::draw_cmd::UiFrame;
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
+use scenes::gameplay::GameplayScene;
 use scenes::shop::ShopScene;
 use scenes::splash::SplashScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
@@ -143,6 +145,7 @@ struct App {
     tooltips: TooltipState,
     cascade_tuning: CascadeTuning,
     deferred_round_end: Option<GameEvent>,
+    update_checker: update_check::UpdateChecker,
 }
 
 impl App {
@@ -239,6 +242,7 @@ impl App {
             prev_cursor: (0.0, 0.0),
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
+            update_checker: update_check::UpdateChecker::spawn(),
         }
     }
 
@@ -316,12 +320,50 @@ impl App {
                 self.run.advance_round();
                 self.pending_scene = Some(if self.run.is_run_complete() {
                     Scene::GameOver(GameOverScene::victory(final_score, target))
+                } else if !self.run.tutorial_shop_enabled() {
+                    // Tutorial: skip shop and go straight to gameplay.
+                    Scene::Gameplay(GameplayScene::new())
                 } else {
                     Scene::Shop(ShopScene::new(self.run.run_number, &mut self.run))
                 });
                 self.transition_alpha = 1.0;
             }
             GameEvent::GameOver { .. } => {
+                // Tutorial retry: if the tutorial is active and the player
+                // hasn't reached the graduation zone, restart the current
+                // blind with adaptive difficulty instead of ending the run.
+                let tutorial_retry = self
+                    .run
+                    .tutorial
+                    .as_ref()
+                    .is_some_and(|t| t.is_active() && t.current_lesson < 8);
+                if tutorial_retry {
+                    self.run.retry_tutorial_blind();
+                    let retry_num = self
+                        .run
+                        .tutorial
+                        .as_ref()
+                        .map(|t| t.retry_count)
+                        .unwrap_or(0);
+                    let hint = if retry_num == 1 {
+                        "Don\u{2019}t worry \u{2014} the target has been lowered. Try again!"
+                    } else {
+                        "Keep going \u{2014} you\u{2019}ve got this!"
+                    };
+                    let modal = Modal::new("Try Again!", hint, ModalTheme::Success);
+                    self.modals.push(modal);
+                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::new()));
+                    self.transition_alpha = 1.0;
+                    return;
+                }
+
+                // Mark tutorial as completed if the player reached graduation
+                // (or finished the tutorial run regardless of outcome).
+                if let Some(ref tutorial) = self.run.tutorial {
+                    if tutorial.finished || tutorial.current_lesson >= 8 {
+                        self.progress.tutorial_completed = true;
+                    }
+                }
                 self.progress.runs_completed += 1;
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
@@ -439,7 +481,11 @@ impl App {
         // Spawn departure animations before updating hand tiles (old data still in renderer).
         if !frame.departing_indices.is_empty() {
             let depart_lifetime = self.cascade_tuning.depart_lifetime_ms as f32 / 1000.0;
-            renderer.depart_tiles(&frame.departing_indices, depart_lifetime, self.gfx.tile_preset);
+            renderer.depart_tiles(
+                &frame.departing_indices,
+                depart_lifetime,
+                self.gfx.tile_preset,
+            );
         }
         renderer.update_hand_tiles(&frame.hand_tiles);
 
@@ -527,7 +573,8 @@ impl App {
 
         // SFX test overlay — on top of modals.
         if let Some(ref mut overlay) = self.debug.sfx_test_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+            let (insts, lbls) =
+                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
             frame.quads(insts);
             frame.texts(lbls);
             self.active_buttons.clear();
@@ -537,7 +584,8 @@ impl App {
         if let Some(ref overlay) = self.debug.camera_debug_overlay {
             // Override the scene's camera with the debug values.
             frame.camera_override = Some(overlay.to_camera_params());
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+            let (insts, lbls) =
+                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
             frame.quads(insts);
             frame.texts(lbls);
             self.active_buttons.clear();
@@ -545,7 +593,8 @@ impl App {
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+            let (insts, lbls) =
+                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
             frame.quads(insts);
             frame.texts(lbls);
             self.active_buttons.clear();
@@ -987,8 +1036,82 @@ impl ApplicationHandler for App {
                             self.audio.play_sfx(audio::SfxId::CandleFlareWhoosh);
                             self.audio.play_sfx(audio::SfxId::CandleFlareImpact);
                         }
+                        GameEvent::TutorialMilestone(milestone) => {
+                            use crate::game::tutorial::TutorialMilestone;
+                            let (title, body) = match milestone {
+                                TutorialMilestone::FirstPair => (
+                                    "First Pair!",
+                                    "Two matching tiles \u{2014} the foundation of every hand.",
+                                ),
+                                TutorialMilestone::FirstTriplet => (
+                                    "First Triplet!",
+                                    "Three of a kind scores big chips. Keep building!",
+                                ),
+                                TutorialMilestone::FirstSequence => (
+                                    "First Sequence!",
+                                    "Three in a row, same suit. Smooth and versatile.",
+                                ),
+                                TutorialMilestone::FirstDiscard => {
+                                    ("First Discard!", "Out with the old, in with the new.")
+                                }
+                                TutorialMilestone::FirstFullHand => (
+                                    "First Full Hand!",
+                                    "4 melds + 1 pair \u{2014} the ultimate yaku. Huge multiplier!",
+                                ),
+                                TutorialMilestone::FirstShopBuy => (
+                                    "First Relic!",
+                                    "Relics power up your scoring for the rest of the run.",
+                                ),
+                            };
+                            let win_size = self
+                                .window
+                                .as_ref()
+                                .map(|w| w.inner_size())
+                                .unwrap_or(PhysicalSize::new(800, 600));
+                            let ww = win_size.width as f32;
+                            let wh = win_size.height as f32;
+                            let modal = crate::ui::modal::Modal::new(
+                                title,
+                                body,
+                                crate::ui::modal::ModalTheme::Success,
+                            )
+                            .with_fireworks(
+                                ww * 0.5,
+                                wh * 0.8,
+                                ww * 0.5,
+                                3,
+                            );
+                            self.modals.push(modal);
+                            self.audio.play_sfx(audio::SfxId::ScoreFinal);
+                        }
                         other => log::info!("event: {other:?}"),
                     }
+                }
+
+                // 1a. Poll background update check.
+                if let Some(result) = self.update_checker.poll() {
+                    let modal = match result {
+                        update_check::UpdateResult::Updated { new_version } => {
+                            Modal::new(
+                                "Updated!",
+                                format!("v{new_version} installed.\nRestart to use the new version."),
+                                ModalTheme::Info,
+                            )
+                        }
+                        update_check::UpdateResult::UpdateFailed {
+                            new_version,
+                            release_url,
+                            error,
+                        } => {
+                            log::warn!("auto-update to v{new_version} failed: {error}");
+                            Modal::new(
+                                "Update Available",
+                                format!("v{new_version} is available but auto-update failed.\n\n{release_url}"),
+                                ModalTheme::Info,
+                            )
+                        }
+                    };
+                    self.modals.push(modal);
                 }
 
                 // 1b. Poll debug menu actions.
@@ -1110,7 +1233,12 @@ impl ApplicationHandler for App {
 
                 // 3b'''. If the camera debug overlay is open, intercept input.
                 if let Some(mut overlay) = self.debug.camera_debug_overlay.take() {
-                    let close = overlay.update(&actions);
+                    let wh = self
+                        .window
+                        .as_ref()
+                        .map(|w| w.inner_size().height as f32)
+                        .unwrap_or(800.0);
+                    let close = overlay.update(&actions, wh);
                     if !close {
                         self.debug.camera_debug_overlay = Some(overlay);
                     } else {
@@ -1169,6 +1297,7 @@ impl ApplicationHandler for App {
                     .solve(win_size.width as f32, win_size.height as f32);
                 let mut quit_requested = false;
                 let mut switch_profile_req: Option<usize> = None;
+                let mut delete_profile_req: Option<usize> = None;
                 let cursor_pos = self
                     .input
                     .as_ref()
@@ -1198,6 +1327,7 @@ impl ApplicationHandler for App {
                     focus_tile_index: focus,
                     quit_requested: &mut quit_requested,
                     switch_profile: &mut switch_profile_req,
+                    delete_profile: &mut delete_profile_req,
                     cursor_pos,
                     loading_done,
                     cascade_tuning: &self.cascade_tuning,
@@ -1211,6 +1341,8 @@ impl ApplicationHandler for App {
                     picked_hand_tile: picked_hand_tile_for_update,
                     scroll_lines,
                     ui_scale: self.gfx.ui_scale,
+                    tutorial_eligible: self.progress.runs_completed == 0
+                        && !self.progress.tutorial_completed,
                 };
                 if let Some(mut next_scene) = self.scene.update(ctx) {
                     // When transitioning *to* the Meld Guide from a game scene,
@@ -1281,6 +1413,21 @@ impl ApplicationHandler for App {
                     };
                     if new_idx != self.active_profile {
                         self.switch_profile(new_idx);
+                    }
+                }
+
+                // Handle profile delete request.
+                if let Some(idx) = delete_profile_req {
+                    let idx = idx.min(2);
+                    persistence::delete_profile(idx);
+                    // If we just deleted the active profile, reload it (now
+                    // returns a fresh default since the file is gone).
+                    if idx == self.active_profile {
+                        self.progress = persistence::load_profile(idx);
+                        self.run = persistence::load_run(idx)
+                            .unwrap_or_else(crate::game::run::RunState::new_demo);
+                        self.run.available_yaku = self.progress.available_yaku();
+                        self.run.available_rules = self.progress.available_rules();
                     }
                 }
 

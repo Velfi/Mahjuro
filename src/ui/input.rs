@@ -37,6 +37,8 @@ pub enum UiAction {
     Pause,
     /// Open the glossary / help overlay (`?`, `F1`, `H`, gamepad Select).
     Help,
+    /// Delete the focused item (e.g. a profile slot). Bound to `Delete` / `X`.
+    Delete,
     /// Debug-only: blow a strong one-shot wind gust at the candle row so we
     /// can verify flame/wind reactions in-game. Bound to `B`.
     DebugBlowWind,
@@ -144,6 +146,7 @@ impl InputState {
             KeyCode::Space => actions.push(UiAction::Confirm),
             KeyCode::Escape => actions.push(UiAction::Pause),
             KeyCode::Backspace => actions.push(UiAction::Cancel),
+            KeyCode::Delete | KeyCode::KeyX => actions.push(UiAction::Delete),
             KeyCode::KeyS => actions.push(UiAction::ScoreHand),
             KeyCode::Enter | KeyCode::NumpadEnter => actions.push(UiAction::Confirm),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
@@ -219,7 +222,8 @@ pub fn apply_ui_actions(
             | UiAction::Pause
             | UiAction::Help
             | UiAction::DebugBlowWind
-            | UiAction::DebugToggleAxes => {}
+            | UiAction::DebugToggleAxes
+            | UiAction::Delete => {}
             UiAction::FocusNext
             | UiAction::FocusPrev
             | UiAction::FocusDown

@@ -734,7 +734,8 @@ impl SfxTestOverlay {
         let rows_y0 = panel_y + pad + title_h + pad;
         for (i, &id) in ids.iter().enumerate() {
             let row_y = rows_y0 + i as f32 * (row_h + row_gap);
-            self.row_rects.push([panel_x + 4.0, row_y, panel_w - 8.0, row_h]);
+            self.row_rects
+                .push([panel_x + 4.0, row_y, panel_w - 8.0, row_h]);
             let is_focused = self.cursor == i;
 
             let bg = if is_focused {
@@ -795,6 +796,9 @@ pub struct CameraDebugOverlay {
     target: [f32; 3],
     up: [f32; 3],
     fovy_deg: f32,
+    /// Window height at draw time, included in clipboard output so the
+    /// camera can be scaled proportionally at different resolutions.
+    last_window_h: f32,
 }
 
 impl CameraDebugOverlay {
@@ -805,6 +809,7 @@ impl CameraDebugOverlay {
             target: cam.target,
             up: cam.up,
             fovy_deg: cam.fovy_deg,
+            last_window_h: 0.0,
         }
     }
 
@@ -847,7 +852,8 @@ impl CameraDebugOverlay {
     }
 
     /// Returns `true` if the overlay should close.
-    pub fn update(&mut self, actions: &[UiAction]) -> bool {
+    pub fn update(&mut self, actions: &[UiAction], window_h: f32) -> bool {
+        self.last_window_h = window_h;
         for a in actions {
             match a {
                 UiAction::FocusDown => {
@@ -863,9 +869,15 @@ impl CameraDebugOverlay {
                     self.adjust(-10.0);
                 }
                 UiAction::Confirm | UiAction::CommitDiscard => {
-                    // Copy to clipboard.
+                    // Copy to clipboard.  Includes the reference window
+                    // height and pre-written `cs` scaling so the camera
+                    // can be resolution-independent when pasted into a
+                    // scene.
+                    let rh = self.last_window_h;
                     let text = format!(
-                        "CameraParams {{\n    eye: [{:.1}, {:.1}, {:.1}],\n    target: [{:.1}, {:.1}, {:.1}],\n    up: [{:.1}, {:.1}, {:.1}],\n    fovy_deg: {:.1},\n}}",
+                        "// ref_h: {:.0}\nlet cs = h / {:.0}_f32;\nCameraParams {{\n    eye: [{:.1} * cs, {:.1} * cs, {:.1} * cs],\n    target: [{:.1} * cs, {:.1} * cs, {:.1} * cs],\n    up: [{:.1}, {:.1}, {:.1}],\n    fovy_deg: {:.1},\n}}",
+                        rh,
+                        rh,
                         self.eye[0],
                         self.eye[1],
                         self.eye[2],

@@ -299,12 +299,320 @@ RELIC_PROMPTS: dict[str, str] = {
         "every flower is perfectly duplicated left-to-right, mirror image. "
         "Warm afternoon light refracts through the glass. Teal and sage."
     ),
+    "ikebana": (
+        "A stark alcove containing a single ikebana arrangement in a dark "
+        "ceramic vase. Two blooming branches arch toward each other, their "
+        "petals radiating concentric rings of light. A calligraphy scroll "
+        "hangs behind the arrangement, its characters glowing faintly. The "
+        "shadows are impossibly sharp. Deep navy and ochre. Austere and still."
+    ),
     "hanami": (
         "A picnic blanket beneath a cherry tree in full bloom, petals falling "
         "like snow. On the blanket: neat stacks of gold coins among lacquered "
         "bento boxes and ceramic cups. No people — just the feast, the gold, "
         "and an impossible density of blossoms. Dappled pink light, nostalgic "
         "and slightly dreamy. Cheerful beginner-kit energy."
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 15 NEW RELICS
+    # ═══════════════════════════════════════════════════════════════════
+    "jade_serpent": (
+        "A jade-green snake coiled around a bundle of bamboo stalks, its "
+        "scales formed from tiny mahjong tile faces. A simple terrarium "
+        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
+        "slightly off — the snake has too-large friendly eyes. Cream and "
+        "olive green palette."
+    ),
+    "ink_brush": (
+        "A calligraphy brush standing upright in an ink stone, mid-stroke — "
+        "a splatter of ink radiates outward, forming tiny character-suit tile "
+        "shapes. Wooden desk, rice paper, and a window with gray daylight. "
+        "Simple, nostalgic. Warm tan and black ink tones."
+    ),
+    "pearl_diver": (
+        "A diver in a vintage brass helmet descending into turquoise water, "
+        "reaching for a cluster of luminous pearls arranged in the pattern of "
+        "dots-suit tile pips. Bubbles trail upward. Coral and sand below. "
+        "Simple, cheerful composition with faded blues and cream."
+    ),
+    "low_tide": (
+        "A beach at low tide revealing a mosaic of numbered tiles (1, 2, 3) "
+        "embedded in the wet sand. Tide pools reflect a pale sky. A child's "
+        "bucket and shovel sit nearby, slightly too large. Peaceful, warm, "
+        "beginner-kit energy. Tan, soft blue, cream."
+    ),
+    "merchants_eye": (
+        "A jeweler's monocle on a velvet cushion, its lens showing a tiny "
+        "reflected price tag with the number crossed out and replaced by a "
+        "smaller one. A cluttered shop counter with coins and trinkets. Warm "
+        "lamplight, cozy but slightly uncanny. Cream, olive, faded gold."
+    ),
+    "edge_runner": (
+        "A futuristic motorcycle tearing along the razor edge of a cliff road, "
+        "one wheel off the edge. The cliff face is tiled with enormous 1s and "
+        "9s. Sunset behind, deep ravine below. Dynamic angle, bold teal and "
+        "burnt orange. Speed lines and dust clouds."
+    ),
+    "lucky_seven": (
+        "A slot machine built into the side of a mecha, its three reels all "
+        "showing sevens. Coins pour from the machine's mouth into a growing "
+        "pile. Neon-lit arcade background, hazy with machine smoke. Bold "
+        "jade and orange palette. Lucky-charm energy."
+    ),
+    "momentum": (
+        "A series of pendulums in a Newton's cradle, each ball replaced by "
+        "a mahjong tile, captured mid-swing with the last tile flying off. "
+        "Motion blur streaks. Dark workshop table, dramatic side-lighting. "
+        "The cradle frame is brass with rivets. Teal and steel palette."
+    ),
+    "minimalist": (
+        "A zen garden with a single rock and perfectly raked sand, viewed from "
+        "above. The rock is a pair of identical small tiles leaning against "
+        "each other. Extreme negative space. Late afternoon shadow stretches "
+        "across the frame. Deep teal and sand palette. Very still."
+    ),
+    "turtle_shell": (
+        "A tortoise with a shell made of hexagonal tile faces, trudging across "
+        "a cracked desert floor. A distant sandstorm approaches. The shell "
+        "glows faintly with a protective shimmer. Low angle, dramatic sky. "
+        "Burnt orange and teal atmosphere."
+    ),
+    "closed_gate": (
+        "A massive iron gate slamming shut, viewed from inside. The gap "
+        "narrows to a sliver of light. Terminal tiles (1s and 9s) and honor "
+        "characters are forged into the gate's surface. Sparks fly from the "
+        "hinges. Dark interior, blinding light from outside. Navy and rust."
+    ),
+    "gold_furnace": (
+        "A squat industrial furnace with its door ajar, molten gold pouring "
+        "into ingot molds. The furnace has dial gauges showing mult readings "
+        "in nonsense script. A worker in a leather apron watches from shadow. "
+        "Intense orange glow against dark navy walls. Austere, industrial."
+    ),
+    "snowball": (
+        "A snowball rolling downhill, growing enormous, picking up tiles and "
+        "coins and debris. A village at the bottom of the hill looks on in "
+        "alarm. Moonlit winter night, deep blue-white palette. The snowball "
+        "casts sharp geometric shadows. Military precision in the chaos."
+    ),
+    "second_wind": (
+        "A runner collapsed at a finish line, one hand reaching forward, a "
+        "second ghostly version of the same runner rising from the body and "
+        "sprinting onward. Stadium lights, empty bleachers, dusk sky. "
+        "Navy and ochre with ethereal blue translucency on the ghost figure."
+    ),
+    "glass_cannon": (
+        "A cannon made entirely of cut crystal and glass, mid-firing. The "
+        "muzzle blast shatters hairline cracks through the barrel. Prismatic "
+        "light refracts through the crystal body. Velvet display room with "
+        "ornate gold-foil frame elements. Dramatic, luxurious, fragile. "
+        "Royal purple, deep gold, midnight blue."
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # BALATRO-INSPIRED (Patch F)
+    # ═══════════════════════════════════════════════════════════════════
+    "last_breath": (
+        "A deep-sea diver's helmet with the last air bubble escaping upward, "
+        "the bubble containing a glowing tile. Murky abyss below, faint "
+        "bioluminescent creatures in the distance. The diver's hand reaches "
+        "for something off-frame. Navy, ochre, deep rust. Suffocating calm."
+    ),
+    "tile_polisher": (
+        "A watchmaker's bench covered in tiles being hand-polished, each one "
+        "progressively shinier from left to right. The rightmost tile gleams "
+        "like a mirror. Magnifying glasses, fine cloths, wood shavings. "
+        "Single overhead lamp. Precise, meditative. Navy and muted gold."
+    ),
+    "paper_lantern": (
+        "A single red paper lantern hanging from a wire in an empty alley, "
+        "its candle burning too brightly. The paper is visibly thin, on the "
+        "edge of catching fire. Smoke wisps curl upward. Wet cobblestones "
+        "reflect the glow. Night scene. Bold teal and burnt orange."
+    ),
+    "iron_lantern": (
+        "A heavy cast-iron lantern bolted to a fortress wall, its flame "
+        "burning cold blue through thick glass. Frost rimes the bolts. The "
+        "wall stretches into fog in both directions. Military checkpoint "
+        "energy. Austere. Deep navy, steel gray, muted gold."
+    ),
+    "mirror_tile": (
+        "Two identical ornate hand mirrors facing each other on a velvet "
+        "pedestal, creating an infinite regression. In the deepest reflection, "
+        "a tile glows. Gold-foil border elements frame the scene. Museum "
+        "lighting, purple velvet, midnight blue. Luxurious and unsettling."
+    ),
+    "way_of_purity": (
+        "A monk in white robes walking a single-color tile path across a "
+        "misty mountain bridge. Every tile is the same suit. The monk's "
+        "reflection in the chasm below shows the path in a different color. "
+        "Austere, meditative. Deep navy and ochre. Technical precision."
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PATCH G: 25 BALATRO-INSPIRED RELICS
+    # ═══════════════════════════════════════════════════════════════════
+    # -- Retrigger --
+    "leading_tile": (
+        "A marching band of tile-faced figures, the drum major at the front "
+        "glowing twice as brightly as the others, mid-stride through a foggy "
+        "street parade. Confetti and banners in nonsense script. Dynamic "
+        "angle. Bold teal and orange, parade-float energy."
+    ),
+    "low_echo": (
+        "A cave mouth with numbered tiles (1, 2, 3, 4) embedded in the rock. "
+        "Sound waves visualized as concentric rings echo outward from each "
+        "tile. A bat hangs from the ceiling, too large. Deep teal interior, "
+        "amber glow from within the cave. Moist atmosphere."
+    ),
+    "tea_ceremony": (
+        "A traditional tea ceremony setup — iron kettle, bamboo whisk, three "
+        "cups arranged on a tatami mat. Steam rises from the kettle forming "
+        "tile shapes. The third cup has a crack running through it. Warm "
+        "afternoon light through shoji screens. Navy and ochre. Calm before "
+        "destruction."
+    ),
+    "ghost_hand": (
+        "A translucent spectral hand hovering above a mahjong table, its "
+        "fingers gently touching tiles that glow where contacted. The living "
+        "player's hand is visible at the table edge, oblivious. Candlelit "
+        "room, deep teal shadows. Eerie but not frightening."
+    ),
+    # -- Scaling --
+    "clean_streak": (
+        "A pristine white bowling lane stretching to infinity, every pin "
+        "replaced by a numbered tile. The ball mid-roll is impossibly clean "
+        "and reflective. No honor symbols anywhere. Fluorescent lighting, "
+        "waxed floor gleam. Teal and steel palette. Satisfying, clinical."
+    ),
+    "obsession": (
+        "A detective's evidence board with red string connecting tile "
+        "photographs, newspaper clippings in nonsense script, and circled "
+        "patterns. One yaku pattern is crossed out with a thick red X. "
+        "Dim office, single desk lamp. Navy and rust. Paranoid energy."
+    ),
+    "bonfire": (
+        "A bonfire made of broken relics — shattered mirrors, cracked jade, "
+        "twisted metal frames — burning bright on a hillside at night. A "
+        "figure warms their hands, silhouetted. Sparks rise into a starless "
+        "sky. Deep teal and burnt orange. Bittersweet warmth."
+    ),
+    "river_runner": (
+        "A kayaker shooting rapids, each wave crest formed by a sequence of "
+        "three tiles in ascending order. The river cuts through a canyon with "
+        "layers of geological strata visible. Dramatic spray and motion blur. "
+        "Navy and ochre. Adventure, accumulation."
+    ),
+    # -- Fragile --
+    "melting_ice": (
+        "A block of ice on a wooden table, melting under a single heat lamp. "
+        "Embedded in the ice: a glowing tile, gradually becoming exposed. "
+        "Puddle spreading across the table. Clock on the wall. Simple, warm "
+        "lighting. Cheerful but anxious. Cream and faded blue."
+    ),
+    "silk_thread": (
+        "A spool of luminous silk thread on a loom, the thread pulled taut "
+        "and fraying at one point. The woven fabric shows tile patterns. "
+        "Gentle workshop light through a dusty window. The thread glows "
+        "faintly where it's thinnest. Teal and amber. Delicate tension."
+    ),
+    # -- Copy / Meta --
+    "shadow_hand": (
+        "A puppet theater stage where a hand puppet casts a shadow on the "
+        "back wall — but the shadow is a different, more elaborate puppet "
+        "performing the same gesture. Velvet curtains, footlights. The "
+        "shadow is sharper than the puppet casting it. Royal purple, deep "
+        "gold, burgundy. Luxurious and uncanny."
+    ),
+    "empty_frame": (
+        "A gallery wall with ornate picture frames, each frame empty except "
+        "for a faint glow where a painting should be. One frame has a small "
+        "mult counter ticking upward in its corner. Polished marble floor "
+        "reflects the frames. Teal and steel. Elegant absence."
+    ),
+    # -- Economy --
+    "gold_idol": (
+        "A small golden idol sitting on a stone pedestal in a jungle clearing. "
+        "Three gold coins materialize from thin air above the idol. Vines "
+        "and moss creep up the pedestal. Dappled green light. The idol's "
+        "expression is pleased. Cheerful, warm tan and gold."
+    ),
+    "jade_abacus": (
+        "A jade-and-brass abacus on a merchant's desk, beads arranged to "
+        "show a calculation. Tiny gold coins balance on the top rail. "
+        "Ledger books and an ink pot nearby. Warm lamplight, wooden interior. "
+        "Simple, cheerful. Cream, olive green, faded gold."
+    ),
+    "nest_egg": (
+        "A bird's nest in a bare winter tree, containing a single golden egg "
+        "that grows larger in each of three sequential panels (like assembly "
+        "instructions on a model kit). The egg cracks slightly in the last "
+        "panel. Dawn light. Cheerful, cream and soft gold."
+    ),
+    "patience": (
+        "An hourglass on a game table, sand trickling slowly. Around the "
+        "hourglass: untouched discard tiles and a growing pile of gold coins. "
+        "The sand grains are tiny coins. Warm amber lamplight, wood grain "
+        "table. Calm, cozy. Tan, cream, faded gold."
+    ),
+    # -- Conditional ×mult --
+    "way_of_pairs": (
+        "Two identical samurai statues facing each other in a stone garden, "
+        "each holding a mirror that reflects the other infinitely. Cherry "
+        "blossoms fall between them. The symmetry is perfect and unsettling. "
+        "Dawn light. Deep navy, ochre, rust. Meditative precision."
+    ),
+    "way_of_triplets": (
+        "Three identical watchtowers on a ridge, each tower a perfect copy "
+        "of the others, connected by heavy chains. Lightning strikes all "
+        "three simultaneously. Dark storm sky, dramatic chiaroscuro. The "
+        "towers cast triple overlapping shadows. Navy, ochre, deep rust."
+    ),
+    "way_of_sequences": (
+        "A train with sequentially numbered carriages (1-2-3, 4-5-6) crossing "
+        "a bridge over a vast canyon. The bridge arches form ascending numbers. "
+        "Dramatic perspective from below. Sunset light. Navy and ochre. "
+        "Industrial precision, satisfying order."
+    ),
+    # -- Probability / Chaos --
+    "fortunes_favor": (
+        "A double-sided coin spinning in mid-air, both visible faces showing "
+        "heads. The coin hovers above a fortune-teller's crystal ball on a "
+        "velvet cloth. Tarot cards scattered around it. The crystal ball "
+        "reflects a different room. Navy, ochre, muted gold. Rigged luck."
+    ),
+    "cracked_tile": (
+        "A mahjong tile with a deep crack running diagonally through it, "
+        "placed on a felt table. Through the crack, impossible light spills — "
+        "sometimes bright, sometimes dark. A hand hesitates above it. "
+        "Simple composition. Cream, tan, uncertain warm light. Beginner-kit "
+        "gamble energy."
+    ),
+    "star_tile": (
+        "A single tile floating in a planetarium dome, a five-pointed star "
+        "etched into its face, rotating slowly. Star projections spin across "
+        "the domed ceiling around it. A figure watches from a reclining "
+        "chair below. Deep teal and amber glow. Magical, uncertain."
+    ),
+    # -- Sell-to-activate --
+    "smoke_bomb": (
+        "A round black bomb with a lit fuse, sitting on a shop counter next "
+        "to a 'FOR SALE' sign in nonsense script. Smoke already wisps from "
+        "the fuse. The shopkeeper has stepped back, hands raised. Dramatic "
+        "shadows. Navy, ochre, rust. Tense, darkly funny."
+    ),
+    "phantom_relic": (
+        "A glass display case containing nothing — but the shadow inside the "
+        "case shows the silhouette of an ornate relic that isn't there. A "
+        "museum placard reads nonsense text. Three tally marks scratched "
+        "into the case glass. Navy and deep rust. Haunted patience."
+    ),
+    "ritual_blade": (
+        "A ceremonial dagger on a stone altar, its blade reflecting not the "
+        "room but the relic next to it, which appears to dissolve in the "
+        "reflection. Candle smoke, carved symbols on the altar. The blade "
+        "has a faint golden edge. Navy, ochre, rust. Sacrificial precision."
     ),
 
     # ═══════════════════════════════════════════════════════════════════
@@ -374,7 +682,57 @@ RELIC_RARITY: dict[str, str] = {
     "furiten_ward": "uncommon",
     "codex_compass": "uncommon",
     "garden_keeper": "uncommon",
+    "ikebana": "rare",
     "hanami": "common",
+    # ── 15 new relics ──
+    "jade_serpent": "common",
+    "ink_brush": "common",
+    "pearl_diver": "common",
+    "low_tide": "common",
+    "merchants_eye": "common",
+    "edge_runner": "uncommon",
+    "lucky_seven": "uncommon",
+    "momentum": "uncommon",
+    "minimalist": "uncommon",
+    "turtle_shell": "uncommon",
+    "closed_gate": "rare",
+    "gold_furnace": "rare",
+    "snowball": "rare",
+    "second_wind": "rare",
+    "glass_cannon": "legendary",
+    # ── Balatro-inspired (Patch F) ──
+    "last_breath": "rare",
+    "tile_polisher": "rare",
+    "paper_lantern": "uncommon",
+    "iron_lantern": "rare",
+    "mirror_tile": "legendary",
+    "way_of_purity": "rare",
+    # ── Patch G ──
+    "leading_tile": "uncommon",
+    "low_echo": "uncommon",
+    "tea_ceremony": "rare",
+    "ghost_hand": "uncommon",
+    "clean_streak": "uncommon",
+    "obsession": "rare",
+    "bonfire": "uncommon",
+    "river_runner": "rare",
+    "melting_ice": "common",
+    "silk_thread": "uncommon",
+    "shadow_hand": "legendary",
+    "empty_frame": "uncommon",
+    "gold_idol": "common",
+    "jade_abacus": "common",
+    "nest_egg": "common",
+    "patience": "common",
+    "way_of_pairs": "rare",
+    "way_of_triplets": "rare",
+    "way_of_sequences": "rare",
+    "fortunes_favor": "rare",
+    "cracked_tile": "common",
+    "star_tile": "uncommon",
+    "smoke_bomb": "rare",
+    "phantom_relic": "rare",
+    "ritual_blade": "rare",
 }
 
 # Subtle border tint color per rarity (RGBA).

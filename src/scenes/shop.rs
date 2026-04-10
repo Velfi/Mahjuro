@@ -222,13 +222,27 @@ fn apply_shop_action(
                     run.relics.active.push(relic);
                     // Initialize counters for stateful relics.
                     match relic {
-                        RelicId::MeltingIce => { run.relic_counters.insert(RelicId::MeltingIce, 80); }
-                        RelicId::SilkThread => { run.relic_counters.insert(RelicId::SilkThread, 40); }
-                        RelicId::TeaCeremony => { run.relic_counters.insert(RelicId::TeaCeremony, 3); }
+                        RelicId::MeltingIce => {
+                            run.relic_counters.insert(RelicId::MeltingIce, 80);
+                        }
+                        RelicId::SilkThread => {
+                            run.relic_counters.insert(RelicId::SilkThread, 40);
+                        }
+                        RelicId::TeaCeremony => {
+                            run.relic_counters.insert(RelicId::TeaCeremony, 3);
+                        }
                         _ => {}
                     }
                     run.recompute_capacities();
                     items.remove(idx);
+                    // Tutorial milestone: celebrate the first shop purchase.
+                    if let Some(ref mut tut) = run.tutorial {
+                        if tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstShopBuy) {
+                            bus.push(crate::game::event_bus::GameEvent::TutorialMilestone(
+                                crate::game::tutorial::TutorialMilestone::FirstShopBuy,
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -237,7 +251,9 @@ fn apply_shop_action(
                 let rid = run.relics.active[idx];
                 let mut refund = relic_sell_price(rid);
                 // Smoke Bomb: sell to skip the upcoming boss blind.
-                if rid == RelicId::SmokeBomb && run.upcoming_blind == crate::core::rules::BlindKind::Boss {
+                if rid == RelicId::SmokeBomb
+                    && run.upcoming_blind == crate::core::rules::BlindKind::Boss
+                {
                     run.relics.active.remove(idx);
                     // Skip boss — advance the ante without playing.
                     run.ante += 1;
@@ -247,13 +263,21 @@ fn apply_shop_action(
                 }
                 // Nest Egg: sell value grows by +2 per round held.
                 if rid == RelicId::NestEgg {
-                    let rounds = run.relic_counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
+                    let rounds = run
+                        .relic_counters
+                        .get(&RelicId::NestEgg)
+                        .copied()
+                        .unwrap_or(0);
                     refund = refund.saturating_add(2 * rounds as u32);
                 }
                 // Phantom Relic: after 3 rounds, selling duplicates a
                 // random owned relic instead of giving gold.
                 if rid == RelicId::PhantomRelic {
-                    let rounds = run.relic_counters.get(&RelicId::PhantomRelic).copied().unwrap_or(0);
+                    let rounds = run
+                        .relic_counters
+                        .get(&RelicId::PhantomRelic)
+                        .copied()
+                        .unwrap_or(0);
                     run.relics.active.remove(idx);
                     run.relic_counters.remove(&RelicId::PhantomRelic);
                     if rounds >= 3 && !run.relics.is_full() {
@@ -276,7 +300,8 @@ fn apply_shop_action(
                     run.relics.active.remove(idx + 1);
                     run.relics.active.remove(idx);
                     // Store permanent mult as ×10 integer.
-                    *run.relic_counters.entry(RelicId::RitualBlade).or_insert(0) += victim_value * 2 * 10;
+                    *run.relic_counters.entry(RelicId::RitualBlade).or_insert(0) +=
+                        victim_value * 2 * 10;
                     return ShopActionResult::None;
                 }
                 run.relics.active.remove(idx);
@@ -1323,12 +1348,16 @@ impl SceneBehavior for ShopScene {
         // Help action opens the Meld Guide scene.
         for &cid in ctx.button_clicks {
             if cid == SHOP_HELP_BADGE_ID {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
         }
 
@@ -1404,7 +1433,9 @@ impl SceneBehavior for ShopScene {
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
             return t;
         }
@@ -1495,7 +1526,9 @@ impl SceneBehavior for ShopScene {
                             ctx.bus,
                         );
                         // Update focus to follow the moved relic.
-                        if matches!(a, UiAction::NavigateHudNext) && owned_idx + 1 < ctx.run.relics.active.len() {
+                        if matches!(a, UiAction::NavigateHudNext)
+                            && owned_idx + 1 < ctx.run.relics.active.len()
+                        {
                             self.focus = Some(ShopFocus::Relic(n_for_sale + owned_idx + 1));
                         } else if matches!(a, UiAction::NavigateHudPrev) && owned_idx > 0 {
                             self.focus = Some(ShopFocus::Relic(n_for_sale + owned_idx - 1));
@@ -1519,9 +1552,13 @@ impl SceneBehavior for ShopScene {
                         continue;
                     }
                     if let Some(hit) = focus.to_hit() {
-                        if let Some(action) =
-                            shop_action_for_hit(hit, &self.items, &self.zodiac_items, &self.talisman_items, ctx.run)
-                        {
+                        if let Some(action) = shop_action_for_hit(
+                            hit,
+                            &self.items,
+                            &self.zodiac_items,
+                            &self.talisman_items,
+                            ctx.run,
+                        ) {
                             let result = apply_shop_action(
                                 action,
                                 &mut self.items,
@@ -1581,9 +1618,13 @@ impl SceneBehavior for ShopScene {
                 self.journal.toggle();
                 return None;
             }
-            if let Some(action) =
-                shop_action_for_hit(hit, &self.items, &self.zodiac_items, &self.talisman_items, ctx.run)
-            {
+            if let Some(action) = shop_action_for_hit(
+                hit,
+                &self.items,
+                &self.zodiac_items,
+                &self.talisman_items,
+                ctx.run,
+            ) {
                 let result = apply_shop_action(
                     action,
                     &mut self.items,
@@ -1780,7 +1821,11 @@ impl SceneBehavior for ShopScene {
                 rotation_x_deg: 0.0,
                 rotation_z_deg: 0.0,
                 color: [1.0, 1.0, 1.0, alpha],
-                kind: if let Consumable::Zodiac(z) = item.consumable { Some(z) } else { None },
+                kind: if let Consumable::Zodiac(z) = item.consumable {
+                    Some(z)
+                } else {
+                    None
+                },
             });
         }
 
@@ -2476,6 +2521,98 @@ impl SceneBehavior for ShopScene {
                         });
                     }
                 }
+            }
+        }
+
+        // ── Tutorial shop banner ────────────────────────────────────────
+        // When the tutorial is active and the lesson is shop-enabled, show
+        // a hint banner at the top of the screen guiding the player through
+        // the shop UI — mirroring the gameplay scene's tutorial overlay
+        // style.
+        if let Some(ref tut) = ctx.run.tutorial {
+            if tut.is_active() && tut.current_lesson_def().shop_enabled {
+                let has_bought = tut
+                    .celebrated
+                    .contains(&crate::game::tutorial::TutorialMilestone::FirstShopBuy);
+                let (flavor, hint) = if has_bought {
+                    (
+                        "Gold well spent returns tenfold.",
+                        "Nice find! You can also buy Ribbons and Talismans. Press Next Round when done.",
+                    )
+                } else if self.items.is_empty() {
+                    (
+                        "The cabinet is bare\u{2026}",
+                        "Press Next Round to move on.",
+                    )
+                } else {
+                    (
+                        "Welcome to the Shop!",
+                        "Hover a relic in the cabinet to see what it does, then click to buy it. \
+                         Ribbons level up yaku patterns; Talismans enhance your tiles.",
+                    )
+                };
+
+                let alpha = 1.0_f32;
+                let flavor_px = typography::size(typography::HEADING, h, ui_scale);
+                let hint_px = typography::size(typography::TITLE, h, ui_scale);
+                let pad = (16.0 * ui_scale).max(10.0);
+                let banner_h = pad + flavor_px + pad * 0.5 + hint_px + pad;
+                let banner_y = h * 0.01;
+                let banner_x = w * 0.10;
+                let banner_w = w * 0.80;
+
+                // Gold border.
+                let border = 2.0;
+                quads.push(GpuInstance {
+                    rect: [
+                        banner_x - border,
+                        banner_y - border,
+                        banner_w + border * 2.0,
+                        banner_h + border * 2.0,
+                    ],
+                    color: [
+                        color::BRASS[0],
+                        color::BRASS[1],
+                        color::BRASS[2],
+                        0.4 * alpha,
+                    ],
+                });
+                // Dark panel.
+                quads.push(GpuInstance {
+                    rect: [banner_x, banner_y, banner_w, banner_h],
+                    color: [
+                        color::MIDNIGHT[0],
+                        color::MIDNIGHT[1],
+                        color::MIDNIGHT[2],
+                        0.88 * alpha,
+                    ],
+                });
+                // Flavor text (gold).
+                let flavor_y = banner_y + pad;
+                let text_w = banner_w - pad * 2.0;
+                texts.push(TextLabel {
+                    rect: [banner_x + pad, flavor_y, text_w, flavor_px * 1.5],
+                    text: flavor.to_string(),
+                    color: [color::GOLD[0], color::GOLD[1], color::GOLD[2], 0.8 * alpha],
+                    font_px: Some(flavor_px),
+                    align: TextAlign::Center,
+                    ..Default::default()
+                });
+                // Hint text (champagne).
+                let hint_y = flavor_y + flavor_px + pad * 0.5;
+                texts.push(TextLabel {
+                    rect: [banner_x + pad, hint_y, text_w, hint_px * 1.5],
+                    text: hint.to_string(),
+                    color: [
+                        color::CHAMPAGNE[0],
+                        color::CHAMPAGNE[1],
+                        color::CHAMPAGNE[2],
+                        alpha,
+                    ],
+                    font_px: Some(hint_px),
+                    align: TextAlign::Center,
+                    ..Default::default()
+                });
             }
         }
 

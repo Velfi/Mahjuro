@@ -287,10 +287,7 @@ impl PauseMenu {
 
     fn do_restart(&mut self, run: &mut RunState) -> PauseUpdate {
         *run = RunState::new_demo();
-        PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(
-            run.run_number,
-            run,
-        ))))
+        PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(run.run_number, run))))
     }
 
     /// Append pause-overlay draw elements to the given vectors.
