@@ -16,10 +16,8 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::{
-    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx,
-};
 use super::start_screen::StartScreenScene;
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Page indices ──────────────────────────────────────────────────────────
 
@@ -212,11 +210,8 @@ impl SceneBehavior for MeldGuideScene {
                 let score_font = typography::size(typography::BODY, h, ui_scale).max(16.0);
                 let score_h = score_font * 1.5;
                 let score_y = h * 0.78;
-                let score_text = format!(
-                    "+{} mult  /  +{} chips",
-                    yk.mult_bonus(),
-                    yk.chip_bonus(),
-                );
+                let score_text =
+                    format!("+{} mult  /  +{} chips", yk.mult_bonus(), yk.chip_bonus(),);
                 frame.text(TextLabel {
                     rect: [0.0, score_y, w, score_h],
                     text: score_text,
@@ -425,10 +420,7 @@ fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
                 },
                 TileGroup {
                     label: "Terminals (1 & 9)",
-                    tiles: vec![
-                        t(Suit::Characters, 1, 3),
-                        t(Suit::Bamboos, 9, 4),
-                    ],
+                    tiles: vec![t(Suit::Characters, 1, 3), t(Suit::Bamboos, 9, 4)],
                     accent: [0.85, 0.45, 0.35, 0.9],
                 },
                 TileGroup {
@@ -448,10 +440,7 @@ fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
             vec![
                 TileGroup {
                     label: "Flower Pair",
-                    tiles: vec![
-                        t(Suit::Flower, 1, 0),
-                        t(Suit::Flower, 2, 1),
-                    ],
+                    tiles: vec![t(Suit::Flower, 1, 0), t(Suit::Flower, 2, 1)],
                     accent: [0.85, 0.55, 0.70, 0.9],
                 },
                 TileGroup {
@@ -490,26 +479,74 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         YakuKind::Tanyao => (
             "All tiles ranked 2\u{2013}8 \u{2014} no terminals (1/9) or honors.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Characters, &[2, 3, 4], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[5, 6, 7], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[8, 8, 8], trip_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[2, 3, 4],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[5, 6, 7],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[8, 8, 8],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Characters, &[5, 5], pair_color),
             ]),
         ),
         YakuKind::Toitoi => (
             "All melds are triplets or kongs \u{2014} no sequences allowed.",
             meld_groups(&[
-                ("Trip", SetKind::Triplet, Suit::Characters, &[1, 1, 1], trip_color),
-                ("Trip", SetKind::Triplet, Suit::Bamboos, &[5, 5, 5], trip_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[9, 9, 9], trip_color),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Characters,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Bamboos,
+                    &[5, 5, 5],
+                    trip_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[9, 9, 9],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Wind, &[1, 1], pair_color),
             ]),
         ),
         YakuKind::Honroutou => (
             "Every tile is a terminal (1 or 9) or an honor (wind/dragon).",
             meld_groups(&[
-                ("Trip", SetKind::Triplet, Suit::Characters, &[1, 1, 1], trip_color),
-                ("Trip", SetKind::Triplet, Suit::Bamboos, &[9, 9, 9], trip_color),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Characters,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Bamboos,
+                    &[9, 9, 9],
+                    trip_color,
+                ),
                 ("Trip", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
                 ("Pair", SetKind::Pair, Suit::Circles, &[1, 1], pair_color),
             ]),
@@ -517,63 +554,189 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         YakuKind::Iipeikou => (
             "Two identical sequences in the same suit.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[1, 2, 3], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[4, 4, 4], trip_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[4, 4, 4],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Characters, &[9, 9], pair_color),
             ]),
         ),
         YakuKind::FullHand => (
             "Complete 14-tile hand: 4 melds + 1 pair.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Characters, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[4, 5, 6], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[7, 7, 7], trip_color),
-                ("Seq", SetKind::Sequence, Suit::Characters, &[7, 8, 9], seq_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[7, 7, 7],
+                    trip_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[7, 8, 9],
+                    seq_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Dragon, &[1, 1], pair_color),
             ]),
         ),
         YakuKind::Chinitsu => (
             "All tiles from a single number suit, no honors.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[4, 5, 6], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Bamboos, &[7, 7, 7], trip_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Bamboos,
+                    &[7, 7, 7],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Bamboos, &[9, 9], pair_color),
             ]),
         ),
         YakuKind::SanshokuDoujun => (
             "Same numerical sequence in all three number suits.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Characters, &[4, 5, 6], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[4, 5, 6], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Circles, &[4, 5, 6], seq_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Circles,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Wind, &[1, 1], pair_color),
             ]),
         ),
         YakuKind::Junchan => (
             "Every meld contains a terminal (rank 1 or 9). Pair is also terminal.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Characters, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[7, 8, 9], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[1, 1, 1], trip_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[7, 8, 9],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Characters, &[9, 9], pair_color),
             ]),
         ),
         YakuKind::Ittsu => (
             "1\u{2013}9 straight in one suit: three sequences covering 1-2-3, 4-5-6, 7-8-9.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[4, 5, 6], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[7, 8, 9], seq_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[7, 8, 9],
+                    seq_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Characters, &[5, 5], pair_color),
             ]),
         ),
         YakuKind::Honitsu => (
             "One number suit plus honors only \u{2014} no other number suits.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[2, 3, 4], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[6, 7, 8], seq_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[2, 3, 4],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[6, 7, 8],
+                    seq_color,
+                ),
                 ("Trip", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
                 ("Pair", SetKind::Pair, Suit::Bamboos, &[9, 9], pair_color),
             ]),
@@ -581,8 +744,20 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         YakuKind::Yakuhai => (
             "Triplet (or kong) of any dragon, or of the current round wind.",
             meld_groups(&[
-                ("Trip", SetKind::Triplet, Suit::Dragon, &[1, 1, 1], trip_color),
-                ("Seq", SetKind::Sequence, Suit::Characters, &[2, 3, 4], seq_color),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Dragon,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[2, 3, 4],
+                    seq_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Bamboos, &[5, 5], pair_color),
             ]),
         ),
@@ -601,9 +776,27 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         YakuKind::ChickenHand => (
             "A valid hand that triggers no other yaku \u{2014} scores base chips \u{00d7} 1 mult.",
             meld_groups(&[
-                ("Seq", SetKind::Sequence, Suit::Characters, &[1, 2, 3], seq_color),
-                ("Seq", SetKind::Sequence, Suit::Bamboos, &[4, 5, 6], seq_color),
-                ("Trip", SetKind::Triplet, Suit::Circles, &[3, 3, 3], trip_color),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Characters,
+                    &[1, 2, 3],
+                    seq_color,
+                ),
+                (
+                    "Seq",
+                    SetKind::Sequence,
+                    Suit::Bamboos,
+                    &[4, 5, 6],
+                    seq_color,
+                ),
+                (
+                    "Trip",
+                    SetKind::Triplet,
+                    Suit::Circles,
+                    &[3, 3, 3],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Wind, &[2, 2], pair_color),
             ]),
         ),
@@ -612,9 +805,7 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
 
 /// Build `TileGroup`s from a compact descriptor list. Assigns sequential tile
 /// ids across all groups so the renderer treats each tile as unique.
-fn meld_groups(
-    specs: &[(&'static str, SetKind, Suit, &[u8], [f32; 4])],
-) -> Vec<TileGroup> {
+fn meld_groups(specs: &[(&'static str, SetKind, Suit, &[u8], [f32; 4])]) -> Vec<TileGroup> {
     let mut id_counter: u32 = 0;
     specs
         .iter()

@@ -68,7 +68,10 @@ pub(crate) fn upload_rgba_texture(
     (tex, view)
 }
 
-pub(crate) fn white_albedo(device: &wgpu::Device, queue: &wgpu::Queue) -> (wgpu::Texture, wgpu::TextureView) {
+pub(crate) fn white_albedo(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (wgpu::Texture, wgpu::TextureView) {
     upload_rgba_texture(
         device,
         queue,
@@ -227,7 +230,10 @@ pub(crate) fn load_zodiac_ribbon_textures(
     let mut mid_views = Vec::with_capacity(cap);
     let mut bot_views = Vec::with_capacity(cap);
 
-    let load_one = |textures: &mut Vec<wgpu::Texture>, slug: &str, part: &str| -> wgpu::TextureView {
+    let load_one = |textures: &mut Vec<wgpu::Texture>,
+                    slug: &str,
+                    part: &str|
+     -> wgpu::TextureView {
         let path = format!("textures/zodiac_{}_{}.png", slug, part);
         let label = format!("zodiac-ribbon-{}-{}", slug, part);
         let (tex, view) = match crate::asset_path::get(&path) {
@@ -257,7 +263,12 @@ pub(crate) fn load_zodiac_ribbon_textures(
         mid_views.push(load_one(&mut textures, slug, "mid"));
         bot_views.push(load_one(&mut textures, slug, "bot"));
     }
-    ZodiacRibbonTextures { textures, top_views, mid_views, bot_views }
+    ZodiacRibbonTextures {
+        textures,
+        top_views,
+        mid_views,
+        bot_views,
+    }
 }
 
 /// Spawn a background thread that decodes all relic PNGs and sends the RGBA

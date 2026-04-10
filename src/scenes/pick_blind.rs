@@ -446,7 +446,8 @@ impl SceneBehavior for PickBlindScene {
                 (ShrineState::Future, _) => stone_mid,
                 (ShrineState::Upcoming, BlindKind::Boss) => ctx
                     .run
-                    .boss.upcoming
+                    .boss
+                    .upcoming
                     .map(|k| blend_with_stone(k.tier().halo_color(), 0.45))
                     .unwrap_or(stone_light),
                 (ShrineState::Upcoming, _) => stone_light,
@@ -519,7 +520,7 @@ impl SceneBehavior for PickBlindScene {
             let tag_color = match skip_tag.map(|t| t.rarity()) {
                 Some(crate::core::tag::TagRarity::Rare) => [1.00, 0.84, 0.30, 1.0], // gold
                 Some(crate::core::tag::TagRarity::Uncommon) => [0.55, 0.85, 0.55, 1.0], // jade
-                _ => [0.82, 0.82, 0.88, 1.0], // silver
+                _ => [0.82, 0.82, 0.88, 1.0],                                       // silver
             };
             frame.coin_batch(vec![CoinPlacement {
                 world_pos: [skip_px, skip_py, dish_top_y],
@@ -685,7 +686,8 @@ impl SceneBehavior for PickBlindScene {
             // Other shrines: just the name.
             let title_text: String = if blind == BlindKind::Boss {
                 ctx.run
-                    .boss.upcoming
+                    .boss
+                    .upcoming
                     .map(|k| k.def().name.to_string())
                     .unwrap_or_else(|| "Boss Blind".to_string())
             } else {
@@ -718,7 +720,8 @@ impl SceneBehavior for PickBlindScene {
                     // rule before they ever fight it.
                     let description: &str = ctx
                         .run
-                        .boss.effect
+                        .boss
+                        .effect
                         .as_ref()
                         .and_then(|e| e.description_override.as_deref())
                         .unwrap_or(def.description);
@@ -755,7 +758,8 @@ impl SceneBehavior for PickBlindScene {
         // Title: upcoming blind name + ante header
         let title_text = if upcoming == BlindKind::Boss {
             ctx.run
-                .boss.upcoming
+                .boss
+                .upcoming
                 .map(|k| k.def().name.to_string())
                 .unwrap_or_else(|| "Boss Blind".to_string())
         } else {
@@ -794,7 +798,8 @@ impl SceneBehavior for PickBlindScene {
                 let def = kind.def();
                 let description: &str = ctx
                     .run
-                    .boss.effect
+                    .boss
+                    .effect
                     .as_ref()
                     .and_then(|e| e.description_override.as_deref())
                     .unwrap_or(def.description);
@@ -823,11 +828,13 @@ impl SceneBehavior for PickBlindScene {
         let play_focused_label = self.play_focused();
         let skip_focused_label = self.skip_focused();
 
-        let projected_play = ctx.proj
+        let projected_play = ctx
+            .proj
             .aux_dish_rects
             .iter()
             .find_map(|(pid, r)| (*pid == Some(PICK_PLAY_DISH)).then_some(*r));
-        let projected_skip = ctx.proj
+        let projected_skip = ctx
+            .proj
             .aux_dish_rects
             .iter()
             .find_map(|(pid, r)| (*pid == Some(PICK_SKIP_DISH)).then_some(*r));
@@ -913,8 +920,7 @@ impl SceneBehavior for PickBlindScene {
                     .max(8.0)
                     .min(w - altar_label_w - 8.0);
                 let stack_h = altar_label_h + altar_caption_h * 2.0 + 4.0;
-                let ly = (skip_anchor_rect[1] + skip_anchor_rect[3] + 30.0)
-                    .min(h - stack_h - 8.0);
+                let ly = (skip_anchor_rect[1] + skip_anchor_rect[3] + 30.0).min(h - stack_h - 8.0);
                 let title_color = if skip_focused_label {
                     color::CHAMPAGNE
                 } else {

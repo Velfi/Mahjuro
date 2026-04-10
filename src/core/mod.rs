@@ -1,7 +1,7 @@
 pub mod boss;
-pub mod error;
 pub mod consumable;
 pub mod deck;
+pub mod error;
 pub mod hand;
 pub mod progression;
 pub mod relic;

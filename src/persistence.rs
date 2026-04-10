@@ -506,3 +506,14 @@ pub fn profile_summary(index: usize) -> ProfileSummary {
 pub fn all_profile_summaries() -> Vec<ProfileSummary> {
     (0..MAX_PROFILES).map(profile_summary).collect()
 }
+
+/// Delete all data for a profile slot — the progress file and any saved run.
+pub fn delete_profile(index: usize) {
+    let path = profile_path(index);
+    if path.exists() {
+        if let Err(e) = fs::remove_file(&path) {
+            log::warn!("delete_profile: {e}");
+        }
+    }
+    delete_saved_run(index);
+}

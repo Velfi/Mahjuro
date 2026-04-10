@@ -99,7 +99,9 @@ impl SfxId {
             SfxId::PackOpen => "kenney_interface-sounds/Audio/open_003.ogg",
             SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
             SfxId::ZodiacReveal => "kenney_interface-sounds/Audio/glass_006.ogg",
-            SfxId::ZodiacLevelUp => "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI03.ogg",
+            SfxId::ZodiacLevelUp => {
+                "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI03.ogg"
+            }
             SfxId::CandleFlareWhoosh => "kenney_interface-sounds/Audio/maximize_008.ogg",
             SfxId::CandleFlareImpact => "kenney_music-jingles/Audio/Hit jingles/jingles_HIT16.ogg",
         }

@@ -248,6 +248,11 @@ pub struct GameplayScene {
     /// Multiplied into candle intensity, radius, and flame brightness so
     /// the room visibly flares up on a monster hand.
     candle_flare: f32,
+    /// Tutorial hint overlay — shows banners and highlights during the
+    /// onboarding flow. `None` for non-tutorial runs.
+    tutorial_overlay: Option<super::tutorial_overlay::TutorialOverlay>,
+    /// Hand tile indices that should glow (affinity hint for tutorial).
+    tutorial_affinity_indices: Vec<usize>,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -365,6 +370,8 @@ impl GameplayScene {
             kiln_mode: false,
             kiln_picks_remaining: 0,
             candle_flare: 0.0,
+            tutorial_overlay: None,
+            tutorial_affinity_indices: Vec::new(),
         }
     }
 }
@@ -402,6 +409,29 @@ impl SceneBehavior for GameplayScene {
         // same race (mouse click on tile while controller focus was on a
         // consumable) without the heuristic.
         self.cursor_pos = ctx.cursor_pos;
+
+        // Tutorial overlay: initialize lazily on first update if tutorial is active.
+        if ctx.run.tutorial.as_ref().is_some_and(|t| t.is_active())
+            && self.tutorial_overlay.is_none()
+        {
+            self.tutorial_overlay = Some(super::tutorial_overlay::TutorialOverlay::new());
+        }
+        // Update tutorial overlay each frame.
+        if let Some(ref mut overlay) = self.tutorial_overlay {
+            overlay.cascade_active = self.cascade.is_some();
+            overlay.update(ctx.run, dt);
+        }
+        // Compute tutorial affinity glow indices.
+        if ctx.run.tutorial_affinity_glow() {
+            let lesson = ctx.run.tutorial.as_ref().unwrap().current_lesson_def();
+            self.tutorial_affinity_indices = crate::game::tutorial::affinity_tile_indices(
+                &ctx.run.hand,
+                &ctx.run.selected,
+                lesson.allowed_sets,
+            );
+        } else {
+            self.tutorial_affinity_indices.clear();
+        }
 
         // Cache the latest wind timing from the cascade tuning so live
         // tweaks in the debug overlay take effect on the next frame and so
@@ -573,12 +603,16 @@ impl SceneBehavior for GameplayScene {
         // Help action opens the Meld Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
         }
 
@@ -597,7 +631,9 @@ impl SceneBehavior for GameplayScene {
             // The pause menu's "Meld Guide" entry sets a one-shot flag and
             // closes itself; drain the flag to transition to the Meld Guide scene.
             if self.pause_menu.take_meld_guide_request() {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
+                    true,
+                )));
             }
             return t;
         }
@@ -790,8 +826,10 @@ impl SceneBehavior for GameplayScene {
                             crate::core::scoring::StepKind::Gold,
                             new_level as f32,
                         );
-                        self.particles.emit(src.0, src.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
-                        ctx.bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
+                        self.particles
+                            .emit(src.0, src.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+                        ctx.bus
+                            .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                     }
                     Some(crate::game::run::ConsumableUseResult::Talisman { kind }) => {
                         log::info!(
@@ -1030,10 +1068,14 @@ impl SceneBehavior for GameplayScene {
                                             new_level as f32,
                                         );
                                         self.particles.emit(
-                                            src.0, src.1, 24,
-                                            [0.95, 0.78, 0.25, 1.0], 0.9,
+                                            src.0,
+                                            src.1,
+                                            24,
+                                            [0.95, 0.78, 0.25, 1.0],
+                                            0.9,
                                         );
-                                        ctx.bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
+                                        ctx.bus
+                                            .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                                     }
                                     crate::game::run::ConsumableUseResult::Talisman { kind } => {
                                         log::info!(
@@ -1210,6 +1252,45 @@ impl SceneBehavior for GameplayScene {
                     }
 
                     if pts > 0 {
+                        // Tutorial: detect milestones and push celebration events.
+                        if let Some(ref breakdown) = ctx.run.last_breakdown {
+                            let set_kinds = breakdown.scored_set_kinds.clone();
+                            // Check for FullHand milestone.
+                            let is_full_hand = ctx
+                                .run
+                                .available_yaku
+                                .contains(&crate::core::yaku::YakuKind::FullHand)
+                                && breakdown
+                                    .detected_yaku
+                                    .iter()
+                                    .any(|y| *y == crate::core::yaku::YakuKind::FullHand);
+                            if let Some(ref mut tutorial) = ctx.run.tutorial {
+                                if tutorial.is_active() {
+                                    // Celebrate first meld type.
+                                    if let Some(milestone) =
+                                        crate::game::tutorial::milestone_for_sets(&set_kinds)
+                                    {
+                                        if tutorial.celebrate(milestone) {
+                                            ctx.bus.push(
+                                                crate::game::event_bus::GameEvent::TutorialMilestone(milestone),
+                                            );
+                                        }
+                                    }
+                                    // Celebrate first FullHand.
+                                    if is_full_hand
+                                        && tutorial.celebrate(
+                                            crate::game::tutorial::TutorialMilestone::FirstFullHand,
+                                        )
+                                    {
+                                        ctx.bus.push(
+                                            crate::game::event_bus::GameEvent::TutorialMilestone(
+                                                crate::game::tutorial::TutorialMilestone::FirstFullHand,
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         // If this single hand scored at least the entire
                         // blind target, flare the candles up dramatically.
                         if pts >= ctx.run.target_score {
@@ -1218,12 +1299,28 @@ impl SceneBehavior for GameplayScene {
                         }
                         if let Some(breakdown) = ctx.run.last_breakdown.clone() {
                             if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
-                                self.cascade = Some(ScoringCascade::with_tuning(
+                                // Tutorial lesson 5: use slow-mo annotated cascade.
+                                let use_tutorial_cascade = ctx.run.tutorial_annotated_cascade();
+                                let tuning = if use_tutorial_cascade {
+                                    crate::game::cascade::CascadeTuning::tutorial_slow()
+                                } else {
+                                    ctx.cascade_tuning.clone()
+                                };
+                                let mut cascade = ScoringCascade::with_tuning(
                                     breakdown,
                                     score_before,
                                     pts,
-                                    ctx.cascade_tuning.clone(),
-                                ));
+                                    tuning,
+                                );
+                                cascade.tutorial_annotated = use_tutorial_cascade;
+                                // Mark annotated cascade as shown so it only
+                                // fires once per lesson.
+                                if use_tutorial_cascade {
+                                    if let Some(ref mut tut) = ctx.run.tutorial {
+                                        tut.cascade_annotated = true;
+                                    }
+                                }
+                                self.cascade = Some(cascade);
                                 self.last_revealed_step = None;
                                 self.cascade_final_emitted = false;
                                 // Emit particles on successful score.
@@ -1254,12 +1351,18 @@ impl SceneBehavior for GameplayScene {
                                 // screen feels lit up by the candle flare.
                                 if self.candle_flare > 0.0 {
                                     self.particles.explode(
-                                        px, py, count * 2,
-                                        [1.0, 0.55, 0.15, 1.0], 1.6,
+                                        px,
+                                        py,
+                                        count * 2,
+                                        [1.0, 0.55, 0.15, 1.0],
+                                        1.6,
                                     );
                                     self.particles.explode(
-                                        px, py, count,
-                                        [1.0, 0.92, 0.55, 1.0], 1.3,
+                                        px,
+                                        py,
+                                        count,
+                                        [1.0, 0.92, 0.55, 1.0],
+                                        1.3,
                                     );
                                 }
                                 // displayed_score will be driven by cascade
@@ -1479,7 +1582,8 @@ impl SceneBehavior for GameplayScene {
         // "Boss Blind" label so the player can read what they're up against
         // at a glance.
         let blind_label: String = if run.blind == crate::core::rules::BlindKind::Boss {
-            run.boss.upcoming
+            run.boss
+                .upcoming
                 .map(|k| k.def().name.to_string())
                 .unwrap_or_else(|| run.blind.name().to_string())
         } else {
@@ -1519,7 +1623,8 @@ impl SceneBehavior for GameplayScene {
                 if let Some(k) = run.boss.upcoming {
                     let d = k.def();
                     let desc: &str = run
-                        .boss.effect
+                        .boss
+                        .effect
                         .as_ref()
                         .and_then(|e| e.description_override.as_deref())
                         .unwrap_or(d.description);
@@ -2307,7 +2412,8 @@ impl SceneBehavior for GameplayScene {
             let orig_dish_y = strip_y - dish_pad_y;
             let orig_dish_w = total_w + dish_pad_x * 2.0;
             let orig_dish_h = slot_h + dish_pad_y * 2.0;
-            let projected_dish = ctx.proj
+            let projected_dish = ctx
+                .proj
                 .aux_dish_rects
                 .iter()
                 .find_map(|(pid, r)| (*pid == Some(PICK_CONSUMABLE_DISH)).then_some(*r));
@@ -2506,11 +2612,19 @@ impl SceneBehavior for GameplayScene {
             .filter(|&(_, &sel)| sel)
             .map(|(i, _)| i)
             .collect();
-        let hint_indices = if !selected_indices.is_empty() && self.cascade.is_none() {
+        let mut hint_indices = if !selected_indices.is_empty() && self.cascade.is_none() {
             suggest_completions(&run.hand, &selected_indices)
         } else {
             vec![]
         };
+        // Tutorial affinity glow: merge tutorial hints into hint_indices.
+        if !self.tutorial_affinity_indices.is_empty() {
+            for &idx in &self.tutorial_affinity_indices {
+                if !hint_indices.contains(&idx) {
+                    hint_indices.push(idx);
+                }
+            }
+        }
 
         // Tile hover tooltip — show full info for the tile under the cursor.
         // Anchored to the perspective-projected tile rect (one frame stale,
@@ -2552,7 +2666,8 @@ impl SceneBehavior for GameplayScene {
                     // Resolve the anchor rect: prefer the projected rect for
                     // this index, otherwise the flat slot rect.
                     let anchor: (f32, f32, f32, f32) = ctx
-                        .proj.hand_rects
+                        .proj
+                        .hand_rects
                         .iter()
                         .find(|(i, _)| *i == idx)
                         .map(|(_, r)| (r[0], r[1], r[2], r[3]))
@@ -2904,7 +3019,10 @@ impl SceneBehavior for GameplayScene {
                 let flare_mul = 1.0 + self.candle_flare;
                 point_lights.push(PointLight {
                     pos: [cx_j, cy_j, wick_world_y],
-                    radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker) * flare_mul,
+                    radius: radius_px
+                        * light_radius_mul
+                        * (1.05 + 0.3 * candle.flicker)
+                        * flare_mul,
                     color: [1.0, 0.55, 0.22],
                     intensity: light_intensity * candle.flicker * self.light_ramp * flare_mul,
                 });
@@ -2946,6 +3064,29 @@ impl SceneBehavior for GameplayScene {
                     color: [0.30, 1.00, 0.45],
                     intensity: 3.4 * pulse,
                 });
+            }
+        }
+
+        // ── Tutorial pulse light on the Play mirror ───────────────────────
+        // When the tutorial overlay is highlighting the Play button, add a
+        // pulsing blue-white point light over the bronze mirror so the
+        // player's eye is drawn to it.
+        if let Some(ref overlay) = self.tutorial_overlay {
+            if overlay.highlight == Some(super::tutorial_overlay::HighlightTarget::PlayButton) {
+                if let Some(ref mirror) = bronze_mirror_placement {
+                    let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
+                    let budget = crate::render::wgpu_renderer::MAX_POINT_LIGHTS
+                        .saturating_sub(point_lights.len());
+                    if budget > 0 {
+                        let diam = mirror.extents[0];
+                        point_lights.push(PointLight {
+                            pos: [mirror.world_pos[0], mirror.world_pos[1], diam * 0.6],
+                            radius: diam * 3.0 + pulse * diam * 1.0,
+                            color: [0.6, 0.75, 1.0],
+                            intensity: 3.5 + pulse * 4.0,
+                        });
+                    }
+                }
             }
         }
 
@@ -3996,6 +4137,21 @@ impl SceneBehavior for GameplayScene {
                 GAMEPLAY_3D_HIT_ID,
             ));
         }
+        // Tutorial overlay: draw hint banner on top of HUD.
+        if let Some(ref overlay) = self.tutorial_overlay {
+            let mut tut_quads = Vec::new();
+            let mut tut_labels = Vec::new();
+            overlay.draw(
+                ctx.layout.window_w,
+                ctx.layout.window_h,
+                ctx.ui_scale,
+                &mut tut_quads,
+                &mut tut_labels,
+            );
+            frame.quads(tut_quads);
+            frame.texts(tut_labels);
+        }
+
         frame.buttons = buttons;
         frame.window_title = window_title;
         frame.debug_axes = self.debug_show_axes;

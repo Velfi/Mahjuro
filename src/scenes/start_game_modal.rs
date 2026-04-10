@@ -33,6 +33,8 @@ impl ModalAction {
 pub struct TileSelectScene {
     tree: TreeState,
     material: TileMaterial,
+    /// If true, the next run starts in tutorial mode instead of standard.
+    tutorial_mode: bool,
 }
 
 impl TileSelectScene {
@@ -40,6 +42,16 @@ impl TileSelectScene {
         Self {
             tree: TreeState::new(),
             material: TileMaterial::default(),
+            tutorial_mode: false,
+        }
+    }
+
+    /// Create a tile-select scene that will start a tutorial run.
+    pub fn new_tutorial() -> Self {
+        Self {
+            tree: TreeState::new(),
+            material: TileMaterial::Bamboo,
+            tutorial_mode: true,
         }
     }
 
@@ -76,8 +88,14 @@ impl TileSelectScene {
     }
 
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
-        *run = RunState::new_with_material(self.material);
-        Some(Scene::Shop(ShopScene::new(run.run_number, run)))
+        if self.tutorial_mode {
+            *run = RunState::new_tutorial();
+            // Tutorial skips the initial shop — go straight to gameplay.
+            Some(Scene::Gameplay(super::gameplay::GameplayScene::new()))
+        } else {
+            *run = RunState::new_with_material(self.material);
+            Some(Scene::Shop(ShopScene::new(run.run_number, run)))
+        }
     }
 }
 

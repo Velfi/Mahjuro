@@ -83,6 +83,19 @@ impl Default for CascadeTuning {
 const PRE_TOTAL_FREEZE_MS: u64 = 140;
 
 impl CascadeTuning {
+    /// Slow-motion cascade for tutorial lesson 5 — 2× durations so the
+    /// player can read each step. The gameplay scene injects annotation
+    /// text into the `CascadeFrame` when this is active.
+    pub fn tutorial_slow() -> Self {
+        Self {
+            base_hold_ms: 1200,
+            step_hold_ms: 1000,
+            total_hold_ms: 1800,
+            tick_duration_ms: 700,
+            ..Self::default()
+        }
+    }
+
     pub fn base_hold(&self) -> Duration {
         Duration::from_millis(self.base_hold_ms)
     }
@@ -125,6 +138,8 @@ pub struct ScoringCascade {
     pub earned: u32,
     /// Timing parameters.
     tuning: CascadeTuning,
+    /// Whether tutorial annotation text should be injected into frames.
+    pub tutorial_annotated: bool,
 }
 
 /// What the UI should display for the current cascade frame.
@@ -147,6 +162,9 @@ pub struct CascadeFrame {
     pub phase_t: f32,
     /// Which axis (if any) just got an update — drives the bump animation.
     pub pulse_axis: Option<StepKind>,
+    /// Tutorial annotation text to display alongside the current phase.
+    /// `None` when not in annotated tutorial mode.
+    pub tutorial_annotation: Option<&'static str>,
 }
 
 impl ScoringCascade {
@@ -163,6 +181,7 @@ impl ScoringCascade {
             score_before,
             earned,
             tuning,
+            tutorial_annotated: false,
         }
     }
 
@@ -353,6 +372,29 @@ impl ScoringCascade {
             }
         };
 
+        // Tutorial annotations: contextual text for each cascade phase.
+        let tutorial_annotation = if self.tutorial_annotated {
+            match &self.phase {
+                Phase::ShowBase => Some("Base chips from your tiles and melds"),
+                Phase::ShowStep(_) => {
+                    if let Some((ref _source, kind)) = latest_step {
+                        match kind {
+                            StepKind::Chips => Some("Bonus chips added!"),
+                            StepKind::Mult => Some("Multiplier increased!"),
+                            StepKind::Final => Some("Chips \u{00d7} Mult = your score!"),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Phase::ShowTotal | Phase::Done => Some("Chips \u{00d7} Mult = your final score!"),
+                Phase::PreTotalFreeze => Some("And now the grand total..."),
+            }
+        } else {
+            None
+        };
+
         CascadeFrame {
             displayed_score: score_target,
             active: self.is_active(),
@@ -362,6 +404,7 @@ impl ScoringCascade {
             latest_step,
             phase_t,
             pulse_axis,
+            tutorial_annotation,
         }
     }
 }

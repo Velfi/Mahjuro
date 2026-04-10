@@ -377,6 +377,50 @@ jobs:
 
           ARCH=x86_64 ./appimagetool "$APPDIR" "${{ steps.artifact.outputs.filename }}"
 
+      # ──────────────── Update archive (for self_update crate) ────────────────
+      - name: Create update archive (macOS)
+        if: matrix.name == 'macOS'
+        id: update_archive
+        run: |
+          codesign --sign "$APPLE_SIGNING_IDENTITY" \
+            --options runtime \
+            --timestamp \
+            target/release-universal/mahjuro
+          ARCHIVE="mahjuro-${RELEASE_TAG}-macos-universal.tar.gz"
+          tar -czf "$ARCHIVE" -C target/release-universal mahjuro
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create update archive (Windows)
+        if: matrix.name == 'Windows'
+        id: update_archive_win
+        shell: bash
+        run: |
+          ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
+          cd "target/${{ matrix.target }}/release"
+          7z a "../../../${ARCHIVE}" "${{ matrix.binary }}"
+          cd ../../..
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - name: Create update archive (Linux)
+        if: matrix.name == 'Linux'
+        id: update_archive_linux
+        run: |
+          ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
+          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" mahjuro
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - name: Set update archive name
+        id: update
+        shell: bash
+        run: |
+          NAME="${{ steps.update_archive.outputs.filename }}${{ steps.update_archive_win.outputs.filename }}${{ steps.update_archive_linux.outputs.filename }}"
+          echo "filename=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.update.outputs.filename }}
+          path: ${{ steps.update.outputs.filename }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.filename }}

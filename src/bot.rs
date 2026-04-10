@@ -555,9 +555,15 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         run.relics.active.push(id);
         // Initialize counters for stateful relics.
         match id {
-            RelicId::MeltingIce => { run.relic_counters.insert(RelicId::MeltingIce, 80); }
-            RelicId::SilkThread => { run.relic_counters.insert(RelicId::SilkThread, 40); }
-            RelicId::TeaCeremony => { run.relic_counters.insert(RelicId::TeaCeremony, 3); }
+            RelicId::MeltingIce => {
+                run.relic_counters.insert(RelicId::MeltingIce, 80);
+            }
+            RelicId::SilkThread => {
+                run.relic_counters.insert(RelicId::SilkThread, 40);
+            }
+            RelicId::TeaCeremony => {
+                run.relic_counters.insert(RelicId::TeaCeremony, 3);
+            }
             _ => {}
         }
         run.recompute_capacities();

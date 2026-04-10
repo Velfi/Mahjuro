@@ -14,6 +14,7 @@ use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_se
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
+use crate::game::tutorial::TutorialState;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
 /// boss-specific logic has a single owner.
@@ -204,6 +205,10 @@ pub struct RunState {
     /// adds +20 chips permanently.
     #[serde(default)]
     pub river_runner_bonus: i32,
+    /// Tutorial state. `None` for normal (non-tutorial) runs. Present
+    /// during the player's very first run to gate mechanics by lesson.
+    #[serde(default)]
+    pub tutorial: Option<TutorialState>,
 }
 
 impl RunState {
@@ -291,6 +296,7 @@ impl RunState {
             tile_polisher_bonus: 0,
             relic_counters: std::collections::BTreeMap::new(),
             river_runner_bonus: 0,
+            tutorial: None,
         };
         // Roll skip-reward tags for ante 1.
         state.roll_ante_tags();
@@ -335,6 +341,239 @@ impl RunState {
     /// Start a new run with the given tile material set.
     pub fn new_with_material(material: crate::persistence::TileMaterial) -> Self {
         Self::new(GameMode::with_material(material))
+    }
+
+    /// Start a tutorial run for first-time players. Uses a stripped-down
+    /// game mode and enables the tutorial state machine.
+    pub fn new_tutorial() -> Self {
+        let mut state = Self::new(GameMode::tutorial());
+        state.tutorial = Some(TutorialState::new(1));
+        // Seed the initial hand for lesson 1 (pairs).
+        state.seed_tutorial_hand();
+        state
+    }
+
+    /// Advance the tutorial to the next lesson. Adjusts hand size, target,
+    /// discards, and available yaku per the lesson definition. Returns the
+    /// new lesson number, or `None` if the tutorial finished.
+    pub fn advance_tutorial_lesson(&mut self) -> Option<u32> {
+        let tutorial = self.tutorial.as_mut()?;
+        let next = tutorial.advance()?;
+        let lesson = tutorial.current_lesson_def();
+
+        // Apply lesson overrides to the mode.
+        self.mode.apply_lesson(lesson);
+
+        // Update run state from mode.
+        self.available_yaku = self.mode.starting_yaku.clone();
+        self.target_score = self.mode.base_target;
+        self.base_target = self.mode.base_target;
+        self.discards_remaining = self.mode.starting_discards;
+
+        // Adjust hand size: grow by drawing more tiles if needed.
+        let target_hand_size = self.mode.hand_size;
+        while self.hand.len() < target_hand_size {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+            } else {
+                break;
+            }
+        }
+        self.hand.sort();
+        self.selected.resize(self.hand.len(), false);
+
+        // Seed guaranteed melds for early lessons.
+        self.seed_tutorial_hand();
+
+        Some(next)
+    }
+
+    /// Retry the current tutorial blind after a failure. Records the failure
+    /// for adaptive difficulty, re-deals the hand, and resets plays/discards
+    /// without advancing the lesson or ante. The lowered target is applied
+    /// via `retry_target_factor` in `apply_blind`.
+    pub fn retry_tutorial_blind(&mut self) {
+        if let Some(ref mut tut) = self.tutorial {
+            tut.record_failure();
+        }
+
+        // Reset round state (same blind, same lesson).
+        self.round_score = 0;
+        self.round_rules.clear();
+        self.plays_remaining = self.mode.starting_plays;
+        self.discards_remaining = self.mode.starting_discards;
+        self.last_breakdown = None;
+        self.scored_last_turn = false;
+        self.quickdraw_used = false;
+        self.joker_used = false;
+        self.full_hand_played_this_round = false;
+        self.played_yaku_this_round.clear();
+        self.honors_scored_this_round = false;
+
+        // Re-deal the wall and hand.
+        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        self.wall = Wall::from_filtered_with_packs(
+            &self.removed_tile_ids,
+            &self.tile_packs,
+            &self.tile_enhancements,
+            overflow,
+        );
+        self.hand.clear();
+        let draw_count = self.mode.hand_size;
+        for _ in 0..draw_count {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+            }
+        }
+        self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
+        self.restamp_hand_enhancements();
+        self.seed_tutorial_hand();
+
+        // Re-apply blind (with lowered target via retry_target_factor).
+        self.apply_blind(self.blind);
+    }
+
+    /// Check if a set of detected meld kinds is valid for the current
+    /// tutorial lesson. Returns `Ok(())` or an error message.
+    pub fn tutorial_validate_sets(&self, set_kinds: &[SetKind]) -> Result<(), &'static str> {
+        if let Some(ref tutorial) = self.tutorial {
+            if tutorial.is_active() {
+                let lesson = tutorial.current_lesson_def();
+                return crate::game::tutorial::validate_sets_for_lesson(set_kinds, lesson);
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if discarding is allowed in the current tutorial lesson.
+    pub fn tutorial_discard_allowed(&self) -> bool {
+        match &self.tutorial {
+            Some(tutorial) if tutorial.is_active() => tutorial.current_lesson_def().discard_enabled,
+            _ => true,
+        }
+    }
+
+    /// Check if the shop should be shown in the current tutorial lesson.
+    pub fn tutorial_shop_enabled(&self) -> bool {
+        match &self.tutorial {
+            Some(tutorial) if tutorial.is_active() => tutorial.current_lesson_def().shop_enabled,
+            _ => true,
+        }
+    }
+
+    /// Whether tile affinity glow should be active.
+    pub fn tutorial_affinity_glow(&self) -> bool {
+        match &self.tutorial {
+            Some(tutorial) if tutorial.is_active() => tutorial.current_lesson_def().affinity_glow,
+            _ => false,
+        }
+    }
+
+    /// Whether the scoring cascade should run in annotated slow-mo.
+    pub fn tutorial_annotated_cascade(&self) -> bool {
+        match &self.tutorial {
+            Some(tutorial) if tutorial.is_active() && !tutorial.cascade_annotated => {
+                tutorial.current_lesson_def().annotated_cascade
+            }
+            _ => false,
+        }
+    }
+
+    /// Seed guaranteed melds into the current hand for tutorial lessons.
+    /// Shuffles the hand first so retries produce different tile layouts,
+    /// then overwrites a few positions to ensure the player can form the
+    /// melds that the current lesson teaches. Only affects lessons 1-5.
+    fn seed_tutorial_hand(&mut self) {
+        use rand::seq::SliceRandom;
+
+        let lesson_id = match &self.tutorial {
+            Some(t) if t.is_active() => t.current_lesson,
+            _ => return,
+        };
+
+        // Shuffle before seeding so the base tiles vary between attempts.
+        let mut rng = rand::rng();
+        self.hand.shuffle(&mut rng);
+
+        match lesson_id {
+            1 => {
+                // Ensure at least 2 pairs. Pick two tiles and duplicate them.
+                if self.hand.len() >= 4 {
+                    let face0 = (self.hand[0].suit, self.hand[0].rank);
+                    // Make hand[1] match hand[0].
+                    self.hand[1].suit = face0.0;
+                    self.hand[1].rank = face0.1;
+                    // Make another pair from hand[2].
+                    let face1 = (self.hand[2].suit, self.hand[2].rank);
+                    self.hand[3].suit = face1.0;
+                    self.hand[3].rank = face1.1;
+                    self.hand.sort();
+                }
+            }
+            2 => {
+                // Ensure at least 1 triplet.
+                if self.hand.len() >= 3 {
+                    let face = (self.hand[0].suit, self.hand[0].rank);
+                    self.hand[1].suit = face.0;
+                    self.hand[1].rank = face.1;
+                    self.hand[2].suit = face.0;
+                    self.hand[2].rank = face.1;
+                    self.hand.sort();
+                }
+            }
+            3 => {
+                // Ensure at least 1 sequence. Pick a numbered suit tile and
+                // make the next two consecutive.
+                let len = self.hand.len();
+                if len >= 3 {
+                    let base_face = self
+                        .hand
+                        .iter()
+                        .find(|t| t.is_number_tile() && t.rank <= 7)
+                        .map(|t| (t.suit, t.rank));
+                    if let Some((suit, rank)) = base_face {
+                        let i = len - 2;
+                        let j = len - 1;
+                        self.hand[i].suit = suit;
+                        self.hand[i].rank = rank + 1;
+                        self.hand[j].suit = suit;
+                        self.hand[j].rank = rank + 2;
+                    }
+                    self.hand.sort();
+                }
+            }
+            4 | 5 => {
+                // Ensure the 14-tile hand has a sequence + triplet + pair
+                // (close to FullHand territory for lesson 5).
+                let len = self.hand.len();
+                if len >= 9 {
+                    // Triplet from first tile.
+                    let face = (self.hand[0].suit, self.hand[0].rank);
+                    self.hand[1].suit = face.0;
+                    self.hand[1].rank = face.1;
+                    self.hand[2].suit = face.0;
+                    self.hand[2].rank = face.1;
+                    // Sequence from a mid-range numbered suit.
+                    let seq_face = self.hand[4..]
+                        .iter()
+                        .find(|t| t.is_number_tile() && t.rank <= 7)
+                        .map(|t| (t.suit, t.rank));
+                    if let Some((suit, rank)) = seq_face {
+                        self.hand[5].suit = suit;
+                        self.hand[5].rank = rank + 1;
+                        self.hand[6].suit = suit;
+                        self.hand[6].rank = rank + 2;
+                    }
+                    // Pair from hand[7].
+                    let pf = (self.hand[7].suit, self.hand[7].rank);
+                    self.hand[8].suit = pf.0;
+                    self.hand[8].rank = pf.1;
+                    self.hand.sort();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
@@ -481,11 +720,22 @@ impl RunState {
     /// boss blinds, and applies any per-round resource resets.
     pub fn apply_blind(&mut self, blind: BlindKind) {
         self.blind = blind;
-        self.target_score = (self.base_target as f32 * blind.target_multiplier()) as u32;
+        let mut target = (self.base_target as f32 * blind.target_multiplier()) as u32;
+        // Tutorial adaptive difficulty: lower the target after repeated failures.
+        if let Some(ref tut) = self.tutorial {
+            if tut.is_active() {
+                target = (target as f32 * tut.retry_target_factor()) as u32;
+            }
+        }
+        self.target_score = target;
         // Boss dispatch — push rule modifiers and run the on_apply hook so
         // category-C taxers (zero discards, hand-size shrink, gold cost) take
         // effect before the player draws their first hand.
-        if blind == BlindKind::Boss {
+        let simplified = self
+            .tutorial
+            .as_ref()
+            .is_some_and(|t| t.is_active() && t.current_lesson_def().simplified_boss);
+        if blind == BlindKind::Boss && !simplified {
             // Read from the resolved effect (built at reveal time) so reactive
             // bosses' chosen variants land correctly. Take/restore to dodge
             // the &mut self conflict when calling on_apply.
@@ -543,6 +793,14 @@ impl RunState {
             Some(result) => result,
             None => return 0,
         };
+
+        // Tutorial: reject plays with set kinds not yet unlocked.
+        {
+            let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
+            if self.tutorial_validate_sets(&set_kinds).is_err() {
+                return 0;
+            }
+        }
         // If tiles were modified by JokerTile substitution, mark it used.
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
@@ -619,10 +877,14 @@ impl RunState {
         }
         // Star Tile: 1-in-4 chance to level up a scored yaku.
         if self.relics.has(RelicId::StarTile) && !breakdown.detected_yaku.is_empty() {
-            use rand::seq::IndexedRandom;
             use rand::RngExt;
+            use rand::seq::IndexedRandom;
             let mut rng = rand::rng();
-            let prob = if self.relics.has(RelicId::FortunesFavor) { 2 } else { 1 };
+            let prob = if self.relics.has(RelicId::FortunesFavor) {
+                2
+            } else {
+                1
+            };
             if rng.random_ratio(prob, 4) {
                 if let Some(&y) = breakdown.detected_yaku.choose(&mut rng) {
                     let _new_level = self.yaku_levels.level_up(y);
@@ -741,6 +1003,9 @@ impl RunState {
 
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-seed guaranteed melds so the tutorial lesson stays solvable
+        // after replacement tiles are drawn from the wall.
+        self.seed_tutorial_hand();
         // Re-apply persistent enhancements to any newly-drawn tiles.
         self.restamp_hand_enhancements();
 
@@ -775,7 +1040,11 @@ impl RunState {
                     0
                 };
             // Gold Idol: +3 gold at round end.
-            let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) { 3u32 } else { 0 };
+            let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) {
+                3u32
+            } else {
+                0
+            };
             // Jade Abacus: +1 interest per 4 gold held (max +4).
             let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
                 (self.gold.max(0) as u32 / 4).min(4)
@@ -852,7 +1121,10 @@ impl RunState {
 
     /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
     /// Returns the decomposition and the (possibly modified) tiles used for scoring.
-    pub fn try_validate_with_wildcards(&self, tiles: &[Tile]) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    pub fn try_validate_with_wildcards(
+        &self,
+        tiles: &[Tile],
+    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &self.round_rules) {
             return Some((sets, tiles.to_vec()));
@@ -908,6 +1180,10 @@ impl RunState {
     /// Returns the number of tiles removed, or 0 if nothing was selected or no
     /// discards remain.
     pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {
+        // Tutorial: block discards until the lesson enables them.
+        if !self.tutorial_discard_allowed() {
+            return 0;
+        }
         if self.discards_remaining == 0 {
             return 0;
         }
@@ -931,6 +1207,15 @@ impl RunState {
         }
         self.discards_remaining -= 1;
         self.selected = vec![false; self.hand.len()];
+
+        // Tutorial milestone: celebrate the first discard.
+        if let Some(ref mut tut) = self.tutorial {
+            if tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstDiscard) {
+                bus.push(GameEvent::TutorialMilestone(
+                    crate::game::tutorial::TutorialMilestone::FirstDiscard,
+                ));
+            }
+        }
 
         // Silk Thread: -0.3 mult (stored as -3 in ×10 units) per discard.
         if self.relics.has(RelicId::SilkThread) {
@@ -966,6 +1251,9 @@ impl RunState {
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        // Re-seed guaranteed melds so the tutorial lesson stays solvable
+        // after replacement tiles are drawn from the wall.
+        self.seed_tutorial_hand();
         // Re-apply persistent enhancements to any newly-drawn tiles.
         self.restamp_hand_enhancements();
     }
@@ -1019,7 +1307,12 @@ impl RunState {
             let mut rng = rand::rng();
             let denom = if fortunes { 10 } else { 5 };
             if rng.random_ratio(1, denom) {
-                if let Some(pos) = self.relics.active.iter().position(|&r| r == RelicId::PaperLantern) {
+                if let Some(pos) = self
+                    .relics
+                    .active
+                    .iter()
+                    .position(|&r| r == RelicId::PaperLantern)
+                {
                     self.relics.active[pos] = RelicId::IronLantern;
                 }
             }
@@ -1040,7 +1333,10 @@ impl RunState {
         }
         // Phantom Relic: increment rounds held.
         if self.relics.has(RelicId::PhantomRelic) {
-            *self.relic_counters.entry(RelicId::PhantomRelic).or_insert(0) += 1;
+            *self
+                .relic_counters
+                .entry(RelicId::PhantomRelic)
+                .or_insert(0) += 1;
         }
         // Obsession: check if the player's most-used yaku was NOT scored
         // this round. If so, increment the counter.
@@ -1108,6 +1404,12 @@ impl RunState {
         self.selected = vec![false; self.hand.len()];
         // Re-apply persistent enhancements to the newly-dealt hand.
         self.restamp_hand_enhancements();
+
+        // Tutorial: advance to the next lesson and apply its overrides.
+        // This may resize the hand and adjust the target.
+        if self.tutorial.as_ref().is_some_and(|t| t.is_active()) {
+            self.advance_tutorial_lesson();
+        }
 
         // Roll the next ante's boss when we cross an ante boundary. Final
         // ante draws from the dedicated final pool; everyone else draws
@@ -1359,6 +1661,7 @@ mod tests {
             tile_polisher_bonus: 0,
             relic_counters: BTreeMap::new(),
             river_runner_bonus: 0,
+            tutorial: None,
         }
     }
 

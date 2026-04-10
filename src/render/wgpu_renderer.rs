@@ -5432,7 +5432,8 @@ impl WgpuRenderer {
                     mx_x = mx_x.max(sx);
                     mx_y = mx_y.max(sy);
                 }
-                self.proj.relic_rects
+                self.proj
+                    .relic_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
 
                 // Activation halo: enqueue a champagne radial bloom around
@@ -5582,7 +5583,8 @@ impl WgpuRenderer {
                         mx_x = mx_x.max(sx);
                         mx_y = mx_y.max(sy);
                     }
-                    self.proj.pack_rects
+                    self.proj
+                        .pack_rects
                         .push(([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y], p.pick_id));
                     slot += 1;
                 }
@@ -5675,7 +5677,8 @@ impl WgpuRenderer {
                             }
                         }
                     }
-                    self.proj.shrine_rects
+                    self.proj
+                        .shrine_rects
                         .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
                     // Glow gently brightens the shrine's tint so the
                     // upcoming shrine reads as the active choice at
@@ -5767,7 +5770,8 @@ impl WgpuRenderer {
                     }
                 }
             }
-            self.proj.aux_dish_rects
+            self.proj
+                .aux_dish_rects
                 .push((d.pick_id, [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]));
             self.last_aux_dish_aabbs.push((center, half));
         }
@@ -5872,8 +5876,8 @@ impl WgpuRenderer {
                     }
 
                     // Top cap
-                    let top_model = base_transform
-                        * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                    let top_model =
+                        base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
                     emit_slot(ribbon_slot_cursor, top_model, Some((idx, 0)));
                     ribbon_slot_cursor += 1;
 
@@ -5894,21 +5898,21 @@ impl WgpuRenderer {
                     ribbon_slot_cursor += 1;
 
                     // For pick-testing, store the full-ribbon model matrix.
-                    let full_model = base_transform
-                        * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                    let full_model =
+                        base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
                     self.last_ribbon_models.push(full_model);
                 } else {
                     // Untextured (plain) ribbon — single slot, same as before.
-                    let model = base_transform
-                        * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                    let model =
+                        base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
                     emit_slot(ribbon_slot_cursor, model, None);
                     ribbon_slot_cursor += 1;
                     self.last_ribbon_models.push(model);
                 }
 
                 // Project the ribbon's full AABB to screen for tooltip/click.
-                let full_model = base_transform
-                    * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                let full_model =
+                    base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
                 let local_corners = [
                     glam::Vec3::new(-0.5, -1.0, -0.05),
                     glam::Vec3::new(0.5, -1.0, -0.05),
@@ -5931,7 +5935,8 @@ impl WgpuRenderer {
                     mx_x = mx_x.max(sx);
                     mx_y = mx_y.max(sy);
                 }
-                self.proj.ribbon_rects
+                self.proj
+                    .ribbon_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             }
             self.last_ribbon_batch_slot_counts
@@ -6017,7 +6022,8 @@ impl WgpuRenderer {
                     mx_x = mx_x.max(psx);
                     mx_y = mx_y.max(psy);
                 }
-                self.proj.talisman_rects
+                self.proj
+                    .talisman_rects
                     .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             }
         }
@@ -6216,7 +6222,8 @@ impl WgpuRenderer {
                 mx_x = mx_x.max(sx);
                 mx_y = mx_y.max(sy);
             }
-            self.proj.plaque_rects
+            self.proj
+                .plaque_rects
                 .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
             // Plaque local AABB is the unit cube (push_box convention).
             // Slot 0 is the blind plaque, slot 1 is the scoring placard.
@@ -6346,7 +6353,8 @@ impl WgpuRenderer {
                     inst.decal_label_hash = label_hash;
                 }
                 inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, material, true);
-                self.proj.yaku_tablet_rects
+                self.proj
+                    .yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_yaku_tablet_models.push(model);
                 self.last_debug_pickables
@@ -6403,7 +6411,8 @@ impl WgpuRenderer {
                     self.wood_tablet_mesh.default_material,
                     true,
                 );
-                self.proj.wood_tablet_rects
+                self.proj
+                    .wood_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_wood_tablet_models.push(model);
                 // 0 = sort suit, 1 = sort rank, 2 = yaku journal book.
@@ -7166,8 +7175,7 @@ impl WgpuRenderer {
                     if ribbon_shadow_cursor >= MAX_RIBBON_SLOTS {
                         break;
                     }
-                    let anchor =
-                        pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
+                    let anchor = pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
                     let eff_w = r.width;
                     let eff_l = r.length;
                     let depth = eff_w * 0.15;
@@ -7189,40 +7197,44 @@ impl WgpuRenderer {
                             break;
                         }
                         // Top cap
-                        let top_model = base_transform
-                            * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
-                        self.ribbon_instances[ribbon_shadow_cursor]
-                            .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
+                        let top_model =
+                            base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
+                        self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                            &self.queue,
+                            light_view_proj_arr,
+                            top_model,
+                        );
                         ribbon_shadow_cursor += 1;
                         // Middle
                         if mid_h > 0.0 {
                             let mid_model = base_transform
                                 * Mat4::from_translation(glam::Vec3::new(0.0, -cap_h, 0.0))
                                 * Mat4::from_scale(glam::Vec3::new(eff_w, mid_h, depth));
-                            self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(
-                                    &self.queue,
-                                    light_view_proj_arr,
-                                    mid_model,
-                                );
+                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                                &self.queue,
+                                light_view_proj_arr,
+                                mid_model,
+                            );
                             ribbon_shadow_cursor += 1;
                         }
                         // Bottom cap
                         let bot_model = base_transform
-                            * Mat4::from_translation(glam::Vec3::new(
-                                0.0,
-                                -(cap_h + mid_h),
-                                0.0,
-                            ))
+                            * Mat4::from_translation(glam::Vec3::new(0.0, -(cap_h + mid_h), 0.0))
                             * Mat4::from_scale(glam::Vec3::new(eff_w, cap_h, depth));
-                        self.ribbon_instances[ribbon_shadow_cursor]
-                            .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);
+                        self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                            &self.queue,
+                            light_view_proj_arr,
+                            bot_model,
+                        );
                         ribbon_shadow_cursor += 1;
                     } else {
-                        let model = base_transform
-                            * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
-                        self.ribbon_instances[ribbon_shadow_cursor]
-                            .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                        let model =
+                            base_transform * Mat4::from_scale(glam::Vec3::new(eff_w, eff_l, depth));
+                        self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                            &self.queue,
+                            light_view_proj_arr,
+                            model,
+                        );
                         ribbon_shadow_cursor += 1;
                     }
                 }
