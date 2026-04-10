@@ -56,6 +56,10 @@ pub enum GameEvent {
     ZodiacReveal,
     /// A zodiac was consumed and levelled up a yaku.
     ZodiacLevelUp,
+    /// A relic's effect just fired (scoring, round-end, discard, consumable
+    /// interaction, etc.). Drives the glow + wiggle animation on every scene
+    /// that renders relics.
+    RelicActivated(crate::core::relic::RelicId),
     /// A single hand scored at least the entire blind target — candles
     /// flare up and sparks fly.
     CandleFlare,

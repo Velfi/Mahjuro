@@ -419,7 +419,13 @@ impl SceneBehavior for GameplayScene {
         // Update tutorial overlay each frame.
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.cascade_active = self.cascade.is_some();
-            overlay.update(ctx.run, dt);
+            overlay.update(
+                ctx.run,
+                dt,
+                ctx.layout.window_w,
+                ctx.layout.window_h,
+                ctx.ui_scale,
+            );
         }
         // Compute tutorial affinity glow indices.
         if ctx.run.tutorial_affinity_glow() {
@@ -600,9 +606,18 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
+        // Scene transition in progress — keep animations running but block
+        // all input so the player can't alter game state during the fade-out.
+        if ctx.transitioning {
+            return None;
+        }
+
         // Help action opens the Meld Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
+                if let Some(ref mut tut) = ctx.run.tutorial {
+                    tut.meld_guide_opened = true;
+                }
                 return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
                     true,
                 )));
@@ -610,6 +625,9 @@ impl SceneBehavior for GameplayScene {
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
+                if let Some(ref mut tut) = ctx.run.tutorial {
+                    tut.meld_guide_opened = true;
+                }
                 return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
                     true,
                 )));
@@ -631,6 +649,9 @@ impl SceneBehavior for GameplayScene {
             // The pause menu's "Meld Guide" entry sets a one-shot flag and
             // closes itself; drain the flag to transition to the Meld Guide scene.
             if self.pause_menu.take_meld_guide_request() {
+                if let Some(ref mut tut) = ctx.run.tutorial {
+                    tut.meld_guide_opened = true;
+                }
                 return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
                     true,
                 )));
@@ -685,10 +706,9 @@ impl SceneBehavior for GameplayScene {
                         // step's delta against the previous step's running
                         // values so the player sees the *contribution* of
                         // each relic / yaku as a discrete object that flies
-                        // toward the score panel and lands in the running
-                        // total. The Final beat is intentionally skipped
-                        // here — the score panel itself handles the closing
-                        // crescendo via screen shake + gold flash.
+                        // toward a floating accumulator label. The
+                        // accumulator shows the running chips or mult total
+                        // and pulses each time a pop lands.
                         let (prev_chips, prev_mult) = if idx > 0 {
                             let prev = &cascade.breakdown.steps[idx - 1];
                             (prev.running_chips, prev.running_mult)
@@ -724,8 +744,43 @@ impl SceneBehavior for GameplayScene {
                             }
                             StepKind::Final => (String::new(), 0.0),
                         };
+
+                        // Accumulator positions: chips floats left-of-center,
+                        // mult floats right-of-center, both between the
+                        // modifier strip and the score panel.
+                        let ms = ctx.layout.modifier_strip;
+                        let sp = ctx.layout.score_panel;
+                        let accum_y = ms.y + ms.h + (sp.y - (ms.y + ms.h)) * 0.45;
+                        let chips_accum_pos = (ms.x + ms.w * 0.30, accum_y);
+                        let mult_accum_pos = (ms.x + ms.w * 0.70, accum_y);
+
+                        // Update the accumulator label for the axis this step
+                        // touches so the running total ticks up.
+                        match step.kind {
+                            StepKind::Chips => {
+                                self.score_popups.set_accumulator(
+                                    StepKind::Chips,
+                                    chips_accum_pos,
+                                    format!("{}", step.running_chips),
+                                );
+                            }
+                            StepKind::Mult => {
+                                let m = step.running_mult;
+                                let mult_label = if (m - m.round()).abs() < 0.05 {
+                                    format!("x{}", m.round() as i64)
+                                } else {
+                                    format!("x{:.1}", m)
+                                };
+                                self.score_popups.set_accumulator(
+                                    StepKind::Mult,
+                                    mult_accum_pos,
+                                    mult_label,
+                                );
+                            }
+                            _ => {}
+                        }
+
                         if !label.is_empty() {
-                            let ms = ctx.layout.modifier_strip;
                             let source_x = match step.kind {
                                 StepKind::Chips => ms.x + ms.w * 0.30,
                                 StepKind::Mult => ms.x + ms.w * 0.70,
@@ -733,8 +788,13 @@ impl SceneBehavior for GameplayScene {
                                 StepKind::Final => ms.x + ms.w * 0.50,
                             };
                             let source_y = ms.y + ms.h * 0.5;
-                            let sp = ctx.layout.score_panel;
-                            let dest = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5);
+                            // Pops fly to their axis accumulator, not the
+                            // score panel.
+                            let dest = match step.kind {
+                                StepKind::Chips => chips_accum_pos,
+                                StepKind::Mult => mult_accum_pos,
+                                _ => (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5),
+                            };
                             self.score_popups.spawn(
                                 label,
                                 (source_x, source_y),
@@ -805,6 +865,17 @@ impl SceneBehavior for GameplayScene {
         self.relic_glow_starts
             .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
 
+        // Drain non-scoring relic activations from the run state. These are
+        // pushed by run.rs for effects that fire outside the scoring cascade
+        // (round-end gold, discard triggers, draw bonuses, consumable
+        // interactions, etc.). Each activation starts a glow+wiggle and
+        // pushes a bus event for audio.
+        for rid in ctx.run.relic_activations.drain(..) {
+            self.relic_glow_starts.insert(rid, now);
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::RelicActivated(rid));
+        }
+
         // Zodiac inventory clicks (Patch B finishing): the player can use a
         // Zodiac card between plays to permanently level its yaku for the
         // run. Click ids are `ZODIAC_USE_BASE + slot_idx`. Only allowed when
@@ -816,7 +887,7 @@ impl SceneBehavior for GameplayScene {
                 match ctx.run.use_consumable(idx) {
                     Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) => {
                         log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level);
-                        let label = format!("{} Lv.{}", yaku.name(), new_level);
+                        let label = format!("{} Lvl.{}", yaku.name(), new_level);
                         let src = ctx.cursor_pos;
                         let dest = (src.0, src.1 - 200.0);
                         self.score_popups.spawn(
@@ -977,7 +1048,37 @@ impl SceneBehavior for GameplayScene {
                         .find_map(|(t, r)| matches!(t, FocusTarget::HandTile(_)).then_some(*r))
                 });
                 if let Some(rect) = start_rect {
-                    if let Some(next) = pick_neighbor(rect, dir, &focus_rects) {
+                    let spatial = pick_neighbor(rect, dir, &focus_rects);
+                    // Navigation overrides for the two-row action bar:
+                    let overridden = match (self.focus, dir) {
+                        // LEFT from Mirror → Journal (skip the yaku row)
+                        (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Left) => {
+                            focus_rects
+                                .iter()
+                                .find(|(t, _)| {
+                                    matches!(t, FocusTarget::Button(GameplayButton::Journal))
+                                })
+                                .map(|(t, _)| *t)
+                        }
+                        // RIGHT from Discard → yaku tablet if any, else SortSuit
+                        (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Right) => {
+                            let has_yaku = focus_rects
+                                .iter()
+                                .any(|(t, _)| matches!(t, FocusTarget::YakuTablet(_)));
+                            if has_yaku {
+                                None // let spatial result stand
+                            } else {
+                                focus_rects
+                                    .iter()
+                                    .find(|(t, _)| {
+                                        matches!(t, FocusTarget::Button(GameplayButton::SortSuit))
+                                    })
+                                    .map(|(t, _)| *t)
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(next) = overridden.or(spatial) {
                         self.focus = Some(next);
                     }
                 } else if let Some((first, _)) = focus_rects.first() {
@@ -1057,7 +1158,7 @@ impl SceneBehavior for GameplayScene {
                                             yaku.name(),
                                             new_level,
                                         );
-                                        let label = format!("{} Lv.{}", yaku.name(), new_level);
+                                        let label = format!("{} Lvl.{}", yaku.name(), new_level);
                                         let src = ctx.cursor_pos;
                                         let dest = (src.0, src.1 - 200.0);
                                         self.score_popups.spawn(
@@ -3088,6 +3189,24 @@ impl SceneBehavior for GameplayScene {
                     }
                 }
             }
+
+            // ── Tutorial pulse light on the Discard bowl ──────────────────
+            if overlay.highlight == Some(super::tutorial_overlay::HighlightTarget::DiscardBowl) {
+                if let Some(ref bowl) = discard_bowl_placement {
+                    let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
+                    let budget = crate::render::wgpu_renderer::MAX_POINT_LIGHTS
+                        .saturating_sub(point_lights.len());
+                    if budget > 0 {
+                        let diam = bowl.extents[0];
+                        point_lights.push(PointLight {
+                            pos: [bowl.world_pos[0], bowl.world_pos[1], diam * 0.6],
+                            radius: diam * 3.0 + pulse * diam * 1.0,
+                            color: [0.6, 0.75, 1.0],
+                            intensity: 3.5 + pulse * 4.0,
+                        });
+                    }
+                }
+            }
         }
 
         // The 3D table + tiles + candles ARE the UI. Selection feedback is
@@ -3176,24 +3295,29 @@ impl SceneBehavior for GameplayScene {
                 // emit a real additive halo around it. Attack is the first
                 // ~12% of the lifetime; the rest is a quadratic decay so the
                 // glow flares quickly and lingers in a soft afterglow.
-                let glow = if let Some(start) = self.relic_glow_starts.get(&rid) {
+                let (glow, wiggle_deg) = if let Some(start) = self.relic_glow_starts.get(&rid) {
                     let now_for_glow = Instant::now();
                     let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
                     let life = RELIC_GLOW_LIFETIME.as_secs_f32();
                     if age >= life {
-                        0.0
+                        (0.0, 0.0)
                     } else {
                         let t = (age / life).clamp(0.0, 1.0);
                         let attack_end = 0.12_f32;
-                        if t < attack_end {
+                        let glow = if t < attack_end {
                             (t / attack_end).clamp(0.0, 1.0)
                         } else {
                             let decay_t = (t - attack_end) / (1.0 - attack_end);
                             (1.0 - decay_t).max(0.0).powi(2)
-                        }
+                        };
+                        // Decaying sinusoidal wiggle synced to the glow envelope.
+                        // ~6 oscillations over the lifetime, amplitude peaks at
+                        // 12 degrees then decays with the glow.
+                        let wiggle = glow * 12.0 * (age * 22.0).sin();
+                        (glow, wiggle)
                     }
                 } else {
-                    0.0
+                    (0.0, 0.0)
                 };
 
                 let px = start_x + i as f32 * cell_w;
@@ -3204,6 +3328,7 @@ impl SceneBehavior for GameplayScene {
                     relic_id: rid,
                     glow,
                     rotation_x_deg: 0.0,
+                    rotation_z_deg: wiggle_deg,
                 });
             }
         }
@@ -3247,9 +3372,10 @@ impl SceneBehavior for GameplayScene {
 
                 // Tooltip: name + description in a small dark panel anchored
                 // above the hovered relic.
-                use crate::core::relic::all_relic_defs;
+                use crate::core::relic::{all_relic_defs, relic_description_live};
                 let defs = all_relic_defs();
                 if let Some(def) = defs.iter().find(|d| d.id == rid) {
+                    let live_desc = relic_description_live(rid, &ctx.run.relic_counters);
                     let pad = 18.0_f32;
                     let tip_w = 440.0_f32;
                     let title_h = 38.0_f32;
@@ -3266,8 +3392,7 @@ impl SceneBehavior for GameplayScene {
                     let body_step = body_line_h * 1.6;
                     let body_box = body_line_h * 1.8;
                     let body_inner_w = tip_w - pad * 2.0;
-                    let wrapped_lines =
-                        widget::wrap_text(def.description, body_inner_w, body_line_h);
+                    let wrapped_lines = widget::wrap_text(&live_desc, body_inner_w, body_line_h);
                     let body_h = (wrapped_lines.len() as f32 * body_step).max(body_box);
                     let tip_h = pad * 2.0 + title_h + body_h;
                     let mut tip_x = rx + rw * 0.5 - tip_w * 0.5;
@@ -3321,7 +3446,7 @@ impl SceneBehavior for GameplayScene {
                             tip_w - pad * 2.0,
                             body_h,
                         ],
-                        def.description,
+                        &live_desc,
                         body_style,
                         layout.window_h,
                         ctx.ui_scale,
@@ -4089,8 +4214,12 @@ impl SceneBehavior for GameplayScene {
         // tooltip, zodiac slot hover tooltip, relic hover outline +
         // tooltip. Pushed *after* `hand_tile_faces` so they always sit
         // on top of the visible tile rank text, not under it.
-        frame.quads(hover_quads);
-        frame.texts(hover_text);
+        // Suppressed when an app-level modal is active so tooltip text
+        // doesn't bleed through the modal's semi-transparent dimmer.
+        if !ctx.modal_active {
+            frame.quads(hover_quads);
+            frame.texts(hover_text);
+        }
 
         // PAUSE OVERLAY: dim panel + buttons + text built earlier into
         // its own buffers. Sits above the hover layer so the pause menu

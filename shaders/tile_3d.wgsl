@@ -401,7 +401,30 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Candle-only composition: tile albedo modulated purely by the
     // accumulated point-light contribution. No directional shadow
     // attenuation — the wicks are the only lights in the scene.
-    let lit_rgb = rgb * point_contrib + sheen_acc;
+    var lit_rgb = rgb * point_contrib + sheen_acc;
+
+    // ── Blocked-tile dimming (solitaire) ───────────────────────────
+    // base_color_factor.x: 1.0 = free/playable, <1.0 = blocked.
+    // Desaturate toward luminance then scale down so blocked tiles
+    // read as inert stone without becoming illegible.
+    let brightness = cam.base_color_factor.x;
+    if (brightness < 0.99) {
+        let lum = dot(lit_rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+        lit_rgb = mix(lit_rgb, vec3<f32>(lum), 0.35) * brightness;
+    }
+
+    // ── Selection highlight (solitaire) ────────────────────────────
+    // base_color_factor.y: 1.0 = selected, 0.0 = not selected.
+    // Warm champagne-gold brighten + fresnel rim to echo the Midnight
+    // Gold theme without needing outline geometry.
+    let sel = cam.base_color_factor.y;
+    if (sel > 0.5) {
+        let gold = vec3<f32>(1.00, 0.84, 0.42);
+        lit_rgb = lit_rgb * 1.20 + gold * 0.08;
+        let rim = pow(1.0 - ndv_global, 2.5) * 0.15;
+        lit_rgb = lit_rgb + gold * rim;
+    }
+
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
     return vec4<f32>(out_rgb, 1.0);

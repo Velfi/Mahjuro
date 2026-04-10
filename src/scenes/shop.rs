@@ -19,7 +19,8 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
-    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price, relic_sell_price,
+    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price,
+    relic_description_live, relic_sell_price, relic_sell_price_live,
 };
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
@@ -27,9 +28,9 @@ use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::render::curio_cabinet_mesh::{NICHE_COLS, NICHE_ROWS, niche_centers_local};
 use crate::render::draw_cmd::{
-    CameraParams, CoinPlacement, CurioCabinetPlacement, DishExplicit, PackPlacement,
-    PlaquePlacement, RelicPlacement, ShowcaseTilePlacement, TalismanPlacement, UiFrame,
-    ZodiacRibbonPlacement,
+    BookPlacement, CameraParams, CoinPlacement, CurioCabinetPlacement, DishExplicit,
+    GoldBarPlacement, PackPlacement, PlaquePlacement, RelicPlacement, ShowcaseTilePlacement,
+    TalismanPlacement, UiFrame, ZodiacRibbonPlacement,
 };
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
@@ -302,12 +303,16 @@ fn apply_shop_action(
                     // Store permanent mult as ×10 integer.
                     *run.relic_counters.entry(RelicId::RitualBlade).or_insert(0) +=
                         victim_value * 2 * 10;
+                    run.relic_activations.push(RelicId::RitualBlade);
                     return ShopActionResult::None;
                 }
                 run.relics.active.remove(idx);
                 run.gold = run.gold.saturating_add(refund as i32);
                 // Bonfire: track relic sales for mult bonus.
                 *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
+                if run.relics.has(RelicId::Bonfire) {
+                    run.relic_activations.push(RelicId::Bonfire);
+                }
             }
         }
         ShopAction::MoveRelicLeft(idx) => {
@@ -616,6 +621,13 @@ pub struct ShopScene {
     /// Timestamp of the previous frame — used to compute `dt` for
     /// particle and popup animation.
     last_frame: Instant,
+    /// Monotonic accumulated time in seconds — drives idle coin/bar
+    /// animation in `draw_frame` without calling `Instant::now()`.
+    age_secs: f32,
+    /// Per-relic glow start times. Populated when `relic_activations` is
+    /// drained from the run state (e.g. Bonfire on relic sell, RitualBlade
+    /// on destroy). Drives glow + wiggle on owned relics in the shop.
+    relic_glow_starts: std::collections::HashMap<RelicId, Instant>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -629,6 +641,8 @@ const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 const SHOP_REROLL_ID: u32 = 0x9400;
 /// Base gold cost for the first shop reroll.
 const REROLL_BASE_COST: u32 = 5;
+/// How long a relic glow + wiggle lasts after activation.
+const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// How much the reroll cost increases per use within a single shop visit.
 const REROLL_COST_INCREMENT: u32 = 5;
 /// Pick id for the foreground relic dish.
@@ -800,6 +814,8 @@ impl ShopScene {
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),
+            age_secs: 0.0,
+            relic_glow_starts: std::collections::HashMap::new(),
         }
     }
 
@@ -838,7 +854,7 @@ impl ShopScene {
     ) {
         if let Some(celeb) = self.zodiac_celebration.take() {
             bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
-            let label = format!("{} Lv.{}", celeb.yaku_name, celeb.new_level);
+            let label = format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level);
             let center = (w * 0.5, h * 0.45);
             let dest = (center.0, center.1 - 200.0);
             self.score_popups.spawn(
@@ -1113,13 +1129,10 @@ impl ShopLayout {
         // far right. Symmetry of language: relics and consumables share
         // the same "laid flat in a tray" treatment so they parse as "your
         // collection" rather than two unrelated systems.
-        // Inventory shelf. With the wide-FOV close camera, anything below
-        // ~h*0.74 pixel-y projects into the dark bottom corners outside
-        // the cabinet's lit area. The shelf is lifted to h*0.70 and all
-        // tray x-positions are tightened toward the screen center so the
-        // player's possessions read as one cohesive band rather than
-        // four objects flung to the corners.
-        let shelf_y = h * 0.70;
+        // Inventory shelf. Raised to h*0.62 so the relic and consumable
+        // trays sit higher — closer to the cabinet and further from the
+        // bottom-of-screen buttons.
+        let shelf_y = h * 0.62;
         // All three inventory trays share a ~12mm brass rim — small
         // decorative dishes that hold the player's items. Footprint
         // (width/depth) stays layout-relative so the shelf reads as a
@@ -1131,8 +1144,9 @@ impl ShopLayout {
         // Consumable tray: owned zodiac ribbons + talisman tablets laid flat.
         let consumable_row_center_px = (w * 0.58, shelf_y, 0.0);
         let consumable_row_extents = [w * 0.10, dish_rim, h * 0.10];
-        // Coin dish — sits just right of the consumable tray.
-        let coin_dish_center_px = (w * 0.76, shelf_y, 0.0);
+        // Coin dish — sits just right of the consumable tray, pulled
+        // forward toward the camera so the gold reads larger on screen.
+        let coin_dish_center_px = (w * 0.62, h * 1.1, h * 0.3);
         let coin_dish_extents = [w * 0.045, dish_rim, h * 0.07];
 
         // ── Owned consumable sizing ─────────────────────────────────────
@@ -1177,7 +1191,7 @@ impl ShopLayout {
         let start_x = self.relic_dish_center_px.0 - dish_w * 0.5 + (dish_w / n) * 0.5;
         let px = start_x + (dish_w / n) * idx as f32;
         let py = self.relic_dish_center_px.1;
-        let wy = self.relic_dish_extents[1] * 0.5 + 4.0;
+        let wy = self.relic_dish_extents[1] + 4.0;
         (px, py, wy)
     }
 
@@ -1251,79 +1265,128 @@ fn consumable_color(c: Consumable) -> [f32; 4] {
     }
 }
 
-/// Cheap deterministic PRNG for laying out coin piles. Same xorshift the
-/// renderer uses internally.
-struct CoinRand(u32);
-impl CoinRand {
-    fn new(seed: u32) -> Self {
-        Self(seed.max(1))
-    }
-    fn next(&mut self) -> f32 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 17;
-        self.0 ^= self.0 << 5;
-        (self.0 as f32) / u32::MAX as f32
-    }
-}
-
-/// Lay out a pile of `gold` coins inside the coin dish. Coins pack into
-/// hexagonal layers; once a layer fills, the pile starts a new layer above.
-fn coin_pile_layout(
+/// Tiered gold display: coin strings for small amounts, gold bars for large.
+///
+/// **Denomination breakdown** (applied when gold ≥ 100):
+///   big bars   = gold / 100       (each worth 100)
+///   mini bars  = (gold % 100) / 25 (each worth 25)
+///   coins      = gold % 25        (remainder as vertical strings of 10)
+///
+/// Below 100 gold the display is pure coin strings (10 per string).
+fn coin_display_layout(
     gold: u32,
     dish_center_px: (f32, f32, f32),
     dish_extents: [f32; 3],
-    seed: u32,
-) -> Vec<CoinPlacement> {
-    let n = (gold as usize).min(crate::render::wgpu_renderer::MAX_COIN_SLOTS);
-    if n == 0 {
-        return Vec::new();
+    time: f32,
+) -> (Vec<GoldBarPlacement>, Vec<CoinPlacement>) {
+    if gold == 0 {
+        return (Vec::new(), Vec::new());
     }
+
     let coin_radius = 9.0_f32;
     let coin_thickness = 3.5_f32;
-    // Available footprint: a slightly inset square inside the dish bounds.
-    // (Hex packing inside a circle is fiddly; an inset square is fine.)
-    let inset_x = dish_extents[0] * 0.42;
-    let inset_z = dish_extents[2] * 0.42;
-    // Hex grid spacing (face-to-face).
-    let dx = coin_radius * 2.05;
-    let dz = coin_radius * 1.78;
-    // Per-layer columns/rows.
-    let cols = ((inset_x * 2.0) / dx).floor() as i32;
-    let rows = ((inset_z * 2.0) / dz).floor() as i32;
-    let cols = cols.max(1);
-    let rows = rows.max(1);
-    let per_layer = (cols * rows) as usize;
-    let mut out = Vec::with_capacity(n);
-    let mut rng = CoinRand::new(seed);
-    let dish_top_y = dish_extents[1] + 2.0;
-    for i in 0..n {
-        let layer = i / per_layer.max(1);
-        let in_layer = i % per_layer.max(1);
-        let r = (in_layer as i32) / cols;
-        let c = (in_layer as i32) % cols;
-        // Hex offset every other row.
-        let row_offset = if r % 2 == 0 { 0.0 } else { dx * 0.5 };
-        let lx = -inset_x + dx * 0.5 + c as f32 * dx + row_offset;
-        let lz = -inset_z + dz * 0.5 + r as f32 * dz;
-        // Tiny per-coin jitter so the pile doesn't read as a perfect grid.
-        let jitter_x = (rng.next() - 0.5) * 1.5;
-        let jitter_z = (rng.next() - 0.5) * 1.5;
-        let jitter_y = (rng.next() - 0.5) * 0.4;
-        let rot_y = (rng.next() - 0.5) * std::f32::consts::TAU;
-        let world_y = dish_top_y + layer as f32 * coin_thickness + jitter_y;
-        out.push(CoinPlacement {
-            world_pos: [
-                dish_center_px.0 + lx + jitter_x,
-                dish_center_px.1 + lz + jitter_z,
-                world_y,
-            ],
-            rotation_y: rot_y,
-            radius: coin_radius,
-            thickness: coin_thickness,
-            color: [1.00, 0.78, 0.30, 1.0],
-        });
+    let coins_per_string: u32 = 10;
+    let dish_top_y = dish_center_px.2 + dish_extents[1] + 2.0;
+    let gold_color: [f32; 4] = [1.00, 0.78, 0.30, 1.0];
+    // Slightly darker gold for bars so they read as a distinct denomination.
+    let bar_color: [f32; 4] = [0.92, 0.72, 0.22, 1.0];
+
+    // ── Denomination split ────────────────────────────────────────────
+    let big_bars = gold / 100;
+    let after_big = gold % 100;
+    let mini_bars = after_big / 25;
+    let coin_gold = after_big % 25;
+
+    let total_bars = (big_bars + mini_bars) as usize;
+    let n_coin_strings = if coin_gold > 0 {
+        ((coin_gold - 1) / coins_per_string + 1) as usize
+    } else {
+        0
+    };
+    let total_coins = (coin_gold as usize).min(crate::render::wgpu_renderer::MAX_COIN_SLOTS);
+
+    // ── Spatial budget ────────────────────────────────────────────────
+    // Bars sit in a row at the back of the dish; coin strings sit in
+    // front. Both are centered within the dish footprint.
+    let footprint_x = dish_extents[0] * 0.90;
+
+    // ── Bars ──────────────────────────────────────────────────────────
+    let mut bars = Vec::with_capacity(total_bars);
+    if total_bars > 0 {
+        let big_he: [f32; 3] = [7.0, 4.0, 5.0];
+        let mini_he: [f32; 3] = [5.0, 3.0, 3.5];
+        // Lay bars in a single row; if more than fit side-by-side, stack
+        // additional layers on top.
+        let max_per_row = ((footprint_x * 2.0) / (big_he[0] * 2.5)).floor().max(1.0) as usize;
+        let mut bar_idx: usize = 0;
+        // Big bars first, then mini bars.
+        let bar_specs: Vec<(usize, [f32; 3])> = std::iter::repeat((0, big_he))
+            .take(big_bars as usize)
+            .chain(std::iter::repeat((1, mini_he)).take(mini_bars as usize))
+            .collect();
+        for (spec_i, (_kind, he)) in bar_specs.iter().enumerate() {
+            let row = bar_idx / max_per_row;
+            let col = bar_idx % max_per_row;
+            let cols_this_row = max_per_row.min(total_bars - row * max_per_row);
+            let row_width = cols_this_row as f32 * he[0] * 2.5;
+            let x_off = -row_width * 0.5 + he[0] * 1.25 + col as f32 * he[0] * 2.5;
+            let world_y = dish_top_y + he[1] + row as f32 * (big_he[1] * 2.0 + 1.0);
+            // Bars sit toward the back of the dish.
+            let z_off = -dish_extents[2] * 0.25;
+            // Gentle rotation drift for sparkle.
+            let rot = 0.02 * (time * 0.5 + spec_i as f32 * 2.3).sin();
+            bars.push(GoldBarPlacement {
+                world_pos: [dish_center_px.0 + x_off, dish_center_px.1 + z_off, world_y],
+                rotation_y: rot,
+                half_extents: *he,
+                color: bar_color,
+            });
+            bar_idx += 1;
+        }
     }
-    out
+
+    // ── Coin strings ─────────────────────────────────────────────────
+    let mut coins = Vec::with_capacity(total_coins);
+    if total_coins > 0 {
+        // Strings sit in a row toward the front of the dish. When bars
+        // are present they shift forward; when alone they center in the
+        // dish.
+        let z_off = if total_bars > 0 {
+            dish_extents[2] * 0.25
+        } else {
+            0.0
+        };
+        let string_spacing = (coin_radius * 2.2).min(if n_coin_strings > 1 {
+            (footprint_x * 2.0) / (n_coin_strings as f32)
+        } else {
+            coin_radius * 2.2
+        });
+        let row_width = n_coin_strings as f32 * string_spacing;
+        let mut placed = 0u32;
+        for s in 0..n_coin_strings {
+            let x_off = -row_width * 0.5 + string_spacing * 0.5 + s as f32 * string_spacing;
+            let coins_in_this_string = coins_per_string.min(coin_gold - placed);
+            for c in 0..coins_in_this_string {
+                let si = s as f32;
+                let ci = c as f32;
+                // Idle sway + bob.
+                let sway = 0.04 * (time * 1.2 + si * 1.8).sin();
+                let bob = 0.3 * (time * 0.9 + si * 2.1 + ci * 0.4).sin();
+                let base_rot = si * 0.15;
+                let world_y = dish_top_y + ci * coin_thickness + bob;
+                coins.push(CoinPlacement {
+                    world_pos: [dish_center_px.0 + x_off, dish_center_px.1 + z_off, world_y],
+                    rotation_y: base_rot + sway,
+                    radius: coin_radius,
+                    thickness: coin_thickness,
+                    color: gold_color,
+                });
+                placed += 1;
+            }
+        }
+    }
+
+    (bars, coins)
 }
 
 impl SceneBehavior for ShopScene {
@@ -1342,8 +1405,18 @@ impl SceneBehavior for ShopScene {
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+        self.age_secs += dt;
         self.particles.update(dt);
         self.score_popups.update(now);
+
+        // Drain relic activations and evict expired glows.
+        for rid in ctx.run.relic_activations.drain(..) {
+            self.relic_glow_starts.insert(rid, now);
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::RelicActivated(rid));
+        }
+        self.relic_glow_starts
+            .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
 
         // Help action opens the Meld Guide scene.
         for &cid in ctx.button_clicks {
@@ -1668,6 +1741,7 @@ impl SceneBehavior for ShopScene {
         // as "shop in a smoky backroom" rather than "game UI on a dark
         // page."
         frame.background(BackgroundId::Black);
+        frame.ember_drift();
         frame.camera_override = Some(layout.camera);
 
         // ── Curio cabinet (back wall) ──────────────────────────────────
@@ -1710,15 +1784,17 @@ impl SceneBehavior for ShopScene {
             pick_id: Some(PICK_COIN_DISH),
         });
         // Yaku Journal book — sits at the far-left of the inventory
-        // shelf as a bookend to the player's possession area. Reuses the
-        // dish pick path; clicking it opens `JournalOverlay`.
+        // shelf as a standing book (rounded spine, page inset).
+        // Clicking it opens `JournalOverlay`.
         let journal_cx = w * 0.13;
-        let journal_cy = h * 0.70;
+        let journal_cy = h * 0.62;
         let journal_cz = h * 0.05;
-        let journal_extents = [w * 0.030, 22.0, h * 0.05];
-        frame.dish_explicit(DishExplicit {
-            center_pos: [journal_cx, journal_cy, journal_cz],
-            extents: journal_extents,
+        let journal_extents = [w * 0.018, h * 0.06, w * 0.025];
+        frame.book(BookPlacement {
+            world_pos: [journal_cx, journal_cy, journal_cz],
+            rotation_y: 0.15, // slight yaw so the spine catches the light
+            half_extents: [journal_extents[0], journal_extents[1], journal_extents[2]],
+            color: [0.30, 0.12, 0.08, 1.0], // oxblood leather
             pick_id: Some(PICK_JOURNAL_BOOK),
         });
 
@@ -1771,9 +1847,10 @@ impl SceneBehavior for ShopScene {
                 relic_id: item.relic,
                 glow: 0.0,
                 rotation_x_deg: 0.0,
+                rotation_z_deg: 0.0,
             });
         }
-        let owned_base = layout.relic_dish_extents[0] * 0.09;
+        let owned_base = layout.relic_dish_extents[0] * 0.15;
         for (i, &rid) in ctx.run.relics.active.iter().enumerate() {
             let (px, py, wy) = layout.owned_relic_pos(i);
             let rarity = all_relic_defs()
@@ -1782,13 +1859,35 @@ impl SceneBehavior for ShopScene {
                 .map(|d| d.rarity)
                 .unwrap_or(Rarity::Common);
             let half = relic_half_extents(rid, owned_base);
+            let (glow, wiggle_deg) = if let Some(start) = self.relic_glow_starts.get(&rid) {
+                let age = Instant::now()
+                    .saturating_duration_since(*start)
+                    .as_secs_f32();
+                let life = RELIC_GLOW_LIFETIME.as_secs_f32();
+                if age >= life {
+                    (0.0, 0.0)
+                } else {
+                    let t = (age / life).clamp(0.0, 1.0);
+                    let attack_end = 0.12_f32;
+                    let g = if t < attack_end {
+                        (t / attack_end).clamp(0.0, 1.0)
+                    } else {
+                        let decay_t = (t - attack_end) / (1.0 - attack_end);
+                        (1.0 - decay_t).max(0.0).powi(2)
+                    };
+                    (g, g * 12.0 * (age * 22.0).sin())
+                }
+            } else {
+                (0.0, 0.0)
+            };
             relic_placements.push(RelicPlacement {
                 world_pos: [px, py, wy],
                 half_extents: half,
                 color: rarity_color(rarity),
                 relic_id: rid,
-                glow: 0.0,
+                glow,
                 rotation_x_deg: 0.0,
+                rotation_z_deg: wiggle_deg,
             });
         }
         if !relic_placements.is_empty() {
@@ -1900,15 +1999,16 @@ impl SceneBehavior for ShopScene {
             frame.talisman_batch(talisman_placements);
         }
 
-        // ── Coin pile inside the coin dish ─────────────────────────────
-        let coins = coin_pile_layout(
+        // ── Gold display: bars + coin strings inside the coin dish ─────
+        let (bars, coins) = coin_display_layout(
             ctx.run.gold.max(0) as u32,
             layout.coin_dish_center_px,
             layout.coin_dish_extents,
-            // Stable per-gold-count seed so the pile doesn't reshuffle each
-            // frame.
-            (ctx.run.gold.max(0) as u32).wrapping_add(0xC01F).max(1),
+            self.age_secs,
         );
+        if !bars.is_empty() {
+            frame.gold_bar_batch(bars);
+        }
         if !coins.is_empty() {
             frame.coin_batch(coins);
         }
@@ -1979,18 +2079,18 @@ impl SceneBehavior for ShopScene {
                 color: [1.00, 0.90, 0.62],
                 intensity: 3.00,
             },
-            // Coin dish spotlight — tighter, slightly cooler so the gold
-            // pops without overpowering the relic tray. Height kept
-            // inside the radius (same falloff fix as above).
+            // Coin dish sparkle light — raised above the tallest coin
+            // strings/bars, tighter radius to concentrate on the gold,
+            // with a breathing intensity pulse for an always-on sparkle.
             PointLight {
                 pos: [
                     layout.coin_dish_center_px.0,
                     layout.coin_dish_center_px.1,
-                    h * 0.14,
+                    h * 0.24,
                 ],
-                radius: h * 0.42,
-                color: [1.00, 0.92, 0.66],
-                intensity: 2.60,
+                radius: h * 0.38,
+                color: [1.00, 0.94, 0.55],
+                intensity: 3.40 + 0.20 * (self.age_secs * 0.7).sin(),
             },
             // Journal book spotlight — small, anchored to the bookend
             // at the far-left of the shelf so it reads as its own object.
@@ -2250,15 +2350,12 @@ impl SceneBehavior for ShopScene {
                         let rid = ctx.run.relics.active[oi];
                         let defs = all_relic_defs();
                         let def = defs.iter().find(|d| d.id == rid);
-                        let (name, desc) = def
-                            .map(|d| (d.name.to_string(), d.description.to_string()))
-                            .unwrap_or(("Relic".into(), String::new()));
-                        (
-                            name,
-                            desc,
-                            format!("Sell {}g", relic_sell_price(rid)),
-                            color::CHAMPAGNE,
-                        )
+                        let name = def
+                            .map(|d| d.name.to_string())
+                            .unwrap_or_else(|| "Relic".into());
+                        let desc = relic_description_live(rid, &ctx.run.relic_counters);
+                        let sell = relic_sell_price_live(rid, &ctx.run.relic_counters);
+                        (name, desc, format!("Sell {}g", sell), color::CHAMPAGNE)
                     } else {
                         (String::new(), String::new(), String::new(), color::SLATE)
                     }
@@ -2556,10 +2653,22 @@ impl SceneBehavior for ShopScene {
                 let flavor_px = typography::size(typography::HEADING, h, ui_scale);
                 let hint_px = typography::size(typography::TITLE, h, ui_scale);
                 let pad = (16.0 * ui_scale).max(10.0);
-                let banner_h = pad + flavor_px + pad * 0.5 + hint_px + pad;
-                let banner_y = h * 0.01;
-                let banner_x = w * 0.10;
-                let banner_w = w * 0.80;
+
+                // Right-side vertical panel — sits below the zodiac area so
+                // it never overlaps relic tooltips in the upper-left.
+                let banner_w = (w * 0.24).clamp(260.0, 420.0);
+                let banner_x = w - banner_w - w * 0.02;
+                let banner_y = h * 0.45;
+                let text_w = banner_w - pad * 2.0;
+
+                // Pre-wrap both text blocks to compute dynamic height.
+                let flavor_line_h = flavor_px * 1.4;
+                let flavor_lines = widget::wrap_text(flavor, text_w, flavor_px);
+                let flavor_h = flavor_lines.len().max(1) as f32 * flavor_line_h;
+                let hint_line_h = hint_px * 1.4;
+                let hint_lines = widget::wrap_text(hint, text_w, hint_px);
+                let hint_h = hint_lines.len().max(1) as f32 * hint_line_h;
+                let banner_h = pad + flavor_h + pad * 0.5 + hint_h + pad;
 
                 // Gold border.
                 let border = 2.0;
@@ -2587,32 +2696,41 @@ impl SceneBehavior for ShopScene {
                         0.88 * alpha,
                     ],
                 });
-                // Flavor text (gold).
+                // Flavor text (gold, left-aligned for narrow panel).
                 let flavor_y = banner_y + pad;
-                let text_w = banner_w - pad * 2.0;
-                texts.push(TextLabel {
-                    rect: [banner_x + pad, flavor_y, text_w, flavor_px * 1.5],
-                    text: flavor.to_string(),
-                    color: [color::GOLD[0], color::GOLD[1], color::GOLD[2], 0.8 * alpha],
-                    font_px: Some(flavor_px),
-                    align: TextAlign::Center,
-                    ..Default::default()
-                });
-                // Hint text (champagne).
-                let hint_y = flavor_y + flavor_px + pad * 0.5;
-                texts.push(TextLabel {
-                    rect: [banner_x + pad, hint_y, text_w, hint_px * 1.5],
-                    text: hint.to_string(),
-                    color: [
-                        color::CHAMPAGNE[0],
-                        color::CHAMPAGNE[1],
-                        color::CHAMPAGNE[2],
-                        alpha,
-                    ],
-                    font_px: Some(hint_px),
-                    align: TextAlign::Center,
-                    ..Default::default()
-                });
+                widget::push_text_block(
+                    &mut texts,
+                    [banner_x + pad, flavor_y, text_w, flavor_h],
+                    flavor,
+                    TextStyle {
+                        tier: typography::HEADING,
+                        color: [color::GOLD[0], color::GOLD[1], color::GOLD[2], 0.8 * alpha],
+                        padding: 0.0,
+                        align: TextAlign::Left,
+                    },
+                    h,
+                    ui_scale,
+                );
+                // Hint text (champagne, left-aligned).
+                let hint_y = flavor_y + flavor_h + pad * 0.5;
+                widget::push_text_block(
+                    &mut texts,
+                    [banner_x + pad, hint_y, text_w, hint_h],
+                    hint,
+                    TextStyle {
+                        tier: typography::TITLE,
+                        color: [
+                            color::CHAMPAGNE[0],
+                            color::CHAMPAGNE[1],
+                            color::CHAMPAGNE[2],
+                            alpha,
+                        ],
+                        padding: 0.0,
+                        align: TextAlign::Left,
+                    },
+                    h,
+                    ui_scale,
+                );
             }
         }
 
@@ -2782,14 +2900,16 @@ impl SceneBehavior for ShopScene {
                 rect: [0.0, 0.0, w, h],
                 color: [0.0, 0.0, 0.0, 0.72],
             });
+            // Constellation starfield vignette behind the ribbon.
+            frame.starfield();
 
             let t = celeb.elapsed();
             // Ribbon dimensions — large and centered.
             let ribbon_w = h * 0.12;
             let ribbon_l = h * 0.55;
             let cx = w * 0.5;
-            let cy = h * 0.40;
-            let lift = h * 0.35;
+            let cy = h * 0.35;
+            let lift = h * 0.50;
 
             // ── Snake / sway animation ──────────────────────────────
             // Primary sway: slow sinusoidal yaw oscillation.
@@ -2818,7 +2938,7 @@ impl SceneBehavior for ShopScene {
             let title_font = (h * 0.04).max(24.0);
             let title_y = h * 0.10;
             frame.text(TextLabel {
-                text: format!("{} Lv.{}", celeb.yaku_name, celeb.new_level),
+                text: format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level),
                 rect: [0.0, title_y, w, title_font * 1.5],
                 font_px: Some(title_font),
                 color: [0.95, 0.78, 0.25, alpha],
@@ -2933,6 +3053,8 @@ impl SceneBehavior for ShopScene {
                             rotation: [60.0_f32.to_radians(), 0.0, 0.0],
                             scale,
                             size_px: tile_size,
+                            brightness: 1.0,
+                            selected: false,
                         });
                     }
 

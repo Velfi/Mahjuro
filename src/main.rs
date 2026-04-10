@@ -32,10 +32,11 @@ use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::shop::ShopScene;
 use scenes::splash::SplashScene;
+use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
-use ui::modal::{Modal, ModalQueue, ModalTheme};
+use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
 use ui::tooltip::TooltipState;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -51,6 +52,7 @@ use winit::window::{Window, WindowId};
 struct RenderSettings {
     smoke_intensity: crate::persistence::SmokeIntensity,
     smoke_detail: crate::persistence::SmokeDetail,
+    effects_quality: crate::persistence::EffectsQuality,
     tile_preset: crate::persistence::TilePreset,
     tile_material: crate::persistence::TileMaterial,
     gamma: f32,
@@ -108,6 +110,14 @@ impl DebugState {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransitionKind {
+    /// Default fast fade (~0.2 s).
+    Quick,
+    /// Dramatic shooting-star cascade (~2.8 s total).
+    ShootingStarCascade,
+}
+
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<WgpuRenderer>,
@@ -130,6 +140,9 @@ struct App {
     active_profile: usize,
     audio: audio::AudioManager,
     transition_alpha: f32,
+    transition_speed: f32,
+    transition_timer: f32,
+    transition_kind: TransitionKind,
     pending_scene: Option<Scene>,
     /// Scene suspended while the Meld Guide is open. Restored when the guide
     /// signals `wants_back`.
@@ -220,6 +233,9 @@ impl App {
             active_profile,
             audio,
             transition_alpha: 1.0,
+            transition_speed: 0.08,
+            transition_timer: 0.0,
+            transition_kind: TransitionKind::Quick,
             pending_scene: None,
             suspended_scene: None,
             quit_requested: false,
@@ -230,6 +246,7 @@ impl App {
             gfx: RenderSettings {
                 smoke_intensity: settings.smoke_intensity,
                 smoke_detail: settings.smoke_detail,
+                effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
                 gamma: settings.gamma,
@@ -297,31 +314,94 @@ impl App {
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run.gold = self.run.gold.saturating_add(payout.total as i32);
                 self.audio.play_sfx(audio::SfxId::RoundWin);
-                let mut lines = vec![format!(
-                    "Score: {} / {}",
-                    self.run.round_score, self.run.target_score
-                )];
-                lines.push(format!("Base reward  +${}", payout.base_reward));
-                if payout.unused_play_bonus > 0 {
-                    lines.push(format!("Unused plays  +${}", payout.unused_play_bonus));
-                }
-                if payout.interest > 0 {
-                    lines.push(format!("Interest  +${}", payout.interest));
-                }
-                if payout.green_luck_bonus > 0 {
-                    lines.push(format!("Green Luck  +${}", payout.green_luck_bonus));
-                }
-                lines.push(format!("Total  +${}", payout.total));
-                let modal = Modal::new("Round Complete!", lines.join("\n"), ModalTheme::Success)
-                    .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
-                self.modals.push(modal);
                 let final_score = self.run.round_score;
                 let target = self.run.target_score;
-                self.run.advance_round();
+                // Capture the tutorial lesson *before* advancing so the
+                // recap scene can show what was just learned.
+                let tutorial_lesson_before = self
+                    .run
+                    .tutorial
+                    .as_ref()
+                    .filter(|t| t.is_active())
+                    .map(|t| t.current_lesson);
+                self.run.advance_round(&mut self.bus);
+
+                // First-encounter tooltip: gold payout.
+                if let Some(ref mut tut) = self.run.tutorial {
+                    if tut.is_active()
+                        && payout.total > 0
+                        && tut.encounter(crate::game::tutorial::FirstEncounter::GoldPayout)
+                    {
+                        self.modals.push(Modal::new(
+                            crate::game::tutorial::FirstEncounter::GoldPayout.title(),
+                            crate::game::tutorial::FirstEncounter::GoldPayout.message(),
+                            ModalTheme::Success,
+                        ));
+                    }
+                }
+
+                // After Lesson 5 (Chips x Mult), grant a free relic to
+                // introduce the concept before the shop appears. This
+                // bridges the gap between learning scoring and discovering
+                // the relic/shop meta-loop.
+                if tutorial_lesson_before == Some(5)
+                    && !self
+                        .run
+                        .relics
+                        .active
+                        .contains(&crate::core::relic::RelicId::PairPower)
+                {
+                    self.run
+                        .relics
+                        .active
+                        .push(crate::core::relic::RelicId::PairPower);
+                    let modal = Modal::new(
+                        "Relic Earned!",
+                        "You found Pair Power! Relics give passive bonuses for the rest of your run. Pairs now score +30 chips and +1 mult.",
+                        ModalTheme::Success,
+                    );
+                    self.modals.push(modal);
+                }
+
+                // Skip the "Round Complete" modal during tutorials — the
+                // TutorialRecap scene already shows the round outcome and
+                // rendering both causes them to overlap.
+                if tutorial_lesson_before.is_none() {
+                    let mut lines = vec![format!(
+                        "Score: {} / {}",
+                        self.run.round_score, self.run.target_score
+                    )];
+                    lines.push(format!("Base reward  +${}", payout.base_reward));
+                    if payout.unused_play_bonus > 0 {
+                        lines.push(format!("Unused plays  +${}", payout.unused_play_bonus));
+                    }
+                    if payout.interest > 0 {
+                        lines.push(format!("Interest  +${}", payout.interest));
+                    }
+                    if payout.green_luck_bonus > 0 {
+                        lines.push(format!("Green Luck  +${}", payout.green_luck_bonus));
+                    }
+                    lines.push(format!("Total  +${}", payout.total));
+                    let modal =
+                        Modal::new("Round Complete!", lines.join("\n"), ModalTheme::Success)
+                            .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
+                    self.modals.push(modal);
+                }
+
                 self.pending_scene = Some(if self.run.is_run_complete() {
+                    // Victory — save progress (mirrors the GameOver loss path).
+                    self.progress.has_won = true;
+                    self.progress.runs_completed += 1;
+                    self.progress.record_score(self.run.round_score);
+                    let _ = self.progress.check_level_up();
+                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    persistence::delete_saved_run(self.active_profile);
                     Scene::GameOver(GameOverScene::victory(final_score, target))
+                } else if let Some(lesson) = tutorial_lesson_before {
+                    // Tutorial: show a recap of the completed lesson.
+                    let shop_follows = self.run.tutorial_shop_enabled();
+                    Scene::TutorialRecap(TutorialRecapScene::new(lesson, shop_follows))
                 } else if !self.run.tutorial_shop_enabled() {
-                    // Tutorial: skip shop and go straight to gameplay.
                     Scene::Gameplay(GameplayScene::new())
                 } else {
                     Scene::Shop(ShopScene::new(self.run.run_number, &mut self.run))
@@ -338,19 +418,28 @@ impl App {
                     .as_ref()
                     .is_some_and(|t| t.is_active() && t.current_lesson < 8);
                 if tutorial_retry {
-                    self.run.retry_tutorial_blind();
-                    let retry_num = self
+                    // Capture stats before retry resets them.
+                    let round_score = self.run.round_score;
+                    let target_score = self.run.target_score;
+                    let plays_left = self.run.plays_remaining;
+                    let discards_left = self.run.discards_remaining;
+                    let lesson = self
                         .run
                         .tutorial
                         .as_ref()
-                        .map(|t| t.retry_count)
-                        .unwrap_or(0);
-                    let hint = if retry_num == 1 {
-                        "Don\u{2019}t worry \u{2014} the target has been lowered. Try again!"
-                    } else {
-                        "Keep going \u{2014} you\u{2019}ve got this!"
-                    };
-                    let modal = Modal::new("Try Again!", hint, ModalTheme::Success);
+                        .map(|t| t.current_lesson)
+                        .unwrap_or(1);
+
+                    self.run.retry_tutorial_blind();
+
+                    let feedback = crate::game::tutorial::failure_feedback(
+                        round_score,
+                        target_score,
+                        plays_left,
+                        discards_left,
+                        lesson,
+                    );
+                    let modal = Modal::new("Try Again!", &feedback, ModalTheme::Success);
                     self.modals.push(modal);
                     self.pending_scene = Some(Scene::Gameplay(GameplayScene::new()));
                     self.transition_alpha = 1.0;
@@ -372,15 +461,73 @@ impl App {
                 // player isn't offered "Continue" into a finished game.
                 persistence::delete_saved_run(self.active_profile);
 
-                if let Some(level) = level_up {
-                    log::info!("Level up! Now level {}", level);
-                    let modal = Modal::new(
-                        format!("Level Up! — Level {}", level),
-                        "New content unlocked!",
-                        ModalTheme::Success,
-                    )
-                    .with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
-                    self.pending_post_game_over_modals.push(modal);
+                if let Some(result) = level_up {
+                    log::info!("Level up! Now level {}", result.new_level);
+                    let mut pages = Vec::new();
+
+                    // Yaku pages.
+                    for yk in &result.yaku {
+                        pages.push(UnlockPage {
+                            category: "New Yaku".into(),
+                            name: yk.name().into(),
+                            description: yk.description().into(),
+                            relic_id: None,
+                            accent_color: render::theme::color::TWILIGHT,
+                        });
+                    }
+
+                    // Relic pages.
+                    let relic_defs = core::relic::all_relic_defs();
+                    for rid in &result.relics {
+                        if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
+                            let accent = match def.rarity {
+                                core::relic::Rarity::Common => render::theme::color::rarity(0),
+                                core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
+                                core::relic::Rarity::Rare => render::theme::color::rarity(2),
+                                core::relic::Rarity::Legendary => render::theme::color::rarity(3),
+                            };
+                            pages.push(UnlockPage {
+                                category: "New Relic".into(),
+                                name: def.name.into(),
+                                description: def.description.into(),
+                                relic_id: Some(*rid),
+                                accent_color: accent,
+                            });
+                        }
+                    }
+
+                    // Rule pages.
+                    for rm in &result.rules {
+                        pages.push(UnlockPage {
+                            category: "New Rule".into(),
+                            name: rm.name().into(),
+                            description: rm.description().into(),
+                            relic_id: None,
+                            accent_color: render::theme::color::AMBER,
+                        });
+                    }
+
+                    // Dora page.
+                    if result.dora {
+                        pages.push(UnlockPage {
+                            category: "Bonus".into(),
+                            name: "Dora Tiles".into(),
+                            description: "Red-highlighted tiles now appear in the wall, granting bonus chips when scored.".into(),
+                            relic_id: None,
+                            accent_color: render::theme::color::CHAMPAGNE,
+                        });
+                    }
+
+                    if !pages.is_empty() {
+                        let modal = Modal::new(
+                            format!("Level Up! — Level {}", result.new_level),
+                            "",
+                            ModalTheme::Success,
+                        )
+                        .with_pages(pages)
+                        .with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
+                        self.pending_post_game_over_modals.push(modal);
+                    }
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
@@ -444,6 +591,7 @@ impl App {
                 hide_scoring_placard: self.debug.hide_scoring_placard,
             },
             ui_scale: self.gfx.ui_scale,
+            modal_active,
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -510,6 +658,7 @@ impl App {
                         font_px: l.font_px,
                         align: l.align,
                         no_glossary: l.no_glossary,
+                        scroll_offset: l.scroll_offset,
                     })
                 } else {
                     None
@@ -550,14 +699,23 @@ impl App {
         let alpha = self.transition_alpha;
         frame.apply_alpha(alpha);
 
+        // Overlay the shooting-star cascade effect during dramatic transitions.
+        if self.transition_kind == TransitionKind::ShootingStarCascade
+            && self.transition_timer > 0.0
+        {
+            frame.transition_progress = self.transition_timer;
+            frame.shooting_star_cascade();
+        }
+
         let size = win.inner_size();
         self.modals.update();
-        if let Some((modal_insts, modal_labels, modal_buttons)) =
-            self.modals
-                .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
+        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_icons)) = self
+            .modals
+            .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
+            frame.relic_icons(modal_relic_icons);
             // Replace scene buttons with modal buttons so only dismiss works.
             self.active_buttons = modal_buttons;
         }
@@ -708,6 +866,7 @@ impl App {
             &frame,
             self.gfx.smoke_intensity,
             self.gfx.smoke_detail,
+            self.gfx.effects_quality,
             self.gfx.tile_preset,
             active_material,
             draw_settle_speed,
@@ -887,6 +1046,15 @@ impl App {
                 self.run.boss.upcoming = Some(kind);
                 self.run.resolve_upcoming_boss();
                 log::info!("[Debug] Set boss to {}", kind.name());
+            }
+            DebugAction::TestOverlay => {
+                let modal = Modal::new(
+                    "Test Overlay",
+                    "This is a blank test modal.\nClick anywhere or press Enter to continue.",
+                    ModalTheme::Info,
+                );
+                self.modals.push(modal);
+                log::info!("[Debug] Spawned test overlay modal");
             }
         }
         // Request redraw to reflect changes immediately.
@@ -1084,6 +1252,11 @@ impl ApplicationHandler for App {
                             self.modals.push(modal);
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                         }
+                        GameEvent::RelicActivated(_) => {
+                            // Visual feedback (glow + wiggle) is handled by the
+                            // active scene; audio is a soft chime layered on top.
+                            self.audio.play_sfx(audio::SfxId::ScoreStep);
+                        }
                         other => log::info!("event: {other:?}"),
                     }
                 }
@@ -1091,13 +1264,11 @@ impl ApplicationHandler for App {
                 // 1a. Poll background update check.
                 if let Some(result) = self.update_checker.poll() {
                     let modal = match result {
-                        update_check::UpdateResult::Updated { new_version } => {
-                            Modal::new(
-                                "Updated!",
-                                format!("v{new_version} installed.\nRestart to use the new version."),
-                                ModalTheme::Info,
-                            )
-                        }
+                        update_check::UpdateResult::Updated { new_version } => Modal::new(
+                            "Updated!",
+                            format!("v{new_version} installed.\nRestart to use the new version."),
+                            ModalTheme::Info,
+                        ),
                         update_check::UpdateResult::UpdateFailed {
                             new_version,
                             release_url,
@@ -1106,7 +1277,9 @@ impl ApplicationHandler for App {
                             log::warn!("auto-update to v{new_version} failed: {error}");
                             Modal::new(
                                 "Update Available",
-                                format!("v{new_version} is available but auto-update failed.\n\n{release_url}"),
+                                format!(
+                                    "v{new_version} is available but auto-update failed.\n\n{release_url}"
+                                ),
                                 ModalTheme::Info,
                             )
                         }
@@ -1268,12 +1441,27 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
-                // 3c. If a modal is active, intercept input: dismiss on Confirm/Cancel.
+                // 3c. If a modal is active, intercept input.
                 if self.modals.is_active() {
                     for a in &actions {
-                        if matches!(a, UiAction::Confirm | UiAction::Cancel) {
-                            self.modals.dismiss();
-                            break;
+                        match a {
+                            UiAction::Confirm => {
+                                self.modals.advance_page();
+                                break;
+                            }
+                            UiAction::Cancel => {
+                                self.modals.dismiss();
+                                break;
+                            }
+                            UiAction::FocusNext => {
+                                self.modals.navigate(1);
+                                break;
+                            }
+                            UiAction::FocusPrev => {
+                                self.modals.navigate(-1);
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                     // Block all actions from reaching the scene.
@@ -1343,6 +1531,8 @@ impl ApplicationHandler for App {
                     ui_scale: self.gfx.ui_scale,
                     tutorial_eligible: self.progress.runs_completed == 0
                         && !self.progress.tutorial_completed,
+                    multiple_materials: self.progress.plastic_unlocked(),
+                    transitioning: self.pending_scene.is_some(),
                 };
                 if let Some(mut next_scene) = self.scene.update(ctx) {
                     // When transitioning *to* the Meld Guide from a game scene,
@@ -1363,6 +1553,23 @@ impl ApplicationHandler for App {
                             next_scene = restored;
                         }
                     }
+                    // Choose transition style: dramatic cascade for
+                    // new-game flows, quick fade for everything else.
+                    let use_cascade = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::StartScreen(_), Scene::TileSelect(_))
+                            | (Scene::StartScreen(_), Scene::Shop(_))
+                            | (Scene::TileSelect(_), Scene::Shop(_))
+                            | (Scene::TileSelect(_), Scene::TileLiteracy(_))
+                    );
+                    if use_cascade {
+                        self.transition_kind = TransitionKind::ShootingStarCascade;
+                        self.transition_speed = 0.012;
+                    } else {
+                        self.transition_kind = TransitionKind::Quick;
+                        self.transition_speed = 0.08;
+                    }
+                    self.transition_timer = 0.0;
                     // Start fade-out transition.
                     self.pending_scene = Some(next_scene);
                     self.transition_alpha = 1.0;
@@ -1387,6 +1594,7 @@ impl ApplicationHandler for App {
                     self.audio.set_enabled(opts.sfx_enabled);
                     self.gfx.smoke_intensity = opts.smoke_intensity;
                     self.gfx.smoke_detail = opts.smoke_detail;
+                    self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
                     self.gfx.tile_material = opts.tile_material;
                     self.gfx.gamma = opts.gamma;
@@ -1447,8 +1655,14 @@ impl ApplicationHandler for App {
                 }
 
                 // Advance transition animation using the animation controller.
-                if self.pending_scene.is_some() {
-                    self.transition_alpha -= 0.08;
+                // Pause the transition while a modal is active so the player
+                // must dismiss milestone / celebration modals before the scene
+                // change proceeds (e.g. "First Pair!" before the recap screen).
+                if self.pending_scene.is_some() && !self.modals.is_active() {
+                    self.transition_alpha -= self.transition_speed;
+                    // Map alpha 1→0 onto timer 0→0.5 (first half of transition).
+                    self.transition_timer =
+                        (1.0 - self.transition_alpha.max(0.0)).clamp(0.0, 1.0) * 0.5;
                     if self.transition_alpha <= 0.0 {
                         self.transition_alpha = 0.0;
                         if let Some(next) = self.pending_scene.take() {
@@ -1491,7 +1705,16 @@ impl ApplicationHandler for App {
                         }
                     }
                 } else if self.transition_alpha < 1.0 {
-                    self.transition_alpha = (self.transition_alpha + 0.08).min(1.0);
+                    self.transition_alpha =
+                        (self.transition_alpha + self.transition_speed).min(1.0);
+                    // Map alpha 0→1 onto timer 0.5→1.0 (second half).
+                    self.transition_timer = 0.5 + (self.transition_alpha.clamp(0.0, 1.0)) * 0.5;
+                    // Reset transition kind once fully faded in.
+                    if self.transition_alpha >= 1.0 {
+                        self.transition_timer = 0.0;
+                        self.transition_kind = TransitionKind::Quick;
+                        self.transition_speed = 0.08;
+                    }
                 }
 
                 // Handle quit request from scene.

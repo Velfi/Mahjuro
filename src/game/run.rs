@@ -183,6 +183,14 @@ pub struct RunState {
     /// Tag-granted bonus hand size for the next round.
     #[serde(default)]
     pub tag_bonus_hand_size: i32,
+    /// Pending zodiac activation from a ZodiacBlessing skip-reward tag.
+    /// Consumed by the pick-blind scene to trigger the celebration overlay.
+    #[serde(skip)]
+    pub pending_zodiac_celebration: Option<(
+        crate::core::zodiac::ZodiacKind,
+        crate::core::yaku::YakuKind,
+        u32,
+    )>,
     /// Permanent per-tile chip bonus accumulated by the Tile Polisher
     /// relic. Each scored tile adds +3 to this counter for the rest of
     /// the run. Applied in Phase 2 of scoring.
@@ -209,6 +217,13 @@ pub struct RunState {
     /// during the player's very first run to gate mechanics by lesson.
     #[serde(default)]
     pub tutorial: Option<TutorialState>,
+
+    /// Relics whose effects just fired this frame. Scenes drain this each
+    /// frame to drive glow + wiggle animations. Populated by `run.rs`
+    /// methods whenever a relic triggers (scoring, round-end, discard,
+    /// draw, consumable interaction, etc.).
+    #[serde(skip)]
+    pub relic_activations: Vec<RelicId>,
 }
 
 impl RunState {
@@ -293,10 +308,12 @@ impl RunState {
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
+            pending_zodiac_celebration: None,
             tile_polisher_bonus: 0,
             relic_counters: std::collections::BTreeMap::new(),
             river_runner_bonus: 0,
             tutorial: None,
+            relic_activations: Vec::new(),
         };
         // Roll skip-reward tags for ante 1.
         state.roll_ante_tags();
@@ -492,6 +509,12 @@ impl RunState {
             _ => return,
         };
 
+        // Only certain lessons need seeded guaranteed melds; later lessons
+        // play with whatever the wall gives.
+        if lesson_id > 7 || lesson_id == 6 {
+            return;
+        }
+
         // Shuffle before seeding so the base tiles vary between attempts.
         let mut rng = rand::rng();
         self.hand.shuffle(&mut rng);
@@ -569,6 +592,28 @@ impl RunState {
                     let pf = (self.hand[7].suit, self.hand[7].rank);
                     self.hand[8].suit = pf.0;
                     self.hand[8].rank = pf.1;
+                    self.hand.sort();
+                }
+            }
+            7 => {
+                // Guarantee an honor triplet so the player can trigger Yakuhai.
+                use crate::core::tile::Suit;
+                use rand::RngExt;
+                let len = self.hand.len();
+                if len >= 3 {
+                    let honor_suits = [Suit::Wind, Suit::Dragon];
+                    let suit = honor_suits[rng.random_range(0..honor_suits.len())];
+                    let rank: u8 = if suit == Suit::Wind {
+                        rng.random_range(1..=4) // East, South, West, North
+                    } else {
+                        rng.random_range(1..=3) // Red, Green, White
+                    };
+                    self.hand[0].suit = suit;
+                    self.hand[0].rank = rank;
+                    self.hand[1].suit = suit;
+                    self.hand[1].rank = rank;
+                    self.hand[2].suit = suit;
+                    self.hand[2].rank = rank;
                     self.hand.sort();
                 }
             }
@@ -720,6 +765,7 @@ impl RunState {
     /// boss blinds, and applies any per-round resource resets.
     pub fn apply_blind(&mut self, blind: BlindKind) {
         self.blind = blind;
+        self.round_score = 0;
         let mut target = (self.base_target as f32 * blind.target_multiplier()) as u32;
         // Tutorial adaptive difficulty: lower the target after repeated failures.
         if let Some(ref tut) = self.tutorial {
@@ -804,6 +850,7 @@ impl RunState {
         // If tiles were modified by JokerTile substitution, mark it used.
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
+            self.relic_activations.push(RelicId::JokerTile);
         }
 
         // Score the tiles (using substituted tiles if wildcards were applied).
@@ -834,16 +881,27 @@ impl RunState {
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
         self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
+        // Collect relic activations from the scoring breakdown — these are
+        // the relics that contributed ScoreSteps. The gameplay scene will
+        // time their glow+wiggle to the cascade step-reveal animation, so
+        // they are NOT pushed into relic_activations here (that would fire
+        // them all at once before the cascade starts).
+        // Instead, only non-scoring side-effect activations are pushed below.
+
         // Tile Polisher: every scored tile permanently gains +3 chips for
         // the rest of the run. Count tiles across all scored sets.
         if self.relics.has(RelicId::TilePolisher) {
             let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
             self.tile_polisher_bonus += 3 * tile_count;
+            self.relic_activations.push(RelicId::TilePolisher);
         }
         // River Runner: +20 permanent chips per sequence scored.
         if self.relics.has(RelicId::RiverRunner) {
             let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
-            self.river_runner_bonus += 20 * seq_count;
+            if seq_count > 0 {
+                self.river_runner_bonus += 20 * seq_count;
+                self.relic_activations.push(RelicId::RiverRunner);
+            }
         }
         // Melting Ice: -8 chips per play. Destroy at 0.
         if self.relics.has(RelicId::MeltingIce) {
@@ -888,6 +946,7 @@ impl RunState {
             if rng.random_ratio(prob, 4) {
                 if let Some(&y) = breakdown.detected_yaku.choose(&mut rng) {
                     let _new_level = self.yaku_levels.level_up(y);
+                    self.relic_activations.push(RelicId::StarTile);
                 }
             }
         }
@@ -912,6 +971,7 @@ impl RunState {
             let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
+                self.relic_activations.push(RelicId::KanDrum);
             }
         }
         // Record played yaku for The Censor (repeat-yaku half-strength) before
@@ -949,6 +1009,7 @@ impl RunState {
                 self.consumables
                     .items
                     .push(crate::core::consumable::Consumable::Zodiac(z));
+                self.relic_activations.push(RelicId::EightTreasures);
             }
         }
 
@@ -981,6 +1042,7 @@ impl RunState {
         let effective = boss::effective_hand_size(self);
         let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
             self.quickdraw_used = true;
+            self.relic_activations.push(RelicId::QuickDraw);
             effective + 1
         } else {
             effective
@@ -997,6 +1059,7 @@ impl RunState {
                 if let Some(matching) = self.wall.draw_matching(tt.suit, tt.rank) {
                     self.hand.push(matching);
                     bus.push(GameEvent::TileDrawn(matching));
+                    self.relic_activations.push(RelicId::SetMagnet);
                 }
             }
         }
@@ -1035,25 +1098,35 @@ impl RunState {
             let interest = (self.gold.max(0) as u32 / 5).min(5);
             let green_luck_bonus =
                 if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
+                    self.relic_activations.push(RelicId::GreenLuck);
                     4
                 } else {
                     0
                 };
             // Gold Idol: +3 gold at round end.
             let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) {
+                self.relic_activations.push(RelicId::GoldIdol);
                 3u32
             } else {
                 0
             };
             // Jade Abacus: +1 interest per 4 gold held (max +4).
             let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
-                (self.gold.max(0) as u32 / 4).min(4)
+                let bonus = (self.gold.max(0) as u32 / 4).min(4);
+                if bonus > 0 {
+                    self.relic_activations.push(RelicId::JadeAbacus);
+                }
+                bonus
             } else {
                 0
             };
             // Patience: +2 gold per unused discard.
             let patience_bonus = if self.relics.has(RelicId::Patience) {
-                2 * self.discards_remaining
+                let bonus = 2 * self.discards_remaining;
+                if bonus > 0 {
+                    self.relic_activations.push(RelicId::Patience);
+                }
+                bonus
             } else {
                 0
             };
@@ -1219,6 +1292,7 @@ impl RunState {
 
         // Silk Thread: -0.3 mult (stored as -3 in ×10 units) per discard.
         if self.relics.has(RelicId::SilkThread) {
+            self.relic_activations.push(RelicId::SilkThread);
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
             *v = (*v - 3).max(0);
             if *v == 0 {
@@ -1247,6 +1321,8 @@ impl RunState {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
                 bus.push(GameEvent::TileDrawn(t));
+                self.relic_activations
+                    .push(crate::core::relic::RelicId::ShantenShove);
             }
         }
         self.hand.sort();
@@ -1296,7 +1372,7 @@ impl RunState {
     /// Small/Big/Boss multipliers in `apply_blind` derive each blind's actual target.
     /// We only grow `base_target` when the player defeats the Boss and rolls into the
     /// next ante; within an ante, the base stays put.
-    pub fn advance_round(&mut self) {
+    pub fn advance_round(&mut self, _bus: &mut EventBus) {
         // Fortune's Favor halves destruction chances (doubles survival).
         let fortunes = self.relics.has(RelicId::FortunesFavor);
         // Paper Lantern: 1-in-5 chance to burn up at round end. When it
@@ -1330,6 +1406,7 @@ impl RunState {
         // Nest Egg: increment rounds held (affects sell value).
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
+            self.relic_activations.push(RelicId::NestEgg);
         }
         // Phantom Relic: increment rounds held.
         if self.relics.has(RelicId::PhantomRelic) {
@@ -1337,6 +1414,7 @@ impl RunState {
                 .relic_counters
                 .entry(RelicId::PhantomRelic)
                 .or_insert(0) += 1;
+            self.relic_activations.push(RelicId::PhantomRelic);
         }
         // Obsession: check if the player's most-used yaku was NOT scored
         // this round. If so, increment the counter.
@@ -1349,6 +1427,7 @@ impl RunState {
             if let Some(top) = top_yaku {
                 if !self.played_yaku_this_round.contains(&top) {
                     *self.relic_counters.entry(RelicId::Obsession).or_insert(0) += 1;
+                    self.relic_activations.push(RelicId::Obsession);
                 } else {
                     // Reset on use — rewards variety, not just avoidance.
                     self.relic_counters.insert(RelicId::Obsession, 0);
@@ -1363,7 +1442,6 @@ impl RunState {
             self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
         }
         self.run_number += 1;
-        self.round_score = 0;
         self.target_score = self.base_target; // will be overridden by apply_blind
         self.round_rules.clear();
         self.plays_remaining = self.mode.starting_plays;
@@ -1440,7 +1518,6 @@ impl RunState {
     pub fn skip_to_next_blind(&mut self) {
         self.upcoming_blind = self.upcoming_blind.next();
         self.run_number += 1;
-        self.round_score = 0;
         // Skipping stays inside the same ante (Boss can't be skipped), so the
         // ante's base target is unchanged — only the blind multiplier shifts.
         self.target_score = self.base_target;
@@ -1530,18 +1607,17 @@ impl RunState {
                 "+2 shop relics"
             }
             TagKind::ZodiacBlessing => {
-                use crate::core::consumable::Consumable;
                 use crate::core::zodiac::ZodiacKind;
                 use rand::seq::IndexedRandom;
                 let all = ZodiacKind::all();
                 let mut rng = rand::rng();
                 if let Some(&z) = all.choose(&mut rng) {
-                    if !self.consumables.try_push(Consumable::Zodiac(z)) {
-                        self.gold = self.gold.saturating_add(4);
-                        return "+4 gold (full)";
-                    }
+                    let yaku = z.yaku();
+                    let new_level = self.yaku_levels.level_up(yaku);
+                    self.pending_zodiac_celebration = Some((z, yaku, new_level));
+                    return "Zodiac activated";
                 }
-                "Zodiac gained"
+                "No zodiac"
             }
             TagKind::RelicOffering => {
                 use crate::core::relic::all_relic_defs;
@@ -1658,10 +1734,12 @@ mod tests {
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
+            pending_zodiac_celebration: None,
             tile_polisher_bonus: 0,
             relic_counters: BTreeMap::new(),
             river_runner_bonus: 0,
             tutorial: None,
+            relic_activations: Vec::new(),
         }
     }
 
@@ -1965,11 +2043,12 @@ mod tests {
     #[test]
     fn advance_round_resets_selection() {
         let mut run = test_run();
+        let mut bus = bus();
         run.toggle_select(0);
         run.toggle_select(5);
         assert_eq!(run.selected_count(), 2);
 
-        run.advance_round();
+        run.advance_round(&mut bus);
 
         assert_eq!(run.selected_count(), 0);
         assert_eq!(run.selected.len(), run.hand.len());

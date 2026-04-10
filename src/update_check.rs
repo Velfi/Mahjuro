@@ -132,9 +132,8 @@ fn run_update() -> Option<UpdateResult> {
             Some(UpdateResult::Updated { new_version })
         }
         Err(e) => {
-            let release_url = format!(
-                "https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{new_version}"
-            );
+            let release_url =
+                format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{new_version}");
             log::warn!("update download/apply failed: {e}");
             Some(UpdateResult::UpdateFailed {
                 new_version,

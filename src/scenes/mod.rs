@@ -15,7 +15,9 @@ pub mod solitaire;
 pub mod splash;
 pub mod start_game_modal;
 pub mod start_screen;
+pub mod tile_literacy;
 pub mod tutorial_overlay;
+pub mod tutorial_recap;
 
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
@@ -29,6 +31,8 @@ pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
 pub use start_screen::StartScreenScene;
+pub use tile_literacy::TileLiteracyScene;
+pub use tutorial_recap::TutorialRecapScene;
 
 use enum_dispatch::enum_dispatch;
 
@@ -138,6 +142,12 @@ pub struct UpdateCtx<'a> {
     /// Whether the player should be offered the tutorial (first run, tutorial
     /// not yet completed). Read by the start screen and tile-select scenes.
     pub tutorial_eligible: bool,
+    /// Whether the player has unlocked multiple tile materials (i.e., has won
+    /// at least once). When false, the tile-select scene is skipped.
+    pub multiple_materials: bool,
+    /// `true` while a scene transition is pending (fade-out in progress).
+    /// Scenes should skip input processing but continue running animations.
+    pub transitioning: bool,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -162,6 +172,9 @@ pub struct DrawCtx<'a> {
     pub debug_visibility: DebugVisibility,
     /// User's UI scale preference (1.0 = default).
     pub ui_scale: f32,
+    /// Whether an app-level modal overlay is active (modal queue, debug
+    /// overlays, etc). Scenes should suppress hover tooltips when true.
+    pub modal_active: bool,
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -357,4 +370,6 @@ pub enum Scene {
     Options(OptionsScene),
     Collection(CollectionScene),
     Solitaire(SolitaireScene),
+    TutorialRecap(TutorialRecapScene),
+    TileLiteracy(TileLiteracyScene),
 }

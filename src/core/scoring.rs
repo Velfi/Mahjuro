@@ -863,9 +863,9 @@ pub fn score_sets(
         }
     }
 
-    // Gold Furnace: +1 mult per 5 gold held, max +4.
+    // Gold Furnace: +1 mult per 5 gold held.
     if has(RelicId::GoldFurnace) {
-        let bonus = (ctx.gold.max(0) as f64 / 5.0).floor().min(4.0);
+        let bonus = (ctx.gold.max(0) as f64 / 5.0).floor();
         if bonus > 0.0 {
             push_mult!("Gold Furnace", bonus);
         }
@@ -1054,7 +1054,60 @@ pub fn score_sets(
         push_mult!("Glass Cannon", delta);
     }
 
-    // ── Phase 7: final multiplication beat ───────────────────────────────
+    // ── Phase 7: reorder so all chip steps fire before mult ────────────
+    //
+    // The cascade alternates chips/mult as relics fire, but we want a clean
+    // visual: chip pile builds first, *then* mult ramps. Partition the steps
+    // and rebuild running totals from the independent deltas.
+    {
+        // Extract per-step deltas from the original interleaved order.
+        struct Delta {
+            source: String,
+            kind: StepKind,
+            chip_delta: i32,
+            mult_delta: f64,
+        }
+        let mut deltas: Vec<Delta> = Vec::with_capacity(steps.len());
+        let mut prev_c = base_chips;
+        let mut prev_m = 1.0_f64;
+        for s in &steps {
+            deltas.push(Delta {
+                source: s.source.clone(),
+                kind: s.kind,
+                chip_delta: s.running_chips - prev_c,
+                mult_delta: s.running_mult - prev_m,
+            });
+            prev_c = s.running_chips;
+            prev_m = s.running_mult;
+        }
+
+        // Stable partition: chips, then mult, then gold (preserving relative
+        // order within each group).
+        deltas.sort_by_key(|d| match d.kind {
+            StepKind::Chips => 0,
+            StepKind::Mult => 1,
+            StepKind::Gold => 2,
+            StepKind::Final => 3,
+        });
+
+        // Rebuild steps with fresh running totals.
+        let mut rc = base_chips;
+        let mut rm = 1.0_f64;
+        steps.clear();
+        for d in deltas {
+            rc += d.chip_delta;
+            rm += d.mult_delta;
+            steps.push(ScoreStep {
+                source: d.source,
+                kind: d.kind,
+                running_chips: rc,
+                running_mult: rm,
+                running_total: combine(rc, rm),
+            });
+        }
+    }
+
+    // ── Phase 8: final multiplication beat ───────────────────────────────
 
     let final_chips = chips;
     let final_mult = mult;

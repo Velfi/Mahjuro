@@ -23,11 +23,12 @@ use crate::render::decal::{
 };
 use crate::render::dora_stand_mesh::build_dora_stand_mesh;
 use crate::render::draw_cmd::{
-    BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement, CurioCabinetPlacement,
-    DishExplicit, DoraStandPlacement, DrawCmd, ExtrudedGlyphPlacement, FallingBonePlacement,
-    MirrorPlacement, OfudaPlacement, PackPlacement, PegBlockPlacement, PlaquePlacement,
-    RelicPlacement, ShowcaseTilePlacement, ShrinePlacement, TalismanPlacement, UiFrame,
-    WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement, ZodiacRibbonPlacement,
+    BookPlacement, BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement,
+    CurioCabinetPlacement, DishExplicit, DoraStandPlacement, DrawCmd, ExtrudedGlyphPlacement,
+    FallingBonePlacement, GoldBarPlacement, MirrorPlacement, OfudaPlacement, PackPlacement,
+    PegBlockPlacement, PlaquePlacement, RelicPlacement, ShowcaseTilePlacement, ShrinePlacement,
+    TalismanPlacement, UiFrame, WallStackPlacement, WoodTabletPlacement, YakuTabletPlacement,
+    ZodiacRibbonPlacement,
 };
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
@@ -38,7 +39,7 @@ use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::peg_block_mesh::build_peg_block_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
-use crate::render::relic_dish::{build_dish_mesh, build_unit_box_mesh};
+use crate::render::relic_dish::{build_book_mesh, build_dish_mesh, build_unit_box_mesh};
 use crate::render::ribbon_mesh::build_ribbon_mesh;
 use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
@@ -57,6 +58,9 @@ struct Globals {
     screen: [f32; 2],
     time: f32,
     gamma: f32,
+    cursor_pos: [f32; 2],
+    transition_progress: f32,
+    quality_level: f32,
 }
 
 #[repr(C)]
@@ -270,6 +274,10 @@ pub struct TextLabel {
     /// (e.g. yaku progress cards), so terms inside them don't get underlined
     /// or trigger nested tooltips.
     pub no_glossary: bool,
+    /// Horizontal scroll offset in pixels (for marquee-style text).
+    /// Shifts the rasterised text leftward by this many pixels so the
+    /// caller can animate it for overflow text.  Default 0.0.
+    pub scroll_offset: f32,
 }
 
 impl Default for TextLabel {
@@ -281,6 +289,7 @@ impl Default for TextLabel {
             font_px: None,
             align: TextAlign::Center,
             no_glossary: false,
+            scroll_offset: 0.0,
         }
     }
 }
@@ -442,6 +451,10 @@ pub struct WgpuRenderer {
     tile_quad_pipeline: wgpu::RenderPipeline,
     light_beam_pipeline: wgpu::RenderPipeline,
     flame_pipeline: wgpu::RenderPipeline,
+    starfield_pipeline: wgpu::RenderPipeline,
+    ember_drift_pipeline: wgpu::RenderPipeline,
+    golden_dust_pipeline: wgpu::RenderPipeline,
+    shooting_star_cascade_pipeline: wgpu::RenderPipeline,
     #[allow(dead_code)]
     tile_pipeline: wgpu::RenderPipeline,
     /// Gold-metal "shell" pipeline used to draw a 3D outline behind each
@@ -659,6 +672,16 @@ pub struct WgpuRenderer {
     /// Per-coin instances (shop scene). Indexed sequentially by `CoinBatch`
     /// placement order; truncated at `MAX_COIN_SLOTS`.
     coin_instances: Vec<LitMeshInstance>,
+    /// Per-gold-bar instances (shop scene). Rendered as unit-box meshes
+    /// with Metal material. Truncated at `MAX_BAR_SLOTS`.
+    bar_instances: Vec<LitMeshInstance>,
+    /// Procedural book mesh (rounded spine + page inset). Used by the shop
+    /// scene for the Yaku Journal bookend.
+    book_mesh: LitMeshGpu,
+    /// Single instance for the journal book.
+    book_instance: LitMeshInstance,
+    /// Book model matrix + pick_id from the last frame, for slab-test picking.
+    last_book_model: Option<(Mat4, u32)>,
     /// Single instance for the shop's curio cabinet.
     cabinet_instance: LitMeshInstance,
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
@@ -850,6 +873,10 @@ pub const MAX_TALISMAN_SLOTS: usize = 8;
 /// `CoinBatch` cmds). The shop tooltip still shows the true gold count when
 /// it exceeds this; the visual just caps the pile.
 pub const MAX_COIN_SLOTS: usize = 64;
+/// Maximum number of gold bars rendered per frame (across all `GoldBarBatch`
+/// cmds). With big bars worth 100 and mini bars worth 25, 16 slots covers
+/// absurdly high gold counts.
+pub const MAX_BAR_SLOTS: usize = 16;
 /// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
 /// the relic dish and the coin dish).
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
@@ -1731,6 +1758,9 @@ impl WgpuRenderer {
                 screen: [size.width as f32, size.height as f32],
                 time: 0.0,
                 gamma: 1.0,
+                cursor_pos: [size.width as f32 * 0.5, size.height as f32 * 0.5],
+                transition_progress: 0.0,
+                quality_level: 2.0,
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -2161,6 +2191,85 @@ impl WgpuRenderer {
             multiview_mask: None,
             cache: None,
         });
+
+        // ── Fullscreen additive vignette pipelines ─────────────────────
+        // Starfield, ember-drift, and golden-dust all share the same
+        // layout: no vertex buffers, globals-only bind group, additive
+        // blend onto the UI colour target.
+        let vignette_pipeline = |label: &str, wgsl: &str| -> wgpu::RenderPipeline {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&quad_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+
+        let starfield_pipeline = vignette_pipeline(
+            "starfield-pipeline",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/starfield.wgsl"
+            )),
+        );
+        let ember_drift_pipeline = vignette_pipeline(
+            "ember-drift-pipeline",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/ember_drift.wgsl"
+            )),
+        );
+        let golden_dust_pipeline = vignette_pipeline(
+            "golden-dust-pipeline",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/golden_dust.wgsl"
+            )),
+        );
+        let shooting_star_cascade_pipeline = vignette_pipeline(
+            "shooting-star-cascade-pipeline",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/shooting_star_cascade.wgsl"
+            )),
+        );
 
         let tile_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
@@ -2694,6 +2803,7 @@ impl WgpuRenderer {
         let coin_mesh = LitMeshGpu::new(&device, &build_coin_mesh(), "coin");
         let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
         let cabinet_mesh = LitMeshGpu::new(&device, &build_curio_cabinet_mesh(), "curio-cabinet");
+        let book_mesh = LitMeshGpu::new(&device, &build_book_mesh(), "book");
         let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
         // Skeuomorphic gameplay HUD meshes (phase 1).
         let plaque_mesh = LitMeshGpu::new(&device, &build_plaque_mesh(), "plaque");
@@ -2801,6 +2911,26 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
+        // Gold bar instances — same Metal material as coins, reuses the coin
+        // heightmap for a subtle engraved look on bar faces.
+        let mut bar_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BAR_SLOTS);
+        for _ in 0..MAX_BAR_SLOTS {
+            bar_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_coin_height_view,
+                &tile_sampler,
+            ));
+        }
+        // Single book instance for the journal bookend.
+        let book_instance = LitMeshInstance::new(
+            &device,
+            &lit_mesh_material_layout,
+            &shadow_caster_layout,
+            &lit_mesh_white_view,
+            &tile_sampler,
+        );
         // Per-kind heightmap textures for talisman tablets. Each is a PNG
         // asset loaded from assets/textures/ and uploaded as a linear RGBA8
         // texture. Falls back to a flat mid-gray 1×1 if the asset is missing.
@@ -2916,6 +3046,10 @@ impl WgpuRenderer {
             tile_quad_pipeline,
             light_beam_pipeline,
             flame_pipeline,
+            starfield_pipeline,
+            ember_drift_pipeline,
+            golden_dust_pipeline,
+            shooting_star_cascade_pipeline,
             tile_pipeline,
             tile_outline_pipeline,
             tile_glow_pipeline,
@@ -2964,6 +3098,10 @@ impl WgpuRenderer {
             ribbon_zodiac_tex,
             talisman_instances,
             coin_instances,
+            bar_instances,
+            book_mesh,
+            book_instance,
+            last_book_model: None,
             cabinet_instance,
             shrine_instances,
             aux_dish_instances,
@@ -3428,6 +3566,15 @@ impl WgpuRenderer {
                 0.0,
             ) {
                 consider(ShopHit::Talisman(i), t);
+            }
+        }
+        // Book — local-space slab test (handles rotation correctly).
+        // The book mesh spans x ∈ [−0.58, 0.5] (spine bulge), y/z ∈ [−0.5, 0.5].
+        // Use half-extents (0.54, 0.5, 0.5) centered at x = −0.04 to cover the
+        // full convex hull of the mesh.
+        if let Some((model, pid)) = self.last_book_model {
+            if let Some(t) = slab_test(model, 0.54, 0.5, 0.5, 0.0) {
+                consider(ShopHit::Dish(pid), t);
             }
         }
         // Auxiliary dishes (world-space AABB picks).
@@ -3951,6 +4098,9 @@ impl WgpuRenderer {
                 time: self.creation_time.elapsed().as_secs_f32(),
                 // Gamma will be re-uploaded on the next render() call.
                 gamma: 1.0,
+                cursor_pos: [new_size.width as f32 * 0.5, new_size.height as f32 * 0.5],
+                transition_progress: 0.0,
+                quality_level: 2.0,
             }),
         );
 
@@ -3982,6 +4132,7 @@ impl WgpuRenderer {
         frame: &UiFrame,
         smoke_intensity: crate::persistence::SmokeIntensity,
         smoke_detail: crate::persistence::SmokeDetail,
+        effects_quality: crate::persistence::EffectsQuality,
         tile_preset: crate::persistence::TilePreset,
         tile_material: crate::persistence::TileMaterial,
         draw_settle_speed: f32,
@@ -4055,13 +4206,19 @@ impl WgpuRenderer {
         }
 
         // Update globals with current time for animated shaders.
+        let w_f = self.size.width as f32;
+        let h_f = self.size.height as f32;
+        let (cx, cy) = frame.cursor_pos.unwrap_or((w_f * 0.5, h_f * 0.5));
         self.queue.write_buffer(
             &self.globals_buffer,
             0,
             bytemuck::bytes_of(&Globals {
-                screen: [self.size.width as f32, self.size.height as f32],
+                screen: [w_f, h_f],
                 time: self.creation_time.elapsed().as_secs_f32(),
                 gamma: gamma.max(0.01),
+                cursor_pos: [cx, cy],
+                transition_progress: frame.transition_progress,
+                quality_level: effects_quality.quality_level_f32(),
             }),
         );
 
@@ -4543,6 +4700,11 @@ impl WgpuRenderer {
                     // Pack enhancement kind into .z so the tile shader can
                     // apply fresnel-masked sheen effects per-enhancement.
                     let mut bcf = self.tile_base_color_factor;
+                    // Channels .x and .y carry showcase-tile flags
+                    // (brightness, selection). Hand tiles use the outline
+                    // shell + glow halo instead, so force neutral values.
+                    bcf[0] = 1.0;
+                    bcf[1] = 0.0;
                     bcf[2] = htg.tile_id.2.map_or(0.0, |e| e.shader_id());
                     // When this tile is selected, also write an inflated
                     // model matrix into the outline shell uniform so the
@@ -4766,6 +4928,7 @@ impl WgpuRenderer {
                 th,
                 lbl.font_px,
                 align,
+                lbl.scroll_offset,
             );
             let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -4837,6 +5000,10 @@ impl WgpuRenderer {
 
         enum RenderOp {
             Background(BackgroundId),
+            Starfield,
+            EmberDrift,
+            GoldenDust,
+            ShootingStarCascade,
             Table,
             Dish,
             RelicBatch(usize),    // index into `relic_batches`
@@ -4848,6 +5015,8 @@ impl WgpuRenderer {
             ZodiacBatch(usize), // index into `ribbon_batches`
             TalismanBatch(usize), // index into `talisman_batches`
             CoinBatch(usize), // index into `coin_batches`
+            GoldBarBatch(usize), // index into `bar_batches`
+            Book,         // single book instance
             QuadBatch { buf_idx: usize, count: u32 },
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
@@ -4881,6 +5050,8 @@ impl WgpuRenderer {
         let mut ribbon_batches: Vec<&[ZodiacRibbonPlacement]> = Vec::new();
         let mut talisman_batches: Vec<&[TalismanPlacement]> = Vec::new();
         let mut coin_batches: Vec<&[CoinPlacement]> = Vec::new();
+        let mut bar_batches: Vec<&[GoldBarPlacement]> = Vec::new();
+        let mut book_cmd: Option<&BookPlacement> = None;
         let mut aux_dish_cmds: Vec<&DishExplicit> = Vec::new();
         let mut cabinet_cmds: Vec<&CurioCabinetPlacement> = Vec::new();
         let mut shrine_batches: Vec<&[ShrinePlacement]> = Vec::new();
@@ -4905,6 +5076,30 @@ impl WgpuRenderer {
             match &frame.cmds[i] {
                 DrawCmd::Background(id) => {
                     ops.push(RenderOp::Background(*id));
+                    i += 1;
+                }
+                DrawCmd::Starfield => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::Starfield);
+                    }
+                    i += 1;
+                }
+                DrawCmd::EmberDrift => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::EmberDrift);
+                    }
+                    i += 1;
+                }
+                DrawCmd::GoldenDust => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::GoldenDust);
+                    }
+                    i += 1;
+                }
+                DrawCmd::ShootingStarCascade => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Low {
+                        ops.push(RenderOp::ShootingStarCascade);
+                    }
                     i += 1;
                 }
                 DrawCmd::Table => {
@@ -4966,6 +5161,17 @@ impl WgpuRenderer {
                     let idx = coin_batches.len();
                     coin_batches.push(placements.as_slice());
                     ops.push(RenderOp::CoinBatch(idx));
+                    i += 1;
+                }
+                DrawCmd::GoldBarBatch(placements) => {
+                    let idx = bar_batches.len();
+                    bar_batches.push(placements.as_slice());
+                    ops.push(RenderOp::GoldBarBatch(idx));
+                    i += 1;
+                }
+                DrawCmd::Book(p) => {
+                    book_cmd = Some(p);
+                    ops.push(RenderOp::Book);
                     i += 1;
                 }
                 DrawCmd::Plaque(p) => {
@@ -5218,6 +5424,7 @@ impl WgpuRenderer {
                         font_px: Some(label_size),
                         align: TextAlign::Center,
                         no_glossary: true,
+                        ..Default::default()
                     };
                     let td = make_text_draw(
                         &self.device,
@@ -5326,11 +5533,17 @@ impl WgpuRenderer {
                     p.world_pos[1],
                     p.world_pos[2] + p.half_extents[1],
                 );
-                let rotation = if p.rotation_x_deg != 0.0 {
+                let rot_x = if p.rotation_x_deg != 0.0 {
                     Mat4::from_rotation_x(p.rotation_x_deg.to_radians())
                 } else {
                     Mat4::IDENTITY
                 };
+                let rot_z = if p.rotation_z_deg != 0.0 {
+                    Mat4::from_rotation_z(p.rotation_z_deg.to_radians())
+                } else {
+                    Mat4::IDENTITY
+                };
+                let rotation = rot_x * rot_z;
                 let model = Mat4::from_translation(center)
                     * rotation
                     * Mat4::from_scale(glam::Vec3::new(
@@ -6057,6 +6270,63 @@ impl WgpuRenderer {
                     model,
                     material,
                 );
+            }
+        }
+
+        // ── Gold bar batches (shop scene) ─────────────────────────────
+        let mut bar_slot_cursor: usize = 0;
+        for batch in &bar_batches {
+            for b in batch.iter() {
+                if bar_slot_cursor >= MAX_BAR_SLOTS {
+                    break;
+                }
+                let slot_i = bar_slot_cursor;
+                bar_slot_cursor += 1;
+                let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                let model = Mat4::from_translation(center)
+                    * Mat4::from_rotation_y(b.rotation_y)
+                    * Mat4::from_scale(glam::Vec3::new(
+                        b.half_extents[0] * 2.0,
+                        b.half_extents[1] * 2.0,
+                        b.half_extents[2] * 2.0,
+                    ));
+                let material = MaterialParams {
+                    kind: MaterialKind::Metal,
+                    base_color: b.color,
+                    specular_strength: 1.0,
+                    specular_power: 96.0,
+                };
+                self.bar_instances[slot_i].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    material,
+                );
+            }
+        }
+
+        // ── Book (journal bookend, shop scene) ──────────────────────────
+        self.last_book_model = None;
+        if let Some(b) = book_cmd {
+            let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+            let model = Mat4::from_translation(center)
+                * Mat4::from_rotation_y(b.rotation_y)
+                * Mat4::from_scale(glam::Vec3::new(
+                    b.half_extents[0] * 2.0,
+                    b.half_extents[1] * 2.0,
+                    b.half_extents[2] * 2.0,
+                ));
+            let material = MaterialParams {
+                kind: MaterialKind::Plain,
+                base_color: b.color,
+                specular_strength: 0.20,
+                specular_power: 16.0,
+            };
+            self.book_instance
+                .write_uniform(&self.queue, view_proj_arr, model, material);
+            // Store model matrix + pick id for local-space slab-test picking.
+            if let Some(pid) = b.pick_id {
+                self.last_book_model = Some((model, pid));
             }
         }
 
@@ -7293,6 +7563,45 @@ impl WgpuRenderer {
                 }
             }
         }
+        // Gold bar shadow casters.
+        {
+            let mut bar_shadow_cursor: usize = 0;
+            for batch in &bar_batches {
+                for b in batch.iter() {
+                    if bar_shadow_cursor >= MAX_BAR_SLOTS {
+                        break;
+                    }
+                    let slot_i = bar_shadow_cursor;
+                    bar_shadow_cursor += 1;
+                    let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                    let model = Mat4::from_translation(center)
+                        * Mat4::from_rotation_y(b.rotation_y)
+                        * Mat4::from_scale(glam::Vec3::new(
+                            b.half_extents[0] * 2.0,
+                            b.half_extents[1] * 2.0,
+                            b.half_extents[2] * 2.0,
+                        ));
+                    self.bar_instances[slot_i].write_shadow_uniform(
+                        &self.queue,
+                        light_view_proj_arr,
+                        model,
+                    );
+                }
+            }
+        }
+        // Book shadow caster.
+        if let Some(b) = book_cmd {
+            let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+            let model = Mat4::from_translation(center)
+                * Mat4::from_rotation_y(b.rotation_y)
+                * Mat4::from_scale(glam::Vec3::new(
+                    b.half_extents[0] * 2.0,
+                    b.half_extents[1] * 2.0,
+                    b.half_extents[2] * 2.0,
+                ));
+            self.book_instance
+                .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+        }
         if needs_dish {
             if let Some((lo_x, lo_y, hi_x, hi_y)) = dish_bounds {
                 let cx = (lo_x + hi_x) * 0.5;
@@ -7412,6 +7721,8 @@ impl WgpuRenderer {
 
                     let stg = &self.showcase_tiles[slot_cursor];
                     let mut sc_bcf = self.tile_base_color_factor;
+                    sc_bcf[0] = p.brightness;
+                    sc_bcf[1] = if p.selected { 1.0 } else { 0.0 };
                     sc_bcf[2] = p.tile.enhancement.map_or(0.0, |e| e.shader_id());
                     self.queue.write_buffer(
                         &stg.uniform_buffer,
@@ -7772,6 +8083,40 @@ impl WgpuRenderer {
                 }
             }
 
+            // Gold bars (shop). Uses the same unit-box mesh as relics.
+            {
+                let total_bars = bar_batches
+                    .iter()
+                    .map(|b| b.len())
+                    .sum::<usize>()
+                    .min(MAX_BAR_SLOTS);
+                if total_bars > 0 {
+                    shadow_pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                    shadow_pass.set_index_buffer(
+                        self.relic_box_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    for slot_i in 0..total_bars {
+                        let Some(inst) = self.bar_instances.get(slot_i) else {
+                            break;
+                        };
+                        shadow_pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
+                        shadow_pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                    }
+                }
+            }
+
+            // Book shadow (journal bookend).
+            if book_cmd.is_some() {
+                shadow_pass.set_vertex_buffer(0, self.book_mesh.vertex_buffer.slice(..));
+                shadow_pass.set_index_buffer(
+                    self.book_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                shadow_pass.set_bind_group(0, &self.book_instance.shadow_bind_group, &[]);
+                shadow_pass.draw_indexed(0..self.book_mesh.index_count, 0, 0..1);
+            }
+
             // Hand tiles — one draw per (tile, primitive). Same multi-prim
             // walk the main pass uses, but only the position attribute is
             // read by the shadow shader so the bind group is the per-tile
@@ -7860,6 +8205,26 @@ impl WgpuRenderer {
                         );
                         pass.draw_indexed(0..6, 0, 0..1);
                     }
+                }
+                RenderOp::Starfield => {
+                    pass.set_pipeline(&self.starfield_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                RenderOp::EmberDrift => {
+                    pass.set_pipeline(&self.ember_drift_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                RenderOp::GoldenDust => {
+                    pass.set_pipeline(&self.golden_dust_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                RenderOp::ShootingStarCascade => {
+                    pass.set_pipeline(&self.shooting_star_cascade_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
                 }
                 RenderOp::Table => {
                     pass.set_pipeline(&self.lit_mesh_pipeline);
@@ -8112,6 +8477,43 @@ impl WgpuRenderer {
                         pass.set_bind_group(0, &inst.bind_group, &[]);
                         pass.draw_indexed(0..self.coin_mesh.index_count, 0, 0..1);
                     }
+                }
+                RenderOp::GoldBarBatch(batch_idx) => {
+                    let batch = bar_batches[*batch_idx];
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.relic_box_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    let mut start_slot = 0usize;
+                    for prev in 0..*batch_idx {
+                        start_slot += bar_batches[prev].len();
+                    }
+                    for (i, _) in batch.iter().enumerate() {
+                        let slot_i = start_slot + i;
+                        let Some(inst) = self.bar_instances.get(slot_i) else {
+                            break;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                    }
+                }
+                RenderOp::Book => {
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(0, &self.book_instance.bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.book_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.book_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    pass.draw_indexed(0..self.book_mesh.index_count, 0, 0..1);
                 }
                 RenderOp::Plaque(slot_i) => {
                     let Some(inst) = self.plaque_instances.get(*slot_i) else {

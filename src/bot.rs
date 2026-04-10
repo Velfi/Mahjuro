@@ -637,6 +637,7 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
     let mode = config.into_mode();
     let mut run = RunState::new(mode);
     let mut stats = RunStats::default();
+    let mut bus = EventBus::default();
 
     loop {
         if run.is_run_complete() {
@@ -672,7 +673,7 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
             stats.antes_cleared += 1;
         }
 
-        run.advance_round();
+        run.advance_round(&mut bus);
 
         // Shop visit happens after advance_round (matching Shop → PickBlind scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.

@@ -93,6 +93,10 @@ pub struct RelicPlacement {
     /// of the box backward (away from the camera). Used by the shop scene to
     /// lean for-sale relics against the back of the cabinet shelf.
     pub rotation_x_deg: f32,
+    /// Rotation around the local Z axis in degrees. Used for the activation
+    /// wiggle — the scene drives a decaying sinusoidal oscillation so the
+    /// relic wobbles when its scoring effect triggers.
+    pub rotation_z_deg: f32,
 }
 
 /// A tile-pack box on the shop shelf. Rendered using the same unit-box mesh
@@ -185,6 +189,38 @@ pub struct CoinPlacement {
     pub thickness: f32,
     /// Linear-space RGBA tint.
     pub color: [f32; 4],
+}
+
+/// One gold bar (big or mini) sitting in the coin dish area.
+///
+/// Bars are rendered as unit-box meshes via the lit-mesh pipeline with the
+/// Metal material, giving them the same specular gold finish as coins.
+#[derive(Clone, Copy, Debug)]
+pub struct GoldBarPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the bar's base center.
+    pub world_pos: [f32; 3],
+    /// Yaw rotation about world Y in radians.
+    pub rotation_y: f32,
+    /// Half-extents of the bar in world units (width/2, height/2, depth/2).
+    pub half_extents: [f32; 3],
+    /// Linear-space RGBA tint.
+    pub color: [f32; 4],
+}
+
+/// A standing book rendered via the book mesh (rounded spine, page inset).
+/// Used by the shop scene for the Yaku Journal bookend on the inventory shelf.
+#[derive(Clone, Copy, Debug)]
+pub struct BookPlacement {
+    /// `(pixel_x, pixel_y, world_y)` for the book's base center.
+    pub world_pos: [f32; 3],
+    /// Yaw rotation about world Y in radians.
+    pub rotation_y: f32,
+    /// Half-extents in world units (width/2, height/2, depth/2).
+    pub half_extents: [f32; 3],
+    /// Linear-space RGBA tint for the cover.
+    pub color: [f32; 4],
+    /// Optional pick id for hit testing.
+    pub pick_id: Option<u32>,
 }
 
 /// One free-standing dish placement in world space (no auto-sizing from a
@@ -443,6 +479,12 @@ pub struct ShowcaseTilePlacement {
     /// Pixel-space footprint width — controls the physical world size of the
     /// tile via the active tile-preset ratios (face_long, thickness).
     pub size_px: f32,
+    /// Brightness multiplier: `1.0` = normal, `< 1.0` = dimmed (e.g. blocked
+    /// tiles in solitaire). Passed to the tile shader via `base_color_factor.x`.
+    pub brightness: f32,
+    /// Whether this tile is currently selected (e.g. first pick in solitaire).
+    /// Passed to the tile shader via `base_color_factor.y`.
+    pub selected: bool,
 }
 
 pub struct FallingBonePlacement {
@@ -500,6 +542,15 @@ pub struct CurioCabinetPlacement {
 pub enum DrawCmd {
     /// Full-screen background image.
     Background(BackgroundId),
+    /// Procedural constellation starfield (fullscreen triangle, no data).
+    Starfield,
+    /// Procedural rising-ember vignette (fullscreen triangle, no data).
+    EmberDrift,
+    /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
+    GoldenDust,
+    /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
+    /// Brightness driven by `UiFrame::transition_progress`.
+    ShootingStarCascade,
     /// Procedural lacquered-wood table mesh (one per scene, drawn via
     /// `lit_mesh_pipeline`). Sized by the renderer from the current window.
     Table,
@@ -545,6 +596,11 @@ pub enum DrawCmd {
     /// the shop scene to display the player's gold as a pile of coins in a
     /// dish.
     CoinBatch(Vec<CoinPlacement>),
+    /// Gold bars rendered as unit-box meshes with Metal material. Used by
+    /// the shop scene when the player has ≥100 gold.
+    GoldBarBatch(Vec<GoldBarPlacement>),
+    /// A standing book mesh (Yaku Journal). Single placement per frame.
+    Book(BookPlacement),
     /// Light beams + hand tile body quads (drawn via `light_beam_pipeline` +
     /// `tile_quad_pipeline`). Renderer pulls hand state from `UiFrame`.
     HandTileBackdrop,
@@ -669,6 +725,9 @@ pub struct UiFrame {
     pub buttons: Vec<ButtonDef>,
     /// Title shown in the OS window chrome.
     pub window_title: String,
+    /// Scene-transition progress (0.0 = inactive, >0.0 = animating).
+    /// Uploaded to the GPU `Globals` uniform for the cascade shader.
+    pub transition_progress: f32,
 }
 
 impl UiFrame {
@@ -691,12 +750,25 @@ impl UiFrame {
             tile_material_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
+            transition_progress: 0.0,
         }
     }
 
     // ── Push helpers ────────────────────────────────────────────────────
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
+    }
+    pub fn starfield(&mut self) {
+        self.cmds.push(DrawCmd::Starfield);
+    }
+    pub fn ember_drift(&mut self) {
+        self.cmds.push(DrawCmd::EmberDrift);
+    }
+    pub fn golden_dust(&mut self) {
+        self.cmds.push(DrawCmd::GoldenDust);
+    }
+    pub fn shooting_star_cascade(&mut self) {
+        self.cmds.push(DrawCmd::ShootingStarCascade);
     }
     pub fn hand_tile_backdrop(&mut self) {
         self.cmds.push(DrawCmd::HandTileBackdrop);
@@ -739,6 +811,12 @@ impl UiFrame {
     }
     pub fn coin_batch(&mut self, placements: Vec<CoinPlacement>) {
         self.cmds.push(DrawCmd::CoinBatch(placements));
+    }
+    pub fn gold_bar_batch(&mut self, placements: Vec<GoldBarPlacement>) {
+        self.cmds.push(DrawCmd::GoldBarBatch(placements));
+    }
+    pub fn book(&mut self, placement: BookPlacement) {
+        self.cmds.push(DrawCmd::Book(placement));
     }
     pub fn plaque(&mut self, p: PlaquePlacement) {
         self.cmds.push(DrawCmd::Plaque(p));
@@ -816,6 +894,10 @@ impl UiFrame {
                 DrawCmd::Flame(_) => {}
                 DrawCmd::Text(lbl) => lbl.color[3] *= alpha,
                 DrawCmd::Background(_)
+                | DrawCmd::Starfield
+                | DrawCmd::EmberDrift
+                | DrawCmd::GoldenDust
+                | DrawCmd::ShootingStarCascade
                 | DrawCmd::HandTileBackdrop
                 | DrawCmd::HandTileFaces
                 | DrawCmd::FluidSmoke
@@ -844,7 +926,9 @@ impl UiFrame {
                 | DrawCmd::FallingBoneBatch(_)
                 | DrawCmd::ExtrudedGlyphBatch(_)
                 | DrawCmd::ShowcaseTileBatch(_)
-                | DrawCmd::GlossaryAnchor { .. } => {}
+                | DrawCmd::GlossaryAnchor { .. }
+                | DrawCmd::GoldBarBatch(_)
+                | DrawCmd::Book(_) => {}
             }
         }
     }

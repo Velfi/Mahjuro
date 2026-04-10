@@ -300,3 +300,202 @@ pub fn build_dish_mesh() -> MeshCpu {
         },
     }
 }
+
+/// Build a book mesh: a rectangular box with a rounded spine on the −X edge
+/// and a narrow page-block inset visible on the other three open edges
+/// (+X, +Z, −Z). The mesh spans −0.5..+0.5 on each axis so callers can
+/// scale it into the desired proportions (width × height × depth).
+///
+/// The spine is approximated with 6 arc segments to give it a convincing
+/// curved look under the lit-mesh shader. The page inset is a thinner
+/// inner box offset from the cover by `PAGE_INSET` on three sides,
+/// recessed by `COVER_THICK` in Y, giving the silhouette of paper pages
+/// peeking out between the covers.
+pub fn build_book_mesh() -> MeshCpu {
+    // How far the spine bulges past the cover on the −X side.
+    const SPINE_BULGE: f32 = 0.08;
+    // Number of arc segments in the spine curve.
+    const SPINE_SEGS: usize = 6;
+    // Cover thickness (how far pages are recessed from the cover surface).
+    const COVER_THICK: f32 = 0.06;
+    // How far pages are inset from the cover edge on +X / +Z / −Z.
+    const PAGE_INSET: f32 = 0.02;
+
+    let mut vertices: Vec<Vertex3dTex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    // Helper: push a quad (4 verts, 6 indices) with a flat normal.
+    let mut push_quad = |normal: [f32; 3], corners: [[f32; 3]; 4]| {
+        let base = vertices.len() as u32;
+        let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        for (c, uv) in corners.iter().zip(uvs.iter()) {
+            vertices.push(Vertex3dTex {
+                position: *c,
+                normal,
+                uv: *uv,
+            });
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+
+    // ── Cover box (outer shell) ───────────────────────────────────────
+    // +X face (open edge of pages)
+    push_quad(
+        [1.0, 0.0, 0.0],
+        [
+            [0.5, -0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [0.5, 0.5, 0.5],
+            [0.5, -0.5, 0.5],
+        ],
+    );
+    // +Y face (front cover)
+    push_quad(
+        [0.0, 1.0, 0.0],
+        [
+            [-0.5, 0.5, -0.5],
+            [-0.5, 0.5, 0.5],
+            [0.5, 0.5, 0.5],
+            [0.5, 0.5, -0.5],
+        ],
+    );
+    // −Y face (back cover)
+    push_quad(
+        [0.0, -1.0, 0.0],
+        [
+            [-0.5, -0.5, 0.5],
+            [-0.5, -0.5, -0.5],
+            [0.5, -0.5, -0.5],
+            [0.5, -0.5, 0.5],
+        ],
+    );
+    // +Z face (top edge)
+    push_quad(
+        [0.0, 0.0, 1.0],
+        [
+            [-0.5, -0.5, 0.5],
+            [0.5, -0.5, 0.5],
+            [0.5, 0.5, 0.5],
+            [-0.5, 0.5, 0.5],
+        ],
+    );
+    // −Z face (bottom edge)
+    push_quad(
+        [0.0, 0.0, -1.0],
+        [
+            [0.5, -0.5, -0.5],
+            [-0.5, -0.5, -0.5],
+            [-0.5, 0.5, -0.5],
+            [0.5, 0.5, -0.5],
+        ],
+    );
+
+    // ── Spine (rounded −X edge) ───────────────────────────────────────
+    // Arc from (−0.5, −0.5) to (−0.5, +0.5) in the XY plane, bulging
+    // out to x = −0.5 − SPINE_BULGE at the midpoint. Each segment is a
+    // quad strip running along z (−0.5..+0.5).
+    {
+        let cx = -0.5_f32; // arc center x (flat cover edge)
+        let cy = 0.0_f32; // arc center y
+        let ry = 0.5_f32; // half-height of the cover
+        let rx = SPINE_BULGE; // how far the spine pokes out
+        for seg in 0..SPINE_SEGS {
+            let t0 = seg as f32 / SPINE_SEGS as f32;
+            let t1 = (seg + 1) as f32 / SPINE_SEGS as f32;
+            // Angles from π/2 (top, +Y) to −π/2 (bottom, −Y), going
+            // through π (leftward bulge).
+            let a0 = std::f32::consts::FRAC_PI_2 - t0 * std::f32::consts::PI;
+            let a1 = std::f32::consts::FRAC_PI_2 - t1 * std::f32::consts::PI;
+            let x0 = cx - rx * a0.cos().abs();
+            let y0 = cy + ry * a0.sin();
+            let x1 = cx - rx * a1.cos().abs();
+            let y1 = cy + ry * a1.sin();
+            // Normal points outward from the arc center.
+            let nx0 = -a0.cos();
+            let ny0 = a0.sin();
+            let nx1 = -a1.cos();
+            let ny1 = a1.sin();
+            let nmx = (nx0 + nx1) * 0.5;
+            let nmy = (ny0 + ny1) * 0.5;
+            let len = (nmx * nmx + nmy * nmy).sqrt().max(0.001);
+            let normal = [nmx / len, nmy / len, 0.0];
+            push_quad(
+                normal,
+                [[x0, y0, -0.5], [x1, y1, -0.5], [x1, y1, 0.5], [x0, y0, 0.5]],
+            );
+        }
+    }
+
+    // ── Page block (inner lighter box on the open edge) ───────────────
+    // Visible on +X, +Z, −Z as a recessed cream-colored band. The page
+    // block sits between the two covers (y = ±(0.5 − COVER_THICK)) and
+    // is inset from the cover edges.
+    let py = 0.5 - COVER_THICK; // page half-thickness in Y
+    let pz = 0.5 - PAGE_INSET; // page half-depth in Z
+    let px_inner = -0.5 + PAGE_INSET; // page start on −X side
+    let px_outer = 0.5 - PAGE_INSET; // page end on +X side
+    // +X face of pages (the fore-edge)
+    push_quad(
+        [1.0, 0.0, 0.0],
+        [
+            [px_outer, -py, -pz],
+            [px_outer, py, -pz],
+            [px_outer, py, pz],
+            [px_outer, -py, pz],
+        ],
+    );
+    // +Z face of pages (top edge pages)
+    push_quad(
+        [0.0, 0.0, 1.0],
+        [
+            [px_inner, -py, pz],
+            [px_outer, -py, pz],
+            [px_outer, py, pz],
+            [px_inner, py, pz],
+        ],
+    );
+    // −Z face of pages (bottom edge pages)
+    push_quad(
+        [0.0, 0.0, -1.0],
+        [
+            [px_outer, -py, -pz],
+            [px_inner, -py, -pz],
+            [px_inner, py, -pz],
+            [px_outer, py, -pz],
+        ],
+    );
+    // +Y face of pages (front page surface, recessed below front cover)
+    push_quad(
+        [0.0, 1.0, 0.0],
+        [
+            [px_inner, py, -pz],
+            [px_inner, py, pz],
+            [px_outer, py, pz],
+            [px_outer, py, -pz],
+        ],
+    );
+    // −Y face of pages (back page surface, recessed below back cover)
+    push_quad(
+        [0.0, -1.0, 0.0],
+        [
+            [px_inner, -py, pz],
+            [px_inner, -py, -pz],
+            [px_outer, -py, -pz],
+            [px_outer, -py, pz],
+        ],
+    );
+
+    MeshCpu {
+        vertices,
+        indices,
+        // Deep oxblood / maroon cover — reads as aged leather under warm
+        // candlelight. The page block will be tinted at render time via
+        // a per-instance material override (cream/ivory).
+        default_material: MaterialParams {
+            kind: MaterialKind::Plain,
+            base_color: [0.30, 0.12, 0.08, 1.0],
+            specular_strength: 0.20,
+            specular_power: 16.0,
+        },
+    }
+}

@@ -25,6 +25,10 @@ pub struct PlayerProgress {
     /// Whether the player has completed (or skipped) the tutorial.
     #[serde(default)]
     pub tutorial_completed: bool,
+    /// Whether the player has ever won a run (defeated the final boss).
+    /// Unlocks the Plastic tile material.
+    #[serde(default)]
+    pub has_won: bool,
 }
 
 impl PlayerProgress {
@@ -37,6 +41,7 @@ impl PlayerProgress {
             bonus_plays: 0,
             starting_relic_slots: 0,
             tutorial_completed: false,
+            has_won: false,
         }
     }
 
@@ -59,24 +64,45 @@ impl PlayerProgress {
         }
     }
 
-    /// Check if a new level was reached and apply unlocks. Returns the new level if changed.
-    pub fn check_level_up(&mut self) -> Option<u32> {
+    /// Check if a new level was reached and apply unlocks.
+    /// Returns details of what was unlocked, or `None` if nothing new.
+    pub fn check_level_up(&mut self) -> Option<LevelUpResult> {
         let level = self.current_level();
         let unlocks = unlocks_for_level(level);
 
         let mut changed = false;
+        let mut new_relics = Vec::new();
         for relic in unlocks.relics {
             if self.unlocked_relics.insert(relic) {
+                new_relics.push(relic);
                 changed = true;
             }
         }
+        let mut new_rules = Vec::new();
         for rule in unlocks.rules {
             if self.unlocked_rules.insert(rule) {
+                new_rules.push(rule);
                 changed = true;
             }
         }
 
-        if changed { Some(level) } else { None }
+        // Yaku and dora are level-gated (not tracked in a HashSet), so they
+        // are always "new" for their unlock level.
+        if !unlocks.yaku.is_empty() || unlocks.dora {
+            changed = true;
+        }
+
+        if changed {
+            Some(LevelUpResult {
+                new_level: level,
+                relics: new_relics,
+                rules: new_rules,
+                yaku: unlocks.yaku,
+                dora: unlocks.dora,
+            })
+        } else {
+            None
+        }
     }
 
     /// Relics available for this player's progression level.
@@ -107,38 +133,38 @@ impl PlayerProgress {
     pub fn available_yaku(&self) -> Vec<YakuKind> {
         let level = self.current_level();
         let mut available = vec![YakuKind::FullHand, YakuKind::Yakuhai];
-        if level >= 2 {
-            available.push(YakuKind::Toitoi);
-            available.push(YakuKind::Tanyao);
-        }
-        if level >= 3 {
-            available.push(YakuKind::Iipeikou);
-            available.push(YakuKind::Honitsu);
-        }
-        if level >= 4 {
-            available.push(YakuKind::Chinitsu);
-            available.push(YakuKind::Chiitoitsu);
-        }
-        if level >= 5 {
-            available.push(YakuKind::SanshokuDoujun);
-            available.push(YakuKind::Honroutou);
-        }
-        if level >= 6 {
-            available.push(YakuKind::Junchan);
-            available.push(YakuKind::Ittsu);
+        for l in 1..=level {
+            available.extend(unlocks_for_level(l).yaku);
         }
         available
     }
 
+    /// Whether the Plastic tile material is unlocked (requires first victory).
+    pub fn plastic_unlocked(&self) -> bool {
+        self.has_won
+    }
+
     /// Whether dora tiles are enabled at this level.
     pub fn dora_enabled(&self) -> bool {
-        self.current_level() >= 4
+        let level = self.current_level();
+        (1..=level).any(|l| unlocks_for_level(l).dora)
     }
 }
 
 struct LevelUnlocks {
     relics: Vec<RelicId>,
     rules: Vec<RuleModifier>,
+    yaku: Vec<YakuKind>,
+    dora: bool,
+}
+
+/// What was unlocked when the player leveled up.
+pub struct LevelUpResult {
+    pub new_level: u32,
+    pub relics: Vec<RelicId>,
+    pub rules: Vec<RuleModifier>,
+    pub yaku: Vec<YakuKind>,
+    pub dora: bool,
 }
 
 fn unlocks_for_level(level: u32) -> LevelUnlocks {
@@ -154,6 +180,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::InkBrush,
             ],
             rules: vec![RuleModifier::PairDoubleScore],
+            yaku: vec![],
+            dora: false,
         },
         2 => LevelUnlocks {
             relics: vec![
@@ -165,6 +193,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::LowTide,
             ],
             rules: vec![],
+            yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
+            dora: false,
         },
         3 => LevelUnlocks {
             relics: vec![
@@ -176,6 +206,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Momentum,
             ],
             rules: vec![RuleModifier::SequenceWrap],
+            yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
+            dora: false,
         },
         4 => LevelUnlocks {
             relics: vec![
@@ -187,6 +219,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TurtleShell,
             ],
             rules: vec![RuleModifier::NoSequenceBonus],
+            yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
+            dora: true,
         },
         5 => LevelUnlocks {
             relics: vec![
@@ -199,6 +233,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Minimalist,
             ],
             rules: vec![RuleModifier::HonorTripleScore],
+            yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
+            dora: false,
         },
         6 => LevelUnlocks {
             relics: vec![
@@ -210,6 +246,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::ClosedGate,
             ],
             rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
+            yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
+            dora: false,
         },
         7 => LevelUnlocks {
             relics: vec![
@@ -221,10 +259,14 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Snowball,
             ],
             rules: vec![],
+            yaku: vec![],
+            dora: false,
         },
         _ => LevelUnlocks {
             relics: vec![],
             rules: vec![],
+            yaku: vec![],
+            dora: false,
         },
     }
 }
@@ -251,8 +293,14 @@ mod tests {
     fn level_up_unlocks_relics() {
         let mut p = PlayerProgress::new();
         p.runs_completed = 1;
-        let level = p.check_level_up();
-        assert!(level.is_some());
+        let result = p.check_level_up();
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.new_level, 2);
+        assert!(result.relics.contains(&RelicId::MultiplierMaster));
+        assert!(result.yaku.contains(&YakuKind::Toitoi));
+        assert!(result.yaku.contains(&YakuKind::Tanyao));
+        assert!(!result.dora);
         assert!(p.unlocked_relics.contains(&RelicId::MultiplierMaster));
     }
 

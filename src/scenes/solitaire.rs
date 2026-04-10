@@ -393,6 +393,8 @@ impl SceneBehavior for SolitaireScene {
                 rotation: [0.0, 0.0, 0.0],
                 scale: 1.0,
                 size_px: tile_w,
+                brightness: if free { 1.0 } else { 0.55 },
+                selected: self.selected == Some(i),
             });
 
             // Hit-test button for free tiles.
