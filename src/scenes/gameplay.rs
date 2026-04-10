@@ -1959,8 +1959,9 @@ impl SceneBehavior for GameplayScene {
         // yaku*. Players who want to study levels, bonuses, or
         // construction hints open the Journal book on the table; the
         // play area is reserved for "what just fired this turn".
-        let visible_previews: Vec<&crate::core::yaku::YakuPreview> =
+        let mut visible_previews: Vec<&crate::core::yaku::YakuPreview> =
             previews.iter().filter(|p| p.active).collect();
+        visible_previews.sort_by_key(|p| p.kind);
 
         // If the selection is a valid hand but triggers no yaku, show a
         // chicken-hand tablet so the player knows the hand is legal.

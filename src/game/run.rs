@@ -10,7 +10,7 @@ use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selectio
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets};
+use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
@@ -810,9 +810,25 @@ impl RunState {
             self.discards_remaining += self.tag_bonus_discards;
             self.tag_bonus_discards = 0;
         }
-        // tag_bonus_hand_size is consumed by the hand-draw loop in
-        // advance_round / skip_to_next_blind — not here, since the hand is
-        // already dealt by the time apply_blind runs.
+        // Deal the wall and hand for this round.
+        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        self.wall = Wall::from_filtered_with_packs(
+            &self.removed_tile_ids,
+            &self.tile_packs,
+            &self.tile_enhancements,
+            overflow,
+        );
+        self.hand.clear();
+        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
+        self.tag_bonus_hand_size = 0;
+        for _ in 0..draw_count {
+            if let Some(t) = self.wall.draw() {
+                self.hand.push(t);
+            }
+        }
+        self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
+        self.restamp_hand_enhancements();
     }
 
     /// Score the currently-selected tiles as a played hand.
@@ -877,7 +893,7 @@ impl RunState {
             unscored_hand_tiles: self.hand.len().saturating_sub(selected_tiles.len()),
             river_runner_bonus: self.river_runner_bonus,
         };
-        let breakdown = score_sets(&scoring_tiles, &sets, &ctx, &self.round_rules);
+        let breakdown = score_sets_with_original(&scoring_tiles, &sets, &ctx, &self.round_rules, &selected_tiles);
         let earned = breakdown.total.max(0) as u32;
         self.round_score = self.round_score.saturating_add(earned);
         self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
@@ -1174,7 +1190,7 @@ impl RunState {
             .map(|(t, _)| *t)
             .collect();
         let (sets, scoring_tiles) = self.try_validate_with_wildcards(&selected_tiles)?;
-        Some(preview_score(&scoring_tiles, &sets, &self.available_yaku))
+        Some(preview_score(&scoring_tiles, &sets, &self.available_yaku, Some(&selected_tiles)))
     }
 
     /// Check if the current selection forms a valid playable hand.
@@ -1463,25 +1479,9 @@ impl RunState {
         self.honors_scored_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
-        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
-        self.wall = Wall::from_filtered_with_packs(
-            &self.removed_tile_ids,
-            &self.tile_packs,
-            &self.tile_enhancements,
-            overflow,
-        );
         self.hand.clear();
-        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
+        self.selected.clear();
         self.tag_bonus_hand_size = 0;
-        for _ in 0..draw_count {
-            if let Some(t) = self.wall.draw() {
-                self.hand.push(t);
-            }
-        }
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
-        // Re-apply persistent enhancements to the newly-dealt hand.
-        self.restamp_hand_enhancements();
 
         // Tutorial: advance to the next lesson and apply its overrides.
         // This may resize the hand and adjust the target.
@@ -1541,25 +1541,9 @@ impl RunState {
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.blind = self.upcoming_blind;
-        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
-        self.wall = Wall::from_filtered_with_packs(
-            &self.removed_tile_ids,
-            &self.tile_packs,
-            &self.tile_enhancements,
-            overflow,
-        );
         self.hand.clear();
-        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
+        self.selected.clear();
         self.tag_bonus_hand_size = 0;
-        for _ in 0..draw_count {
-            if let Some(t) = self.wall.draw() {
-                self.hand.push(t);
-            }
-        }
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
-        // Re-apply persistent enhancements to the newly-dealt hand.
-        self.restamp_hand_enhancements();
     }
 
     // ── Skip-reward tags ──────────────────────────────────────────────

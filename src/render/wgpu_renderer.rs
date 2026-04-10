@@ -1687,7 +1687,7 @@ impl WgpuRenderer {
         // pass profiler (Debug menu → "Profile GPU…") can record start/end
         // ticks per render pass. The feature is optional — on backends that
         // lack it the profiler stays a no-op.
-        let mut required_features = wgpu::Features::empty();
+        let mut required_features = wgpu::Features::CLEAR_TEXTURE;
         let timestamp_supported = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         if timestamp_supported {
             required_features |= wgpu::Features::TIMESTAMP_QUERY;
@@ -6327,6 +6327,30 @@ impl WgpuRenderer {
             // Store model matrix + pick id for local-space slab-test picking.
             if let Some(pid) = b.pick_id {
                 self.last_book_model = Some((model, pid));
+                // Project the book's AABB to a screen rect so the shop's
+                // focus-rect graph can reach it via keyboard / controller.
+                let hx = b.half_extents[0];
+                let hy = b.half_extents[1];
+                let hz = b.half_extents[2];
+                let mut mn_x = f32::INFINITY;
+                let mut mn_y = f32::INFINITY;
+                let mut mx_x = f32::NEG_INFINITY;
+                let mut mx_y = f32::NEG_INFINITY;
+                for sx in [-hx, hx] {
+                    for sy in [-hy, hy] {
+                        for sz in [-hz, hz] {
+                            let w = center + glam::Vec3::new(sx, sy, sz);
+                            let (px, py) = project_to_screen(w);
+                            mn_x = mn_x.min(px);
+                            mn_y = mn_y.min(py);
+                            mx_x = mx_x.max(px);
+                            mx_y = mx_y.max(py);
+                        }
+                    }
+                }
+                self.proj
+                    .aux_dish_rects
+                    .push((Some(pid), [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]));
             }
         }
 
