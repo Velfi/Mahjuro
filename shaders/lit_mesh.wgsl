@@ -469,6 +469,19 @@ fn fs_main(
     let spec_strength = mesh.material_params.y;
     let spec_power = max(mesh.material_params.z, 1.0);
 
+    // ── Material kind booleans ──────────────────────────────────────
+    // Derived once from the float `kind` and used everywhere below.
+    // Keep these in sync with MaterialKind in lit_mesh.rs.
+    //   0 = Plain, 1 = Wax, 2 = (unused), 3 = LacqueredWood,
+    //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water, 7 = Talisman,
+    //   8 = Foil
+    let is_wax       = (kind > 0.5 && kind < 1.5);
+    let is_wood      = (kind > 2.5 && kind < 4.5);
+    let is_metal     = (kind > 4.5 && kind < 5.5);
+    let is_water_mat = (kind > 5.5 && kind < 6.5);
+    let is_talisman  = (kind > 6.5 && kind < 7.5);
+    let is_foil      = (kind > 7.5 && kind < 8.5);
+
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-
     // flow analysis happy regardless of how it inlines the branch below.
@@ -479,7 +492,7 @@ fn fs_main(
     // a transparent overlay (engraved label) composited *over* the procedural
     // base material rather than multiplied with it. For talismans (kind>6.5),
     // .w carries the sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome).
-    let has_decal = mesh.material_params.w > 0.5 && kind < 6.5;
+    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -487,13 +500,13 @@ fn fs_main(
         // decal composite at the end will lay the engraved glyphs on top.
         albedo = mesh.base_color.rgb;
     }
-    if (kind > 4.5 && kind < 5.5) {
+    if (is_metal) {
         // Metal: the bound texture is a heightmap, not an albedo. Use the
         // raw base colour and let the height contribute later via the
         // normal-perturbation block below.
         albedo = mesh.base_color.rgb;
     }
-    if (kind > 7.5) {
+    if (is_foil) {
         // Foil: the bound texture IS the full-colour pack art; multiply it
         // with the base colour (typically white) so the art shows through.
         // The metallic foil sheen is layered on top in the per-light loop.
@@ -501,7 +514,7 @@ fn fs_main(
     }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
-    if (kind > 2.5 && kind < 4.5) {
+    if (is_wood) {
         // Lacquered wood: procedural grain overrides the (white) albedo tex.
         // Kind 3 (the horizontal table) samples in world XZ so the grain
         // tiles at a fixed world-space frequency regardless of the model's
@@ -606,7 +619,7 @@ fn fs_main(
     // indigo→teal gradient with foam crests, and a Blinn-Phong specular
     // pool from the candle lights. The branch returns immediately so we
     // skip the wood/wax/metal lighting path entirely.
-    if (kind > 5.5 && kind < 6.5) {
+    if (is_water_mat) {
         let time = lights.extras.y;
         let is_water = in.uv.y > 0.5;
         var water_n = n;
@@ -710,7 +723,7 @@ fn fs_main(
     // and bottom of the coin) and rotate the normal toward the gradient.
     // Only flat-ish faces are perturbed — the rim's UVs wrap once around
     // the cylinder and the gradient there would be meaningless.
-    if (kind > 4.5 && kind < 5.5) {
+    if (is_metal) {
         let face_flat = abs(n.y);
         if (face_flat > 0.6) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
@@ -747,7 +760,7 @@ fn fs_main(
     // the tablet's orientation (upright on the wall or laid flat in the
     // tray). Only the flat front/back faces are perturbed — detected via
     // local_pos.z proximity to the half-thickness (±0.09).
-    if (kind > 6.5) {
+    if (is_talisman) {
         let face_flat = abs(abs(in.local_pos.z) - 0.09);
         if (face_flat < 0.02) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
@@ -787,10 +800,6 @@ fn fs_main(
     let view_dir = normalize(cam_pos - in.world_pos);
     let ndv_view = clamp(dot(n, view_dir), 0.0, 1.0);
 
-    let is_wood = (kind > 2.5 && kind < 4.5);
-    let is_wax  = (kind > 0.5 && kind < 1.5);
-    let is_metal = (kind > 4.5 && kind < 5.5);
-    let is_foil = (kind > 7.5);
 
     // Wrap-diffuse subsurface: softens the terminator past 90° so the
     // shaded side picks up a tinted bleed. Wood gets a tiny amount,
@@ -807,7 +816,7 @@ fn fs_main(
         wrap = 0.55;
         sss_strength = 0.55;
         sss_tint = vec3<f32>(1.00, 0.78, 0.42);
-    } else if (kind > 6.5) {
+    } else if (is_talisman) {
         // Talisman SSS: per-kind tint so each material scatters light
         // through its surface with the right hue. The sub-kind index
         // lives in material_params.w (0=jade, 1=pearl, 2=gilded, 3=poly).
@@ -841,7 +850,6 @@ fn fs_main(
     // object that is back-lit, exactly where real wax glows.
     // Jade uses the same model — nephrite/jadeite tablets are thin
     // enough that back-lit edges glow with a warm green.
-    let is_talisman = (kind > 6.5);
     let back_distortion = 0.45;
     let back_power = select(4.0, 6.0, is_talisman); // jade is denser, tighter lobe
     var back_scale = 0.0;

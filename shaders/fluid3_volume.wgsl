@@ -50,7 +50,8 @@ struct PointLights {
 
 // Convert a world position to a voxel texel coordinate for textureLoad.
 fn world_to_texel(world: vec3<f32>, grid_min: vec3<f32>, grid_max: vec3<f32>) -> vec3<i32> {
-    let grid_size = vec3<f32>(96.0, 48.0, 96.0); // must match fluid.rs GRID_X/Y/Z
+    let dims = textureDimensions(lit_density_tex);
+    let grid_size = vec3<f32>(f32(dims.x), f32(dims.y), f32(dims.z));
     let uvw = (world - grid_min) / (grid_max - grid_min);
     let cell = clamp(uvw * grid_size, vec3<f32>(0.0), grid_size - vec3<f32>(1.0));
     return vec3<i32>(i32(cell.x), i32(cell.y), i32(cell.z));

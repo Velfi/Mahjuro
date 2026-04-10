@@ -107,7 +107,9 @@ impl BlindKind {
         }
     }
 
-    /// Gold reward granted for skipping this blind. Boss can't be skipped.
+    /// Gold reward formerly granted for skipping this blind. Replaced by
+    /// skip-reward tags (`core::tag`), but kept for reference / tests.
+    #[allow(dead_code)]
     pub fn skip_reward(self) -> u32 {
         match self {
             BlindKind::Small => 3,

@@ -7,19 +7,20 @@
 //! ```text
 //!   +Y up                                +X right
 //!   ┌────────────────────────────────┐
-//!   │ ┌────┬────┬────┐               │  ← top frame
-//!   │ │    │    │    │  ribbons hang │
-//!   │ ├────┼────┼────┤  on the right │
-//!   │ │    │    │    │  half against │
-//!   │ └────┴────┴────┘  the back     │
+//!   │ ┌────┬────┬────┐  zodiac      │  ← top frame
+//!   │ │    │    │    │  ribbons     │
+//!   │ ├────┼────┼────┤ ─────────── │  ← shelf ledge
+//!   │ │    │    │    │  talisman   │
+//!   │ └────┴────┴────┘  tablets    │
 //!   │   relic niches                 │
 //!   └────────────────────────────────┘  ← bottom frame
 //! ```
 //!
 //! The left half is subdivided into a `NICHE_COLS x NICHE_ROWS` grid of
 //! inset compartments (back panel pushed in by `NICHE_DEPTH` plus dividers
-//! between cells). The right half is left as a flat back panel; the shop
-//! scene pins ribbons against it.
+//! between cells). The right half has a horizontal shelf ledge at
+//! `RIGHT_SHELF_Y` splitting it into an upper zone (zodiac ribbons) and a
+//! lower zone (talisman tablets), with the tile pack below both.
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
@@ -42,6 +43,10 @@ const DIVIDER: f32 = 0.025;
 pub const DIVIDER_X: f32 = 0.10;
 /// Half-thickness of the cabinet's front plane (z extent).
 const HALF_Z: f32 = 0.5;
+/// Local-y of the horizontal shelf on the right half that separates the
+/// zodiac ribbon row (above) from the talisman shelf (below). Exported so
+/// the shop scene can align talisman anchors to it.
+pub const RIGHT_SHELF_Y: f32 = 0.28;
 
 /// Build the curio cabinet mesh in local space (-0.5..+0.5 on each axis).
 pub fn build_curio_cabinet_mesh() -> MeshCpu {
@@ -198,6 +203,25 @@ pub fn build_curio_cabinet_mesh() -> MeshCpu {
             );
         }
     }
+
+    // ── 5. Right-half horizontal shelf: thin ledge separating the zodiac
+    //         ribbon area (above) from the talisman display (below). Spans
+    //         the full width of the right section and has enough z-depth to
+    //         read as a real shelf, not just a line.
+    let right_x0 = DIVIDER_X + DIVIDER * 0.5;
+    let right_x1 = xmax - FRAME;
+    let shelf_thickness = 0.025;
+    push_box(
+        &mut vertices,
+        &mut indices,
+        right_x0,
+        right_x1,
+        RIGHT_SHELF_Y - shelf_thickness * 0.5,
+        RIGHT_SHELF_Y + shelf_thickness * 0.5,
+        // Extend back from the front plane to give the shelf visible depth.
+        zfront_lo - 0.12,
+        zfront_hi,
+    );
 
     MeshCpu {
         vertices,

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::tile::Suit;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelicId {
     // ── 15 retuned keepers from Patch A ────────────────────────────────
@@ -69,6 +69,116 @@ pub enum RelicId {
     Ikebana,
     /// Each flower scored grants +3 gold immediately.
     Hanami,
+    // ── 15 new relics ─────────────────────────────────────────────────
+    /// Bamboo-suit tiles in scored sets: +8 chips each.
+    JadeSerpent,
+    /// Characters-suit tiles in scored sets: +8 chips each.
+    InkBrush,
+    /// Dots-suit tiles in scored sets: +8 chips each.
+    PearlDiver,
+    /// Tiles ranked 1–3 in scored sets: +6 chips each.
+    LowTide,
+    /// Relics cost $1 less in the shop (minimum $1).
+    MerchantsEye,
+    /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
+    EdgeRunner,
+    /// Rank-7 tiles in scored sets: +1.5 mult each.
+    LuckySeven,
+    /// +0.5 mult per play already used this round.
+    Momentum,
+    /// Playing exactly one set that is a pair: +4 mult.
+    Minimalist,
+    /// +50 chips if mult is below 3.0 after all other bonuses.
+    TurtleShell,
+    /// All scored tiles are terminals or honors: +4 mult.
+    ClosedGate,
+    /// +1 mult per 5 gold held (max +4 mult).
+    GoldFurnace,
+    /// +0.1 mult per 100 total score earned this run (max +5 mult).
+    Snowball,
+    /// +1 play per round.
+    SecondWind,
+    /// ×2 final mult, but 1 fewer play per round.
+    GlassCannon,
+    // ── Balatro-inspired relics (Patch F) ─────────────────────────────
+    /// On your final play of the round, retrigger all scored tiles (they
+    /// each contribute their chip value a second time).
+    LastBreath,
+    /// Every scored tile permanently gains +3 chips for the rest of the
+    /// run. Tracked in `RunState::tile_polisher_bonus`.
+    TilePolisher,
+    /// +6 mult, but 1-in-5 chance to be destroyed at end of each round.
+    /// When destroyed, replaced by Iron Lantern.
+    PaperLantern,
+    /// Replaces Paper Lantern when it burns. ×2 final mult, 1-in-1000
+    /// chance to break at end of round.
+    IronLantern,
+    /// Copies the scoring effect of the relic immediately after it in
+    /// the player's relic inventory. No effect if it's the last slot.
+    MirrorTile,
+    /// ×2.5 mult if every scored tile belongs to a single numbered suit.
+    WayOfPurity,
+    // ── Patch G: 25 Balatro-inspired relics ───────────────────────────
+    // Retrigger
+    /// Retrigger the first tile in each scored set.
+    LeadingTile,
+    /// Retrigger tiles ranked 1–4 in scored sets.
+    LowEcho,
+    /// Retrigger all scored tiles for 3 plays, then self-destructs.
+    TeaCeremony,
+    /// Tiles NOT in scored sets each grant +2 chips.
+    GhostHand,
+    // Scaling
+    /// +0.5 mult per consecutive play without honor tiles. Resets when
+    /// honors are scored.
+    CleanStreak,
+    /// +0.3 mult per round you don't score your most-used yaku.
+    Obsession,
+    /// +0.4 mult per relic sold this run.
+    Bonfire,
+    /// +20 chips permanently each time you score a sequence.
+    RiverRunner,
+    // Fragile
+    /// +80 chips, loses 8 chips per play. Destroyed at 0.
+    MeltingIce,
+    /// +4 mult, loses 0.3 mult per discard. Destroyed at 0.
+    SilkThread,
+    // Copy / Meta
+    /// Copies the effect of the first relic in your inventory.
+    ShadowHand,
+    /// +1.5 mult per empty relic slot.
+    EmptyFrame,
+    // Economy
+    /// +3 gold at round end.
+    GoldIdol,
+    /// +1 gold interest per 4 gold held (max +4).
+    JadeAbacus,
+    /// Gains +2 sell value each round. Sell when ripe.
+    NestEgg,
+    /// +2 gold per unused discard at round end.
+    Patience,
+    // Conditional ×mult
+    /// ×2 mult if scored hand is all pairs.
+    WayOfPairs,
+    /// ×2.5 mult if scored hand is all triplets/kongs.
+    WayOfTriplets,
+    /// ×2 mult if scored hand is all sequences.
+    WayOfSequences,
+    // Probability / Chaos
+    /// Doubles all relic trigger probabilities.
+    FortunesFavor,
+    /// +0 to +8 mult (random per play).
+    CrackedTile,
+    /// 1-in-4 chance to level up a scored yaku after each play.
+    StarTile,
+    // Sell-to-activate
+    /// Sell to skip the current boss blind.
+    SmokeBomb,
+    /// After 3 rounds, sell to duplicate a random owned relic.
+    PhantomRelic,
+    /// Destroy the relic to the right; gain permanent mult equal to
+    /// double its sell value.
+    RitualBlade,
 }
 
 impl RelicId {
@@ -110,6 +220,52 @@ impl RelicId {
             RelicId::GardenKeeper => "garden_keeper.png",
             RelicId::Ikebana => "ikebana.png",
             RelicId::Hanami => "hanami.png",
+            RelicId::JadeSerpent => "jade_serpent.png",
+            RelicId::InkBrush => "ink_brush.png",
+            RelicId::PearlDiver => "pearl_diver.png",
+            RelicId::LowTide => "low_tide.png",
+            RelicId::MerchantsEye => "merchants_eye.png",
+            RelicId::EdgeRunner => "edge_runner.png",
+            RelicId::LuckySeven => "lucky_seven.png",
+            RelicId::Momentum => "momentum.png",
+            RelicId::Minimalist => "minimalist.png",
+            RelicId::TurtleShell => "turtle_shell.png",
+            RelicId::ClosedGate => "closed_gate.png",
+            RelicId::GoldFurnace => "gold_furnace.png",
+            RelicId::Snowball => "snowball.png",
+            RelicId::SecondWind => "second_wind.png",
+            RelicId::GlassCannon => "glass_cannon.png",
+            RelicId::LastBreath => "last_breath.png",
+            RelicId::TilePolisher => "tile_polisher.png",
+            RelicId::PaperLantern => "paper_lantern.png",
+            RelicId::IronLantern => "iron_lantern.png",
+            RelicId::MirrorTile => "mirror_tile.png",
+            RelicId::WayOfPurity => "way_of_purity.png",
+            RelicId::LeadingTile => "leading_tile.png",
+            RelicId::LowEcho => "low_echo.png",
+            RelicId::TeaCeremony => "tea_ceremony.png",
+            RelicId::GhostHand => "ghost_hand.png",
+            RelicId::CleanStreak => "clean_streak.png",
+            RelicId::Obsession => "obsession.png",
+            RelicId::Bonfire => "bonfire.png",
+            RelicId::RiverRunner => "river_runner.png",
+            RelicId::MeltingIce => "melting_ice.png",
+            RelicId::SilkThread => "silk_thread.png",
+            RelicId::ShadowHand => "shadow_hand.png",
+            RelicId::EmptyFrame => "empty_frame.png",
+            RelicId::GoldIdol => "gold_idol.png",
+            RelicId::JadeAbacus => "jade_abacus.png",
+            RelicId::NestEgg => "nest_egg.png",
+            RelicId::Patience => "patience.png",
+            RelicId::WayOfPairs => "way_of_pairs.png",
+            RelicId::WayOfTriplets => "way_of_triplets.png",
+            RelicId::WayOfSequences => "way_of_sequences.png",
+            RelicId::FortunesFavor => "fortunes_favor.png",
+            RelicId::CrackedTile => "cracked_tile.png",
+            RelicId::StarTile => "star_tile.png",
+            RelicId::SmokeBomb => "smoke_bomb.png",
+            RelicId::PhantomRelic => "phantom_relic.png",
+            RelicId::RitualBlade => "ritual_blade.png",
         }
     }
 }
@@ -359,6 +515,97 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             description: "+$3 gold each time a flower is scored",
             rarity: Rarity::Common,
         },
+        // ── 15 new relics ──────────────────────────────────────────────
+        RelicDef {
+            id: RelicId::JadeSerpent,
+            name: "Jade Serpent",
+            description: "Bamboo tiles in scored sets: +8 chips each",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::InkBrush,
+            name: "Ink Brush",
+            description: "Characters tiles in scored sets: +8 chips each",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::PearlDiver,
+            name: "Pearl Diver",
+            description: "Dots tiles in scored sets: +8 chips each",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::LowTide,
+            name: "Low Tide",
+            description: "Tiles ranked 1-3 in scored sets: +6 chips each",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::MerchantsEye,
+            name: "Merchant's Eye",
+            description: "Relics cost $1 less in the shop",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::EdgeRunner,
+            name: "Edge Runner",
+            description: "Terminal tiles (1s and 9s) in scored sets: +12 chips each",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::LuckySeven,
+            name: "Lucky Seven",
+            description: "Rank-7 tiles in scored sets: +1.5 mult each",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Momentum,
+            name: "Momentum",
+            description: "+0.5 mult per play already used this round",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Minimalist,
+            name: "Minimalist",
+            description: "Playing a single pair: +4 mult",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::TurtleShell,
+            name: "Turtle Shell",
+            description: "+50 chips if your mult is below 3",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::ClosedGate,
+            name: "Closed Gate",
+            description: "All scored tiles are terminals or honors: +4 mult",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::GoldFurnace,
+            name: "Gold Furnace",
+            description: "+1 mult per 5 gold held (max +4)",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::Snowball,
+            name: "Snowball",
+            description: "+0.1 mult per 100 total score this run (max +5)",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::SecondWind,
+            name: "Second Wind",
+            description: "+1 play per round",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::GlassCannon,
+            name: "Glass Cannon",
+            description: "×2 final mult, but 1 fewer play per round",
+            rarity: Rarity::Legendary,
+        },
         // CodexCompass — disabled because the relic has no scoring effect
         // and the in-round yaku-loadout swap UI doesn't exist. Re-enable
         // when the loadout-swap action is wired into the gameplay scene.
@@ -368,6 +615,203 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         //     description: "Once per round: swap one yaku in your loadout",
         //     rarity: Rarity::Uncommon,
         // },
+        // ── Balatro-inspired relics (Patch F) ──────────────────────────
+        RelicDef {
+            id: RelicId::LastBreath,
+            name: "Last Breath",
+            description: "On your final play, retrigger all scored tiles",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::TilePolisher,
+            name: "Tile Polisher",
+            description: "Every scored tile permanently gains +3 chips this run",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::PaperLantern,
+            name: "Paper Lantern",
+            description: "+6 mult; 1-in-5 chance to burn at round end",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::IronLantern,
+            name: "Iron Lantern",
+            description: "×2 mult; 1-in-1000 chance to break at round end",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::MirrorTile,
+            name: "Mirror Tile",
+            description: "Copies the effect of the next relic in your inventory",
+            rarity: Rarity::Legendary,
+        },
+        RelicDef {
+            id: RelicId::WayOfPurity,
+            name: "Way of Purity",
+            description: "All scored tiles are one suit: ×2.5 mult",
+            rarity: Rarity::Rare,
+        },
+        // ── Patch G: 25 Balatro-inspired relics ────────────────────────
+        // Retrigger
+        RelicDef {
+            id: RelicId::LeadingTile,
+            name: "Leading Tile",
+            description: "Retrigger the first tile in each scored set",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::LowEcho,
+            name: "Low Echo",
+            description: "Retrigger tiles ranked 1-4 in scored sets",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::TeaCeremony,
+            name: "Tea Ceremony",
+            description: "Retrigger all tiles for 3 plays, then destroyed",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::GhostHand,
+            name: "Ghost Hand",
+            description: "Unscored hand tiles each grant +2 chips",
+            rarity: Rarity::Uncommon,
+        },
+        // Scaling
+        RelicDef {
+            id: RelicId::CleanStreak,
+            name: "Clean Streak",
+            description: "+0.5 mult per consecutive play without honors",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Obsession,
+            name: "Obsession",
+            description: "+0.3 mult per round without your top yaku",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::Bonfire,
+            name: "Bonfire",
+            description: "+0.4 mult per relic sold this run",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::RiverRunner,
+            name: "River Runner",
+            description: "+20 chips permanently each time you score a sequence",
+            rarity: Rarity::Rare,
+        },
+        // Fragile
+        RelicDef {
+            id: RelicId::MeltingIce,
+            name: "Melting Ice",
+            description: "+80 chips, loses 8 per play (destroyed at 0)",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::SilkThread,
+            name: "Silk Thread",
+            description: "+4 mult, loses 0.3 per discard (destroyed at 0)",
+            rarity: Rarity::Uncommon,
+        },
+        // Copy / Meta
+        RelicDef {
+            id: RelicId::ShadowHand,
+            name: "Shadow Hand",
+            description: "Copies the effect of your first relic",
+            rarity: Rarity::Legendary,
+        },
+        RelicDef {
+            id: RelicId::EmptyFrame,
+            name: "Empty Frame",
+            description: "+1.5 mult per empty relic slot",
+            rarity: Rarity::Uncommon,
+        },
+        // Economy
+        RelicDef {
+            id: RelicId::GoldIdol,
+            name: "Gold Idol",
+            description: "+3 gold at round end",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::JadeAbacus,
+            name: "Jade Abacus",
+            description: "+1 interest per 4 gold held (max +4)",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::NestEgg,
+            name: "Nest Egg",
+            description: "Gains +2 sell value each round; sell when ripe",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::Patience,
+            name: "Patience",
+            description: "+2 gold per unused discard at round end",
+            rarity: Rarity::Common,
+        },
+        // Conditional ×mult
+        RelicDef {
+            id: RelicId::WayOfPairs,
+            name: "Way of Pairs",
+            description: "All pairs scored: ×2 mult",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::WayOfTriplets,
+            name: "Way of Triplets",
+            description: "All triplets/kongs scored: ×2.5 mult",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::WayOfSequences,
+            name: "Way of Sequences",
+            description: "All sequences scored: ×2 mult",
+            rarity: Rarity::Rare,
+        },
+        // Probability / Chaos
+        RelicDef {
+            id: RelicId::FortunesFavor,
+            name: "Fortune's Favor",
+            description: "Doubles all relic trigger probabilities",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::CrackedTile,
+            name: "Cracked Tile",
+            description: "+0 to +8 mult (random per play)",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::StarTile,
+            name: "Star Tile",
+            description: "1-in-4 chance to level up a scored yaku",
+            rarity: Rarity::Uncommon,
+        },
+        // Sell-to-activate
+        RelicDef {
+            id: RelicId::SmokeBomb,
+            name: "Smoke Bomb",
+            description: "Sell to skip the current boss blind",
+            rarity: Rarity::Rare,
+        },
+        // PhantomRelic not in shop — appears via special means only.
+        RelicDef {
+            id: RelicId::PhantomRelic,
+            name: "Phantom Relic",
+            description: "After 3 rounds, sell to duplicate a random relic",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::RitualBlade,
+            name: "Ritual Blade",
+            description: "Destroy the next relic for permanent mult",
+            rarity: Rarity::Rare,
+        },
     ]
 }
 
@@ -398,6 +842,22 @@ impl RelicState {
 
     pub fn len(&self) -> usize {
         self.active.len()
+    }
+
+    /// Swap two relics by index. Used by the rearrange UI (MirrorTile
+    /// copies the relic to its right, so ordering matters).
+    pub fn swap_relics(&mut self, a: usize, b: usize) {
+        if a < self.active.len() && b < self.active.len() {
+            self.active.swap(a, b);
+        }
+    }
+
+    /// Returns the RelicId immediately *after* `id` in the active list,
+    /// or `None` if `id` is the last relic (or absent). Used by Mirror
+    /// Tile to find the relic it copies.
+    pub fn relic_after(&self, id: RelicId) -> Option<RelicId> {
+        let pos = self.active.iter().position(|&r| r == id)?;
+        self.active.get(pos + 1).copied()
     }
 }
 
@@ -437,6 +897,23 @@ pub struct ScoreContext<'a> {
     /// Yaku detected on prior plays in the current round, used by The Censor
     /// boss to halve repeat-yaku contributions. Empty in normal rounds.
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
+    /// Player's current gold at the moment of scoring (for Gold Furnace).
+    pub gold: i32,
+    /// Cumulative score earned across the entire run (for Snowball).
+    pub total_score: u64,
+    /// True when this is the player's last remaining play this round
+    /// (plays_remaining == 1 at scoring time). Powers Last Breath.
+    pub is_final_play: bool,
+    /// Permanent per-tile chip bonus accumulated by the Tile Polisher
+    /// relic over the course of the run.
+    pub tile_polisher_bonus: i32,
+    /// Per-relic mutable counters (clean_streak, melting_ice chips, etc.).
+    /// Keyed by RelicId, value meaning varies by relic.
+    pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
+    /// Number of hand tiles NOT in the scored sets (for Ghost Hand).
+    pub unscored_hand_tiles: usize,
+    /// River Runner accumulated permanent chip bonus.
+    pub river_runner_bonus: i32,
 }
 
 // All scoring effects now live in `core::scoring::score_sets` directly,

@@ -37,6 +37,14 @@ pub enum SfxId {
     PackOpen,
     /// Individual tile revealed during pack opening celebration.
     PackTileReveal,
+    /// Zodiac ribbon close-up reveal (mystical shimmer).
+    ZodiacReveal,
+    /// Zodiac consumed — yaku levelled up (positive stinger).
+    ZodiacLevelUp,
+    /// Rising whoosh when candles flare up on a blind-breaking hand.
+    CandleFlareWhoosh,
+    /// Heavy impact sting layered on top of the whoosh.
+    CandleFlareImpact,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -61,6 +69,10 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::PackBuy,
         SfxId::PackOpen,
         SfxId::PackTileReveal,
+        SfxId::ZodiacReveal,
+        SfxId::ZodiacLevelUp,
+        SfxId::CandleFlareWhoosh,
+        SfxId::CandleFlareImpact,
     ]
 }
 
@@ -86,6 +98,10 @@ impl SfxId {
             SfxId::PackBuy => "kenney_interface-sounds/Audio/confirmation_003.ogg",
             SfxId::PackOpen => "kenney_interface-sounds/Audio/open_003.ogg",
             SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
+            SfxId::ZodiacReveal => "kenney_interface-sounds/Audio/glass_006.ogg",
+            SfxId::ZodiacLevelUp => "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI03.ogg",
+            SfxId::CandleFlareWhoosh => "kenney_interface-sounds/Audio/maximize_008.ogg",
+            SfxId::CandleFlareImpact => "kenney_music-jingles/Audio/Hit jingles/jingles_HIT16.ogg",
         }
     }
 }

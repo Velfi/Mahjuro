@@ -24,7 +24,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
 use super::ButtonDef;
-use super::glossary::yaku_shape_text;
+use super::meld_guide::yaku_shape_text;
 
 /// Click id used by the journal's "Close" button. Picked from the same
 /// high-numbered range glossary uses so it can't collide with scene

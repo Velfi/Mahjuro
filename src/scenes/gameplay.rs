@@ -21,7 +21,7 @@ use crate::ui::input::{UiAction, apply_ui_actions};
 use crate::ui::widget::{self, TextStyle};
 
 use super::pause_menu::PauseMenu;
-use super::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
@@ -197,8 +197,6 @@ pub struct GameplayScene {
     /// Whether the current cascade has already emitted its `ScoreCascadeFinal`
     /// event. Reset when a new cascade starts.
     cascade_final_emitted: bool,
-    /// Cross-input glossary overlay (`?` / F1 / H to toggle).
-    glossary: super::glossary::GlossaryOverlay,
     /// Yaku Journal overlay — Balatro-style run-stats page listing every
     /// yaku with its level, leveled bonuses, and run play count. Opened
     /// by clicking the Journal book on the table.
@@ -245,6 +243,11 @@ pub struct GameplayScene {
     kiln_mode: bool,
     /// Maximum tiles the player can still select in this Kiln activation.
     kiln_picks_remaining: usize,
+    /// Candle flare intensity — spikes when a single hand scores more than
+    /// the entire blind target, then decays exponentially back to 0.0.
+    /// Multiplied into candle intensity, radius, and flame brightness so
+    /// the room visibly flares up on a monster hand.
+    candle_flare: f32,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -264,6 +267,11 @@ const LIGHT_RAMP_DURATION_SECS: f32 = 0.8;
 
 /// How long a relic glow lingers after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
+
+/// Peak flare intensity when a single hand exceeds the entire blind.
+const CANDLE_FLARE_PEAK: f32 = 1.5;
+/// Exponential decay rate for the candle flare (per second). Higher = faster fade.
+const CANDLE_FLARE_DECAY: f32 = 2.5;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -345,7 +353,6 @@ impl GameplayScene {
             relic_glow_starts: std::collections::HashMap::new(),
             last_revealed_step: None,
             cascade_final_emitted: false,
-            glossary: super::glossary::GlossaryOverlay::new(),
             journal: super::journal::JournalOverlay::new(),
             prev_hand_len: 0,
             last_deal_at: None,
@@ -357,6 +364,7 @@ impl GameplayScene {
             debug_show_axes: false,
             kiln_mode: false,
             kiln_picks_remaining: 0,
+            candle_flare: 0.0,
         }
     }
 }
@@ -371,12 +379,11 @@ impl SceneBehavior for GameplayScene {
 
     /// See [`crate::scenes::SceneBehavior::has_blocking_overlay`]. Reports
     /// `true` when any in-scene modal-like overlay is up: pause menu,
-    /// glossary screen, or the scoring cascade animation. The cascade is
-    /// included because it already blocks input internally — declaring it
-    /// here also kills hover tooltips on hand tiles and relics during the
-    /// score reveal.
+    /// journal, or the scoring cascade animation. The cascade is included
+    /// because it already blocks input internally — declaring it here also
+    /// kills hover tooltips on hand tiles and relics during the score reveal.
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused || self.glossary.open || self.journal.open || self.cascade.is_some()
+        self.pause_menu.paused || self.journal.open || self.cascade.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -519,17 +526,34 @@ impl SceneBehavior for GameplayScene {
             })
             .unwrap_or(1.0);
         self.candle_time += dt;
+        let candle_flare_boost = 1.0 + self.candle_flare;
         for c in self.candles.iter_mut() {
             let t = self.candle_time;
             let target =
                 (0.9 + 0.18 * (t * 7.3 + c.phase).sin() + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
-                    * candle_dim;
+                    * candle_dim
+                    * candle_flare_boost;
             // Exponential smoothing — keeps the light from snapping. Bump
             // the rate during a gust so the dim/recover edge reads as a
             // wind hit instead of a slow fade.
-            let smooth_rate = if candle_dim < 0.95 { 22.0 } else { 12.0 };
+            let smooth_rate = if self.candle_flare > 0.1 {
+                28.0
+            } else if candle_dim < 0.95 {
+                22.0
+            } else {
+                12.0
+            };
             let k = (1.0 - (-dt * smooth_rate).exp()).clamp(0.0, 1.0);
             c.flicker += (target - c.flicker) * k;
+        }
+
+        // Decay the candle flare (exponential fall-off so it fades fast
+        // at first then lingers subtly). Kill it once negligible.
+        if self.candle_flare > 0.0 {
+            self.candle_flare *= (-dt * CANDLE_FLARE_DECAY).exp();
+            if self.candle_flare < 0.01 {
+                self.candle_flare = 0.0;
+            }
         }
 
         // Light ramp: candles start dark and spark on after the opening deal.
@@ -546,31 +570,19 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Glossary overlay (Patch UX): cross-input help. The Help action
-        // toggles it; while open, the overlay swallows all other input. The
-        // `?` badge in the HUD also routes here via HELP_BADGE_ID.
+        // Help action opens the Meld Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
-                self.glossary.toggle();
-                return None;
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
         }
-        if !self.glossary.open {
-            for a in ctx.actions {
-                if matches!(a, UiAction::Help) {
-                    self.glossary.toggle();
-                    return None;
-                }
+        for a in ctx.actions {
+            if matches!(a, UiAction::Help) {
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
-        } else {
-            // Overlay is open — let it process input and then bail out.
-            self.glossary
-                .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
-            return None;
         }
 
-        // Yaku Journal overlay (Patch UX): same modal pattern as the
-        // glossary. Opened by clicking the Journal book on the table
+        // Yaku Journal overlay: same modal pattern. Opened by clicking the Journal book on the table
         // (routed via the 3D-hit dispatcher below); while open the
         // overlay swallows all other input.
         if self.journal.open {
@@ -582,11 +594,10 @@ impl SceneBehavior for GameplayScene {
         // Pause menu handling — drives the menu while paused and intercepts
         // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // The pause menu's "Glossary" entry sets a one-shot flag and
-            // closes itself; drain the flag here so the gameplay glossary
-            // overlay opens on the very next frame.
-            if self.pause_menu.take_glossary_request() {
-                self.glossary.toggle();
+            // The pause menu's "Meld Guide" entry sets a one-shot flag and
+            // closes itself; drain the flag to transition to the Meld Guide scene.
+            if self.pause_menu.take_meld_guide_request() {
+                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)));
             }
             return t;
         }
@@ -769,6 +780,18 @@ impl SceneBehavior for GameplayScene {
                 match ctx.run.use_consumable(idx) {
                     Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) => {
                         log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level);
+                        let label = format!("{} Lv.{}", yaku.name(), new_level);
+                        let src = ctx.cursor_pos;
+                        let dest = (src.0, src.1 - 200.0);
+                        self.score_popups.spawn(
+                            label,
+                            src,
+                            dest,
+                            crate::core::scoring::StepKind::Gold,
+                            new_level as f32,
+                        );
+                        self.particles.emit(src.0, src.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+                        ctx.bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                     }
                     Some(crate::game::run::ConsumableUseResult::Talisman { kind }) => {
                         log::info!(
@@ -996,6 +1019,21 @@ impl SceneBehavior for GameplayScene {
                                             yaku.name(),
                                             new_level,
                                         );
+                                        let label = format!("{} Lv.{}", yaku.name(), new_level);
+                                        let src = ctx.cursor_pos;
+                                        let dest = (src.0, src.1 - 200.0);
+                                        self.score_popups.spawn(
+                                            label,
+                                            src,
+                                            dest,
+                                            crate::core::scoring::StepKind::Gold,
+                                            new_level as f32,
+                                        );
+                                        self.particles.emit(
+                                            src.0, src.1, 24,
+                                            [0.95, 0.78, 0.25, 1.0], 0.9,
+                                        );
+                                        ctx.bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                                     }
                                     crate::game::run::ConsumableUseResult::Talisman { kind } => {
                                         log::info!(
@@ -1172,6 +1210,12 @@ impl SceneBehavior for GameplayScene {
                     }
 
                     if pts > 0 {
+                        // If this single hand scored at least the entire
+                        // blind target, flare the candles up dramatically.
+                        if pts >= ctx.run.target_score {
+                            self.candle_flare = CANDLE_FLARE_PEAK;
+                            ctx.bus.push(crate::game::event_bus::GameEvent::CandleFlare);
+                        }
                         if let Some(breakdown) = ctx.run.last_breakdown.clone() {
                             if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
                                 self.cascade = Some(ScoringCascade::with_tuning(
@@ -1205,6 +1249,19 @@ impl SceneBehavior for GameplayScene {
                                     [1.0, 0.97, 0.85, 1.0],
                                     0.9,
                                 );
+                                // Blind-breaker bonus sparks: extra ember
+                                // showers that linger longer so the whole
+                                // screen feels lit up by the candle flare.
+                                if self.candle_flare > 0.0 {
+                                    self.particles.explode(
+                                        px, py, count * 2,
+                                        [1.0, 0.55, 0.15, 1.0], 1.6,
+                                    );
+                                    self.particles.explode(
+                                        px, py, count,
+                                        [1.0, 0.92, 0.55, 1.0], 1.3,
+                                    );
+                                }
                                 // displayed_score will be driven by cascade
                             } else {
                                 self.displayed_score = ctx.run.round_score;
@@ -1287,7 +1344,6 @@ impl SceneBehavior for GameplayScene {
             _ => usize::MAX,
         };
         let now = Instant::now();
-        let glossary_open = self.glossary.open;
         let journal_open = self.journal.open;
 
         // The window title is recomputed unconditionally so the OS chrome
@@ -1308,36 +1364,7 @@ impl SceneBehavior for GameplayScene {
             run.discards_remaining,
         );
 
-        // ── Glossary early-return path ──────────────────────────────────
-        //
-        // When the glossary overlay is open, the entire HUD / 3D scene is
-        // suppressed and the glossary panel takes over the screen. The
-        // legacy code handled this by drawing the HUD and then having
-        // `GlossaryOverlay::draw` blow the per-frame vecs away — that hack
-        // is the original source of the tooltip-z-order bug class. The
-        // canonical-frame port instead returns a *fresh* `UiFrame`
-        // containing only the background and the glossary panel.
-        if glossary_open {
-            let mut frame = UiFrame::new();
-            frame.background(super::BackgroundId::Black);
-            self.glossary.draw_into_frame(
-                &mut frame,
-                layout.window_w,
-                layout.window_h,
-                ctx.ui_scale,
-            );
-            // Click-blocker behind the glossary's own buttons (added last
-            // so it never preempts a real button click).
-            frame.buttons.push(ButtonDef::scene(
-                (0.0, 0.0, layout.window_w, layout.window_h),
-                u32::MAX,
-            ));
-            frame.focus = focus;
-            frame.window_title = window_title;
-            return frame;
-        }
-
-        // Journal overlay early-return — same shape as the glossary path.
+        // Journal overlay early-return.
         // Returns a fresh frame containing only the background and the
         // journal panel so the live HUD/3D scene doesn't bleed through.
         if journal_open {
@@ -1452,7 +1479,7 @@ impl SceneBehavior for GameplayScene {
         // "Boss Blind" label so the player can read what they're up against
         // at a glance.
         let blind_label: String = if run.blind == crate::core::rules::BlindKind::Boss {
-            run.upcoming_boss
+            run.boss.upcoming
                 .map(|k| k.def().name.to_string())
                 .unwrap_or_else(|| run.blind.name().to_string())
         } else {
@@ -1489,10 +1516,10 @@ impl SceneBehavior for GameplayScene {
         // whether a cascade is currently animating in the modifier strip.
         let (ofuda_title_text, ofuda_rule_text) =
             if run.blind == crate::core::rules::BlindKind::Boss {
-                if let Some(k) = run.upcoming_boss {
+                if let Some(k) = run.boss.upcoming {
                     let d = k.def();
                     let desc: &str = run
-                        .upcoming_boss_effect
+                        .boss.effect
                         .as_ref()
                         .and_then(|e| e.description_override.as_deref())
                         .unwrap_or(d.description);
@@ -1703,7 +1730,17 @@ impl SceneBehavior for GameplayScene {
             .filter(|&(_, &sel)| sel)
             .map(|(t, _)| *t)
             .collect();
-        let previews = yaku_preview(&selected_tiles_for_yaku, &run.available_yaku);
+        let round_wind_for_yaku =
+            Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante));
+        let wildcard_result = run.try_validate_with_wildcards(&selected_tiles_for_yaku);
+        let previews = yaku_preview(
+            &selected_tiles_for_yaku,
+            &run.available_yaku,
+            round_wind_for_yaku,
+            wildcard_result
+                .as_ref()
+                .map(|(sets, tiles)| (sets.as_slice(), tiles.as_slice())),
+        );
         // Captured during the loop below — `(yaku_kind, anchor_x, anchor_y)`
         // for the card the cursor is currently hovering, if any. The tooltip
         // is pushed into the *hover layer* after the loop completes so it
@@ -1776,7 +1813,7 @@ impl SceneBehavior for GameplayScene {
                     hover: if hovered_now { 1.0 } else { 0.0 },
                 });
                 if hovered_now {
-                    let (ax, ay) = match ctx.projected_yaku_tablet_rects.first().copied() {
+                    let (ax, ay) = match ctx.proj.yaku_tablet_rects.first().copied() {
                         Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
                             (px + pw * 0.5, py)
                         }
@@ -1818,7 +1855,7 @@ impl SceneBehavior for GameplayScene {
                     // see — falls back to the input pixel rect on the first
                     // frame before projection data is available.
                     if hovered_now {
-                        let (ax, ay) = match ctx.projected_yaku_tablet_rects.get(i).copied() {
+                        let (ax, ay) = match ctx.proj.yaku_tablet_rects.get(i).copied() {
                             Some([px, py, pw, _ph])
                                 if pw > 0.0 && px.is_finite() && py.is_finite() =>
                             {
@@ -1916,10 +1953,10 @@ impl SceneBehavior for GameplayScene {
             // focus picker tolerates absent targets and the next frame
             // repopulates.
             let proj = match ALL_BUTTONS[i] {
-                GameplayButton::SortSuit => ctx.projected_wood_tablet_rects.get(0).copied(),
-                GameplayButton::SortRank => ctx.projected_wood_tablet_rects.get(1).copied(),
-                GameplayButton::Discard => ctx.projected_bowl_rect,
-                GameplayButton::Play => ctx.projected_mirror_rect,
+                GameplayButton::SortSuit => ctx.proj.wood_tablet_rects.get(0).copied(),
+                GameplayButton::SortRank => ctx.proj.wood_tablet_rects.get(1).copied(),
+                GameplayButton::Discard => ctx.proj.bowl_rect,
+                GameplayButton::Play => ctx.proj.mirror_rect,
                 // Pushed separately alongside the journal placement
                 // block further down — its slot index in the wood
                 // tablet rect vec isn't known until then.
@@ -2021,7 +2058,7 @@ impl SceneBehavior for GameplayScene {
                     // projected mesh rect — no layout-rect fallback, so
                     // on the very first frame after a scene transition
                     // the label briefly doesn't appear.
-                    if let Some(r) = ctx.projected_bowl_rect.filter(|_| hovered) {
+                    if let Some(r) = ctx.proj.bowl_rect.filter(|_| hovered) {
                         let label_h = (r[3] * 0.38).max(28.0);
                         hover_text.push(TextLabel {
                             rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
@@ -2051,7 +2088,7 @@ impl SceneBehavior for GameplayScene {
                     // when it's the active selection. Same projected-mesh
                     // anchoring as the river label above (no layout-rect
                     // fallback).
-                    if let Some(r) = ctx.projected_mirror_rect.filter(|_| hovered) {
+                    if let Some(r) = ctx.proj.mirror_rect.filter(|_| hovered) {
                         let label_h = (r[3] * 0.38).max(28.0);
                         hover_text.push(TextLabel {
                             rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
@@ -2115,7 +2152,7 @@ impl SceneBehavior for GameplayScene {
         // renderer's projected wood-tablet rect for the journal slot.
         // Same one-frame stale snapshot pattern as the other action
         // buttons; first-frame absence is harmless.
-        if let Some(&rect) = ctx.projected_wood_tablet_rects.get(journal_pick_idx) {
+        if let Some(&rect) = ctx.proj.wood_tablet_rects.get(journal_pick_idx) {
             focus_rect_graph.push((FocusTarget::Button(GameplayButton::Journal), rect));
         }
         // The Journal label is engraved directly on the wood tablet
@@ -2270,7 +2307,7 @@ impl SceneBehavior for GameplayScene {
             let orig_dish_y = strip_y - dish_pad_y;
             let orig_dish_w = total_w + dish_pad_x * 2.0;
             let orig_dish_h = slot_h + dish_pad_y * 2.0;
-            let projected_dish = ctx
+            let projected_dish = ctx.proj
                 .aux_dish_rects
                 .iter()
                 .find_map(|(pid, r)| (*pid == Some(PICK_CONSUMABLE_DISH)).then_some(*r));
@@ -2515,7 +2552,7 @@ impl SceneBehavior for GameplayScene {
                     // Resolve the anchor rect: prefer the projected rect for
                     // this index, otherwise the flat slot rect.
                     let anchor: (f32, f32, f32, f32) = ctx
-                        .projected_hand_rects
+                        .proj.hand_rects
                         .iter()
                         .find(|(i, _)| *i == idx)
                         .map(|(_, r)| (r[0], r[1], r[2], r[3]))
@@ -2846,7 +2883,9 @@ impl SceneBehavior for GameplayScene {
                 let flame_y = cy_j - flame_h * 1.2;
                 flame_instances.push(GpuInstance {
                     rect: [flame_x, flame_y, flame_w, flame_h],
-                    color: [0.0, 0.0, self.light_ramp, phase01],
+                    // .b = brightness (light_ramp + flare boost so the flame
+                    //       visibly surges beyond its normal ceiling).
+                    color: [0.0, 0.0, self.light_ramp + self.candle_flare, phase01],
                 });
 
                 // Point light at the wick tip — sits at world_y =
@@ -2860,11 +2899,14 @@ impl SceneBehavior for GameplayScene {
                 // compensate, otherwise the front row stays in shadow.
                 let (light_radius_mul, light_intensity) =
                     if i == 4 { (2.2, 1.0) } else { (1.0, 2.3) };
+                // Flare multiplier: boosts intensity and radius when a
+                // monster hand clears the whole blind in one shot.
+                let flare_mul = 1.0 + self.candle_flare;
                 point_lights.push(PointLight {
                     pos: [cx_j, cy_j, wick_world_y],
-                    radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker),
+                    radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker) * flare_mul,
                     color: [1.0, 0.55, 0.22],
-                    intensity: light_intensity * candle.flicker * self.light_ramp,
+                    intensity: light_intensity * candle.flicker * self.light_ramp * flare_mul,
                 });
                 let _ = candle_w;
             }
@@ -3032,12 +3074,12 @@ impl SceneBehavior for GameplayScene {
         // Either way, the relic tooltip and outline show whenever
         // `self.focus` is `Some(Relic(i))`.
         let hovered_relic_idx: Option<usize> = match self.focus {
-            Some(FocusTarget::Relic(i)) if i < ctx.projected_relic_rects.len() => Some(i),
+            Some(FocusTarget::Relic(i)) if i < ctx.proj.relic_rects.len() => Some(i),
             _ => None,
         };
         if let Some(hi) = hovered_relic_idx {
             if let (Some(rect), Some(rid)) = (
-                ctx.projected_relic_rects.get(hi),
+                ctx.proj.relic_rects.get(hi),
                 relic_placements.get(hi).map(|p| p.relic_id),
             ) {
                 // Gold rim drawn around the projected screen rect — cheap
@@ -3157,7 +3199,7 @@ impl SceneBehavior for GameplayScene {
                     PegKind::Hands => 0,
                     PegKind::Discards => 1,
                 };
-                if let Some(r) = ctx.projected_peg_rects[rect_idx] {
+                if let Some(r) = ctx.proj.peg_rects[rect_idx] {
                     let (title, body) = match kind {
                         PegKind::Hands => (
                             "Hands Remaining".to_string(),
@@ -3252,7 +3294,7 @@ impl SceneBehavior for GameplayScene {
                     ("".to_string(), "".to_string())
                 };
                 if !title.is_empty() {
-                    let (ax, ay) = match ctx.projected_yaku_tablet_rects.get(i).copied() {
+                    let (ax, ay) = match ctx.proj.yaku_tablet_rects.get(i).copied() {
                         Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
                             (px + pw * 0.5, py)
                         }
@@ -3841,25 +3883,25 @@ impl SceneBehavior for GameplayScene {
         // pegs, gold) before the centralized focus ring so the lookup
         // can find them. The button-bar and consumable strip already
         // pushed their entries inline above.
-        for (i, rect) in ctx.projected_hand_rects.iter() {
+        for (i, rect) in ctx.proj.hand_rects.iter() {
             focus_rect_graph.push((FocusTarget::HandTile(*i), *rect));
         }
-        if ctx.projected_hand_rects.is_empty() {
+        if ctx.proj.hand_rects.is_empty() {
             for (i, slot) in hand_slots.iter().enumerate() {
                 focus_rect_graph.push((FocusTarget::HandTile(i), [slot.0, slot.1, slot.2, slot.3]));
             }
         }
-        for (i, r) in ctx.projected_relic_rects.iter().enumerate() {
+        for (i, r) in ctx.proj.relic_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 {
                 focus_rect_graph.push((FocusTarget::Relic(i), *r));
             }
         }
-        if let Some(r) = ctx.projected_peg_rects[0] {
+        if let Some(r) = ctx.proj.peg_rects[0] {
             if r[2] > 1.0 && r[3] > 1.0 {
                 focus_rect_graph.push((FocusTarget::Peg(PegKind::Hands), r));
             }
         }
-        if let Some(r) = ctx.projected_peg_rects[1] {
+        if let Some(r) = ctx.proj.peg_rects[1] {
             if r[2] > 1.0 && r[3] > 1.0 {
                 focus_rect_graph.push((FocusTarget::Peg(PegKind::Discards), r));
             }
@@ -3876,7 +3918,7 @@ impl SceneBehavior for GameplayScene {
         // (one frame stale) to match where the player actually sees the
         // tablets after camera projection; on the very first frame they
         // may be missing, in which case the tablet is briefly skipped.
-        for (i, r) in ctx.projected_yaku_tablet_rects.iter().enumerate() {
+        for (i, r) in ctx.proj.yaku_tablet_rects.iter().enumerate() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 focus_rect_graph.push((FocusTarget::YakuTablet(i), *r));
             }

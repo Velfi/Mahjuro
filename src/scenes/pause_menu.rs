@@ -17,7 +17,7 @@ use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 enum PauseAction {
     Resume,
     Restart,
-    Glossary,
+    MeldGuide,
     Options,
     MainMenu,
     Exit,
@@ -49,12 +49,10 @@ pub struct PauseMenu {
     /// pause menu — input and draw are delegated to it until the user
     /// chooses Back, at which point we drop back to the pause root.
     options_overlay: Option<OptionsScene>,
-    /// One-shot flag set when the user picks "Glossary" from the menu. The
-    /// owning scene drains it via `take_glossary_request()` after
-    /// `handle()` returns and toggles its glossary overlay; the pause menu
-    /// itself closes in the same step so the glossary can take over the
-    /// screen unobstructed.
-    glossary_requested: bool,
+    /// One-shot flag set when the user picks "Meld Guide" from the menu.
+    /// The owning scene drains it via `take_meld_guide_request()` after
+    /// `handle()` returns and transitions to the Meld Guide scene.
+    meld_guide_requested: bool,
 }
 
 impl PauseMenu {
@@ -63,16 +61,16 @@ impl PauseMenu {
             paused: false,
             tree: TreeState::new(),
             options_overlay: None,
-            glossary_requested: false,
+            meld_guide_requested: false,
         }
     }
 
-    /// Drain the glossary-open request flag. Returns `true` exactly once
-    /// after the user picks "Glossary" from the pause menu; subsequent
+    /// Drain the meld-guide-open request flag. Returns `true` exactly once
+    /// after the user picks "Meld Guide" from the pause menu; subsequent
     /// calls return `false` until they re-open the menu and pick it again.
-    pub fn take_glossary_request(&mut self) -> bool {
-        let v = self.glossary_requested;
-        self.glossary_requested = false;
+    pub fn take_meld_guide_request(&mut self) -> bool {
+        let v = self.meld_guide_requested;
+        self.meld_guide_requested = false;
         v
     }
 
@@ -81,7 +79,7 @@ impl PauseMenu {
         self.paused = true;
         self.tree = TreeState::new();
         self.options_overlay = None;
-        self.glossary_requested = false;
+        self.meld_guide_requested = false;
     }
 
     /// True when the embedded options overlay is currently visible. Callers
@@ -124,9 +122,9 @@ impl PauseMenu {
                 ButtonVariant::Default,
             ),
             wt::button_id(
-                PauseAction::Glossary.id(),
-                "Glossary",
-                PauseAction::Glossary,
+                PauseAction::MeldGuide.id(),
+                "Meld Guide",
+                PauseAction::MeldGuide,
                 ButtonVariant::Default,
             ),
             wt::button_id(
@@ -266,12 +264,12 @@ impl PauseMenu {
                 PauseUpdate::Resume
             }
             Some(PauseAction::Restart) => self.do_restart(run),
-            Some(PauseAction::Glossary) => {
+            Some(PauseAction::MeldGuide) => {
                 // Set the one-shot flag and close the pause menu so the
-                // owning scene can take over with its glossary overlay on
-                // the next frame. The scene drains the flag via
-                // `take_glossary_request()` after `handle()` returns.
-                self.glossary_requested = true;
+                // owning scene can transition to the Meld Guide on the
+                // next frame. The scene drains the flag via
+                // `take_meld_guide_request()` after `handle()` returns.
+                self.meld_guide_requested = true;
                 self.paused = false;
                 PauseUpdate::Resume
             }
@@ -291,7 +289,7 @@ impl PauseMenu {
         *run = RunState::new_demo();
         PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(
             run.run_number,
-            &run.relics,
+            run,
         ))))
     }
 

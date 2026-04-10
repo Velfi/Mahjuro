@@ -103,7 +103,7 @@ impl ZodiacKind {
     }
 
     /// Lowercase slug used for asset filenames (e.g. `dragon` →
-    /// `assets/textures/zodiac_dragon.png`). See
+    /// `assets/textures/zodiac_dragon_{top,mid,bot}.png`). See
     /// `scripts/generate_zodiac_ribbons.py`.
     pub fn slug(self) -> &'static str {
         match self {

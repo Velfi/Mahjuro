@@ -65,6 +65,7 @@ impl SmoothScroll {
     /// Step by exactly one entry in the given direction.  Rounds the
     /// current target to the nearest integer first so repeated
     /// keyboard / d-pad presses land on clean entry boundaries.
+    #[allow(dead_code)]
     pub fn step(&self, direction: i32) {
         let rounded = self.target.get().round();
         let t = (rounded + direction as f32).clamp(0.0, self.max.get());

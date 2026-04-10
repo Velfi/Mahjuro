@@ -70,6 +70,85 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     }
 }
 
+/// Return the asset filename stem for a tile inside a tileset directory.
+///
+/// Maps `(Suit, rank)` to the naming convention used in `assets/sets/`:
+///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Circles → D1..D9,
+///   Winds → EWind/SWind/WWind/NWind, Dragons → DRed/DGreen/DWhite,
+///   Flowers → Flower1..Flower4, Seasons → Season1..Season4.
+fn tile_set_filename(tile: &Tile) -> Option<String> {
+    match tile.suit {
+        Suit::Bamboos => Some(format!("B{}", tile.rank)),
+        Suit::Characters => Some(format!("C{}", tile.rank)),
+        Suit::Circles => Some(format!("D{}", tile.rank)),
+        Suit::Wind => {
+            let prefix = match tile.rank {
+                1 => "E",
+                2 => "S",
+                3 => "W",
+                4 => "N",
+                _ => return None,
+            };
+            Some(format!("{prefix}Wind"))
+        }
+        Suit::Dragon => {
+            let name = match tile.rank {
+                1 => "Red",
+                2 => "Green",
+                3 => "White",
+                _ => return None,
+            };
+            Some(format!("D{name}"))
+        }
+        Suit::Flower => Some(format!("Flower{}", tile.rank)),
+        Suit::Season => Some(format!("Season{}", tile.rank)),
+    }
+}
+
+/// Try to load and alpha-blend a tileset PNG decal onto `dst`.
+///
+/// Returns `true` if the asset was found and blitted, `false` otherwise so the
+/// caller can fall back to font rasterization.
+fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set: &str) -> bool {
+    let Some(stem) = tile_set_filename(tile) else {
+        return false;
+    };
+    let path = format!("sets/{tile_set}/{stem}.png");
+    let Some(file) = crate::asset_path::get(&path) else {
+        log::debug!("tileset decal not found: {path}; falling back to font rasterization");
+        return false;
+    };
+
+    let Ok(decoder) =
+        image::ImageReader::new(std::io::Cursor::new(file.data.as_ref())).with_guessed_format()
+    else {
+        return false;
+    };
+    let Ok(img) = decoder.decode() else {
+        return false;
+    };
+    let img = img.resize_exact(dst_w, dst_h, image::imageops::FilterType::Lanczos3);
+    let img = img.to_rgba8();
+
+    for (i, src_px) in img.pixels().enumerate() {
+        let di = i * 4;
+        if di + 3 >= dst.len() {
+            break;
+        }
+        let sa = src_px[3] as f32 / 255.0;
+        let da = dst[di + 3] as f32 / 255.0;
+        let out_a = sa + da * (1.0 - sa);
+        if out_a > 0.0 {
+            for c in 0..3 {
+                dst[di + c] =
+                    ((src_px[c] as f32 * sa + dst[di + c] as f32 * da * (1.0 - sa)) / out_a) as u8;
+            }
+            dst[di + 3] = (out_a * 255.0) as u8;
+        }
+    }
+    true
+}
+
 /// Rasterise a `width × height` RGBA8 face decal that mirrors the 2D tile layout:
 ///   * suit-coloured short label (number / wind / dragon) on the upper portion
 ///   * suit-coloured emoji indicator on the lower portion
@@ -79,14 +158,31 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
 /// `width` and `height` should match the tile face's world aspect ratio
 /// (long axis vertical, short axis horizontal) so glyph pixels stay square
 /// after the shader stretches the texture across the face.
+///
+/// When `tile_set` is `Some("original")` (or another set name), the function
+/// loads a pre-made PNG from `assets/sets/<name>/` instead of rasterizing
+/// glyphs. Falls back to font rasterization if the asset is missing.
 pub fn rasterize_tile_face_decal(
     tile: &Tile,
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
     width: u32,
     height: u32,
+    tile_set: Option<&str>,
 ) -> Vec<u8> {
     let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+    // If a tileset is configured, try to load the PNG decal for this tile.
+    if let Some(set_name) = tile_set {
+        if blit_set_decal(&mut rgba, width, height, tile, set_name) {
+            // Talisman accent border drawn *after* the set decal so it
+            // composites on top and stays visible.
+            if let Some(enh) = tile.enhancement {
+                draw_enhancement_border(&mut rgba, width, height, enh);
+            }
+            return rgba;
+        }
+    }
 
     // Talisman accent border. Drawn first so the symbol/emoji blits sit on
     // top of it. Each enhancement gets a distinct hue (see

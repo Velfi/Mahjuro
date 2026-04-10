@@ -1,4 +1,5 @@
 pub mod boss;
+pub mod error;
 pub mod consumable;
 pub mod deck;
 pub mod hand;
@@ -7,6 +8,7 @@ pub mod relic;
 pub mod rules;
 pub mod scoring;
 pub mod shanten;
+pub mod tag;
 pub mod talisman;
 pub mod tile;
 pub mod tile_pack;

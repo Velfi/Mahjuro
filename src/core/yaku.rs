@@ -177,10 +177,38 @@ pub struct YakuPreview {
 /// Compute a `YakuPreview` for each yaku in the player's available pool, based
 /// on the currently-selected tiles. Yaku that need a valid decomposition fall
 /// back to a "needs valid hand" hint when the selection doesn't decompose.
-pub fn yaku_preview(tiles: &[Tile], available: &[YakuKind]) -> Vec<YakuPreview> {
-    let sets_opt = validate_selection(tiles);
-    let active_yaku: Vec<YakuKind> = match &sets_opt {
-        Some(s) => detect_yaku(tiles, s),
+///
+/// When `wildcard_result` is `Some`, it supplies a pre-computed decomposition
+/// and (possibly substituted) tile list from relic-aware validation (e.g.
+/// WildWinds, JokerTile). This lets the preview reflect hands that only
+/// become valid after relic substitutions.
+pub fn yaku_preview(
+    tiles: &[Tile],
+    available: &[YakuKind],
+    round_wind: Option<u8>,
+    wildcard_result: Option<(&[DetectedSet], &[Tile])>,
+) -> Vec<YakuPreview> {
+    let (sets_opt, effective_tiles) = match wildcard_result {
+        Some((sets, resolved)) => (Some(sets.to_vec()), resolved),
+        None => {
+            // No wildcard context — fall back to plain validation.
+            let v = validate_selection(tiles);
+            // We need to return a reference to `tiles` in both arms, so
+            // store the owned vec alongside the slice we actually iterate.
+            return yaku_preview_inner(tiles, &v, available, round_wind);
+        }
+    };
+    yaku_preview_inner(effective_tiles, &sets_opt, available, round_wind)
+}
+
+fn yaku_preview_inner(
+    tiles: &[Tile],
+    sets_opt: &Option<Vec<DetectedSet>>,
+    available: &[YakuKind],
+    round_wind: Option<u8>,
+) -> Vec<YakuPreview> {
+    let active_yaku: Vec<YakuKind> = match sets_opt {
+        Some(s) => detect_yaku_with_wind(tiles, s, round_wind),
         None => Vec::new(),
     };
 

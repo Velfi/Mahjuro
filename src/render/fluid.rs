@@ -211,6 +211,11 @@ pub struct FluidSim {
     // Current frame size (for the depth read in the render pass).
     screen_w: f32,
     screen_h: f32,
+
+    /// When set, the next `step` zeroes out the velocity/density field
+    /// (dissipation = 0) and drains pending impulses so the smoke vanishes
+    /// instantly. Cleared automatically after one step.
+    pending_clear: bool,
 }
 
 impl FluidSim {
@@ -801,6 +806,7 @@ impl FluidSim {
             grid_max: Vec3::new(100.0, 60.0, 100.0),
             screen_w,
             screen_h,
+            pending_clear: false,
         }
     }
 
@@ -956,6 +962,11 @@ impl FluidSim {
         }
     }
 
+    /// Schedule a full clear of the smoke field on the next `step`.
+    pub fn clear(&mut self) {
+        self.pending_clear = true;
+    }
+
     /// Run one simulation step. Call before beginning the render pass.
     pub fn step(
         &mut self,
@@ -964,11 +975,21 @@ impl FluidSim {
         dt: f32,
         intensity: SmokeIntensity,
     ) {
-        let (density_dis, vel_dis, buoyancy, mut jacobi_iters) = match intensity {
-            SmokeIntensity::Off => return,
-            SmokeIntensity::Subtle => (0.992, 0.985, 8.0, 12u32),
-            SmokeIntensity::Strong => (0.996, 0.99, 14.0, 18),
-            SmokeIntensity::OverTheTop => (0.998, 0.993, 22.0, 24),
+        let clearing = self.pending_clear;
+        if clearing {
+            self.pending_clear = false;
+            self.impulses.clear();
+        }
+        let (density_dis, vel_dis, buoyancy, mut jacobi_iters) = if clearing {
+            // Zero dissipation wipes the field in one advect pass.
+            (0.0_f64, 0.0_f64, 0.0, 2u32)
+        } else {
+            match intensity {
+                SmokeIntensity::Off => return,
+                SmokeIntensity::Subtle => (0.992, 0.985, 8.0, 12u32),
+                SmokeIntensity::Strong => (0.996, 0.99, 14.0, 18),
+                SmokeIntensity::OverTheTop => (0.998, 0.993, 22.0, 24),
+            }
         };
         // Force even iteration count so the final result lands in pressure[0].
         if jacobi_iters % 2 != 0 {

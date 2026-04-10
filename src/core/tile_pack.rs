@@ -5,6 +5,25 @@ use serde::{Deserialize, Serialize};
 
 use super::tile::{Suit, Tile, TileEnhancement};
 
+/// Cheap deterministic PRNG seeded from a u32 (xorshift32).
+fn pack_rng_next(state: &mut u32) -> u32 {
+    let mut s = *state;
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    *state = s;
+    s
+}
+
+/// Shuffle a small slice in-place using a seeded xorshift.
+fn seeded_shuffle<T>(slice: &mut [T], seed: u32) {
+    let mut state = seed.wrapping_add(1).max(1); // ensure non-zero
+    for i in (1..slice.len()).rev() {
+        let j = (pack_rng_next(&mut state) as usize) % (i + 1);
+        slice.swap(i, j);
+    }
+}
+
 /// ID offset for pack-generated tiles. Standard wall uses 0–139.
 pub const PACK_TILE_ID_BASE: u32 = 1000;
 /// Each pack instance gets a block of 16 IDs (more than any single pack needs).
@@ -103,28 +122,52 @@ impl TilePackKind {
             id += 1;
         };
 
+        // Use start_id as a deterministic seed so composition varies per
+        // pack slot but stays stable across rounds and save/load.
+        let mut rng_state = start_id.wrapping_mul(2654435761).max(1);
+
         match self {
             Self::Honors => {
+                // 7 tiles drawn from the honor pool.  Build a pool of all 7
+                // unique honors, shuffle, then pick how many winds vs dragons
+                // to include — sometimes you get 2 of a dragon, sometimes an
+                // extra wind instead.
+                let mut pool: Vec<(Suit, u8)> = Vec::new();
                 for rank in 1..=4 {
-                    push(Suit::Wind, rank, &mut out);
+                    pool.push((Suit::Wind, rank));
                 }
                 for rank in 1..=3 {
-                    push(Suit::Dragon, rank, &mut out);
+                    pool.push((Suit::Dragon, rank));
+                }
+                // Add duplicates of a few random entries to create variety
+                let dup1 = (pack_rng_next(&mut rng_state) as usize) % pool.len();
+                let dup2 = (pack_rng_next(&mut rng_state) as usize) % pool.len();
+                pool.push(pool[dup1]);
+                pool.push(pool[dup2]);
+                seeded_shuffle(&mut pool, rng_state);
+                for &(suit, rank) in pool.iter().take(7) {
+                    push(suit, rank, &mut out);
                 }
             }
             Self::Polychrome => {
-                // One tile from each numbered suit + one random extra.
-                // Use a deterministic pattern rather than RNG so the tiles
-                // are stable across save/load (IDs are deterministic).
-                push(Suit::Characters, 5, &mut out);
-                push(Suit::Bamboos, 5, &mut out);
-                push(Suit::Circles, 5, &mut out);
-                push(Suit::Characters, 9, &mut out);
+                // 4 random numbered tiles, one per roll.
+                let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+                for _ in 0..4 {
+                    let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
+                    let rank = (pack_rng_next(&mut rng_state) % 9 + 1) as u8;
+                    push(suit, rank, &mut out);
+                }
             }
             Self::Terminals => {
-                for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
-                    push(suit, 1, &mut out);
-                    push(suit, 9, &mut out);
+                // 6 terminal tiles — still all 1s and 9s, but the suit
+                // distribution is randomized (could be 3 bamboo-1s and no
+                // character-1, etc.)
+                let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+                for &terminal_rank in &[1u8, 9] {
+                    for _ in 0..3 {
+                        let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
+                        push(suit, terminal_rank, &mut out);
+                    }
                 }
             }
             Self::Flowers => {
@@ -133,17 +176,23 @@ impl TilePackKind {
                 }
             }
             Self::BambooGrove => {
-                for rank in 1..=8 {
+                let mut ranks: Vec<u8> = (1..=9).collect();
+                seeded_shuffle(&mut ranks, rng_state);
+                for &rank in ranks.iter().take(8) {
                     push(Suit::Bamboos, rank, &mut out);
                 }
             }
             Self::CoinCache => {
-                for rank in 1..=8 {
+                let mut ranks: Vec<u8> = (1..=9).collect();
+                seeded_shuffle(&mut ranks, rng_state);
+                for &rank in ranks.iter().take(8) {
                     push(Suit::Circles, rank, &mut out);
                 }
             }
             Self::ScrollLibrary => {
-                for rank in 1..=8 {
+                let mut ranks: Vec<u8> = (1..=9).collect();
+                seeded_shuffle(&mut ranks, rng_state);
+                for &rank in ranks.iter().take(8) {
                     push(Suit::Characters, rank, &mut out);
                 }
             }

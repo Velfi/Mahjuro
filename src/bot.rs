@@ -183,6 +183,13 @@ fn ctx_for(run: &RunState) -> ScoreContext<'_> {
         yaku_levels: Some(run.yaku_levels.clone()),
         yaku_loadout: run.yaku_loadout.clone(),
         played_yaku_this_round: run.played_yaku_this_round.clone(),
+        gold: run.gold,
+        total_score: run.total_score_earned,
+        is_final_play: run.plays_remaining == 1,
+        tile_polisher_bonus: run.tile_polisher_bonus,
+        relic_counters: run.relic_counters.clone(),
+        unscored_hand_tiles: 0,
+        river_runner_bonus: run.river_runner_bonus,
     }
 }
 
@@ -447,6 +454,13 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
         yaku_levels: yaku_levels.clone(),
         yaku_loadout: yaku_loadout.clone(),
         played_yaku_this_round: played_yaku.clone(),
+        gold: run.gold,
+        total_score: run.total_score_earned,
+        is_final_play: run.plays_remaining == 1,
+        tile_polisher_bonus: run.tile_polisher_bonus,
+        relic_counters: run.relic_counters.clone(),
+        unscored_hand_tiles: 0,
+        river_runner_bonus: run.river_runner_bonus,
     };
     let hypo_ctx = ScoreContext {
         relics: &hypothetical,
@@ -460,6 +474,13 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
         yaku_levels,
         yaku_loadout,
         played_yaku_this_round: played_yaku,
+        gold: run.gold,
+        total_score: run.total_score_earned,
+        is_final_play: run.plays_remaining == 1,
+        tile_polisher_bonus: run.tile_polisher_bonus,
+        relic_counters: run.relic_counters.clone(),
+        unscored_hand_tiles: 0,
+        river_runner_bonus: run.river_runner_bonus,
     };
 
     let score = |hand: &[Tile], ctx: &ScoreContext| -> i32 {
@@ -487,15 +508,25 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
 /// positive marginal value the bot can afford. Repeats while gold and relic slots
 /// allow another worthwhile purchase.
 fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
+    // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
+    let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
+    let patron_gift = run.tag_patron_gift;
+    // Free reroll is a no-op for the bot (it doesn't reroll).
+    run.tag_free_reroll = false;
+    run.tag_patron_gift = false;
+    run.tag_rich_stock = false;
+
     let defs = all_relic_defs();
+    let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
     let mut pool: Vec<RelicId> = defs
         .iter()
-        .filter(|d| !run.relics.has(d.id))
+        .filter(|d| !run.relics.has(d.id) && !shop_excluded.contains(&d.id))
         .map(|d| d.id)
         .collect();
     pool.shuffle(&mut rand::rng());
-    let mut shop: Vec<RelicId> = pool.into_iter().take(3).collect();
+    let mut shop: Vec<RelicId> = pool.into_iter().take(3 + extra_relics).collect();
 
+    let mut free_relic = patron_gift;
     loop {
         if run.relics.is_full() || shop.is_empty() {
             break;
@@ -503,7 +534,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         // Find the best affordable item with positive marginal value.
         let mut best: Option<(usize, i32)> = None;
         for (i, &id) in shop.iter().enumerate() {
-            let price = relic_buy_price(id);
+            let price = if free_relic { 0 } else { relic_buy_price(id) };
             if price as i32 > run.gold {
                 continue;
             }
@@ -518,9 +549,17 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
         }
         let Some((idx, _)) = best else { break };
         let id = shop.remove(idx);
-        let price = relic_buy_price(id);
+        let price = if free_relic { 0 } else { relic_buy_price(id) };
+        free_relic = false;
         run.gold -= price as i32;
         run.relics.active.push(id);
+        // Initialize counters for stateful relics.
+        match id {
+            RelicId::MeltingIce => { run.relic_counters.insert(RelicId::MeltingIce, 80); }
+            RelicId::SilkThread => { run.relic_counters.insert(RelicId::SilkThread, 40); }
+            RelicId::TeaCeremony => { run.relic_counters.insert(RelicId::TeaCeremony, 3); }
+            _ => {}
+        }
         run.recompute_capacities();
         stats.relics_bought += 1;
         stats.gold_spent += price;
@@ -602,10 +641,12 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
         let blind = run.upcoming_blind;
 
         // Skip strategy: bank gold on Small/Big when projected score comfortably
-        // overshoots the target. Skipping doesn't grant a relic and doesn't visit
-        // the shop, so it's purely an early-ante optimization.
+        // overshoots the target. Tag rewards replace flat gold — apply them
+        // the same way the pick-blind scene does.
         if should_skip_blind(&run, blind) {
-            run.gold = run.gold.saturating_add(blind.skip_reward() as i32);
+            if let Some(tag) = run.tag_for_blind(blind) {
+                run.apply_tag(tag);
+            }
             run.skip_to_next_blind();
             stats.blinds_skipped += 1;
             continue;
