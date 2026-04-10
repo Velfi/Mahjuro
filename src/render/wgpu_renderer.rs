@@ -4361,7 +4361,7 @@ impl WgpuRenderer {
         );
 
         {
-            for (i, htg) in self.hand_tiles.iter().enumerate() {
+            for (i, _htg) in self.hand_tiles.iter().enumerate() {
                 let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
                     continue;
                 };

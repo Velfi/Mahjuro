@@ -22,8 +22,6 @@ use crate::ui::input::UiAction;
 /// Visual variant for a panel — picks the background color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelVariant {
-    /// Default raised panel: INDIGO with a BRASS border.
-    Default,
     /// Hero panel for the score / important callouts: TWILIGHT with GOLD border.
     Hero,
 }
@@ -34,7 +32,6 @@ pub enum PanelVariant {
 /// reads as a recessed gold inlay rather than a hard outline.
 pub fn push_panel(out: &mut Vec<GpuInstance>, rect: [f32; 4], variant: PanelVariant) {
     let (bg, border) = match variant {
-        PanelVariant::Default => (color::INDIGO, color::BRASS),
         PanelVariant::Hero => (color::TWILIGHT, color::GOLD),
     };
     push_panel_colored(out, rect, bg, border);
