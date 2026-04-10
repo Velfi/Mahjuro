@@ -158,15 +158,19 @@ impl SceneBehavior for ProfileSelectScene {
             color: color::OBSIDIAN,
         });
 
+        let showing_dialog = self.confirm_delete != ConfirmDelete::None;
+
         // Title.
         let title_h = (48.0 * scale).max(28.0);
         let title_y = h * 0.06;
-        frame.text(TextLabel {
-            rect: [0.0, title_y, w, title_h],
-            text: "Select Profile".into(),
-            color: color::CHAMPAGNE,
-            ..Default::default()
-        });
+        if !showing_dialog {
+            frame.text(TextLabel {
+                rect: [0.0, title_y, w, title_h],
+                text: "Select Profile".into(),
+                color: color::CHAMPAGNE,
+                ..Default::default()
+            });
+        }
 
         // Profile cards — single source of truth via card_rects().
         let summaries = persistence::all_profile_summaries();
@@ -179,36 +183,44 @@ impl SceneBehavior for ProfileSelectScene {
             let is_active = i == ctx.active_profile;
 
             // Card background.
-            let bg_color = if is_focused {
-                color::DUSK
-            } else {
-                color::INDIGO
-            };
-            frame.quad(GpuInstance {
-                rect: [card_x, card_y, card_w, card_h],
-                color: bg_color,
-            });
-
-            // Active indicator stripe on left edge.
-            if is_active {
-                let stripe_w = 4.0 * scale;
+            if !showing_dialog {
+                let bg_color = if is_focused {
+                    color::DUSK
+                } else {
+                    color::INDIGO
+                };
                 frame.quad(GpuInstance {
-                    rect: [card_x, card_y, stripe_w, card_h],
-                    color: color::JADE,
+                    rect: [card_x, card_y, card_w, card_h],
+                    color: bg_color,
                 });
+
+                // Active indicator stripe on left edge.
+                if is_active {
+                    let stripe_w = 4.0 * scale;
+                    frame.quad(GpuInstance {
+                        rect: [card_x, card_y, stripe_w, card_h],
+                        color: color::JADE,
+                    });
+                }
+
+                // Selection highlight border (top and bottom gold lines).
+                if is_focused {
+                    let border = 2.0 * scale;
+                    frame.quad(GpuInstance {
+                        rect: [card_x, card_y, card_w, border],
+                        color: color::GOLD,
+                    });
+                    frame.quad(GpuInstance {
+                        rect: [card_x, card_y + card_h - border, card_w, border],
+                        color: color::GOLD,
+                    });
+                }
             }
 
-            // Selection highlight border (top and bottom gold lines).
-            if is_focused {
-                let border = 2.0 * scale;
-                frame.quad(GpuInstance {
-                    rect: [card_x, card_y, card_w, border],
-                    color: color::GOLD,
-                });
-                frame.quad(GpuInstance {
-                    rect: [card_x, card_y + card_h - border, card_w, border],
-                    color: color::GOLD,
-                });
+            // Skip card text when the delete dialog is open — text is
+            // rendered in a separate overlay pass so quads can't occlude it.
+            if showing_dialog {
+                continue;
             }
 
             let pad_x = 16.0 * scale;
@@ -293,10 +305,10 @@ impl SceneBehavior for ProfileSelectScene {
 
         // ── Confirmation overlay ───────────────────────────────────────
         if let ConfirmDelete::Pending(del_idx) = self.confirm_delete {
-            // Dim the background.
+            // Fully opaque overlay so card text underneath is completely hidden.
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
-                color: [0.0, 0.0, 0.0, 0.6],
+                color: color::OBSIDIAN,
             });
 
             let dialog_w = (300.0 * scale).min(w * 0.85);
@@ -304,20 +316,21 @@ impl SceneBehavior for ProfileSelectScene {
             let dialog_x = (w - dialog_w) * 0.5;
             let dialog_y = (h - dialog_h) * 0.5;
 
+            // Border (full rectangle).
+            let b = 2.0 * scale;
+            frame.quad(GpuInstance {
+                rect: [
+                    dialog_x - b,
+                    dialog_y - b,
+                    dialog_w + b * 2.0,
+                    dialog_h + b * 2.0,
+                ],
+                color: color::RUBY,
+            });
             // Dialog background.
             frame.quad(GpuInstance {
                 rect: [dialog_x, dialog_y, dialog_w, dialog_h],
                 color: color::OBSIDIAN,
-            });
-            // Border.
-            let b = 2.0 * scale;
-            frame.quad(GpuInstance {
-                rect: [dialog_x, dialog_y, dialog_w, b],
-                color: color::RUBY,
-            });
-            frame.quad(GpuInstance {
-                rect: [dialog_x, dialog_y + dialog_h - b, dialog_w, b],
-                color: color::RUBY,
             });
 
             let msg_h = (24.0 * scale).max(16.0);

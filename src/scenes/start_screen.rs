@@ -3,7 +3,8 @@
 use std::cell::RefCell;
 use std::time::Instant;
 
-use crate::persistence;
+use crate::game::run::RunState;
+use crate::persistence::{self, TileMaterial};
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{CameraParams, PlaquePlacement, UiFrame, WoodTabletPlacement};
 use crate::render::theme::{color, metrics, typography};
@@ -16,6 +17,7 @@ use super::gameplay::GameplayScene;
 use super::meld_guide::MeldGuideScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
+use super::shop::ShopScene;
 use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
 use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
@@ -85,6 +87,9 @@ pub struct StartScreenScene {
     /// Focus rect graph from the previous `draw_frame`, used by `update()`
     /// for spatial navigation (one-frame-stale snapshot pattern).
     last_focus_rects: RefCell<Vec<(MenuFocus, [f32; 4])>>,
+    /// Cached cursor position from the most recent `update()` for the
+    /// starfield parallax effect in `draw_frame()`.
+    cursor_pos: (f32, f32),
 }
 
 impl StartScreenScene {
@@ -94,12 +99,15 @@ impl StartScreenScene {
             hover_anims: [0.0; 8],
             last_frame: Instant::now(),
             last_focus_rects: RefCell::new(Vec::new()),
+            cursor_pos: (0.0, 0.0),
         }
     }
 }
 
 impl SceneBehavior for StartScreenScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        self.cursor_pos = ctx.cursor_pos;
+
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -188,7 +196,12 @@ impl SceneBehavior for StartScreenScene {
                     if ctx.tutorial_eligible {
                         return Some(Scene::TileSelect(TileSelectScene::new_tutorial()));
                     }
-                    return Some(Scene::TileSelect(TileSelectScene::new()));
+                    if ctx.multiple_materials {
+                        return Some(Scene::TileSelect(TileSelectScene::new()));
+                    }
+                    // Only one material available — skip tile select.
+                    *ctx.run = RunState::new_with_material(TileMaterial::default());
+                    return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)));
                 }
                 Some(MenuFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
                 Some(MenuFocus::MeldGuide) => {
@@ -311,8 +324,8 @@ impl SceneBehavior for StartScreenScene {
 
         // ── Title plaque ────────────────────────────────────────────────
         let plaque_y = start_y - h * 0.06;
-        let plaque_w = h * 0.20;
-        let plaque_h = h * 0.055;
+        let plaque_w = h * 0.40;
+        let plaque_h = h * 0.1375;
         let plaque_depth = h * 0.012;
 
         let summaries = persistence::all_profile_summaries();
@@ -379,6 +392,7 @@ impl SceneBehavior for StartScreenScene {
         frame.candles(candle_placements);
         frame.plaque(plaque);
         frame.wood_tablet_batch(tablets);
+        frame.starfield();
         frame.flames(flame_instances);
         frame.fluid_smoke();
         frame.quads(quads);
@@ -387,7 +401,7 @@ impl SceneBehavior for StartScreenScene {
         frame.point_lights = point_lights;
         frame.candle_light_count = 2;
         frame.flame_height_world = h * 0.04;
-        frame.cursor_pos = Some((w * 0.5, h * 0.5));
+        frame.cursor_pos = Some(self.cursor_pos);
         frame.camera_override = Some(camera);
         frame.buttons = buttons;
         frame.window_title = "Mahjuro".into();

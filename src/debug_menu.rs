@@ -49,6 +49,8 @@ pub enum DebugAction {
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
+    /// Spawn a blank test modal overlay to verify overlay blocking behavior.
+    TestOverlay,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -135,6 +137,11 @@ impl DebugMenuBar {
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
         let _ = debug_menu.append(&open_pack_item);
+
+        // Spawn a blank test modal to verify overlay input blocking.
+        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
+        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
+        let _ = debug_menu.append(&test_overlay_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

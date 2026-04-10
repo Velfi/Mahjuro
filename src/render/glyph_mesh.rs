@@ -79,6 +79,18 @@ impl ttf_parser::OutlineBuilder for OutlineCollector {
     }
 
     fn close(&mut self) {
+        // Remove duplicate closing vertex (some fonts line_to back to the
+        // start before calling close, creating a zero-length edge that
+        // breaks earcut).
+        if self.current.len() > 3 {
+            let first = self.current[0];
+            let last = *self.current.last().unwrap();
+            let dx = (first.0 - last.0).abs();
+            let dy = (first.1 - last.1).abs();
+            if dx < 1e-4 && dy < 1e-4 {
+                self.current.pop();
+            }
+        }
         if self.current.len() > 2 {
             self.contours.push(std::mem::take(&mut self.current));
         } else {
@@ -102,78 +114,131 @@ fn load_font_data() -> Option<&'static [u8]> {
 // Triangulation helpers
 // ---------------------------------------------------------------------------
 
-/// Build front and back cap triangles plus side walls for a set of contours.
-fn extrude_contours(
-    contours: &[Vec<(f32, f32)>],
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-) {
-    // Flatten all contours into earcutr format: a flat vec of [x, y, x, y, ...]
-    // with a `hole_indices` vec marking where each hole contour starts.
-    let mut coords: Vec<f64> = Vec::new();
-    let mut hole_indices: Vec<usize> = Vec::new();
+/// Signed area of a contour (positive = CCW in the flipped-Y coordinate
+/// space used by the glyph meshes).
+fn signed_area(pts: &[(f32, f32)]) -> f64 {
+    let n = pts.len();
+    let mut a = 0.0_f64;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        a += (pts[j].0 as f64 - pts[i].0 as f64) * (pts[j].1 as f64 + pts[i].1 as f64);
+    }
+    a * 0.5
+}
 
-    // The first contour is the outer boundary; subsequent contours are holes
-    // (inner cutouts like the counter of '0', '8', etc.).
-    //
-    // ttf-parser emits contours in the order the font stores them — for most
-    // TrueType fonts the outer contour comes first and inner contours follow,
-    // but there's no hard guarantee. We use signed area to sort: the contour
-    // with the largest absolute area is the outer boundary, and the rest are
-    // holes.
+/// Point-in-polygon test (ray-casting). Returns true if `pt` is inside `poly`.
+fn point_in_contour(poly: &[(f32, f32)], pt: (f32, f32)) -> bool {
+    let (px, py) = pt;
+    let mut inside = false;
+    let n = poly.len();
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = poly[i];
+        let (xj, yj) = poly[j];
+        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Ensure a contour has the requested winding (CCW if `want_ccw`, CW otherwise).
+fn ensure_winding(pts: &[(f32, f32)], want_ccw: bool) -> Vec<(f32, f32)> {
+    let area = signed_area(pts);
+    let is_ccw = area > 0.0;
+    if is_ccw == want_ccw {
+        pts.to_vec()
+    } else {
+        pts.iter().copied().rev().collect()
+    }
+}
+
+/// A single outer boundary contour paired with its interior holes.
+struct ContourGroup {
+    outer: Vec<(f32, f32)>,
+    holes: Vec<Vec<(f32, f32)>>,
+}
+
+/// Partition a glyph's contours into groups of (outer boundary + holes).
+///
+/// Some glyphs have multiple disconnected outer boundaries (e.g. 'i' has
+/// the stem and the dot). We can't just pick the largest contour as "the"
+/// outer boundary and treat everything else as holes — a contour that
+/// isn't geometrically inside another is its own outer boundary.
+fn group_contours(contours: &[Vec<(f32, f32)>]) -> Vec<ContourGroup> {
     if contours.is_empty() {
-        return;
+        return Vec::new();
     }
 
-    // Compute signed area for each contour (positive = CCW, negative = CW).
-    let signed_area = |pts: &[(f32, f32)]| -> f64 {
-        let n = pts.len();
-        let mut a = 0.0_f64;
-        for i in 0..n {
-            let j = (i + 1) % n;
-            a += (pts[j].0 as f64 - pts[i].0 as f64) * (pts[j].1 as f64 + pts[i].1 as f64);
-        }
-        a * 0.5
-    };
-
-    let mut areas: Vec<(usize, f64)> = contours
+    // Compute absolute area for sorting and signed area for winding.
+    let mut info: Vec<(usize, f64)> = contours
         .iter()
         .enumerate()
         .map(|(i, c)| (i, signed_area(c)))
         .collect();
-    // Sort by descending absolute area — largest is outer.
-    areas.sort_by(|a, b| {
+    // Sort by descending absolute area so we process larger contours first.
+    info.sort_by(|a, b| {
         b.1.abs()
             .partial_cmp(&a.1.abs())
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let outer_idx = areas[0].0;
-    let outer_area = areas[0].1;
+    let mut groups: Vec<ContourGroup> = Vec::new();
+    let mut assigned = vec![false; contours.len()];
 
-    // Outer contour must be CCW for earcutr. If it's CW (negative area), we
-    // need to reverse it. Holes must be CW (opposite winding).
-    let maybe_reverse = |pts: &[(f32, f32)], want_ccw: bool, area: f64| -> Vec<(f32, f32)> {
-        let is_ccw = area > 0.0;
-        if is_ccw == want_ccw {
-            pts.to_vec()
-        } else {
-            pts.iter().copied().rev().collect()
+    // First pass: identify outer boundaries (contours not inside any other).
+    for &(idx, _area) in &info {
+        if assigned[idx] {
+            continue;
         }
-    };
+        // Check if this contour sits inside any already-identified outer
+        // boundary. Use the contour's centroid as the sample point — the
+        // first vertex often lies exactly on the outer boundary edge (shared
+        // vertices in serif fonts like 'H', 'k'), which makes the ray-cast
+        // indeterminate.
+        let c = &contours[idx];
+        let inv = 1.0 / c.len() as f32;
+        let sample = c.iter().fold((0.0_f32, 0.0_f32), |acc, &(x, y)| {
+            (acc.0 + x * inv, acc.1 + y * inv)
+        });
+        let mut is_hole_of = None;
+        for (gi, group) in groups.iter().enumerate() {
+            if point_in_contour(&group.outer, sample) {
+                is_hole_of = Some(gi);
+                break;
+            }
+        }
 
-    let outer = maybe_reverse(&contours[outer_idx], true, outer_area);
-    for &(x, y) in &outer {
+        if let Some(gi) = is_hole_of {
+            // This contour is inside an existing outer — add it as a hole.
+            let hole = ensure_winding(&contours[idx], false); // holes = CW
+            groups[gi].holes.push(hole);
+        } else {
+            // This contour is a new outer boundary.
+            let outer = ensure_winding(&contours[idx], true); // outer = CCW
+            groups.push(ContourGroup {
+                outer,
+                holes: Vec::new(),
+            });
+        }
+        assigned[idx] = true;
+    }
+
+    groups
+}
+
+/// Build front/back cap triangles and side walls for one contour group
+/// (outer boundary + holes).
+fn extrude_group(group: &ContourGroup, vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
+    let mut coords: Vec<f64> = Vec::new();
+    let mut hole_indices: Vec<usize> = Vec::new();
+
+    for &(x, y) in &group.outer {
         coords.push(x as f64);
         coords.push(y as f64);
     }
-
-    let hole_contours: Vec<Vec<(f32, f32)>> = areas[1..]
-        .iter()
-        .map(|&(i, a)| maybe_reverse(&contours[i], false, a))
-        .collect();
-
-    for hole in &hole_contours {
+    for hole in &group.holes {
         hole_indices.push(coords.len() / 2);
         for &(x, y) in hole {
             coords.push(x as f64);
@@ -184,7 +249,7 @@ fn extrude_contours(
     // Triangulate
     let tri_indices = match earcutr::earcut(&coords, &hole_indices, 2) {
         Ok(idx) => idx,
-        Err(_) => return, // triangulation failed — skip this glyph
+        Err(_) => return, // triangulation failed — skip this component
     };
 
     let all_pts: Vec<(f32, f32)> = coords
@@ -227,7 +292,6 @@ fn extrude_contours(
             let j = (i + 1) % n;
             let (x0, y0) = pts[i];
             let (x1, y1) = pts[j];
-            // Edge normal (pointing outward for CCW winding)
             let dx = x1 - x0;
             let dy = y1 - y0;
             let len = (dx * dx + dy * dy).sqrt().max(1e-8);
@@ -236,7 +300,6 @@ fn extrude_contours(
             let normal = [nx, ny, 0.0];
 
             let base_w = vertices.len() as u32;
-            // Quad: two triangles
             vertices.push(Vertex3dTex {
                 position: [x0, y0, DEPTH],
                 normal,
@@ -268,9 +331,20 @@ fn extrude_contours(
         }
     };
 
-    build_walls(&outer);
-    for hole in &hole_contours {
+    build_walls(&group.outer);
+    for hole in &group.holes {
         build_walls(hole);
+    }
+}
+
+/// Build front and back cap triangles plus side walls for a set of contours.
+fn extrude_contours(
+    contours: &[Vec<(f32, f32)>],
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+) {
+    for group in group_contours(contours) {
+        extrude_group(&group, vertices, indices);
     }
 }
 

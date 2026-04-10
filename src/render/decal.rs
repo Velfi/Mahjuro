@@ -335,6 +335,7 @@ pub fn rasterize_tablet_label_decal(
         inner_h,
         None,
         LabelAlign::Center,
+        0.0,
     );
 
     // Soft carved-shadow pass: a slightly darker tint, offset 1px down/right,
@@ -1026,7 +1027,7 @@ pub fn rasterize_label_styled(
     font_px: Option<f32>,
     align: LabelAlign,
 ) -> Vec<u8> {
-    rasterize_label_styled_with_fallback(font, None, text, width, height, font_px, align)
+    rasterize_label_styled_with_fallback(font, None, text, width, height, font_px, align, 0.0)
 }
 
 /// Like [`rasterize_label_styled`] but with an optional emoji fallback font.
@@ -1039,6 +1040,7 @@ pub fn rasterize_label_styled_with_fallback(
     height: u32,
     font_px: Option<f32>,
     align: LabelAlign,
+    scroll_offset: f32,
 ) -> Vec<u8> {
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
@@ -1085,12 +1087,12 @@ pub fn rasterize_label_styled_with_fallback(
     // In the pixel buffer Y increases downward, while fontdue uses Y-up from baseline.
     let baseline_y = (height as f32 - text_block_h) * 0.5 + ascender_px;
 
-    // Horizontal start depends on alignment.
+    // Horizontal start depends on alignment, then shifted by scroll_offset.
     let start_x = match align {
         LabelAlign::Left => 0.0,
         LabelAlign::Center => (width as f32 - total_advance) * 0.5,
         LabelAlign::Right => width as f32 - total_advance,
-    };
+    } - scroll_offset;
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     blit_line(&glyphs, &mut rgba, width, height, start_x, baseline_y);

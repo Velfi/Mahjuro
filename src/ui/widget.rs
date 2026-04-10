@@ -213,26 +213,28 @@ pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
     };
 
     let mut lines: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_w = 0.0f32;
 
-    for word in text.split_whitespace() {
-        let ww = word_w(word);
-        let need = if current.is_empty() { ww } else { space_w + ww };
-        if !current.is_empty() && current_w + need > max_width_px {
-            lines.push(std::mem::take(&mut current));
-            current = word.to_string();
-            current_w = ww;
-        } else {
-            if !current.is_empty() {
-                current.push(' ');
-                current_w += space_w;
+    // Process each explicit line separately so '\n' always forces a break.
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        let mut current_w = 0.0f32;
+
+        for word in paragraph.split_whitespace() {
+            let ww = word_w(word);
+            let need = if current.is_empty() { ww } else { space_w + ww };
+            if !current.is_empty() && current_w + need > max_width_px {
+                lines.push(std::mem::take(&mut current));
+                current = word.to_string();
+                current_w = ww;
+            } else {
+                if !current.is_empty() {
+                    current.push(' ');
+                    current_w += space_w;
+                }
+                current.push_str(word);
+                current_w += ww;
             }
-            current.push_str(word);
-            current_w += ww;
         }
-    }
-    if !current.is_empty() {
         lines.push(current);
     }
     if lines.is_empty() {

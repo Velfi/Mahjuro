@@ -1032,45 +1032,7 @@ fn yaku_clue(yk: YakuKind) -> String {
 }
 
 fn yaku_description(yk: YakuKind) -> &'static str {
-    // Suit emoji match tile_suit_emoji: 🎴 Characters, 🎋 Bamboo, 🔴 Circles.
-    // Honor emoji: 🐉 Dragon, 🌬 Wind.
-    match yk {
-        YakuKind::FullHand => "14 tiles: 4 melds + 1 pair",
-        YakuKind::Toitoi => {
-            "All triplets/kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
-        }
-        YakuKind::Tanyao => {
-            "Only tiles rank 2\u{2013}8 (e.g. \u{1f3b4}234 \u{1f38b}567 \u{1f534}88)"
-        }
-        YakuKind::Yakuhai => "Triplet of dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})",
-        YakuKind::Iipeikou => {
-            "Two identical sequences in one suit (e.g. \u{1f38b}123 \u{1f38b}123)"
-        }
-        YakuKind::SanshokuDoujun => {
-            "Same sequence in all 3 suits (e.g. \u{1f3b4}456 \u{1f38b}456 \u{1f534}456)"
-        }
-        YakuKind::Ittsu => {
-            "1\u{2013}9 straight in one suit (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789)"
-        }
-        YakuKind::Honitsu => {
-            "One number suit + honors only (e.g. \u{1f38b}234 \u{1f38b}678 \u{1f32c}\u{1f32c}\u{1f32c})"
-        }
-        YakuKind::Chinitsu => {
-            "All one suit, no honors (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789 \u{1f38b}11)"
-        }
-        YakuKind::Junchan => {
-            "Every meld has a 1 or 9 (e.g. \u{1f38b}123 \u{1f3b4}789 \u{1f534}111 \u{1f38b}99)"
-        }
-        YakuKind::Honroutou => {
-            "Only 1s, 9s, and honors (e.g. \u{1f38b}111 \u{1f3b4}999 \u{1f32c}\u{1f32c}\u{1f32c})"
-        }
-        YakuKind::Chiitoitsu => {
-            "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
-        }
-        YakuKind::ChickenHand => {
-            "Valid hand with no yaku \u{2014} scores base chips \u{00d7} 1 mult"
-        }
-    }
+    yk.description()
 }
 
 fn rule_clue(rm: RuleModifier) -> String {

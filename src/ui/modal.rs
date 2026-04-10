@@ -4,9 +4,20 @@ use std::time::Instant;
 
 use rand::RngExt;
 
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::core::relic::RelicId;
+use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
+use crate::ui::widget::wrap_text;
+
+/// A single page in a paginated unlock carousel.
+pub struct UnlockPage {
+    pub category: String,
+    pub name: String,
+    pub description: String,
+    pub relic_id: Option<RelicId>,
+    pub accent_color: [f32; 4],
+}
 
 /// Color theme for a modal.
 #[derive(Clone, Copy)]
@@ -239,6 +250,10 @@ pub struct Modal {
     fade_in_secs: f32,
     /// Optional firework celebration.
     pub fireworks: Option<Fireworks>,
+    /// Paginated unlock pages (empty for normal modals).
+    pub pages: Vec<UnlockPage>,
+    /// Current page index when pages are present.
+    pub current_page: usize,
 }
 
 impl Modal {
@@ -250,6 +265,8 @@ impl Modal {
             shown_at: Instant::now(),
             fade_in_secs: 0.25,
             fireworks: None,
+            pages: Vec::new(),
+            current_page: 0,
         }
     }
 
@@ -259,6 +276,17 @@ impl Modal {
         fw.launch(center_x, base_y, spread, count);
         self.fireworks = Some(fw);
         self
+    }
+
+    /// Attach paginated unlock pages to this modal.
+    pub fn with_pages(mut self, pages: Vec<UnlockPage>) -> Self {
+        self.pages = pages;
+        self.current_page = 0;
+        self
+    }
+
+    pub fn has_pages(&self) -> bool {
+        !self.pages.is_empty()
     }
 
     /// Current opacity based on fade-in progress (0.0 to 1.0).
@@ -320,6 +348,34 @@ impl ModalQueue {
         }
     }
 
+    /// Navigate pages on the active modal by `delta` (-1 = left, +1 = right).
+    pub fn navigate(&mut self, delta: i32) {
+        if let Some(modal) = self.queue.first_mut() {
+            if modal.has_pages() {
+                let new = (modal.current_page as i32 + delta)
+                    .max(0)
+                    .min(modal.pages.len() as i32 - 1) as usize;
+                if new != modal.current_page {
+                    modal.current_page = new;
+                    modal.shown_at = Instant::now(); // restart fade-in
+                }
+            }
+        }
+    }
+
+    /// Advance to the next page, or dismiss if on the last page (or no pages).
+    /// Returns `true` if there was something to advance/dismiss.
+    pub fn advance_page(&mut self) -> bool {
+        if let Some(modal) = self.queue.first_mut() {
+            if modal.has_pages() && modal.current_page + 1 < modal.pages.len() {
+                modal.current_page += 1;
+                modal.shown_at = Instant::now();
+                return true;
+            }
+        }
+        self.dismiss()
+    }
+
     /// Dismiss the current modal. Returns `true` if there was one to dismiss.
     pub fn dismiss(&mut self) -> bool {
         if self.queue.is_empty() {
@@ -334,14 +390,19 @@ impl ModalQueue {
         }
     }
 
-    /// Generate GPU instances, text labels, and a dismiss button for the active modal.
+    /// Generate GPU instances, text labels, relic icons, and buttons for the active modal.
     /// Returns `None` if no modal is active.
     pub fn draw(
         &self,
         window_w: f32,
         window_h: f32,
         ui_scale: f32,
-    ) -> Option<(Vec<GpuInstance>, Vec<TextLabel>, Vec<ButtonDef>)> {
+    ) -> Option<(
+        Vec<GpuInstance>,
+        Vec<TextLabel>,
+        Vec<ButtonDef>,
+        Vec<RelicIcon>,
+    )> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
         let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
@@ -349,6 +410,7 @@ impl ModalQueue {
         let mut instances = Vec::new();
         let mut labels = Vec::new();
         let mut buttons = Vec::new();
+        let mut relic_icons = Vec::new();
 
         // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
         let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
@@ -357,23 +419,77 @@ impl ModalQueue {
             color: [or_, og, ob, 0.65 * alpha],
         });
 
-        // Modal card dimensions.
+        if modal.has_pages() {
+            self.draw_paginated(
+                modal,
+                alpha,
+                scale,
+                window_w,
+                window_h,
+                &mut instances,
+                &mut labels,
+                &mut relic_icons,
+            );
+        } else {
+            self.draw_simple(
+                modal,
+                alpha,
+                scale,
+                window_w,
+                window_h,
+                &mut instances,
+                &mut labels,
+            );
+        }
+
+        // Firework particles (rendered on top of dim overlay but mixed with card).
+        if let Some(ref fw) = modal.fireworks {
+            for (rect, color) in fw.instances() {
+                instances.push(GpuInstance { rect, color });
+            }
+        }
+
+        // Full-screen dismiss button so clicking anywhere also works.
+        buttons.push(ButtonDef::ui(
+            (0.0, 0.0, window_w, window_h),
+            UiAction::Confirm,
+        ));
+
+        Some((instances, labels, buttons, relic_icons))
+    }
+
+    /// Draw a simple title+body modal (original behavior).
+    fn draw_simple(
+        &self,
+        modal: &Modal,
+        alpha: f32,
+        scale: f32,
+        window_w: f32,
+        window_h: f32,
+        instances: &mut Vec<GpuInstance>,
+        labels: &mut Vec<TextLabel>,
+    ) {
         let card_w = (360.0 * scale).min(window_w * 0.8);
         let title_h = (48.0 * scale).max(28.0);
-        let body_lines = modal.body.lines().count().max(1) as f32;
         let dismiss_h = (28.0 * scale).max(18.0);
         let padding = (20.0 * scale).max(10.0);
+        let body_font = (18.0 * scale).max(14.0);
+        let body_inner_w = card_w - padding * 2.0;
+        let wrapped = wrap_text(&modal.body, body_inner_w, body_font);
+        let body_line_step = body_font * 1.4;
+        let body_lines = wrapped.len().max(1) as f32;
         let chrome_h = padding + title_h + padding * 0.5 + padding * 0.75 + dismiss_h + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
-        let body_h = (body_lines * 24.0 * scale)
+        let body_h = (body_lines * body_line_step)
             .max(20.0)
             .min(max_body_h.max(20.0));
+        let body_text = wrapped.join("\n");
         let card_h = chrome_h + body_h;
 
         let card_x = (window_w - card_w) * 0.5;
         let card_y = ((window_h - card_h) * 0.5).max(8.0);
 
-        // Border (slightly larger card behind).
+        // Border.
         let border = 3.0 * scale;
         let [br, bg, bb, ba] = modal.theme.border_color();
         instances.push(GpuInstance {
@@ -393,23 +509,25 @@ impl ModalQueue {
             color: [cr, cg, cb, ca * alpha],
         });
 
-        // Title text — use a proportioned rect for readability.
+        // Title.
         let title_y = card_y + padding;
         let [tr, tg, tb, ta] = modal.theme.title_color();
         labels.push(TextLabel {
             rect: [card_x + padding, title_y, card_w - padding * 2.0, title_h],
             text: modal.title.clone(),
             color: [tr, tg, tb, ta * alpha],
+            font_px: Some(title_h * 0.65),
             ..Default::default()
         });
 
-        // Body text.
+        // Body.
         let body_y = title_y + title_h + padding * 0.5;
         let [dr, dg, db, da] = modal.theme.body_color();
         labels.push(TextLabel {
-            rect: [card_x + padding, body_y, card_w - padding * 2.0, body_h],
-            text: modal.body.clone(),
+            rect: [card_x + padding, body_y, body_inner_w, body_h],
+            text: body_text,
             color: [dr, dg, db, da * alpha],
+            font_px: Some(body_font),
             ..Default::default()
         });
 
@@ -427,22 +545,143 @@ impl ModalQueue {
                 let [r, g, b, a] = crate::render::theme::color::SLATE;
                 [r, g, b, a * 0.8 * alpha]
             },
+            font_px: Some((14.0 * scale).max(12.0)),
             ..Default::default()
         });
+    }
 
-        // Firework particles (rendered on top of dim overlay but mixed with card).
-        if let Some(ref fw) = modal.fireworks {
-            for (rect, color) in fw.instances() {
-                instances.push(GpuInstance { rect, color });
-            }
+    /// Draw a paginated unlock carousel page.
+    fn draw_paginated(
+        &self,
+        modal: &Modal,
+        alpha: f32,
+        scale: f32,
+        window_w: f32,
+        window_h: f32,
+        instances: &mut Vec<GpuInstance>,
+        labels: &mut Vec<TextLabel>,
+        relic_icons: &mut Vec<RelicIcon>,
+    ) {
+        let page = &modal.pages[modal.current_page];
+        let padding = (20.0 * scale).max(10.0);
+        let card_w = (400.0 * scale).min(window_w * 0.85);
+
+        // Layout heights.
+        let category_h = (30.0 * scale).max(18.0);
+        let icon_h = if page.relic_id.is_some() {
+            (64.0 * scale).max(40.0)
+        } else {
+            0.0
+        };
+        let icon_gap = if page.relic_id.is_some() {
+            padding * 0.5
+        } else {
+            0.0
+        };
+        let name_h = (44.0 * scale).max(26.0);
+        let desc_lines = page.description.lines().count().max(1) as f32;
+        let desc_h = (desc_lines * 22.0 * scale).max(20.0).min(window_h * 0.3);
+        let nav_h = (24.0 * scale).max(16.0);
+
+        let card_h = padding
+            + category_h
+            + padding * 0.5
+            + icon_h
+            + icon_gap
+            + name_h
+            + padding * 0.5
+            + desc_h
+            + padding * 0.75
+            + nav_h
+            + padding;
+        let card_x = (window_w - card_w) * 0.5;
+        let card_y = ((window_h - card_h) * 0.5).max(8.0);
+
+        // Border with page accent color.
+        let border = 3.0 * scale;
+        let [ar, ag, ab, aa] = page.accent_color;
+        instances.push(GpuInstance {
+            rect: [
+                card_x - border,
+                card_y - border,
+                card_w + border * 2.0,
+                card_h + border * 2.0,
+            ],
+            color: [ar, ag, ab, aa * alpha],
+        });
+
+        // Card background.
+        let [cr, cg, cb, ca] = modal.theme.bg_color();
+        instances.push(GpuInstance {
+            rect: [card_x, card_y, card_w, card_h],
+            color: [cr, cg, cb, ca * alpha],
+        });
+
+        let mut y = card_y + padding;
+        let content_w = card_w - padding * 2.0;
+
+        // Category label (e.g. "New Relic").
+        labels.push(TextLabel {
+            rect: [card_x + padding, y, content_w, category_h],
+            text: page.category.clone(),
+            color: {
+                let [r, g, b, a] = crate::render::theme::color::SLATE;
+                [r, g, b, a * alpha]
+            },
+            ..Default::default()
+        });
+        y += category_h + padding * 0.5;
+
+        // Relic icon (if applicable).
+        if let Some(relic_id) = page.relic_id {
+            let icon_size = icon_h.min(content_w * 0.4);
+            let icon_x = card_x + (card_w - icon_size) * 0.5;
+            relic_icons.push(RelicIcon {
+                rect: [icon_x, y, icon_size, icon_size],
+                relic_id,
+            });
+            y += icon_h + icon_gap;
         }
 
-        // Full-screen dismiss button so clicking anywhere also works.
-        buttons.push(ButtonDef::ui(
-            (0.0, 0.0, window_w, window_h),
-            UiAction::Confirm,
-        ));
+        // Item name — large, gold.
+        let [tr, tg, tb, ta] = modal.theme.title_color();
+        labels.push(TextLabel {
+            rect: [card_x + padding, y, content_w, name_h],
+            text: page.name.clone(),
+            color: [tr, tg, tb, ta * alpha],
+            ..Default::default()
+        });
+        y += name_h + padding * 0.5;
 
-        Some((instances, labels, buttons))
+        // Description.
+        let [dr, dg, db, da] = modal.theme.body_color();
+        labels.push(TextLabel {
+            rect: [card_x + padding, y, content_w, desc_h],
+            text: page.description.clone(),
+            color: [dr, dg, db, da * alpha],
+            ..Default::default()
+        });
+        y += desc_h + padding * 0.75;
+
+        // Navigation hint + page indicator.
+        let total = modal.pages.len();
+        let current = modal.current_page + 1;
+        let nav_text = if total > 1 {
+            format!(
+                "\u{25c0}  {} / {}  \u{25b6}  \u{2022}  Enter to continue",
+                current, total
+            )
+        } else {
+            "Enter to continue".into()
+        };
+        labels.push(TextLabel {
+            rect: [card_x + padding, y, content_w, nav_h],
+            text: nav_text,
+            color: {
+                let [r, g, b, a] = crate::render::theme::color::SLATE;
+                [r, g, b, a * 0.8 * alpha]
+            },
+            ..Default::default()
+        });
     }
 }

@@ -24,6 +24,47 @@ pub enum TutorialMilestone {
     FirstShopBuy,
 }
 
+/// First-encounter UI events that trigger a one-time contextual tooltip.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FirstEncounter {
+    /// First time the blind target is displayed.
+    BlindTarget,
+    /// First gold payout after clearing a blind.
+    GoldPayout,
+    /// First yaku tag shown during scoring.
+    YakuTag,
+    /// First relic effect fires during scoring.
+    RelicEffect,
+}
+
+impl FirstEncounter {
+    /// The tooltip title shown on first encounter.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::BlindTarget => "Blind Target",
+            Self::GoldPayout => "Gold Earned!",
+            Self::YakuTag => "Yaku Bonus!",
+            Self::RelicEffect => "Relic Activated!",
+        }
+    }
+
+    /// The tooltip message shown on first encounter.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::BlindTarget => "Reach this score before you run out of plays to clear the blind.",
+            Self::GoldPayout => {
+                "You earn gold for clearing blinds. Spend it in the Shop on Relics!"
+            }
+            Self::YakuTag => {
+                "White tags are yaku \u{2014} special patterns that boost your multiplier. Check the Meld Guide for all of them!"
+            }
+            Self::RelicEffect => {
+                "Your relic just fired! Relics add chips or mult automatically when their condition is met."
+            }
+        }
+    }
+}
+
 // ── Tutorial state (serialized inside RunState) ───────────────────────
 
 /// Per-run tutorial tracking. `None` on normal (non-tutorial) runs.
@@ -45,6 +86,10 @@ pub struct TutorialState {
     pub celebrated: HashSet<TutorialMilestone>,
     /// Whether the annotated (slow-mo) cascade has been shown this lesson.
     pub cascade_annotated: bool,
+    /// Whether the player has opened the Meld Guide during this lesson.
+    pub meld_guide_opened: bool,
+    /// First-encounter tooltips already shown (persists across lessons).
+    pub encounters_shown: HashSet<FirstEncounter>,
 }
 
 impl Default for TutorialState {
@@ -64,6 +109,8 @@ impl TutorialState {
             retry_count: 0,
             celebrated: HashSet::new(),
             cascade_annotated: false,
+            meld_guide_opened: false,
+            encounters_shown: HashSet::new(),
         }
     }
 
@@ -89,6 +136,7 @@ impl TutorialState {
         self.sub_step = 0;
         self.retry_count = 0;
         self.cascade_annotated = false;
+        self.meld_guide_opened = false;
         Some(self.current_lesson)
     }
 
@@ -96,6 +144,12 @@ impl TutorialState {
     /// Returns `true` if this is the first time (should show fireworks).
     pub fn celebrate(&mut self, milestone: TutorialMilestone) -> bool {
         self.celebrated.insert(milestone)
+    }
+
+    /// Check if a first-encounter tooltip should be shown and mark it.
+    /// Returns `true` if this is the first time (should show tooltip).
+    pub fn encounter(&mut self, encounter: FirstEncounter) -> bool {
+        self.encounters_shown.insert(encounter)
     }
 
     /// Record a blind failure for adaptive difficulty. After repeated
@@ -118,6 +172,7 @@ impl TutorialState {
 
 pub const LESSON_COUNT: usize = 9;
 
+#[allow(dead_code)]
 pub struct LessonDef {
     pub id: u32,
     /// Italic flavor line shown above the hint.
@@ -146,6 +201,9 @@ pub struct LessonDef {
     /// Whether the first scoring cascade this lesson runs in annotated
     /// slow-motion (lesson 5).
     pub annotated_cascade: bool,
+    /// Short recap shown on the post-lesson summary screen.
+    /// First element is the headline, rest are bullet points.
+    pub recap: &'static [&'static str],
 }
 
 /// Look up a lesson by 1-based ID. Clamps to the valid range so corrupted
@@ -164,7 +222,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     LessonDef {
         id: 1,
         flavor_text: "Every journey begins with a matching pair.",
-        intro_text: "Select two matching tiles, then press Play to score them.",
+        intro_text: "Select two matching tiles, then press Play to score them. Reach the target score to clear the blind!",
         step_prompts: &[
             "Select two matching tiles.",
             "Press Play to score your pair!",
@@ -178,6 +236,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: true,
         annotated_cascade: false,
+        recap: &[
+            "Pairs Unlocked",
+            "Two identical tiles form a Pair \u{2014} the simplest meld. Example: [3m] [3m]",
+            "Pairs are worth fewer chips, but they\u{2019}re easy to find.",
+        ],
     },
     // ── Lesson 2: Triplets ────────────────────────────────────────
     //   [0] no selection  [1] has selection
@@ -198,6 +261,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: true,
         annotated_cascade: false,
+        recap: &[
+            "Triplets Unlocked",
+            "Three identical tiles form a Triplet \u{2014} more chips than a pair. Example: [5p] [5p] [5p]",
+            "Four identical tiles form a Kong \u{2014} even stronger. Example: [East] [East] [East] [East]",
+        ],
     },
     // ── Lesson 3: Sequences ───────────────────────────────────────
     //   [0] no selection  [1] has selection
@@ -209,7 +277,8 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         step_prompts: &[
             "Look for three tiles in a row \u{2014} like 2, 3, 4 of the same suit.",
             "Press Play to score your sequence!",
-            "Tip: open the Pause menu to find the Meld Guide \u{2014} it shows every pattern!",
+            "Now open the Pause menu and check the Meld Guide \u{2014} it\u{2019}s your pattern cheat sheet!",
+            "Nice! The Meld Guide has every pattern you\u{2019}ll need. Keep scoring to beat this blind!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -225,6 +294,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: true,
         affinity_glow: true,
         annotated_cascade: false,
+        recap: &[
+            "Sequences Unlocked",
+            "Three consecutive tiles in the same suit form a Sequence. Example: [2s] [3s] [4s]",
+            "The Meld Guide (Pause menu) lists every pattern you can play.",
+        ],
     },
     // ── Lesson 4: Discarding ──────────────────────────────────────
     //   [0] before first score, no selection — prompt discard
@@ -235,7 +309,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         flavor_text: "Let go of what doesn't serve you.",
         intro_text: "Discard tiles you don't need to draw better ones from the wall.",
         step_prompts: &[
-            "Select tiles that don\u{2019}t fit any meld, then press Discard.",
+            "The tile highlights are off now \u{2014} you\u{2019}ll spot patterns on your own! Select tiles that don\u{2019}t fit any meld, then press Discard.",
             "Press Discard to swap them for new tiles!",
             "Build melds and press Play to score!",
         ],
@@ -253,6 +327,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: false,
+        recap: &[
+            "Discarding Unlocked",
+            "Select unwanted tiles and press Discard to swap them for new draws.",
+            "Discards are limited \u{2014} use them wisely to sculpt your hand.",
+        ],
     },
     // ── Lesson 5: Chips × Mult ────────────────────────────────────
     //   [0] before cascade — prompt play
@@ -263,7 +342,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         intro_text: "Watch the scoring breakdown \u{2014} your chips are multiplied for the final score!",
         step_prompts: &[
             "Play a hand and watch the cascade closely.",
-            "Watch the scoring breakdown \u{2014} Chips \u{00d7} Mult!",
+            "Watch the scoring breakdown \u{2014} Chips \u{00d7} Mult! Next lesson, you\u{2019}ll unlock Yaku \u{2014} bonus patterns that boost your multiplier even further.",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -279,6 +358,12 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: true,
+        recap: &[
+            "Scoring: Chips \u{00d7} Mult",
+            "Each meld adds chips. Your multiplier grows from meld quality.",
+            "Example: a Triplet gives 50 chips. At \u{00d7}2 mult, that\u{2019}s 100 points!",
+            "Coming up: Yaku \u{2014} special patterns that multiply your score even more!",
+        ],
     },
     // ── Lesson 6: FullHand & Yaku ─────────────────────────────────
     //   [0] no selection  [1] has selection
@@ -286,11 +371,12 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     LessonDef {
         id: 6,
         flavor_text: "A complete hand opens every door.",
-        intro_text: "Build 4 melds + 1 pair (14 tiles) for the FullHand yaku \u{2014} a big multiplier bonus!",
+        intro_text: "Keep scoring pairs, triplets, and sequences to beat the blind. If you use all 14 tiles as 4 melds + 1 pair, you\u{2019}ll trigger FullHand \u{2014} a big multiplier bonus!",
         step_prompts: &[
-            "Try to use all 14 tiles: 4 melds and 1 pair for FullHand!",
-            "FullHand gives +5 mult \u{2014} a massive boost! Press Play.",
+            "Score pairs, triplets, and sequences. Try for 4 melds + 1 pair to get FullHand!",
+            "Press Play to score! The white tags that appear are yaku \u{2014} bonus patterns that boost your mult.",
             "FullHand is just one yaku \u{2014} check the Meld Guide (Pause menu) for all 13!",
+            "Great \u{2014} the Meld Guide lists all 13 yaku. Keep scoring to beat this blind!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -306,15 +392,20 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: false,
+        recap: &[
+            "Yaku Unlocked",
+            "Yaku are bonus patterns that boost your mult when scored.",
+            "FullHand: use all 14 tiles as 4 melds + 1 pair. Worth +5 mult and +60 chips!",
+        ],
     },
     // ── Lesson 7: Honors & Yakuhai ────────────────────────────────
     //   [0] no selection  [1] has selection
     LessonDef {
         id: 7,
         flavor_text: "Wind and dragon bow to no suit.",
-        intro_text: "Honor tiles (Winds & Dragons) can form triplets. A dragon or wind triplet triggers the Yakuhai yaku!",
+        intro_text: "Honor tiles (Winds & Dragons) are like face cards in poker \u{2014} there are fewer of them, but they\u{2019}re worth more. A dragon or wind triplet triggers the Yakuhai yaku!",
         step_prompts: &[
-            "Look for Wind or Dragon tiles \u{2014} a triplet triggers Yakuhai!",
+            "Look for Wind or Dragon tiles \u{2014} rare but powerful. A triplet triggers Yakuhai!",
             "Press Play to score!",
         ],
         allowed_sets: &[
@@ -324,13 +415,19 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             SetKind::Sequence,
         ],
         discard_enabled: true,
-        shop_enabled: false,
+        shop_enabled: true,
         hand_size: None,
         target_override: Some(600),
         allowed_yaku: &[YakuKind::FullHand, YakuKind::Yakuhai],
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: false,
+        recap: &[
+            "Honor Tiles & Yakuhai",
+            "Winds and Dragons are rare honor tiles worth extra chips.",
+            "A wind or dragon triplet triggers Yakuhai \u{2014} another yaku multiplier.",
+            "The Shop is next \u{2014} spend gold on more Relics to power up your run!",
+        ],
     },
     // ── Lesson 8: The Shop ────────────────────────────────────────
     //   [0] no selection (gameplay)  [1] has selection (gameplay)
@@ -356,6 +453,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: false,
+        recap: &[
+            "The Shop",
+            "After each boss blind, spend gold on Relics in the Shop.",
+            "Relics give permanent scoring bonuses for the rest of the run.",
+        ],
     },
     // ── Lesson 9: Graduation ──────────────────────────────────────
     LessonDef {
@@ -377,8 +479,70 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         simplified_boss: false,
         affinity_glow: false,
         annotated_cascade: false,
+        recap: &[
+            "Tutorial Complete",
+            "You\u{2019}ve learned everything you need to play.",
+            "Discover new yaku, collect relics, and defeat bosses. Good luck!",
+        ],
     },
 ];
+
+/// Generate a diagnostic feedback hint after a tutorial failure.
+///
+/// Examines the final round state to give the player a specific tip about
+/// what went wrong, rather than a generic "try again" message.
+pub fn failure_feedback(
+    round_score: u32,
+    target_score: u32,
+    plays_remaining: u32,
+    discards_remaining: u32,
+    lesson: u32,
+) -> String {
+    let gap = target_score.saturating_sub(round_score);
+    let score_pct = if target_score > 0 {
+        (round_score as f32 / target_score as f32 * 100.0) as u32
+    } else {
+        100
+    };
+
+    // Prioritize the most actionable feedback.
+    if plays_remaining > 0 {
+        return format!(
+            "You scored {} / {} ({}%) but had {} play{} left! Try to use every play.",
+            round_score,
+            target_score,
+            score_pct,
+            plays_remaining,
+            if plays_remaining == 1 { "" } else { "s" },
+        );
+    }
+
+    if discards_remaining > 1 && lesson >= 4 {
+        return format!(
+            "You scored {} / {} ({}%). You had {} discards left \u{2014} swapping tiles can help you find bigger melds!",
+            round_score, target_score, score_pct, discards_remaining,
+        );
+    }
+
+    if score_pct >= 80 {
+        return format!(
+            "So close! {} / {} ({}%). Try building triplets or sequences \u{2014} they\u{2019}re worth more than pairs.",
+            round_score, target_score, score_pct,
+        );
+    }
+
+    if lesson <= 3 {
+        return format!(
+            "You scored {} / {} ({}%). Look for tiles that share the same suit and rank \u{2014} those form melds!",
+            round_score, target_score, score_pct,
+        );
+    }
+
+    format!(
+        "You scored {} / {} \u{2014} {} short. Mix bigger melds like triplets and sequences with pairs for more chips!",
+        round_score, target_score, gap,
+    )
+}
 
 /// Given a set of detected meld kinds, return which milestone (if any)
 /// should be celebrated.

@@ -876,6 +876,8 @@ fn layout_tile_groups(
                 rotation: [0.0, 0.0, 0.0],
                 scale: 1.0,
                 size_px: tile_size,
+                brightness: 1.0,
+                selected: false,
             });
             cursor_x += tile_size;
         }

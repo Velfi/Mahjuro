@@ -33,8 +33,6 @@ pub const PACK_ID_STRIDE: u32 = 16;
 pub enum TilePackKind {
     /// +7 honor tiles: one of each wind (E/S/W/N) + one of each dragon (R/G/W).
     Honors,
-    /// +4 random numbered tiles, pre-enhanced with Polychrome (×1.2 mult).
-    Polychrome,
     /// +6 terminal tiles: one extra 1 and one extra 9 per numbered suit.
     Terminals,
     /// +4 flower wildcards (F1–F4), doubling the flower pool.
@@ -51,7 +49,6 @@ impl TilePackKind {
     pub fn all() -> &'static [Self] {
         &[
             Self::Honors,
-            Self::Polychrome,
             Self::Terminals,
             Self::Flowers,
             Self::BambooGrove,
@@ -63,7 +60,6 @@ impl TilePackKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Honors => "Honors Pack",
-            Self::Polychrome => "Polychrome Pack",
             Self::Terminals => "Terminals Pack",
             Self::Flowers => "Flowers Pack",
             Self::BambooGrove => "Bamboo Grove",
@@ -75,7 +71,6 @@ impl TilePackKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::Honors => "+7 honor tiles to the wall (winds + dragons)",
-            Self::Polychrome => "+4 Polychrome numbered tiles to the wall",
             Self::Terminals => "+6 terminal tiles to the wall (1s and 9s)",
             Self::Flowers => "+4 flower wildcards to the wall",
             Self::BambooGrove => "+8 bamboo tiles to the wall",
@@ -88,7 +83,6 @@ impl TilePackKind {
     pub fn asset_filename(self) -> &'static str {
         match self {
             Self::Honors => "pack_honors.png",
-            Self::Polychrome => "pack_polychrome.png",
             Self::Terminals => "pack_terminals.png",
             Self::Flowers => "pack_flowers.png",
             Self::BambooGrove => "pack_bamboo_grove.png",
@@ -100,7 +94,6 @@ impl TilePackKind {
     pub fn shop_price(self) -> u32 {
         match self {
             Self::Honors => 7,
-            Self::Polychrome => 12,
             Self::Terminals => 8,
             Self::Flowers => 6,
             Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 8,
@@ -110,10 +103,6 @@ impl TilePackKind {
     /// Generate the extra tiles for this pack. IDs start at `start_id` and
     /// increment sequentially. The caller is responsible for choosing a
     /// non-colliding `start_id` (see [`PACK_TILE_ID_BASE`] / [`PACK_ID_STRIDE`]).
-    ///
-    /// Polychrome pack tiles are returned *without* their enhancement —
-    /// the caller should stamp `TileEnhancement::Polychrome` via the
-    /// `tile_enhancements` map so the enhancement persists across rounds.
     pub fn generate_tiles(self, start_id: u32) -> Vec<Tile> {
         let mut id = start_id;
         let mut out = Vec::new();
@@ -146,15 +135,6 @@ impl TilePackKind {
                 pool.push(pool[dup2]);
                 seeded_shuffle(&mut pool, rng_state);
                 for &(suit, rank) in pool.iter().take(7) {
-                    push(suit, rank, &mut out);
-                }
-            }
-            Self::Polychrome => {
-                // 4 random numbered tiles, one per roll.
-                let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
-                for _ in 0..4 {
-                    let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
-                    let rank = (pack_rng_next(&mut rng_state) % 9 + 1) as u8;
                     push(suit, rank, &mut out);
                 }
             }
@@ -204,9 +184,6 @@ impl TilePackKind {
     /// The enhancement that should be pre-stamped on this pack's tiles
     /// at purchase time, if any.
     pub fn pre_enhancement(self) -> Option<TileEnhancement> {
-        match self {
-            Self::Polychrome => Some(TileEnhancement::Polychrome),
-            _ => None,
-        }
+        None
     }
 }

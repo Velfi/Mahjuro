@@ -14,13 +14,15 @@
 //! (panel headers, per-shrine labels, skip button) sits on top.
 
 use std::cell::Cell;
+use std::time::Instant;
 
 use crate::core::rules::BlindKind;
+use crate::core::zodiac::ZodiacKind;
 use crate::render::draw_cmd::{
-    CameraParams, CoinPlacement, DishExplicit, ShrinePlacement, UiFrame,
+    CameraParams, CoinPlacement, DishExplicit, ShrinePlacement, UiFrame, ZodiacRibbonPlacement,
 };
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, PanelVariant};
@@ -29,6 +31,41 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use super::gameplay::GameplayScene;
 use super::pause_menu::PauseMenu;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+
+/// Zodiac ribbon close-up celebration for the pick-blind scene.
+/// Mirrors `ShopScene`'s `ZodiacCelebration` — shows the activated
+/// ribbon front and center with a sinusoidal sway animation.
+struct ZodiacCelebration {
+    kind: ZodiacKind,
+    yaku_name: &'static str,
+    new_level: u32,
+    started_at: Instant,
+    dismissed: bool,
+}
+
+impl ZodiacCelebration {
+    const DURATION: f32 = 2.0;
+
+    fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
+        Self {
+            kind,
+            yaku_name,
+            new_level,
+            started_at: Instant::now(),
+            dismissed: false,
+        }
+    }
+
+    fn elapsed(&self) -> f32 {
+        Instant::now()
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32()
+    }
+
+    fn is_done(&self) -> bool {
+        self.dismissed || self.elapsed() >= Self::DURATION
+    }
+}
 
 /// `pick_id` for the play altar `DishExplicit`. Used to look up its
 /// projected screen rect in `ctx.aux_dish_rects` for label placement.
@@ -59,6 +96,8 @@ pub struct PickBlindScene {
     last_play_rect: Cell<Option<[f32; 4]>>,
     /// Cached projected screen rect of the skip altar.
     last_skip_rect: Cell<Option<[f32; 4]>>,
+    /// Active zodiac ribbon close-up celebration, if any.
+    zodiac_celebration: Option<ZodiacCelebration>,
 }
 
 impl PickBlindScene {
@@ -70,6 +109,7 @@ impl PickBlindScene {
             pause_menu: PauseMenu::new(),
             last_play_rect: Cell::new(None),
             last_skip_rect: Cell::new(None),
+            zodiac_celebration: None,
         }
     }
 
@@ -335,10 +375,42 @@ impl SceneBehavior for PickBlindScene {
     }
 
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused
+        self.pause_menu.paused || self.zodiac_celebration.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
+        // Pick up a pending zodiac celebration from a ZodiacBlessing tag.
+        if self.zodiac_celebration.is_none() {
+            if let Some((kind, yaku, new_level)) = ctx.run.pending_zodiac_celebration.take() {
+                self.zodiac_celebration =
+                    Some(ZodiacCelebration::new(kind, yaku.name(), new_level));
+                ctx.bus
+                    .push(crate::game::event_bus::GameEvent::ZodiacReveal);
+            }
+        }
+
+        // Zodiac ribbon close-up — swallow input until dismissed or timed out.
+        if let Some(ref mut celeb) = self.zodiac_celebration {
+            let has_input = ctx.actions.iter().any(|a| {
+                matches!(
+                    a,
+                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
+                )
+            }) || !ctx.button_clicks.is_empty();
+            if has_input {
+                celeb.dismissed = true;
+            }
+            if celeb.is_done() {
+                let celeb = self.zodiac_celebration.take().unwrap();
+                ctx.bus
+                    .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
+                // Celebration finished — drop through to normal update.
+                let _ = celeb;
+            } else {
+                return None;
+            }
+        }
+
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             return t;
         }
@@ -412,6 +484,7 @@ impl SceneBehavior for PickBlindScene {
         // layered dark indigo + vignettes, but the gamma-encoded linear
         // floor of even [0.002] reads as visible indigo on screen.)
         frame.background(BackgroundId::Black);
+        frame.ember_drift();
         frame.camera_override = Some(layout.camera);
 
         // ── 3D shrines ────────────────────────────────────────────────
@@ -1016,6 +1089,67 @@ impl SceneBehavior for PickBlindScene {
         // Push 2D layers + metadata onto the frame.
         frame.quads(quads);
         frame.texts(texts);
+
+        // ── Zodiac ribbon close-up celebration overlay ──────────────
+        if let Some(ref celeb) = self.zodiac_celebration {
+            // Semi-transparent dimmer.
+            frame.quad(GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.0, 0.0, 0.0, 0.72],
+            });
+            frame.starfield();
+
+            let t = celeb.elapsed();
+            let ribbon_w = h * 0.12;
+            let ribbon_l = h * 0.55;
+            let cx = w * 0.5;
+            let cy = h * 0.28;
+            let lift = h * 0.50;
+
+            let sway_yaw = (t * 1.8).sin() * 12.0;
+            let sway_roll = (t * 2.5 + 0.7).sin() * 6.0;
+            let tilt = 8.0 + (t * 1.2).sin() * 3.0;
+            let alpha = (t / 0.3).clamp(0.0, 1.0);
+
+            frame.zodiac_batch(vec![ZodiacRibbonPlacement {
+                anchor_pos: [cx, cy, lift],
+                length: ribbon_l,
+                width: ribbon_w,
+                rotation_y_deg: sway_yaw,
+                rotation_x_deg: tilt,
+                rotation_z_deg: sway_roll,
+                color: [1.0, 1.0, 1.0, alpha],
+                kind: Some(celeb.kind),
+            }]);
+
+            let title_font = (h * 0.04).max(24.0);
+            let title_y = h * 0.10;
+            frame.text(TextLabel {
+                text: format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level),
+                rect: [0.0, title_y, w, title_font * 1.5],
+                font_px: Some(title_font),
+                color: [0.95, 0.78, 0.25, alpha],
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+
+            let prompt_font = (h * 0.028).max(18.0);
+            let prompt_y = h * 0.88;
+            let pulse_alpha = alpha * (0.5 + 0.5 * (t * 3.0).sin());
+            frame.text(TextLabel {
+                text: "Click or press confirm to continue".to_string(),
+                rect: [0.0, prompt_y, w, prompt_font * 1.5],
+                font_px: Some(prompt_font),
+                color: [1.0, 1.0, 1.0, pulse_alpha],
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+
+            // Block all scene buttons — clicks go to the celebration.
+            buttons.clear();
+            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
+        }
+
         frame.buttons = buttons;
         frame.window_title = "Mahjuro".to_string();
 

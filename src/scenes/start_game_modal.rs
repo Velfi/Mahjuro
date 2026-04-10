@@ -90,8 +90,10 @@ impl TileSelectScene {
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
         if self.tutorial_mode {
             *run = RunState::new_tutorial();
-            // Tutorial skips the initial shop — go straight to gameplay.
-            Some(Scene::Gameplay(super::gameplay::GameplayScene::new()))
+            // Show tile literacy intro before the first tutorial lesson.
+            Some(Scene::TileLiteracy(
+                super::tile_literacy::TileLiteracyScene::new(),
+            ))
         } else {
             *run = RunState::new_with_material(self.material);
             Some(Scene::Shop(ShopScene::new(run.run_number, run)))
@@ -217,10 +219,16 @@ impl SceneBehavior for TileSelectScene {
         let gap_sm = (16.0 * scale).max(8.0);
         let gap_lg = (28.0 * scale).max(14.0);
 
-        let title_h = typography::size(2.25, h, ui_scale);
-        let name_h = typography::size(typography::TITLE, h, ui_scale);
-        let bonus_h = typography::size(typography::HEADING, h, ui_scale);
-        let hint_h = typography::size(typography::CAPTION, h, ui_scale);
+        let title_px = typography::size(2.25, h, ui_scale);
+        let name_px = typography::size(typography::TITLE, h, ui_scale);
+        let bonus_px = typography::size(typography::HEADING, h, ui_scale);
+        let hint_px = typography::size(typography::CAPTION, h, ui_scale);
+
+        // Rect heights need room above the font size for line padding.
+        let title_h = title_px * 1.4;
+        let name_h = name_px * 1.4;
+        let bonus_h = bonus_px * 1.4;
+        let hint_h = hint_px * 1.4;
 
         let text_block_h = title_h + gap_sm + name_h + gap_sm + bonus_h;
         let mut cursor_y = (h * 0.5 - text_block_h) * 0.5 + h * 0.05;
@@ -231,6 +239,7 @@ impl SceneBehavior for TileSelectScene {
             rect: [text_x, cursor_y, text_w, title_h],
             text: "Choose Your Tiles".into(),
             color: color::CHAMPAGNE,
+            font_px: Some(title_px),
             ..Default::default()
         });
         cursor_y += title_h + gap_lg;
@@ -239,6 +248,7 @@ impl SceneBehavior for TileSelectScene {
             rect: [text_x, cursor_y, text_w, name_h],
             text: self.material.label().into(),
             color: color::CHAMPAGNE,
+            font_px: Some(name_px),
             ..Default::default()
         });
         cursor_y += name_h + gap_sm;
@@ -247,6 +257,7 @@ impl SceneBehavior for TileSelectScene {
             rect: [text_x, cursor_y, text_w, bonus_h],
             text: self.material.bonus_description().into(),
             color: color::MIST,
+            font_px: Some(bonus_px),
             ..Default::default()
         });
 
@@ -256,6 +267,7 @@ impl SceneBehavior for TileSelectScene {
             rect: [text_x, hint_y, text_w, hint_h],
             text: "\u{25C0}  \u{25B6}  Change tiles   |   Enter to play".into(),
             color: color::SLATE,
+            font_px: Some(hint_px),
             ..Default::default()
         });
 

@@ -92,7 +92,7 @@ pub enum RelicId {
     TurtleShell,
     /// All scored tiles are terminals or honors: +4 mult.
     ClosedGate,
-    /// +1 mult per 5 gold held (max +4 mult).
+    /// +1 mult per 5 gold held.
     GoldFurnace,
     /// +0.1 mult per 100 total score earned this run (max +5 mult).
     Snowball,
@@ -308,6 +308,90 @@ pub fn relic_by_name(name: &str) -> Option<RelicId> {
 /// Refund when selling a relic — half buy price, minimum 1 gold.
 pub fn relic_sell_price(id: RelicId) -> u32 {
     (relic_buy_price(id) / 2).max(1)
+}
+
+/// Effective sell price for a relic, accounting for counter-based bonuses
+/// (e.g. Nest Egg grows by +2 per round held).
+pub fn relic_sell_price_live(
+    id: RelicId,
+    counters: &std::collections::BTreeMap<RelicId, i32>,
+) -> u32 {
+    let mut sell = relic_sell_price(id);
+    if id == RelicId::NestEgg {
+        let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
+        sell = sell.saturating_add(2 * rounds as u32);
+    }
+    sell
+}
+
+/// Return a live description for relics whose counters change their tooltip.
+/// Falls back to the static `RelicDef::description` when no counter applies.
+pub fn relic_description_live(
+    id: RelicId,
+    counters: &std::collections::BTreeMap<RelicId, i32>,
+) -> String {
+    let base = all_relic_defs()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.description)
+        .unwrap_or("");
+    match id {
+        RelicId::MeltingIce => {
+            let remaining = counters.get(&RelicId::MeltingIce).copied().unwrap_or(80);
+            format!("{base} [{remaining} chips left]")
+        }
+        RelicId::SilkThread => {
+            let thread = counters.get(&RelicId::SilkThread).copied().unwrap_or(40);
+            format!("{base} [+{:.1} mult left]", thread as f64 / 10.0)
+        }
+        RelicId::TeaCeremony => {
+            let charges = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(3);
+            format!(
+                "{base} [{charges} charge{} left]",
+                if charges == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::CleanStreak => {
+            let streak = counters.get(&RelicId::CleanStreak).copied().unwrap_or(0);
+            format!(
+                "{base} [streak: {streak}, +{:.1} mult]",
+                0.5 * streak as f64
+            )
+        }
+        RelicId::Obsession => {
+            let rounds = counters.get(&RelicId::Obsession).copied().unwrap_or(0);
+            format!(
+                "{base} [{rounds} round{}, +{:.1} mult]",
+                if rounds == 1 { "" } else { "s" },
+                0.3 * rounds as f64
+            )
+        }
+        RelicId::Bonfire => {
+            let sold = counters.get(&RelicId::Bonfire).copied().unwrap_or(0);
+            format!("{base} [{sold} sold, +{:.1} mult]", 0.4 * sold as f64)
+        }
+        RelicId::RitualBlade => {
+            let perm = counters.get(&RelicId::RitualBlade).copied().unwrap_or(0);
+            format!("{base} [+{:.1} mult stored]", perm as f64 / 10.0)
+        }
+        RelicId::PhantomRelic => {
+            let rounds = counters.get(&RelicId::PhantomRelic).copied().unwrap_or(0);
+            if rounds >= 3 {
+                format!("{base} [ready to duplicate!]")
+            } else {
+                format!("{base} [{rounds}/3 rounds]")
+            }
+        }
+        RelicId::NestEgg => {
+            let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
+            let sell = relic_sell_price_live(id, counters);
+            format!(
+                "{base} [held {rounds} round{}, sell {sell}g]",
+                if rounds == 1 { "" } else { "s" }
+            )
+        }
+        _ => base.to_string(),
+    }
 }
 
 pub fn all_relic_defs() -> &'static [RelicDef] {
@@ -585,7 +669,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::GoldFurnace,
             name: "Gold Furnace",
-            description: "+1 mult per 5 gold held (max +4)",
+            description: "+1 mult per 5 gold held",
             rarity: Rarity::Rare,
         },
         RelicDef {

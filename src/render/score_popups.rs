@@ -1,13 +1,10 @@
-//! Floating 3D score popups: per-step "+50" / "×3" / "=12500" labels that
-//! pop in at the source of a scoring contribution, settle, drift toward the
-//! score panel, then collapse into it.
+//! Floating 3D score popups: per-step "+50" / "×3" labels that pop in at the
+//! source of a scoring contribution, settle, drift toward a floating
+//! accumulator label, then collapse into it.
 //!
-//! Modeled on `falling_bones.rs`: a simple `Vec<ScorePopup>` with a
-//! per-frame `update(dt)` and a `placements()` accessor that the renderer
-//! consumes via `DrawCmd::ExtrudedGlyphBatch`. The system itself doesn't
-//! care about font, mesh tessellation, or GPU upload — it just emits
-//! `ExtrudedGlyphPlacement`s with the desired pose and tint each frame and
-//! lets the renderer's lazy `GlyphMeshCache` build the matching meshes.
+//! The accumulator labels ("120", "×4") persist through the cascade, sitting
+//! at a fixed screen position and ticking up as pops land. When the cascade
+//! ends the caller calls `clear()` to wipe everything.
 
 use std::time::Instant;
 
@@ -34,6 +31,9 @@ const YAW_JITTER: f32 = 0.18;
 const LIFT_BASE: f32 = 450.0;
 const LIFT_DRIFT: f32 = 30.0;
 
+/// Accumulator label lifetime phases.
+const ACCUM_BIRTH_SECS: f32 = 0.20;
+
 #[derive(Clone, Debug)]
 struct ScorePopup {
     label: String,
@@ -45,13 +45,31 @@ struct ScorePopup {
     yaw: f32,
 }
 
+/// A persistent floating label that accumulates chip or mult totals.
+#[derive(Clone, Debug)]
+struct Accumulator {
+    kind: StepKind,
+    pos: (f32, f32),
+    /// Current displayed value (ticks up as pops land).
+    value_label: String,
+    born_at: Instant,
+    /// Timestamp of the last value bump — drives a scale pulse.
+    last_bump: Instant,
+    color: [f32; 4],
+    base_scale: f32,
+}
+
 pub struct ScorePopupSystem {
     popups: Vec<ScorePopup>,
+    accumulators: Vec<Accumulator>,
 }
 
 impl ScorePopupSystem {
     pub fn new() -> Self {
-        Self { popups: Vec::new() }
+        Self {
+            popups: Vec::new(),
+            accumulators: Vec::new(),
+        }
     }
 
     /// Spawn a new popup. `magnitude` is the absolute numeric delta the
@@ -65,19 +83,7 @@ impl ScorePopupSystem {
         kind: StepKind,
         magnitude: f32,
     ) {
-        // Tint by axis. Chips read cool indigo, mult warm crimson, the final
-        // beat champagne gold — same colour grammar the rest of the cascade
-        // HUD already uses.
-        let color = match kind {
-            StepKind::Chips => [0.62, 0.78, 1.0, 1.0],
-            StepKind::Mult => [1.0, 0.55, 0.55, 1.0],
-            StepKind::Gold => [0.95, 0.78, 0.25, 1.0],
-            StepKind::Final => [1.0, 0.92, 0.45, 1.0],
-        };
-        // Magnitude → scale: log curve so a +5 popup is still readable but
-        // a +500 popup is dramatically bigger. Base height ≈ 60 world units
-        // (the glyph mesh is normalised to height 1.0, so this is the
-        // direct world-space character height).
+        let color = kind_color(kind);
         let mag = magnitude.abs().max(1.0);
         let scale = 300.0 * (1.0 + (mag.log2() / 8.0).clamp(0.0, 0.8));
         let mut rng = rand::rng();
@@ -93,49 +99,65 @@ impl ScorePopupSystem {
         });
     }
 
+    /// Set (or create) an accumulator for the given axis. The accumulator
+    /// sits at `pos` and displays `value_label`. Called each cascade step
+    /// so the displayed number tracks the running total.
+    pub fn set_accumulator(&mut self, kind: StepKind, pos: (f32, f32), value_label: String) {
+        let now = Instant::now();
+        if let Some(acc) = self.accumulators.iter_mut().find(|a| a.kind == kind) {
+            acc.value_label = value_label;
+            acc.last_bump = now;
+            acc.pos = pos;
+        } else {
+            self.accumulators.push(Accumulator {
+                kind,
+                pos,
+                value_label,
+                born_at: now,
+                last_bump: now,
+                color: kind_color(kind),
+                base_scale: 380.0,
+            });
+        }
+    }
+
     /// Advance the system; despawn any popups whose lifetime has elapsed.
     pub fn update(&mut self, now: Instant) {
         self.popups
             .retain(|p| now.saturating_duration_since(p.born_at).as_secs_f32() < LIFETIME);
     }
 
-    /// Drop every popup immediately. Called when the cascade ends or is
-    /// skipped so the play space clears for the next hand.
+    /// Drop every popup and accumulator immediately. Called when the cascade
+    /// ends or is skipped so the play space clears for the next hand.
     pub fn clear(&mut self) {
         self.popups.clear();
+        self.accumulators.clear();
     }
 
     pub fn is_active(&self) -> bool {
-        !self.popups.is_empty()
+        !self.popups.is_empty() || !self.accumulators.is_empty()
     }
 
     /// Build the per-frame placement list the renderer consumes.
     pub fn placements(&self, now: Instant) -> Vec<ExtrudedGlyphPlacement> {
-        self.popups
+        let mut out: Vec<ExtrudedGlyphPlacement> = self
+            .popups
             .iter()
             .map(|p| {
                 let age = now.saturating_duration_since(p.born_at).as_secs_f32();
                 let t = (age / LIFETIME).clamp(0.0, 1.0);
 
                 // ── Lifecycle phases ───────────────────────────────────
-                // 0..T_BIRTH_END  — pop in (0 → 1.25× base) at source_xy
-                // T_BIRTH_END..T_SETTLE_END — settle to base, drift up
-                // T_SETTLE_END..T_DRIFT_END — fly toward dest, hold scale
-                // T_DRIFT_END..1.0 — collapse (scale + alpha → 0)
                 let (scale_mul, alpha, pos_t, lift_extra) = if t < T_BIRTH_END {
                     let local = t / T_BIRTH_END;
-                    // Ease-out-back overshoot: 1 + (1.70158+1)*(local-1)^3
-                    // simplified to a quick 0 → 1.25 lift via sine.
                     let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.25;
                     (s, 1.0, 0.0, 0.0)
                 } else if t < T_SETTLE_END {
                     let local = (t - T_BIRTH_END) / (T_SETTLE_END - T_BIRTH_END);
-                    // Relax 1.25 → 1.0
                     let s = 1.25 + (1.0 - 1.25) * local;
                     (s, 1.0, 0.0, LIFT_DRIFT * local)
                 } else if t < T_DRIFT_END {
                     let local = (t - T_SETTLE_END) / (T_DRIFT_END - T_SETTLE_END);
-                    // Ease-in-cubic: accelerates toward the score panel.
                     let pt = local * local * local;
                     (1.0, 1.0, pt, LIFT_DRIFT)
                 } else {
@@ -150,8 +172,6 @@ impl ScorePopupSystem {
                 let mut color = p.color;
                 color[3] *= alpha;
 
-                // Light emissive ramps with the birth pop and decays as the
-                // popup drifts so the freshly-spawned label catches the eye.
                 let emissive = if t < T_BIRTH_END {
                     1.0
                 } else if t < T_SETTLE_END {
@@ -163,14 +183,66 @@ impl ScorePopupSystem {
                 ExtrudedGlyphPlacement {
                     world_pos: [px, py, LIFT_BASE + lift_extra],
                     scale: p.base_scale * scale_mul,
-                    rotation_x: 0.18, // gentle rake toward the camera
+                    rotation_x: 0.18,
                     rotation_y: p.yaw,
                     label: p.label.clone(),
                     color,
                     emissive,
                 }
             })
-            .collect()
+            .collect();
+
+        // ── Accumulator labels ────────────────────────────────────────────
+        for acc in &self.accumulators {
+            let age = now.saturating_duration_since(acc.born_at).as_secs_f32();
+            let bump_age = now.saturating_duration_since(acc.last_bump).as_secs_f32();
+
+            // Birth: scale from 0 → 1 over ACCUM_BIRTH_SECS.
+            let birth_scale = if age < ACCUM_BIRTH_SECS {
+                let t = age / ACCUM_BIRTH_SECS;
+                (t * std::f32::consts::FRAC_PI_2).sin()
+            } else {
+                1.0
+            };
+
+            // Bump pulse: 1.0 → 1.18 → 1.0 over 0.15s after each value change.
+            let bump_scale = if bump_age < 0.15 {
+                let t = bump_age / 0.15;
+                1.0 + 0.18 * (1.0 - t) * (1.0 - t)
+            } else {
+                1.0
+            };
+
+            // Emissive flash on bump.
+            let emissive = if bump_age < 0.12 {
+                0.8
+            } else if bump_age < 0.3 {
+                0.8 * (1.0 - (bump_age - 0.12) / 0.18)
+            } else {
+                0.15
+            };
+
+            out.push(ExtrudedGlyphPlacement {
+                world_pos: [acc.pos.0, acc.pos.1, LIFT_BASE + 10.0],
+                scale: acc.base_scale * birth_scale * bump_scale,
+                rotation_x: 0.18,
+                rotation_y: 0.0,
+                label: acc.value_label.clone(),
+                color: acc.color,
+                emissive,
+            });
+        }
+
+        out
+    }
+}
+
+fn kind_color(kind: StepKind) -> [f32; 4] {
+    match kind {
+        StepKind::Chips => [0.62, 0.78, 1.0, 1.0],
+        StepKind::Mult => [1.0, 0.55, 0.55, 1.0],
+        StepKind::Gold => [0.95, 0.78, 0.25, 1.0],
+        StepKind::Final => [1.0, 0.92, 0.45, 1.0],
     }
 }
 

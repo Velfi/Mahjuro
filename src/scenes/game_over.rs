@@ -95,6 +95,9 @@ impl SceneBehavior for GameOverScene {
             rect: [0.0, 0.0, w, h],
             color: color::OBSIDIAN,
         });
+        if self.won {
+            frame.golden_dust();
+        }
         frame.text(TextLabel {
             rect: headline_rect,
             text: headline.to_string(),
