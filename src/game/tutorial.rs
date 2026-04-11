@@ -22,6 +22,8 @@ pub enum TutorialMilestone {
     FirstDiscard,
     FirstFullHand,
     FirstShopBuy,
+    /// First time the player presses Trigger to cash in a structure.
+    FirstTrigger,
 }
 
 /// First-encounter UI events that trigger a one-time contextual tooltip.
@@ -218,14 +220,17 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     // ── Lesson 1: Tiles & Pairs ───────────────────────────────────
     //
     // step_prompts indices (used by TutorialOverlay):
-    //   [0] no selection  [1] has selection
+    //   [0] no selection         → prompt selection
+    //   [1] has selection        → press Play to bank
+    //   [2] structure has melds  → press Trigger to score
     LessonDef {
         id: 1,
         flavor_text: "Every journey begins with a matching pair.",
-        intro_text: "Select two matching tiles, then press Play to score them. Reach the target score to clear the blind!",
+        intro_text: "Select two matching tiles and press Play to bank them, then press Trigger to score. Reach the target to clear the blind!",
         step_prompts: &[
             "Select two matching tiles.",
-            "Press Play to score your pair!",
+            "Press Play to bank your pair into the structure!",
+            "Press Trigger to cash in your structure and score!",
         ],
         allowed_sets: &[SetKind::Pair],
         discard_enabled: false,
@@ -239,18 +244,21 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         recap: &[
             "Pairs Unlocked",
             "Two identical tiles form a Pair \u{2014} the simplest meld. Example: [3m] [3m]",
-            "Pairs are worth fewer chips, but they\u{2019}re easy to find.",
+            "Play banks your melds. Press Trigger to cash in and score!",
         ],
     },
     // ── Lesson 2: Triplets ────────────────────────────────────────
-    //   [0] no selection  [1] has selection
+    //   [0] no selection         → prompt selection
+    //   [1] has selection        → press Play to bank
+    //   [2] structure has melds  → press Trigger to score
     LessonDef {
         id: 2,
         flavor_text: "Two is company. Three is power.",
-        intro_text: "Three matching tiles form a Triplet \u{2014} worth more than a pair!",
+        intro_text: "Three matching tiles form a Triplet \u{2014} worth more than a pair! Bank melds with Play, then Trigger to score.",
         step_prompts: &[
             "Find three identical tiles for a triplet.",
-            "Press Play to score!",
+            "Press Play to bank your meld!",
+            "Press Trigger to cash in your structure and score!",
         ],
         allowed_sets: &[SetKind::Pair, SetKind::Triplet, SetKind::Kong],
         discard_enabled: false,
@@ -268,15 +276,19 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         ],
     },
     // ── Lesson 3: Sequences ───────────────────────────────────────
-    //   [0] no selection  [1] has selection
-    //   [2] after scoring — Meld Guide hint
+    //   [0] no selection         → prompt selection
+    //   [1] has selection        → press Play to bank
+    //   [2] structure has melds  → press Trigger to score
+    //   [3] after scoring        → Meld Guide hint
+    //   [4] after opening guide  → acknowledgment
     LessonDef {
         id: 3,
         flavor_text: "The river flows in order.",
-        intro_text: "Three consecutive tiles in the same suit form a Sequence.",
+        intro_text: "Three consecutive tiles in the same suit form a Sequence. Bank melds with Play, then Trigger to score.",
         step_prompts: &[
             "Look for three tiles in a row \u{2014} like 2, 3, 4 of the same suit.",
-            "Press Play to score your sequence!",
+            "Press Play to bank your sequence!",
+            "Press Trigger to cash in and score!",
             "Now open the Pause menu and check the Meld Guide \u{2014} it\u{2019}s your pattern cheat sheet!",
             "Nice! The Meld Guide has every pattern you\u{2019}ll need. Keep scoring to beat this blind!",
         ],
@@ -303,15 +315,17 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     // ── Lesson 4: Discarding ──────────────────────────────────────
     //   [0] before first score, no selection — prompt discard
     //   [1] has selection + discards available — press Discard
-    //   [2] fallback — build melds and play
+    //   [2] fallback: has selection, no discards — press Play to bank
+    //   [3] structure has melds — press Trigger to score
     LessonDef {
         id: 4,
         flavor_text: "Let go of what doesn't serve you.",
-        intro_text: "Discard tiles you don't need to draw better ones from the wall.",
+        intro_text: "Discard tiles you don\u{2019}t need to draw better ones, then bank melds with Play and Trigger to score.",
         step_prompts: &[
             "The tile highlights are off now \u{2014} you\u{2019}ll spot patterns on your own! Select tiles that don\u{2019}t fit any meld, then press Discard.",
             "Press Discard to swap them for new tiles!",
-            "Build melds and press Play to score!",
+            "Good \u{2014} now build melds and press Play to bank them!",
+            "Press Trigger to cash in your structure and score!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -334,15 +348,19 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         ],
     },
     // ── Lesson 5: Chips × Mult ────────────────────────────────────
-    //   [0] before cascade — prompt play
-    //   [1] during cascade — watch breakdown
+    //   [0] no selection              → prompt play
+    //   [1] has selection             → press Play to bank
+    //   [2] structure has melds       → press Trigger to score
+    //   [3] during cascade            → watch breakdown
     LessonDef {
         id: 5,
         flavor_text: "The secret of every master: multiply your fortune.",
-        intro_text: "Watch the scoring breakdown \u{2014} your chips are multiplied for the final score!",
+        intro_text: "Bank your best melds with Play, then press Trigger \u{2014} watch the scoring cascade to see Chips \u{00d7} Mult!",
         step_prompts: &[
-            "Play a hand and watch the cascade closely.",
-            "Watch the scoring breakdown \u{2014} Chips \u{00d7} Mult! Next lesson, you\u{2019}ll unlock Yaku \u{2014} bonus patterns that boost your multiplier even further.",
+            "Build your best melds and press Play to bank them.",
+            "Press Play to bank your melds into the structure!",
+            "Press Trigger to cash in \u{2014} watch the cascade closely!",
+            "Chips \u{00d7} Mult \u{2014} that\u{2019}s your score! More melds banked = bigger multiplier. Next lesson: Yaku!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -360,23 +378,25 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         annotated_cascade: true,
         recap: &[
             "Scoring: Chips \u{00d7} Mult",
-            "Each meld adds chips. Your multiplier grows from meld quality.",
-            "Example: a Triplet gives 50 chips. At \u{00d7}2 mult, that\u{2019}s 100 points!",
+            "Bank melds with Play, then press Trigger to score them all at once.",
+            "More melds in the structure = bigger mult bonus. A Triplet gives 50 chips at \u{00d7}2 mult = 100 pts!",
             "Coming up: Yaku \u{2014} special patterns that multiply your score even more!",
         ],
     },
     // ── Lesson 6: FullHand & Yaku ─────────────────────────────────
-    //   [0] no selection  [1] has selection
-    //   [2] after scoring — yaku count hint
+    //   [0] no selection         → prompt selection
+    //   [1] has selection        → press Play to bank
+    //   [2] after scoring        → yaku count hint
+    //   [3] after Meld Guide     → acknowledgment
     LessonDef {
         id: 6,
         flavor_text: "A complete hand opens every door.",
-        intro_text: "Keep scoring pairs, triplets, and sequences to beat the blind. If you use all 14 tiles as 4 melds + 1 pair, you\u{2019}ll trigger FullHand \u{2014} a big multiplier bonus!",
+        intro_text: "Bank melds with Play and Trigger to score. If you bank all 14 tiles as 4 melds + 1 pair, you\u{2019}ll trigger FullHand \u{2014} a big multiplier bonus!",
         step_prompts: &[
-            "Score pairs, triplets, and sequences. Try for 4 melds + 1 pair to get FullHand!",
-            "Press Play to score! The white tags that appear are yaku \u{2014} bonus patterns that boost your mult.",
+            "Bank pairs, triplets, and sequences. Try for 4 melds + 1 pair to get FullHand!",
+            "Press Play to bank! The white tags at Trigger time are yaku \u{2014} bonus patterns that boost your mult.",
             "FullHand is just one yaku \u{2014} check the Meld Guide (Pause menu) for all 13!",
-            "Great \u{2014} the Meld Guide lists all 13 yaku. Keep scoring to beat this blind!",
+            "Great \u{2014} the Meld Guide lists all 13 yaku. Keep banking and scoring to beat this blind!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -399,14 +419,14 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         ],
     },
     // ── Lesson 7: Honors & Yakuhai ────────────────────────────────
-    //   [0] no selection  [1] has selection
+    //   [0] no selection  [1] has selection → press Play to bank
     LessonDef {
         id: 7,
         flavor_text: "Wind and dragon bow to no suit.",
         intro_text: "Honor tiles (Winds & Dragons) are like face cards in poker \u{2014} there are fewer of them, but they\u{2019}re worth more. A dragon or wind triplet triggers the Yakuhai yaku!",
         step_prompts: &[
             "Look for Wind or Dragon tiles \u{2014} rare but powerful. A triplet triggers Yakuhai!",
-            "Press Play to score!",
+            "Press Play to bank your melds, then Trigger to score!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -430,14 +450,14 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         ],
     },
     // ── Lesson 8: The Shop ────────────────────────────────────────
-    //   [0] no selection (gameplay)  [1] has selection (gameplay)
+    //   [0] no selection (gameplay)  [1] has selection → press Play to bank
     LessonDef {
         id: 8,
         flavor_text: "Gold well spent returns tenfold.",
         intro_text: "Beat this blind to reach the Shop! You\u{2019}ll spend gold on Relics that boost your scoring.",
         step_prompts: &[
-            "Beat this blind to reach the Shop \u{2014} build your best melds!",
-            "Press Play to score and earn gold for the Shop!",
+            "Beat this blind to reach the Shop \u{2014} bank your best melds!",
+            "Press Play to bank, then Trigger to score and earn gold for the Shop!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -508,7 +528,7 @@ pub fn failure_feedback(
     // Prioritize the most actionable feedback.
     if plays_remaining > 0 {
         return format!(
-            "You scored {} / {} ({}%) but had {} play{} left! Try to use every play.",
+            "You scored {} / {} ({}%) but had {} play{} left! Bank more melds with Play, then Trigger to cash in.",
             round_score,
             target_score,
             score_pct,

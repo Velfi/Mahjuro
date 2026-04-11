@@ -1235,6 +1235,10 @@ impl ApplicationHandler for App {
                                     "First Relic!",
                                     "Relics power up your scoring for the rest of the run.",
                                 ),
+                                TutorialMilestone::FirstTrigger => (
+                                    "First Trigger!",
+                                    "Structure cashed in \u{2014} bank more melds to multiply your score!",
+                                ),
                             };
                             let win_size = self
                                 .window
