@@ -26,6 +26,14 @@ pub struct GameMode {
     /// gameplay bonuses (e.g. Plastic grants +1 discard).
     #[serde(default)]
     pub tile_material: TileMaterial,
+    /// When true (default), valid plays commit melds into the structure bank
+    /// until cash-in. When false, each play scores immediately (classic).
+    #[serde(default = "default_structure_bank")]
+    pub structure_bank: bool,
+}
+
+fn default_structure_bank() -> bool {
+    true
 }
 
 impl GameMode {
@@ -50,6 +58,7 @@ impl GameMode {
             starting_yaku: vec![],
             consumable_capacity: 0,
             tile_material: TileMaterial::Bamboo,
+            structure_bank: true,
         }
     }
 
@@ -87,6 +96,7 @@ impl GameMode {
             starting_yaku: crate::core::yaku::YakuKind::all().to_vec(),
             consumable_capacity: 2,
             tile_material: material,
+            structure_bank: true,
         }
     }
 }

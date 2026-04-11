@@ -63,6 +63,8 @@ pub enum GameEvent {
     /// A single hand scored at least the entire blind target — candles
     /// flare up and sparks fly.
     CandleFlare,
+    /// Melds were committed into the structure (mirror).
+    StructureCommitted,
     /// Tutorial milestone celebration (first pair, first triplet, etc.).
     TutorialMilestone(crate::game::tutorial::TutorialMilestone),
 }

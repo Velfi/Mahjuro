@@ -44,6 +44,8 @@ pub enum SfxId {
     CandleFlareWhoosh,
     /// Heavy impact sting layered on top of the whoosh.
     CandleFlareImpact,
+    /// Melds locked into the structure bank (distinct from [`Self::TilePlace`]).
+    StructureCommit,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -72,6 +74,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::ZodiacLevelUp,
         SfxId::CandleFlareWhoosh,
         SfxId::CandleFlareImpact,
+        SfxId::StructureCommit,
     ]
 }
 
@@ -100,6 +103,7 @@ impl SfxId {
             SfxId::ZodiacLevelUp => "zodiac_jingle.ogg",
             SfxId::CandleFlareWhoosh => "candle_flareup.ogg",
             SfxId::CandleFlareImpact => "candle_impact.ogg",
+            SfxId::StructureCommit => "kenney_interface-sounds/Audio/confirmation_002.ogg",
         }
     }
 }

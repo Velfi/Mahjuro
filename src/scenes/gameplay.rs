@@ -1,5 +1,7 @@
 //! Gameplay scene — the main tile-playing loop.
 
+mod action_bar_layout;
+
 use std::time::Instant;
 
 use crate::core::hand::suggest_completions;
@@ -8,7 +10,10 @@ use crate::core::yaku::yaku_preview;
 use crate::game::cascade::ScoringCascade;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
-use crate::render::draw_cmd::{CascadeTokenKind, DrawCmd, UiFrame};
+use crate::render::draw_cmd::{
+    CascadeTokenKind, CascadeTokenPlacement, DrawCmd, ShowcaseTilePlacement, UiFrame,
+};
+use crate::render::table_space::TableAnchorPx;
 use crate::render::falling_bones::FallingBoneSystem;
 use crate::render::flying_coins::FlyingCoinSystem;
 use crate::render::particles::ParticleSystem;
@@ -22,6 +27,8 @@ use crate::ui::widget::{self, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+
+use action_bar_layout::{action_hud_world_z_py_nudge, compute_action_bar, ActionBarLayout};
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
@@ -59,7 +66,10 @@ impl CandleState {
 enum GameplayButton {
     SortSuit,
     SortRank,
+    /// Commit selected melds into the structure (mirror).
     Play,
+    /// Cash in structure for score (wood tablet above mirror).
+    Trigger,
     Discard,
     /// Yaku Journal book — focusable so keyboard / controller players can
     /// reach the journal without a mouse. Has no `UiAction` analogue
@@ -105,7 +115,7 @@ const ALL_BUTTONS: [GameplayButton; 5] = [
     GameplayButton::SortRank,
     GameplayButton::Discard,
     GameplayButton::Play,
-    GameplayButton::Journal,
+    GameplayButton::Trigger,
 ];
 
 impl GameplayButton {
@@ -118,6 +128,7 @@ impl GameplayButton {
             GameplayButton::SortSuit => UiAction::SortBySuit,
             GameplayButton::SortRank => UiAction::SortByRank,
             GameplayButton::Play => UiAction::ScoreHand,
+            GameplayButton::Trigger => UiAction::TriggerStructure,
             GameplayButton::Discard => UiAction::CommitDiscard,
             GameplayButton::Journal => return None,
         })
@@ -175,12 +186,9 @@ pub struct GameplayScene {
     pending_refill: Option<Instant>,
     /// Latest cursor position (window coords), captured each update for hover tooltips.
     cursor_pos: (f32, f32),
-    /// Animated state for the ambient candles flanking the play area. The
-    /// first four are the original score-panel + hand-strip lanterns; the
-    /// fifth is a "footlight" candle in front of the camera that lights the
-    /// bottom row of yaku tablets and action buttons.
+    /// Score panel (2) + hand strip — upper pair (2) + lower pair (2) + footlight (1).
     /// Updated every frame; consumed in `draw()` to position flames + lights.
-    candles: [CandleState; 5],
+    candles: [CandleState; 7],
     /// Wall-clock time used to advance candle flicker (independent of the
     /// game's `Instant::now()` references so the candles keep moving even if
     /// the game logic is paused).
@@ -233,6 +241,10 @@ pub struct GameplayScene {
     /// alpha, and point-light brightness so the scene fades in via the
     /// candles "sparking on" rather than a smoke curtain.
     light_ramp: f32,
+    /// Wall time of the deal that started the ramp. Kept until `light_ramp`
+    /// reaches 1.0 so clearing `last_deal_at` after the opening wind (smoke)
+    /// cannot strand the ramp mid-way when wind ends before ~1.1s.
+    light_ramp_anchor: Option<Instant>,
     /// Debug-only: when true, the renderer overlays world-axes bars at the
     /// camera target so we can see which direction is +X / +Y / +Z while
     /// dialing in placements. Toggled from the native Debug menu.
@@ -344,14 +356,13 @@ impl GameplayScene {
             pending_departures: Vec::new(),
             pending_refill: None,
             cursor_pos: (0.0, 0.0),
-            // Five candles with golden-ratio spaced phases so their flicker
-            // never visually syncs up. Phases are in [0, TAU). The fifth
-            // entry drives the front-camera footlight candle.
             candles: [
                 CandleState::new(0.0),
                 CandleState::new(1.7),
                 CandleState::new(3.9),
                 CandleState::new(5.2),
+                CandleState::new(2.1),
+                CandleState::new(4.4),
                 CandleState::new(2.6),
             ],
             candle_time: 0.0,
@@ -366,12 +377,97 @@ impl GameplayScene {
             debug_wind_at: None,
             initial_smoke_fill_active: true,
             light_ramp: 0.0,
+            light_ramp_anchor: None,
             debug_show_axes: false,
             kiln_mode: false,
             kiln_picks_remaining: 0,
             candle_flare: 0.0,
             tutorial_overlay: None,
             tutorial_affinity_indices: Vec::new(),
+        }
+    }
+
+    /// Full scoring cascade + tutorial milestones after round score increases (commit autotrigger or manual trigger).
+    fn begin_scoring_cascade(&mut self, ctx: &mut UpdateCtx<'_>, score_before: u32, gained: u32) {
+        if gained == 0 {
+            self.displayed_score = ctx.run.round_score;
+            return;
+        }
+        if let Some(ref breakdown) = ctx.run.last_breakdown {
+            let set_kinds = breakdown.scored_set_kinds.clone();
+            let is_full_hand = ctx
+                .run
+                .available_yaku
+                .contains(&crate::core::yaku::YakuKind::FullHand)
+                && breakdown
+                    .detected_yaku
+                    .iter()
+                    .any(|y| *y == crate::core::yaku::YakuKind::FullHand);
+            if let Some(ref mut tutorial) = ctx.run.tutorial {
+                if tutorial.is_active() {
+                    if let Some(milestone) = crate::game::tutorial::milestone_for_sets(&set_kinds) {
+                        if tutorial.celebrate(milestone) {
+                            ctx.bus
+                                .push(crate::game::event_bus::GameEvent::TutorialMilestone(
+                                    milestone,
+                                ));
+                        }
+                    }
+                    if is_full_hand
+                        && tutorial
+                            .celebrate(crate::game::tutorial::TutorialMilestone::FirstFullHand)
+                    {
+                        ctx.bus
+                            .push(crate::game::event_bus::GameEvent::TutorialMilestone(
+                                crate::game::tutorial::TutorialMilestone::FirstFullHand,
+                            ));
+                    }
+                }
+            }
+        }
+        if gained >= ctx.run.target_score {
+            self.candle_flare = CANDLE_FLARE_PEAK;
+            ctx.bus.push(crate::game::event_bus::GameEvent::CandleFlare);
+        }
+        if let Some(breakdown) = ctx.run.last_breakdown.clone() {
+            if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
+                let use_tutorial_cascade = ctx.run.tutorial_annotated_cascade();
+                let tuning = if use_tutorial_cascade {
+                    crate::game::cascade::CascadeTuning::tutorial_slow()
+                } else {
+                    ctx.cascade_tuning.clone()
+                };
+                let mut cascade =
+                    ScoringCascade::with_tuning(breakdown, score_before, gained, tuning);
+                cascade.tutorial_annotated = use_tutorial_cascade;
+                if use_tutorial_cascade {
+                    if let Some(ref mut tut) = ctx.run.tutorial {
+                        tut.cascade_annotated = true;
+                    }
+                }
+                self.cascade = Some(cascade);
+                self.last_revealed_step = None;
+                self.cascade_final_emitted = false;
+                let sp = ctx.layout.score_panel;
+                let px = sp.x + sp.w * 0.5;
+                let py = sp.y + sp.h * 0.5;
+                let mag = (gained as f32).max(1.0).log2();
+                let count = ((16.0 + mag * 8.0) as usize).clamp(16, 128);
+                self.particles
+                    .explode(px, py, count, [1.0, 0.86, 0.32, 1.0], 1.1);
+                self.particles
+                    .explode(px, py, count / 3, [1.0, 0.97, 0.85, 1.0], 0.9);
+                if self.candle_flare > 0.0 {
+                    self.particles
+                        .explode(px, py, count * 2, [1.0, 0.55, 0.15, 1.0], 1.6);
+                    self.particles
+                        .explode(px, py, count, [1.0, 0.92, 0.55, 1.0], 1.3);
+                }
+            } else {
+                self.displayed_score = ctx.run.round_score;
+            }
+        } else {
+            self.displayed_score = ctx.run.round_score;
         }
     }
 }
@@ -460,6 +556,9 @@ impl SceneBehavior for GameplayScene {
         let cur_hand_len = ctx.run.hand.len();
         if cur_hand_len > self.prev_hand_len {
             self.last_deal_at = Some(now);
+            if self.light_ramp < 1.0 && self.light_ramp_anchor.is_none() {
+                self.light_ramp_anchor = Some(now);
+            }
         }
         self.prev_hand_len = cur_hand_len;
 
@@ -519,7 +618,13 @@ impl SceneBehavior for GameplayScene {
         if self.initial_smoke_fill_active {
             if let Some(deal_at) = self.last_deal_at {
                 let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
-                if elapsed >= self.wind_delay_secs + self.wind_duration_secs {
+                let wind_end = self.wind_delay_secs + self.wind_duration_secs;
+                let ramp_end = LIGHT_RAMP_DELAY_SECS + LIGHT_RAMP_DURATION_SECS;
+                // Do not clear `last_deal_at` until both the wind sweep and
+                // the candle light-ramp window have finished — otherwise
+                // `light_ramp` stops advancing (it keyed off `last_deal_at`)
+                // while still < 1 if wind tunings make `wind_end` < ~1.1s.
+                if elapsed >= wind_end.max(ramp_end) {
                     self.initial_smoke_fill_active = false;
                     // Clear `last_deal_at` so the opening deal doesn't
                     // fire a second wind gust at the *normal* delay
@@ -593,9 +698,11 @@ impl SceneBehavior for GameplayScene {
         }
 
         // Light ramp: candles start dark and spark on after the opening deal.
+        // Uses `light_ramp_anchor`, not `last_deal_at`, so the opening-smoke
+        // path can clear the latter without freezing brightness mid-ramp.
         if self.light_ramp < 1.0 {
-            if let Some(deal_at) = self.last_deal_at {
-                let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
+            if let Some(t0) = self.light_ramp_anchor {
+                let elapsed = now.saturating_duration_since(t0).as_secs_f32();
                 if elapsed > LIGHT_RAMP_DELAY_SECS {
                     let t = ((elapsed - LIGHT_RAMP_DELAY_SECS) / LIGHT_RAMP_DURATION_SECS)
                         .clamp(0.0, 1.0);
@@ -604,6 +711,9 @@ impl SceneBehavior for GameplayScene {
                     self.light_ramp = t * t;
                 }
             }
+        }
+        if self.light_ramp >= 1.0 {
+            self.light_ramp_anchor = None;
         }
 
         // Scene transition in progress — keep animations running but block
@@ -978,6 +1088,13 @@ impl SceneBehavior for GameplayScene {
                 self.focus = None;
             }
         }
+        if matches!(self.focus, Some(FocusTarget::Button(GameplayButton::Trigger))) {
+            let has_structure =
+                ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
+            if !has_structure {
+                self.focus = None;
+            }
+        }
 
         // Phase A: cursor-mode sync. When the player is using the mouse,
         // hover IS focus — overwrite `self.focus` each frame from the
@@ -1051,30 +1168,23 @@ impl SceneBehavior for GameplayScene {
                     let spatial = pick_neighbor(rect, dir, &focus_rects);
                     // Navigation overrides for the two-row action bar:
                     let overridden = match (self.focus, dir) {
-                        // LEFT from Mirror → Journal (skip the yaku row)
+                        // LEFT from Play (commit melds) → Discard
                         (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Left) => {
                             focus_rects
                                 .iter()
                                 .find(|(t, _)| {
-                                    matches!(t, FocusTarget::Button(GameplayButton::Journal))
+                                    matches!(t, FocusTarget::Button(GameplayButton::Discard))
                                 })
                                 .map(|(t, _)| *t)
                         }
-                        // RIGHT from Discard → yaku tablet if any, else SortSuit
+                        // RIGHT from Discard → Play (commit melds)
                         (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Right) => {
-                            let has_yaku = focus_rects
+                            focus_rects
                                 .iter()
-                                .any(|(t, _)| matches!(t, FocusTarget::YakuTablet(_)));
-                            if has_yaku {
-                                None // let spatial result stand
-                            } else {
-                                focus_rects
-                                    .iter()
-                                    .find(|(t, _)| {
-                                        matches!(t, FocusTarget::Button(GameplayButton::SortSuit))
-                                    })
-                                    .map(|(t, _)| *t)
-                            }
+                                .find(|(t, _)| {
+                                    matches!(t, FocusTarget::Button(GameplayButton::Play))
+                                })
+                                .map(|(t, _)| *t)
                         }
                         _ => None,
                     };
@@ -1137,7 +1247,7 @@ impl SceneBehavior for GameplayScene {
                         Some(FocusTarget::Button(GameplayButton::Journal)) => {
                             // Journal has no `UiAction`; toggle the
                             // overlay in-place. Mirrors the cursor-pick
-                            // path that special-cases `WoodTablet(2)`
+                            // path that special-cases the journal tablet index
                             // earlier in `update`.
                             self.journal.toggle();
                         }
@@ -1239,15 +1349,12 @@ impl SceneBehavior for GameplayScene {
                 continue;
             }
             use crate::render::wgpu_renderer::GameplayPick;
-            // WoodTablet(2) is the Journal book — pushed at the end of
-            // the action-row loop in `draw()` after the two sort tablets
-            // (the third action-row slot is now the bronze mirror, not a
-            // wood tablet). Click toggles the JournalOverlay; rest of
-            // update() bails out next frame because `journal.open` will be
-            // true.
+            let has_structure =
+                ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
+            let journal_tablet_i: usize = if has_structure { 3 } else { 2 };
             if matches!(
                 ctx.picked_gameplay_object,
-                Some(GameplayPick::WoodTablet(2))
+                Some(GameplayPick::WoodTablet(i)) if i == journal_tablet_i
             ) {
                 self.journal.toggle();
                 return None;
@@ -1255,6 +1362,9 @@ impl SceneBehavior for GameplayScene {
             let action = match ctx.picked_gameplay_object {
                 Some(GameplayPick::WoodTablet(0)) => Some(UiAction::SortBySuit),
                 Some(GameplayPick::WoodTablet(1)) => Some(UiAction::SortByRank),
+                Some(GameplayPick::WoodTablet(2)) if has_structure => {
+                    Some(UiAction::TriggerStructure)
+                }
                 Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
                 Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
                 _ => None,
@@ -1341,137 +1451,49 @@ impl SceneBehavior for GameplayScene {
             match a {
                 UiAction::ScoreHand => {
                     let had_selection = ctx.run.selected_count() > 0;
+                    let bank_before = ctx.run.structure_banked_meld_chips();
+                    let round_before = ctx.run.round_score;
                     let score_before = ctx.run.round_score;
-                    let pts = ctx.run.score_selected_tiles(ctx.bus);
+                    let step = ctx.run.score_selected_tiles(ctx.bus);
+                    let gained = ctx.run.round_score.saturating_sub(round_before);
 
-                    if pts == 0 && had_selection {
-                        // Invalid hand — shake feedback.
+                    if step == 0 && had_selection {
                         ctx.anim
                             .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
-                    } else {
+                    } else if gained > 0 {
                         ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                        self.begin_scoring_cascade(&mut ctx, score_before, gained);
+                    } else if step > 0 {
+                        ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
+                        let bank_after = ctx.run.structure_banked_meld_chips();
+                        let d = bank_after.saturating_sub(bank_before);
+                        if d > 0 {
+                            let sp = ctx.layout.score_panel;
+                            let px = sp.x + sp.w * 0.5;
+                            let py = sp.y + sp.h * 0.5 + 40.0;
+                            self.score_popups.spawn(
+                                format!("+{d} structure chips"),
+                                (px, py),
+                                (px, py - 48.0),
+                                StepKind::Chips,
+                                d as f32,
+                            );
+                        }
                     }
-
-                    if pts > 0 {
-                        // Tutorial: detect milestones and push celebration events.
-                        if let Some(ref breakdown) = ctx.run.last_breakdown {
-                            let set_kinds = breakdown.scored_set_kinds.clone();
-                            // Check for FullHand milestone.
-                            let is_full_hand = ctx
-                                .run
-                                .available_yaku
-                                .contains(&crate::core::yaku::YakuKind::FullHand)
-                                && breakdown
-                                    .detected_yaku
-                                    .iter()
-                                    .any(|y| *y == crate::core::yaku::YakuKind::FullHand);
-                            if let Some(ref mut tutorial) = ctx.run.tutorial {
-                                if tutorial.is_active() {
-                                    // Celebrate first meld type.
-                                    if let Some(milestone) =
-                                        crate::game::tutorial::milestone_for_sets(&set_kinds)
-                                    {
-                                        if tutorial.celebrate(milestone) {
-                                            ctx.bus.push(
-                                                crate::game::event_bus::GameEvent::TutorialMilestone(milestone),
-                                            );
-                                        }
-                                    }
-                                    // Celebrate first FullHand.
-                                    if is_full_hand
-                                        && tutorial.celebrate(
-                                            crate::game::tutorial::TutorialMilestone::FirstFullHand,
-                                        )
-                                    {
-                                        ctx.bus.push(
-                                            crate::game::event_bus::GameEvent::TutorialMilestone(
-                                                crate::game::tutorial::TutorialMilestone::FirstFullHand,
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        // If this single hand scored at least the entire
-                        // blind target, flare the candles up dramatically.
-                        if pts >= ctx.run.target_score {
-                            self.candle_flare = CANDLE_FLARE_PEAK;
-                            ctx.bus.push(crate::game::event_bus::GameEvent::CandleFlare);
-                        }
-                        if let Some(breakdown) = ctx.run.last_breakdown.clone() {
-                            if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
-                                // Tutorial lesson 5: use slow-mo annotated cascade.
-                                let use_tutorial_cascade = ctx.run.tutorial_annotated_cascade();
-                                let tuning = if use_tutorial_cascade {
-                                    crate::game::cascade::CascadeTuning::tutorial_slow()
-                                } else {
-                                    ctx.cascade_tuning.clone()
-                                };
-                                let mut cascade = ScoringCascade::with_tuning(
-                                    breakdown,
-                                    score_before,
-                                    pts,
-                                    tuning,
-                                );
-                                cascade.tutorial_annotated = use_tutorial_cascade;
-                                // Mark annotated cascade as shown so it only
-                                // fires once per lesson.
-                                if use_tutorial_cascade {
-                                    if let Some(ref mut tut) = ctx.run.tutorial {
-                                        tut.cascade_annotated = true;
-                                    }
-                                }
-                                self.cascade = Some(cascade);
-                                self.last_revealed_step = None;
-                                self.cascade_final_emitted = false;
-                                // Emit particles on successful score.
-                                let sp = ctx.layout.score_panel;
-                                let px = sp.x + sp.w * 0.5;
-                                let py = sp.y + sp.h * 0.5;
-                                // Particle count scales with the magnitude of
-                                // the hand. Log curve so a tiny pair still gets
-                                // a meaningful burst and a 50,000-point hand
-                                // really erupts. `explode()` produces big
-                                // chunky shards with a strong upward kick — a
-                                // firework, not a polite puff. Layered
-                                // two-colour bursts (warm gold core + smaller
-                                // white-hot shower) give the explosion depth.
-                                let mag = (pts as f32).max(1.0).log2();
-                                let count = ((16.0 + mag * 8.0) as usize).clamp(16, 128);
-                                self.particles
-                                    .explode(px, py, count, [1.0, 0.86, 0.32, 1.0], 1.1);
-                                self.particles.explode(
-                                    px,
-                                    py,
-                                    count / 3,
-                                    [1.0, 0.97, 0.85, 1.0],
-                                    0.9,
-                                );
-                                // Blind-breaker bonus sparks: extra ember
-                                // showers that linger longer so the whole
-                                // screen feels lit up by the candle flare.
-                                if self.candle_flare > 0.0 {
-                                    self.particles.explode(
-                                        px,
-                                        py,
-                                        count * 2,
-                                        [1.0, 0.55, 0.15, 1.0],
-                                        1.6,
-                                    );
-                                    self.particles.explode(
-                                        px,
-                                        py,
-                                        count,
-                                        [1.0, 0.92, 0.55, 1.0],
-                                        1.3,
-                                    );
-                                }
-                                // displayed_score will be driven by cascade
-                            } else {
-                                self.displayed_score = ctx.run.round_score;
-                            }
+                }
+                UiAction::TriggerStructure => {
+                    if !ctx.run.uses_structure_bank() {
+                        // Classic mode: plays score on commit; no cash-in action.
+                    } else {
+                        let score_before = ctx.run.round_score;
+                        let earned = ctx.run.trigger_structure_manual(ctx.bus);
+                        let gained = ctx.run.round_score.saturating_sub(score_before);
+                        if earned == 0 {
+                            ctx.anim
+                                .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
                         } else {
-                            self.displayed_score = ctx.run.round_score;
+                            ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                            self.begin_scoring_cascade(&mut ctx, score_before, gained);
                         }
                     }
                 }
@@ -1518,6 +1540,7 @@ impl SceneBehavior for GameplayScene {
                 !matches!(
                     a,
                     UiAction::ScoreHand
+                        | UiAction::TriggerStructure
                         | UiAction::SortBySuit
                         | UiAction::SortByRank
                         | UiAction::CommitDiscard
@@ -1705,9 +1728,24 @@ impl SceneBehavior for GameplayScene {
         } else {
             String::new()
         };
+        let structure_hud = if !run.structure_sets.is_empty() {
+            format!(
+                "   Structure: chip stack {} · mult pressure {}",
+                run.structure_chip_pile_tier(),
+                run.structure_mult_pile_tier()
+            )
+        } else {
+            String::new()
+        };
         let score_text_bot = format!(
-            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}{}",
-            run.gold, tiles_left, wind_label, shanten_text, dora_section, peek_section
+            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}{}{}",
+            run.gold,
+            tiles_left,
+            wind_label,
+            shanten_text,
+            dora_section,
+            peek_section,
+            structure_hud
         );
         // Captured for the hanging plaque cmd built later in `frame.cmds`.
         // The plaque carries the same two-line payload as a per-instance
@@ -1809,84 +1847,96 @@ impl SceneBehavior for GameplayScene {
         // relic row is rendered in the gameplay scene anymore.
         let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
-        // Bottom button bar.  The sort tablets, discard bowl, and bronze
-        // mirror are 3D objects whose visual size comes from the renderer —
-        // the 2D rects here are hit-test anchors and placement guides, so
-        // they use the base resolution scale without the UI scale boost.
-        // Text readability is handled by the typography system separately.
-        let scale = (layout.window_w.min(layout.window_h)) / 600.0 * ctx.ui_scale;
+        // Bottom button bar: sort tablets, discard bowl, bronze mirror — see
+        // [`action_bar_layout`] for spacing, lift, and rects.
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
-        let btn_w = (120.0 * layout_scale).max(60.0);
-        let btn_h = (32.0 * layout_scale).max(20.0);
-        let btn_gap = 12.0 * layout_scale;
         let selected_count = run.selected_count();
         let selection_valid = run.is_selection_valid();
-        // The yaku tablet panel keeps its old "4 buttons wide" container so
-        // the active-yaku row stays roomy when 1-3 cards are visible. The
-        // bottom action row now only holds the two sort tablets — the
-        // discard bowl and bronze mirror have been promoted up to flank
-        // the yaku panel on the table felt, where they read as the
-        // physical "throw away" / "play" gestures rather than as buttons
-        // jammed into the chrome strip.
-        let container_w = (btn_w * 4.0 + btn_gap * 3.0).min(layout.window_w * 0.92);
-        let container_x = (layout.window_w - container_w) * 0.5;
-        let btn_y = layout.window_h - btn_h - (12.0 * layout_scale);
 
-        // Bottom row: just the two sort tablets, centered on the screen.
-        let sort_container_w = btn_w * 2.0 + btn_gap;
-        let sort_container_x = (layout.window_w - sort_container_w) * 0.5;
-        let suit_btn_rect = (sort_container_x, btn_y, btn_w, btn_h);
-        let rank_btn_rect = (sort_container_x + btn_w + btn_gap, btn_y, btn_w, btn_h);
-
-        // Bowl + mirror are positioned in the *yaku row* — at the same
-        // vertical level as the bone yaku tablets — flanking the yaku
-        // panel on the left and right. Their click rects (`discard_btn_rect`
-        // / `play_btn_rect`) are sized to match the bowl/mirror diameter
-        // so the focus rect graph + spatial nav land on the visible
-        // object instead of an invisible button-shaped slot.
+        // Bowl + mirror: own row below the hand tile slots, above sort+journal
+        // (discard left, play right within the centered playfield). Click rects
+        // match diameter.
         //
-        // The yaku panel geometry below is *recomputed* in the
-        // `visible_previews.is_empty()` branch — we duplicate just enough
-        // here (panel_h + panel_y + a panel_gap) to keep the bowl/mirror
-        // anchored to the same vertical band even when the yaku panel is
-        // empty (so they don't snap up/down as the player selects tiles
-        // and active yaku appear / disappear).
-        let yaku_panel_h = (66.0 * layout_scale).max(48.0).min(layout.window_h * 0.20);
+        // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
+        // row, then sort + journal.
+        let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
         let yaku_panel_gap = 8.0 * layout_scale;
-        let yaku_panel_y = (btn_y - yaku_panel_h - yaku_panel_gap).max(4.0);
-        let bowl_diam = (yaku_panel_h * 2.4).min(layout.window_h * 0.18);
-        // Inset the bowl + mirror *inside* the yaku panel's horizontal
-        // span so they overlap the panel edges instead of floating off in
-        // the table corners. Combined with the forward push below this
-        // reads as the bowl/mirror sitting in front of the yaku tablets
-        // rather than alongside them.
-        let bowl_inset = bowl_diam * 0.30;
-        // Push the bowl/mirror toward the camera by sliding them down in
-        // pixel-y. In `pixel_to_world` higher pixel_y = closer to the
-        // camera (the front of the table), so adding a fraction of the
-        // yaku panel height bumps them downstage of the yaku row.
-        let bowl_forward_push = yaku_panel_h * 0.55;
-        let bowl_cy = yaku_panel_y + yaku_panel_h * 0.5 + bowl_forward_push;
-        let bowl_cx = (container_x + bowl_inset - bowl_diam * 0.5).max(bowl_diam * 0.5 + 4.0);
-        let mirror_cx = (container_x + container_w - bowl_inset + bowl_diam * 0.5)
-            .min(layout.window_w - bowl_diam * 0.5 - 4.0);
-        let mirror_cy = bowl_cy;
-        // Synthesize square click rects centered on the bowl / mirror.
-        // Downstream the placement loop reads `bw, bh` from these rects to
-        // size + center the meshes — square rects keep `bw.min(bh * 2.4)`
-        // collapsing to the bowl diameter.
-        let discard_btn_rect = (
-            bowl_cx - bowl_diam * 0.5,
-            bowl_cy - bowl_diam * 0.5,
-            bowl_diam,
-            bowl_diam,
+        let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
+        let structure_tag_h = if has_structure {
+            (17.0 * layout_scale).max(14.0)
+        } else {
+            0.0
+        };
+        let structure_meld_h = if has_structure {
+            (46.0 * layout_scale).max(38.0)
+        } else {
+            0.0
+        };
+        let structure_pad = if has_structure {
+            (5.0 * layout_scale).max(3.0)
+        } else {
+            0.0
+        };
+        let structure_block_h = if has_structure {
+            structure_tag_h + structure_meld_h + structure_pad
+        } else {
+            0.0
+        };
+        // Cassowary hand slots span almost the entire lower window (below the relic strip).
+        // HUD (yaku, structure) uses [`HAND_HUD_STACK_Y_FRAC`] — higher on screen than the mesh
+        // anchor in `wgpu_renderer` — so panels clear the physical rack.
+        let (_slot_x, slot_y, _slot_w, slot_h) = hand_slots.first().copied().unwrap_or((
+            0.0,
+            layout.hand_strip.y,
+            100.0,
+            layout.hand_strip.h,
+        ));
+        let tile_center_y = slot_y + slot_h * crate::ui::layout::HAND_HUD_STACK_Y_FRAC;
+        let clear_above_tiles = (34.0 * layout_scale).max(26.0);
+        let band_top_above_tiles = (tile_center_y - clear_above_tiles).max(4.0);
+        let min_yaku_y = layout.modifier_strip.y + layout.modifier_strip.h + (4.0 * layout_scale);
+        // Stack upward from the hand: yaku row anchors just above the tile
+        // band; structure strip sits above the yaku row (smaller y).
+        let mut yaku_row_y = band_top_above_tiles - yaku_panel_h;
+        let mut structure_strip_top = if has_structure {
+            yaku_row_y - yaku_panel_gap - structure_block_h
+        } else {
+            band_top_above_tiles
+        };
+        if yaku_row_y < min_yaku_y {
+            yaku_row_y = min_yaku_y;
+            if has_structure {
+                structure_strip_top = yaku_row_y - yaku_panel_gap - structure_block_h;
+            }
+        }
+        if has_structure && structure_strip_top < min_yaku_y {
+            let deficit = min_yaku_y - structure_strip_top;
+            structure_strip_top += deficit;
+            yaku_row_y += deficit;
+        }
+        let ab = compute_action_bar(
+            layout,
+            &hand_slots,
+            layout_scale,
+            ctx.ui_scale,
+            has_structure,
+            structure_strip_top,
+            structure_tag_h,
+            structure_meld_h,
         );
-        let play_btn_rect = (
-            mirror_cx - bowl_diam * 0.5,
-            mirror_cy - bowl_diam * 0.5,
-            bowl_diam,
-            bowl_diam,
-        );
+        let ActionBarLayout {
+            scale,
+            container_w,
+            container_x,
+            suit_btn_rect,
+            rank_btn_rect,
+            discard_btn_rect,
+            play_btn_rect,
+            trigger_btn_rect,
+            action_hud_table_lift,
+            ..
+        } = ab;
+        let action_world_z_py = action_hud_world_z_py_nudge(layout_scale);
 
         // ── Frame accumulators ───────────────────────────────────────────
         //
@@ -1894,9 +1944,8 @@ impl SceneBehavior for GameplayScene {
         // and pushes them into the final `UiFrame` at the end of this
         // function in canonical order:
         //
-        //   1. PERSISTENT HUD (`hud_quads` + `hud_text`) — score panel,
-        //      yaku cards, button bar, zodiac slots, particles, help
-        //      badge. Lives between the 3D backdrop and the
+        //   1. PERSISTENT HUD (`hud_quads` + optional `hud_text`) — particles,
+        //      etc. Lives between the 3D backdrop and the
         //      `HandTileFaces` marker so tile faces read on top of HUD
         //      panels they overlap.
         //
@@ -1915,6 +1964,8 @@ impl SceneBehavior for GameplayScene {
         // persistent text — they're a separate downstream batch.
         let mut hud_quads: Vec<GpuInstance> = Vec::new();
         let hud_text: Vec<TextLabel> = Vec::new();
+        let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
+        let mut structure_pile_tokens: Vec<CascadeTokenPlacement> = Vec::new();
         let mut hover_quads: Vec<GpuInstance> = Vec::new();
         let mut hover_text: Vec<TextLabel> = Vec::new();
 
@@ -1947,6 +1998,86 @@ impl SceneBehavior for GameplayScene {
                 .as_ref()
                 .map(|(sets, tiles)| (sets.as_slice(), tiles.as_slice())),
         );
+
+        // Structure strip: 3D committed melds + tier tokens only (no 2D mat/tags).
+        // Laid out above `yaku_row_y` (see hand_slots / band_top_above_tiles).
+        if has_structure {
+            let pad = (8.0 * layout_scale).max(6.0);
+            let intra_gap = (3.0 * layout_scale).max(2.0);
+            let inter_gap = (10.0 * layout_scale).max(7.0);
+            let total_tiles: usize = run.structure_sets.iter().map(|s| s.tile_ids.len()).sum();
+            let intra_count: usize = run
+                .structure_sets
+                .iter()
+                .map(|s| s.tile_ids.len().saturating_sub(1))
+                .sum();
+            let inter_count = run.structure_sets.len().saturating_sub(1);
+            let available_w = container_w
+                - pad * 2.0
+                - intra_count as f32 * intra_gap
+                - inter_count as f32 * inter_gap;
+            let n_t = total_tiles.max(1);
+            let tile_size = (available_w / n_t as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
+            let meld_top = structure_strip_top + structure_tag_h;
+            let center_py = meld_top + structure_meld_h * 0.5;
+            let mut x_cursor = container_x + pad;
+            for (mi, set) in run.structure_sets.iter().enumerate() {
+                for (ti, &tid) in set.tile_ids.iter().enumerate() {
+                    let Some(tile) = run.structure_tiles.iter().find(|t| t.id == tid).copied()
+                    else {
+                        continue;
+                    };
+                    let px = x_cursor + tile_size * 0.5;
+                    let lift = ti as f32 * 1.2 + mi as f32 * 0.15;
+                    structure_showcase.push(ShowcaseTilePlacement {
+                        tile,
+                        center_pos: [px, center_py, 3.0 + lift],
+                        rotation: [0.0, 0.0, 0.0],
+                        scale: 1.0,
+                        size_px: tile_size,
+                        brightness: 1.0,
+                        selected: false,
+                    });
+                    x_cursor += tile_size + intra_gap;
+                }
+                if mi + 1 < run.structure_sets.len() {
+                    x_cursor += inter_gap - intra_gap;
+                }
+            }
+
+            let chip_tier = run.structure_chip_pile_tier().min(5) as usize;
+            let mult_tier = run.structure_mult_pile_tier().min(4) as usize;
+            let (tr_x, tr_y, _tr_w, tr_h) = trigger_btn_rect;
+            let pill_w = (22.0 * layout_scale).max(18.0);
+            let pill_h = (16.0 * layout_scale).max(12.0);
+            let t_th = (pill_h * 0.35).max(4.0);
+            let gap_x = (8.0 * layout_scale).max(5.0);
+            let col_cx = (tr_x - gap_x - pill_w * 1.1).max(pill_w * 0.5 + 4.0);
+            let base_cy = tr_y + tr_h * 0.5;
+            for i in 0..chip_tier {
+                let lift = i as f32 * 2.0;
+                structure_pile_tokens.push(CascadeTokenPlacement {
+                    world_pos: [col_cx - pill_w * 0.55, base_cy - lift, 5.0 + lift * 0.08],
+                    extents: [pill_w * 0.5, t_th, pill_h * 0.5],
+                    kind: CascadeTokenKind::Chips,
+                    pulse: 0.35,
+                });
+            }
+            for i in 0..mult_tier {
+                let lift = i as f32 * 2.0;
+                structure_pile_tokens.push(CascadeTokenPlacement {
+                    world_pos: [
+                        col_cx + pill_w * 0.55 + gap_x,
+                        base_cy - lift,
+                        5.0 + lift * 0.08,
+                    ],
+                    extents: [pill_w * 0.5, t_th, pill_h * 0.5],
+                    kind: CascadeTokenKind::Mult,
+                    pulse: 0.35,
+                });
+            }
+        }
+
         // Captured during the loop below — `(yaku_kind, anchor_x, anchor_y)`
         // for the card the cursor is currently hovering, if any. The tooltip
         // is pushed into the *hover layer* after the loop completes so it
@@ -1978,9 +2109,8 @@ impl SceneBehavior for GameplayScene {
         let mut yaku_tablet_placements: Vec<crate::render::draw_cmd::YakuTabletPlacement> =
             Vec::new();
         if !visible_previews.is_empty() || is_chicken_hand {
-            let panel_h = (66.0 * layout_scale).max(48.0).min(layout.window_h * 0.20);
-            let panel_gap = 8.0 * layout_scale;
-            let panel_y = (btn_y - panel_h - panel_gap).max(4.0);
+            let panel_h = yaku_panel_h;
+            let panel_y = yaku_row_y;
             let panel_w = container_w;
             let panel_x = container_x;
             let tablet_count = if is_chicken_hand {
@@ -2134,11 +2264,11 @@ impl SceneBehavior for GameplayScene {
             rank_btn_rect,
             discard_btn_rect,
             play_btn_rect,
+            trigger_btn_rect,
         ];
         // Phase 4: action row is now physical objects.
         //   - Sort by Suit / Sort by Rank → carved wood tablets
-        //   - Discard                     → lacquered wood bowl (left)
-        //   - Play Hand                   → polished bronze mirror (right)
+        //   - Discard / Play              → bowl + mirror (row below hand, above sort)
         // The flat slate-blue button background quads are gone; only the
         // focus-highlight border remains as a 2D affordance for keyboard
         // navigation.
@@ -2146,9 +2276,15 @@ impl SceneBehavior for GameplayScene {
             Vec::new();
         let mut discard_bowl_placement: Option<crate::render::draw_cmd::BowlPlacement> = None;
         let mut bronze_mirror_placement: Option<crate::render::draw_cmd::MirrorPlacement> = None;
+        // `action_hud_table_lift`: third component of [`crate::render::draw_cmd::TableSurfaceAnchor`]
+        // (height above felt); set in [`action_bar_layout::compute_action_bar`].
         let play_enabled = selection_valid && run.plays_remaining > 0;
+        let trigger_enabled = run.can_trigger_structure_now();
         let discard_enabled = selected_count > 0 && run.discards_remaining > 0;
         for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
+            if i == 4 && !has_structure {
+                continue;
+            }
             // Register this button in the focus rect graph so the unified
             // focus model can navigate to it spatially.
             // Anchor the focus hit-test on the renderer's projected mesh
@@ -2164,6 +2300,7 @@ impl SceneBehavior for GameplayScene {
                 GameplayButton::SortRank => ctx.proj.wood_tablet_rects.get(1).copied(),
                 GameplayButton::Discard => ctx.proj.bowl_rect,
                 GameplayButton::Play => ctx.proj.mirror_rect,
+                GameplayButton::Trigger => ctx.proj.wood_tablet_rects.get(2).copied(),
                 // Pushed separately alongside the journal placement
                 // block further down — its slot index in the wood
                 // tablet rect vec isn't known until then.
@@ -2208,6 +2345,12 @@ impl SceneBehavior for GameplayScene {
                         Some(crate::render::wgpu_renderer::GameplayPick::BronzeMirror),
                     ) || focused_btn == Some(GameplayButton::Play)
                 }
+                4 => {
+                    matches!(
+                        pick,
+                        Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(2)),
+                    ) || focused_btn == Some(GameplayButton::Trigger)
+                }
                 _ => false,
             };
             // The per-button focus highlight is gone — the unified focus
@@ -2215,6 +2358,11 @@ impl SceneBehavior for GameplayScene {
             // at the end of `draw_frame` via `push_focus_ring`.
             let center_px = bx + bw * 0.5;
             let center_py = by + bh * 0.5;
+            let action_anchor = TableAnchorPx {
+                px: center_px,
+                py: center_py + action_world_z_py,
+                lift_y: action_hud_table_lift,
+            };
             let tablet_thickness = (bh * 0.35).max(8.0);
             match i {
                 0 | 1 => {
@@ -2224,7 +2372,7 @@ impl SceneBehavior for GameplayScene {
                     };
                     let _tablet_idx = wood_tablet_placements.len();
                     wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
-                        world_pos: [center_px, center_py, 0.0],
+                        world_pos: action_anchor.to_draw_cmd_triple(),
                         extents: [bw, tablet_thickness, bh],
                         label: label.to_string(),
                         pressed: 0.0,
@@ -2237,8 +2385,8 @@ impl SceneBehavior for GameplayScene {
                     // via a per-instance decal texture — no 2D overlay.
                 }
                 2 => {
-                    // Discard bowl — flanks the yaku tablet panel on the
-                    // far left of the table felt. The synthesized
+                    // Discard bowl — left side of the discard/play row under the rack.
+                    // The synthesized
                     // `discard_btn_rect` above is already a square sized to
                     // the desired bowl diameter and centered at the
                     // (bowl_cx, bowl_cy) anchor, so we just read the rect
@@ -2255,7 +2403,7 @@ impl SceneBehavior for GameplayScene {
                     let target = if hovered && discard_enabled { 1.0 } else { 0.0 };
                     let diam = bw.min(bh);
                     discard_bowl_placement = Some(crate::render::draw_cmd::BowlPlacement {
-                        world_pos: [center_px, center_py, 0.0],
+                        world_pos: action_anchor.to_draw_cmd_triple(),
                         extents: [diam, diam, diam],
                         hover: target,
                     });
@@ -2278,8 +2426,7 @@ impl SceneBehavior for GameplayScene {
                     }
                 }
                 3 => {
-                    // Bronze mirror — flanks the yaku tablet panel on the
-                    // far right, mirror image of the bowl on the left.
+                    // Bronze mirror — right side of that same row (paired with the bowl).
                     // Same square `play_btn_rect` convention as the bowl,
                     // and the same binary-target → renderer-eased envelope
                     // pattern. The renderer's `mirror_hover_anim` field
@@ -2287,7 +2434,7 @@ impl SceneBehavior for GameplayScene {
                     let target = if hovered && play_enabled { 1.0 } else { 0.0 };
                     let diam = bw.min(bh);
                     bronze_mirror_placement = Some(crate::render::draw_cmd::MirrorPlacement {
-                        world_pos: [center_px, center_py, 0.0],
+                        world_pos: action_anchor.to_draw_cmd_triple(),
                         extents: [diam, diam, diam],
                         hover: target,
                     });
@@ -2297,9 +2444,38 @@ impl SceneBehavior for GameplayScene {
                     // fallback).
                     if let Some(r) = ctx.proj.mirror_rect.filter(|_| hovered) {
                         let label_h = (r[3] * 0.38).max(28.0);
+                        let mirror_label = if run.uses_structure_bank() {
+                            "Commit melds"
+                        } else {
+                            "Score hand"
+                        };
                         hover_text.push(TextLabel {
                             rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
-                            text: "Play hand".to_string(),
+                            text: mirror_label.to_string(),
+                            color: [1.0, 0.84, 0.40, 1.0],
+                            align: TextAlign::Center,
+                            no_glossary: true,
+                            ..Default::default()
+                        });
+                    }
+                }
+                4 => {
+                    let target = if hovered && trigger_enabled { 1.0 } else { 0.0 };
+                    let tablet_thickness = (bh * 0.35).max(8.0);
+                    let _tablet_idx = wood_tablet_placements.len();
+                    wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
+                        world_pos: action_anchor.to_draw_cmd_triple(),
+                        extents: [bw, tablet_thickness, bh],
+                        label: "Cash in".to_string(),
+                        pressed: 0.0,
+                        hover: target,
+                        disabled: !trigger_enabled,
+                    });
+                    if let Some(r) = ctx.proj.wood_tablet_rects.get(2).filter(|_| hovered) {
+                        let label_h = (r[3] * 0.38).max(28.0);
+                        hover_text.push(TextLabel {
+                            rect: [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h],
+                            text: "Cash in structure (T)".to_string(),
                             color: [1.0, 0.84, 0.40, 1.0],
                             align: TextAlign::Center,
                             no_glossary: true,
@@ -2315,12 +2491,11 @@ impl SceneBehavior for GameplayScene {
         // the existing wood-tablet pipeline + pick path so we don't have
         // to plumb a new mesh through the renderer just for the book.
         // Sits in the *bottom action row* to the right of the two sort
-        // tablets (the bowl + mirror moved up to flank the yaku panel,
-        // leaving room in the bottom row for the journal). Clicking it
+        // tablets (bowl/mirror sit in the row above). Clicking it
         // toggles the JournalOverlay — the click is dispatched in
-        // `update()` via `GameplayPick::WoodTablet(2)`, because after
-        // the layout swap only the two sort tablets occupy wood-tablet
-        // slots 0 and 1 and the journal lands in slot 2.
+        // `update()` via `GameplayPick::WoodTablet(journal_pick_idx)` —
+        // journal is slot 3 when the cash-in tablet is present (slot 2),
+        // otherwise slot 2 when there is no committed structure to cash in.
         let journal_pick_idx = wood_tablet_placements.len();
         // The journal "lights up" on either cursor pick or keyboard focus,
         // matching how the other action buttons treat hover. The
@@ -2348,7 +2523,12 @@ impl SceneBehavior for GameplayScene {
         let book_cx = desired_cx.min(max_cx);
         let book_thickness = (book_h * 0.45).max(8.0);
         wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
-            world_pos: [book_cx, book_cy, 0.0],
+            world_pos: TableAnchorPx {
+                px: book_cx,
+                py: book_cy + action_world_z_py,
+                lift_y: action_hud_table_lift,
+            }
+            .to_draw_cmd_triple(),
             extents: [book_w, book_thickness, book_h],
             label: "Journal".to_string(),
             pressed: 0.0,
@@ -2937,11 +3117,8 @@ impl SceneBehavior for GameplayScene {
         // this function, so it does not appear here.
 
         // ── Candles ─────────────────────────────────────────────────────
-        // Four ambient candles flank the play area: one on each side of the
-        // score panel up top, one on each side of the hand strip down below.
-        // Each candle pushes a 3D `CandlePlacement` (rendered via the
-        // lit-mesh pipeline), an additive `Flame` quad, and a matching
-        // `PointLight` so the 3D tile + table shaders pick up the warmth.
+        // Score L/R, hand strip L/R (upper row), hand strip L/R (lower row),
+        // footlight. Each: 3D wax + wick, additive `Flame` quad, `PointLight`.
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
@@ -2975,6 +3152,11 @@ impl SceneBehavior for GameplayScene {
             .last()
             .map(|r| r.x + r.w)
             .unwrap_or(layout.window_w);
+        let rack_bottom = layout
+            .hand_slots
+            .first()
+            .map(|s| s.y + s.h)
+            .unwrap_or_else(|| layout.hand_strip.y + layout.hand_strip.h);
         // Bottom candles are pushed well outboard from the hand strip
         // *and* shifted backward in Z (smaller pixel-y → farther from
         // the camera), so they sit behind the tile strip in depth as
@@ -2989,37 +3171,35 @@ impl SceneBehavior for GameplayScene {
         // them one candle-width further from the camera (smaller pixel-y →
         // greater table-z) so they read as the rear pair in depth.
         let back_z_push = candle_w;
-        let candle_centers: [(f32, f32); 5] = [
-            // Score panel left
+        let cy_hand_upper = strip_y - bottom_z_back;
+        let cy_hand_lower = rack_bottom + candle_w * 0.5 + edge_pad * 0.5;
+        let candle_centers: [(f32, f32); 7] = [
             (
                 (sp.x - candle_w - edge_pad).max(candle_w * 0.5 + 4.0),
                 sp.y + sp.h * 0.5 - back_z_push,
             ),
-            // Score panel right
             (
                 (sp.x + sp.w + candle_w + edge_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
                 sp.y + sp.h * 0.5 - back_z_push,
             ),
-            // Hand strip left — far outboard and recessed behind the strip
             (
                 (strip_left - candle_w * 0.5 - bottom_pad).max(candle_w * 0.5 + 4.0),
-                strip_y - bottom_z_back,
+                cy_hand_upper,
             ),
-            // Hand strip right — far outboard and recessed behind the strip
             (
                 (strip_right + candle_w * 0.5 + bottom_pad)
                     .min(layout.window_w - candle_w * 0.5 - 4.0),
-                strip_y - bottom_z_back,
+                cy_hand_upper,
             ),
-            // Footlight: a fifth candle planted *behind* the camera so
-            // its pool spills forward across the bottom row of yaku and
-            // wood tablets without the candle mesh itself floating into
-            // the player's view. The renderer's `pixel_to_world` maps
-            // pixel-y → table-z linearly, and the gameplay camera sits
-            // around z = 0.95 * window_h (i.e. pixel-y ≈ 1.45 * window_h
-            // in this mapping), so anything past ~1.5 * window_h is
-            // safely clipped out of the view frustum. The point light
-            // attached to the wick is what does the actual illumination.
+            (
+                (strip_left - candle_w * 0.5 - bottom_pad).max(candle_w * 0.5 + 4.0),
+                cy_hand_lower,
+            ),
+            (
+                (strip_right + candle_w * 0.5 + bottom_pad)
+                    .min(layout.window_w - candle_w * 0.5 - 4.0),
+                cy_hand_lower,
+            ),
             (layout.window_w * 0.5, layout.window_h * 1.55),
         ];
 
@@ -3036,8 +3216,8 @@ impl SceneBehavior for GameplayScene {
         // visible height. The wick tip lives at WICK_TIP_Y * scale above
         // the base in true world units.
         // Cheap deterministic hash → 4 pseudorandom values in [-1, 1].
-        // Used to jitter candle position, scale, and height per index so the
-        // four votives don't snap to a perfectly symmetric grid.
+        // Used to jitter candle position, scale, and height per index so
+        // votives don't snap to a perfectly symmetric grid.
         fn candle_jitter(seed: u32) -> (f32, f32, f32, f32) {
             let s = seed.wrapping_add(1);
             let h = |k: u32| -> f32 {
@@ -3068,16 +3248,14 @@ impl SceneBehavior for GameplayScene {
                 let (jx, jy, js, jh) = candle_jitter(i as u32);
                 let (jitter_x_pix, jitter_y_pix) = match i {
                     0 | 1 => (jx * 22.0 * scale_c, jy * 16.0 * scale_c),
-                    2 => (-jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
-                    3 => (jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
-                    // Footlight (index 4): small symmetric jitter, never
-                    // pulled backward into the action row's footprint.
+                    2 | 4 => (-jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
+                    3 | 5 => (jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
                     _ => (jx * 14.0 * scale_c, jy.abs() * 8.0 * scale_c),
                 };
                 let cx_j = cx + jitter_x_pix;
                 let cy_j = cy_anchor + jitter_y_pix;
-                // ±12% scale variation so the four votives read as a real
-                // set rather than four identical instances.
+                // ±12% scale variation so the table votives read as a real
+                // set rather than identical instances.
                 let candle_scale = candle_scale_base * (1.0 + js * 0.12);
                 // ±15% height variation so they aren't all the same tallness.
                 let height_scale = 1.0 + jh * 0.15;
@@ -3110,12 +3288,12 @@ impl SceneBehavior for GameplayScene {
                 // jittered table-plane (cx_j, cy_j) anchor. The renderer
                 // maps the pixel-layout x/y onto the table.
                 let wick_world_y = WICK_TIP_Y * candle_scale * height_scale;
-                // The footlight (index 4) sits well behind the camera, so its
+                // The footlight (index 6) sits well behind the camera, so its
                 // wick is much farther from the action row than any of the
                 // table-edge candles — bump its radius and intensity to
                 // compensate, otherwise the front row stays in shadow.
                 let (light_radius_mul, light_intensity) =
-                    if i == 4 { (2.2, 1.0) } else { (1.0, 2.3) };
+                    if i == 6 { (2.2, 1.0) } else { (1.0, 2.3) };
                 // Flare multiplier: boosts intensity and radius when a
                 // monster hand clears the whole blind in one shot.
                 let flare_mul = 1.0 + self.candle_flare;
@@ -3150,7 +3328,7 @@ impl SceneBehavior for GameplayScene {
             let pulse = 0.75 + 0.25 * (self.candle_time * 4.0).sin();
             // Cap to whatever budget remains in the point-light buffer
             // after the candle plumes already pushed above. The shader
-            // array is sized for 16, so the five candles plus up to ~11
+            // array is sized for 16, so the seven candles plus up to ~9
             // hints fits comfortably; this clamp is defensive only.
             let hint_budget =
                 crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
@@ -3159,7 +3337,7 @@ impl SceneBehavior for GameplayScene {
                     continue;
                 };
                 let cx = sx + sw * 0.5;
-                let cy = sy + sh * 0.5;
+                let cy = sy + sh * crate::ui::layout::HAND_TILE_MESH_Y_FRAC;
                 point_lights.push(PointLight {
                     pos: [cx, cy, sw * 1.5],
                     radius: sw * 1.6,
@@ -3942,14 +4120,13 @@ impl SceneBehavior for GameplayScene {
             }
         }
         frame.quads(hud_quads);
-        // Phase 3: bone yaku tablets sit just below the hand. Pushed before
-        // hud_text so the 2D yaku name labels render on top of the wood.
+        // Committed structure melds + tier tokens: inserted before `HandTileBackdrop`
+        // at end of `draw_frame` so they sit on the table behind the rack (depth order).
+        // Phase 3: bone yaku tablets (decal names on mesh).
         if !yaku_tablet_placements.is_empty() {
             frame.yaku_tablet_batch(yaku_tablet_placements);
         }
-        // Phase 4: action row. Wood sort/play tablets + lacquered discard
-        // bowl. The 2D button text labels in `hud_text` sit on top of the
-        // wood, same hybrid pattern as the yaku tablets.
+        // Phase 4: wood sort/journal/trigger + lacquered bowl + bronze mirror.
         if !wood_tablet_placements.is_empty() {
             frame.wood_tablet_batch(wood_tablet_placements);
         }
@@ -4296,8 +4473,48 @@ impl SceneBehavior for GameplayScene {
         // order. Compiled out of release builds.
         debug_assert_marker_uniqueness(&frame);
 
-        frame
+        insert_structure_before_hand(
+            frame,
+            structure_showcase,
+            structure_pile_tokens,
+        )
     }
+}
+
+/// Structure melds/tokens must draw before the hand mesh or the rack depth-tests over them.
+fn insert_structure_before_hand(
+    mut frame: UiFrame,
+    structure_showcase: Vec<ShowcaseTilePlacement>,
+    structure_pile_tokens: Vec<CascadeTokenPlacement>,
+) -> UiFrame {
+    let pos = frame
+        .cmds
+        .iter()
+        .position(|c| matches!(c, DrawCmd::HandTileBackdrop));
+    let Some(pos) = pos else {
+        if !structure_showcase.is_empty() {
+            frame
+                .cmds
+                .push(DrawCmd::ShowcaseTileBatch(structure_showcase));
+        }
+        if !structure_pile_tokens.is_empty() {
+            frame
+                .cmds
+                .push(DrawCmd::CascadeTokenBatch(structure_pile_tokens));
+        }
+        return frame;
+    };
+    if !structure_pile_tokens.is_empty() {
+        frame
+            .cmds
+            .insert(pos, DrawCmd::CascadeTokenBatch(structure_pile_tokens));
+    }
+    if !structure_showcase.is_empty() {
+        frame
+            .cmds
+            .insert(pos, DrawCmd::ShowcaseTileBatch(structure_showcase));
+    }
+    frame
 }
 
 /// Debug-only invariant: a frame should contain at most one

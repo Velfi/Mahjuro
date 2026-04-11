@@ -26,7 +26,7 @@ use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
 use render::animation::AnimationController;
-use render::draw_cmd::UiFrame;
+use render::draw_cmd::{CameraParams, UiFrame};
 use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
@@ -80,6 +80,9 @@ struct DebugState {
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     object_hit_test_armed: bool,
+    /// Effective 3D camera after the scene's `draw_frame` (override or table
+    /// default), updated each paint — used to seed camera debug overlay.
+    last_effective_camera: CameraParams,
 }
 
 impl DebugState {
@@ -98,6 +101,7 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             object_hit_test_armed: false,
+            last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }
 
@@ -600,6 +604,11 @@ impl App {
         // `UiFrame.cmds` list whose push order is z-order.
         let mut frame: UiFrame = self.scene.draw_frame(ctx);
 
+        let h = size.height as f32;
+        self.debug.last_effective_camera = frame
+            .camera_override
+            .unwrap_or_else(|| CameraParams::default_table_camera(h));
+
         // Index of the last cmd produced by the scene itself, captured
         // BEFORE any modal/tuning/sfx/fps/tooltip overlay is appended
         // below. Used by the tooltip-overlay snapshot a few lines down so
@@ -978,15 +987,8 @@ impl App {
             }
             DebugAction::OpenCameraDebug => {
                 if self.debug.camera_debug_overlay.is_none() {
-                    // Seed from the current frame's camera override, or a
-                    // sensible default if the active scene doesn't set one.
-                    let default_cam = render::draw_cmd::CameraParams {
-                        eye: [0.0, 600.0, 400.0],
-                        target: [0.0, 0.0, 0.0],
-                        up: [0.0, 1.0, 0.0],
-                        fovy_deg: 45.0,
-                    };
-                    self.debug.camera_debug_overlay = Some(CameraDebugOverlay::new(&default_cam));
+                    let seed = self.debug.last_effective_camera;
+                    self.debug.camera_debug_overlay = Some(CameraDebugOverlay::new(&seed));
                     log::info!("[Debug] Opened camera debug overlay");
                 }
             }
@@ -1203,6 +1205,9 @@ impl ApplicationHandler for App {
                         GameEvent::CandleFlare => {
                             self.audio.play_sfx(audio::SfxId::CandleFlareWhoosh);
                             self.audio.play_sfx(audio::SfxId::CandleFlareImpact);
+                        }
+                        GameEvent::StructureCommitted => {
+                            self.audio.play_sfx(audio::SfxId::StructureCommit);
                         }
                         GameEvent::TutorialMilestone(milestone) => {
                             use crate::game::tutorial::TutorialMilestone;

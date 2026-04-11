@@ -25,6 +25,7 @@ pub mod river_mesh;
 pub mod score_popups;
 pub mod shrine_mesh;
 pub mod table_mesh;
+pub mod table_space;
 pub mod talisman_mesh;
 pub mod texture_upload;
 pub mod theme;

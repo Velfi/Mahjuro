@@ -1049,7 +1049,7 @@ fn rule_clue(rm: RuleModifier) -> String {
         RuleModifier::PairsScoreZero => "The Hermit boss.".into(),
         RuleModifier::SequencesHalved => "The Forest boss.".into(),
         RuleModifier::MiddleTilesZero => "The Drunkard boss.".into(),
-        RuleModifier::MustPlayFour => "The Bureaucrat boss.".into(),
+        RuleModifier::MustPlayFive => "The Bureaucrat boss.".into(),
         RuleModifier::RequireHonor => "The Dragon final boss.".into(),
         RuleModifier::CensorRepeats => "The Censor boss.".into(),
     }

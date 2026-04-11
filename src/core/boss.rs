@@ -383,11 +383,11 @@ pub static ALL_BOSSES: &[BossDef] = &[
     BossDef {
         kind: BossKind::Bureaucrat,
         name: "The Bureaucrat",
-        description: "Must play exactly 4 tiles",
+        description: "Must play exactly 5 tiles",
         tier: BossTier::Medium,
         min_ante: 3,
         effect: BossEffect {
-            rule_pushes: &[RuleModifier::MustPlayFour],
+            rule_pushes: &[RuleModifier::MustPlayFive],
             on_apply: None,
             on_play: None,
         },

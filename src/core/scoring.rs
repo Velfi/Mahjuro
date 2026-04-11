@@ -15,8 +15,9 @@
 use crate::core::hand::{DetectedSet, SetKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::rules::RuleModifier;
+use crate::core::structure::structure_depth_mult_bonus;
 use crate::core::tile::{Suit, Tile};
-use crate::core::yaku::{YakuKind, detect_yaku, detect_yaku_with_wind};
+use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
 
 /// Which axis a cascade step contributes to. The cascade renders chip and
 /// mult deltas slightly differently (color, +N vs +Nx), so the variant lets
@@ -632,7 +633,7 @@ fn score_sets_inner(
     // ── Phase 4: yaku → mult ─────────────────────────────────────────────
 
     let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round_wind, original_tiles);
-    let detected_yaku: Vec<YakuKind> = if ctx.available_yaku.is_empty() {
+    let mut detected_yaku: Vec<YakuKind> = if ctx.available_yaku.is_empty() {
         all_yaku
     } else {
         all_yaku
@@ -640,6 +641,11 @@ fn score_sets_inner(
             .filter(|y| ctx.available_yaku.contains(y))
             .collect()
     };
+    if let Some(st) = &ctx.structure {
+        if st.inject_chicken_if_no_yaku && detected_yaku.is_empty() {
+            detected_yaku.push(YakuKind::ChickenHand);
+        }
+    }
     // Patch B finishing: each yaku contributes both chips and mult, scaled by
     // its current level (default 1) from `ctx.yaku_levels`. Yaku outside the
     // active loadout score at half strength — except FullHand and Yakuhai,
@@ -670,6 +676,13 @@ fn score_sets_inner(
             push_chips!(yaku.name(), chip_bonus);
         }
         push_mult!(yaku.name(), mult_bonus);
+    }
+
+    if let Some(st) = &ctx.structure {
+        let depth = structure_depth_mult_bonus(st.meld_count);
+        if depth > 0.0 {
+            push_mult!("Structure depth", depth);
+        }
     }
 
     // ── Phase 4.5: Tenpai Bonus ──────────────────────────────────────────
@@ -1130,6 +1143,17 @@ fn score_sets_inner(
         }
     }
 
+    if let Some(st) = &ctx.structure {
+        if st.early_cashout_mult < 1.0 - 1e-9 {
+            let new_m = mult * st.early_cashout_mult;
+            let delta = new_m - mult;
+            mult = new_m;
+            if delta.abs() > 1e-9 {
+                push_mult!("Early cashout", delta);
+            }
+        }
+    }
+
     // ── Phase 8: final multiplication beat ───────────────────────────────
 
     let final_chips = chips;
@@ -1360,6 +1384,7 @@ mod tests {
             relic_counters: std::collections::BTreeMap::new(),
             unscored_hand_tiles: 0,
             river_runner_bonus: 0,
+            structure: None,
         }
     }
 
@@ -1507,6 +1532,7 @@ mod tests {
             relic_counters: std::collections::BTreeMap::new(),
             unscored_hand_tiles: 0,
             river_runner_bonus: 0,
+            structure: None,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Off-loadout: Ittsu (4 mult, 50 chips) → halved to (2 mult, 25 chips).
@@ -1567,6 +1593,7 @@ mod tests {
             relic_counters: std::collections::BTreeMap::new(),
             unscored_hand_tiles: 0,
             river_runner_bonus: 0,
+            structure: None,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // Verify Toitoi step exists with expected chip & mult deltas.
@@ -1842,6 +1869,7 @@ mod tests {
             relic_counters: std::collections::BTreeMap::new(),
             unscored_hand_tiles: 0,
             river_runner_bonus: 0,
+            structure: None,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
         // 3 dora tiles × 25 (Patch A retune, was 20) = +75 chips
