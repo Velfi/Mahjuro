@@ -1493,6 +1493,18 @@ impl SceneBehavior for GameplayScene {
                                 .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
                         } else {
                             ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                            // First-trigger milestone (tutorial only).
+                            if let Some(tutorial) = ctx.run.tutorial.as_mut() {
+                                if tutorial.celebrate(
+                                    crate::game::tutorial::TutorialMilestone::FirstTrigger,
+                                ) {
+                                    ctx.bus.push(
+                                        crate::game::event_bus::GameEvent::TutorialMilestone(
+                                            crate::game::tutorial::TutorialMilestone::FirstTrigger,
+                                        ),
+                                    );
+                                }
+                            }
                             self.begin_scoring_cascade(&mut ctx, score_before, gained);
                         }
                     }

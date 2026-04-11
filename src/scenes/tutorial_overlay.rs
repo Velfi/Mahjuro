@@ -15,6 +15,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 pub enum HighlightTarget {
     HandTiles,
     PlayButton,
+    TriggerButton,
     DiscardBowl,
     ScorePanel,
 }
@@ -85,13 +86,20 @@ impl TutorialOverlay {
         let has_selection = run.selected_count() > 0;
         let has_discards = run.discards_remaining > 0;
         let score_progress = run.round_score > 0;
+        let has_structure = !run.structure_sets.is_empty();
         let prompts = lesson.step_prompts;
 
         // ── Compute step index + highlight per lesson ─────────────────
         let (step, highlight): (usize, Option<HighlightTarget>) = match tutorial.current_lesson {
-            // Lesson 4 (discarding): three states with a dedicated highlight.
+            // Lesson 4 (discarding): four states with dedicated highlights.
+            //   [0] no score, no selection   → highlight Discard
+            //   [1] has selection + discards  → highlight Discard
+            //   [2] has selection, no discards → highlight Play
+            //   [3] structure has melds        → highlight Trigger
             4 => {
-                if !score_progress && !has_selection {
+                if has_structure {
+                    (3, Some(HighlightTarget::TriggerButton))
+                } else if !score_progress && !has_selection {
                     (0, Some(HighlightTarget::DiscardBowl))
                 } else if has_selection && has_discards {
                     (1, Some(HighlightTarget::DiscardBowl))
@@ -100,24 +108,40 @@ impl TutorialOverlay {
                 }
             }
             // Lesson 5 (chips × mult): cascade-aware.
+            //   [0] no selection         → prompt play
+            //   [1] has selection        → highlight Play
+            //   [2] structure has melds  → highlight Trigger
+            //   [3] during cascade       → highlight ScorePanel
             5 => {
                 if self.cascade_active {
-                    (1, Some(HighlightTarget::ScorePanel))
+                    (3, Some(HighlightTarget::ScorePanel))
+                } else if has_structure {
+                    (2, Some(HighlightTarget::TriggerButton))
+                } else if has_selection {
+                    (1, Some(HighlightTarget::PlayButton))
                 } else {
-                    (0, Some(HighlightTarget::PlayButton))
+                    (0, None)
                 }
             }
-            // All other lessons: generic [0]=no selection [1]=has selection
-            // [2]=after-scoring contextual tip (if defined)
-            // [3]=acknowledgment after opening the Meld Guide (if defined).
+            // Generic lessons:
+            //   [0] no selection         → highlight HandTiles
+            //   [1] has selection        → highlight Play
+            //   [2] structure has melds  → highlight Trigger  (if defined)
+            //   then after-scoring tips (Meld Guide, etc.) if more prompts exist
             _ => {
-                if score_progress && !has_selection && prompts.len() > 2 {
-                    let step = if tutorial.meld_guide_opened && prompts.len() > 3 {
-                        3
+                // After-scoring contextual tips: Meld Guide prompts (lessons 3, 6).
+                // These sit at the end of step_prompts, after the three action steps.
+                let action_steps = if prompts.len() >= 3 { 3 } else { prompts.len() };
+                let post_steps = prompts.len().saturating_sub(action_steps);
+                if score_progress && !has_selection && !has_structure && post_steps > 0 {
+                    let step = if tutorial.meld_guide_opened && post_steps > 1 {
+                        action_steps + 1
                     } else {
-                        2
+                        action_steps
                     };
                     (step, None)
+                } else if has_structure && prompts.len() > 2 {
+                    (2, Some(HighlightTarget::TriggerButton))
                 } else if has_selection {
                     (1, Some(HighlightTarget::PlayButton))
                 } else {
