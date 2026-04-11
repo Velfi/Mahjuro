@@ -17,8 +17,7 @@ pub enum SfxId {
     ScoreStep,
     /// Three perceptibly different tick pitches cycled per cascade step so
     /// the audio rises through the reveal sequence even though `rodio`
-    /// doesn't support runtime pitch shifting. Mapped to Kenney
-    /// `tick_001/002/004.ogg`.
+    /// doesn't support runtime pitch shifting.
     ScoreTickA,
     ScoreTickB,
     ScoreTickC,
@@ -80,30 +79,27 @@ impl SfxId {
     pub(crate) fn filename(self) -> &'static str {
         match self {
             SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
-            SfxId::TilePlace => "nomagician-ui-button-sound-cancel-back-exit-continue-467877.mp3",
+            SfxId::TilePlace => "Snap.ogg",
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
-            SfxId::ScoreReveal => "kenney_ui-audio/Audio/switch38.ogg",
-            SfxId::ScoreStep => "kenney_ui-audio/Audio/rollover1.ogg",
-            SfxId::ScoreTickA => "kenney_interface-sounds/Audio/tick_001.ogg",
-            SfxId::ScoreTickB => "kenney_interface-sounds/Audio/tick_002.ogg",
-            SfxId::ScoreTickC => "kenney_interface-sounds/Audio/tick_004.ogg",
-            SfxId::ScoreCrescendo => "kenney_music-jingles/Audio/Hit jingles/jingles_HIT09.ogg",
-            SfxId::ScoreFinal => "kenney_interface-sounds/Audio/confirmation_002.ogg",
+            SfxId::ScoreReveal => "intake.ogg",
+            SfxId::ScoreStep => "vwomp2.ogg",
+            SfxId::ScoreTickA => "plink3.ogg",
+            SfxId::ScoreTickB => "plink4.ogg",
+            SfxId::ScoreTickC => "plink7.ogg",
+            SfxId::ScoreCrescendo => "scorecrescendo.ogg",
+            SfxId::ScoreFinal => "MixingBell.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
-            SfxId::InvalidAction => "kenney_interface-sounds/Audio/drop_003.ogg",
-            SfxId::CoinDrop => "kenney_interface-sounds/Audio/drop_002.ogg",
-            SfxId::RoundWin => "kenney_music-jingles/Audio/Sax jingles/jingles_SAX16.ogg",
-            SfxId::GameOver => "alphix-game-over-417465.mp3",
-            // Placeholder pack sounds — swap for real foils in second pass.
+            SfxId::InvalidAction => "invalid.ogg",
+            SfxId::CoinDrop => "coindrop.ogg",
+            SfxId::RoundWin => "roundwin.ogg",
+            SfxId::GameOver => "gameover.ogg",
             SfxId::PackBuy => "kenney_interface-sounds/Audio/confirmation_003.ogg",
             SfxId::PackOpen => "kenney_interface-sounds/Audio/open_003.ogg",
             SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
             SfxId::ZodiacReveal => "kenney_interface-sounds/Audio/glass_006.ogg",
-            SfxId::ZodiacLevelUp => {
-                "kenney_music-jingles/Audio/Pizzicato jingles/jingles_PIZZI03.ogg"
-            }
-            SfxId::CandleFlareWhoosh => "kenney_interface-sounds/Audio/maximize_008.ogg",
-            SfxId::CandleFlareImpact => "kenney_music-jingles/Audio/Hit jingles/jingles_HIT16.ogg",
+            SfxId::ZodiacLevelUp => "zodiac_jingle.ogg",
+            SfxId::CandleFlareWhoosh => "candle_flareup.ogg",
+            SfxId::CandleFlareImpact => "candle_impact.ogg",
         }
     }
 }
