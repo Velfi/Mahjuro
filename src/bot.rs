@@ -14,9 +14,10 @@ use rand::seq::SliceRandom;
 
 use crate::core::deck::Wall;
 use crate::core::hand::{detect_all_sets, validate_selection_with_rules};
-use crate::core::relic::{RelicId, ScoreContext, all_relic_defs, relic_buy_price};
+use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_buy_price};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::score_sets;
+use crate::core::scoring::score_sets_with_original;
+use crate::core::structure::{StructureTriggerKind, StructureTriggerMeta, early_cashout_factor};
 use crate::core::tile::Tile;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
@@ -169,41 +170,57 @@ impl AggregateStats {
     }
 }
 
-/// Build a `ScoreContext` borrowing from the run.
-fn ctx_for(run: &RunState) -> ScoreContext<'_> {
+/// Score context for evaluating a **commit** (merged structure + new melds) as if triggered.
+fn ctx_for_merged_commit<'a>(
+    run: &'a RunState,
+    relics: &'a RelicState,
+    merged_tiles: &[Tile],
+    merged_sets: &[crate::core::hand::DetectedSet],
+) -> ScoreContext<'a> {
+    let plays_rem_after = run.plays_remaining.saturating_sub(1);
+    let plays_used_after = run.mode.starting_plays.saturating_sub(plays_rem_after);
+    let meta = StructureTriggerMeta {
+        kind: StructureTriggerKind::Manual,
+        meld_count: merged_sets.len() as u32,
+        early_cashout_mult: early_cashout_factor(merged_tiles, merged_sets),
+        inject_chicken_if_no_yaku: true,
+    };
     ScoreContext {
-        relics: &run.relics,
+        relics,
         scored_last_turn: run.scored_last_turn,
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
-        round_wind: Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante)),
+        round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
         first_full_hand_of_round: !run.full_hand_played_this_round,
-        plays_used: run.mode.starting_plays.saturating_sub(run.plays_remaining),
+        plays_used: plays_used_after,
         riichi_active: false,
         yaku_levels: Some(run.yaku_levels.clone()),
         yaku_loadout: run.yaku_loadout.clone(),
         played_yaku_this_round: run.played_yaku_this_round.clone(),
         gold: run.gold,
         total_score: run.total_score_earned,
-        is_final_play: run.plays_remaining == 1,
+        is_final_play: plays_rem_after == 0,
         tile_polisher_bonus: run.tile_polisher_bonus,
         relic_counters: run.relic_counters.clone(),
-        unscored_hand_tiles: 0,
+        unscored_hand_tiles: run.hand.len().saturating_sub(merged_tiles.len()),
         river_runner_bonus: run.river_runner_bonus,
+        structure: Some(meta),
     }
 }
 
-/// Find the best (score, indices) playable selection from `hand`.
-/// Pure function — used both for the live hand and rollout hands.
+/// Find the best (score, indices) commit from `hand`, merging into the current structure.
+/// `relics_override` is for shop marginal evaluation (hypothetical extra relic).
 fn best_play_in_hand(
+    run: &RunState,
     hand: &[Tile],
     rules: &[RuleModifier],
-    ctx: &ScoreContext,
+    relics_override: Option<&RelicState>,
 ) -> Option<(i32, Vec<usize>)> {
     let n = hand.len();
     if n < 2 || n > 20 {
         return None;
     }
+    let relics = relics_override.unwrap_or(&run.relics);
     let mut best: Option<(i32, Vec<usize>)> = None;
     let limit: u32 = 1u32 << n;
     for mask in 1u32..limit {
@@ -220,7 +237,12 @@ fn best_play_in_hand(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
-        let breakdown = score_sets(&tiles, &sets, ctx, rules);
+        let mut merged_sets = run.structure_sets.clone();
+        merged_sets.extend(sets.iter().cloned());
+        let mut merged_tiles = run.structure_tiles.clone();
+        merged_tiles.extend(tiles.iter().copied());
+        let ctx = ctx_for_merged_commit(run, relics, &merged_tiles, &merged_sets);
+        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
         if breakdown.total <= 0 {
             continue;
         }
@@ -239,8 +261,7 @@ fn best_play_in_hand(
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
 pub fn pick_best_play(run: &RunState) -> Option<(i32, Vec<usize>)> {
-    let ctx = ctx_for(run);
-    best_play_in_hand(&run.hand, &run.round_rules, &ctx)
+    best_play_in_hand(run, &run.hand, &run.round_rules, None)
 }
 
 /// Rate each tile by how many *potential* melds in the current hand it participates in.
@@ -295,8 +316,7 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> i32 
         .collect();
     new_hand.extend_from_slice(peeked);
     new_hand.sort();
-    let ctx = ctx_for(run);
-    best_play_in_hand(&new_hand, &run.round_rules, &ctx)
+    best_play_in_hand(run, &new_hand, &run.round_rules, None)
         .map(|(s, _)| s)
         .unwrap_or(0)
 }
@@ -316,6 +336,28 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
 
         let best = pick_best_play(run);
         let best_score = best.as_ref().map(|(s, _)| *s).unwrap_or(0);
+
+        // Structure: cash in when the current structure scores at least as much as the best
+        // commit preview (saves a play), or when there is no positive commit but the structure can score.
+        let trigger_preview = if run.uses_structure_bank() && run.can_trigger_structure_now() {
+            run.preview_manual_trigger_total()
+        } else {
+            0
+        };
+        if run.uses_structure_bank()
+            && trigger_preview > 0
+            && (best_score <= 0 || trigger_preview >= best_score)
+        {
+            let earned = run.trigger_structure_manual(&mut bus);
+            if earned > 0 {
+                for ev in bus.drain() {
+                    if let GameEvent::RoundComplete { payout, .. } = ev {
+                        run.gold = run.gold.saturating_add(payout.total as i32);
+                    }
+                }
+                continue;
+            }
+        }
 
         // Strategic discard via 1-step rollout: try several candidate discard subsets,
         // peek the actual upcoming wall tiles, evaluate the best play in each
@@ -436,67 +478,20 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     let mut hypothetical = run.relics.clone();
     hypothetical.active.push(candidate);
 
-    let round_wind = Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante));
-    let first_full = !run.full_hand_played_this_round;
-    let plays_used = run.mode.starting_plays.saturating_sub(run.plays_remaining);
-    let yaku_levels = Some(run.yaku_levels.clone());
-    let yaku_loadout = run.yaku_loadout.clone();
-    let played_yaku = run.played_yaku_this_round.clone();
-    let baseline_ctx = ScoreContext {
-        relics: &run.relics,
-        scored_last_turn: run.scored_last_turn,
-        dora_faces: run.wall.dora_faces(),
-        available_yaku: run.available_yaku.clone(),
-        round_wind,
-        first_full_hand_of_round: first_full,
-        plays_used,
-        riichi_active: false,
-        yaku_levels: yaku_levels.clone(),
-        yaku_loadout: yaku_loadout.clone(),
-        played_yaku_this_round: played_yaku.clone(),
-        gold: run.gold,
-        total_score: run.total_score_earned,
-        is_final_play: run.plays_remaining == 1,
-        tile_polisher_bonus: run.tile_polisher_bonus,
-        relic_counters: run.relic_counters.clone(),
-        unscored_hand_tiles: 0,
-        river_runner_bonus: run.river_runner_bonus,
-    };
-    let hypo_ctx = ScoreContext {
-        relics: &hypothetical,
-        scored_last_turn: run.scored_last_turn,
-        dora_faces: run.wall.dora_faces(),
-        available_yaku: run.available_yaku.clone(),
-        round_wind,
-        first_full_hand_of_round: first_full,
-        plays_used,
-        riichi_active: false,
-        yaku_levels,
-        yaku_loadout,
-        played_yaku_this_round: played_yaku,
-        gold: run.gold,
-        total_score: run.total_score_earned,
-        is_final_play: run.plays_remaining == 1,
-        tile_polisher_bonus: run.tile_polisher_bonus,
-        relic_counters: run.relic_counters.clone(),
-        unscored_hand_tiles: 0,
-        river_runner_bonus: run.river_runner_bonus,
-    };
-
-    let score = |hand: &[Tile], ctx: &ScoreContext| -> i32 {
-        best_play_in_hand(hand, &run.round_rules, ctx)
+    let score = |hand: &[Tile], relics: Option<&RelicState>| -> i32 {
+        best_play_in_hand(run, hand, &run.round_rules, relics)
             .map(|(s, _)| s)
             .unwrap_or(0)
     };
 
     // Sample 1: the bot's actual current hand (weighted heavily).
-    let mut delta_sum: i32 = score(&run.hand, &hypo_ctx) - score(&run.hand, &baseline_ctx);
+    let mut delta_sum: i32 = score(&run.hand, Some(&hypothetical)) - score(&run.hand, None);
     let mut sample_count: i32 = 1;
 
     // Samples 2..N: synthetic random hands from fresh walls.
     for _ in 0..RELIC_EVAL_SAMPLES {
         let hand = sample_random_hand(run.mode.hand_size);
-        delta_sum += score(&hand, &hypo_ctx) - score(&hand, &baseline_ctx);
+        delta_sum += score(&hand, Some(&hypothetical)) - score(&hand, None);
         sample_count += 1;
     }
 

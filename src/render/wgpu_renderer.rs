@@ -47,6 +47,7 @@ use crate::render::river_mesh::{
 };
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
+use crate::render::table_space::pixel_to_table_world;
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
@@ -904,8 +905,8 @@ pub const MAX_PEG_SLOTS: usize = 32;
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
 /// Maximum number of dora stands per frame.
 pub const MAX_DORA_STAND_SLOTS: usize = 2;
-/// Maximum number of cascade scoring tokens per frame (chips + mult).
-pub const MAX_CASCADE_TOKEN_SLOTS: usize = 4;
+/// Cascade scoring bone pool (modifier strip + structure tier preview batches).
+pub use crate::render::gpu_types::MAX_CASCADE_TOKEN_SLOTS;
 /// Maximum number of physical falling-bone instances in flight at once.
 /// Sized to comfortably hold a multi-step cascade's worth of bursts (each
 /// scoring step spawns a small handful) without overflowing the pool.
@@ -2821,13 +2822,9 @@ impl WgpuRenderer {
         // Shared 1×1 white texture for procedural meshes that don't sample.
         let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
-        // Pre-allocate candle slots (matches the gameplay layout's ambient
-        // candles plus a "footlight" candle in front of the camera that
-        // illuminates the bottom row of yaku/wood tablets — without it the
-        // 3D action row falls completely outside every other candle's pool
-        // and reads as a black silhouette). Each slot owns two instances:
-        // wax + wick.
-        const NUM_CANDLE_SLOTS: usize = 5;
+        // Pre-allocate candle slots (gameplay: score pair + two hand-strip
+        // pairs + footlight). Each slot owns two instances: wax + wick.
+        const NUM_CANDLE_SLOTS: usize = 7;
         let mut candle_instances: Vec<[LitMeshInstance; 2]> = Vec::with_capacity(NUM_CANDLE_SLOTS);
         for _ in 0..NUM_CANDLE_SLOTS {
             candle_instances.push([
@@ -4301,12 +4298,11 @@ impl WgpuRenderer {
                 c.fovy_deg.to_radians(),
             )
         } else {
-            let eye_height = h * 0.55;
-            let eye_back = h * 1.0;
+            let c = crate::render::draw_cmd::CameraParams::default_table_camera(h);
             (
-                glam::Vec3::new(0.0, eye_height, eye_back),
-                glam::Vec3::new(0.0, h * 0.05, -h * 0.10),
-                55.0_f32.to_radians(),
+                glam::Vec3::from_array(c.eye),
+                glam::Vec3::from_array(c.target),
+                c.fovy_deg.to_radians(),
             )
         };
         let up_v = frame
@@ -4343,10 +4339,7 @@ impl WgpuRenderer {
             }),
         );
 
-        // Helper: map a layout pixel position onto the table-plane world.
-        let pixel_to_world = |px: f32, py: f32, world_y: f32| -> glam::Vec3 {
-            glam::Vec3::new(px - w * 0.5, world_y, py - h * 0.5)
-        };
+        // Table plane mapping: see [`crate::render::table_space::pixel_to_table_world`].
         // Helper: project a world position to integer screen pixels for use
         // in 2D overlay quads (selection halos, hint pulses, hover arrows).
         let project_to_screen = |world: glam::Vec3| -> (f32, f32) {
@@ -4426,8 +4419,8 @@ impl WgpuRenderer {
             for cmd in frame.cmds.iter() {
                 if let DrawCmd::CandleBatch(placements) = cmd {
                     for p in placements.iter() {
-                        let base_world = pixel_to_world(p.world_pos[0], p.world_pos[1], 0.0);
-                        let tip_world = pixel_to_world(
+                        let base_world = pixel_to_table_world(w, h, p.world_pos[0], p.world_pos[1], 0.0);
+                        let tip_world = pixel_to_table_world(w, h, 
                             p.world_pos[0],
                             p.world_pos[1],
                             crate::render::candle_mesh::WICK_TIP_Y * p.scale * p.height_scale,
@@ -4464,7 +4457,7 @@ impl WgpuRenderer {
                         // by the same *visual* amount as near ones.
                         let mut wind_px = (0.0_f32, 0.0_f32);
                         for g in frame.wind_gusts.iter() {
-                            let g_world = pixel_to_world(g.center_px.0, g.center_px.1, g.lift);
+                            let g_world = pixel_to_table_world(w, h, g.center_px.0, g.center_px.1, g.lift);
                             let dist = (g_world - tip_world).length();
                             let r = (g.radius * 3.0).max(1.0);
                             let falloff = (1.0 - (dist / r).clamp(0.0, 1.0)).powf(1.5);
@@ -4537,17 +4530,18 @@ impl WgpuRenderer {
                 let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
                 let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();
 
-                // Tile center in pixel-layout coords.
+                // Tile center in pixel-layout coords (toward bottom of slot = toward player).
                 let cx_px = sx + sw * 0.5 + slide_x_slots * sw;
                 // The slide_y residual still pushes the tile back briefly
                 // for new-tile entry; in table-space that becomes a +z push
                 // (further from the player) which reads as the tile sliding
                 // in across the wood toward its final spot.
-                let cy_px = sy + sh * 0.5 + slide_y;
+                let cy_px =
+                    sy + sh * crate::ui::layout::HAND_TILE_MESH_Y_FRAC + slide_y;
 
                 // World position: laid flat just above the table.
                 let world_y_lift = tile_thickness_px * 0.5 + 4.0;
-                let world = pixel_to_world(cx_px, cy_px, world_y_lift);
+                let world = pixel_to_table_world(w, h, cx_px, cy_px, world_y_lift);
 
                 // Smoke impulse from per-tile motion: compare to last
                 // frame's world position for this uid and inject the
@@ -5479,7 +5473,7 @@ impl WgpuRenderer {
                 let Some(instances) = self.candle_instances.get(slot_i) else {
                     break;
                 };
-                let base = pixel_to_world(
+                let base = pixel_to_table_world(w, h, 
                     placement.world_pos[0],
                     placement.world_pos[1],
                     placement.world_pos[2],
@@ -5528,7 +5522,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = relic_slot_cursor;
                 relic_slot_cursor += 1;
-                let center = pixel_to_world(
+                let center = pixel_to_table_world(w, h, 
                     p.world_pos[0],
                     p.world_pos[1],
                     p.world_pos[2] + p.half_extents[1],
@@ -5699,7 +5693,7 @@ impl WgpuRenderer {
                     if slot >= self.pack_instances.len() {
                         break;
                     }
-                    let center = pixel_to_world(
+                    let center = pixel_to_table_world(w, h, 
                         p.world_pos[0],
                         p.world_pos[1],
                         p.world_pos[2] + p.half_extents[1],
@@ -5813,7 +5807,7 @@ impl WgpuRenderer {
                 let dw = (hi_x - lo_x).max(40.0);
                 let dd = (hi_y - lo_y).max(28.0);
                 let dh = 10.0_f32; // dish rim height (world units)
-                let center = pixel_to_world(cx, cy, dh * 0.5);
+                let center = pixel_to_table_world(w, h, cx, cy, dh * 0.5);
                 let model =
                     Mat4::from_translation(center) * Mat4::from_scale(glam::Vec3::new(dw, dh, dd));
                 self.dish_instance.write_uniform(
@@ -5828,7 +5822,7 @@ impl WgpuRenderer {
         // ── Curio cabinet (single instance) ────────────────────────────
         self.last_cabinet_world_aabb = None;
         if let Some(c) = cabinet_cmds.first() {
-            let center = pixel_to_world(c.center_pos[0], c.center_pos[1], c.center_pos[2]);
+            let center = pixel_to_table_world(w, h, c.center_pos[0], c.center_pos[1], c.center_pos[2]);
             let half = glam::Vec3::new(c.extents[0] * 0.5, c.extents[1] * 0.5, c.extents[2] * 0.5);
             let model = Mat4::from_translation(center)
                 * Mat4::from_scale(glam::Vec3::new(c.extents[0], c.extents[1], c.extents[2]));
@@ -5856,7 +5850,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = shrine_cursor;
                     shrine_cursor += 1;
-                    let center = pixel_to_world(
+                    let center = pixel_to_table_world(w, h, 
                         s.world_pos[0],
                         s.world_pos[1],
                         s.world_pos[2] + s.extents[1] * 0.5,
@@ -5948,7 +5942,7 @@ impl WgpuRenderer {
             ));
         }
         for (slot_i, d) in aux_dish_cmds.iter().enumerate() {
-            let center = pixel_to_world(
+            let center = pixel_to_table_world(w, h, 
                 d.center_pos[0],
                 d.center_pos[1],
                 d.center_pos[2] + d.extents[1] * 0.5,
@@ -6008,7 +6002,7 @@ impl WgpuRenderer {
                 if ribbon_slot_cursor >= MAX_RIBBON_SLOTS {
                     break;
                 }
-                let anchor = pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
+                let anchor = pixel_to_table_world(w, h, r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
                 let eff_w = r.width;
                 let eff_l = r.length;
                 let depth = eff_w * 0.15;
@@ -6168,7 +6162,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = talisman_slot_cursor;
                 talisman_slot_cursor += 1;
-                let center = pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
+                let center = pixel_to_table_world(w, h, t.center_pos[0], t.center_pos[1], t.center_pos[2]);
                 // Talisman mesh local extents are (HALF_W, HALF_H, HALF_T) ≈
                 // (0.5, 0.7, 0.09); scale so the world-space bounds match
                 // the requested extents.
@@ -6250,7 +6244,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = coin_slot_cursor;
                 coin_slot_cursor += 1;
-                let center = pixel_to_world(c.world_pos[0], c.world_pos[1], c.world_pos[2]);
+                let center = pixel_to_table_world(w, h, c.world_pos[0], c.world_pos[1], c.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(c.rotation_y)
                     * Mat4::from_scale(glam::Vec3::new(
@@ -6282,7 +6276,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = bar_slot_cursor;
                 bar_slot_cursor += 1;
-                let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                let center = pixel_to_table_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(b.rotation_y)
                     * Mat4::from_scale(glam::Vec3::new(
@@ -6308,7 +6302,7 @@ impl WgpuRenderer {
         // ── Book (journal bookend, shop scene) ──────────────────────────
         self.last_book_model = None;
         if let Some(b) = book_cmd {
-            let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+            let center = pixel_to_table_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
             let model = Mat4::from_translation(center)
                 * Mat4::from_rotation_y(b.rotation_y)
                 * Mat4::from_scale(glam::Vec3::new(
@@ -6443,7 +6437,7 @@ impl WgpuRenderer {
             if slot_i >= MAX_PLAQUE_SLOTS {
                 break;
             }
-            let center = pixel_to_world(p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+            let center = pixel_to_table_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
             let model = Mat4::from_translation(center)
                 * Mat4::from_rotation_y(p.rotation_y_deg.to_radians())
                 * Mat4::from_rotation_x(plaque_tilt_x)
@@ -6538,7 +6532,7 @@ impl WgpuRenderer {
             if slot_i >= MAX_OFUDA_SLOTS {
                 break;
             }
-            let center = pixel_to_world(p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+            let center = pixel_to_table_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
             let model = Mat4::from_translation(center)
                 * Mat4::from_rotation_y(p.rotation_y_deg.to_radians())
                 * Mat4::from_rotation_x(ofuda_tilt_x)
@@ -6603,12 +6597,15 @@ impl WgpuRenderer {
                 yaku_tablet_slot_cursor += 1;
                 // Hover lift along world Y so the tablet rises off the tray.
                 let lift = t.hover.clamp(0.0, 1.0) * t.extents[1] * 0.4;
-                let center = pixel_to_world(
+                let center = pixel_to_table_world(w, h, 
                     t.world_pos[0],
                     t.world_pos[1],
                     t.world_pos[2] + t.extents[1] * 0.5 + lift,
                 );
+                // Tilt top face toward the camera (same X-rotation as wood tablets).
+                let tilt_rad = 25.0_f32.to_radians();
                 let model = Mat4::from_translation(center)
+                    * Mat4::from_rotation_x(tilt_rad)
                     * Mat4::from_scale(glam::Vec3::new(t.extents[0], t.extents[1], t.extents[2]));
                 // Active tablets warm up to a champagne tint; dim ones stay
                 // bone. The decal pass (phase 2) will paint the engraved name
@@ -6667,7 +6664,7 @@ impl WgpuRenderer {
                 wood_tablet_slot_cursor += 1;
                 let lift = t.hover.clamp(0.0, 1.0) * t.extents[1] * 0.25;
                 let press = t.pressed.clamp(0.0, 1.0) * t.extents[1] * 0.3;
-                let center = pixel_to_world(
+                let center = pixel_to_table_world(w, h, 
                     t.world_pos[0],
                     t.world_pos[1],
                     t.world_pos[2] + t.extents[1] * 0.5 + lift - press,
@@ -6749,7 +6746,7 @@ impl WgpuRenderer {
             // a positive Rx rotation pivots the bowl's +Y axis toward
             // +Z, presenting more of its mouth to the player.
             let tilt = anim * 18.0_f32.to_radians();
-            let center = pixel_to_world(
+            let center = pixel_to_table_world(w, h, 
                 b.world_pos[0],
                 b.world_pos[1],
                 b.world_pos[2] + b.extents[1] * 0.5 + lift,
@@ -6797,7 +6794,7 @@ impl WgpuRenderer {
             // four-spirit relief catches more candle light at hover.
             // Same Rx sign rationale as the bowl above.
             let tilt = anim * 22.0_f32.to_radians();
-            let center = pixel_to_world(
+            let center = pixel_to_table_world(w, h, 
                 m.world_pos[0],
                 m.world_pos[1],
                 m.world_pos[2] + m.extents[1] * 0.5 + lift,
@@ -6839,7 +6836,7 @@ impl WgpuRenderer {
                 break;
             }
             // The block itself.
-            let block_center = pixel_to_world(
+            let block_center = pixel_to_table_world(w, h, 
                 p.world_pos[0],
                 p.world_pos[1],
                 p.world_pos[2] + p.extents[1] * 0.5,
@@ -6871,8 +6868,8 @@ impl WgpuRenderer {
                 let plays_w = peg_step * (p.plays_max as f32 - 1.0).max(0.0) + peg_radius * 2.0;
                 let disc_w = peg_step * (p.discards_max as f32 - 1.0).max(0.0) + peg_radius * 2.0;
                 let row_h = peg_radius * 2.0;
-                let plays_center = pixel_to_world(p.world_pos[0], p.world_pos[1], plays_lift);
-                let discards_center = pixel_to_world(p.world_pos[0], p.world_pos[1], discards_lift);
+                let plays_center = pixel_to_table_world(w, h, p.world_pos[0], p.world_pos[1], plays_lift);
+                let discards_center = pixel_to_table_world(w, h, p.world_pos[0], p.world_pos[1], discards_lift);
                 let plays_scale = glam::Vec3::new(plays_w, row_h, p.extents[2]);
                 let disc_scale = glam::Vec3::new(disc_w, row_h, p.extents[2]);
                 let plays_model =
@@ -6903,7 +6900,7 @@ impl WgpuRenderer {
                         return;
                     }
                     let px = start_x + peg_step * k as f32;
-                    let center = pixel_to_world(px, p.world_pos[1], lift);
+                    let center = pixel_to_table_world(w, h, px, p.world_pos[1], lift);
                     let model = Mat4::from_translation(center)
                         * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
                         * Mat4::from_rotation_y(-std::f32::consts::FRAC_PI_2)
@@ -6974,7 +6971,7 @@ impl WgpuRenderer {
                 let px = w_cmd.world_pos[0] + col as f32 * tile_w;
                 let py = w_cmd.world_pos[1] + layer as f32 * tile_d;
                 let pz = w_cmd.world_pos[2] + tile_h * 0.5;
-                let center = pixel_to_world(px, py, pz);
+                let center = pixel_to_table_world(w, h, px, py, pz);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_scale(glam::Vec3::new(tile_w, tile_h, tile_d));
                 let material = MaterialParams {
@@ -7000,7 +6997,7 @@ impl WgpuRenderer {
             if slot_i >= MAX_DORA_STAND_SLOTS {
                 break;
             }
-            let center = pixel_to_world(
+            let center = pixel_to_table_world(w, h, 
                 d.world_pos[0],
                 d.world_pos[1],
                 d.world_pos[2] + d.extents[1] * 0.5,
@@ -7030,7 +7027,7 @@ impl WgpuRenderer {
                 let slot_i = cascade_token_slot_cursor;
                 cascade_token_slot_cursor += 1;
                 let pulse_scale = 1.0 + 0.18 * t.pulse.clamp(0.0, 1.0);
-                let center = pixel_to_world(t.world_pos[0], t.world_pos[1], t.world_pos[2]);
+                let center = pixel_to_table_world(w, h, t.world_pos[0], t.world_pos[1], t.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_scale(glam::Vec3::new(
                         t.extents[0] * pulse_scale,
@@ -7075,7 +7072,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = falling_bone_slot_cursor;
                 falling_bone_slot_cursor += 1;
-                let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                let center = pixel_to_table_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(b.rotation[1])
                     * Mat4::from_rotation_x(b.rotation[0])
@@ -7115,7 +7112,7 @@ impl WgpuRenderer {
                 }
                 let slot_i = extruded_glyph_slot_cursor;
                 extruded_glyph_slot_cursor += 1;
-                let center = pixel_to_world(g.world_pos[0], g.world_pos[1], g.world_pos[2]);
+                let center = pixel_to_table_world(w, h, g.world_pos[0], g.world_pos[1], g.world_pos[2]);
                 let model = Mat4::from_translation(center)
                     * Mat4::from_rotation_y(g.rotation_y)
                     * Mat4::from_rotation_x(-std::f32::consts::PI + g.rotation_x)
@@ -7165,12 +7162,15 @@ impl WgpuRenderer {
         // is sized to comfortably bracket the table area in world units.
         if let Some(ref mut fluid) = self.fluid {
             // Grid bounds: a box roughly enclosing the table + headroom for
-            // candle plumes. Matches the world space defined by pixel_to_world
+            // candle plumes. Matches the world space from `pixel_to_table_world`
             // (table at y=0, x ∈ ±w/2, z ∈ ±h/2).
             let half_w = w * 0.75;
             let half_z = h * 0.75;
             let grid_min = glam::Vec3::new(-half_w, -12.0, -half_z);
-            let grid_max = glam::Vec3::new(half_w, h * 0.75, half_z);
+            // Vertical extent was h*0.75 + 12 below the rim; double total height
+            // for more plume headroom (same floor, raised ceiling).
+            let smoke_box_h = h * 0.75 + 12.0;
+            let grid_max = glam::Vec3::new(half_w, grid_min.y + 2.0 * smoke_box_h, half_z);
             fluid.set_grid_bounds(grid_min, grid_max);
 
             // Candle plume impulses — walk this frame's draw commands and
@@ -7178,7 +7178,7 @@ impl WgpuRenderer {
             for cmd in frame.cmds.iter() {
                 if let DrawCmd::CandleBatch(placements) = cmd {
                     for p in placements.iter() {
-                        let tip = pixel_to_world(
+                        let tip = pixel_to_table_world(w, h, 
                             p.world_pos[0],
                             p.world_pos[1],
                             crate::render::candle_mesh::WICK_TIP_Y * p.scale * p.height_scale,
@@ -7200,10 +7200,10 @@ impl WgpuRenderer {
             // when they want a deliberate, time-shaped breath of wind on the
             // smoke — e.g. blowing the post-deal smoke off the hand strip a
             // few seconds after dealing. Coordinates are layout pixels; we
-            // run them through the same `pixel_to_world` projection used by
+            // run them through the same `pixel_to_table_world` projection used by
             // candle plumes so the gust lands on the table plane.
             for g in frame.wind_gusts.iter() {
-                let pos = pixel_to_world(g.center_px.0, g.center_px.1, g.lift);
+                let pos = pixel_to_table_world(w, h, g.center_px.0, g.center_px.1, g.lift);
                 fluid.inject_impulse(
                     pos,
                     glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]),
@@ -7256,11 +7256,11 @@ impl WgpuRenderer {
                                 // so the puff actually lifts off the table
                                 // instead of sitting at hit point until
                                 // buoyancy slowly catches up.
-                                let puff_density = (speed * 0.05).min(0.18);
+                                let puff_density = (speed * 0.032).min(0.12);
                                 fluid.inject_impulse(
-                                    hit + glam::Vec3::new(0.0, 4.0 * win_scale, 0.0),
-                                    delta * inv_dt * 0.35 + glam::Vec3::new(0.0, 12.0, 0.0),
-                                    28.0 * win_scale,
+                                    hit + glam::Vec3::new(0.0, 3.0 * win_scale, 0.0),
+                                    delta * inv_dt * 0.22 + glam::Vec3::new(0.0, 8.0, 0.0),
+                                    22.0 * win_scale,
                                     puff_density,
                                 );
                             }
@@ -7367,7 +7367,7 @@ impl WgpuRenderer {
                 let Some(instances) = self.candle_instances.get(slot_i) else {
                     break;
                 };
-                let base = pixel_to_world(
+                let base = pixel_to_table_world(w, h, 
                     placement.world_pos[0],
                     placement.world_pos[1],
                     placement.world_pos[2],
@@ -7388,7 +7388,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = relic_shadow_cursor;
                     relic_shadow_cursor += 1;
-                    let center = pixel_to_world(
+                    let center = pixel_to_table_world(w, h, 
                         p.world_pos[0],
                         p.world_pos[1],
                         p.world_pos[2] + p.half_extents[1],
@@ -7409,7 +7409,7 @@ impl WgpuRenderer {
         }
         // Curio cabinet shadow caster (single instance).
         if let Some(c) = cabinet_cmds.first() {
-            let center = pixel_to_world(c.center_pos[0], c.center_pos[1], c.center_pos[2]);
+            let center = pixel_to_table_world(w, h, c.center_pos[0], c.center_pos[1], c.center_pos[2]);
             let model = Mat4::from_translation(center)
                 * Mat4::from_scale(glam::Vec3::new(c.extents[0], c.extents[1], c.extents[2]));
             self.cabinet_instance
@@ -7426,7 +7426,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = shrine_shadow_cursor;
                     shrine_shadow_cursor += 1;
-                    let center = pixel_to_world(
+                    let center = pixel_to_table_world(w, h, 
                         s.world_pos[0],
                         s.world_pos[1],
                         s.world_pos[2] + s.extents[1] * 0.5,
@@ -7447,7 +7447,7 @@ impl WgpuRenderer {
         }
         // Auxiliary dish shadow casters.
         for (slot_i, d) in aux_dish_cmds.iter().enumerate() {
-            let center = pixel_to_world(
+            let center = pixel_to_table_world(w, h, 
                 d.center_pos[0],
                 d.center_pos[1],
                 d.center_pos[2] + d.extents[1] * 0.5,
@@ -7469,7 +7469,7 @@ impl WgpuRenderer {
                     if ribbon_shadow_cursor >= MAX_RIBBON_SLOTS {
                         break;
                     }
-                    let anchor = pixel_to_world(r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
+                    let anchor = pixel_to_table_world(w, h, r.anchor_pos[0], r.anchor_pos[1], r.anchor_pos[2]);
                     let eff_w = r.width;
                     let eff_l = r.length;
                     let depth = eff_w * 0.15;
@@ -7544,7 +7544,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = talisman_shadow_cursor;
                     talisman_shadow_cursor += 1;
-                    let center = pixel_to_world(t.center_pos[0], t.center_pos[1], t.center_pos[2]);
+                    let center = pixel_to_table_world(w, h, t.center_pos[0], t.center_pos[1], t.center_pos[2]);
                     let sx = t.extents[0] / (TALISMAN_LOCAL_HALF[0] * 2.0);
                     let sy = t.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                     let sz = t.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
@@ -7571,7 +7571,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = coin_shadow_cursor;
                     coin_shadow_cursor += 1;
-                    let center = pixel_to_world(c.world_pos[0], c.world_pos[1], c.world_pos[2]);
+                    let center = pixel_to_table_world(w, h, c.world_pos[0], c.world_pos[1], c.world_pos[2]);
                     let model = Mat4::from_translation(center)
                         * Mat4::from_rotation_y(c.rotation_y)
                         * Mat4::from_scale(glam::Vec3::new(
@@ -7597,7 +7597,7 @@ impl WgpuRenderer {
                     }
                     let slot_i = bar_shadow_cursor;
                     bar_shadow_cursor += 1;
-                    let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+                    let center = pixel_to_table_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
                     let model = Mat4::from_translation(center)
                         * Mat4::from_rotation_y(b.rotation_y)
                         * Mat4::from_scale(glam::Vec3::new(
@@ -7615,7 +7615,7 @@ impl WgpuRenderer {
         }
         // Book shadow caster.
         if let Some(b) = book_cmd {
-            let center = pixel_to_world(b.world_pos[0], b.world_pos[1], b.world_pos[2]);
+            let center = pixel_to_table_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
             let model = Mat4::from_translation(center)
                 * Mat4::from_rotation_y(b.rotation_y)
                 * Mat4::from_scale(glam::Vec3::new(
@@ -7633,7 +7633,7 @@ impl WgpuRenderer {
                 let dw = (hi_x - lo_x).max(40.0);
                 let dd = (hi_y - lo_y).max(28.0);
                 let dh = 10.0_f32;
-                let center = pixel_to_world(cx, cy, dh * 0.5);
+                let center = pixel_to_table_world(w, h, cx, cy, dh * 0.5);
                 let model =
                     Mat4::from_translation(center) * Mat4::from_scale(glam::Vec3::new(dw, dh, dd));
                 self.dish_instance
@@ -7721,7 +7721,7 @@ impl WgpuRenderer {
                     }
 
                     // Build model matrix from the placement's explicit 3D transform.
-                    let center = pixel_to_world(p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+                    let center = pixel_to_table_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
                     let tile_short_px = p.size_px * 0.85;
                     let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
                     let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();
@@ -7817,7 +7817,7 @@ impl WgpuRenderer {
 
             // Pick the dominant horizontal axis (X or Z; Y is up) by
             // comparing the spread of tile centers. The hand is laid out
-            // along screen X — that's world X after `pixel_to_world` — but
+            // along screen X — that's world X after `pixel_to_table_world` — but
             // detecting it from the data keeps this robust if the layout
             // ever rotates.
             if tiles.len() >= 2 {

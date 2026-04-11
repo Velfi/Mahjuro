@@ -26,7 +26,10 @@ pub enum UiAction {
     /// Toggle-select the focused tile for discard.
     Confirm,
     Cancel,
+    /// Commit selected melds into the structure (costs one play).
     ScoreHand,
+    /// Cash in the structure for score (no play cost).
+    TriggerStructure,
     /// Commit: discard all selected tiles and auto-draw back to full hand.
     CommitDiscard,
     NavigateHudNext,
@@ -107,6 +110,7 @@ impl InputState {
                 }),
                 ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::ScoreHand),
                 ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::CommitDiscard),
+                ButtonPressed(Button::RightThumb, _) => actions.push(UiAction::TriggerStructure),
                 ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),
                 ButtonPressed(Button::North, _) => actions.push(UiAction::CommitDiscard),
                 AxisChanged(Axis::LeftStickX, v, _) if v > 0.5 => actions.push(UiAction::FocusNext),
@@ -148,6 +152,7 @@ impl InputState {
             KeyCode::Backspace => actions.push(UiAction::Cancel),
             KeyCode::Delete | KeyCode::KeyX => actions.push(UiAction::Delete),
             KeyCode::KeyS => actions.push(UiAction::ScoreHand),
+            KeyCode::KeyT => actions.push(UiAction::TriggerStructure),
             KeyCode::Enter | KeyCode::NumpadEnter => actions.push(UiAction::Confirm),
             KeyCode::Tab => actions.push(UiAction::SortBySuit),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
@@ -219,6 +224,7 @@ pub fn apply_ui_actions(
             }
             UiAction::SortBySuit
             | UiAction::SortByRank
+            | UiAction::TriggerStructure
             | UiAction::Pause
             | UiAction::Help
             | UiAction::DebugBlowWind

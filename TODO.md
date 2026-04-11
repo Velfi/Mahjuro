@@ -1,0 +1,11 @@
+- Fix the explicit navigation for game UI lower screen stuff
+- skip shrine bonus discard not working
+- some of the more interesting relics dont work (+1 plays)
+- merchant's eye not working
+- relic re-arranging not implemented
+  - investigate the mirror and shadow hand items when you fix this.
+- remove yaku scholar
+- bureacrat and dragon both suck
+    - what do you do when you have no discards and no valid hand?
+- fortune's favor should live update values
+- 

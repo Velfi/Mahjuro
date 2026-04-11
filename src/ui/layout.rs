@@ -79,6 +79,14 @@ const RELIC_H_RATIO: f64 = 0.12; // 12% of window height
 /// the strip needs a margin or the edge tiles get clipped by the window.
 const HAND_X_PAD_RATIO: f64 = 0.07;
 
+/// Where the **3D hand tile mesh** is anchored vertically within each tall slot (fraction from top).
+/// Higher values move the rack toward the bottom of the slot — nearer the player in table space —
+/// so structure / yaku sit further from the tile silhouettes.
+pub const HAND_TILE_MESH_Y_FRAC: f32 = 0.63;
+/// Reference height within the slot for stacking yaku + structure **above** the rack (smaller than
+/// [`HAND_TILE_MESH_Y_FRAC`] so HUD bands sit higher on screen than the physical tiles).
+pub const HAND_HUD_STACK_Y_FRAC: f32 = 0.38;
+
 pub struct UiLayout {
     solver: Solver,
     win_w: Variable,

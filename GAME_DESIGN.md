@@ -11,16 +11,18 @@ Mahjuro is a riichi-style mahjong roguelite that makes mahjong approachable for 
 
 ## **2. Core Gameplay Loop**
 
-1. **Draw Tiles** – Draw tiles from a limited pool (your “deck”).
-2. **Form Hands** – Build sets:
-
+1. **Pick a Blind** — Choose to play (or skip for a penalty) the next Small, Big, or Boss blind in the current ante.
+2. **Draw Tiles** — Draw from the wall into a hand of limited size.
+3. **Form Melds** — Select tiles and play them as:
    * Pair (2 tiles)
+   * Sequence / Chow (3 consecutive numbers, same suit)
    * Triplet / Pong (3 of a kind)
-   * Sequence / Chow (3 consecutive numbers of same suit)
-3. **Score Hands** – Hands give points based on type, multipliers, and relic effects.
-4. **Select Power-Ups / Modifiers** – Gain relics, tile upgrades, or rule-breaking modifiers.
-5. **Repeat / Progress** – Reach a score target, face a “round boss” or modifier challenge.
-6. **Post-Run Unlocks** – Unlock new rules, relics, tile types, or starting bonuses.
+   * Kong (4 of a kind)
+4. **Score the Hand** — Chips × Mult in the style of Balatro, modified by yaku, relics, tile enhancements, dora, and the active rule modifier.
+5. **Discard to Refine** — Sacrifice unwanted tiles from a limited discard budget (4/round by default) to redraw from the wall. Unused discards can still pay out via relics and end-of-round bonuses.
+6. **Repeat Plays** — Each round gives a fixed number of plays (4 by default) to meet the blind's score target.
+7. **Shop Phase** — Between blinds, spend earned coins on relics, zodiacs, talismans, and rerolls from a 3D curio cabinet.
+8. **Advance Antes** — Clear Small → Big → Boss across 8 antes. The final boss at ante 8 ends the run.
 
 ---
 
@@ -28,36 +30,76 @@ Mahjuro is a riichi-style mahjong roguelite that makes mahjong approachable for 
 
 ### **A. Tile Types**
 
-* **Number Tiles:** 1–9 in 3 suits (Characters, Bamboos, Circles)
+* **Number Tiles:** 1–9 in 3 suits — Characters, Bamboos, Circles
 * **Honor Tiles:** Winds (East, South, West, North), Dragons (Red, Green, White)
-* **Special Tiles:** Flowers, Seasons (optional, late-game or relic-driven)
+* **Flowers:** Act as wildcards — one flower can substitute for a missing tile in a meld (max one substitution per meld); flowers themselves contribute no base chips
+* **Seasons:** Solitaire-only bonus tiles
 
-### **B. Hand Patterns**
+### **B. Tile Enhancements**
 
-* **Pairs:** Basic block
-* **Triplets (Pong):** Medium scoring
-* **Sequences (Chow):** Medium scoring
-* **Full Hand:** 4 sets + 1 pair → large bonus
-* **Optional Advanced Patterns:** All Triplets, Flush, Mixed Sets
+Persistent per-tile modifiers applied via talismans in the shop:
 
-### **C. Relics (Balatro-Style Upgrades)**
+* **Jade** — +20 chips
+* **Pearl** — +30 chips
+* **Gilded** — +0.5 mult
+* **Polychrome** — ×1.2 mult per meld containing the tile
+* **Kiln** — consumable that permanently destroys a tile from the wall
 
-* Modify scoring, tile behavior, or rules. Examples:
+### **C. Meld Types & Base Scoring**
 
-  * *“Triplets deal double damage”*
-  * *“Sequences hit all targets”*
-  * *“Pairs count as triplets”*
-  * *“Winning without honors doubles score”*
-  * *“All bamboo tiles +2 multiplier”*
+| Meld     | Tiles              | Base Chips |
+| -------- | ------------------ | ---------- |
+| Pair     | 2 identical        | 18         |
+| Sequence | 3 consecutive      | 28         |
+| Triplet  | 3 identical        | 50         |
+| Kong     | 4 identical        | 80         |
 
-### **D. Rule Modifiers**
+Kongs additionally flip a new **dora indicator**, and each dora indicator adds +35 chips to matching tiles on subsequent plays.
 
-* Dynamic changes to the game each round:
+### **D. Yaku (Hand Patterns)**
 
-  * “Sequences can wrap (8-9-1)”
-  * “Pairs score double”
-  * “Must win in 3 turns”
-  * “Duplicate tiles allowed”
+Yaku grant flat mult on top of meld chips. Players carry a **yaku loadout** (3 base slots, expandable to 4 via relic) plus two always-active patterns (FullHand, Yakuhai). Fourteen yaku are implemented:
+
+* **Always active:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet)
+* **Loadout:** Tanyao (2–8 only), Toitoi (all triplets), Iipeikou (doubled sequence), Sanshoku Doujun (same sequence in 3 suits), Ittsu (1-2-3 + 4-5-6 + 7-8-9), Honitsu (one suit + honors), Chinitsu (one suit only), Junchan (every meld touches a terminal), Honroutou (terminals and honors only), Chiitoitsu (seven pairs), Chicken Hand (zero-mult fallback)
+
+Yaku level up via **zodiacs**: using a zodiac consumable grants +0.5 mult to its bound yaku (capped at +5).
+
+### **E. Scoring System**
+
+`final_score = floor(chips × mult)`
+
+* **Chips** come from rank values (1–9 for numbers, flat 12 for honors) + meld bonuses + enhancements + dora
+* **Mult** accumulates from yaku, relics, zodiac levels, and conditional triggers
+* Cascading score steps drive the score popup animation
+
+### **F. Relics**
+
+**79 relics** are implemented across six content patches, spanning categories such as:
+
+* **Core scoring** — TripletBoost, SequenceSurge, PairPower, HonorFury
+* **Info / tempo** — ShantenShove, WallPeek, KanDrum, DoraCrown, Riichi
+* **Flower / suit synergy** — GardenKeeper, Ikebana, JadeSerpent, InkBrush, PearlDiver
+* **Conditional scaling** — Momentum, Minimalist, ClosedGate, GoldFurnace, Snowball
+* **Play budget** — SecondWind (+1 play), GlassCannon (fewer plays, ×2 mult)
+* **Retrigger / echo** — LeadingTile, LowEcho, TeaCeremony, GhostHand
+* **Fragile / scaling** — MeltingIce, SilkThread, CleanStreak, Obsession, Bonfire
+* **Economy** — GoldIdol, JadeAbacus, NestEgg, Patience
+* **Way-of** conditional mult — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
+* **Chaos / sell-to-activate** — FortunesFavor, CrackedTile, StarTile, SmokeBomb, PhantomRelic, RitualBlade
+
+Relics come in Common / Uncommon / Rare tiers that gate shop availability and price.
+
+### **G. Rule Modifiers**
+
+**12 implemented modifiers**, split between neutral round rules and boss taxers:
+
+* **Round rules:** Sequence Wrap (7-8-9, 8-9-1), Pair Double Score, No Sequences, Reduced Plays, Honor Triple Score, No-Sequence Bonus
+* **Boss taxers:** Pairs Score Zero (Hermit), Sequences Halved (Forest), Middle Tiles Zero (Drunkard), Must Play Four (Bureaucrat), Require Honor (Dragon final boss), Censor Repeats (Censor)
+
+### **H. Consumables & Slots**
+
+Talismans and zodiacs share a **base inventory of 2 slots**, expandable via Zodiac Pouch (+1) and Lunar Almanac (+1, with duplication). Both are purchased from the shop and applied manually.
 
 ---
 
@@ -65,111 +107,109 @@ Mahjuro is a riichi-style mahjong roguelite that makes mahjong approachable for 
 
 ### **A. In-Run Progression**
 
-* Gain relics and tile pool modifications mid-run
-* Stack multipliers and rule-breaking effects
-* Each round may include random “modifier challenges”
+* 8 antes, each containing Small (×0.85 target) → Big (×1.35) → Boss (×1.5 + effect)
+* Round wind cycles East → South → West → North, affecting Yakuhai eligibility
+* Coins earned from blinds fund shop purchases between rounds
+* Skipping a blind grants a smaller reward but forfeits its score contribution
 
 ### **B. Meta Progression (Between Runs)**
 
-* Unlock new rules gradually:
+Tracked in `PlayerProgress` with a **7-level unlock system** driven by runs completed:
 
-  * Start: basic sets and pair
-  * Mid-game: simple yaku (All Simples, All Triplets)
-  * Late-game: Riichi mechanics, Dora, Honors modifiers
-* Unlock new relics, tile types, and starting loadouts
-* Light permanent upgrades: +HP, starting relics, improved tile odds
+* Level 1 (0 runs) → level 7 (20+ runs)
+* Each level unlocks a gated pool of relics, rule modifiers, yaku, and dora mechanics
+* Top 10 high scores tracked per profile
+* Achievements grant permanent run upgrades (tutorial clear, first win → Plastic tile material, etc.)
 
 ### **C. Knowledge Progression**
 
-* Players learn probability and pattern recognition naturally
-* End-of-run summary highlights:
-
-  * “Most favored patterns”
-  * “Missed hands”
-  * “Potential multipliers ignored”
+* Tutorial overlay highlights hand tiles, play button, discard bowl, and score panel with pulsing cues
+* Tutorial recap screen summarizes the first run
+* Meld Guide, Tile Literacy, and Collection scenes teach patterns outside a run
 
 ---
 
 ## **5. Difficulty Scaling**
 
-* Enemies or round challenges escalate not just by numbers but by mechanics:
-
-  * Tile theft, locked tiles, random forced discards
-  * Round time limits
-  * Modifier stacks in late runs
-
-* Boss rounds (“Blind Challenges”) introduce absurd rules for risk/reward
+* **14 boss encounters** (12 regular bosses + the Dragon final boss), each with a unique tax or restriction effect
+* Score targets scale per ante and per blind tier
+* Rule modifiers stack with boss effects in late antes, forcing unusual play patterns
+* The ante-8 Dragon final boss requires honors to score and caps the run
 
 ---
 
 ## **6. Visual & UI Design**
 
-* **Tile Drag & Drop:** Smooth snapping, satisfying interactions
-* **Hand Hints:** Highlight potential sets and near-complete hands
-* **Multiplier Feedback:** Visual flares when stacking relics or modifiers
-* **Score Pop-ups:** Immediate feedback when hands complete
-* **Rule Notifications:** Clearly show temporary rule changes each round
+* **3D render pipeline** (wgpu) — over 30 render modules including particles, fluid simulation, falling bones, flying coins, and bone-rigged meshes
+* **Scenes implemented:** Gameplay, Pick Blind, Shop (3D curio cabinet with spotlight hover), Splash, Start Screen, Profile Select, Tutorial Overlay, Tutorial Recap, Solitaire, Collection, Journal, Options, Pause Menu, Game Over, Tile Literacy, Meld Guide
+* **Score popups** animate each chip/mult cascade step
+* **Level-up carousel** pages through newly unlocked relics, rules, and yaku after each run
+* **Tutorial tooltips** pulse on relevant UI anchors and show contextual banners
 
 ---
 
 ## **7. Accessibility & Approachability**
 
-* Start with **core sets only** – remove full yaku and complicated rules
-* Introduce complexity gradually via unlocks
-* Friendly terminology for beginners:
-
+* Start with core melds and a small yaku pool; advanced patterns unlock via meta progression
+* Friendly terminology:
   * Pair → Pair
   * Triplet → Three of a Kind
   * Sequence → Straight
   * Yaku → Hand Bonus
   * Riichi → Lock-In Bet
-* Use **visual teaching** instead of text-heavy tutorials
+* Visual teaching through tile highlights, tutorial overlay, and recap screen rather than text walls
 
 ---
 
 ## **8. Art & Audio Style**
 
-* Clean, modern tile art
-* Smooth animations for draws, sets, and multipliers
+* Clean, modern 3D tile art with multiple materials (Plastic unlock is one example)
+* Smooth cascade animations for draws, melds, and scoring
+* "Midnight Gold" palette — cool indigo base with gold accents
 * Audio cues:
-
   * *Click* → tile placement
-  * *Clack* → completed set
+  * *Clack* → completed meld
   * *Whoosh / ding* → scoring or multiplier
 
 ---
 
-## **9. MVP Scope**
+## **9. Current State (post-MVP)**
 
-Focus on first playable prototype:
+The original MVP scope is fully implemented and significantly exceeded:
 
-* Tile draw/discard
-* Pair, Triplet, Sequence detection
-* Simple scoring system
-* 10–15 relics
-* 1–2 round modifiers
-* Score targets
-* Post-run unlocks (optional early progression)
+| MVP target                        | Status      | Current reality                           |
+| --------------------------------- | ----------- | ----------------------------------------- |
+| Tile draw/discard                 | Done        | Wall refill, discard bowl, river tracking |
+| Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards                  |
+| Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
+| 10–15 relics                      | Exceeded    | **79 relics** across 6 patches            |
+| 1–2 rule modifiers                | Exceeded    | **12 modifiers** + 14 boss effects        |
+| Score targets                     | Done        | 8 antes × 3 blinds each                   |
+| Post-run unlocks                  | Done        | 7-level unlock gating                     |
+| *Bonus: Yaku system*              | Implemented | 14 patterns, loadout + zodiac leveling    |
+| *Bonus: Talismans & enhancements* | Implemented | 5 enhancement types, persistent per tile  |
+| *Bonus: 3D shop*                  | Implemented | Curio cabinet with spotlight hover        |
+| *Bonus: Tutorial / onboarding*    | Implemented | Overlay, recap, dedicated learn scenes    |
+| *Bonus: VFX / animation*          | Implemented | Fluid sim, particles, bone rigs           |
 
 ---
 
 ## **10. Longer-Term Features / Expansion Ideas**
 
-* Boss battles with forced modifiers
-* Special tile events (flowers, seasons)
-* Multiplayer / leaderboards (score attack)
-* Cosmetic tile sets
-* Achievements / rare relics for high-score runs
+* Additional boss encounters and themed antes
+* More yaku and advanced patterns (Riichi-style wait detection, Dora bombs)
+* Cosmetic tile sets beyond the current material unlocks
+* Leaderboards and daily seeds for score attack
 * Full Riichi optional mode for advanced players
+* Additional relic patches (patches H+) extending the 79-relic pool
 
 ---
 
 ## **11. Branding & Tone**
 
-* Title: **Mahjuro** – short, memorable, modern
+* Title: **Mahjuro** — short, memorable, modern
 * Tone: playful but strategic, chaotic but understandable
 * Tagline ideas:
-
-  * “Break the rules. Build the hands.”
-  * “Mahjong, reimagined for chaos.”
-  * “Stack. Score. Shatter.”
+  * "Break the rules. Build the hands."
+  * "Mahjong, reimagined for chaos."
+  * "Stack. Score. Shatter."

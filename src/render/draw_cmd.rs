@@ -42,11 +42,31 @@ pub struct CameraParams {
     pub fovy_deg: f32,
 }
 
+impl CameraParams {
+    /// Default "person at the table" camera when [`UiFrame::camera_override`] is
+    /// `None` — must match `WgpuRenderer`'s resolve path.
+    pub fn default_table_camera(window_h: f32) -> Self {
+        let h = window_h.max(1.0);
+        // ref_h: 2104
+        let cs = h / 2104_f32;
+        Self {
+            eye: [0.0 * cs, 1157.2 * cs, 2104.0 * cs],
+            target: [0.0 * cs, 105.2 * cs, 39.6 * cs],
+            up: [0.0, 1.0, 0.0],
+            fovy_deg: 55.0,
+        }
+    }
+}
+
+/// Packs `(pixel_x, pixel_y, lift_y)` where `lift_y` is height above the table (world **+Y**).
+/// Consumed by [`crate::render::table_space::pixel_to_table_world`].
+pub type TableSurfaceAnchor = [f32; 3];
+
 /// One soft wind impulse to inject into the volumetric smoke sim this frame.
 ///
 /// Coordinates use the same `(pixel_x, pixel_y)` convention as the rest of the
 /// scene draw output: the renderer projects them onto the table plane (with
-/// the optional `lift_px` height) using its `pixel_to_world` helper before
+/// the optional `lift_px` height) using [`crate::render::table_space::pixel_to_table_world`] before
 /// queueing the impulse on the fluid sim. Velocity is in world units (the same
 /// space the existing candle plumes and cursor wind use), so a small upward +Z
 /// push reads as a gentle breath flowing toward the back of the table.
@@ -73,7 +93,7 @@ pub struct WindGust {
 #[derive(Clone, Copy, Debug)]
 pub struct RelicPlacement {
     /// `(pixel_x, pixel_y, world_y_lift)` for the box's *base center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Half-extents of the relic box in world units (x = width/2, y = height/2,
     /// z = depth/2). Each placeholder gets a slightly different size so the
     /// row reads as a collection of distinct objects.
@@ -104,7 +124,7 @@ pub struct RelicPlacement {
 /// every face. `rotation_x_deg` leans the box against the shelf back.
 #[derive(Clone, Copy, Debug)]
 pub struct PackPlacement {
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     pub half_extents: [f32; 3],
     pub color: [f32; 4],
     pub kind: TilePackKind,
@@ -180,7 +200,7 @@ pub struct TalismanPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct CoinPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the coin's center.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Yaw rotation about world Y in radians (small per-coin jitter).
     pub rotation_y: f32,
     /// World-units radius (typically a few pixels).
@@ -198,7 +218,7 @@ pub struct CoinPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct GoldBarPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the bar's base center.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Yaw rotation about world Y in radians.
     pub rotation_y: f32,
     /// Half-extents of the bar in world units (width/2, height/2, depth/2).
@@ -212,7 +232,7 @@ pub struct GoldBarPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct BookPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the book's base center.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Yaw rotation about world Y in radians.
     pub rotation_y: f32,
     /// Half-extents in world units (width/2, height/2, depth/2).
@@ -293,7 +313,7 @@ pub struct OfudaPlacement {
 #[derive(Clone, Debug)]
 pub struct YakuTabletPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the tablet's *base center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Yaku display name (engraved on the face via decal).
@@ -311,8 +331,8 @@ pub struct YakuTabletPlacement {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct WoodTabletPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the tablet's *base center*.
-    pub world_pos: [f32; 3],
+    /// Tablet *base center* as [`TableSurfaceAnchor`] (`lift_y` = height above felt).
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Engraved label (Sort by Suit, Sort by Rank, Play, …).
@@ -328,8 +348,8 @@ pub struct WoodTabletPlacement {
 /// The discard bowl. Click target = drop selected tile in.
 #[derive(Clone, Copy, Debug)]
 pub struct BowlPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the bowl's *base center*.
-    pub world_pos: [f32; 3],
+    /// Bowl *base center* as [`TableSurfaceAnchor`].
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Hover lift envelope in [0, 1].
@@ -341,8 +361,8 @@ pub struct BowlPlacement {
 /// footprint and hover-lift convention.
 #[derive(Clone, Copy, Debug)]
 pub struct MirrorPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the mirror's *base center*.
-    pub world_pos: [f32; 3],
+    /// Mirror *base center* as [`TableSurfaceAnchor`].
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Hover lift envelope in [0, 1].
@@ -355,7 +375,7 @@ pub struct MirrorPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct PegBlockPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the block's *base center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Number of plays remaining (left peg row, capped at `plays_max`).
@@ -372,7 +392,7 @@ pub struct PegBlockPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct WallStackPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the bottom-back-left of the stack.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Tile slot dimensions in world units (per-tile width/height/depth).
     pub tile_extents: [f32; 3],
     /// Number of facedown tiles still in the wall.
@@ -386,7 +406,7 @@ pub struct WallStackPlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct DoraStandPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the stand's *base center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
 }
@@ -408,7 +428,7 @@ pub enum CascadeTokenKind {
 #[derive(Clone, Copy, Debug)]
 pub struct CascadeTokenPlacement {
     /// `(pixel_x, pixel_y, world_y)` for the token's *center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Width × thickness × depth in world units.
     pub extents: [f32; 3],
     /// Which scoring axis this token shows.
@@ -429,7 +449,7 @@ pub struct ExtrudedGlyphPlacement {
     /// `(pixel_x, pixel_y, world_y_lift)` for the popup's *center*. Pixel
     /// x/y resolve to world xz via `pixel_to_world`; `world_y_lift` is the
     /// height above the table plane the popup currently floats at.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Uniform world-units scale applied to the glyph mesh. The mesh itself
     /// is normalised to a height of 1.0 unit, so this directly sets the
     /// rendered character height in world space.
@@ -492,7 +512,7 @@ pub struct FallingBonePlacement {
     /// resolve to world xz via `pixel_to_world`; `world_y` is the live
     /// height above the table plane that the simulation drives under
     /// gravity.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Width × thickness × depth in world units.
     pub extents: [f32; 3],
     /// Tumble euler angles (rot_x, rot_y, rot_z) in radians.
@@ -511,7 +531,7 @@ pub struct FallingBonePlacement {
 #[derive(Clone, Copy, Debug)]
 pub struct ShrinePlacement {
     /// `(pixel_x, pixel_y, world_y)` for the shrine's *base center*.
-    pub world_pos: [f32; 3],
+    pub world_pos: TableSurfaceAnchor,
     /// Full extents in world units (width × height × depth). Per-instance
     /// scaling is how the Small / Big / Boss shrines get visibly distinct
     /// sizes.
@@ -556,7 +576,7 @@ pub enum DrawCmd {
     Table,
     /// 3D candle meshes for the gameplay scene. Each placement becomes one
     /// wax-body draw + one wick draw via the `lit_mesh_pipeline`. Limited to
-    /// the renderer's pre-allocated candle slot pool (currently 4).
+    /// the renderer's pre-allocated candle slot pool (currently 7).
     CandleBatch(Vec<CandlePlacement>),
     /// 3D dish mesh sitting on the table — a wide low brass tray that holds
     /// the physical relic placeholders. The renderer reads the placement out

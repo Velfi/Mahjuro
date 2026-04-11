@@ -1,5 +1,9 @@
 # Mahjuro — Agent Notes
 
+## 3D table HUD coordinates
+
+Meshes drawn on the felt (relic boxes, wood tablets, bowl/mirror, etc.) use packed [`TableSurfaceAnchor`](src/render/draw_cmd.rs) values: `[pixel_x, pixel_y, lift_y]` where `lift_y` is height above the table (world **+Y**). The renderer maps them with [`pixel_to_table_world`](src/render/table_space.rs). Gameplay bottom-bar spacing and lift live in [`action_bar_layout.rs`](src/scenes/gameplay/action_bar_layout.rs).
+
 ## Font Scaling
 
 Text labels are rasterized via `rasterize_label` (src/render/decal.rs), which sizes the font at `min(height * 0.55, width * 1.5 / char_count)`. This means:

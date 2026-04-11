@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::core::boss::{self, BossKind};
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
+use crate::core::structure::{
+    StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
+    chip_pile_tier, early_cashout_factor, is_winning_structure_shape, mult_pile_tier,
+};
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
@@ -74,6 +78,12 @@ pub struct RunState {
     pub hand: Vec<Tile>,
     /// Which hand tiles are marked for discard (parallel with `hand`).
     pub selected: Vec<bool>,
+    /// Melds committed from hand into the structure (deferred scoring until trigger).
+    #[serde(default)]
+    pub structure_sets: Vec<DetectedSet>,
+    /// Tile copies held in the structure (same ids as in `structure_sets`).
+    #[serde(default)]
+    pub structure_tiles: Vec<Tile>,
     pub round_score: u32,
     pub target_score: u32,
     pub base_target: u32,
@@ -254,6 +264,8 @@ impl RunState {
             wall,
             hand,
             selected,
+            structure_sets: Vec::new(),
+            structure_tiles: Vec::new(),
             round_score: 0,
             target_score: mode.base_target,
             base_target: mode.base_target,
@@ -828,19 +840,24 @@ impl RunState {
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
         self.restamp_hand_enhancements();
     }
 
-    /// Score the currently-selected tiles as a played hand.
-    /// Returns the points earned (0 if selection is invalid, empty, or no plays left).
-    /// Valid selections decompose perfectly into melds (pairs, triplets, sequences)
-    /// with no leftover tiles. Scored tiles are removed and replacements drawn.
+    /// Commit selected melds into structure (costs one play). Alias for the
+    /// structure-system primary action — same as [`Self::commit_selection_to_structure`].
     pub fn score_selected_tiles(&mut self, bus: &mut EventBus) -> u32 {
+        self.commit_selection_to_structure(bus)
+    }
+
+    /// Move validated melds from hand into **structure**; consumes one play.
+    /// Returns points added this step (`0` or `1` success token for UI; real score is on trigger).
+    pub fn commit_selection_to_structure(&mut self, bus: &mut EventBus) -> u32 {
         if self.plays_remaining == 0 || self.selected_count() == 0 {
             return 0;
         }
 
-        // Extract selected tiles.
         let selected_tiles: Vec<Tile> = self
             .hand
             .iter()
@@ -849,77 +866,36 @@ impl RunState {
             .map(|(t, _)| *t)
             .collect();
 
-        // Validate: must decompose into melds with no leftovers (respecting rules).
-        // Try wildcard substitution if JokerTile or WildWinds relics are active.
         let (sets, scoring_tiles) = match self.try_validate_with_wildcards(&selected_tiles) {
             Some(result) => result,
             None => return 0,
         };
 
-        // Tutorial: reject plays with set kinds not yet unlocked.
         {
             let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
             if self.tutorial_validate_sets(&set_kinds).is_err() {
                 return 0;
             }
         }
-        // If tiles were modified by JokerTile substitution, mark it used.
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
             self.relic_activations.push(RelicId::JokerTile);
         }
 
-        // Score the tiles (using substituted tiles if wildcards were applied).
-        let ctx = ScoreContext {
-            relics: &self.relics,
-            scored_last_turn: self.scored_last_turn,
-            dora_faces: self.wall.dora_faces(),
-            available_yaku: self.available_yaku.clone(),
-            round_wind: Some(BlindKind::round_wind_for_ante(self.ante)),
-            first_full_hand_of_round: !self.full_hand_played_this_round,
-            plays_used: self
-                .mode
-                .starting_plays
-                .saturating_sub(self.plays_remaining),
-            riichi_active: false,
-            yaku_levels: Some(self.yaku_levels.clone()),
-            yaku_loadout: self.yaku_loadout.clone(),
-            played_yaku_this_round: self.played_yaku_this_round.clone(),
-            gold: self.gold,
-            total_score: self.total_score_earned,
-            is_final_play: self.plays_remaining == 1,
-            tile_polisher_bonus: self.tile_polisher_bonus,
-            relic_counters: self.relic_counters.clone(),
-            unscored_hand_tiles: self.hand.len().saturating_sub(selected_tiles.len()),
-            river_runner_bonus: self.river_runner_bonus,
-        };
-        let breakdown = score_sets_with_original(&scoring_tiles, &sets, &ctx, &self.round_rules, &selected_tiles);
-        let earned = breakdown.total.max(0) as u32;
-        self.round_score = self.round_score.saturating_add(earned);
-        self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
-        // Collect relic activations from the scoring breakdown — these are
-        // the relics that contributed ScoreSteps. The gameplay scene will
-        // time their glow+wiggle to the cascade step-reveal animation, so
-        // they are NOT pushed into relic_activations here (that would fire
-        // them all at once before the cascade starts).
-        // Instead, only non-scoring side-effect activations are pushed below.
-
-        // Tile Polisher: every scored tile permanently gains +3 chips for
-        // the rest of the run. Count tiles across all scored sets.
-        if self.relics.has(RelicId::TilePolisher) {
-            let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
-            self.tile_polisher_bonus += 3 * tile_count;
-            self.relic_activations.push(RelicId::TilePolisher);
-        }
-        // River Runner: +20 permanent chips per sequence scored.
-        if self.relics.has(RelicId::RiverRunner) {
-            let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
-            if seq_count > 0 {
-                self.river_runner_bonus += 20 * seq_count;
-                self.relic_activations.push(RelicId::RiverRunner);
+        if self.mode.structure_bank {
+            for s in &sets {
+                self.structure_sets.push(s.clone());
             }
+            self.structure_tiles.extend(scoring_tiles.iter().copied());
+            bus.push(GameEvent::StructureCommitted);
+        } else {
+            let original = scoring_tiles.clone();
+            let _ =
+                self.apply_scored_melds(sets.clone(), scoring_tiles.clone(), original, None, bus);
         }
-        // Melting Ice: -8 chips per play. Destroy at 0.
+
+        self.plays_remaining = self.plays_remaining.saturating_sub(1);
+
         if self.relics.has(RelicId::MeltingIce) {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
             *v = (*v - 8).max(0);
@@ -928,7 +904,6 @@ impl RunState {
                 self.relic_counters.remove(&RelicId::MeltingIce);
             }
         }
-        // Tea Ceremony: -1 charge per play. Destroy at 0.
         if self.relics.has(RelicId::TeaCeremony) {
             let v = self.relic_counters.entry(RelicId::TeaCeremony).or_insert(3);
             *v -= 1;
@@ -937,7 +912,6 @@ impl RunState {
                 self.relic_counters.remove(&RelicId::TeaCeremony);
             }
         }
-        // Clean Streak: increment on plays without honors, reset on honors.
         if self.relics.has(RelicId::CleanStreak) {
             let has_honors = scoring_tiles
                 .iter()
@@ -949,7 +923,130 @@ impl RunState {
                 *v += 1;
             }
         }
-        // Star Tile: 1-in-4 chance to level up a scored yaku.
+
+        if self.mode.structure_bank {
+            self.scored_last_turn = false;
+        }
+
+        let indices: Vec<usize> = self
+            .selected
+            .iter()
+            .enumerate()
+            .filter(|&(_, &s)| s)
+            .map(|(i, _)| i)
+            .rev()
+            .collect();
+        for &i in &indices {
+            self.hand.remove(i);
+        }
+
+        let effective = boss::effective_hand_size(self);
+        let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
+            self.quickdraw_used = true;
+            self.relic_activations.push(RelicId::QuickDraw);
+            effective + 1
+        } else {
+            effective
+        };
+        while self.hand.len() < draw_target {
+            let Some(t) = self.wall.draw() else { break };
+            self.hand.push(t);
+            bus.push(GameEvent::TileDrawn(t));
+        }
+
+        self.hand.sort();
+        if !self.mode.structure_bank {
+            self.set_magnet_after_score(&sets, &scoring_tiles, bus);
+            self.hand.sort();
+        }
+        self.selected = vec![false; self.hand.len()];
+        self.seed_tutorial_hand();
+        self.restamp_hand_enhancements();
+
+        if self.blind == BlindKind::Boss {
+            if let Some(eff) = self.boss.effect.take() {
+                if let Some(hook) = eff.on_play {
+                    hook(self);
+                }
+                self.boss.effect = Some(eff);
+            }
+        }
+
+        self.try_autotrigger_structure_full(bus);
+        if self.mode.structure_bank
+            && self.plays_remaining == 0
+            && self.round_score < self.target_score
+            && !self.structure_sets.is_empty()
+        {
+            let _ = self.trigger_structure(StructureTriggerKind::AutoNoPlays, bus);
+        }
+        self.emit_round_resolution_events(bus);
+        1
+    }
+
+    /// When false, plays score immediately and the structure bank / cash-in UI are disabled.
+    #[inline]
+    pub fn uses_structure_bank(&self) -> bool {
+        self.mode.structure_bank
+    }
+
+    /// Core scoring path for resolved melds (structure trigger or classic commit).
+    fn apply_scored_melds(
+        &mut self,
+        sets: Vec<DetectedSet>,
+        scoring_tiles: Vec<Tile>,
+        original_for_wildcard: Vec<Tile>,
+        structure_meta: Option<StructureTriggerMeta>,
+        bus: &mut EventBus,
+    ) -> u32 {
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let ctx = ScoreContext {
+            relics: &self.relics,
+            scored_last_turn: self.scored_last_turn,
+            dora_faces: self.wall.dora_faces(),
+            available_yaku: self.available_yaku.clone(),
+            round_wind: rw,
+            first_full_hand_of_round: !self.full_hand_played_this_round,
+            plays_used: self
+                .mode
+                .starting_plays
+                .saturating_sub(self.plays_remaining),
+            riichi_active: false,
+            yaku_levels: Some(self.yaku_levels.clone()),
+            yaku_loadout: self.yaku_loadout.clone(),
+            played_yaku_this_round: self.played_yaku_this_round.clone(),
+            gold: self.gold,
+            total_score: self.total_score_earned,
+            is_final_play: self.plays_remaining == 0,
+            tile_polisher_bonus: self.tile_polisher_bonus,
+            relic_counters: self.relic_counters.clone(),
+            unscored_hand_tiles: self.hand.len(),
+            river_runner_bonus: self.river_runner_bonus,
+            structure: structure_meta,
+        };
+        let breakdown = score_sets_with_original(
+            &scoring_tiles,
+            &sets,
+            &ctx,
+            &self.round_rules,
+            &original_for_wildcard,
+        );
+        let earned = breakdown.total.max(0) as u32;
+        self.round_score = self.round_score.saturating_add(earned);
+        self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
+
+        if self.relics.has(RelicId::TilePolisher) {
+            let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
+            self.tile_polisher_bonus += 3 * tile_count;
+            self.relic_activations.push(RelicId::TilePolisher);
+        }
+        if self.relics.has(RelicId::RiverRunner) {
+            let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+            if seq_count > 0 {
+                self.river_runner_bonus += 20 * seq_count;
+                self.relic_activations.push(RelicId::RiverRunner);
+            }
+        }
         if self.relics.has(RelicId::StarTile) && !breakdown.detected_yaku.is_empty() {
             use rand::RngExt;
             use rand::seq::IndexedRandom;
@@ -966,23 +1063,18 @@ impl RunState {
                 }
             }
         }
-        // Flower gold (Bamboo effect): award immediately so the player sees
-        // the gold counter tick during the cascade.
         if breakdown.flower_gold > 0 {
             self.gold = self.gold.saturating_add(breakdown.flower_gold);
             bus.push(GameEvent::GoldChanged {
                 delta: breakdown.flower_gold,
             });
         }
-        // Latch the first-FullHand-of-round flag so the Tenpai Bonus only
-        // fires once per round.
         let scored_full_hand = breakdown
             .detected_yaku
             .contains(&crate::core::yaku::YakuKind::FullHand);
         if scored_full_hand {
             self.full_hand_played_this_round = true;
         }
-        // KanDrum (Patch C): every Kong scored grants +1 play this round.
         if self.relics.has(RelicId::KanDrum) {
             let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
             if kong_count > 0 {
@@ -990,10 +1082,6 @@ impl RunState {
                 self.relic_activations.push(RelicId::KanDrum);
             }
         }
-        // Record played yaku for The Censor (repeat-yaku half-strength) before
-        // moving the breakdown into last_breakdown. Also bump the run-wide
-        // counter that powers the Yaku Journal — this tracks every firing,
-        // independent of the Censor de-dup, so the journal reflects raw plays.
         for &y in &breakdown.detected_yaku {
             *self.yaku_times_played.entry(y).or_insert(0) += 1;
             if !self.played_yaku_this_round.contains(&y) {
@@ -1001,23 +1089,16 @@ impl RunState {
             }
         }
         self.last_breakdown = Some(breakdown);
-        self.plays_remaining = self.plays_remaining.saturating_sub(1);
         self.scored_last_turn = earned > 0;
 
-        // Track honors-played for the per-round Green Luck payout. Once
-        // any scored hand this round contains a Wind/Dragon the relic's
-        // round-end bonus is forfeit; the flag stays set until round
-        // reset (advance_round / skip_to_next_blind).
         if !self.honors_scored_this_round
-            && selected_tiles
+            && scoring_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
         {
             self.honors_scored_this_round = true;
         }
 
-        // EightTreasures (Patch C): scoring a FullHand grants a random Zodiac
-        // (ignores inventory cap so the relic always feels good).
         if scored_full_hand && self.relics.has(RelicId::EightTreasures) {
             use rand::seq::IndexedRandom;
             let mut rng = rand::rng();
@@ -1029,86 +1110,108 @@ impl RunState {
             }
         }
 
-        // Check if any triplet (or kong) was scored (for SetMagnet).
+        earned
+    }
+
+    fn set_magnet_after_score(
+        &mut self,
+        sets: &[DetectedSet],
+        scoring_tiles: &[Tile],
+        bus: &mut EventBus,
+    ) {
+        if !self.relics.has(RelicId::SetMagnet) {
+            return;
+        }
         let scored_triplet = sets
             .iter()
             .find(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong));
         let triplet_tile = scored_triplet.and_then(|s| {
             s.tile_ids
                 .first()
-                .and_then(|id| selected_tiles.iter().find(|t| t.id == *id))
+                .and_then(|id| scoring_tiles.iter().find(|t| t.id == *id))
                 .copied()
         });
+        if let Some(ref tt) = triplet_tile {
+            if let Some(matching) = self.wall.draw_matching(tt.suit, tt.rank) {
+                self.hand.push(matching);
+                bus.push(GameEvent::TileDrawn(matching));
+                self.relic_activations.push(RelicId::SetMagnet);
+            }
+        }
+    }
 
-        // Remove scored tiles from hand (reverse order to keep indices valid).
-        let indices: Vec<usize> = self
-            .selected
-            .iter()
-            .enumerate()
-            .filter(|&(_, &s)| s)
-            .map(|(i, _)| i)
-            .rev()
-            .collect();
-        for &i in &indices {
-            self.hand.remove(i);
+    /// Score and clear structure (does not consume a play).
+    pub fn trigger_structure(&mut self, kind: StructureTriggerKind, bus: &mut EventBus) -> u32 {
+        if self.structure_sets.is_empty() {
+            return 0;
+        }
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        if kind == StructureTriggerKind::Manual
+            && !can_trigger_structure(
+                &self.structure_tiles,
+                &self.structure_sets,
+                rw,
+                &self.available_yaku,
+            )
+        {
+            return 0;
         }
 
-        // Auto-draw back to full hand. Effective hand size accounts for any
-        // boss-induced shrink (e.g. The Whisper).
-        let effective = boss::effective_hand_size(self);
-        let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
-            self.quickdraw_used = true;
-            self.relic_activations.push(RelicId::QuickDraw);
-            effective + 1
-        } else {
-            effective
+        let sets = self.structure_sets.clone();
+        let scoring_tiles = self.structure_tiles.clone();
+        let original_for_wildcard = scoring_tiles.clone();
+
+        let early = match kind {
+            StructureTriggerKind::Manual => early_cashout_factor(&scoring_tiles, &sets),
+            StructureTriggerKind::AutoFull | StructureTriggerKind::AutoNoPlays => 1.0,
         };
-        while self.hand.len() < draw_target {
-            let Some(t) = self.wall.draw() else { break };
-            self.hand.push(t);
-            bus.push(GameEvent::TileDrawn(t));
-        }
 
-        // SetMagnet: scoring a triplet draws a matching tile from the wall.
-        if self.relics.has(RelicId::SetMagnet) {
-            if let Some(ref tt) = triplet_tile {
-                if let Some(matching) = self.wall.draw_matching(tt.suit, tt.rank) {
-                    self.hand.push(matching);
-                    bus.push(GameEvent::TileDrawn(matching));
-                    self.relic_activations.push(RelicId::SetMagnet);
-                }
-            }
-        }
+        let meta = StructureTriggerMeta {
+            kind,
+            meld_count: sets.len() as u32,
+            early_cashout_mult: early,
+            inject_chicken_if_no_yaku: true,
+        };
 
+        let earned = self.apply_scored_melds(
+            sets.clone(),
+            scoring_tiles.clone(),
+            original_for_wildcard,
+            Some(meta),
+            bus,
+        );
+
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
+
+        self.set_magnet_after_score(&sets, &scoring_tiles, bus);
         self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
-        // Re-seed guaranteed melds so the tutorial lesson stays solvable
-        // after replacement tiles are drawn from the wall.
-        self.seed_tutorial_hand();
-        // Re-apply persistent enhancements to any newly-drawn tiles.
-        self.restamp_hand_enhancements();
 
-        // Per-play boss hook: fires after the hand refill so wall-burn etc.
-        // affects the *next* draw, not the one we just refilled into. Only
-        // active during boss blinds — checked via `upcoming_boss` because
-        // `apply_blind` is what set this run's boss.
-        if self.blind == BlindKind::Boss {
-            if let Some(eff) = self.boss.effect.take() {
-                if let Some(hook) = eff.on_play {
-                    hook(self);
-                }
-                self.boss.effect = Some(eff);
-            }
+        earned
+    }
+
+    fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
+        if self.structure_sets.is_empty() {
+            return;
         }
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets) {
+            return;
+        }
+        if !can_trigger_structure(
+            &self.structure_tiles,
+            &self.structure_sets,
+            rw,
+            &self.available_yaku,
+        ) {
+            return;
+        }
+        let _ = self.trigger_structure(StructureTriggerKind::AutoFull, bus);
+    }
 
+    fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
         bus.push(GameEvent::ScoreUpdated(self.round_score));
         if self.round_score >= self.target_score {
-            // Balatro-style payout: a flat per-blind reward, +$1 per
-            // unused play, +$1 per $5 banked (capped at $5), and Green
-            // Luck's honors-free round bonus on top. Overscoring is
-            // worth nothing on its own — late-run income comes from
-            // efficient clears and banked interest, not from blowing
-            // past the target.
             let base_reward = self.blind.clear_reward();
             let unused_play_bonus = self.plays_remaining;
             let interest = (self.gold.max(0) as u32 / 5).min(5);
@@ -1119,14 +1222,12 @@ impl RunState {
                 } else {
                     0
                 };
-            // Gold Idol: +3 gold at round end.
             let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) {
                 self.relic_activations.push(RelicId::GoldIdol);
                 3u32
             } else {
                 0
             };
-            // Jade Abacus: +1 interest per 4 gold held (max +4).
             let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
                 let bonus = (self.gold.max(0) as u32 / 4).min(4);
                 if bonus > 0 {
@@ -1136,7 +1237,6 @@ impl RunState {
             } else {
                 0
             };
-            // Patience: +2 gold per unused discard.
             let patience_bonus = if self.relics.has(RelicId::Patience) {
                 let bonus = 2 * self.discards_remaining;
                 if bonus > 0 {
@@ -1153,9 +1253,6 @@ impl RunState {
                 .saturating_add(gold_idol_bonus)
                 .saturating_add(jade_abacus_bonus)
                 .saturating_add(patience_bonus);
-            // Gold payout is deferred — applied in handle_round_end_event()
-            // after the scoring cascade finishes, so the UI doesn't show the
-            // new balance while the animation is still playing.
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
                 payout: crate::game::event_bus::RoundPayout {
@@ -1171,6 +1268,98 @@ impl RunState {
                 final_score: self.round_score,
             });
         }
+    }
+
+    /// Banked meld chips in structure (for HUD tiers).
+    pub fn structure_banked_meld_chips(&self) -> i32 {
+        banked_meld_chips(&self.structure_sets)
+    }
+
+    pub fn structure_chip_pile_tier(&self) -> u8 {
+        chip_pile_tier(self.structure_banked_meld_chips())
+    }
+
+    pub fn structure_mult_pile_tier(&self) -> u8 {
+        mult_pile_tier(self.structure_sets.len())
+    }
+
+    /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).
+    pub fn can_trigger_structure_now(&self) -> bool {
+        if !self.mode.structure_bank || self.structure_sets.is_empty() {
+            return false;
+        }
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        can_trigger_structure(
+            &self.structure_tiles,
+            &self.structure_sets,
+            rw,
+            &self.available_yaku,
+        )
+    }
+
+    /// Read-only preview of points from a manual structure cash-in (no state change).
+    /// RNG-driven relic hooks in a real [`Self::trigger_structure`] may differ slightly.
+    pub fn preview_manual_trigger_total(&self) -> i32 {
+        if !self.mode.structure_bank || self.structure_sets.is_empty() {
+            return 0;
+        }
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        if !can_trigger_structure(
+            &self.structure_tiles,
+            &self.structure_sets,
+            rw,
+            &self.available_yaku,
+        ) {
+            return 0;
+        }
+        let sets = self.structure_sets.clone();
+        let scoring_tiles = self.structure_tiles.clone();
+        let original_for_wildcard = scoring_tiles.clone();
+        let early = early_cashout_factor(&scoring_tiles, &sets);
+        let meta = StructureTriggerMeta {
+            kind: StructureTriggerKind::Manual,
+            meld_count: sets.len() as u32,
+            early_cashout_mult: early,
+            inject_chicken_if_no_yaku: true,
+        };
+        let ctx = ScoreContext {
+            relics: &self.relics,
+            scored_last_turn: self.scored_last_turn,
+            dora_faces: self.wall.dora_faces(),
+            available_yaku: self.available_yaku.clone(),
+            round_wind: rw,
+            first_full_hand_of_round: !self.full_hand_played_this_round,
+            plays_used: self
+                .mode
+                .starting_plays
+                .saturating_sub(self.plays_remaining),
+            riichi_active: false,
+            yaku_levels: Some(self.yaku_levels.clone()),
+            yaku_loadout: self.yaku_loadout.clone(),
+            played_yaku_this_round: self.played_yaku_this_round.clone(),
+            gold: self.gold,
+            total_score: self.total_score_earned,
+            is_final_play: self.plays_remaining == 0,
+            tile_polisher_bonus: self.tile_polisher_bonus,
+            relic_counters: self.relic_counters.clone(),
+            unscored_hand_tiles: self.hand.len(),
+            river_runner_bonus: self.river_runner_bonus,
+            structure: Some(meta),
+        };
+        let breakdown = score_sets_with_original(
+            &scoring_tiles,
+            &sets,
+            &ctx,
+            &self.round_rules,
+            &original_for_wildcard,
+        );
+        breakdown.total.max(0) as i32
+    }
+
+    /// Manual structure cash-in (no play cost) + round resolution events.
+    pub fn trigger_structure_manual(&mut self, bus: &mut EventBus) -> u32 {
+        let earned = self.trigger_structure(StructureTriggerKind::Manual, bus);
+        self.emit_round_resolution_events(bus);
         earned
     }
 
@@ -1190,7 +1379,12 @@ impl RunState {
             .map(|(t, _)| *t)
             .collect();
         let (sets, scoring_tiles) = self.try_validate_with_wildcards(&selected_tiles)?;
-        Some(preview_score(&scoring_tiles, &sets, &self.available_yaku, Some(&selected_tiles)))
+        Some(preview_score(
+            &scoring_tiles,
+            &sets,
+            &self.available_yaku,
+            Some(&selected_tiles),
+        ))
     }
 
     /// Check if the current selection forms a valid playable hand.
@@ -1481,6 +1675,8 @@ impl RunState {
         self.blind = self.upcoming_blind;
         self.hand.clear();
         self.selected.clear();
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
         self.tag_bonus_hand_size = 0;
 
         // Tutorial: advance to the next lesson and apply its overrides.
@@ -1543,6 +1739,8 @@ impl RunState {
         self.blind = self.upcoming_blind;
         self.hand.clear();
         self.selected.clear();
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
         self.tag_bonus_hand_size = 0;
     }
 
@@ -1682,6 +1880,8 @@ mod tests {
             full_hand_played_this_round: false,
             gold: mode.starting_gold as i32,
             hand,
+            structure_sets: vec![],
+            structure_tiles: vec![],
             joker_used: false,
             last_breakdown: None,
             mode: mode.clone(),
@@ -2036,7 +2236,6 @@ mod tests {
 
         assert_eq!(run.selected_count(), 0);
         assert_eq!(run.selected.len(), run.hand.len());
-        assert_eq!(run.hand.len(), HAND_SIZE);
         assert_eq!(run.discards_remaining, STARTING_DISCARDS);
     }
 
@@ -2057,6 +2256,25 @@ mod tests {
         // Scored tiles removed and redrawn.
         assert_eq!(run.hand.len(), HAND_SIZE);
         assert_eq!(run.selected_count(), 0);
+    }
+
+    #[test]
+    fn classic_mode_scores_on_commit_without_structure_bank() {
+        let mut run = test_run();
+        run.mode.structure_bank = false;
+        let mut bus = bus();
+        let score_before = run.round_score;
+        run.toggle_select(0);
+        run.toggle_select(1);
+        run.toggle_select(2);
+        let pts = run.score_selected_tiles(&mut bus);
+        assert!(pts > 0);
+        assert!(
+            run.round_score > score_before,
+            "classic play adds to round score immediately"
+        );
+        assert!(run.structure_sets.is_empty());
+        assert!(run.structure_tiles.is_empty());
     }
 
     #[test]

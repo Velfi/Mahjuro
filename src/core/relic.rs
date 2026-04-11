@@ -998,6 +998,14 @@ pub struct ScoreContext<'a> {
     pub unscored_hand_tiles: usize,
     /// River Runner accumulated permanent chip bonus.
     pub river_runner_bonus: i32,
+    /// When set, this score is from **structure trigger** (not a direct hand play).
+    ///
+    /// **Structure migration:** relics that used to fire on every "scoring play" may need a
+    /// split: effects that should happen when melds **land** (`RunState::commit_selection_to_structure`)
+    /// vs when the player **cashes in** (`trigger_structure`). Examples wired today: MeltingIce /
+    /// Tea / CleanStreak on commit; TilePolisher / River Runner / Star Tile / KanDrum / scoring
+    /// cascades on trigger. Audit new "per play" relics against this split.
+    pub structure: Option<crate::core::structure::StructureTriggerMeta>,
 }
 
 // All scoring effects now live in `core::scoring::score_sets` directly,

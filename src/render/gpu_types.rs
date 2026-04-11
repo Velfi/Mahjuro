@@ -446,8 +446,10 @@ pub const MAX_PEG_SLOTS: usize = 32;
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
 /// Maximum number of dora stands per frame.
 pub const MAX_DORA_STAND_SLOTS: usize = 2;
-/// Maximum number of cascade scoring tokens per frame (chips + mult).
-pub const MAX_CASCADE_TOKEN_SLOTS: usize = 4;
+/// Maximum number of cascade scoring tokens per frame across all batches.
+/// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
+/// strip adds 2 more during an active cascade.
+pub const MAX_CASCADE_TOKEN_SLOTS: usize = 16;
 /// Maximum number of physical falling-bone instances in flight at once.
 /// Sized to comfortably hold a multi-step cascade's worth of bursts (each
 /// scoring step spawns a small handful) without overflowing the pool.

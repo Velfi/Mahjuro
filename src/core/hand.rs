@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 
@@ -81,7 +83,7 @@ fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
     parts.join("  ")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetKind {
     Pair,
     Triplet,
@@ -92,7 +94,7 @@ pub enum SetKind {
     Kong,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetectedSet {
     pub kind: SetKind,
     /// Tile ids participating in this set (references into the hand).
@@ -242,7 +244,7 @@ pub fn validate_selection_with_rules(
     }
     // Pre-validation rejects from boss effects. These run before decomposition
     // so we don't waste cycles on hands the boss already disqualifies.
-    if rules.contains(&RuleModifier::MustPlayFour) && tiles.len() != 4 {
+    if rules.contains(&RuleModifier::MustPlayFive) && tiles.len() != 5 {
         return None;
     }
     if rules.contains(&RuleModifier::RequireHonor)

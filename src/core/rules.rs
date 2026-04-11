@@ -23,8 +23,8 @@ pub enum RuleModifier {
     SequencesHalved,
     /// Tiles of rank 5 contribute zero point value. (The Drunkard boss.)
     MiddleTilesZero,
-    /// Selection must contain exactly 4 tiles. (The Bureaucrat boss.)
-    MustPlayFour,
+    /// Selection must contain exactly 5 tiles. (The Bureaucrat boss.)
+    MustPlayFive,
     /// Selection must contain at least one Honor (Wind or Dragon) tile.
     /// (The Dragon final boss.)
     RequireHonor,
@@ -44,7 +44,7 @@ impl RuleModifier {
             RuleModifier::PairsScoreZero => "Silent Pairs",
             RuleModifier::SequencesHalved => "Withered Sequences",
             RuleModifier::MiddleTilesZero => "Drunken Middles",
-            RuleModifier::MustPlayFour => "Bureaucratic Form",
+            RuleModifier::MustPlayFive => "Bureaucratic Form",
             RuleModifier::RequireHonor => "Honor Required",
             RuleModifier::CensorRepeats => "Repeats Censored",
         }
@@ -61,7 +61,7 @@ impl RuleModifier {
             RuleModifier::PairsScoreZero => "Pairs score 0 base chips",
             RuleModifier::SequencesHalved => "Sequences score half base chips",
             RuleModifier::MiddleTilesZero => "Rank-5 tiles score 0",
-            RuleModifier::MustPlayFour => "Must play exactly 4 tiles",
+            RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
             RuleModifier::RequireHonor => "Hand must contain a Wind or Dragon tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",
         }
