@@ -108,9 +108,8 @@ impl InputState {
                 } else {
                     UiAction::Cancel
                 }),
-                ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::ScoreHand),
-                ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::CommitDiscard),
-                ButtonPressed(Button::RightThumb, _) => actions.push(UiAction::TriggerStructure),
+                ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::TriggerStructure),
+                ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::TriggerStructure),
                 ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),
                 ButtonPressed(Button::North, _) => actions.push(UiAction::CommitDiscard),
                 AxisChanged(Axis::LeftStickX, v, _) if v > 0.5 => actions.push(UiAction::FocusNext),
