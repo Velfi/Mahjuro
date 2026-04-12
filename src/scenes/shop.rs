@@ -416,6 +416,42 @@ fn consumable_sell_price(c: Consumable) -> u32 {
     (buy / 2).max(1)
 }
 
+fn owned_consumable_count(run: &crate::game::run::RunState, pred: fn(Consumable) -> bool) -> usize {
+    run.consumables
+        .items
+        .iter()
+        .copied()
+        .filter(|&c| pred(c))
+        .count()
+}
+
+fn live_shop_hit(
+    hit: ShopHit,
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    pack_item: &Option<TilePackShopItem>,
+    run: &crate::game::run::RunState,
+) -> Option<ShopHit> {
+    let valid = match hit {
+        ShopHit::Relic(i) => i < items.len() + run.relics.active.len(),
+        ShopHit::Ribbon(i) => {
+            i < zodiac_items.len()
+                + owned_consumable_count(run, |c| matches!(c, Consumable::Zodiac(_)))
+        }
+        ShopHit::Talisman(i) => {
+            i < talisman_items.len()
+                + owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)))
+        }
+        ShopHit::Dish(id) => matches!(
+            id,
+            PICK_RELIC_DISH | PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_TILE_PACK
+        ) && (id != PICK_TILE_PACK || pack_item.is_some()),
+        ShopHit::TilePack(id) => id == PICK_TILE_PACK && pack_item.is_some(),
+    };
+    valid.then_some(hit)
+}
+
 fn owned_ribbon_inventory_index(
     ribbon_idx: usize,
     zodiac_items: &[ConsumableShopItem],
@@ -2284,10 +2320,20 @@ impl SceneBehavior for ShopScene {
         // cursor. Cursor mode `update()` writes `self.focus` from the
         // pick result already, so this expression collapses to "show the
         // focused element" in the steady state.
-        let hover: Option<ShopHit> = self
+        let hover = self
             .focus
             .and_then(|f| f.to_hit())
-            .or(ctx.picked_shop_object);
+            .or(ctx.picked_shop_object)
+            .and_then(|hit| {
+                live_shop_hit(
+                    hit,
+                    &self.items,
+                    &self.zodiac_items,
+                    &self.talisman_items,
+                    &self.pack_item,
+                    ctx.run,
+                )
+            });
         if let Some(hit) = hover {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
             // Helper: get the (px, py, wy) anchor of a hit consumable for
