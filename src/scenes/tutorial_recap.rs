@@ -178,6 +178,16 @@ impl SceneBehavior for TutorialRecapScene {
         if (self.completed_lesson as usize) < LESSON_COUNT {
             let next = lesson_def(self.completed_lesson + 1);
             let preview_y = cy + card_h - 110.0 * scale;
+            let preview_title = if self.shop_follows {
+                "Next Stop"
+            } else {
+                "Up Next"
+            };
+            let preview_text = if self.shop_follows {
+                "Visit the Shop between rounds. Relics grant passive bonuses for the rest of the run, ribbons level up yaku, and talismans enhance tiles. Hover items to inspect them, buy what helps, then press Next Round."
+            } else {
+                next.intro_text
+            };
 
             frame.text(TextLabel {
                 rect: [
@@ -186,7 +196,7 @@ impl SceneBehavior for TutorialRecapScene {
                     card_w - 40.0 * scale,
                     22.0 * scale,
                 ],
-                text: "Up Next".to_string(),
+                text: preview_title.to_string(),
                 color: color::GOLD,
                 font_px: Some(18.0 * scale),
                 align: TextAlign::Center,
@@ -197,7 +207,7 @@ impl SceneBehavior for TutorialRecapScene {
             let intro_w = card_w - 60.0 * scale;
             // Rough chars-per-line: rect width / (font_px * 0.5).
             let chars_per_line = ((intro_w / (intro_font * 0.5)) as usize).max(20);
-            let wrapped = simple_word_wrap(next.intro_text, chars_per_line);
+            let wrapped = simple_word_wrap(preview_text, chars_per_line);
             let line_count = wrapped.matches('\n').count() + 1;
             let intro_h = intro_font * 1.3 * line_count as f32;
 

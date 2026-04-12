@@ -167,9 +167,10 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
     GlossaryEntry {
         term: "Full Hand",
         aliases: &[],
-        description: "Yaku: a complete 14-tile hand. Build 4 melds \
-                      (triplets, sequences, or kongs) plus 1 pair, then \
-                      score them all in one round. +5 mult, +60 chips.",
+        description: "Yaku: the standard complete 14-tile hand shape. \
+                      Build 4 melds (triplets, sequences, or kongs) plus \
+                      1 pair: 4+4+4+4+2, not 2x7 seven pairs. +5 mult, \
+                      +60 chips.",
     },
     GlossaryEntry {
         term: "Tanyao",

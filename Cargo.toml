@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.102"
 bytemuck = { version = "1.23", features = ["derive"] }
 cassowary = "0.3.0"
+clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11.8"
 earcutr = "0.4"
 fontdue = "0.8"
@@ -32,6 +33,8 @@ enum_dispatch = "0.3"
 rodio = { version = "0.19", features = ["vorbis"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
 self_update = { version = "0.42", features = ["archive-zip", "archive-tar"] }
+rayon = "1.11.0"
+human_format = "1.2.1"
 
 [dev-dependencies]
 proptest = "1.6"

@@ -943,7 +943,6 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::RedDragonRage => "Fury of the red dragon.".into(),
         // ── Patch C new relics ──
         RelicId::ShantenShove => "One last push toward tenpai.".into(),
-        RelicId::WallPeek => "Glimpses what's coming.".into(),
         RelicId::KanDrum => "Beats louder for every kong.".into(),
         RelicId::DoraCrown => "Crown of indicators.".into(),
         RelicId::RiichiStick => "A bet declared with confidence.".into(),
@@ -953,10 +952,9 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::RoundCompass => "Honors the round wind.".into(),
         RelicId::ZodiacPouch => "Holds an extra Zodiac.".into(),
         RelicId::LunarAlmanac => "Doubles every third Zodiac use.".into(),
-        RelicId::YakuScholar => "Master more yaku at once.".into(),
         RelicId::EightTreasures => "A complete hand pulls a Zodiac from the air.".into(),
         RelicId::KongsBlessing => "Kongs blessed with a pair's power.".into(),
-        RelicId::CodexCompass => "Reshape your loadout mid-round.".into(),
+        RelicId::CodexCompass => "A compass from an older ruleset.".into(),
         // ── Flower-synergy relics ──
         RelicId::GardenKeeper => "Tends the garden with double care.".into(),
         RelicId::Ikebana => "Art in arranging many flowers.".into(),

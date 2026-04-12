@@ -19,8 +19,8 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
-    Rarity, RelicId, RelicState, all_relic_defs, relic_buy_price as relic_price,
-    relic_description_live, relic_sell_price, relic_sell_price_live,
+    Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price,
+    relic_sell_price_live, relic_shop_price,
 };
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
@@ -136,7 +136,7 @@ fn shop_action_for_hit(
             if i < n_for_sale {
                 Some(ShopAction::BuyCard(i))
             } else {
-                Some(ShopAction::SellRelic(i - n_for_sale))
+                None
             }
         }
         ShopHit::Ribbon(i) => {
@@ -162,19 +162,7 @@ fn shop_action_for_hit(
             if i < talisman_items.len() {
                 Some(ShopAction::BuyTalisman(i))
             } else {
-                let oi = i - talisman_items.len();
-                let mut count = 0usize;
-                let mut inv_idx = None;
-                for (idx, c) in run.consumables.items.iter().enumerate() {
-                    if matches!(c, Consumable::Talisman(_)) {
-                        if count == oi {
-                            inv_idx = Some(idx);
-                            break;
-                        }
-                        count += 1;
-                    }
-                }
-                inv_idx.map(ShopAction::SellConsumable)
+                None
             }
         }
         ShopHit::Dish(id) if id == PICK_TILE_PACK => Some(ShopAction::BuyPack),
@@ -428,6 +416,48 @@ fn consumable_sell_price(c: Consumable) -> u32 {
     (buy / 2).max(1)
 }
 
+fn owned_ribbon_inventory_index(
+    ribbon_idx: usize,
+    zodiac_items: &[ConsumableShopItem],
+    run: &crate::game::run::RunState,
+) -> Option<usize> {
+    if ribbon_idx < zodiac_items.len() {
+        return None;
+    }
+    let oi = ribbon_idx - zodiac_items.len();
+    let mut count = 0usize;
+    for (idx, c) in run.consumables.items.iter().enumerate() {
+        if matches!(c, Consumable::Zodiac(_)) {
+            if count == oi {
+                return Some(idx);
+            }
+            count += 1;
+        }
+    }
+    None
+}
+
+fn owned_talisman_inventory_index(
+    talisman_idx: usize,
+    talisman_items: &[ConsumableShopItem],
+    run: &crate::game::run::RunState,
+) -> Option<usize> {
+    if talisman_idx < talisman_items.len() {
+        return None;
+    }
+    let oi = talisman_idx - talisman_items.len();
+    let mut count = 0usize;
+    for (idx, c) in run.consumables.items.iter().enumerate() {
+        if matches!(c, Consumable::Talisman(_)) {
+            if count == oi {
+                return Some(idx);
+            }
+            count += 1;
+        }
+    }
+    None
+}
+
 /// A purchasable relic in the shop.
 struct ShopItem {
     relic: RelicId,
@@ -436,6 +466,16 @@ struct ShopItem {
     rarity: Rarity,
     price: u32,
     sold: bool,
+}
+
+impl ShopItem {
+    fn buy_label(&self) -> String {
+        if self.price == 0 {
+            "FREE".to_string()
+        } else {
+            format!("Buy {}g", self.price)
+        }
+    }
 }
 
 /// A purchasable consumable in the shop — either a Zodiac or a Talisman.
@@ -475,6 +515,45 @@ impl ConsumableShopItem {
 struct TilePackShopItem {
     kind: TilePackKind,
     sold: bool,
+}
+
+fn push_free_badge(
+    quads: &mut Vec<GpuInstance>,
+    texts: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    window_h: f32,
+    ui_scale: f32,
+) {
+    if rect[2] <= 1.0 || rect[3] <= 1.0 || !rect[0].is_finite() || !rect[1].is_finite() {
+        return;
+    }
+    let badge_font = typography::size(typography::MICRO, window_h, ui_scale).max(12.0);
+    let badge_h = (badge_font * 1.55).max(18.0);
+    let badge_w = (badge_font * 4.8).max(52.0);
+    let badge_x = rect[0] + rect[2] - badge_w * 0.88;
+    let badge_y = rect[1] - badge_h * 0.22;
+
+    quads.push(GpuInstance {
+        rect: [badge_x, badge_y, badge_w, badge_h],
+        color: [color::BRASS[0], color::BRASS[1], color::BRASS[2], 0.95],
+    });
+    quads.push(GpuInstance {
+        rect: [badge_x + 2.0, badge_y + 2.0, badge_w - 4.0, badge_h - 4.0],
+        color: [
+            color::MIDNIGHT[0],
+            color::MIDNIGHT[1],
+            color::MIDNIGHT[2],
+            0.96,
+        ],
+    });
+    texts.push(TextLabel {
+        rect: [badge_x + 4.0, badge_y, badge_w - 8.0, badge_h],
+        text: "FREE".to_string(),
+        color: color::CHAMPAGNE,
+        font_px: Some(badge_font),
+        align: TextAlign::Center,
+        ..Default::default()
+    });
 }
 
 /// Which phase the pack celebration is in.
@@ -639,6 +718,10 @@ const SHOP_3D_HIT_ID: u32 = 0x9200;
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Reroll 2D button.
 const SHOP_REROLL_ID: u32 = 0x9400;
+/// Floating sell button for hovered owned relics.
+const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
+/// Floating sell button for hovered owned consumables.
+const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 /// Base gold cost for the first shop reroll.
 const REROLL_BASE_COST: u32 = 5;
 /// How long a relic glow + wiggle lasts after activation.
@@ -717,7 +800,7 @@ fn generate_shop_stock(
     let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
     let mut relic_pool: Vec<&_> = defs
         .iter()
-        .filter(|d| !relics.has(d.id) && !shop_excluded.contains(&d.id))
+        .filter(|d| !relics.owns(d.id) && !shop_excluded.contains(&d.id))
         .collect();
     relic_pool.shuffle(&mut rng);
     let items: Vec<ShopItem> = relic_pool
@@ -728,13 +811,7 @@ fn generate_shop_stock(
             name: d.name,
             description: d.description,
             rarity: d.rarity,
-            price: {
-                let mut p = relic_price(d.id);
-                if relics.has(RelicId::MerchantsEye) {
-                    p = p.saturating_sub(1).max(1);
-                }
-                p
-            },
+            price: relic_shop_price(d.id, relics),
             sold: false,
         })
         .collect();
@@ -775,6 +852,11 @@ fn generate_shop_stock(
 impl ShopScene {
     pub fn new(came_from_round: u32, run: &mut crate::game::run::RunState) -> Self {
         let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
+        let extra_relics = if run.tag_patron_gift {
+            extra_relics.max(1)
+        } else {
+            extra_relics
+        };
         let (mut items, zodiac_items, talisman_items, pack_item) =
             generate_shop_stock(&run.relics, extra_relics);
 
@@ -1577,9 +1659,68 @@ impl SceneBehavior for ShopScene {
                 }
                 continue;
             }
-            // Shoulder buttons: when focused on an owned relic, shift it
-            // left/right in the inventory. Matters for Mirror Tile ordering.
+            // LB / `[` sells the focused owned relic or consumable. RB keeps
+            // the legacy relic reordering affordance for Mirror Tile setups.
             if matches!(a, UiAction::NavigateHudNext | UiAction::NavigateHudPrev) {
+                if matches!(a, UiAction::NavigateHudPrev) {
+                    match self.focus {
+                        Some(ShopFocus::Relic(i)) => {
+                            let n_for_sale = self.items.len();
+                            if i >= n_for_sale {
+                                let owned_idx = i - n_for_sale;
+                                let result = apply_shop_action(
+                                    ShopAction::SellRelic(owned_idx),
+                                    &mut self.items,
+                                    &mut self.zodiac_items,
+                                    &mut self.talisman_items,
+                                    &mut self.pack_item,
+                                    ctx.run,
+                                    ctx.bus,
+                                );
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.focus = None;
+                            }
+                            continue;
+                        }
+                        Some(ShopFocus::Ribbon(i)) => {
+                            if let Some(inv_idx) =
+                                owned_ribbon_inventory_index(i, &self.zodiac_items, ctx.run)
+                            {
+                                let result = apply_shop_action(
+                                    ShopAction::SellConsumable(inv_idx),
+                                    &mut self.items,
+                                    &mut self.zodiac_items,
+                                    &mut self.talisman_items,
+                                    &mut self.pack_item,
+                                    ctx.run,
+                                    ctx.bus,
+                                );
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.focus = None;
+                            }
+                            continue;
+                        }
+                        Some(ShopFocus::Talisman(i)) => {
+                            if let Some(inv_idx) =
+                                owned_talisman_inventory_index(i, &self.talisman_items, ctx.run)
+                            {
+                                let result = apply_shop_action(
+                                    ShopAction::SellConsumable(inv_idx),
+                                    &mut self.items,
+                                    &mut self.zodiac_items,
+                                    &mut self.talisman_items,
+                                    &mut self.pack_item,
+                                    ctx.run,
+                                    ctx.bus,
+                                );
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.focus = None;
+                            }
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
                 if let Some(ShopFocus::Relic(i)) = self.focus {
                     let n_for_sale = self.items.len();
                     if i >= n_for_sale {
@@ -1666,6 +1807,36 @@ impl SceneBehavior for ShopScene {
             }
         }
         for &cid in ctx.button_clicks {
+            if cid >= SHOP_SELL_RELIC_BASE && cid < SHOP_SELL_RELIC_BASE + 64 {
+                let idx = (cid - SHOP_SELL_RELIC_BASE) as usize;
+                let result = apply_shop_action(
+                    ShopAction::SellRelic(idx),
+                    &mut self.items,
+                    &mut self.zodiac_items,
+                    &mut self.talisman_items,
+                    &mut self.pack_item,
+                    ctx.run,
+                    ctx.bus,
+                );
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.focus = None;
+                return None;
+            }
+            if cid >= SHOP_SELL_CONSUMABLE_BASE && cid < SHOP_SELL_CONSUMABLE_BASE + 32 {
+                let idx = (cid - SHOP_SELL_CONSUMABLE_BASE) as usize;
+                let result = apply_shop_action(
+                    ShopAction::SellConsumable(idx),
+                    &mut self.items,
+                    &mut self.zodiac_items,
+                    &mut self.talisman_items,
+                    &mut self.pack_item,
+                    ctx.run,
+                    ctx.bus,
+                );
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.focus = None;
+                return None;
+            }
             if cid == SHOP_NEXT_ROUND_ID {
                 return Some(Scene::PickBlind(PickBlindScene::new()));
             }
@@ -2292,13 +2463,13 @@ impl SceneBehavior for ShopScene {
         let mut quads: Vec<GpuInstance> = Vec::new();
         let mut texts: Vec<TextLabel> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
+        let n_for_sale_relics = self.items.len().min(layout.niche_count);
         // Suppress unused-binding warning when score_panel was the previous
         // anchor and is no longer used here.
         let _ = ctx.layout.score_panel;
 
         // Tooltip on the hovered object.
         if let Some(hit) = hover {
-            let n_for_sale_relics = self.items.len().min(layout.niche_count);
             let n_for_sale_zodiacs = self.zodiac_items.len();
             let n_for_sale_talismans = self.talisman_items.len();
             // Look up the projected screen rect from the renderer.
@@ -2328,7 +2499,7 @@ impl SceneBehavior for ShopScene {
                             format!("Need {}g", item.price as i32 - ctx.run.gold)
                         }
                     } else {
-                        format!("Buy {}g", item.price)
+                        item.buy_label()
                     };
                     let col = if item.sold {
                         color::SLATE
@@ -2353,7 +2524,11 @@ impl SceneBehavior for ShopScene {
                         let name = def
                             .map(|d| d.name.to_string())
                             .unwrap_or_else(|| "Relic".into());
-                        let desc = relic_description_live(rid, &ctx.run.relic_counters);
+                        let desc = relic_description_live(
+                            rid,
+                            &ctx.run.relic_counters,
+                            ctx.run.total_score_earned,
+                        );
                         let sell = relic_sell_price_live(rid, &ctx.run.relic_counters);
                         (name, desc, format!("Sell {}g", sell), color::CHAMPAGNE)
                     } else {
@@ -2368,6 +2543,8 @@ impl SceneBehavior for ShopScene {
                         "SOLD".to_string()
                     } else if !can_afford {
                         format!("Need {}g", price as i32 - ctx.run.gold)
+                    } else if price == 0 {
+                        "FREE".to_string()
                     } else {
                         format!("Buy {}g", price)
                     };
@@ -2423,6 +2600,8 @@ impl SceneBehavior for ShopScene {
                         } else {
                             format!("Need {}g", price as i32 - ctx.run.gold)
                         }
+                    } else if price == 0 {
+                        "FREE".to_string()
                     } else {
                         format!("Buy {}g", price)
                     };
@@ -2482,6 +2661,8 @@ impl SceneBehavior for ShopScene {
                         let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
                             "SOLD".to_string()
+                        } else if price == 0 {
+                            "FREE".to_string()
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
@@ -2509,6 +2690,8 @@ impl SceneBehavior for ShopScene {
                         let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
                             "SOLD".to_string()
+                        } else if price == 0 {
+                            "FREE".to_string()
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
@@ -2621,6 +2804,100 @@ impl SceneBehavior for ShopScene {
             }
         }
 
+        if let Some(hit) = hover {
+            match hit {
+                ShopHit::Relic(i) if i >= n_for_sale_relics => {
+                    let owned_idx = i - n_for_sale_relics;
+                    if let Some(rect) = ctx.proj.relic_rects.get(i).copied() {
+                        let rid = ctx.run.relics.active[owned_idx];
+                        let refund = relic_sell_price_live(rid, &ctx.run.relic_counters);
+                        let sell_rect = [
+                            rect[0] + rect[2] * 0.46,
+                            rect[1] + 6.0,
+                            rect[2] * 0.48,
+                            24.0,
+                        ];
+                        widget::push_button(
+                            &mut quads,
+                            &mut texts,
+                            &mut buttons,
+                            sell_rect,
+                            &format!("Sell {refund}g"),
+                            ButtonVariant::Default,
+                            ButtonState::Rest,
+                            UiAction::Cancel,
+                        );
+                        buttons.pop();
+                        buttons.push(ButtonDef::scene(
+                            (sell_rect[0], sell_rect[1], sell_rect[2], sell_rect[3]),
+                            SHOP_SELL_RELIC_BASE + owned_idx as u32,
+                        ));
+                    }
+                }
+                ShopHit::Ribbon(i) => {
+                    if let Some(inv_idx) =
+                        owned_ribbon_inventory_index(i, &self.zodiac_items, ctx.run)
+                    {
+                        if let Some(rect) = ctx.proj.ribbon_rects.get(i).copied() {
+                            let refund = consumable_sell_price(ctx.run.consumables.items[inv_idx]);
+                            let sell_rect = [
+                                rect[0] + rect[2] * 0.40,
+                                rect[1] + 6.0,
+                                rect[2] * 0.56,
+                                24.0,
+                            ];
+                            widget::push_button(
+                                &mut quads,
+                                &mut texts,
+                                &mut buttons,
+                                sell_rect,
+                                &format!("Sell {refund}g"),
+                                ButtonVariant::Default,
+                                ButtonState::Rest,
+                                UiAction::Cancel,
+                            );
+                            buttons.pop();
+                            buttons.push(ButtonDef::scene(
+                                (sell_rect[0], sell_rect[1], sell_rect[2], sell_rect[3]),
+                                SHOP_SELL_CONSUMABLE_BASE + inv_idx as u32,
+                            ));
+                        }
+                    }
+                }
+                ShopHit::Talisman(i) => {
+                    if let Some(inv_idx) =
+                        owned_talisman_inventory_index(i, &self.talisman_items, ctx.run)
+                    {
+                        if let Some(rect) = ctx.proj.talisman_rects.get(i).copied() {
+                            let refund = consumable_sell_price(ctx.run.consumables.items[inv_idx]);
+                            let sell_rect = [
+                                rect[0] + rect[2] * 0.36,
+                                rect[1] + 6.0,
+                                rect[2] * 0.60,
+                                24.0,
+                            ];
+                            widget::push_button(
+                                &mut quads,
+                                &mut texts,
+                                &mut buttons,
+                                sell_rect,
+                                &format!("Sell {refund}g"),
+                                ButtonVariant::Default,
+                                ButtonState::Rest,
+                                UiAction::Cancel,
+                            );
+                            buttons.pop();
+                            buttons.push(ButtonDef::scene(
+                                (sell_rect[0], sell_rect[1], sell_rect[2], sell_rect[3]),
+                                SHOP_SELL_CONSUMABLE_BASE + inv_idx as u32,
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // ── Tutorial shop banner ────────────────────────────────────────
         // When the tutorial is active and the lesson is shop-enabled, show
         // a hint banner at the top of the screen guiding the player through
@@ -2628,24 +2905,65 @@ impl SceneBehavior for ShopScene {
         // style.
         if let Some(ref tut) = ctx.run.tutorial {
             if tut.is_active() && tut.current_lesson_def().shop_enabled {
+                let n_for_sale_relics = self.items.len().min(layout.niche_count);
+                let n_for_sale_zodiacs = self.zodiac_items.len();
+                let n_for_sale_talismans = self.talisman_items.len();
                 let has_bought = tut
                     .celebrated
                     .contains(&crate::game::tutorial::TutorialMilestone::FirstShopBuy);
                 let (flavor, hint) = if has_bought {
                     (
-                        "Gold well spent returns tenfold.",
-                        "Nice find! You can also buy Ribbons and Talismans. Press Next Round when done.",
+                        "Your upgrades are live.",
+                        "Relics work passively for the rest of the run. Hover items in the lower dish to sell them, or press Next Round when you are ready to test your new build.",
                     )
                 } else if self.items.is_empty() {
                     (
                         "The cabinet is bare\u{2026}",
                         "Press Next Round to move on.",
                     )
+                } else if let Some(hit) = hover {
+                    match hit {
+                        ShopHit::Relic(i) if i < n_for_sale_relics => (
+                            "Relics are permanent run upgrades.",
+                            "This cabinet sells passive relics. Read the tooltip, check the gold cost, and buy the one that best helps your scoring plan.",
+                        ),
+                        ShopHit::Relic(_) => (
+                            "Owned relics live in the lower dish.",
+                            "Hover a relic in the dish to review its effect. Use the Sell button or press LB / [ to cash it out if you want to pivot your build.",
+                        ),
+                        ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => (
+                            "Ribbons level up a yaku.",
+                            "Buying a ribbon boosts one scoring pattern for the rest of the run. They are great when you already know which yaku you want to chase.",
+                        ),
+                        ShopHit::Talisman(i) if i < n_for_sale_talismans => (
+                            "Talismans are consumable upgrades.",
+                            "Talismans go into your consumable tray and modify tiles or scoring. They are flexible pickups when you do not want to commit to a relic.",
+                        ),
+                        ShopHit::Ribbon(_) => (
+                            "Owned ribbons can be used here.",
+                            "Hover an owned ribbon in the tray and click Use to apply its yaku level-up before the next blind.",
+                        ),
+                        ShopHit::Talisman(_) => (
+                            "Owned talismans can be sold back.",
+                            "Hover an owned talisman in the tray to inspect it or sell it for gold if you need room.",
+                        ),
+                        ShopHit::Dish(id) if id == PICK_TILE_PACK => (
+                            "Tile packs change the wall.",
+                            "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
+                        ),
+                        ShopHit::TilePack(_) => (
+                            "Tile packs change the wall.",
+                            "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
+                        ),
+                        _ => (
+                            "Take a look around the Shop.",
+                            "Hover any item to inspect it. The tooltip tells you what it does and whether you can buy, use, or sell it.",
+                        ),
+                    }
                 } else {
                     (
                         "Welcome to the Shop!",
-                        "Hover a relic in the cabinet to see what it does, then click to buy it. \
-                         Ribbons level up yaku patterns; Talismans enhance your tiles.",
+                        "Left cabinet: relics for passive bonuses. Hanging ribbons: yaku level-ups. Jade tablets: talismans. Hover anything to inspect it, then buy what helps before pressing Next Round.",
                     )
                 };
 
@@ -2844,6 +3162,15 @@ impl SceneBehavior for ShopScene {
                 if let Some(rect) = rect_lookup {
                     push_focus_ring(rect, scale, &mut quads);
                 }
+            }
+        }
+
+        for (i, item) in self.items.iter().enumerate() {
+            if item.sold || item.price != 0 {
+                continue;
+            }
+            if let Some(rect) = ctx.proj.relic_rects.get(i).copied() {
+                push_free_badge(&mut quads, &mut texts, rect, h, ui_scale);
             }
         }
 
@@ -3103,5 +3430,34 @@ impl SceneBehavior for ShopScene {
         );
 
         frame
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::game_mode::GameMode;
+
+    #[test]
+    fn patron_gift_shop_always_contains_a_free_relic() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.tag_patron_gift = true;
+
+        let shop = ShopScene::new(1, &mut run);
+
+        assert!(!shop.items.is_empty());
+        assert!(shop.items.iter().any(|item| item.price == 0));
+        assert!(!run.tag_patron_gift);
+    }
+
+    #[test]
+    fn rich_stock_shop_starts_with_two_extra_relics() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.tag_rich_stock = true;
+
+        let shop = ShopScene::new(1, &mut run);
+
+        assert!(shop.items.len() >= 2);
+        assert!(!run.tag_rich_stock);
     }
 }

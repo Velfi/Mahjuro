@@ -58,12 +58,12 @@ Kongs additionally flip a new **dora indicator**, and each dora indicator adds +
 
 ### **D. Yaku (Hand Patterns)**
 
-Yaku grant flat mult on top of meld chips. Players carry a **yaku loadout** (3 base slots, expandable to 4 via relic) plus two always-active patterns (FullHand, Yakuhai). Fourteen yaku are implemented:
+Yaku add both flat chips and flat mult on top of meld chips. FullHand and Yakuhai are always available; the remaining yaku unlock through progression and can all score once unlocked. Fourteen yaku are implemented:
 
-* **Always active:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet)
-* **Loadout:** Tanyao (2–8 only), Toitoi (all triplets), Iipeikou (doubled sequence), Sanshoku Doujun (same sequence in 3 suits), Ittsu (1-2-3 + 4-5-6 + 7-8-9), Honitsu (one suit + honors), Chinitsu (one suit only), Junchan (every meld touches a terminal), Honroutou (terminals and honors only), Chiitoitsu (seven pairs), Chicken Hand (zero-mult fallback)
+* **Always available:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet)
+* **Progression unlocks:** Tanyao (2-8 only), Toitoi (all triplets), Iipeikou (doubled sequence), Sanshoku Doujun (same sequence in 3 suits), Ittsu (1-2-3 + 4-5-6 + 7-8-9), Honitsu (one suit + honors), Chinitsu (one suit only), Junchan (every meld touches a terminal), Honroutou (terminals and honors only), Chiitoitsu (seven pairs), Chicken Hand (fallback valid hand with no other yaku)
 
-Yaku level up via **zodiacs**: using a zodiac consumable grants +0.5 mult to its bound yaku (capped at +5).
+Yaku level up via **zodiacs**: using a zodiac consumable boosts its bound yaku by `+20 chips` and `+0.5 mult` per level.
 
 ### **E. Scoring System**
 
@@ -186,7 +186,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 | 1–2 rule modifiers                | Exceeded    | **12 modifiers** + 14 boss effects        |
 | Score targets                     | Done        | 8 antes × 3 blinds each                   |
 | Post-run unlocks                  | Done        | 7-level unlock gating                     |
-| *Bonus: Yaku system*              | Implemented | 14 patterns, loadout + zodiac leveling    |
+| *Bonus: Yaku system*              | Implemented | 14 patterns, progression unlocks + zodiac leveling |
 | *Bonus: Talismans & enhancements* | Implemented | 5 enhancement types, persistent per tile  |
 | *Bonus: 3D shop*                  | Implemented | Curio cabinet with spotlight hover        |
 | *Bonus: Tutorial / onboarding*    | Implemented | Overlay, recap, dedicated learn scenes    |

@@ -14,9 +14,12 @@ mod scenes;
 mod ui;
 mod update_check;
 
+use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::sync::Arc;
 use std::time::Instant;
 
+use clap::{ArgAction, Args, Parser, Subcommand};
 use debug_menu::{DebugAction, DebugMenuBar};
 use debug_overlays::{
     CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
@@ -34,15 +37,17 @@ use scenes::shop::ShopScene;
 use scenes::splash::SplashScene;
 use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
+use serde::{Deserialize, Serialize};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
 use ui::tooltip::TooltipState;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowId};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+use winit::window::{Fullscreen, Window, WindowId};
 
 // Debug overlays (visibility toggles, cascade tuning, SFX test, camera
 // params) live in `debug_overlays.rs`.  See `mod debug_overlays` above.
@@ -122,6 +127,257 @@ enum TransitionKind {
     ShootingStarCascade,
 }
 
+#[derive(Debug, Parser)]
+#[command(author, version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Run the headless bot for tuning/balance checks.
+    Bot(BotCli),
+    /// Run headless bots, update docs snapshot JSON, and regenerate graphs.
+    BotGraph(BotGraphCli),
+    /// Run the default tuning sweep grid.
+    Sweep(SweepCli),
+}
+
+#[derive(Debug, Args)]
+struct BotCli {
+    /// Number of runs to execute.
+    #[arg(default_value_t = 100)]
+    runs: u32,
+    /// Override the standard mode's base blind target.
+    #[arg(long)]
+    base_target: Option<u32>,
+    /// Override the standard mode's target scaling.
+    #[arg(long)]
+    target_scale: Option<f32>,
+    /// Override the standard mode's starting plays.
+    #[arg(long)]
+    plays: Option<u32>,
+    /// Override the standard mode's starting discards.
+    #[arg(long)]
+    discards: Option<u32>,
+    /// Override the standard mode's starting gold.
+    #[arg(long)]
+    gold: Option<u32>,
+    /// Print per-run bot logs in addition to the aggregate summary.
+    #[arg(long, action = ArgAction::SetTrue)]
+    bot_log: bool,
+    /// Export aggregate bot results to a JSON file.
+    #[arg(long)]
+    export_json: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SweepCli {
+    /// Number of runs to execute per sweep cell.
+    #[arg(long, default_value_t = 40)]
+    runs: u32,
+    /// Export sweep results to a JSON file.
+    #[arg(long)]
+    export_json: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct BotGraphCli {
+    /// Number of runs to execute.
+    #[arg(default_value_t = 10_000)]
+    runs: u32,
+    /// Stable slug used to insert or replace the snapshot in docs JSON.
+    #[arg(long)]
+    slug: Option<String>,
+    /// Chart label. Supports literal \n for multi-line chart labels.
+    #[arg(long)]
+    label: Option<String>,
+    /// Override the standard mode's base blind target.
+    #[arg(long)]
+    base_target: Option<u32>,
+    /// Override the standard mode's target scaling.
+    #[arg(long)]
+    target_scale: Option<f32>,
+    /// Override the standard mode's starting plays.
+    #[arg(long)]
+    plays: Option<u32>,
+    /// Override the standard mode's starting discards.
+    #[arg(long)]
+    discards: Option<u32>,
+    /// Override the standard mode's starting gold.
+    #[arg(long)]
+    gold: Option<u32>,
+    /// Print per-run bot logs in addition to the aggregate summary.
+    #[arg(long, action = ArgAction::SetTrue)]
+    bot_log: bool,
+}
+
+impl BotCli {
+    fn bot_config(&self) -> bot::BotConfig {
+        bot::BotConfig {
+            base_target: self.base_target,
+            target_scaling: self.target_scale,
+            starting_plays: self.plays,
+            starting_discards: self.discards,
+            starting_gold: self.gold,
+        }
+    }
+}
+
+impl BotGraphCli {
+    fn bot_config(&self) -> bot::BotConfig {
+        bot::BotConfig {
+            base_target: self.base_target,
+            target_scaling: self.target_scale,
+            starting_plays: self.plays,
+            starting_discards: self.discards,
+            starting_gold: self.gold,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BotGraphSnapshot {
+    slug: String,
+    label: String,
+    runs: u32,
+    win_rate: f64,
+    avg_blinds: f64,
+    avg_antes: f64,
+    avg_total_score_m: f64,
+    avg_plays: f64,
+    avg_discards: f64,
+    avg_skips: f64,
+    avg_relics: f64,
+    avg_gold_spent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avg_gold_earned: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_base: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_plays: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_interest: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_relics: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avg_final_gold: Option<f64>,
+    deaths_by_ante: std::collections::BTreeMap<u32, u32>,
+}
+
+fn avg_u64(total: u64, runs: u32) -> f64 {
+    if runs == 0 {
+        0.0
+    } else {
+        total as f64 / runs as f64
+    }
+}
+
+fn avg_i64(total: i64, runs: u32) -> f64 {
+    if runs == 0 {
+        0.0
+    } else {
+        total as f64 / runs as f64
+    }
+}
+
+fn default_snapshot_slug(mode: &game::game_mode::GameMode, runs: u32) -> String {
+    format!(
+        "bt{}_ts{}_p{}_d{}_g{}_{}",
+        mode.base_target,
+        format!("{:.2}", mode.target_scaling).replace('.', "_"),
+        mode.starting_plays,
+        mode.starting_discards,
+        mode.starting_gold,
+        runs
+    )
+}
+
+fn default_snapshot_label(mode: &game::game_mode::GameMode, runs: u32) -> String {
+    format!(
+        "Base {}\nScale {:.2}\nP{} D{} G{}\n({} runs)",
+        mode.base_target,
+        mode.target_scaling,
+        mode.starting_plays,
+        mode.starting_discards,
+        mode.starting_gold,
+        runs
+    )
+}
+
+fn build_bot_graph_snapshot(
+    agg: &bot::AggregateStats,
+    slug: String,
+    label: String,
+) -> BotGraphSnapshot {
+    let runs = agg.runs;
+    BotGraphSnapshot {
+        slug,
+        label,
+        runs,
+        win_rate: if runs == 0 {
+            0.0
+        } else {
+            agg.victories as f64 * 100.0 / runs as f64
+        },
+        avg_blinds: avg_u64(agg.blinds_cleared_total, runs),
+        avg_antes: avg_u64(agg.antes_cleared_total, runs),
+        avg_total_score_m: avg_u64(agg.total_score, runs) / 1_000_000.0,
+        avg_plays: avg_u64(agg.total_plays, runs),
+        avg_discards: avg_u64(agg.total_discards, runs),
+        avg_skips: avg_u64(agg.total_blinds_skipped, runs),
+        avg_relics: avg_u64(agg.total_relics_bought, runs),
+        avg_gold_spent: avg_u64(agg.total_gold_spent, runs),
+        avg_gold_earned: Some(avg_u64(
+            agg.total_gold_from_clears + agg.total_gold_from_skip_tags,
+            runs,
+        )),
+        clear_base: Some(avg_u64(agg.total_gold_from_clear_base, runs)),
+        clear_plays: Some(avg_u64(agg.total_gold_from_unused_plays, runs)),
+        clear_interest: Some(avg_u64(agg.total_gold_from_interest, runs)),
+        clear_relics: Some(avg_u64(agg.total_gold_from_clear_relics, runs)),
+        avg_final_gold: Some(avg_i64(agg.total_final_gold, runs)),
+        deaths_by_ante: agg.deaths_by_ante.clone(),
+    }
+}
+
+fn load_snapshots(path: &Path) -> anyhow::Result<Vec<BotGraphSnapshot>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+fn write_snapshots(path: &Path, snapshots: &[BotGraphSnapshot]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(snapshots)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+fn upsert_snapshot(path: &Path, snapshot: BotGraphSnapshot) -> anyhow::Result<()> {
+    let mut snapshots = load_snapshots(path)?;
+    if let Some(existing) = snapshots.iter_mut().find(|item| item.slug == snapshot.slug) {
+        *existing = snapshot;
+    } else {
+        snapshots.push(snapshot);
+    }
+    write_snapshots(path, &snapshots)
+}
+
+fn render_bot_graphs(repo_root: &Path) -> anyhow::Result<()> {
+    let status = ProcessCommand::new("python3")
+        .arg("tools/plot_bot_balance.py")
+        .current_dir(repo_root)
+        .status()?;
+    anyhow::ensure!(status.success(), "graph render failed with status {status}");
+    Ok(())
+}
+
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<WgpuRenderer>,
@@ -163,6 +419,7 @@ struct App {
     cascade_tuning: CascadeTuning,
     deferred_round_end: Option<GameEvent>,
     update_checker: update_check::UpdateChecker,
+    modifiers: ModifiersState,
 }
 
 impl App {
@@ -198,6 +455,33 @@ impl App {
             || self.scene.has_blocking_overlay()
     }
 
+    /// Gameplay-only hover hit-test for the on-table relic row. Uses the
+    /// renderer's projected relic rects, so it matches the visible 3D boxes
+    /// the same way gameplay focus and tooltips already do.
+    fn gameplay_relic_slot_at_cursor(&self, cursor: (f32, f32)) -> Option<usize> {
+        if self.modal_overlay_active() || !matches!(self.scene, Scene::Gameplay(_)) {
+            return None;
+        }
+        let renderer = self.renderer.as_ref()?;
+        renderer
+            .projections()
+            .relic_rects
+            .iter()
+            .enumerate()
+            .find_map(|(i, rect)| {
+                let [x, y, w, h] = *rect;
+                (w > 1.0
+                    && h > 1.0
+                    && x.is_finite()
+                    && y.is_finite()
+                    && cursor.0 >= x
+                    && cursor.0 <= x + w
+                    && cursor.1 >= y
+                    && cursor.1 <= y + h)
+                    .then_some(i)
+            })
+    }
+
     fn new() -> Self {
         let t0 = Instant::now();
         let settings = persistence::load_settings();
@@ -207,6 +491,7 @@ impl App {
         // exists or it was written by a previous build version, fall back
         // to a fresh demo run. `load_run` deletes stale/corrupt saves.
         let mut run = persistence::load_run(active_profile).unwrap_or_else(RunState::new_demo);
+        run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         run.available_yaku = progress.available_yaku();
         run.available_rules = progress.available_rules();
         let mut audio = audio::AudioManager::new();
@@ -264,6 +549,53 @@ impl App {
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
             update_checker: update_check::UpdateChecker::spawn(),
+            modifiers: ModifiersState::default(),
+        }
+    }
+
+    fn toggle_fullscreen(&self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let fullscreen = if window.fullscreen().is_some() {
+            None
+        } else {
+            Some(Fullscreen::Borderless(None))
+        };
+        window.set_fullscreen(fullscreen);
+    }
+
+    fn wants_fullscreen_shortcut(&self, event: &KeyEvent) -> bool {
+        if event.repeat || event.state != ElementState::Pressed {
+            return false;
+        }
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return false;
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            let no_extra_modifiers = !self.modifiers.control_key()
+                && !self.modifiers.shift_key()
+                && !self.modifiers.super_key();
+            self.modifiers.alt_key()
+                && no_extra_modifiers
+                && matches!(code, KeyCode::Enter | KeyCode::NumpadEnter)
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // `fn` is generally handled below the app layer on macOS and is
+            // rarely surfaced by winit, so the practical signal we can bind
+            // is the bare `F` keypress that macOS emits for the standard
+            // fullscreen shortcut on Apple keyboards.
+            self.modifiers.is_empty() && code == KeyCode::KeyF
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = code;
+            false
         }
     }
 
@@ -277,10 +609,12 @@ impl App {
         // Resume the new profile's saved run if it has one — otherwise a
         // fresh demo run, exactly like first-launch behavior.
         self.run = persistence::load_run(new_index).unwrap_or_else(RunState::new_demo);
+        let mut settings = persistence::load_settings();
+        self.run
+            .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         self.run.available_yaku = self.progress.available_yaku();
         self.run.available_rules = self.progress.available_rules();
         // Persist the active profile choice.
-        let mut settings = persistence::load_settings();
         settings.active_profile = new_index;
         let _ = persistence::save_settings(&settings);
     }
@@ -437,7 +771,7 @@ impl App {
                     self.run.retry_tutorial_blind();
 
                     let feedback = crate::game::tutorial::failure_feedback(
-                        round_score,
+                        round_score.min(u32::MAX as u64) as u32,
                         target_score,
                         plays_left,
                         discards_left,
@@ -1058,6 +1392,15 @@ impl App {
                 self.modals.push(modal);
                 log::info!("[Debug] Spawned test overlay modal");
             }
+            DebugAction::ShowVictoryScreen => {
+                while self.modals.dismiss() {}
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::victory(
+                    self.run.round_score,
+                    self.run.target_score,
+                )));
+                self.transition_alpha = 1.0;
+                log::info!("[Debug] Showing victory screen");
+            }
         }
         // Request redraw to reflect changes immediately.
         if let Some(w) = self.window.as_ref() {
@@ -1209,6 +1552,9 @@ impl ApplicationHandler for App {
                         GameEvent::StructureCommitted => {
                             self.audio.play_sfx(audio::SfxId::StructureCommit);
                         }
+                        GameEvent::InvalidAction => {
+                            self.audio.play_sfx(audio::SfxId::InvalidAction);
+                        }
                         GameEvent::TutorialMilestone(milestone) => {
                             use crate::game::tutorial::TutorialMilestone;
                             let (title, body) = match milestone {
@@ -1237,7 +1583,7 @@ impl ApplicationHandler for App {
                                 ),
                                 TutorialMilestone::FirstTrigger => (
                                     "First Trigger!",
-                                    "Structure cashed in \u{2014} bank more melds to multiply your score!",
+                                    "Structure cashed in \u{2014} watch the chip and mult piles build, then bank more melds to multiply your score!",
                                 ),
                             };
                             let win_size = self
@@ -1611,6 +1957,8 @@ impl ApplicationHandler for App {
                     self.gfx.ssr_enabled = opts.ssr_enabled;
                     self.gfx.hdr_enabled = opts.hdr_enabled;
                     self.gfx.ui_scale = opts.ui_scale;
+                    self.run
+                        .set_auto_cash_in_on_full_structure(opts.auto_cash_in_on_full_structure);
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
                     }
@@ -1796,30 +2144,54 @@ impl ApplicationHandler for App {
                         }
                         if !hit {
                             // Check if we're clicking on a hand tile to start drag.
+                            let clicked_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
                             if let Some(input) = self.input.as_mut() {
                                 if let Some(slot) = input.pointer_slot {
                                     input.drag = Some(ui::input::DragState {
+                                        subject: ui::input::DragSubject::HandTile,
                                         from_slot: slot,
                                         start_pos: cursor,
                                         current_pos: cursor,
                                     });
                                     // Only confirm (toggle-select tile) if a hand tile was clicked.
                                     self.mouse_actions.push(UiAction::Confirm);
+                                } else if let Some(slot) = clicked_relic_slot {
+                                    input.drag = Some(ui::input::DragState {
+                                        subject: ui::input::DragSubject::Relic,
+                                        from_slot: slot,
+                                        start_pos: cursor,
+                                        current_pos: cursor,
+                                    });
                                 }
                             }
                         }
                     } else if state == ElementState::Released {
                         // End drag — swap tiles if dropped on a different slot.
                         // Require minimum drag distance to avoid accidental swaps.
+                        let dropped_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
                         if let Some(input) = self.input.as_mut() {
                             if let Some(drag) = input.drag.take() {
                                 let dx = cursor.0 - drag.start_pos.0;
                                 let dy = cursor.1 - drag.start_pos.1;
                                 let dist = (dx * dx + dy * dy).sqrt();
                                 if dist > 10.0 {
-                                    if let Some(target_slot) = input.pointer_slot {
-                                        if target_slot != drag.from_slot {
-                                            self.run.swap_tiles(drag.from_slot, target_slot);
+                                    match drag.subject {
+                                        ui::input::DragSubject::HandTile => {
+                                            if let Some(target_slot) = input.pointer_slot {
+                                                if target_slot != drag.from_slot {
+                                                    self.run
+                                                        .swap_tiles(drag.from_slot, target_slot);
+                                                }
+                                            }
+                                        }
+                                        ui::input::DragSubject::Relic => {
+                                            if let Some(target_slot) = dropped_relic_slot {
+                                                if target_slot != drag.from_slot {
+                                                    self.run
+                                                        .relics
+                                                        .swap_relics(drag.from_slot, target_slot);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1884,8 +2256,16 @@ impl ApplicationHandler for App {
                     w.request_redraw();
                 }
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed {
+                if self.wants_fullscreen_shortcut(&event) {
+                    self.toggle_fullscreen();
+                    if let Some(w) = self.window.as_ref() {
+                        w.request_redraw();
+                    }
+                } else if event.state == ElementState::Pressed {
                     let mut v = Vec::new();
                     let mode_changed = if let Some(input) = self.input.as_mut() {
                         input.on_key(event.physical_key, &mut v)
@@ -1941,45 +2321,76 @@ impl ApplicationHandler for App {
 fn main() -> anyhow::Result<()> {
     crash_guard::install();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let cli = Cli::parse();
 
-    // Headless bot mode for tuning. Examples:
-    //   mahjuro --bot 200
-    //   mahjuro --bot 200 --base-target 250 --target-scale 1.3 --plays 5
-    //   mahjuro --sweep                              (default sweep grid)
-    //   mahjuro --sweep --runs 50
-    let args: Vec<String> = std::env::args().collect();
-    let arg_value = |name: &str| -> Option<String> {
-        args.iter()
-            .position(|a| a == name)
-            .and_then(|i| args.get(i + 1).cloned())
-    };
-    let parse_f32 = |name: &str| arg_value(name).and_then(|s| s.parse::<f32>().ok());
-    let parse_u32 = |name: &str| arg_value(name).and_then(|s| s.parse::<u32>().ok());
+    // Headless tuning subcommands. Examples:
+    //   mahjuro bot
+    //   mahjuro bot 200 --base-target 250 --target-scale 1.3 --plays 5
+    //   mahjuro bot --export-json /tmp/bot.json
+    //   mahjuro bot-graph 10000 --slug baseline_10k --label "Baseline\n(10k runs)"
+    //   mahjuro sweep
+    //   mahjuro sweep --runs 50 --export-json /tmp/sweep.json
+    match cli.command {
+        Some(Command::Sweep(sweep)) => {
+            let bases: &[u32] = &[200, 250, 300, 350];
+            let scales: &[f32] = &[1.20, 1.30, 1.40, 1.50];
+            let plays: &[u32] = &[4, 5];
+            bot::run_sweep(
+                sweep.runs,
+                bases,
+                scales,
+                plays,
+                sweep.export_json.as_deref(),
+            );
+            return Ok(());
+        }
+        Some(Command::Bot(bot_cli)) => {
+            bot::run_headless(
+                bot_cli.runs,
+                bot_cli.bot_config(),
+                bot::BotRunOptions {
+                    log: bot_cli.bot_log,
+                    export_json: bot_cli.export_json.clone(),
+                },
+            );
+            return Ok(());
+        }
+        Some(Command::BotGraph(bot_graph)) => {
+            let config = bot_graph.bot_config();
+            let mode = config.clone().into_mode();
+            let slug = bot_graph
+                .slug
+                .clone()
+                .unwrap_or_else(|| default_snapshot_slug(&mode, bot_graph.runs));
+            let label = bot_graph
+                .label
+                .clone()
+                .unwrap_or_else(|| default_snapshot_label(&mode, bot_graph.runs))
+                .replace("\\n", "\n");
+            let agg = bot::run_headless_aggregate(
+                bot_graph.runs,
+                config,
+                bot::BotRunOptions {
+                    log: bot_graph.bot_log,
+                    export_json: None,
+                },
+            );
+            agg.print_summary();
 
-    let bot_config = bot::BotConfig {
-        base_target: parse_u32("--base-target"),
-        target_scaling: parse_f32("--target-scale"),
-        starting_plays: parse_u32("--plays"),
-        starting_discards: parse_u32("--discards"),
-        starting_gold: parse_u32("--gold"),
-    };
-
-    if args.iter().any(|a| a == "--sweep") {
-        let runs = parse_u32("--runs").unwrap_or(40);
-        // Default sweep grid — covers ranges most likely useful for tuning.
-        let bases: &[u32] = &[200, 250, 300, 350];
-        let scales: &[f32] = &[1.20, 1.30, 1.40, 1.50];
-        let plays: &[u32] = &[4, 5];
-        bot::run_sweep(runs, bases, scales, plays);
-        return Ok(());
-    }
-    if let Some(pos) = args.iter().position(|a| a == "--bot") {
-        let n: u32 = args
-            .get(pos + 1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(100);
-        bot::run_headless(n, bot_config);
-        return Ok(());
+            let snapshot = build_bot_graph_snapshot(&agg, slug.clone(), label);
+            let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+            let snapshot_path = repo_root.join("docs").join("bot_balance_runs.json");
+            upsert_snapshot(&snapshot_path, snapshot)?;
+            println!(
+                "updated bot graph snapshot '{}' in {}",
+                slug,
+                snapshot_path.display()
+            );
+            render_bot_graphs(repo_root)?;
+            println!("regenerated docs bot balance graphs");
+            return Ok(());
+        }
+        None => {}
     }
 
     asset_path::log_all_assets();

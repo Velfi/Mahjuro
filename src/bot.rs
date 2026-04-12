@@ -2,29 +2,226 @@
 //!
 //! The bot picks the highest-scoring valid play available in its current hand each turn.
 //! Between turns it strategically discards isolated tiles via 1-step rollout when the
-//! best play falls below the pace needed to clear. Between blinds it picks the relic
-//! that most increases its current best-play value, visits the shop and buys the
-//! affordable relic with the largest marginal value, and skips Small/Big blinds when
-//! its expected score comfortably exceeds the target.
+//! best play falls below the pace needed to clear. Between blinds it values relics and
+//! consumables, visits the shop, buys the most useful affordable upgrade, and skips
+//! Small/Big blinds when its expected score comfortably exceeds the target.
 //!
 //! Run with: `cargo run --release -- --bot 200`
 
 use rand::RngExt;
 use rand::seq::SliceRandom;
+use rayon::prelude::*;
+use serde::Serialize;
+use std::fmt;
+use std::path::{Path, PathBuf};
 
+use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
 use crate::core::hand::{detect_all_sets, validate_selection_with_rules};
-use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_buy_price};
+use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_shop_price};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
-use crate::core::structure::{StructureTriggerKind, StructureTriggerMeta, early_cashout_factor};
-use crate::core::tile::Tile;
+use crate::core::structure::{StructureTriggerKind, StructureTriggerMeta};
+use crate::core::talisman::TalismanKind;
+use crate::core::tile::{Suit, Tile};
+use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
 
+macro_rules! bot_log {
+    ($enabled:expr, $($arg:tt)*) => {
+        if $enabled {
+            println!($($arg)*);
+        }
+    };
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ClearPayoutBreakdown {
+    base_reward: u32,
+    unused_play_bonus: u32,
+    interest: u32,
+    relic_bonus: u32,
+    total: u32,
+}
+
+fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
+    match blind {
+        BlindKind::Boss => {
+            let boss_name = run
+                .boss
+                .upcoming
+                .map(|boss| boss.name())
+                .unwrap_or("Unknown Boss");
+            format!("{} ({})", blind.name(), boss_name)
+        }
+        _ => blind.name().to_string(),
+    }
+}
+
+fn fmt_indices(indices: &[usize]) -> impl fmt::Display + '_ {
+    struct DisplayIndices<'a>(&'a [usize]);
+
+    impl fmt::Display for DisplayIndices<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "[")?;
+            for (i, idx) in self.0.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{idx}")?;
+            }
+            write!(f, "]")
+        }
+    }
+
+    DisplayIndices(indices)
+}
+
+fn current_boss_name(run: &RunState) -> Option<&'static str> {
+    run.boss.upcoming.map(|boss| boss.name())
+}
+
+fn format_top_counts(
+    counts: &std::collections::BTreeMap<String, u32>,
+    limit: usize,
+) -> Option<String> {
+    if counts.is_empty() {
+        return None;
+    }
+
+    let mut items: Vec<(&String, &u32)> = counts.iter().collect();
+    items.sort_by(|(ka, va), (kb, vb)| vb.cmp(va).then_with(|| ka.cmp(kb)));
+    Some(
+        items
+            .into_iter()
+            .take(limit)
+            .map(|(name, count)| format!("{name} x{count}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+#[derive(Debug, Default)]
+struct HandOptionAnalysis {
+    valid_count: u32,
+    committable_count: u32,
+    positive_score_count: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TerminalIssueCause {
+    OutOfPlays,
+    RejectedChosenPlay,
+    NoDiscardsRemaining,
+    EmptyHand,
+}
+
+impl TerminalIssueCause {
+    fn label(self) -> &'static str {
+        match self {
+            Self::OutOfPlays => "out-of-plays",
+            Self::RejectedChosenPlay => "rejected-chosen-play",
+            Self::NoDiscardsRemaining => "no-discards-remaining",
+            Self::EmptyHand => "empty-hand",
+        }
+    }
+}
+
+fn analyze_hand_options(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+) -> HandOptionAnalysis {
+    let n = hand.len();
+    if !(2..=20).contains(&n) {
+        return HandOptionAnalysis::default();
+    }
+
+    let mut analysis = HandOptionAnalysis::default();
+    for mask in enumerate_candidate_play_masks(hand, rules) {
+        let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
+        let tiles: Vec<Tile> = indices.iter().map(|&i| hand[i]).collect();
+        let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
+            continue;
+        };
+
+        analysis.valid_count += 1;
+
+        if run.uses_structure_bank()
+            && run.structure_tiles.len() + scoring_tiles.len() > crate::game::run::HAND_SIZE
+        {
+            continue;
+        }
+        analysis.committable_count += 1;
+
+        let mut merged_sets = run.structure_sets.clone();
+        merged_sets.extend(sets.iter().cloned());
+        let mut merged_tiles = run.structure_tiles.clone();
+        merged_tiles.extend(scoring_tiles.iter().copied());
+        let ctx = ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
+        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        if breakdown.total > 0 {
+            analysis.positive_score_count += 1;
+        }
+    }
+
+    analysis
+}
+
+fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: TerminalIssueCause) {
+    *stats
+        .bot_issues_by_blind
+        .entry(blind_log_label(run, run.blind))
+        .or_insert(0) += 1;
+    if let Some(boss_name) = current_boss_name(run) {
+        *stats
+            .bot_issues_by_boss
+            .entry(boss_name.to_string())
+            .or_insert(0) += 1;
+    }
+
+    let analysis = analyze_hand_options(run, &run.hand, &run.round_rules);
+    let issue_key = if analysis.valid_count == 0 {
+        "no-valid".to_string()
+    } else if analysis.valid_count == 1 && analysis.committable_count == 0 {
+        "only-valid-unplayable".to_string()
+    } else if analysis.valid_count == 1 && analysis.positive_score_count == 0 {
+        "only-valid-no-score".to_string()
+    } else if analysis.committable_count == 0 {
+        format!("other:{}:all-valid-blocked", cause.label())
+    } else if analysis.positive_score_count == 0 {
+        format!("other:{}:all-committable-zero-score", cause.label())
+    } else {
+        format!("other:{}:mixed-options-still-stuck", cause.label())
+    };
+    *stats.bot_issues_by_reason.entry(issue_key).or_insert(0) += 1;
+
+    if analysis.valid_count == 0 {
+        stats.bot_issue_no_valid_hand += 1;
+        return;
+    }
+
+    if analysis.valid_count == 1 && analysis.committable_count == 0 {
+        stats.bot_issue_only_valid_unplayable += 1;
+        return;
+    }
+
+    if analysis.valid_count == 1 && analysis.positive_score_count == 0 {
+        stats.bot_issue_only_valid_no_score += 1;
+        return;
+    }
+
+    if analysis.committable_count > 0 && analysis.positive_score_count > 0 {
+        stats.bot_issue_lost_with_available_lines += 1;
+    } else {
+        stats.bot_issue_other_stuck += 1;
+    }
+}
+
 /// Per-run telemetry collected during a single bot playthrough.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RunStats {
     /// How many blinds the bot successfully cleared in this run.
     pub blinds_cleared: u32,
@@ -52,6 +249,37 @@ pub struct RunStats {
     pub relics_bought: u32,
     /// Total gold spent in shops.
     pub gold_spent: u32,
+    /// Gold earned from blind-clear payouts.
+    pub gold_from_clears: u32,
+    /// Flat Small/Big/Boss reward portion of blind-clear payouts.
+    pub gold_from_clear_base: u32,
+    /// Gold from unspent plays when clearing blinds.
+    pub gold_from_unused_plays: u32,
+    /// Gold from interest on banked gold when clearing blinds.
+    pub gold_from_interest: u32,
+    /// Gold from relic-specific blind-clear payout bonuses.
+    pub gold_from_clear_relics: u32,
+    /// Gold realized immediately from skip tags.
+    pub gold_from_skip_tags: u32,
+    /// Approximate gold-equivalent value of all skip tags taken.
+    pub skip_tag_gold_value: u32,
+    /// Sum of targets on attempted blinds.
+    pub total_target_score: u64,
+    /// Sum of overscore margin on cleared blinds.
+    pub total_overscore: u64,
+    /// Highest single-blind score achieved in the run.
+    pub peak_blind_score: u64,
+    /// Which skip tags the bot actually took.
+    pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
+    /// Terminal bot anomaly counts detected during the run.
+    pub bot_issue_no_valid_hand: u32,
+    pub bot_issue_only_valid_unplayable: u32,
+    pub bot_issue_only_valid_no_score: u32,
+    pub bot_issue_other_stuck: u32,
+    pub bot_issue_lost_with_available_lines: u32,
+    pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
 }
 
 impl Default for RunStats {
@@ -70,12 +298,31 @@ impl Default for RunStats {
             blinds_skipped: 0,
             relics_bought: 0,
             gold_spent: 0,
+            gold_from_clears: 0,
+            gold_from_clear_base: 0,
+            gold_from_unused_plays: 0,
+            gold_from_interest: 0,
+            gold_from_clear_relics: 0,
+            gold_from_skip_tags: 0,
+            skip_tag_gold_value: 0,
+            total_target_score: 0,
+            total_overscore: 0,
+            peak_blind_score: 0,
+            skipped_tags: std::collections::BTreeMap::new(),
+            bot_issue_no_valid_hand: 0,
+            bot_issue_only_valid_unplayable: 0,
+            bot_issue_only_valid_no_score: 0,
+            bot_issue_other_stuck: 0,
+            bot_issue_lost_with_available_lines: 0,
+            bot_issues_by_reason: std::collections::BTreeMap::new(),
+            bot_issues_by_blind: std::collections::BTreeMap::new(),
+            bot_issues_by_boss: std::collections::BTreeMap::new(),
         }
     }
 }
 
 /// Aggregate statistics across many bot runs.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct AggregateStats {
     pub runs: u32,
     pub blinds_cleared_total: u64,
@@ -89,10 +336,31 @@ pub struct AggregateStats {
     pub total_blinds_skipped: u64,
     pub total_relics_bought: u64,
     pub total_gold_spent: u64,
+    pub total_final_gold: i64,
+    pub total_gold_from_clears: u64,
+    pub total_gold_from_clear_base: u64,
+    pub total_gold_from_unused_plays: u64,
+    pub total_gold_from_interest: u64,
+    pub total_gold_from_clear_relics: u64,
+    pub total_gold_from_skip_tags: u64,
+    pub total_skip_tag_gold_value: u64,
+    pub total_target_score: u64,
+    pub total_overscore: u64,
+    pub peak_blind_score: u64,
+    pub total_bot_issue_no_valid_hand: u64,
+    pub total_bot_issue_only_valid_unplayable: u64,
+    pub total_bot_issue_only_valid_no_score: u64,
+    pub total_bot_issue_other_stuck: u64,
+    pub total_bot_issue_lost_with_available_lines: u64,
+    pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
     /// Histogram of (ante -> count of runs that died on that ante).
     pub deaths_by_ante: std::collections::BTreeMap<u32, u32>,
     /// Histogram of (blind -> count of runs that died on that blind).
     pub deaths_by_blind: std::collections::BTreeMap<&'static str, u32>,
+    /// Histogram of skip tags actually taken.
+    pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
+    pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
 }
 
 impl AggregateStats {
@@ -111,12 +379,91 @@ impl AggregateStats {
         self.total_blinds_skipped += s.blinds_skipped as u64;
         self.total_relics_bought += s.relics_bought as u64;
         self.total_gold_spent += s.gold_spent as u64;
+        self.total_final_gold += s.final_gold as i64;
+        self.total_gold_from_clears += s.gold_from_clears as u64;
+        self.total_gold_from_clear_base += s.gold_from_clear_base as u64;
+        self.total_gold_from_unused_plays += s.gold_from_unused_plays as u64;
+        self.total_gold_from_interest += s.gold_from_interest as u64;
+        self.total_gold_from_clear_relics += s.gold_from_clear_relics as u64;
+        self.total_gold_from_skip_tags += s.gold_from_skip_tags as u64;
+        self.total_skip_tag_gold_value += s.skip_tag_gold_value as u64;
+        self.total_target_score += s.total_target_score;
+        self.total_overscore += s.total_overscore;
+        self.peak_blind_score = self.peak_blind_score.max(s.peak_blind_score);
+        self.total_bot_issue_no_valid_hand += s.bot_issue_no_valid_hand as u64;
+        self.total_bot_issue_only_valid_unplayable += s.bot_issue_only_valid_unplayable as u64;
+        self.total_bot_issue_only_valid_no_score += s.bot_issue_only_valid_no_score as u64;
+        self.total_bot_issue_other_stuck += s.bot_issue_other_stuck as u64;
+        self.total_bot_issue_lost_with_available_lines +=
+            s.bot_issue_lost_with_available_lines as u64;
+        for (reason, count) in &s.bot_issues_by_reason {
+            *self.bot_issues_by_reason.entry(reason.clone()).or_insert(0) += *count;
+        }
         *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
         if !s.victory {
             *self
                 .deaths_by_blind
                 .entry(s.died_on_blind.name())
                 .or_insert(0) += 1;
+        }
+        for (tag, count) in &s.skipped_tags {
+            *self.skipped_tags.entry(tag).or_insert(0) += *count;
+        }
+        for (blind, count) in &s.bot_issues_by_blind {
+            *self.bot_issues_by_blind.entry(blind.clone()).or_insert(0) += *count;
+        }
+        for (boss, count) in &s.bot_issues_by_boss {
+            *self.bot_issues_by_boss.entry(boss.clone()).or_insert(0) += *count;
+        }
+    }
+
+    fn merge_in(&mut self, other: AggregateStats) {
+        self.runs += other.runs;
+        self.blinds_cleared_total += other.blinds_cleared_total;
+        self.antes_cleared_total += other.antes_cleared_total;
+        self.victories += other.victories;
+        self.max_ante_reached = self.max_ante_reached.max(other.max_ante_reached);
+        self.total_score += other.total_score;
+        self.total_plays += other.total_plays;
+        self.total_discards += other.total_discards;
+        self.total_strategic_discards += other.total_strategic_discards;
+        self.total_blinds_skipped += other.total_blinds_skipped;
+        self.total_relics_bought += other.total_relics_bought;
+        self.total_gold_spent += other.total_gold_spent;
+        self.total_final_gold += other.total_final_gold;
+        self.total_gold_from_clears += other.total_gold_from_clears;
+        self.total_gold_from_clear_base += other.total_gold_from_clear_base;
+        self.total_gold_from_unused_plays += other.total_gold_from_unused_plays;
+        self.total_gold_from_interest += other.total_gold_from_interest;
+        self.total_gold_from_clear_relics += other.total_gold_from_clear_relics;
+        self.total_gold_from_skip_tags += other.total_gold_from_skip_tags;
+        self.total_skip_tag_gold_value += other.total_skip_tag_gold_value;
+        self.total_target_score += other.total_target_score;
+        self.total_overscore += other.total_overscore;
+        self.peak_blind_score = self.peak_blind_score.max(other.peak_blind_score);
+        self.total_bot_issue_no_valid_hand += other.total_bot_issue_no_valid_hand;
+        self.total_bot_issue_only_valid_unplayable += other.total_bot_issue_only_valid_unplayable;
+        self.total_bot_issue_only_valid_no_score += other.total_bot_issue_only_valid_no_score;
+        self.total_bot_issue_other_stuck += other.total_bot_issue_other_stuck;
+        self.total_bot_issue_lost_with_available_lines +=
+            other.total_bot_issue_lost_with_available_lines;
+        for (reason, count) in other.bot_issues_by_reason {
+            *self.bot_issues_by_reason.entry(reason).or_insert(0) += count;
+        }
+        for (ante, count) in other.deaths_by_ante {
+            *self.deaths_by_ante.entry(ante).or_insert(0) += count;
+        }
+        for (blind, count) in other.deaths_by_blind {
+            *self.deaths_by_blind.entry(blind).or_insert(0) += count;
+        }
+        for (tag, count) in other.skipped_tags {
+            *self.skipped_tags.entry(tag).or_insert(0) += count;
+        }
+        for (blind, count) in other.bot_issues_by_blind {
+            *self.bot_issues_by_blind.entry(blind).or_insert(0) += count;
+        }
+        for (boss, count) in other.bot_issues_by_boss {
+            *self.bot_issues_by_boss.entry(boss).or_insert(0) += count;
         }
     }
 
@@ -132,6 +479,17 @@ impl AggregateStats {
         let avg_discards = self.total_discards as f64 / self.runs as f64;
         let avg_strategic = self.total_strategic_discards as f64 / self.runs as f64;
         let win_rate = self.victories as f64 * 100.0 / self.runs as f64;
+        let avg_final_gold = self.total_final_gold as f64 / self.runs as f64;
+        let avg_gold_from_clears = self.total_gold_from_clears as f64 / self.runs as f64;
+        let avg_gold_from_skip_tags = self.total_gold_from_skip_tags as f64 / self.runs as f64;
+        let avg_skip_tag_gold_value = self.total_skip_tag_gold_value as f64 / self.runs as f64;
+        let avg_target_score = self.total_target_score as f64 / self.runs as f64;
+        let avg_overscore = self.total_overscore as f64 / self.runs as f64;
+        let score_to_target = if self.total_target_score == 0 {
+            0.0
+        } else {
+            self.total_score as f64 / self.total_target_score as f64
+        };
         println!(
             "victories:           {} / {} ({:.1}%)",
             self.victories, self.runs, win_rate
@@ -139,7 +497,7 @@ impl AggregateStats {
         println!("avg blinds cleared:  {:.2}", avg_blinds);
         println!("avg antes cleared:   {:.2}", avg_antes);
         println!("max ante reached:    {}", self.max_ante_reached);
-        println!("avg total score:     {:.0}", avg_score);
+        println!("avg total score:     {}", human_readable_score(avg_score));
         println!("avg plays used:      {:.2}", avg_plays);
         println!(
             "avg discards used:   {:.2} ({:.2} strategic, {:.2} random)",
@@ -156,6 +514,30 @@ impl AggregateStats {
             self.total_relics_bought as f64 / self.runs as f64,
             self.total_gold_spent as f64 / self.runs as f64
         );
+        println!(
+            "avg gold earned:     {:.1} clears + {:.1} skip-tags = {:.1}",
+            avg_gold_from_clears,
+            avg_gold_from_skip_tags,
+            avg_gold_from_clears + avg_gold_from_skip_tags
+        );
+        println!(
+            "avg clear payout:    {:.1} base + {:.1} plays + {:.1} interest + {:.1} relics",
+            self.total_gold_from_clear_base as f64 / self.runs as f64,
+            self.total_gold_from_unused_plays as f64 / self.runs as f64,
+            self.total_gold_from_interest as f64 / self.runs as f64,
+            self.total_gold_from_clear_relics as f64 / self.runs as f64
+        );
+        println!(
+            "avg final gold:      {:.1} (avg skip-tag value taken: {:.1})",
+            avg_final_gold, avg_skip_tag_gold_value
+        );
+        println!(
+            "avg targets faced:   {} (score/target {:.2}x, avg overscore {}, peak blind score {})",
+            human_readable_score(avg_target_score),
+            score_to_target,
+            human_readable_score(avg_overscore),
+            human_readable_score(self.peak_blind_score as f64)
+        );
         println!("\ndeaths by ante:");
         for (ante, count) in &self.deaths_by_ante {
             let pct = *count as f64 * 100.0 / self.runs as f64;
@@ -167,6 +549,84 @@ impl AggregateStats {
             let pct = *count as f64 * 100.0 / self.runs as f64;
             println!("  {:<12} {:>4} ({:>5.1}%)", blind, count, pct);
         }
+        if !self.skipped_tags.is_empty() {
+            println!("\nskip tags taken:");
+            for (tag, count) in &self.skipped_tags {
+                let pct = *count as f64 * 100.0 / self.runs as f64;
+                println!("  {:<16} {:>4} ({:>5.1}%)", tag, count, pct);
+            }
+        }
+        let total_bot_issues = self.total_bot_issue_no_valid_hand
+            + self.total_bot_issue_only_valid_unplayable
+            + self.total_bot_issue_only_valid_no_score
+            + self.total_bot_issue_other_stuck;
+        let total_bot_losses_with_lines = self.total_bot_issue_lost_with_available_lines;
+        if total_bot_issues > 0 || total_bot_losses_with_lines > 0 {
+            println!("\nbot terminal issues:");
+        }
+        if total_bot_issues > 0 {
+            println!("  dead-ends:");
+            println!(
+                "  total {:>6} | no-valid {} | only-valid-unplayable {} | only-valid-no-score {} | other {}",
+                total_bot_issues,
+                self.total_bot_issue_no_valid_hand,
+                self.total_bot_issue_only_valid_unplayable,
+                self.total_bot_issue_only_valid_no_score,
+                self.total_bot_issue_other_stuck
+            );
+        }
+        if total_bot_losses_with_lines > 0 {
+            println!(
+                "  lost with lines available: {}",
+                total_bot_losses_with_lines
+            );
+        }
+        if total_bot_issues > 0 || total_bot_losses_with_lines > 0 {
+            if let Some(blinds) = format_top_counts(&self.bot_issues_by_blind, 5) {
+                println!("  hottest blinds: {blinds}");
+            }
+            if let Some(bosses) = format_top_counts(&self.bot_issues_by_boss, 5) {
+                println!("  hottest bosses: {bosses}");
+            }
+            if let Some(reasons) = format_top_counts(&self.bot_issues_by_reason, 8) {
+                println!("  reasons: {reasons}");
+            }
+        }
+    }
+}
+
+fn clear_payout_breakdown(run: &RunState) -> ClearPayoutBreakdown {
+    let base_reward = run.blind.clear_reward();
+    let unused_play_bonus = run.plays_remaining;
+    let interest = (run.gold.max(0) as u32 / 5).min(3);
+    let green_luck_bonus = if run.relics.has(RelicId::GreenLuck) && !run.honors_scored_this_round {
+        4
+    } else {
+        0
+    };
+    let gold_idol_bonus = if run.relics.has(RelicId::GoldIdol) {
+        3
+    } else {
+        0
+    };
+    let jade_abacus_bonus = if run.relics.has(RelicId::JadeAbacus) {
+        (run.gold.max(0) as u32 / 4).min(4)
+    } else {
+        0
+    };
+    let patience_bonus = if run.relics.has(RelicId::Patience) {
+        2 * run.discards_remaining
+    } else {
+        0
+    };
+    let relic_bonus = green_luck_bonus + gold_idol_bonus + jade_abacus_bonus + patience_bonus;
+    let total = base_reward + unused_play_bonus + interest + relic_bonus;
+    ClearPayoutBreakdown {
+        base_reward,
+        unused_play_bonus,
+        interest,
+        relic_bonus,
+        total,
     }
 }
 
@@ -176,17 +636,18 @@ fn ctx_for_merged_commit<'a>(
     relics: &'a RelicState,
     merged_tiles: &[Tile],
     merged_sets: &[crate::core::hand::DetectedSet],
+    yaku_levels: Option<&YakuLevels>,
 ) -> ScoreContext<'a> {
     let plays_rem_after = run.plays_remaining.saturating_sub(1);
-    let plays_used_after = run.mode.starting_plays.saturating_sub(plays_rem_after);
+    let plays_used_after = run.plays_max.saturating_sub(plays_rem_after);
     let meta = StructureTriggerMeta {
         kind: StructureTriggerKind::Manual,
         meld_count: merged_sets.len() as u32,
-        early_cashout_mult: early_cashout_factor(merged_tiles, merged_sets),
         inject_chicken_if_no_yaku: true,
     };
     ScoreContext {
         relics,
+        tile_debuffs: &run.tile_debuffs,
         scored_last_turn: run.scored_last_turn,
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
@@ -194,8 +655,11 @@ fn ctx_for_merged_commit<'a>(
         first_full_hand_of_round: !run.full_hand_played_this_round,
         plays_used: plays_used_after,
         riichi_active: false,
-        yaku_levels: Some(run.yaku_levels.clone()),
-        yaku_loadout: run.yaku_loadout.clone(),
+        yaku_levels: Some(
+            yaku_levels
+                .cloned()
+                .unwrap_or_else(|| run.yaku_levels.clone()),
+        ),
         played_yaku_this_round: run.played_yaku_this_round.clone(),
         gold: run.gold,
         total_score: run.total_score_earned,
@@ -209,25 +673,22 @@ fn ctx_for_merged_commit<'a>(
 }
 
 /// Find the best (score, indices) commit from `hand`, merging into the current structure.
-/// `relics_override` is for shop marginal evaluation (hypothetical extra relic).
+/// `relics_override` / `yaku_levels_override` are for bot-side what-if evaluation.
 fn best_play_in_hand(
     run: &RunState,
     hand: &[Tile],
     rules: &[RuleModifier],
     relics_override: Option<&RelicState>,
-) -> Option<(i32, Vec<usize>)> {
+    yaku_levels_override: Option<&YakuLevels>,
+) -> Option<(u64, Vec<usize>)> {
     let n = hand.len();
     if n < 2 || n > 20 {
         return None;
     }
     let relics = relics_override.unwrap_or(&run.relics);
-    let mut best: Option<(i32, Vec<usize>)> = None;
-    let limit: u32 = 1u32 << n;
-    for mask in 1u32..limit {
+    let mut best: Option<(u64, Vec<usize>)> = None;
+    for mask in enumerate_candidate_play_masks(hand, rules) {
         let count = mask.count_ones() as usize;
-        if matches!(count, 0 | 1 | 4 | 7 | 10 | 13) {
-            continue;
-        }
         let mut tiles: Vec<Tile> = Vec::with_capacity(count);
         for i in 0..n {
             if mask & (1 << i) != 0 {
@@ -237,11 +698,22 @@ fn best_play_in_hand(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
+        if run.uses_structure_bank()
+            && run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE
+        {
+            continue;
+        }
         let mut merged_sets = run.structure_sets.clone();
         merged_sets.extend(sets.iter().cloned());
         let mut merged_tiles = run.structure_tiles.clone();
         merged_tiles.extend(tiles.iter().copied());
-        let ctx = ctx_for_merged_commit(run, relics, &merged_tiles, &merged_sets);
+        let ctx = ctx_for_merged_commit(
+            run,
+            relics,
+            &merged_tiles,
+            &merged_sets,
+            yaku_levels_override,
+        );
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
         if breakdown.total <= 0 {
             continue;
@@ -258,10 +730,371 @@ fn best_play_in_hand(
     best
 }
 
+#[derive(Clone, Copy)]
+struct IndexedTile {
+    hand_index: usize,
+    tile: Tile,
+}
+
+fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
+    let mut regular = Vec::with_capacity(hand.len());
+    let mut flowers = Vec::new();
+    for (hand_index, &tile) in hand.iter().enumerate() {
+        let indexed = IndexedTile { hand_index, tile };
+        if tile.is_flower() {
+            flowers.push(indexed);
+        } else {
+            regular.push(indexed);
+        }
+    }
+    regular.sort_by_key(|it| it.tile);
+    flowers.sort_by_key(|it| it.tile);
+
+    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
+    let no_sequences = rules.contains(&RuleModifier::NoSequences);
+    let require_honor = rules.contains(&RuleModifier::RequireHonor);
+    let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
+
+    let mut masks = std::collections::HashSet::new();
+    enumerate_regular_subsets(
+        &regular,
+        &flowers,
+        0,
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+        0,
+        &mut masks,
+    );
+    let mut out: Vec<u32> = masks.into_iter().collect();
+    out.sort_unstable();
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enumerate_regular_subsets(
+    remaining: &[IndexedTile],
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    allow_wrap: bool,
+    no_sequences: bool,
+    require_honor: bool,
+    must_play_five: bool,
+    current_tile_count: usize,
+    out: &mut std::collections::HashSet<u32>,
+) {
+    if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
+        return;
+    }
+
+    if remaining.is_empty() {
+        emit_leaf_masks(
+            flowers,
+            current_mask,
+            current_tile_count,
+            must_play_five,
+            out,
+        );
+        return;
+    }
+
+    let first = remaining[0];
+
+    // Skip this tile entirely; it won't be part of the scored selection.
+    enumerate_regular_subsets(
+        &remaining[1..],
+        flowers,
+        current_mask,
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+        current_tile_count,
+        out,
+    );
+
+    if remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
+            enumerate_regular_subsets(
+                &remaining[2..],
+                flowers,
+                current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 2,
+                out,
+            );
+        }
+    }
+
+    if remaining.len() >= 3
+        && same_face(first.tile, remaining[1].tile)
+        && same_face(first.tile, remaining[2].tile)
+    {
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]) {
+            enumerate_regular_subsets(
+                &remaining[3..],
+                flowers,
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << remaining[2].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+
+    if remaining.len() >= 4
+        && same_face(first.tile, remaining[1].tile)
+        && same_face(first.tile, remaining[2].tile)
+        && same_face(first.tile, remaining[3].tile)
+    {
+        if !require_honor
+            || tiles_have_honor(&[
+                first.tile,
+                remaining[1].tile,
+                remaining[2].tile,
+                remaining[3].tile,
+            ])
+        {
+            enumerate_regular_subsets(
+                &remaining[4..],
+                flowers,
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << remaining[2].hand_index)
+                    | (1 << remaining[3].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 4,
+                out,
+            );
+        }
+    }
+
+    if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
+        let flower = flowers[0];
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
+            enumerate_regular_subsets(
+                &remaining[2..],
+                &flowers[1..],
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << flower.hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+
+    if !no_sequences && first.tile.is_number_tile() && !require_honor {
+        for seq in sequence_candidates(remaining, allow_wrap, !flowers.is_empty(), first) {
+            let mut next_mask = current_mask | (1 << first.hand_index);
+            let mut remove = vec![0usize];
+            for idx in seq.regular_indices {
+                next_mask |= 1 << remaining[idx].hand_index;
+                remove.push(idx);
+            }
+            if seq.uses_flower {
+                let flower = flowers[0];
+                next_mask |= 1 << flower.hand_index;
+            }
+            let rest = remove_indices(remaining, &remove);
+            enumerate_regular_subsets(
+                &rest,
+                if seq.uses_flower {
+                    &flowers[1..]
+                } else {
+                    flowers
+                },
+                next_mask,
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+}
+
+fn emit_leaf_masks(
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    current_tile_count: usize,
+    must_play_five: bool,
+    out: &mut std::collections::HashSet<u32>,
+) {
+    for extra_mask in flower_only_masks(flowers) {
+        let total_mask = current_mask | extra_mask;
+        let total_count = total_mask.count_ones() as usize;
+        if total_count == 0 {
+            continue;
+        }
+        if must_play_five {
+            if total_count == 5 {
+                out.insert(total_mask);
+            }
+        } else if total_count >= current_tile_count {
+            out.insert(total_mask);
+        }
+    }
+}
+
+fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+    let mut masks = vec![0];
+    if flowers.len() >= 2 {
+        masks.push((1 << flowers[0].hand_index) | (1 << flowers[1].hand_index));
+    }
+    if flowers.len() >= 3 {
+        masks.push(
+            (1 << flowers[0].hand_index)
+                | (1 << flowers[1].hand_index)
+                | (1 << flowers[2].hand_index),
+        );
+    }
+    if flowers.len() >= 4 {
+        masks.push(
+            (1 << flowers[0].hand_index)
+                | (1 << flowers[1].hand_index)
+                | (1 << flowers[2].hand_index)
+                | (1 << flowers[3].hand_index),
+        );
+    }
+    masks
+}
+
+fn same_face(a: Tile, b: Tile) -> bool {
+    a.suit == b.suit && a.rank == b.rank
+}
+
+fn tiles_have_honor(tiles: &[Tile]) -> bool {
+    tiles
+        .iter()
+        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+}
+
+fn remove_indices(remaining: &[IndexedTile], remove: &[usize]) -> Vec<IndexedTile> {
+    let mut remove_flags = vec![false; remaining.len()];
+    for &idx in remove {
+        remove_flags[idx] = true;
+    }
+    remaining
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, tile)| (!remove_flags[idx]).then_some(*tile))
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct SequenceCandidate {
+    regular_indices: [usize; 2],
+    uses_flower: bool,
+}
+
+fn sequence_candidates(
+    remaining: &[IndexedTile],
+    allow_wrap: bool,
+    can_use_flower: bool,
+    first: IndexedTile,
+) -> Vec<SequenceCandidate> {
+    let mut out = Vec::new();
+    push_sequence_candidate(
+        remaining,
+        first.tile.suit,
+        [first.tile.rank + 1, first.tile.rank + 2],
+        false,
+        &mut out,
+    );
+    if can_use_flower {
+        push_sequence_candidate(
+            remaining,
+            first.tile.suit,
+            [first.tile.rank + 1, first.tile.rank + 2],
+            true,
+            &mut out,
+        );
+    }
+
+    if allow_wrap {
+        for ranks in wrap_sequence_ranks(first.tile.rank) {
+            push_sequence_candidate(remaining, first.tile.suit, *ranks, false, &mut out);
+            if can_use_flower {
+                push_sequence_candidate(remaining, first.tile.suit, *ranks, true, &mut out);
+            }
+        }
+    }
+
+    out
+}
+
+fn push_sequence_candidate(
+    remaining: &[IndexedTile],
+    suit: Suit,
+    ranks: [u8; 2],
+    allow_one_missing: bool,
+    out: &mut Vec<SequenceCandidate>,
+) {
+    let mut found = Vec::new();
+    for &rank in &ranks {
+        let next = remaining
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(idx, tile)| {
+                (tile.tile.suit == suit && tile.tile.rank == rank).then_some(idx)
+            });
+        if let Some(idx) = next {
+            found.push(idx);
+        } else if !allow_one_missing {
+            return;
+        }
+    }
+
+    match found.len() {
+        2 => out.push(SequenceCandidate {
+            regular_indices: [found[0], found[1]],
+            uses_flower: false,
+        }),
+        1 if allow_one_missing => out.push(SequenceCandidate {
+            regular_indices: [found[0], found[0]],
+            uses_flower: true,
+        }),
+        _ => {}
+    }
+}
+
+fn wrap_sequence_ranks(rank: u8) -> &'static [[u8; 2]] {
+    match rank {
+        1 => &[[9, 2], [8, 9]],
+        2 => &[[9, 1]],
+        8 => &[[9, 1]],
+        9 => &[[8, 1], [1, 2]],
+        _ => &[],
+    }
+}
+
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
-pub fn pick_best_play(run: &RunState) -> Option<(i32, Vec<usize>)> {
-    best_play_in_hand(run, &run.hand, &run.round_rules, None)
+pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
+    best_play_in_hand(run, &run.hand, &run.round_rules, None, None)
 }
 
 /// Rate each tile by how many *potential* melds in the current hand it participates in.
@@ -302,7 +1135,7 @@ fn discard_candidates(hand: &[Tile], max_k: usize) -> Vec<Vec<usize>> {
 /// resulting hand could produce. Uses 1-step lookahead with the actual upcoming tiles —
 /// "perfect-information" oracle, which gives us a tuning ceiling rather than a
 /// realistic player bot.
-fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> i32 {
+fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 {
     use std::collections::HashSet;
     let drop_set: HashSet<usize> = discard_indices.iter().copied().collect();
     let k = discard_indices.len();
@@ -316,22 +1149,57 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> i32 
         .collect();
     new_hand.extend_from_slice(peeked);
     new_hand.sort();
-    best_play_in_hand(run, &new_hand, &run.round_rules, None)
+    best_play_in_hand(run, &new_hand, &run.round_rules, None, None)
         .map(|(s, _)| s)
         .unwrap_or(0)
 }
 
 /// Play the current blind to completion. Returns `true` if the bot reached the target.
-fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
+fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
+    let mut turn = 0u32;
 
     loop {
-        if run.round_score >= run.target_score {
+        if run.round_score >= run.target_score as u64 {
+            bot_log!(
+                log,
+                "    blind cleared after {} turns with score {}/{}",
+                turn,
+                run.round_score,
+                run.target_score
+            );
             return true;
         }
         if run.plays_remaining == 0 {
+            if run.round_score < run.target_score as u64 {
+                record_terminal_hand_issue(stats, run, TerminalIssueCause::OutOfPlays);
+            }
+            bot_log!(
+                log,
+                "    blind failed after {} turns with score {}/{}",
+                turn,
+                run.round_score,
+                run.target_score
+            );
             return false;
+        }
+        turn += 1;
+
+        bot_log!(
+            log,
+            "    turn {:>2}: score {}/{} | plays {} | discards {} | hand {} | gold {}",
+            turn,
+            run.round_score,
+            run.target_score,
+            run.plays_remaining,
+            run.discards_remaining,
+            run.hand.len(),
+            run.gold
+        );
+
+        if use_bot_consumables(run, log) {
+            continue;
         }
 
         let best = pick_best_play(run);
@@ -350,6 +1218,12 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
         {
             let earned = run.trigger_structure_manual(&mut bus);
             if earned > 0 {
+                bot_log!(
+                    log,
+                    "      action: trigger structure for {} (best play {})",
+                    earned,
+                    best_score
+                );
                 for ev in bus.drain() {
                     if let GameEvent::RoundComplete { payout, .. } = ev {
                         run.gold = run.gold.saturating_add(payout.total as i32);
@@ -370,9 +1244,9 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
             let candidates = discard_candidates(&run.hand, 5);
             // Margin scales with how far we are from target — late in the round we
             // need bigger swings to be worth losing a play.
-            let need = run.target_score.saturating_sub(run.round_score) as i32;
-            let margin = (need / (run.plays_remaining as i32 + 1)).max(5);
-            let mut best_after: Option<(i32, Vec<usize>)> = None;
+            let need = (run.target_score as u64).saturating_sub(run.round_score);
+            let margin = (need / (run.plays_remaining as u64 + 1)).max(5);
+            let mut best_after: Option<(u64, Vec<usize>)> = None;
             for cand in candidates {
                 let hyp = rollout_post_discard_score(run, &cand);
                 if best_after.as_ref().map(|(s, _)| hyp > *s).unwrap_or(true) {
@@ -381,6 +1255,14 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
             }
             if let Some((after_score, indices)) = best_after {
                 if after_score >= best_score + margin {
+                    bot_log!(
+                        log,
+                        "      action: strategic discard {} -> projected {} (best {} + margin {})",
+                        fmt_indices(&indices),
+                        after_score,
+                        best_score,
+                        margin
+                    );
                     run.clear_selection();
                     for i in &indices {
                         run.toggle_select(*i);
@@ -398,11 +1280,33 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
         }
 
         if let Some((_, indices)) = best {
+            bot_log!(
+                log,
+                "      action: play {} for {} points",
+                fmt_indices(&indices),
+                best_score
+            );
             run.clear_selection();
-            for i in indices {
-                run.toggle_select(i);
+            for i in &indices {
+                run.toggle_select(*i);
             }
-            run.score_selected_tiles(&mut bus);
+            let plays_before = run.plays_remaining;
+            let score_before = run.round_score;
+            let committed = run.score_selected_tiles(&mut bus);
+            if committed == 0
+                && run.plays_remaining == plays_before
+                && run.round_score == score_before
+            {
+                bot_log!(
+                    log,
+                    "      action: rejected play {} (state unchanged)",
+                    fmt_indices(&indices)
+                );
+                run.clear_selection();
+                for _ in bus.drain() {}
+                record_terminal_hand_issue(stats, run, TerminalIssueCause::RejectedChosenPlay);
+                return false;
+            }
             stats.plays_used += 1;
             for ev in bus.drain() {
                 if let GameEvent::RoundComplete { payout, .. } = ev {
@@ -415,16 +1319,26 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
         // No positive-scoring play and no strategic discard helped — random discard
         // as a last-resort shake-up before busting.
         if run.discards_remaining == 0 {
+            record_terminal_hand_issue(stats, run, TerminalIssueCause::NoDiscardsRemaining);
+            bot_log!(log, "      action: no discards remaining");
             return false;
         }
         run.clear_selection();
         let hand_n = run.hand.len();
         if hand_n == 0 {
+            record_terminal_hand_issue(stats, run, TerminalIssueCause::EmptyHand);
+            bot_log!(log, "      action: hand empty, cannot continue");
             return false;
         }
         let drop_n = rng.random_range(1..=hand_n.min(5));
         let mut indices: Vec<usize> = (0..hand_n).collect();
         indices.shuffle(&mut rng);
+        let chosen: Vec<usize> = indices.iter().copied().take(drop_n).collect();
+        bot_log!(
+            log,
+            "      action: fallback discard {}",
+            fmt_indices(&chosen)
+        );
         for i in indices.into_iter().take(drop_n) {
             run.toggle_select(i);
         }
@@ -434,10 +1348,227 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{
+        best_play_in_hand, enumerate_candidate_play_masks, pick_best_play, talisman_marginal_value,
+        use_bot_consumables, zodiac_marginal_value,
+    };
+    use crate::core::consumable::Consumable;
+    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::talisman::TalismanKind;
+    use crate::core::tile::{Suit, Tile};
+    use crate::core::zodiac::ZodiacKind;
+    use crate::game::run::{HAND_SIZE, RunState};
+
+    fn brute_force_best_play_in_hand(run: &RunState) -> Option<(u64, Vec<usize>)> {
+        let n = run.hand.len();
+        let mut best: Option<(u64, Vec<usize>)> = None;
+        let limit: u32 = 1u32 << n;
+        for mask in 1u32..limit {
+            let count = mask.count_ones() as usize;
+            if matches!(count, 0 | 1 | 4 | 7 | 10 | 13) {
+                continue;
+            }
+            let mut tiles = Vec::with_capacity(count);
+            for i in 0..n {
+                if mask & (1 << i) != 0 {
+                    tiles.push(run.hand[i]);
+                }
+            }
+            let Some(sets) =
+                crate::core::hand::validate_selection_with_rules(&tiles, &run.round_rules)
+            else {
+                continue;
+            };
+            if run.uses_structure_bank()
+                && run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE
+            {
+                continue;
+            }
+            let mut merged_sets = run.structure_sets.clone();
+            merged_sets.extend(sets.iter().cloned());
+            let mut merged_tiles = run.structure_tiles.clone();
+            merged_tiles.extend(tiles.iter().copied());
+            let ctx =
+                super::ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
+            let total = crate::core::scoring::score_sets_with_original(
+                &merged_tiles,
+                &merged_sets,
+                &ctx,
+                &run.round_rules,
+                &tiles,
+            )
+            .total;
+            if total <= 0 {
+                continue;
+            }
+            let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
+            if best.as_ref().map(|(s, _)| total > *s).unwrap_or(true) {
+                best = Some((total, indices));
+            }
+        }
+        best
+    }
+
+    fn t(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    fn scoring_test_run() -> RunState {
+        let mut run = RunState::new_demo();
+        run.hand = vec![
+            t(Suit::Characters, 3, 1),
+            t(Suit::Characters, 3, 2),
+            t(Suit::Characters, 3, 3),
+            t(Suit::Bamboos, 6, 4),
+            t(Suit::Bamboos, 6, 5),
+            t(Suit::Bamboos, 6, 6),
+            t(Suit::Circles, 2, 7),
+            t(Suit::Circles, 3, 8),
+            t(Suit::Circles, 4, 9),
+        ];
+        run.hand.sort();
+        run
+    }
+
+    #[test]
+    fn bot_skips_structure_commits_that_overflow_the_bank() {
+        let mut run = RunState::new_demo();
+        run.structure_tiles = run.hand.iter().take(12).copied().collect();
+        run.structure_sets = vec![
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: run.structure_tiles[0..3].iter().map(|t| t.id).collect(),
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: run.structure_tiles[3..6].iter().map(|t| t.id).collect(),
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: run.structure_tiles[6..9].iter().map(|t| t.id).collect(),
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: run.structure_tiles[9..12].iter().map(|t| t.id).collect(),
+            },
+        ];
+        assert_eq!(run.structure_tiles.len(), HAND_SIZE - 2);
+
+        let best = pick_best_play(&run);
+        assert!(
+            best.as_ref()
+                .map(|(_, indices)| run.structure_tiles.len() + indices.len() <= HAND_SIZE)
+                .unwrap_or(true),
+            "bot should not choose a play that the structure bank would reject"
+        );
+    }
+
+    #[test]
+    fn enumerated_masks_match_bruteforce_best_play_on_demo_hand() {
+        let run = RunState::new_demo();
+        assert_eq!(pick_best_play(&run), brute_force_best_play_in_hand(&run));
+    }
+
+    #[test]
+    fn enumerated_masks_match_bruteforce_best_play_with_flowers() {
+        let mut run = RunState::new_demo();
+        run.hand = vec![
+            t(Suit::Characters, 2, 1),
+            t(Suit::Characters, 3, 2),
+            t(Suit::Characters, 5, 3),
+            t(Suit::Characters, 5, 4),
+            t(Suit::Characters, 5, 5),
+            t(Suit::Bamboos, 7, 6),
+            t(Suit::Bamboos, 8, 7),
+            t(Suit::Dragon, 1, 8),
+            t(Suit::Dragon, 1, 9),
+            t(Suit::Flower, 1, 10),
+            t(Suit::Flower, 2, 11),
+        ];
+        run.hand.sort();
+        let new_best = best_play_in_hand(&run, &run.hand, &run.round_rules, None, None);
+        let old_best = brute_force_best_play_in_hand(&run);
+        assert_eq!(new_best, old_best);
+    }
+
+    #[test]
+    fn candidate_masks_only_produce_valid_selections() {
+        let mut run = RunState::new_demo();
+        run.hand = vec![
+            t(Suit::Characters, 1, 1),
+            t(Suit::Characters, 2, 2),
+            t(Suit::Characters, 3, 3),
+            t(Suit::Characters, 7, 4),
+            t(Suit::Characters, 7, 5),
+            t(Suit::Characters, 7, 6),
+            t(Suit::Wind, 1, 7),
+            t(Suit::Wind, 1, 8),
+            t(Suit::Flower, 1, 9),
+            t(Suit::Flower, 2, 10),
+            t(Suit::Flower, 3, 11),
+            t(Suit::Flower, 4, 12),
+        ];
+        run.hand.sort();
+
+        for mask in enumerate_candidate_play_masks(&run.hand, &run.round_rules) {
+            let tiles: Vec<_> = run
+                .hand
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| (mask & (1 << i) != 0).then_some(*t))
+                .collect();
+            assert!(
+                crate::core::hand::validate_selection_with_rules(&tiles, &run.round_rules)
+                    .is_some(),
+                "invalid candidate mask {mask:b} for hand {:?}",
+                run.hand
+            );
+        }
+    }
+
+    #[test]
+    fn zodiac_value_is_positive_when_it_levels_a_relevant_yaku() {
+        let run = scoring_test_run();
+        assert!(zodiac_marginal_value(&run, ZodiacKind::Ox) > 0);
+    }
+
+    #[test]
+    fn talisman_value_is_positive_when_it_buffs_a_scoring_hand() {
+        let run = scoring_test_run();
+        assert!(talisman_marginal_value(&run, TalismanKind::Jade) > 0);
+    }
+
+    #[test]
+    fn bot_uses_zodiacs_and_best_talisman_from_inventory() {
+        let mut run = scoring_test_run();
+        run.consumables.items = vec![
+            Consumable::Zodiac(ZodiacKind::Ox),
+            Consumable::Talisman(TalismanKind::Pearl),
+        ];
+
+        assert!(use_bot_consumables(&mut run, false));
+        assert_eq!(run.yaku_levels.level_of(ZodiacKind::Ox.yaku()), 2);
+        assert!(
+            run.hand.iter().all(|tile| tile.enhancement.is_some()),
+            "best talisman should stamp the hand"
+        );
+        assert!(run.consumables.items.is_empty());
+    }
+}
+
 /// Number of synthetic random hands sampled when evaluating a relic's value.
 /// Higher = more accurate signal but slower (each sample runs `best_play_in_hand`,
 /// which is the bot's hot loop).
 const RELIC_EVAL_SAMPLES: usize = 4;
+
+#[derive(Clone, Copy, Debug)]
+enum ShopOffer {
+    Relic(RelicId),
+    Zodiac(ZodiacKind),
+    Talisman(TalismanKind),
+}
 
 /// Draw a random 14-tile hand from a fresh shuffled wall. Used for relic value
 /// sampling — gives a "typical hand" the relic would face in future plays, not
@@ -454,6 +1585,23 @@ fn sample_random_hand(size: usize) -> Vec<Tile> {
     hand
 }
 
+fn best_play_score_for_hand(
+    run: &RunState,
+    hand: &[Tile],
+    relics_override: Option<&RelicState>,
+    yaku_levels_override: Option<&YakuLevels>,
+) -> u64 {
+    best_play_in_hand(
+        run,
+        hand,
+        &run.round_rules,
+        relics_override,
+        yaku_levels_override,
+    )
+    .map(|(s, _)| s)
+    .unwrap_or(0)
+}
+
 /// Estimate the value of owning `candidate` by averaging the best-play score
 /// improvement across the current hand *and* several synthetic random hands.
 ///
@@ -468,7 +1616,7 @@ fn sample_random_hand(size: usize) -> Vec<Tile> {
 /// `JokerTile`) are still under-valued because we don't simulate draws between
 /// plays. Rarity tie-break compensates.
 fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
-    if run.relics.has(candidate) {
+    if run.relics.owns(candidate) {
         return -1;
     }
     if run.relics.is_full() {
@@ -478,31 +1626,109 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     let mut hypothetical = run.relics.clone();
     hypothetical.active.push(candidate);
 
-    let score = |hand: &[Tile], relics: Option<&RelicState>| -> i32 {
-        best_play_in_hand(run, hand, &run.round_rules, relics)
-            .map(|(s, _)| s)
-            .unwrap_or(0)
-    };
-
     // Sample 1: the bot's actual current hand (weighted heavily).
-    let mut delta_sum: i32 = score(&run.hand, Some(&hypothetical)) - score(&run.hand, None);
-    let mut sample_count: i32 = 1;
+    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand, Some(&hypothetical), None)
+        as i64
+        - best_play_score_for_hand(run, &run.hand, None, None) as i64;
+    let mut sample_count: i64 = 1;
 
     // Samples 2..N: synthetic random hands from fresh walls.
     for _ in 0..RELIC_EVAL_SAMPLES {
         let hand = sample_random_hand(run.mode.hand_size);
-        delta_sum += score(&hand, Some(&hypothetical)) - score(&hand, None);
+        delta_sum += best_play_score_for_hand(run, &hand, Some(&hypothetical), None) as i64
+            - best_play_score_for_hand(run, &hand, None, None) as i64;
         sample_count += 1;
     }
 
-    delta_sum / sample_count
+    (delta_sum / sample_count) as i32
 }
 
-/// Headless analogue of `ShopScene::new` + buy loop. Rolls 3 random non-owned relics
-/// (matching `ShopScene::new`'s pool generation) and buys the one with the largest
-/// positive marginal value the bot can afford. Repeats while gold and relic slots
-/// allow another worthwhile purchase.
-fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
+fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
+    let mut hypothetical = run.yaku_levels.clone();
+    hypothetical.level_up(zodiac.yaku());
+
+    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand, None, Some(&hypothetical))
+        as i64
+        - best_play_score_for_hand(run, &run.hand, None, None) as i64;
+    let mut sample_count: i64 = 1;
+
+    for _ in 0..RELIC_EVAL_SAMPLES {
+        let hand = sample_random_hand(run.mode.hand_size);
+        delta_sum += best_play_score_for_hand(run, &hand, None, Some(&hypothetical)) as i64
+            - best_play_score_for_hand(run, &hand, None, None) as i64;
+        sample_count += 1;
+    }
+
+    (delta_sum / sample_count) as i32
+}
+
+fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
+    let Some(_) = talisman.enhancement() else {
+        return 0;
+    };
+    let base = best_play_score_for_hand(run, &run.hand, None, None);
+    let mut enhanced_hand = run.hand.clone();
+    crate::core::talisman::apply_to_hand(&mut enhanced_hand, talisman);
+    let buffed = best_play_score_for_hand(run, &enhanced_hand, None, None);
+    buffed.saturating_sub(base) as i32
+}
+
+fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
+    let mut used_any = false;
+
+    while let Some(idx) = run
+        .consumables
+        .items
+        .iter()
+        .position(|c| matches!(c, Consumable::Zodiac(_)))
+    {
+        let zodiac = match run.consumables.items[idx] {
+            Consumable::Zodiac(z) => z,
+            Consumable::Talisman(_) => unreachable!(),
+        };
+        let _ = run.use_consumable(idx);
+        bot_log!(log, "      action: use zodiac {:?}", zodiac);
+        used_any = true;
+    }
+
+    let base = pick_best_play(run).map(|(s, _)| s).unwrap_or(0);
+    let mut best_talisman: Option<(usize, TalismanKind, i32)> = None;
+    for (idx, consumable) in run.consumables.items.iter().copied().enumerate() {
+        let Consumable::Talisman(kind) = consumable else {
+            continue;
+        };
+        let delta = talisman_marginal_value(run, kind);
+        if delta <= 0 {
+            continue;
+        }
+        if best_talisman
+            .as_ref()
+            .map(|(_, _, best_delta)| delta > *best_delta)
+            .unwrap_or(true)
+        {
+            best_talisman = Some((idx, kind, delta));
+        }
+    }
+
+    if let Some((idx, kind, delta)) = best_talisman {
+        let _ = run.use_consumable(idx);
+        bot_log!(
+            log,
+            "      action: use talisman {:?} (+{} projected best-play value from {})",
+            kind,
+            delta,
+            base
+        );
+        used_any = true;
+    }
+
+    used_any
+}
+
+/// Headless analogue of `ShopScene::new` + buy loop. Rolls relics plus
+/// consumables and buys the affordable offer with the largest positive
+/// marginal value.
+fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool) {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
     let patron_gift = run.tag_patron_gift;
@@ -515,26 +1741,124 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
     let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
     let mut pool: Vec<RelicId> = defs
         .iter()
-        .filter(|d| !run.relics.has(d.id) && !shop_excluded.contains(&d.id))
+        .filter(|d| !run.relics.owns(d.id) && !shop_excluded.contains(&d.id))
         .map(|d| d.id)
         .collect();
     pool.shuffle(&mut rand::rng());
-    let mut shop: Vec<RelicId> = pool.into_iter().take(3 + extra_relics).collect();
-
-    let mut free_relic = patron_gift;
-    loop {
-        if run.relics.is_full() || shop.is_empty() {
+    let mut rng = rand::rng();
+    const MAX_RIBBONS: usize = 4;
+    const MAX_RELICS: usize = 6;
+    let mut n_relics = rng.random_range(0..=MAX_RELICS) + extra_relics;
+    let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
+    let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
+    while n_zodiacs + n_talismans > MAX_RIBBONS {
+        if n_talismans >= n_zodiacs {
+            n_talismans -= 1;
+        } else {
+            n_zodiacs -= 1;
+        }
+    }
+    while n_relics + n_zodiacs + n_talismans < 2 {
+        let relics_room = n_relics < MAX_RELICS;
+        let ribbons_room = n_zodiacs + n_talismans < MAX_RIBBONS;
+        let zodiacs_room = ribbons_room && n_zodiacs < MAX_RIBBONS;
+        let talismans_room = ribbons_room && n_talismans < MAX_RIBBONS;
+        let mut choices = Vec::with_capacity(3);
+        if relics_room {
+            choices.push(0u8);
+        }
+        if zodiacs_room {
+            choices.push(1u8);
+        }
+        if talismans_room {
+            choices.push(2u8);
+        }
+        if choices.is_empty() {
             break;
         }
-        // Find the best affordable item with positive marginal value.
+        match choices[rng.random_range(0..choices.len())] {
+            0 => n_relics += 1,
+            1 => n_zodiacs += 1,
+            _ => n_talismans += 1,
+        }
+    }
+
+    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().iter().copied().collect();
+    zodiac_pool.shuffle(&mut rng);
+    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
+    talisman_pool.shuffle(&mut rng);
+
+    let mut shop: Vec<ShopOffer> = pool
+        .into_iter()
+        .take(n_relics)
+        .map(ShopOffer::Relic)
+        .collect();
+    shop.extend(
+        zodiac_pool
+            .into_iter()
+            .take(n_zodiacs)
+            .map(ShopOffer::Zodiac),
+    );
+    shop.extend(
+        talisman_pool
+            .into_iter()
+            .take(n_talismans)
+            .map(ShopOffer::Talisman),
+    );
+
+    let mut free_relic = patron_gift;
+    bot_log!(
+        log,
+        "    shop: gold {} | relic slots {}/{} | consumables {}/{} | offerings {:?}{}",
+        run.gold,
+        run.relics.active.len(),
+        run.relics.max_slots,
+        run.consumables.items.len(),
+        run.consumables.capacity,
+        shop,
+        if free_relic {
+            " | patron gift active"
+        } else {
+            ""
+        }
+    );
+    loop {
+        if shop.is_empty() {
+            bot_log!(log, "    shop: leaving ({})", "no offerings left");
+            break;
+        }
+        // Find the best affordable offer with positive marginal value.
         let mut best: Option<(usize, i32)> = None;
-        for (i, &id) in shop.iter().enumerate() {
-            let price = if free_relic { 0 } else { relic_buy_price(id) };
+        for (i, offer) in shop.iter().copied().enumerate() {
+            let price = match offer {
+                ShopOffer::Relic(id) => {
+                    if free_relic {
+                        0
+                    } else {
+                        relic_shop_price(id, &run.relics)
+                    }
+                }
+                ShopOffer::Zodiac(_) => ZodiacKind::shop_price(),
+                ShopOffer::Talisman(kind) => kind.shop_price(),
+            };
             if price as i32 > run.gold {
                 continue;
             }
-            let mv = relic_marginal_value(run, id);
-            // Only buy if it actually helps; otherwise let the bot bank gold.
+            let mv = match offer {
+                ShopOffer::Relic(id) => relic_marginal_value(run, id),
+                ShopOffer::Zodiac(zodiac) => zodiac_marginal_value(run, zodiac),
+                ShopOffer::Talisman(kind) => {
+                    if run.consumables.is_full()
+                        || run.consumables.items.iter().any(
+                            |c| matches!(c, Consumable::Talisman(existing) if *existing == kind),
+                        )
+                    {
+                        0
+                    } else {
+                        talisman_marginal_value(run, kind)
+                    }
+                }
+            };
             if mv <= 0 {
                 continue;
             }
@@ -542,28 +1866,75 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats) {
                 best = Some((i, mv));
             }
         }
-        let Some((idx, _)) = best else { break };
-        let id = shop.remove(idx);
-        let price = if free_relic { 0 } else { relic_buy_price(id) };
-        free_relic = false;
-        run.gold -= price as i32;
-        run.relics.active.push(id);
-        // Initialize counters for stateful relics.
-        match id {
-            RelicId::MeltingIce => {
-                run.relic_counters.insert(RelicId::MeltingIce, 80);
+        let Some((idx, marginal_value)) = best else {
+            bot_log!(log, "    shop: no positive-value affordable purchase");
+            break;
+        };
+        let offer = shop.remove(idx);
+        match offer {
+            ShopOffer::Relic(id) => {
+                let price = if free_relic {
+                    0
+                } else {
+                    relic_shop_price(id, &run.relics)
+                };
+                free_relic = false;
+                run.gold -= price as i32;
+                run.relics.active.push(id);
+                match id {
+                    RelicId::MeltingIce => {
+                        run.relic_counters.insert(RelicId::MeltingIce, 80);
+                    }
+                    RelicId::SilkThread => {
+                        run.relic_counters.insert(RelicId::SilkThread, 40);
+                    }
+                    RelicId::TeaCeremony => {
+                        run.relic_counters.insert(RelicId::TeaCeremony, 3);
+                    }
+                    _ => {}
+                }
+                run.recompute_capacities();
+                stats.relics_bought += 1;
+                stats.gold_spent += price;
+                bot_log!(
+                    log,
+                    "    shop: bought {:?} for {} (marginal value {}, gold now {})",
+                    id,
+                    price,
+                    marginal_value,
+                    run.gold
+                );
             }
-            RelicId::SilkThread => {
-                run.relic_counters.insert(RelicId::SilkThread, 40);
+            ShopOffer::Zodiac(zodiac) => {
+                let price = ZodiacKind::shop_price();
+                run.gold -= price as i32;
+                let new_level = run.yaku_levels.level_up(zodiac.yaku());
+                stats.gold_spent += price;
+                bot_log!(
+                    log,
+                    "    shop: bought zodiac {:?} for {} (marginal value {}, level {}, gold now {})",
+                    zodiac,
+                    price,
+                    marginal_value,
+                    new_level,
+                    run.gold
+                );
             }
-            RelicId::TeaCeremony => {
-                run.relic_counters.insert(RelicId::TeaCeremony, 3);
+            ShopOffer::Talisman(kind) => {
+                let price = kind.shop_price();
+                run.gold -= price as i32;
+                run.consumables.items.push(Consumable::Talisman(kind));
+                stats.gold_spent += price;
+                bot_log!(
+                    log,
+                    "    shop: bought talisman {:?} for {} (marginal value {}, gold now {})",
+                    kind,
+                    price,
+                    marginal_value,
+                    run.gold
+                );
             }
-            _ => {}
         }
-        run.recompute_capacities();
-        stats.relics_bought += 1;
-        stats.gold_spent += price;
     }
 }
 
@@ -578,17 +1949,17 @@ fn should_skip_blind(run: &RunState, blind: BlindKind) -> bool {
         return false;
     }
     let target = (run.base_target as f32 * blind.target_multiplier()) as u32;
-    let best = pick_best_play(run).map(|(s, _)| s as u32).unwrap_or(0);
+    let best = pick_best_play(run).map(|(s, _)| s).unwrap_or(0);
     if best == 0 {
         return false;
     }
     // Optimistic projection: assume the bot can repeat its current best play for
     // every remaining play (ignores discard refresh).
-    let projected = best.saturating_mul(run.plays_remaining);
+    let projected = best.saturating_mul(run.plays_remaining as u64);
     // Only skip if we'd over-shoot by a wide margin (≥ 2× target). The threshold
     // prevents skipping borderline blinds where the gold-from-clearing reward is
     // comparable to the skip reward.
-    projected >= target.saturating_mul(2)
+    projected >= target.saturating_mul(2) as u64
 }
 
 /// Tuning overrides applied on top of `GameMode::standard()` for headless runs.
@@ -602,8 +1973,44 @@ pub struct BotConfig {
     pub starting_gold: Option<u32>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BotRunOptions {
+    pub log: bool,
+    pub export_json: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct BotExport<'a> {
+    runs: u32,
+    mode: &'a GameMode,
+    aggregate: &'a AggregateStats,
+}
+
+#[derive(Serialize)]
+struct SweepCellExport {
+    base_target: u32,
+    target_scaling: f32,
+    starting_plays: u32,
+    aggregate: AggregateStats,
+}
+
+#[derive(Serialize)]
+struct SweepExport {
+    runs_per_cell: u32,
+    cells: Vec<SweepCellExport>,
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(value)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
 impl BotConfig {
-    fn into_mode(self) -> GameMode {
+    pub fn into_mode(self) -> GameMode {
         let mut mode = GameMode::standard();
         if let Some(v) = self.base_target {
             mode.base_target = v;
@@ -629,58 +2036,136 @@ impl BotConfig {
 /// (which scales `base_target` by `target_scaling` and rolls to the next blind) called
 /// after every cleared blind. Run ends on bust or when ante > FINAL_ANTE.
 pub fn play_run_with(config: BotConfig) -> RunStats {
+    play_run_with_options(config, BotRunOptions::default(), None)
+}
+
+fn play_run_with_options(
+    config: BotConfig,
+    options: BotRunOptions,
+    run_number: Option<u32>,
+) -> RunStats {
     let mode = config.into_mode();
     let mut run = RunState::new(mode);
     let mut stats = RunStats::default();
     let mut bus = EventBus::default();
+    let log = options.log;
+
+    bot_log!(
+        log,
+        "== bot run{} start: ante {} | blind {} | target {} | gold {} ==",
+        run_number
+            .map(|n| format!(" #{n}"))
+            .unwrap_or_else(String::new),
+        run.ante,
+        blind_log_label(&run, run.upcoming_blind),
+        run.target_score,
+        run.gold
+    );
 
     loop {
         if run.is_run_complete() {
             stats.victory = true;
             stats.died_on_ante = run.ante;
+            bot_log!(log, "== bot run complete: victory at ante {} ==", run.ante);
             break;
         }
         let blind = run.upcoming_blind;
+        bot_log!(
+            log,
+            "  ante {} | blind {} | target {} | gold {} | relics {}",
+            run.ante,
+            blind_log_label(&run, blind),
+            run.target_score,
+            run.gold,
+            run.relics.active.len()
+        );
 
         // Skip strategy: bank gold on Small/Big when projected score comfortably
         // overshoots the target. Tag rewards replace flat gold — apply them
         // the same way the pick-blind scene does.
         if should_skip_blind(&run, blind) {
+            bot_log!(log, "    action: skip {}", blind.name());
             if let Some(tag) = run.tag_for_blind(blind) {
+                let gold_before = run.gold;
                 run.apply_tag(tag);
+                let gold_after = run.gold;
+                let realized_gold = gold_after.saturating_sub(gold_before).max(0) as u32;
+                stats.gold_from_skip_tags += realized_gold;
+                stats.skip_tag_gold_value += tag.gold_value();
+                *stats.skipped_tags.entry(tag.name()).or_insert(0) += 1;
             }
             run.skip_to_next_blind();
             stats.blinds_skipped += 1;
             continue;
         }
 
+        stats.total_target_score += run.target_score as u64;
         run.apply_blind(blind);
-        let cleared = play_blind(&mut run, &mut stats);
+        let cleared = play_blind(&mut run, &mut stats, log);
         stats.total_score += run.round_score as u64;
+        stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
         stats.died_on_ante = run.ante;
         stats.died_on_blind = blind;
         if !cleared {
             stats.final_gold = run.gold;
+            bot_log!(
+                log,
+                "== bot run end: died on ante {} {} with gold {} ==",
+                run.ante,
+                blind_log_label(&run, blind),
+                run.gold
+            );
             break;
         }
         stats.blinds_cleared += 1;
+        stats.total_overscore += run.round_score.saturating_sub(run.target_score as u64);
         if matches!(blind, BlindKind::Boss) {
             stats.antes_cleared += 1;
         }
+        let payout = clear_payout_breakdown(&run);
+        stats.gold_from_clears += payout.total;
+        stats.gold_from_clear_base += payout.base_reward;
+        stats.gold_from_unused_plays += payout.unused_play_bonus;
+        stats.gold_from_interest += payout.interest;
+        stats.gold_from_clear_relics += payout.relic_bonus;
+
+        bot_log!(
+            log,
+            "  blind {} cleared; advancing with gold {} and total score {}",
+            blind_log_label(&run, blind),
+            run.gold,
+            stats.total_score
+        );
 
         run.advance_round(&mut bus);
 
         // Shop visit happens after advance_round (matching Shop → PickBlind scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
-        visit_shop(&mut run, &mut stats);
+        visit_shop(&mut run, &mut stats, log);
     }
 
     stats.final_gold = run.gold;
+    bot_log!(log, "== bot run stats: {:?} ==", stats);
     stats
 }
 
 /// Run the bot `n` times with the given tuning config and return aggregate stats.
+#[allow(dead_code)]
 pub fn run_with(n: u32, config: BotConfig) -> AggregateStats {
+    (0..n)
+        .into_par_iter()
+        .map(|_| play_run_with(config.clone()))
+        .fold(AggregateStats::default, |mut agg, s| {
+            agg.record(&s);
+            agg
+        })
+        .reduce(AggregateStats::default, |mut a, b| {
+            a.merge_in(b);
+            a
+        })
+}
+
+fn run_with_sequential(n: u32, config: BotConfig) -> AggregateStats {
     let mut agg = AggregateStats::default();
     for _ in 0..n {
         let s = play_run_with(config.clone());
@@ -689,23 +2174,34 @@ pub fn run_with(n: u32, config: BotConfig) -> AggregateStats {
     agg
 }
 
-/// Run the bot `n` times and print aggregate stats. Entry point from `main.rs`.
-pub fn run_headless(n: u32, config: BotConfig) {
+pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions) -> AggregateStats {
     let mode = config.clone().into_mode();
     println!(
-        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={})...",
+        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={})...",
         n,
         mode.base_target,
         mode.target_scaling,
         mode.starting_plays,
         mode.starting_discards,
         mode.starting_gold,
+        options.log,
     );
+    let runs: Vec<RunStats> = if options.log {
+        (0..n)
+            .map(|i| play_run_with_options(config.clone(), options.clone(), Some(i + 1)))
+            .collect()
+    } else {
+        (0..n)
+            .into_par_iter()
+            .map(|i| play_run_with_options(config.clone(), options.clone(), Some(i + 1)))
+            .collect()
+    };
+
     let mut agg = AggregateStats::default();
-    for i in 0..n {
-        let s = play_run_with(config.clone());
-        agg.record(&s);
-        if (i + 1) % 25 == 0 || i + 1 == n {
+    for (i, s) in runs.iter().enumerate() {
+        agg.record(s);
+        let run_number = i as u32 + 1;
+        if run_number % 25 == 0 || run_number == n {
             let outcome = if s.victory {
                 format!("VICTORY (ante {})", s.died_on_ante)
             } else {
@@ -713,21 +2209,46 @@ pub fn run_headless(n: u32, config: BotConfig) {
             };
             println!(
                 "  [{:>4}/{}] last: {} (cleared {} blinds, score {})",
-                i + 1,
+                run_number,
                 n,
                 outcome,
                 s.blinds_cleared,
-                s.total_score,
+                human_readable_score(s.total_score as f64),
             );
         }
     }
+    agg
+}
+
+/// Run the bot `n` times and print aggregate stats. Entry point from `main.rs`.
+pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
+    let mode = config.clone().into_mode();
+    let agg = run_headless_aggregate(n, config, options.clone());
     agg.print_summary();
+    if let Some(path) = options.export_json.as_deref() {
+        let payload = BotExport {
+            runs: n,
+            mode: &mode,
+            aggregate: &agg,
+        };
+        match write_json(path, &payload) {
+            Ok(()) => println!("exported bot JSON to {}", path.display()),
+            Err(err) => eprintln!("failed to export bot JSON to {}: {err}", path.display()),
+        }
+    }
 }
 
 /// Sweep `target_scaling` × `base_target` and print a compact win-rate matrix.
 /// Useful for finding tuning sweet spots quickly. Each cell runs `runs_per_cell`
 /// full bot games and reports `(antes_cleared_avg, win_rate_pct)`.
-pub fn run_sweep(runs_per_cell: u32, base_targets: &[u32], scalings: &[f32], plays_values: &[u32]) {
+pub fn run_sweep(
+    runs_per_cell: u32,
+    base_targets: &[u32],
+    scalings: &[f32],
+    plays_values: &[u32],
+    export_json: Option<&Path>,
+) {
+    let mut export_cells = Vec::new();
     println!(
         "Sweep: {} bases × {} scalings × {} plays-values × {} runs/cell = {} runs total",
         base_targets.len(),
@@ -756,26 +2277,64 @@ pub fn run_sweep(runs_per_cell: u32, base_targets: &[u32], scalings: &[f32], pla
         println!();
 
         for &base in base_targets {
+            let cells: Vec<(String, AggregateStats, f32)> = scalings
+                .par_iter()
+                .map(|&scaling| {
+                    let cfg = BotConfig {
+                        base_target: Some(base),
+                        target_scaling: Some(scaling),
+                        starting_plays: Some(plays),
+                        ..Default::default()
+                    };
+                    let agg = run_with_sequential(runs_per_cell, cfg);
+                    let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
+                    let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
+                    let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
+                    let avg_score = agg.total_score as f64 / agg.runs as f64;
+                    (
+                        format!(
+                            " {:>4.1}/{:>4.1}% ({:>3.1} blinds, {}) |",
+                            avg_antes,
+                            win_pct,
+                            avg_blinds,
+                            human_readable_score(avg_score)
+                        ),
+                        agg,
+                        scaling,
+                    )
+                })
+                .collect();
+            if export_json.is_some() {
+                for (_, agg, scaling) in &cells {
+                    export_cells.push(SweepCellExport {
+                        base_target: base,
+                        target_scaling: *scaling,
+                        starting_plays: plays,
+                        aggregate: agg.clone(),
+                    });
+                }
+            }
             print!("{:>10} |", base);
-            for &scaling in scalings {
-                let cfg = BotConfig {
-                    base_target: Some(base),
-                    target_scaling: Some(scaling),
-                    starting_plays: Some(plays),
-                    ..Default::default()
-                };
-                let agg = run_with(runs_per_cell, cfg);
-                let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
-                let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
-                let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
-                let avg_score = agg.total_score as f64 / agg.runs as f64;
-                print!(
-                    " {:>4.1}/{:>4.1}% ({:>3.1}b {:>5.0}) |",
-                    avg_antes, win_pct, avg_blinds, avg_score
-                );
+            for (cell, _, _) in cells {
+                print!("{cell}");
             }
             println!();
         }
     }
     println!();
+    if let Some(path) = export_json {
+        let payload = SweepExport {
+            runs_per_cell,
+            cells: export_cells,
+        };
+        match write_json(path, &payload) {
+            Ok(()) => println!("exported sweep JSON to {}", path.display()),
+            Err(err) => eprintln!("failed to export sweep JSON to {}: {err}", path.display()),
+        }
+    }
+}
+
+fn human_readable_score(score: f64) -> String {
+    let formatter = human_format::Formatter::new();
+    formatter.format(score)
 }

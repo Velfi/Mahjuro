@@ -89,6 +89,11 @@ pub struct Tile {
     /// time a tile is drawn into the player's hand.
     #[serde(default)]
     pub enhancement: Option<TileEnhancement>,
+    /// Transient render-only flag used by the tile decal rasterizer to stamp
+    /// a debuff marker on the face. Gameplay/scoring debuffs are still sourced
+    /// from run state.
+    #[serde(default)]
+    pub debuffed_visual: bool,
 }
 
 impl Tile {
@@ -98,6 +103,7 @@ impl Tile {
             rank,
             id,
             enhancement: None,
+            debuffed_visual: false,
         }
     }
 

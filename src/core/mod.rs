@@ -1,5 +1,6 @@
 pub mod boss;
 pub mod consumable;
+pub mod debuff;
 pub mod deck;
 pub mod error;
 pub mod hand;

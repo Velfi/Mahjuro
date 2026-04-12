@@ -1,6 +1,7 @@
 //! Game over scene — shown when the player exhausts plays without reaching the target.
 
 use crate::game::run::RunState;
+use crate::persistence;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -14,14 +15,14 @@ use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 struct DismissAction;
 
 pub struct GameOverScene {
-    pub final_score: u32,
+    pub final_score: u64,
     pub target_score: u32,
     pub won: bool,
     tree: TreeState,
 }
 
 impl GameOverScene {
-    pub fn new(final_score: u32, target_score: u32) -> Self {
+    pub fn new(final_score: u64, target_score: u32) -> Self {
         Self {
             final_score,
             target_score,
@@ -31,7 +32,7 @@ impl GameOverScene {
     }
 
     /// Construct a victory screen shown after defeating the final-ante Boss.
-    pub fn victory(final_score: u32, target_score: u32) -> Self {
+    pub fn victory(final_score: u64, target_score: u32) -> Self {
         Self {
             final_score,
             target_score,
@@ -62,6 +63,9 @@ impl SceneBehavior for GameOverScene {
         );
         if action.is_some() {
             *ctx.run = RunState::new_demo();
+            ctx.run.set_auto_cash_in_on_full_structure(
+                persistence::load_settings().auto_cash_in_on_full_structure,
+            );
             return Some(Scene::StartScreen(StartScreenScene::new()));
         }
         None
@@ -96,7 +100,7 @@ impl SceneBehavior for GameOverScene {
             color: color::OBSIDIAN,
         });
         if self.won {
-            frame.golden_dust();
+            frame.moonlit_water();
         }
         frame.text(TextLabel {
             rect: headline_rect,

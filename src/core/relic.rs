@@ -1,5 +1,7 @@
 //! Relic definitions and runtime application hooks.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::core::tile::Suit;
@@ -27,8 +29,6 @@ pub enum RelicId {
     /// When a discard-refill brings the hand to tenpai (shanten 0), draw 1
     /// extra tile from the wall. Tempo relic — one more chance to complete.
     ShantenShove,
-    /// Reveals the next 2 wall tiles. Pure-info — no scoring effect.
-    WallPeek,
     /// Kongs grant +1 play this round and +4 mult when scored.
     KanDrum,
     /// Reveal an extra dora indicator at round start; dora chips become +35.
@@ -51,16 +51,13 @@ pub enum RelicId {
     ZodiacPouch,
     /// +1 zodiac inventory slot; every 3rd Zodiac you use is duplicated.
     LunarAlmanac,
-    /// Active yaku loadout has 4 slots instead of 3.
-    YakuScholar,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
     /// Kongs grant +120 chips and +2 mult each. (The original "counts as
     /// both triplet and pair" semantic was never wired into yaku detection;
     /// this flat bonus replaces it as a real, scoring effect.)
     KongsBlessing,
-    /// Once per round, swap one yaku in your loadout for another unlocked.
-    /// (No active scoring effect — UI hook only.)
+    /// Reserved relic id; the old yaku-loadout swap mechanic no longer exists.
     CodexCompass,
     // ── Flower-synergy relics ──────────────────────────────────────────
     /// Each flower's triggered effect fires a second time.
@@ -94,7 +91,7 @@ pub enum RelicId {
     ClosedGate,
     /// +1 mult per 5 gold held.
     GoldFurnace,
-    /// +0.1 mult per 100 total score earned this run (max +5 mult).
+    /// +0.1 mult per 100 total score earned this run.
     Snowball,
     /// +1 play per round.
     SecondWind,
@@ -203,7 +200,6 @@ impl RelicId {
             // Patch C new relics — placeholder asset names that fall back to
             // the relic's slug. Art for these can come later.
             RelicId::ShantenShove => "shanten_shove.png",
-            RelicId::WallPeek => "wall_peek.png",
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
             RelicId::RiichiStick => "riichi_stick.png",
@@ -213,7 +209,6 @@ impl RelicId {
             RelicId::RoundCompass => "round_compass.png",
             RelicId::ZodiacPouch => "zodiac_pouch.png",
             RelicId::LunarAlmanac => "lunar_almanac.png",
-            RelicId::YakuScholar => "yaku_scholar.png",
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
             RelicId::CodexCompass => "codex_compass.png",
@@ -289,9 +284,27 @@ pub struct RelicDef {
 /// Gold cost to buy a relic in the shop. Stable (deterministic) per relic id so
 /// the shop, bot, and any future tooling agree on prices.
 pub fn relic_buy_price(id: RelicId) -> u32 {
-    let defs = all_relic_defs();
-    let idx = defs.iter().position(|d| d.id == id).unwrap_or(0);
-    3 + (idx as u32 % 4)
+    let rarity = all_relic_defs()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.rarity)
+        .unwrap_or(Rarity::Common);
+    match rarity {
+        Rarity::Common => 6,
+        Rarity::Uncommon => 8,
+        Rarity::Rare => 10,
+        Rarity::Legendary => 12,
+    }
+}
+
+/// Effective gold cost to buy a relic in the shop after active price
+/// modifiers are applied.
+pub fn relic_shop_price(id: RelicId, relics: &RelicState) -> u32 {
+    let mut price = relic_buy_price(id);
+    if relics.has(RelicId::MerchantsEye) {
+        price = price.saturating_sub(1).max(1);
+    }
+    price
 }
 
 /// Find the relic whose display name exactly matches `name`. The scoring
@@ -329,6 +342,7 @@ pub fn relic_sell_price_live(
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
+    total_score: u64,
 ) -> String {
     let base = all_relic_defs()
         .iter()
@@ -389,6 +403,10 @@ pub fn relic_description_live(
                 "{base} [held {rounds} round{}, sell {sell}g]",
                 if rounds == 1 { "" } else { "s" }
             )
+        }
+        RelicId::Snowball => {
+            let bonus = total_score as f64 / 1000.0;
+            format!("{base} [current +{bonus:.1} mult]")
         }
         _ => base.to_string(),
     }
@@ -495,12 +513,6 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             rarity: Rarity::Uncommon,
         },
         RelicDef {
-            id: RelicId::WallPeek,
-            name: "Wall Peek",
-            description: "See the next 2 tiles in the wall",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
             id: RelicId::KanDrum,
             name: "Kan Drum",
             description: "Kongs grant +1 play this round and +4 mult",
@@ -561,12 +573,6 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             name: "Lunar Almanac",
             description: "+1 Zodiac slot; every 3rd Zodiac use is duplicated",
             rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::YakuScholar,
-            name: "Yaku Scholar",
-            description: "Active loadout has 4 yaku slots instead of 3",
-            rarity: Rarity::Uncommon,
         },
         RelicDef {
             id: RelicId::EightTreasures,
@@ -675,7 +681,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::Snowball,
             name: "Snowball",
-            description: "+0.1 mult per 100 total score this run (max +5)",
+            description: "+0.1 mult per 100 total score this run",
             rarity: Rarity::Rare,
         },
         RelicDef {
@@ -690,13 +696,12 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             description: "×2 final mult, but 1 fewer play per round",
             rarity: Rarity::Legendary,
         },
-        // CodexCompass — disabled because the relic has no scoring effect
-        // and the in-round yaku-loadout swap UI doesn't exist. Re-enable
-        // when the loadout-swap action is wired into the gameplay scene.
+        // CodexCompass stays disabled because its old loadout-swap mechanic
+        // no longer exists and it has no replacement scoring effect yet.
         // RelicDef {
         //     id: RelicId::CodexCompass,
         //     name: "Codex Compass",
-        //     description: "Once per round: swap one yaku in your loadout",
+        //     description: "Reserved relic slot",
         //     rarity: Rarity::Uncommon,
         // },
         // ── Balatro-inspired relics (Patch F) ──────────────────────────
@@ -904,6 +909,8 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
 pub struct RelicState {
     pub active: Vec<RelicId>,
     pub max_slots: usize,
+    #[serde(default)]
+    pub debuffed: BTreeSet<RelicId>,
 }
 
 impl Default for RelicState {
@@ -911,12 +918,17 @@ impl Default for RelicState {
         Self {
             active: Vec::new(),
             max_slots: 5,
+            debuffed: BTreeSet::new(),
         }
     }
 }
 
 impl RelicState {
     pub fn has(&self, id: RelicId) -> bool {
+        self.active.contains(&id) && !self.debuffed.contains(&id)
+    }
+
+    pub fn owns(&self, id: RelicId) -> bool {
         self.active.contains(&id)
     }
 
@@ -926,6 +938,33 @@ impl RelicState {
 
     pub fn len(&self) -> usize {
         self.active.len()
+    }
+
+    pub fn enabled_len(&self) -> usize {
+        self.active
+            .iter()
+            .filter(|&&id| !self.debuffed.contains(&id))
+            .count()
+    }
+
+    pub fn is_debuffed(&self, id: RelicId) -> bool {
+        self.active.contains(&id) && self.debuffed.contains(&id)
+    }
+
+    pub fn clear_debuffs(&mut self) {
+        self.debuffed.clear();
+    }
+
+    pub fn set_debuffed<I>(&mut self, relics: I)
+    where
+        I: IntoIterator<Item = RelicId>,
+    {
+        self.debuffed.clear();
+        for id in relics {
+            if self.active.contains(&id) {
+                self.debuffed.insert(id);
+            }
+        }
     }
 
     /// Swap two relics by index. Used by the rearrange UI (MirrorTile
@@ -948,6 +987,7 @@ impl RelicState {
 /// Scoring context for relic hooks.
 pub struct ScoreContext<'a> {
     pub relics: &'a RelicState,
+    pub tile_debuffs: &'a [crate::core::debuff::TileDebuff],
     /// Whether the player scored on their previous play (for ChainReaction).
     pub scored_last_turn: bool,
     /// Dora tile faces (suit, rank) that grant bonus points.
@@ -973,11 +1013,6 @@ pub struct ScoreContext<'a> {
     /// Per-yaku level (Zodiac-card-driven). `None` falls back to all level 1
     /// — used by tests and the bot.
     pub yaku_levels: Option<crate::core::zodiac::YakuLevels>,
-    /// Active yaku loadout: yaku in this list contribute at full strength,
-    /// others (except the always-active FullHand and Yakuhai) contribute at
-    /// half. Empty list = treat all detected yaku as full-strength (test/bot
-    /// default).
-    pub yaku_loadout: Vec<crate::core::yaku::YakuKind>,
     /// Yaku detected on prior plays in the current round, used by The Censor
     /// boss to halve repeat-yaku contributions. Empty in normal rounds.
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
@@ -1013,3 +1048,31 @@ pub struct ScoreContext<'a> {
 // per-relic helper layer redundant — each relic is one match arm in
 // `score_sets`, which is easier to read end-to-end than a chain of
 // `*_multiplier` accessors.
+
+#[cfg(test)]
+mod tests {
+    use super::{RelicId, RelicState, relic_buy_price, relic_shop_price};
+
+    #[test]
+    fn relic_shop_price_matches_base_without_merchants_eye() {
+        let relics = RelicState::default();
+
+        assert_eq!(
+            relic_shop_price(RelicId::TripletBoost, &relics),
+            relic_buy_price(RelicId::TripletBoost)
+        );
+    }
+
+    #[test]
+    fn merchants_eye_reduces_shop_price_by_one() {
+        let mut relics = RelicState::default();
+        relics.active.push(RelicId::MerchantsEye);
+
+        assert_eq!(
+            relic_shop_price(RelicId::TripletBoost, &relics),
+            relic_buy_price(RelicId::TripletBoost)
+                .saturating_sub(1)
+                .max(1)
+        );
+    }
+}

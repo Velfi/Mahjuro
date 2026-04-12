@@ -112,8 +112,10 @@ impl CascadeTuning {
 
 #[derive(Clone, Debug)]
 enum Phase {
-    /// Showing base points.
-    ShowBase,
+    /// Brief hold before the first base-step lands.
+    ShowBaseIntro,
+    /// Showing base meld contribution at index `i`.
+    ShowBaseStep(usize),
     /// Showing relic/rule step at index `i`.
     ShowStep(usize),
     /// Brief freeze after the last step finishes, before snapping into
@@ -133,9 +135,9 @@ pub struct ScoringCascade {
     phase: Phase,
     phase_started: Instant,
     /// The round score *before* this hand was scored.
-    pub score_before: u32,
+    pub score_before: u64,
     /// Points earned this hand.
-    pub earned: u32,
+    pub earned: u64,
     /// Timing parameters.
     tuning: CascadeTuning,
     /// Whether tutorial annotation text should be injected into frames.
@@ -146,11 +148,14 @@ pub struct ScoringCascade {
 #[allow(dead_code)]
 pub struct CascadeFrame {
     /// The displayed round score (ticking up).
-    pub displayed_score: u32,
+    pub displayed_score: u64,
     /// Whether the cascade is still running (blocks input).
     pub active: bool,
     /// Index of the step that just appeared (for pulse animation). None if base or total.
     pub new_step_index: Option<usize>,
+    /// Monotonic reveal slot across base steps first, then regular steps.
+    /// Used by gameplay to fire one-shot effects for every visible beat.
+    pub reveal_ordinal: Option<usize>,
     /// Current chip pile, smoothly interpolated for the active phase.
     pub displayed_chips: i32,
     /// Current mult, smoothly interpolated for the active phase.
@@ -162,6 +167,9 @@ pub struct CascadeFrame {
     pub phase_t: f32,
     /// Which axis (if any) just got an update — drives the bump animation.
     pub pulse_axis: Option<StepKind>,
+    /// Tile ids associated with the currently displayed step. The gameplay
+    /// scene uses these to pulse the contributing tiles in sequence.
+    pub highlight_tile_ids: Vec<u32>,
     /// Tutorial annotation text to display alongside the current phase.
     /// `None` when not in annotated tutorial mode.
     pub tutorial_annotation: Option<&'static str>,
@@ -170,13 +178,13 @@ pub struct CascadeFrame {
 impl ScoringCascade {
     pub fn with_tuning(
         breakdown: ScoreBreakdown,
-        score_before: u32,
-        earned: u32,
+        score_before: u64,
+        earned: u64,
         tuning: CascadeTuning,
     ) -> Self {
         Self {
             breakdown,
-            phase: Phase::ShowBase,
+            phase: Phase::ShowBaseIntro,
             phase_started: Instant::now(),
             score_before,
             earned,
@@ -189,12 +197,27 @@ impl ScoringCascade {
     pub fn update(&mut self, now: Instant) {
         let elapsed = now.saturating_duration_since(self.phase_started);
         match &self.phase {
-            Phase::ShowBase => {
+            Phase::ShowBaseIntro => {
                 if elapsed >= self.tuning.base_hold() {
-                    if self.breakdown.steps.is_empty() {
+                    if !self.breakdown.base_steps.is_empty() {
+                        self.phase = Phase::ShowBaseStep(0);
+                    } else if self.breakdown.steps.is_empty() {
                         self.phase = Phase::ShowTotal;
                     } else {
                         self.phase = Phase::ShowStep(0);
+                    }
+                    self.phase_started = now;
+                }
+            }
+            Phase::ShowBaseStep(i) => {
+                let i = *i;
+                if elapsed >= self.tuning.step_hold() {
+                    if i + 1 < self.breakdown.base_steps.len() {
+                        self.phase = Phase::ShowBaseStep(i + 1);
+                    } else if !self.breakdown.steps.is_empty() {
+                        self.phase = Phase::ShowStep(0);
+                    } else {
+                        self.phase = Phase::PreTotalFreeze;
                     }
                     self.phase_started = now;
                 }
@@ -254,8 +277,11 @@ impl ScoringCascade {
 
         // Phase-relative 0..1 (used by the renderer for the pulse envelope).
         let phase_t = match &self.phase {
-            Phase::ShowBase => {
+            Phase::ShowBaseIntro => {
                 (elapsed.as_secs_f32() / self.tuning.base_hold().as_secs_f32()).min(1.0)
+            }
+            Phase::ShowBaseStep(_) => {
+                (elapsed.as_secs_f32() / self.tuning.step_hold().as_secs_f32()).min(1.0)
             }
             Phase::ShowStep(_) => {
                 (elapsed.as_secs_f32() / self.tuning.step_hold().as_secs_f32()).min(1.0)
@@ -270,22 +296,36 @@ impl ScoringCascade {
         };
 
         // Determine the ticking score target and which step (if any) just fired.
-        let (score_target, new_step_index) = match &self.phase {
-            Phase::ShowBase => {
-                let target = self.score_before + self.breakdown.base_chips.max(0) as u32;
-                (lerp_u32(self.score_before, target, tick_t), None)
+        let (score_target, new_step_index, reveal_ordinal) = match &self.phase {
+            Phase::ShowBaseIntro => (self.score_before, None, None),
+            Phase::ShowBaseStep(i) => {
+                let i = *i;
+                let step = &self.breakdown.base_steps[i];
+                let from = if i > 0 {
+                    self.score_before + self.breakdown.base_steps[i - 1].running_total
+                } else {
+                    self.score_before
+                };
+                let to = self.score_before + step.running_total;
+                (lerp_u64(from, to, tick_t), None, Some(i))
             }
             Phase::ShowStep(i) => {
                 let i = *i;
-                let running = self.breakdown.steps[i].running_total.max(0) as u32;
+                let running = self.breakdown.steps[i].running_total;
                 let prev_running = if i > 0 {
-                    self.breakdown.steps[i - 1].running_total.max(0) as u32
+                    self.breakdown.steps[i - 1].running_total
+                } else if let Some(last_base) = self.breakdown.base_steps.last() {
+                    last_base.running_total
                 } else {
-                    self.breakdown.base_chips.max(0) as u32
+                    0
                 };
                 let from = self.score_before + prev_running;
                 let to = self.score_before + running;
-                (lerp_u32(from, to, tick_t), Some(i))
+                (
+                    lerp_u64(from, to, tick_t),
+                    Some(i),
+                    Some(self.breakdown.base_steps.len() + i),
+                )
             }
             Phase::PreTotalFreeze => {
                 // Hold on whatever the *last* step landed on. We're hanging
@@ -294,13 +334,14 @@ impl ScoringCascade {
                     .breakdown
                     .steps
                     .last()
-                    .map(|s| s.running_total.max(0) as u32)
-                    .unwrap_or_else(|| self.breakdown.base_chips.max(0) as u32);
-                (self.score_before + last, None)
+                    .or_else(|| self.breakdown.base_steps.last())
+                    .map(|s| s.running_total)
+                    .unwrap_or(0);
+                (self.score_before + last, None, None)
             }
             Phase::ShowTotal | Phase::Done => {
                 let total = self.score_before + self.earned;
-                (total, None)
+                (total, None, None)
             }
         };
 
@@ -309,86 +350,115 @@ impl ScoringCascade {
         // Compute the *currently displayed* chip pile and mult value, smoothly
         // interpolating across the active phase. This lets the renderer draw
         // them as two big counters that tick up rather than as a text scroll.
-        let (displayed_chips, displayed_mult, latest_step, pulse_axis) = match &self.phase {
-            Phase::ShowBase => {
-                // Tick chips from 0 → base_chips. Mult sits at ×1.
-                let to = self.breakdown.base_chips as f64;
-                let chips = (to * tick_t as f64).round() as i32;
-                (chips, 1.0, None, None)
-            }
-            Phase::PreTotalFreeze => {
-                // Hold the last step's chips/mult so the readout visibly
-                // freezes through the anticipation pause.
-                let chips = self
-                    .breakdown
-                    .steps
-                    .last()
-                    .map(|s| s.running_chips)
-                    .unwrap_or(self.breakdown.base_chips);
-                let mult = self
-                    .breakdown
-                    .steps
-                    .last()
-                    .map(|s| s.running_mult)
-                    .unwrap_or(1.0);
-                (chips, mult, None, None)
-            }
-            Phase::ShowStep(i) => {
-                let i = *i;
-                let step = &self.breakdown.steps[i];
-                let (prev_chips, prev_mult) = if i > 0 {
-                    let p = &self.breakdown.steps[i - 1];
-                    (p.running_chips as f64, p.running_mult)
-                } else {
-                    (self.breakdown.base_chips as f64, 1.0)
-                };
-                let to_chips = step.running_chips as f64;
-                let to_mult = step.running_mult;
-                let t = tick_t as f64;
-                let chips = (prev_chips + (to_chips - prev_chips) * t).round() as i32;
-                let mult = prev_mult + (to_mult - prev_mult) * t;
-                let pulse = if step.kind == StepKind::Final {
-                    None // final beat handled by total color
-                } else {
-                    Some(step.kind)
-                };
-                (chips, mult, Some((step.source.clone(), step.kind)), pulse)
-            }
-            Phase::ShowTotal | Phase::Done => {
-                // Hold the final values.
-                let chips = self
-                    .breakdown
-                    .steps
-                    .last()
-                    .map(|s| s.running_chips)
-                    .unwrap_or(self.breakdown.base_chips);
-                let mult = self
-                    .breakdown
-                    .steps
-                    .last()
-                    .map(|s| s.running_mult)
-                    .unwrap_or(1.0);
-                (chips, mult, None, None)
-            }
-        };
+        let (displayed_chips, displayed_mult, latest_step, pulse_axis, highlight_tile_ids) =
+            match &self.phase {
+                Phase::ShowBaseIntro => (0, 1.0, None, None, Vec::new()),
+                Phase::ShowBaseStep(i) => {
+                    let i = *i;
+                    let step = &self.breakdown.base_steps[i];
+                    let prev_chips = if i > 0 {
+                        self.breakdown.base_steps[i - 1].running_chips as f64
+                    } else {
+                        0.0
+                    };
+                    let to_chips = step.running_chips as f64;
+                    let t = tick_t as f64;
+                    let chips = (prev_chips + (to_chips - prev_chips) * t).round() as i32;
+                    (
+                        chips,
+                        1.0,
+                        Some((step.source.clone(), step.kind)),
+                        Some(StepKind::Chips),
+                        step.tile_ids.clone(),
+                    )
+                }
+                Phase::PreTotalFreeze => {
+                    // Hold the last step's chips/mult so the readout visibly
+                    // freezes through the anticipation pause.
+                    let chips = self
+                        .breakdown
+                        .steps
+                        .last()
+                        .map(|s| s.running_chips)
+                        .unwrap_or(self.breakdown.base_chips);
+                    let mult = self
+                        .breakdown
+                        .steps
+                        .last()
+                        .map(|s| s.running_mult)
+                        .unwrap_or(1.0);
+                    (chips, mult, None, None, Vec::new())
+                }
+                Phase::ShowStep(i) => {
+                    let i = *i;
+                    let step = &self.breakdown.steps[i];
+                    let (prev_chips, prev_mult) = if i > 0 {
+                        let p = &self.breakdown.steps[i - 1];
+                        (p.running_chips as f64, p.running_mult)
+                    } else {
+                        (self.breakdown.base_chips as f64, 1.0)
+                    };
+                    let to_chips = step.running_chips as f64;
+                    let to_mult = step.running_mult;
+                    let t = tick_t as f64;
+                    let chips = (prev_chips + (to_chips - prev_chips) * t).round() as i32;
+                    let mult = prev_mult + (to_mult - prev_mult) * t;
+                    let pulse = if step.kind == StepKind::Final {
+                        None // final beat handled by total color
+                    } else {
+                        Some(step.kind)
+                    };
+                    (
+                        chips,
+                        mult,
+                        Some((step.source.clone(), step.kind)),
+                        pulse,
+                        step.tile_ids.clone(),
+                    )
+                }
+                Phase::ShowTotal | Phase::Done => {
+                    // Hold the final values.
+                    let chips = self
+                        .breakdown
+                        .steps
+                        .last()
+                        .map(|s| s.running_chips)
+                        .unwrap_or(self.breakdown.base_chips);
+                    let mult = self
+                        .breakdown
+                        .steps
+                        .last()
+                        .map(|s| s.running_mult)
+                        .unwrap_or(1.0);
+                    (chips, mult, None, None, Vec::new())
+                }
+            };
 
         // Tutorial annotations: contextual text for each cascade phase.
         let tutorial_annotation = if self.tutorial_annotated {
             match &self.phase {
-                Phase::ShowBase => Some("Base chips from your tiles and melds"),
+                Phase::ShowBaseIntro | Phase::ShowBaseStep(_) => {
+                    Some("Base chips from your tiles and melds build the first pile")
+                }
                 Phase::ShowStep(_) => {
                     if let Some((ref _source, kind)) = latest_step {
                         match kind {
-                            StepKind::Chips => Some("Bonus chips added!"),
-                            StepKind::Mult => Some("Multiplier increased!"),
-                            StepKind::Final => Some("Chips \u{00d7} Mult = your score!"),
+                            StepKind::Chips => Some("Bonus chips feed the chip pile on the left"),
+                            StepKind::Mult => {
+                                Some("Multiplier bonuses build the mult pile on the right")
+                            }
+                            StepKind::Final => {
+                                Some("The score panel combines them: Chips \u{00d7} Mult")
+                            }
                             _ => None,
                         }
                     } else {
                         None
                     }
                 }
-                Phase::ShowTotal | Phase::Done => Some("Chips \u{00d7} Mult = your final score!"),
+                Phase::ShowTotal | Phase::Done => {
+                    Some("Chips \u{00d7} Mult = your final score on the panel")
+                }
                 Phase::PreTotalFreeze => Some("And now the grand total..."),
             }
         } else {
@@ -399,20 +469,22 @@ impl ScoringCascade {
             displayed_score: score_target,
             active: self.is_active(),
             new_step_index,
+            reveal_ordinal,
             displayed_chips,
             displayed_mult,
             latest_step,
             phase_t,
             pulse_axis,
+            highlight_tile_ids,
             tutorial_annotation,
         }
     }
 }
 
-fn lerp_u32(from: u32, to: u32, t: f32) -> u32 {
+fn lerp_u64(from: u64, to: u64, t: f32) -> u64 {
     if to >= from {
-        from + ((to - from) as f32 * t) as u32
+        from + ((to - from) as f64 * t as f64) as u64
     } else {
-        from - ((from - to) as f32 * t) as u32
+        from - ((from - to) as f64 * t as f64) as u64
     }
 }

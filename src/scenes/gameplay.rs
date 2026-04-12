@@ -4,8 +4,14 @@ mod action_bar_layout;
 
 use std::time::Instant;
 
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
+
+use crate::core::consumable::Consumable;
 use crate::core::hand::suggest_completions;
+use crate::core::relic::{RelicId, relic_sell_price_live};
 use crate::core::scoring::StepKind;
+use crate::core::structure::is_winning_structure_shape;
 use crate::core::yaku::yaku_preview;
 use crate::game::cascade::ScoringCascade;
 use crate::render::animation::ENTITY_SCORE_PANEL;
@@ -13,12 +19,12 @@ use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{
     CascadeTokenKind, CascadeTokenPlacement, DrawCmd, ShowcaseTilePlacement, UiFrame,
 };
-use crate::render::table_space::TableAnchorPx;
 use crate::render::falling_bones::FallingBoneSystem;
 use crate::render::flying_coins::FlyingCoinSystem;
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
-use crate::render::theme::typography;
+use crate::render::table_space::TableAnchorPx;
+use crate::render::theme::{ButtonState, ButtonVariant, typography};
 use crate::render::wgpu_renderer::{
     GpuInstance, PointLight, TextAlign, TextLabel, build_instances_from_layout,
 };
@@ -28,7 +34,7 @@ use crate::ui::widget::{self, TextStyle};
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-use action_bar_layout::{action_hud_world_z_py_nudge, compute_action_bar, ActionBarLayout};
+use action_bar_layout::{ActionBarLayout, action_hud_world_z_py_nudge, compute_action_bar};
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
@@ -118,6 +124,117 @@ const ALL_BUTTONS: [GameplayButton; 5] = [
     GameplayButton::Trigger,
 ];
 
+fn wrap_hand_tile_focus(
+    current: Option<FocusTarget>,
+    dir: FocusDir,
+    focus_rects: &[(FocusTarget, [f32; 4])],
+) -> Option<FocusTarget> {
+    let FocusTarget::HandTile(current_idx) = current? else {
+        return None;
+    };
+    if !matches!(dir, FocusDir::Left | FocusDir::Right) {
+        return None;
+    }
+
+    let mut hand_indices = focus_rects.iter().filter_map(|(target, _)| match *target {
+        FocusTarget::HandTile(i) => Some(i),
+        _ => None,
+    });
+    let first_idx = hand_indices.next()?;
+    let last_idx = hand_indices.last().unwrap_or(first_idx);
+
+    match dir {
+        FocusDir::Left if current_idx == first_idx => Some(FocusTarget::HandTile(last_idx)),
+        FocusDir::Right if current_idx == last_idx => Some(FocusTarget::HandTile(first_idx)),
+        _ => None,
+    }
+}
+
+fn structure_preview_chip_stack_count(final_chips: i32) -> usize {
+    if final_chips <= 0 {
+        0
+    } else {
+        ((final_chips + 74) / 75).clamp(1, 12) as usize
+    }
+}
+
+fn structure_preview_mult_stack_count(final_mult: f64) -> usize {
+    if final_mult <= 0.0 {
+        0
+    } else {
+        final_mult.ceil().clamp(1.0, 10.0) as usize
+    }
+}
+
+fn push_structure_preview_pile(
+    out: &mut Vec<CascadeTokenPlacement>,
+    kind: CascadeTokenKind,
+    count: usize,
+    center_x: f32,
+    center_y: f32,
+    base_lift: f32,
+    extents: [f32; 3],
+    pulse: f32,
+    seed: u64,
+) {
+    if count == 0 {
+        return;
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let overlap_x = extents[0] * 0.82;
+    let overlap_z = extents[2] * 0.82;
+    let overlap_x2 = overlap_x * overlap_x;
+    let overlap_z2 = overlap_z * overlap_z;
+    let max_radius_x = extents[0] * (0.70 + (count as f32).sqrt() * 0.24);
+    let max_radius_z = extents[2] * (0.52 + (count as f32).sqrt() * 0.18);
+    let lift_step = (extents[1] * 0.82).max(2.0);
+    const CANDIDATES_PER_TOKEN: u32 = 14;
+
+    let mut placed: Vec<(f32, f32, f32)> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut best: Option<(f32, f32, f32, f32)> = None;
+        for _ in 0..CANDIDATES_PER_TOKEN {
+            let angle = rng.random_range(0.0..std::f32::consts::TAU);
+            let radius_bias = rng.random::<f32>().powf(1.65);
+            let lx = angle.cos() * max_radius_x * radius_bias;
+            let lz = angle.sin() * max_radius_z * radius_bias;
+            let radial_norm = ((lx / max_radius_x).powi(2) + (lz / max_radius_z).powi(2)).sqrt();
+
+            let mut support_y = base_lift;
+            for (ox, oz, top_y) in &placed {
+                let dx = lx - ox;
+                let dz = lz - oz;
+                let overlap = (dx * dx) / overlap_x2 + (dz * dz) / overlap_z2;
+                if overlap < 1.0 && *top_y > support_y {
+                    support_y = *top_y;
+                }
+            }
+
+            match best {
+                None => best = Some((lx, lz, support_y, radial_norm)),
+                Some((_, _, by, _)) if support_y < by - 0.01 => {
+                    best = Some((lx, lz, support_y, radial_norm));
+                }
+                Some((_, _, by, br)) if (support_y - by).abs() <= 0.01 && radial_norm < br => {
+                    best = Some((lx, lz, support_y, radial_norm));
+                }
+                _ => {}
+            }
+        }
+
+        let (lx, lz, support_y, _) = best.unwrap();
+        let world_y = support_y + extents[1] * 0.5;
+        placed.push((lx, lz, support_y + lift_step));
+        out.push(CascadeTokenPlacement {
+            world_pos: [center_x + lx, center_y + lz, world_y],
+            extents,
+            kind,
+            pulse,
+        });
+    }
+}
+
 impl GameplayButton {
     /// Maps a focusable action button to its `UiAction`. Returns `None`
     /// for buttons whose activation is *not* expressible as a `UiAction`
@@ -135,14 +252,20 @@ impl GameplayButton {
     }
 }
 
+#[derive(Clone)]
+struct CascadeShowcase {
+    tiles: Vec<crate::core::tile::Tile>,
+    sets: Vec<crate::core::hand::DetectedSet>,
+}
+
 pub struct GameplayScene {
     /// Active scoring cascade animation (None when idle).
     cascade: Option<ScoringCascade>,
     /// Displayed score — ticked by the cascade, snaps to real score when idle.
-    displayed_score: u32,
+    displayed_score: u64,
     /// Previous frame's displayed score; used to detect changes and fire the
     /// score-pop tween on the score panel.
-    prev_displayed_score: u32,
+    prev_displayed_score: u64,
     /// Particle effects for scoring.
     particles: ParticleSystem,
     /// Physical scoring bones that tumble onto the play space during a
@@ -209,6 +332,10 @@ pub struct GameplayScene {
     /// yaku with its level, leveled bonuses, and run play count. Opened
     /// by clicking the Journal book on the table.
     journal: super::journal::JournalOverlay,
+    /// Scored tiles kept alive just for the duration of the cascade so the
+    /// reveal can pulse the contributing tiles even after the hand or
+    /// structure has already been cleared from game state.
+    cascade_showcase: Option<CascadeShowcase>,
     /// Hand size observed last frame. Used to detect deal events: any time
     /// the hand grows (initial round deal, post-discard refill) we stamp
     /// `last_deal_at` so the post-deal smoke breath can fire.
@@ -260,11 +387,17 @@ pub struct GameplayScene {
     /// Multiplied into candle intensity, radius, and flame brightness so
     /// the room visibly flares up on a monster hand.
     candle_flare: f32,
+    /// Controller "pick up relic with A" drag source. While set, d-pad/stick
+    /// navigation moves the focused drop target and releasing A commits the
+    /// swap if focus is on another relic.
+    held_relic_drag: Option<usize>,
     /// Tutorial hint overlay — shows banners and highlights during the
     /// onboarding flow. `None` for non-tutorial runs.
     tutorial_overlay: Option<super::tutorial_overlay::TutorialOverlay>,
     /// Hand tile indices that should glow (affinity hint for tutorial).
     tutorial_affinity_indices: Vec<usize>,
+    /// One-shot FoV pop triggered when a placement completes the structure.
+    final_tiles_fov_pop_at: Option<Instant>,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -289,6 +422,10 @@ const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_milli
 const CANDLE_FLARE_PEAK: f32 = 1.5;
 /// Exponential decay rate for the candle flare (per second). Higher = faster fade.
 const CANDLE_FLARE_DECAY: f32 = 2.5;
+/// Duration of the quick camera pop when the structure is completed.
+const FINAL_TILES_FOV_POP_SECS: f32 = 0.22;
+/// Peak FoV reduction in degrees during the completion pop.
+const FINAL_TILES_FOV_POP_DEGREES: f32 = 3.6;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -304,8 +441,59 @@ const HELP_BADGE_ID: u32 = 0x9100;
 /// help badge) are pushed earlier and win the first-hit search in
 /// `main.rs`'s `MouseInput` handler.
 const GAMEPLAY_3D_HIT_ID: u32 = 0x9200;
+const GAMEPLAY_SELL_RELIC_BASE: u32 = 0x9300;
+const GAMEPLAY_SELL_CONSUMABLE_BASE: u32 = 0x9400;
+
+fn gameplay_consumable_sell_price(c: Consumable) -> u32 {
+    let buy = match c {
+        Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
+        Consumable::Talisman(t) => t.shop_price(),
+    };
+    (buy / 2).max(1)
+}
+
+fn gameplay_sell_relic(run: &mut crate::game::run::RunState, idx: usize) -> Option<u32> {
+    let rid = *run.relics.active.get(idx)?;
+    let refund = relic_sell_price_live(rid, &run.relic_counters);
+    run.relics.active.remove(idx);
+    run.relic_counters.remove(&rid);
+    run.gold = run.gold.saturating_add(refund as i32);
+    *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
+    if run.relics.has(RelicId::Bonfire) {
+        run.relic_activations.push(RelicId::Bonfire);
+    }
+    run.recompute_capacities();
+    Some(refund)
+}
+
+fn gameplay_sell_consumable(run: &mut crate::game::run::RunState, idx: usize) -> Option<u32> {
+    let c = *run.consumables.items.get(idx)?;
+    let refund = gameplay_consumable_sell_price(c);
+    run.consumables.items.remove(idx);
+    run.gold = run.gold.saturating_add(refund as i32);
+    Some(refund)
+}
 
 impl GameplayScene {
+    fn display_tile(
+        tile: crate::core::tile::Tile,
+        tile_debuffs: &[crate::core::debuff::TileDebuff],
+    ) -> crate::core::tile::Tile {
+        let mut tile = tile;
+        tile.debuffed_visual = tile_debuffs.iter().any(|debuff| debuff.matches(&tile));
+        tile
+    }
+
+    fn display_tiles(
+        tiles: impl IntoIterator<Item = crate::core::tile::Tile>,
+        tile_debuffs: &[crate::core::debuff::TileDebuff],
+    ) -> Vec<crate::core::tile::Tile> {
+        tiles
+            .into_iter()
+            .map(|tile| Self::display_tile(tile, tile_debuffs))
+            .collect()
+    }
+
     /// Whether the cascade is actively animating (for redraw requests).
     pub fn is_animating(&self) -> bool {
         self.cascade.is_some()
@@ -316,6 +504,7 @@ impl GameplayScene {
             || !self.relic_glow_starts.is_empty()
             || self.post_deal_gust_active()
             || self.debug_wind_active()
+            || self.final_tiles_fov_pop_active()
     }
 
     /// True while the post-deal smoke breath is either pending or actively
@@ -336,6 +525,31 @@ impl GameplayScene {
             return false;
         };
         Instant::now().saturating_duration_since(t).as_secs_f32() < DEBUG_WIND_DURATION
+    }
+
+    fn final_tiles_fov_pop_active(&self) -> bool {
+        let Some(t) = self.final_tiles_fov_pop_at else {
+            return false;
+        };
+        Instant::now().saturating_duration_since(t).as_secs_f32() < FINAL_TILES_FOV_POP_SECS
+    }
+
+    fn final_tiles_fov_pop_offset_deg(&self, now: Instant) -> f32 {
+        let Some(t) = self.final_tiles_fov_pop_at else {
+            return 0.0;
+        };
+        let elapsed = now.saturating_duration_since(t).as_secs_f32();
+        if elapsed >= FINAL_TILES_FOV_POP_SECS {
+            return 0.0;
+        }
+        let progress = (elapsed / FINAL_TILES_FOV_POP_SECS).clamp(0.0, 1.0);
+        FINAL_TILES_FOV_POP_DEGREES * (progress * std::f32::consts::PI).sin()
+    }
+
+    fn trigger_tablet_wiggle_deg(&self, now: Instant) -> f32 {
+        let t = now.saturating_duration_since(self.last_frame).as_secs_f32() + self.candle_time;
+        let burst = (0.5 + 0.5 * (t * 3.1).sin()).powi(2);
+        burst * 8.0 * (t * 20.0).sin()
     }
 
     pub fn new() -> Self {
@@ -370,6 +584,7 @@ impl GameplayScene {
             last_revealed_step: None,
             cascade_final_emitted: false,
             journal: super::journal::JournalOverlay::new(),
+            cascade_showcase: None,
             prev_hand_len: 0,
             last_deal_at: None,
             wind_delay_secs: 3.0,
@@ -382,15 +597,24 @@ impl GameplayScene {
             kiln_mode: false,
             kiln_picks_remaining: 0,
             candle_flare: 0.0,
+            held_relic_drag: None,
             tutorial_overlay: None,
             tutorial_affinity_indices: Vec::new(),
+            final_tiles_fov_pop_at: None,
         }
     }
 
     /// Full scoring cascade + tutorial milestones after round score increases (commit autotrigger or manual trigger).
-    fn begin_scoring_cascade(&mut self, ctx: &mut UpdateCtx<'_>, score_before: u32, gained: u32) {
+    fn begin_scoring_cascade(
+        &mut self,
+        ctx: &mut UpdateCtx<'_>,
+        score_before: u64,
+        gained: u64,
+        showcase: Option<CascadeShowcase>,
+    ) {
         if gained == 0 {
             self.displayed_score = ctx.run.round_score;
+            self.cascade_showcase = None;
             return;
         }
         if let Some(ref breakdown) = ctx.run.last_breakdown {
@@ -425,7 +649,7 @@ impl GameplayScene {
                 }
             }
         }
-        if gained >= ctx.run.target_score {
+        if gained >= ctx.run.target_score as u64 {
             self.candle_flare = CANDLE_FLARE_PEAK;
             ctx.bus.push(crate::game::event_bus::GameEvent::CandleFlare);
         }
@@ -446,6 +670,7 @@ impl GameplayScene {
                     }
                 }
                 self.cascade = Some(cascade);
+                self.cascade_showcase = showcase;
                 self.last_revealed_step = None;
                 self.cascade_final_emitted = false;
                 let sp = ctx.layout.score_panel;
@@ -465,10 +690,389 @@ impl GameplayScene {
                 }
             } else {
                 self.displayed_score = ctx.run.round_score;
+                self.cascade_showcase = None;
             }
         } else {
             self.displayed_score = ctx.run.round_score;
+            self.cascade_showcase = None;
         }
+    }
+
+    fn popup_source_xy(
+        step: &crate::core::scoring::ScoreStep,
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+        cascade_showcase: Option<&CascadeShowcase>,
+    ) -> (f32, f32) {
+        if step.kind == StepKind::Final {
+            let sp = layout.score_panel;
+            return (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5);
+        }
+
+        if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
+            if let Some(center) = Self::relic_popup_center(layout, run, rid) {
+                return center;
+            }
+        }
+
+        if !step.tile_ids.is_empty() {
+            if let Some(center) =
+                Self::showcase_tile_popup_center(layout, run, cascade_showcase, &step.tile_ids)
+            {
+                return center;
+            }
+        }
+
+        if run
+            .available_yaku
+            .iter()
+            .any(|yaku| yaku.name() == step.source)
+        {
+            return Self::yaku_popup_center(layout, run, cascade_showcase);
+        }
+
+        if step.source == "Structure depth" {
+            return Self::trigger_tablet_popup_center(layout, run, cascade_showcase);
+        }
+
+        let ms = layout.modifier_strip;
+        match step.kind {
+            StepKind::Chips => (ms.x + ms.w * 0.30, ms.y + ms.h * 0.60),
+            StepKind::Mult => (ms.x + ms.w * 0.70, ms.y + ms.h * 0.60),
+            StepKind::Gold | StepKind::Final => (ms.x + ms.w * 0.50, ms.y + ms.h * 0.45),
+        }
+    }
+
+    fn relic_popup_center(
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+        rid: crate::core::relic::RelicId,
+    ) -> Option<(f32, f32)> {
+        let active_ids = &run.relics.active;
+        let idx = active_ids.iter().position(|&id| id == rid)?;
+        if active_ids.is_empty() {
+            return None;
+        }
+
+        let row_y = layout.score_panel.y + layout.score_panel.h + layout.window_h * 0.08;
+        let cell_w = layout.mm(45.0);
+        let total_w = cell_w * active_ids.len() as f32;
+        let row_center_x_default = layout.window_w * 0.38;
+        let inv_margin = layout.mm(8.0);
+        let max_right = match Self::consumable_dish_strip(layout, run) {
+            Some((sx, _, _, _)) => (sx - inv_margin).max(layout.mm(20.0)),
+            None => layout.window_w - layout.mm(8.0),
+        };
+        let mut row_center_x = row_center_x_default;
+        let row_right = row_center_x + total_w * 0.5;
+        if row_right > max_right {
+            row_center_x -= row_right - max_right;
+        }
+        let start_x = row_center_x - total_w * 0.5 + cell_w * 0.5;
+        Some((start_x + idx as f32 * cell_w, row_y))
+    }
+
+    fn consumable_dish_strip(
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+    ) -> Option<(f32, f32, f32, f32)> {
+        let consumables = &run.consumables;
+        if consumables.capacity == 0 {
+            return None;
+        }
+        let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let slot_w = (140.0 * zscale).max(120.0);
+        let slot_h = (56.0 * zscale).max(48.0);
+        let gap = (6.0 * zscale).max(3.0);
+        let total_w = (slot_w * consumables.capacity as f32
+            + gap * (consumables.capacity as f32 - 1.0))
+            .min(layout.window_w * 0.65);
+        let strip_x = (layout.window_w - total_w - (48.0 * zscale)).max(4.0);
+        let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
+        Some((strip_x, strip_y, total_w, slot_h))
+    }
+
+    fn yaku_popup_center(
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+        cascade_showcase: Option<&CascadeShowcase>,
+    ) -> (f32, f32) {
+        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
+            .hand_slots
+            .iter()
+            .map(|r| (r.x, r.y, r.w, r.h))
+            .collect();
+        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
+        let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
+        let showcase_present = has_structure || cascade_showcase.is_some();
+        let structure_tag_h = if showcase_present {
+            (17.0 * layout_scale).max(14.0)
+        } else {
+            0.0
+        };
+        let structure_meld_h = if showcase_present {
+            (46.0 * layout_scale).max(38.0)
+        } else {
+            0.0
+        };
+        let structure_pad = if showcase_present {
+            (5.0 * layout_scale).max(3.0)
+        } else {
+            0.0
+        };
+        let structure_block_h = if showcase_present {
+            structure_tag_h + structure_meld_h + structure_pad
+        } else {
+            0.0
+        };
+        let (_, slot_y, _, slot_h) = hand_slots.first().copied().unwrap_or((
+            0.0,
+            layout.hand_strip.y,
+            100.0,
+            layout.hand_strip.h,
+        ));
+        let tile_center_y = slot_y + slot_h * crate::ui::layout::HAND_HUD_STACK_Y_FRAC;
+        let clear_above_tiles = (34.0 * layout_scale).max(26.0);
+        let band_top_above_tiles = (tile_center_y - clear_above_tiles).max(4.0);
+        let min_yaku_y = layout.modifier_strip.y + layout.modifier_strip.h + (4.0 * layout_scale);
+        let mut yaku_row_y = band_top_above_tiles - yaku_panel_h;
+        let mut structure_strip_top = if showcase_present {
+            yaku_row_y - (8.0 * layout_scale) - structure_block_h
+        } else {
+            band_top_above_tiles
+        };
+        if yaku_row_y < min_yaku_y {
+            yaku_row_y = min_yaku_y;
+            if showcase_present {
+                structure_strip_top = yaku_row_y - (8.0 * layout_scale) - structure_block_h;
+            }
+        }
+        if showcase_present && structure_strip_top < min_yaku_y {
+            let deficit = min_yaku_y - structure_strip_top;
+            yaku_row_y += deficit;
+        }
+
+        let ab = compute_action_bar(
+            layout,
+            &hand_slots,
+            layout_scale,
+            1.0,
+            has_structure,
+            structure_strip_top,
+            structure_tag_h,
+            structure_meld_h,
+        );
+        (
+            ab.container_x + ab.container_w * 0.5,
+            yaku_row_y + yaku_panel_h * 0.5,
+        )
+    }
+
+    fn trigger_tablet_popup_center(
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+        cascade_showcase: Option<&CascadeShowcase>,
+    ) -> (f32, f32) {
+        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
+            .hand_slots
+            .iter()
+            .map(|r| (r.x, r.y, r.w, r.h))
+            .collect();
+        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
+        let showcase_present = has_structure || cascade_showcase.is_some();
+        let structure_tag_h = if showcase_present {
+            (17.0 * layout_scale).max(14.0)
+        } else {
+            0.0
+        };
+        let structure_meld_h = if showcase_present {
+            (46.0 * layout_scale).max(38.0)
+        } else {
+            0.0
+        };
+        let structure_pad = if showcase_present {
+            (5.0 * layout_scale).max(3.0)
+        } else {
+            0.0
+        };
+        let structure_block_h = if showcase_present {
+            structure_tag_h + structure_meld_h + structure_pad
+        } else {
+            0.0
+        };
+        let (_, slot_y, _, slot_h) = hand_slots.first().copied().unwrap_or((
+            0.0,
+            layout.hand_strip.y,
+            100.0,
+            layout.hand_strip.h,
+        ));
+        let tile_center_y = slot_y + slot_h * crate::ui::layout::HAND_HUD_STACK_Y_FRAC;
+        let clear_above_tiles = (34.0 * layout_scale).max(26.0);
+        let band_top_above_tiles = (tile_center_y - clear_above_tiles).max(4.0);
+        let min_yaku_y = layout.modifier_strip.y + layout.modifier_strip.h + (4.0 * layout_scale);
+        let mut yaku_row_y =
+            band_top_above_tiles - (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
+        let mut structure_strip_top = if showcase_present {
+            yaku_row_y - (8.0 * layout_scale) - structure_block_h
+        } else {
+            band_top_above_tiles
+        };
+        if yaku_row_y < min_yaku_y {
+            yaku_row_y = min_yaku_y;
+            if showcase_present {
+                structure_strip_top = yaku_row_y - (8.0 * layout_scale) - structure_block_h;
+            }
+        }
+        if showcase_present && structure_strip_top < min_yaku_y {
+            let deficit = min_yaku_y - structure_strip_top;
+            structure_strip_top += deficit;
+        }
+        let ab = compute_action_bar(
+            layout,
+            &hand_slots,
+            layout_scale,
+            1.0,
+            has_structure,
+            structure_strip_top,
+            structure_tag_h,
+            structure_meld_h,
+        );
+        let trigger_btn_rect = ab.trigger_btn_rect;
+        (
+            trigger_btn_rect.0 + trigger_btn_rect.2 * 0.5,
+            trigger_btn_rect.1 + trigger_btn_rect.3 * 0.5,
+        )
+    }
+
+    fn showcase_tile_popup_center(
+        layout: &crate::ui::layout::LayoutResult,
+        run: &crate::game::run::RunState,
+        cascade_showcase: Option<&CascadeShowcase>,
+        tile_ids: &[u32],
+    ) -> Option<(f32, f32)> {
+        let showcase = if let Some(showcase) = cascade_showcase {
+            showcase.clone()
+        } else if run.uses_structure_bank() && !run.structure_sets.is_empty() {
+            CascadeShowcase {
+                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs),
+                sets: run.structure_sets.clone(),
+            }
+        } else {
+            return None;
+        };
+        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
+            .hand_slots
+            .iter()
+            .map(|r| (r.x, r.y, r.w, r.h))
+            .collect();
+        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
+        let showcase_present = has_structure || cascade_showcase.is_some();
+        let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
+        let yaku_panel_gap = 8.0 * layout_scale;
+        let structure_tag_h = if showcase_present {
+            (17.0 * layout_scale).max(14.0)
+        } else {
+            0.0
+        };
+        let structure_meld_h = if showcase_present {
+            (46.0 * layout_scale).max(38.0)
+        } else {
+            0.0
+        };
+        let structure_pad = if showcase_present {
+            (5.0 * layout_scale).max(3.0)
+        } else {
+            0.0
+        };
+        let structure_block_h = if showcase_present {
+            structure_tag_h + structure_meld_h + structure_pad
+        } else {
+            0.0
+        };
+        let (_, slot_y, _, slot_h) = hand_slots.first().copied().unwrap_or((
+            0.0,
+            layout.hand_strip.y,
+            100.0,
+            layout.hand_strip.h,
+        ));
+        let tile_center_y = slot_y + slot_h * crate::ui::layout::HAND_HUD_STACK_Y_FRAC;
+        let clear_above_tiles = (34.0 * layout_scale).max(26.0);
+        let band_top_above_tiles = (tile_center_y - clear_above_tiles).max(4.0);
+        let min_yaku_y = layout.modifier_strip.y + layout.modifier_strip.h + (4.0 * layout_scale);
+        let mut yaku_row_y = band_top_above_tiles - yaku_panel_h;
+        let mut structure_strip_top = if showcase_present {
+            yaku_row_y - yaku_panel_gap - structure_block_h
+        } else {
+            band_top_above_tiles
+        };
+        if yaku_row_y < min_yaku_y {
+            yaku_row_y = min_yaku_y;
+            if showcase_present {
+                structure_strip_top = yaku_row_y - yaku_panel_gap - structure_block_h;
+            }
+        }
+        if showcase_present && structure_strip_top < min_yaku_y {
+            let deficit = min_yaku_y - structure_strip_top;
+            structure_strip_top += deficit;
+        }
+        let ab = compute_action_bar(
+            layout,
+            &hand_slots,
+            layout_scale,
+            1.0,
+            has_structure,
+            structure_strip_top,
+            structure_tag_h,
+            structure_meld_h,
+        );
+        let pad = (8.0 * layout_scale).max(6.0);
+        let preview_pill_w = (22.0 * layout_scale).max(18.0);
+        let preview_gap_x = (8.0 * layout_scale).max(5.0);
+        let preview_lane_w = if has_structure && cascade_showcase.is_none() {
+            preview_pill_w * 2.6 + preview_gap_x + pad
+        } else {
+            0.0
+        };
+        let intra_gap = (3.0 * layout_scale).max(2.0);
+        let inter_gap = (10.0 * layout_scale).max(7.0);
+        let total_tiles: usize = showcase.sets.iter().map(|s| s.tile_ids.len()).sum();
+        let intra_count: usize = showcase
+            .sets
+            .iter()
+            .map(|s| s.tile_ids.len().saturating_sub(1))
+            .sum();
+        let inter_count = showcase.sets.len().saturating_sub(1);
+        let available_w = ab.container_w
+            - pad * 2.0
+            - preview_lane_w
+            - intra_count as f32 * intra_gap
+            - inter_count as f32 * inter_gap;
+        let tile_size =
+            (available_w / total_tiles.max(1) as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
+        let meld_top = structure_strip_top + structure_tag_h;
+        let center_py = meld_top + structure_meld_h * 0.5;
+        let mut x_cursor = ab.container_x + pad;
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut count = 0usize;
+        for (mi, set) in showcase.sets.iter().enumerate() {
+            for &tid in &set.tile_ids {
+                let px = x_cursor + tile_size * 0.5;
+                if tile_ids.contains(&tid) {
+                    sum_x += px;
+                    sum_y += center_py;
+                    count += 1;
+                }
+                x_cursor += tile_size + intra_gap;
+            }
+            if mi + 1 < showcase.sets.len() {
+                x_cursor += inter_gap - intra_gap;
+            }
+        }
+        (count > 0).then_some((sum_x / count as f32, sum_y / count as f32))
     }
 }
 
@@ -770,27 +1374,105 @@ impl SceneBehavior for GameplayScene {
         }
 
         // If a cascade is running, advance it and block most input.
+        let cascade_showcase = self.cascade_showcase.clone();
         if let Some(ref mut cascade) = self.cascade {
             cascade.update(now);
             let frame = cascade.frame(now);
             self.displayed_score = frame.displayed_score;
 
-            // Pulse the score panel on each new step reveal.
-            if frame.new_step_index.is_some() {
+            // Pulse the score panel on each reveal beat.
+            if frame.reveal_ordinal.is_some() {
                 ctx.anim.pulse(ENTITY_SCORE_PANEL);
             }
 
-            // Reveal-edge effects: fire once per step on the frame the
+            // Reveal-edge effects: fire once per visible beat on the frame the
             // cascade transitions onto a new step. Drives both the relic
             // glow overlay and the per-step audio beat.
-            if let Some(idx) = frame.new_step_index {
-                if self.last_revealed_step != Some(idx) {
-                    self.last_revealed_step = Some(idx);
-                    ctx.bus
-                        .push(crate::game::event_bus::GameEvent::ScoreStepRevealed { index: idx });
-                    if let Some(step) = cascade.breakdown.steps.get(idx) {
+            if let Some(ordinal) = frame.reveal_ordinal {
+                if self.last_revealed_step != Some(ordinal) {
+                    self.last_revealed_step = Some(ordinal);
+                    if ordinal >= cascade.breakdown.base_steps.len() {
+                        let idx = ordinal - cascade.breakdown.base_steps.len();
+                        ctx.bus
+                            .push(crate::game::event_bus::GameEvent::ScoreStepRevealed {
+                                index: idx,
+                            });
+                    }
+                    let step = if ordinal < cascade.breakdown.base_steps.len() {
+                        cascade.breakdown.base_steps.get(ordinal)
+                    } else {
+                        cascade
+                            .breakdown
+                            .steps
+                            .get(ordinal - cascade.breakdown.base_steps.len())
+                    };
+                    if let Some(step) = step {
                         if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
                             self.relic_glow_starts.insert(rid, now);
+                        }
+                        let (chip_delta, mult_delta) =
+                            if ordinal < cascade.breakdown.base_steps.len() {
+                                if ordinal > 0 {
+                                    let prev = &cascade.breakdown.base_steps[ordinal - 1];
+                                    (
+                                        step.running_chips - prev.running_chips,
+                                        step.running_mult - prev.running_mult,
+                                    )
+                                } else {
+                                    (step.running_chips, step.running_mult - 1.0)
+                                }
+                            } else {
+                                let idx = ordinal - cascade.breakdown.base_steps.len();
+                                if idx > 0 {
+                                    let prev = &cascade.breakdown.steps[idx - 1];
+                                    (
+                                        step.running_chips - prev.running_chips,
+                                        step.running_mult - prev.running_mult,
+                                    )
+                                } else {
+                                    (
+                                        step.running_chips - cascade.breakdown.base_chips,
+                                        step.running_mult - 1.0,
+                                    )
+                                }
+                            };
+                        let popup_label = match step.kind {
+                            StepKind::Chips if chip_delta != 0 => Some(format!("{chip_delta:+}")),
+                            StepKind::Mult if mult_delta.abs() > 0.001 => {
+                                Some(format!("{mult_delta:+.1}x"))
+                            }
+                            StepKind::Gold => Some(step.source.clone()),
+                            StepKind::Final => Some(format!("={}", step.running_total)),
+                            _ => None,
+                        };
+                        if let Some(label) = popup_label {
+                            let source_xy = Self::popup_source_xy(
+                                step,
+                                ctx.layout,
+                                ctx.run,
+                                cascade_showcase.as_ref(),
+                            );
+                            let sp = ctx.layout.score_panel;
+                            let dest_xy = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5);
+                            let magnitude =
+                                chip_delta.abs().max(1) as f32 + mult_delta.abs() as f32;
+                            self.score_popups
+                                .spawn(label, source_xy, dest_xy, step.kind, magnitude);
+                            if step.tile_ids.iter().any(|&tid| {
+                                ctx.run
+                                    .hand
+                                    .iter()
+                                    .chain(ctx.run.structure_tiles.iter())
+                                    .find(|tile| tile.id == tid)
+                                    .is_some_and(|tile| {
+                                        ctx.run
+                                            .tile_debuffs
+                                            .iter()
+                                            .any(|debuff| debuff.matches(tile))
+                                    })
+                            }) {
+                                self.score_popups.spawn_debuff_x(source_xy, magnitude);
+                            }
                         }
                         // Rain a burst of physical scoring bones onto the
                         // play area below the modifier strip — chips on the
@@ -812,107 +1494,9 @@ impl SceneBehavior for GameplayScene {
                             self.falling_bones.burst(anchor_px, anchor_py, 6, kind);
                         }
 
-                        // Floating numeric popup: build a label from this
-                        // step's delta against the previous step's running
-                        // values so the player sees the *contribution* of
-                        // each relic / yaku as a discrete object that flies
-                        // toward a floating accumulator label. The
-                        // accumulator shows the running chips or mult total
-                        // and pulses each time a pop lands.
-                        let (prev_chips, prev_mult) = if idx > 0 {
-                            let prev = &cascade.breakdown.steps[idx - 1];
-                            (prev.running_chips, prev.running_mult)
-                        } else {
-                            (cascade.breakdown.base_chips, 1.0)
-                        };
-                        let (label, magnitude) = match step.kind {
-                            StepKind::Chips => {
-                                let d = step.running_chips - prev_chips;
-                                if d == 0 {
-                                    (String::new(), 0.0)
-                                } else if d > 0 {
-                                    (format!("+{}", d), d as f32)
-                                } else {
-                                    (format!("{}", d), d as f32)
-                                }
-                            }
-                            StepKind::Mult => {
-                                let d = step.running_mult - prev_mult;
-                                if d.abs() < 1e-3 {
-                                    (String::new(), 0.0)
-                                } else if (d - d.round()).abs() < 0.05 {
-                                    (format!("+{}x", d.round() as i64), d.abs() as f32 * 50.0)
-                                } else {
-                                    (format!("+{:.1}x", d), d.abs() as f32 * 50.0)
-                                }
-                            }
-                            StepKind::Gold => {
-                                // Gold steps show "+$4" in coin color. The
-                                // magnitude is scaled up so the popup reads at
-                                // a similar visual weight to chip/mult popups.
-                                ("+$4".to_string(), 80.0)
-                            }
-                            StepKind::Final => (String::new(), 0.0),
-                        };
-
-                        // Accumulator positions: chips floats left-of-center,
-                        // mult floats right-of-center, both between the
-                        // modifier strip and the score panel.
-                        let ms = ctx.layout.modifier_strip;
-                        let sp = ctx.layout.score_panel;
-                        let accum_y = ms.y + ms.h + (sp.y - (ms.y + ms.h)) * 0.45;
-                        let chips_accum_pos = (ms.x + ms.w * 0.30, accum_y);
-                        let mult_accum_pos = (ms.x + ms.w * 0.70, accum_y);
-
-                        // Update the accumulator label for the axis this step
-                        // touches so the running total ticks up.
-                        match step.kind {
-                            StepKind::Chips => {
-                                self.score_popups.set_accumulator(
-                                    StepKind::Chips,
-                                    chips_accum_pos,
-                                    format!("{}", step.running_chips),
-                                );
-                            }
-                            StepKind::Mult => {
-                                let m = step.running_mult;
-                                let mult_label = if (m - m.round()).abs() < 0.05 {
-                                    format!("x{}", m.round() as i64)
-                                } else {
-                                    format!("x{:.1}", m)
-                                };
-                                self.score_popups.set_accumulator(
-                                    StepKind::Mult,
-                                    mult_accum_pos,
-                                    mult_label,
-                                );
-                            }
-                            _ => {}
-                        }
-
-                        if !label.is_empty() {
-                            let source_x = match step.kind {
-                                StepKind::Chips => ms.x + ms.w * 0.30,
-                                StepKind::Mult => ms.x + ms.w * 0.70,
-                                StepKind::Gold => ms.x + ms.w * 0.50,
-                                StepKind::Final => ms.x + ms.w * 0.50,
-                            };
-                            let source_y = ms.y + ms.h * 0.5;
-                            // Pops fly to their axis accumulator, not the
-                            // score panel.
-                            let dest = match step.kind {
-                                StepKind::Chips => chips_accum_pos,
-                                StepKind::Mult => mult_accum_pos,
-                                _ => (sp.x + sp.w * 0.5, sp.y + sp.h * 0.5),
-                            };
-                            self.score_popups.spawn(
-                                label,
-                                (source_x, source_y),
-                                dest,
-                                step.kind,
-                                magnitude,
-                            );
-                        }
+                        // The pile/bone motion already communicates scoring
+                        // momentum. Avoid piling exact numeric deltas into the
+                        // play space while the cascade is in motion.
                     }
                 }
             }
@@ -950,6 +1534,7 @@ impl SceneBehavior for GameplayScene {
                 // Cascade finished — snap to real score and clear.
                 self.displayed_score = ctx.run.round_score;
                 self.cascade = None;
+                self.cascade_showcase = None;
                 self.last_revealed_step = None;
                 self.cascade_final_emitted = false;
                 // Wipe the physical bones + score popups the moment scoring
@@ -962,6 +1547,7 @@ impl SceneBehavior for GameplayScene {
                     cascade.skip();
                     self.displayed_score = ctx.run.round_score;
                     self.cascade = None;
+                    self.cascade_showcase = None;
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
                     self.falling_bones.clear();
@@ -992,6 +1578,34 @@ impl SceneBehavior for GameplayScene {
         // no cascade is mid-flight, which the early return above already
         // guarantees.
         for &cid in ctx.button_clicks {
+            if cid >= GAMEPLAY_SELL_RELIC_BASE && cid < GAMEPLAY_SELL_RELIC_BASE + 64 {
+                let idx = (cid - GAMEPLAY_SELL_RELIC_BASE) as usize;
+                if let Some(refund) = gameplay_sell_relic(ctx.run, idx) {
+                    self.score_popups.spawn(
+                        format!("+{refund}g"),
+                        ctx.cursor_pos,
+                        (ctx.cursor_pos.0, ctx.cursor_pos.1 - 120.0),
+                        StepKind::Gold,
+                        refund as f32,
+                    );
+                    self.focus = None;
+                }
+                continue;
+            }
+            if cid >= GAMEPLAY_SELL_CONSUMABLE_BASE && cid < GAMEPLAY_SELL_CONSUMABLE_BASE + 32 {
+                let idx = (cid - GAMEPLAY_SELL_CONSUMABLE_BASE) as usize;
+                if let Some(refund) = gameplay_sell_consumable(ctx.run, idx) {
+                    self.score_popups.spawn(
+                        format!("+{refund}g"),
+                        ctx.cursor_pos,
+                        (ctx.cursor_pos.0, ctx.cursor_pos.1 - 120.0),
+                        StepKind::Gold,
+                        refund as f32,
+                    );
+                    self.focus = None;
+                }
+                continue;
+            }
             if cid >= ZODIAC_USE_BASE && cid < ZODIAC_USE_BASE + 16 {
                 let idx = (cid - ZODIAC_USE_BASE) as usize;
                 match ctx.run.use_consumable(idx) {
@@ -1088,9 +1702,11 @@ impl SceneBehavior for GameplayScene {
                 self.focus = None;
             }
         }
-        if matches!(self.focus, Some(FocusTarget::Button(GameplayButton::Trigger))) {
-            let has_structure =
-                ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
+        if matches!(
+            self.focus,
+            Some(FocusTarget::Button(GameplayButton::Trigger))
+        ) {
+            let has_structure = ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
             if !has_structure {
                 self.focus = None;
             }
@@ -1125,6 +1741,13 @@ impl SceneBehavior for GameplayScene {
                 .iter()
                 .find_map(|(t2, r)| (*t2 == t).then_some(*r))
         });
+        let focus_anchor = |focus: Option<FocusTarget>| {
+            focus.and_then(|t| {
+                focus_rects.iter().find_map(|(t2, r)| {
+                    (*t2 == t).then_some((r[0] + r[2] * 0.5, r[1] + r[3] * 0.5))
+                })
+            })
+        };
 
         // Pre-collected list of Consumable targets in focus_rects, in
         // slot order. Used by the legacy `[` / `]` / LB / RB keymap below
@@ -1188,7 +1811,8 @@ impl SceneBehavior for GameplayScene {
                         }
                         _ => None,
                     };
-                    if let Some(next) = overridden.or(spatial) {
+                    let hand_wrap = wrap_hand_tile_focus(self.focus, dir, &focus_rects);
+                    if let Some(next) = overridden.or(spatial).or(hand_wrap) {
                         self.focus = Some(next);
                     }
                 } else if let Some((first, _)) = focus_rects.first() {
@@ -1214,16 +1838,46 @@ impl SceneBehavior for GameplayScene {
                     };
                     continue;
                 }
-                UiAction::NavigateHudPrev if !consumable_targets.is_empty() => {
-                    let cur_idx = match self.focus {
-                        Some(FocusTarget::Consumable(i)) => Some(i),
-                        _ => None,
-                    };
-                    self.focus = match cur_idx {
-                        None => Some(FocusTarget::Consumable(consumable_capacity - 1)),
-                        Some(0) => None,
-                        Some(i) => Some(FocusTarget::Consumable(i - 1)),
-                    };
+                UiAction::NavigateHudPrev => {
+                    if let Some(FocusTarget::Relic(i)) = self.focus {
+                        if let Some(refund) = gameplay_sell_relic(ctx.run, i) {
+                            let src = focus_anchor(self.focus).unwrap_or(ctx.cursor_pos);
+                            self.score_popups.spawn(
+                                format!("+{refund}g"),
+                                src,
+                                (src.0, src.1 - 120.0),
+                                StepKind::Gold,
+                                refund as f32,
+                            );
+                            self.focus = None;
+                        }
+                        continue;
+                    }
+                    if let Some(FocusTarget::Consumable(i)) = self.focus {
+                        if let Some(refund) = gameplay_sell_consumable(ctx.run, i) {
+                            let src = focus_anchor(self.focus).unwrap_or(ctx.cursor_pos);
+                            self.score_popups.spawn(
+                                format!("+{refund}g"),
+                                src,
+                                (src.0, src.1 - 120.0),
+                                StepKind::Gold,
+                                refund as f32,
+                            );
+                            self.focus = None;
+                        }
+                        continue;
+                    }
+                    if !consumable_targets.is_empty() {
+                        let cur_idx = match self.focus {
+                            Some(FocusTarget::Consumable(i)) => Some(i),
+                            _ => None,
+                        };
+                        self.focus = match cur_idx {
+                            None => Some(FocusTarget::Consumable(consumable_capacity - 1)),
+                            Some(0) => None,
+                            Some(i) => Some(FocusTarget::Consumable(i - 1)),
+                        };
+                    }
                     continue;
                 }
                 // Confirm: route by focused target.
@@ -1238,6 +1892,11 @@ impl SceneBehavior for GameplayScene {
                 //     hand tile based on the stale focus_tile_index).
                 UiAction::Confirm => {
                     match self.focus {
+                        Some(FocusTarget::Relic(i))
+                            if ctx.input_mode == crate::ui::input::InputMode::Controller =>
+                        {
+                            self.held_relic_drag = Some(i);
+                        }
                         Some(FocusTarget::HandTile(i)) => {
                             if !ctx.run.hand.is_empty() {
                                 let idx = i.min(ctx.run.hand.len() - 1);
@@ -1322,9 +1981,20 @@ impl SceneBehavior for GameplayScene {
                     }
                     continue;
                 }
+                UiAction::ConfirmRelease => {
+                    if let Some(from_idx) = self.held_relic_drag.take() {
+                        if let Some(FocusTarget::Relic(to_idx)) = self.focus {
+                            if from_idx != to_idx && to_idx < ctx.run.relics.active.len() {
+                                ctx.run.relics.swap_relics(from_idx, to_idx);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // Cancel: clear focus AND let the existing
                 // clear_selection path run via apply_ui_actions.
                 UiAction::Cancel => {
+                    self.held_relic_drag = None;
                     self.focus = None;
                     actions_for_scene.push(a);
                     continue;
@@ -1349,8 +2019,7 @@ impl SceneBehavior for GameplayScene {
                 continue;
             }
             use crate::render::wgpu_renderer::GameplayPick;
-            let has_structure =
-                ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
+            let has_structure = ctx.run.uses_structure_bank() && !ctx.run.structure_sets.is_empty();
             let journal_tablet_i: usize = if has_structure { 3 } else { 2 };
             if matches!(
                 ctx.picked_gameplay_object,
@@ -1454,6 +2123,50 @@ impl SceneBehavior for GameplayScene {
                     let bank_before = ctx.run.structure_banked_meld_chips();
                     let round_before = ctx.run.round_score;
                     let score_before = ctx.run.round_score;
+                    let cascade_showcase = if ctx.run.selected_count() == 0 {
+                        None
+                    } else {
+                        let selected_tiles: Vec<_> = ctx
+                            .run
+                            .hand
+                            .iter()
+                            .zip(ctx.run.selected.iter())
+                            .filter(|&(_, &sel)| sel)
+                            .map(|(t, _)| *t)
+                            .collect();
+                        ctx.run.try_validate_with_wildcards(&selected_tiles).map(
+                            |(sets, scoring_tiles)| {
+                                if ctx.run.uses_structure_bank() {
+                                    let mut tiles = Self::display_tiles(
+                                        ctx.run.structure_tiles.iter().copied(),
+                                        &ctx.run.tile_debuffs,
+                                    );
+                                    tiles.extend(Self::display_tiles(
+                                        scoring_tiles,
+                                        &ctx.run.tile_debuffs,
+                                    ));
+                                    let mut all_sets = ctx.run.structure_sets.clone();
+                                    all_sets.extend(sets);
+                                    CascadeShowcase {
+                                        tiles,
+                                        sets: all_sets,
+                                    }
+                                } else {
+                                    CascadeShowcase {
+                                        tiles: Self::display_tiles(
+                                            scoring_tiles,
+                                            &ctx.run.tile_debuffs,
+                                        ),
+                                        sets,
+                                    }
+                                }
+                            },
+                        )
+                    };
+                    let structure_was_complete = is_winning_structure_shape(
+                        &ctx.run.structure_tiles,
+                        &ctx.run.structure_sets,
+                    );
                     let step = ctx.run.score_selected_tiles(ctx.bus);
                     let gained = ctx.run.round_score.saturating_sub(round_before);
 
@@ -1462,17 +2175,34 @@ impl SceneBehavior for GameplayScene {
                             .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
                     } else if gained > 0 {
                         ctx.anim.pulse(ENTITY_SCORE_PANEL);
-                        self.begin_scoring_cascade(&mut ctx, score_before, gained);
+                        self.begin_scoring_cascade(
+                            &mut ctx,
+                            score_before,
+                            gained,
+                            cascade_showcase,
+                        );
                     } else if step > 0 {
                         ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                         let bank_after = ctx.run.structure_banked_meld_chips();
                         let d = bank_after.saturating_sub(bank_before);
                         if d > 0 {
+                            let structure_is_complete = is_winning_structure_shape(
+                                &ctx.run.structure_tiles,
+                                &ctx.run.structure_sets,
+                            );
                             let sp = ctx.layout.score_panel;
                             let px = sp.x + sp.w * 0.5;
                             let py = sp.y + sp.h * 0.5 + 40.0;
+                            let is_final_tiles = !structure_was_complete && structure_is_complete;
+                            if is_final_tiles {
+                                self.final_tiles_fov_pop_at = Some(Instant::now());
+                            }
                             self.score_popups.spawn(
-                                format!("+{d} structure chips"),
+                                if is_final_tiles {
+                                    "The final tiles!".to_string()
+                                } else {
+                                    "Structure grows".to_string()
+                                },
                                 (px, py),
                                 (px, py - 48.0),
                                 StepKind::Chips,
@@ -1486,6 +2216,13 @@ impl SceneBehavior for GameplayScene {
                         // Classic mode: plays score on commit; no cash-in action.
                     } else {
                         let score_before = ctx.run.round_score;
+                        let cascade_showcase = Some(CascadeShowcase {
+                            tiles: Self::display_tiles(
+                                ctx.run.structure_tiles.iter().copied(),
+                                &ctx.run.tile_debuffs,
+                            ),
+                            sets: ctx.run.structure_sets.clone(),
+                        });
                         let earned = ctx.run.trigger_structure_manual(ctx.bus);
                         let gained = ctx.run.round_score.saturating_sub(score_before);
                         if earned == 0 {
@@ -1505,7 +2242,12 @@ impl SceneBehavior for GameplayScene {
                                     );
                                 }
                             }
-                            self.begin_scoring_cascade(&mut ctx, score_before, gained);
+                            self.begin_scoring_cascade(
+                                &mut ctx,
+                                score_before,
+                                gained,
+                                cascade_showcase,
+                            );
                         }
                     }
                 }
@@ -1645,9 +2387,9 @@ impl SceneBehavior for GameplayScene {
             ),
             ts.scale,
             run.plays_remaining,
-            run.mode.starting_plays,
+            run.plays_max,
             run.discards_remaining,
-            run.mode.starting_discards,
+            run.discards_max,
         );
 
         // Center the hand horizontally when fewer tiles than full slots are present.
@@ -1729,35 +2471,9 @@ impl SceneBehavior for GameplayScene {
             "{}  ·  R{}  ·  {} / {}",
             blind_label, run.run_number, shown_score, run.target_score,
         );
-        let peek_section = if run.relics.has(crate::core::relic::RelicId::WallPeek) {
-            let peeked = run.wall.peek_next(2);
-            if peeked.is_empty() {
-                String::new()
-            } else {
-                let labels: Vec<String> = peeked.iter().map(|t| t.label()).collect();
-                format!("   Next: {}", labels.join(", "))
-            }
-        } else {
-            String::new()
-        };
-        let structure_hud = if !run.structure_sets.is_empty() {
-            format!(
-                "   Structure: chip stack {} · mult pressure {}",
-                run.structure_chip_pile_tier(),
-                run.structure_mult_pile_tier()
-            )
-        } else {
-            String::new()
-        };
         let score_text_bot = format!(
-            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}{}{}",
-            run.gold,
-            tiles_left,
-            wind_label,
-            shanten_text,
-            dora_section,
-            peek_section,
-            structure_hud
+            "${}  ·  Wall {}  ·  Wind {}  ·  {}{}",
+            run.gold, tiles_left, wind_label, shanten_text, dora_section
         );
         // Captured for the hanging plaque cmd built later in `frame.cmds`.
         // The plaque carries the same two-line payload as a per-instance
@@ -1789,6 +2505,8 @@ impl SceneBehavior for GameplayScene {
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
         let ms = layout.modifier_strip;
+        let cascade_frame = self.cascade.as_ref().map(|cascade| cascade.frame(now));
+        let mut cascade_source_label: Option<String> = None;
 
         // Cascade chips/mult bone tokens — populated only while a cascade is
         // active. The numerical readout that used to sit on top of these
@@ -1797,8 +2515,7 @@ impl SceneBehavior for GameplayScene {
         // labels are pushed for the modifier strip anymore.
         let mut cascade_token_placements: Vec<crate::render::draw_cmd::CascadeTokenPlacement> =
             Vec::new();
-        if let Some(ref cascade) = self.cascade {
-            let frame = cascade.frame(now);
+        if let Some(frame) = cascade_frame.as_ref() {
             // Layout (within the modifier strip):
             //   top 36%  → reserved (formerly the source label)
             //   bot 64%  → [ chips token ]  [ mult token ]
@@ -1852,6 +2569,8 @@ impl SceneBehavior for GameplayScene {
                     pulse: pulse_t,
                 });
             }
+
+            cascade_source_label = frame.latest_step.as_ref().map(|(source, _)| source.clone());
         }
 
         // The 2D relic strip is replaced by physical 3D relic boxes sitting
@@ -1874,22 +2593,23 @@ impl SceneBehavior for GameplayScene {
         let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
         let yaku_panel_gap = 8.0 * layout_scale;
         let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
-        let structure_tag_h = if has_structure {
+        let showcase_present = has_structure || self.cascade_showcase.is_some();
+        let structure_tag_h = if showcase_present {
             (17.0 * layout_scale).max(14.0)
         } else {
             0.0
         };
-        let structure_meld_h = if has_structure {
+        let structure_meld_h = if showcase_present {
             (46.0 * layout_scale).max(38.0)
         } else {
             0.0
         };
-        let structure_pad = if has_structure {
+        let structure_pad = if showcase_present {
             (5.0 * layout_scale).max(3.0)
         } else {
             0.0
         };
-        let structure_block_h = if has_structure {
+        let structure_block_h = if showcase_present {
             structure_tag_h + structure_meld_h + structure_pad
         } else {
             0.0
@@ -1910,18 +2630,18 @@ impl SceneBehavior for GameplayScene {
         // Stack upward from the hand: yaku row anchors just above the tile
         // band; structure strip sits above the yaku row (smaller y).
         let mut yaku_row_y = band_top_above_tiles - yaku_panel_h;
-        let mut structure_strip_top = if has_structure {
+        let mut structure_strip_top = if showcase_present {
             yaku_row_y - yaku_panel_gap - structure_block_h
         } else {
             band_top_above_tiles
         };
         if yaku_row_y < min_yaku_y {
             yaku_row_y = min_yaku_y;
-            if has_structure {
+            if showcase_present {
                 structure_strip_top = yaku_row_y - yaku_panel_gap - structure_block_h;
             }
         }
-        if has_structure && structure_strip_top < min_yaku_y {
+        if showcase_present && structure_strip_top < min_yaku_y {
             let deficit = min_yaku_y - structure_strip_top;
             structure_strip_top += deficit;
             yaku_row_y += deficit;
@@ -1975,11 +2695,29 @@ impl SceneBehavior for GameplayScene {
         // that hover tooltips' background quads no longer compete with
         // persistent text — they're a separate downstream batch.
         let mut hud_quads: Vec<GpuInstance> = Vec::new();
-        let hud_text: Vec<TextLabel> = Vec::new();
+        let mut hud_text: Vec<TextLabel> = Vec::new();
         let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
         let mut structure_pile_tokens: Vec<CascadeTokenPlacement> = Vec::new();
         let mut hover_quads: Vec<GpuInstance> = Vec::new();
         let mut hover_text: Vec<TextLabel> = Vec::new();
+        if let Some(source) = cascade_source_label {
+            let src_h = ms.h * 0.36;
+            let label_h = (src_h * 0.72).max(18.0);
+            hud_text.push(TextLabel {
+                rect: [
+                    ms.x + ms.w * 0.08,
+                    ms.y + src_h * 0.10,
+                    ms.w * 0.84,
+                    label_h,
+                ],
+                text: source,
+                color: [0.97, 0.92, 0.80, 1.0],
+                font_px: Some((label_h * 0.56).max(16.0)),
+                align: TextAlign::Center,
+                no_glossary: true,
+                ..Default::default()
+            });
+        }
 
         // Focus rect graph: every focusable HUD element pushes its
         // screen-space rect here as it's laid out below. Stashed in
@@ -2001,31 +2739,92 @@ impl SceneBehavior for GameplayScene {
             .collect();
         let round_wind_for_yaku =
             Some(crate::core::rules::BlindKind::round_wind_for_ante(run.ante));
-        let wildcard_result = run.try_validate_with_wildcards(&selected_tiles_for_yaku);
-        let previews = yaku_preview(
-            &selected_tiles_for_yaku,
-            &run.available_yaku,
-            round_wind_for_yaku,
-            wildcard_result
-                .as_ref()
-                .map(|(sets, tiles)| (sets.as_slice(), tiles.as_slice())),
-        );
+        let wildcard_result = if selected_tiles_for_yaku.is_empty() {
+            None
+        } else {
+            run.try_validate_with_wildcards(&selected_tiles_for_yaku)
+        };
+        let mut yaku_preview_original_tiles: Vec<crate::core::tile::Tile> = Vec::new();
+        let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
+        let mut yaku_preview_sets: Vec<crate::core::hand::DetectedSet> = Vec::new();
 
-        // Structure strip: 3D committed melds + tier tokens only (no 2D mat/tags).
-        // Laid out above `yaku_row_y` (see hand_slots / band_top_above_tiles).
-        if has_structure {
+        if run.uses_structure_bank() {
+            if selected_tiles_for_yaku.is_empty() {
+                yaku_preview_original_tiles =
+                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                yaku_preview_effective_tiles =
+                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                yaku_preview_sets = run.structure_sets.clone();
+            } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
+                yaku_preview_original_tiles =
+                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                yaku_preview_original_tiles.extend(Self::display_tiles(
+                    selected_tiles_for_yaku.iter().copied(),
+                    &run.tile_debuffs,
+                ));
+                yaku_preview_effective_tiles =
+                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                yaku_preview_effective_tiles.extend(Self::display_tiles(
+                    selected_scoring_tiles.iter().copied(),
+                    &run.tile_debuffs,
+                ));
+                yaku_preview_sets = run.structure_sets.clone();
+                yaku_preview_sets.extend(selected_sets.iter().cloned());
+            }
+        } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
+            yaku_preview_original_tiles =
+                Self::display_tiles(selected_tiles_for_yaku.iter().copied(), &run.tile_debuffs);
+            yaku_preview_effective_tiles =
+                Self::display_tiles(selected_scoring_tiles.iter().copied(), &run.tile_debuffs);
+            yaku_preview_sets = selected_sets.clone();
+        }
+
+        let previews = if yaku_preview_sets.is_empty() {
+            Vec::new()
+        } else {
+            yaku_preview(
+                &yaku_preview_original_tiles,
+                &run.available_yaku,
+                round_wind_for_yaku,
+                Some((
+                    yaku_preview_sets.as_slice(),
+                    yaku_preview_effective_tiles.as_slice(),
+                )),
+            )
+        };
+
+        // Structure strip / scored-hand showcase: while idle it shows the
+        // committed structure, and while a cascade is active it keeps the
+        // just-scored tiles visible long enough to pulse them in sequence.
+        let showcase_data = self.cascade_showcase.clone().or_else(|| {
+            has_structure.then(|| CascadeShowcase {
+                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs),
+                sets: run.structure_sets.clone(),
+            })
+        });
+        if let Some(showcase) = showcase_data {
             let pad = (8.0 * layout_scale).max(6.0);
+            // Reserve a gutter on the right for the structure cash-in
+            // preview stacks only while the live structure is still present.
+            let preview_pill_w = (22.0 * layout_scale).max(18.0);
+            let preview_gap_x = (8.0 * layout_scale).max(5.0);
+            let preview_lane_w = if has_structure && self.cascade_showcase.is_none() {
+                preview_pill_w * 2.6 + preview_gap_x + pad
+            } else {
+                0.0
+            };
             let intra_gap = (3.0 * layout_scale).max(2.0);
             let inter_gap = (10.0 * layout_scale).max(7.0);
-            let total_tiles: usize = run.structure_sets.iter().map(|s| s.tile_ids.len()).sum();
-            let intra_count: usize = run
-                .structure_sets
+            let total_tiles: usize = showcase.sets.iter().map(|s| s.tile_ids.len()).sum();
+            let intra_count: usize = showcase
+                .sets
                 .iter()
                 .map(|s| s.tile_ids.len().saturating_sub(1))
                 .sum();
-            let inter_count = run.structure_sets.len().saturating_sub(1);
+            let inter_count = showcase.sets.len().saturating_sub(1);
             let available_w = container_w
                 - pad * 2.0
+                - preview_lane_w
                 - intra_count as f32 * intra_gap
                 - inter_count as f32 * inter_gap;
             let n_t = total_tiles.max(1);
@@ -2033,60 +2832,97 @@ impl SceneBehavior for GameplayScene {
             let meld_top = structure_strip_top + structure_tag_h;
             let center_py = meld_top + structure_meld_h * 0.5;
             let mut x_cursor = container_x + pad;
-            for (mi, set) in run.structure_sets.iter().enumerate() {
+            let active_tile_ids = cascade_frame
+                .as_ref()
+                .map(|frame| frame.highlight_tile_ids.as_slice())
+                .unwrap_or(&[]);
+            let pulse_t = cascade_frame
+                .as_ref()
+                .map(|frame| frame.phase_t)
+                .unwrap_or(0.0);
+            for (mi, set) in showcase.sets.iter().enumerate() {
                 for (ti, &tid) in set.tile_ids.iter().enumerate() {
-                    let Some(tile) = run.structure_tiles.iter().find(|t| t.id == tid).copied()
-                    else {
+                    let Some(tile) = showcase.tiles.iter().find(|t| t.id == tid).copied() else {
                         continue;
                     };
                     let px = x_cursor + tile_size * 0.5;
-                    let lift = ti as f32 * 1.2 + mi as f32 * 0.15;
+                    let mut lift = ti as f32 * 1.2 + mi as f32 * 0.15;
+                    let pulse = active_tile_ids
+                        .iter()
+                        .position(|id| *id == tid)
+                        .map(|pulse_idx| {
+                            let delay = (pulse_idx as f32 * 0.18).min(0.7);
+                            let local_t =
+                                ((pulse_t - delay) / (1.0 - delay).max(0.001)).clamp(0.0, 1.0);
+                            (local_t * std::f32::consts::PI).sin().max(0.0)
+                        })
+                        .unwrap_or(0.0);
+                    let scale = 1.0 + 0.16 * pulse;
+                    let brightness = 1.0 + 0.35 * pulse;
+                    lift += 6.0 * pulse;
                     structure_showcase.push(ShowcaseTilePlacement {
                         tile,
                         center_pos: [px, center_py, 3.0 + lift],
                         rotation: [0.0, 0.0, 0.0],
-                        scale: 1.0,
+                        scale,
                         size_px: tile_size,
-                        brightness: 1.0,
+                        brightness,
                         selected: false,
                     });
                     x_cursor += tile_size + intra_gap;
                 }
-                if mi + 1 < run.structure_sets.len() {
+                if mi + 1 < showcase.sets.len() {
                     x_cursor += inter_gap - intra_gap;
                 }
             }
 
-            let chip_tier = run.structure_chip_pile_tier().min(5) as usize;
-            let mult_tier = run.structure_mult_pile_tier().min(4) as usize;
-            let (tr_x, tr_y, _tr_w, tr_h) = trigger_btn_rect;
-            let pill_w = (22.0 * layout_scale).max(18.0);
-            let pill_h = (16.0 * layout_scale).max(12.0);
-            let t_th = (pill_h * 0.35).max(4.0);
-            let gap_x = (8.0 * layout_scale).max(5.0);
-            let col_cx = (tr_x - gap_x - pill_w * 1.1).max(pill_w * 0.5 + 4.0);
-            let base_cy = tr_y + tr_h * 0.5;
-            for i in 0..chip_tier {
-                let lift = i as f32 * 2.0;
-                structure_pile_tokens.push(CascadeTokenPlacement {
-                    world_pos: [col_cx - pill_w * 0.55, base_cy - lift, 5.0 + lift * 0.08],
-                    extents: [pill_w * 0.5, t_th, pill_h * 0.5],
-                    kind: CascadeTokenKind::Chips,
-                    pulse: 0.35,
-                });
-            }
-            for i in 0..mult_tier {
-                let lift = i as f32 * 2.0;
-                structure_pile_tokens.push(CascadeTokenPlacement {
-                    world_pos: [
-                        col_cx + pill_w * 0.55 + gap_x,
-                        base_cy - lift,
-                        5.0 + lift * 0.08,
-                    ],
-                    extents: [pill_w * 0.5, t_th, pill_h * 0.5],
-                    kind: CascadeTokenKind::Mult,
-                    pulse: 0.35,
-                });
+            if has_structure && self.cascade_showcase.is_none() {
+                let trigger_preview = run.preview_manual_trigger_breakdown();
+                let preview_chips = trigger_preview
+                    .as_ref()
+                    .map(|breakdown| breakdown.final_chips.max(0))
+                    .unwrap_or_else(|| run.structure_banked_meld_chips().max(0));
+                let preview_mult = trigger_preview
+                    .as_ref()
+                    .map(|breakdown| breakdown.final_mult.max(1.0))
+                    .unwrap_or_else(|| {
+                        1.0 + crate::core::structure::structure_depth_mult_bonus(
+                            run.structure_sets.len() as u32,
+                        )
+                    });
+                let chip_stack_count = structure_preview_chip_stack_count(preview_chips);
+                let mult_stack_count = structure_preview_mult_stack_count(preview_mult);
+                let (tr_x, tr_y, _tr_w, tr_h) = trigger_btn_rect;
+                let pill_w = (22.0 * layout_scale).max(18.0);
+                let pill_h = (16.0 * layout_scale).max(12.0);
+                let t_th = (pill_h * 0.35).max(4.0);
+                let gap_x = (8.0 * layout_scale).max(5.0);
+                let col_cx = (tr_x - gap_x - pill_w * 1.1).max(pill_w * 0.5 + 4.0);
+                let base_cy = tr_y + tr_h * 0.5;
+                let base_lift = 5.0;
+                let token_extents = [pill_w * 0.5, t_th, pill_h * 0.5];
+                push_structure_preview_pile(
+                    &mut structure_pile_tokens,
+                    CascadeTokenKind::Chips,
+                    chip_stack_count,
+                    col_cx - pill_w * 0.55,
+                    base_cy,
+                    base_lift,
+                    token_extents,
+                    0.35,
+                    0x5C71_0000_u64 ^ preview_chips.max(0) as u64,
+                );
+                push_structure_preview_pile(
+                    &mut structure_pile_tokens,
+                    CascadeTokenKind::Mult,
+                    mult_stack_count,
+                    col_cx + pill_w * 0.55 + gap_x,
+                    base_cy,
+                    base_lift,
+                    token_extents,
+                    0.35,
+                    0xA17E_0000_u64 ^ preview_mult.to_bits(),
+                );
             }
         }
 
@@ -2109,7 +2945,11 @@ impl SceneBehavior for GameplayScene {
         // If the selection is a valid hand but triggers no yaku, show a
         // chicken-hand tablet so the player knows the hand is legal.
         let is_chicken_hand = visible_previews.is_empty()
-            && crate::core::hand::validate_selection(&selected_tiles_for_yaku).is_some();
+            && !yaku_preview_sets.is_empty()
+            && crate::core::yaku::is_complete_winning_hand(
+                &yaku_preview_effective_tiles,
+                &yaku_preview_sets,
+            );
 
         // Phase 3: yaku selectors are now physical bone tablets sitting in
         // a row in front of the hand. The flat slate-blue card quads + the
@@ -2132,10 +2972,8 @@ impl SceneBehavior for GameplayScene {
             };
             let n = tablet_count as f32;
             let card_gap = 6.0 * layout_scale;
-            // Cap individual card width to what a full loadout (3 yaku) would
-            // get — otherwise a lone active yaku stretches across the entire
-            // container, which reads as a UI bug. Single/few yaku stay
-            // left-aligned at their natural size.
+            // Cap individual card width so a lone active yaku doesn't stretch
+            // across the entire container, which reads as a UI bug.
             let natural_card_w = (panel_w - card_gap * 2.0) / 3.0;
             let card_w = ((panel_w - card_gap * (n - 1.0)) / n).min(natural_card_w);
             // Tablets are flat-on-table dominoes: extents[0] is width
@@ -2156,6 +2994,7 @@ impl SceneBehavior for GameplayScene {
                 yaku_tablet_placements.push(crate::render::draw_cmd::YakuTabletPlacement {
                     world_pos: [center_px, center_py, 0.0],
                     extents: [card_w, tablet_thickness, panel_h],
+                    rotation_z_deg: 0.0,
                     name: "\u{1F414} Chicken Hand".to_string(),
                     progress: 0.0,
                     active: true,
@@ -2189,6 +3028,7 @@ impl SceneBehavior for GameplayScene {
                     yaku_tablet_placements.push(crate::render::draw_cmd::YakuTabletPlacement {
                         world_pos: [center_px, center_py, 0.0],
                         extents: [card_w, tablet_thickness, panel_h],
+                        rotation_z_deg: 0.0,
                         name: p.kind.name().to_string(),
                         progress: p.progress,
                         active: p.active,
@@ -2228,21 +3068,7 @@ impl SceneBehavior for GameplayScene {
                 yk.mult_bonus(),
                 yk.chip_bonus()
             );
-            let body = format!(
-                "{}.  Loadout: {}",
-                yaku_card_shape_text(yk),
-                if run.yaku_loadout.contains(&yk)
-                    || matches!(
-                        yk,
-                        crate::core::yaku::YakuKind::FullHand
-                            | crate::core::yaku::YakuKind::Yakuhai
-                    )
-                {
-                    "yes (full strength)"
-                } else {
-                    "no (scores at 50%)"
-                },
-            );
+            let body = yaku_card_shape_text(yk).to_string();
             push_tooltip(
                 &mut hover_quads,
                 &mut hover_text,
@@ -2389,6 +3215,7 @@ impl SceneBehavior for GameplayScene {
                         label: label.to_string(),
                         pressed: 0.0,
                         hover: if hovered { 1.0 } else { 0.0 },
+                        rotation_z_deg: 0.0,
                         disabled: false,
                     });
                     // Gold overlay label superimposed on the sort tablet
@@ -2474,6 +3301,13 @@ impl SceneBehavior for GameplayScene {
                 4 => {
                     let target = if hovered && trigger_enabled { 1.0 } else { 0.0 };
                     let tablet_thickness = (bh * 0.35).max(8.0);
+                    let structure_full =
+                        is_winning_structure_shape(&run.structure_tiles, &run.structure_sets);
+                    let wiggle_deg = if structure_full && !run.auto_cash_in_on_full_structure {
+                        self.trigger_tablet_wiggle_deg(now)
+                    } else {
+                        0.0
+                    };
                     let _tablet_idx = wood_tablet_placements.len();
                     wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
                         world_pos: action_anchor.to_draw_cmd_triple(),
@@ -2481,6 +3315,7 @@ impl SceneBehavior for GameplayScene {
                         label: "Cash in".to_string(),
                         pressed: 0.0,
                         hover: target,
+                        rotation_z_deg: wiggle_deg,
                         disabled: !trigger_enabled,
                     });
                     if let Some(r) = ctx.proj.wood_tablet_rects.get(2).filter(|_| hovered) {
@@ -2545,6 +3380,7 @@ impl SceneBehavior for GameplayScene {
             label: "Journal".to_string(),
             pressed: 0.0,
             hover: if journal_hovered { 1.0 } else { 0.0 },
+            rotation_z_deg: 0.0,
             disabled: false,
         });
         // Anchor the Journal button's keyboard-nav focus rect on the
@@ -2886,6 +3722,34 @@ impl SceneBehavior for GameplayScene {
                         "Empty. Earn Zodiac cards from blind clears or buy Zodiacs and Talismans in the shop. Both share these slots.",
                     );
                 }
+                if self.focus == Some(FocusTarget::Consumable(slot_idx))
+                    && slot_idx < run.consumables.items.len()
+                    && !paused
+                    && self.cascade.is_none()
+                {
+                    let refund = gameplay_consumable_sell_price(run.consumables.items[slot_idx]);
+                    let sell_rect = [
+                        fx + fw * 0.50,
+                        fy + 6.0,
+                        fw * 0.44,
+                        (24.0 * scale).max(20.0),
+                    ];
+                    widget::push_button(
+                        &mut hover_quads,
+                        &mut hover_text,
+                        &mut buttons,
+                        sell_rect,
+                        &format!("Sell {refund}g"),
+                        ButtonVariant::Default,
+                        ButtonState::Rest,
+                        UiAction::Cancel,
+                    );
+                    buttons.pop();
+                    buttons.push(ButtonDef::scene(
+                        (sell_rect[0], sell_rect[1], sell_rect[2], sell_rect[3]),
+                        GAMEPLAY_SELL_CONSUMABLE_BASE + slot_idx as u32,
+                    ));
+                }
             }
         }
 
@@ -2977,8 +3841,12 @@ impl SceneBehavior for GameplayScene {
                     // headline; the per-source breakdown follows so the
                     // player can see *why* the tile is worth what it is.
                     let dora_faces = run.wall.dora_faces();
-                    let eff =
-                        crate::core::scoring::tile_effective_value(tile, &run.relics, &dora_faces);
+                    let eff = crate::core::scoring::tile_effective_value(
+                        tile,
+                        &run.relics,
+                        &dora_faces,
+                        &run.tile_debuffs,
+                    );
                     let name = tile.full_name();
                     let category = tile.category();
                     let is_selected = run.selected.get(idx).copied().unwrap_or(false);
@@ -3566,7 +4434,15 @@ impl SceneBehavior for GameplayScene {
                 use crate::core::relic::{all_relic_defs, relic_description_live};
                 let defs = all_relic_defs();
                 if let Some(def) = defs.iter().find(|d| d.id == rid) {
-                    let live_desc = relic_description_live(rid, &ctx.run.relic_counters);
+                    let mut live_desc = relic_description_live(
+                        rid,
+                        &ctx.run.relic_counters,
+                        ctx.run.total_score_earned,
+                    );
+                    if let Some(copy_detail) = relic_tooltip_copy_detail(rid, hi, run) {
+                        live_desc.push_str("\n\n");
+                        live_desc.push_str(&copy_detail);
+                    }
                     let pad = 18.0_f32;
                     let tip_w = 440.0_f32;
                     let title_h = 38.0_f32;
@@ -3645,6 +4521,33 @@ impl SceneBehavior for GameplayScene {
                 }
             }
         }
+        if let Some(hi) = hovered_relic_idx {
+            if !paused && self.cascade.is_none() && hi < run.relics.active.len() {
+                let [rx, ry, rw, _rh] = ctx.proj.relic_rects[hi];
+                let refund = relic_sell_price_live(run.relics.active[hi], &run.relic_counters);
+                let sell_rect = [
+                    rx + rw * 0.46,
+                    ry + 6.0,
+                    rw * 0.48,
+                    (24.0 * scale).max(20.0),
+                ];
+                widget::push_button(
+                    &mut hover_quads,
+                    &mut hover_text,
+                    &mut buttons,
+                    sell_rect,
+                    &format!("Sell {refund}g"),
+                    ButtonVariant::Default,
+                    ButtonState::Rest,
+                    UiAction::Cancel,
+                );
+                buttons.pop();
+                buttons.push(ButtonDef::scene(
+                    (sell_rect[0], sell_rect[1], sell_rect[2], sell_rect[3]),
+                    GAMEPLAY_SELL_RELIC_BASE + hi as u32,
+                ));
+            }
+        }
 
         // Display-only focus tooltips: when the player navigates focus
         // onto a counter peg or the gold counter, surface a small info
@@ -3662,14 +4565,14 @@ impl SceneBehavior for GameplayScene {
                             "Hands Remaining".to_string(),
                             format!(
                                 "{} of {} plays left this round. Each Play Hand consumes one peg.",
-                                run.plays_remaining, run.mode.starting_plays,
+                                run.plays_remaining, run.plays_max,
                             ),
                         ),
                         PegKind::Discards => (
                             "Discards Remaining".to_string(),
                             format!(
                                 "{} of {} discards left this round. Each Discard consumes one peg.",
-                                run.discards_remaining, run.mode.starting_discards,
+                                run.discards_remaining, run.discards_max,
                             ),
                         ),
                     };
@@ -3731,21 +4634,7 @@ impl SceneBehavior for GameplayScene {
                             p.kind.mult_bonus(),
                             p.kind.chip_bonus()
                         ),
-                        format!(
-                            "{}.  Loadout: {}",
-                            yaku_card_shape_text(p.kind),
-                            if run.yaku_loadout.contains(&p.kind)
-                                || matches!(
-                                    p.kind,
-                                    crate::core::yaku::YakuKind::FullHand
-                                        | crate::core::yaku::YakuKind::Yakuhai
-                                )
-                            {
-                                "yes (full strength)"
-                            } else {
-                                "no (scores at 50%)"
-                            },
-                        ),
+                        yaku_card_shape_text(p.kind).to_string(),
                     )
                 } else {
                     ("".to_string(), "".to_string())
@@ -3950,6 +4839,13 @@ impl SceneBehavior for GameplayScene {
         // parent text label drawn in the same flush.
         let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
+        let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
+        if fov_pop_offset > 0.0 {
+            let mut camera =
+                crate::render::draw_cmd::CameraParams::default_table_camera(layout.window_h);
+            camera.fovy_deg = (camera.fovy_deg - fov_pop_offset).max(35.0);
+            frame.camera_override = Some(camera);
+        }
         frame.background(super::BackgroundId::Black);
         frame.table();
         frame.hand_tile_backdrop();
@@ -4016,10 +4912,12 @@ impl SceneBehavior for GameplayScene {
         if !ofuda_title_text.is_empty() {
             let sp = layout.score_panel;
             let ms_rect = layout.modifier_strip;
-            // Width/height of the ofuda paper face. A touch wider than the
-            // old extents so the wrapped rule body has room to read.
-            let ofuda_w = ms_rect.w * 0.22;
-            let ofuda_h = ms_rect.h * 1.6;
+            // Width/height of the ofuda paper face. Give it a bit more
+            // physical presence than the first pass so the boss name/rule
+            // reads as a posted warning, not a tiny charm tucked behind the
+            // plaque.
+            let ofuda_w = ms_rect.w * 0.27;
+            let ofuda_h = ms_rect.h * 1.9;
             // Park the right edge of the paper a clear gap to the left of
             // the left score-panel candle. The candle stands at roughly
             // `sp.x - candle_w * 0.5 - edge_pad` (see candle layout above)
@@ -4029,8 +4927,8 @@ impl SceneBehavior for GameplayScene {
             // narrow windows where the score panel is already near the
             // left edge.
             let scale_c = (layout.window_w / 600.0).max(0.5);
-            let candle_clearance = 100.0 * scale_c;
-            let min_left_margin = ofuda_w * 0.5 + 8.0;
+            let candle_clearance = 132.0 * scale_c;
+            let min_left_margin = ofuda_w * 0.5 + 12.0;
             let ofuda_cx = (sp.x - candle_clearance - ofuda_w * 0.5).max(min_left_margin);
             // Push it up the back wall: smaller pixel-y → farther into z
             // (recessed against the wall behind the table) and a taller
@@ -4038,8 +4936,8 @@ impl SceneBehavior for GameplayScene {
             // rather than beside it. The mesh is now upright (no
             // toward-camera tilt — see ofuda_tilt_x in the renderer), so
             // raising it visually moves it up the back wall on screen.
-            let ofuda_cy = sp.y - sp.h * 0.4;
-            let ofuda_lift = layout.window_h * 0.4;
+            let ofuda_cy = sp.y - sp.h * 0.5;
+            let ofuda_lift = layout.window_h * 0.43;
             frame.ofuda(crate::render::draw_cmd::OfudaPlacement {
                 center_pos: [ofuda_cx, ofuda_cy, ofuda_lift],
                 // Real washi paper is ~0.1mm but the ofuda needs visible
@@ -4085,9 +4983,9 @@ impl SceneBehavior for GameplayScene {
                 world_pos: [peg_block_x, peg_block_y, peg_block_lift],
                 extents: [peg_block_w, peg_block_h, peg_block_d],
                 plays_left: run.plays_remaining,
-                plays_max: run.mode.starting_plays,
+                plays_max: run.plays_max,
                 discards_left: run.discards_remaining,
-                discards_max: run.mode.starting_discards,
+                discards_max: run.discards_max,
             });
         }
         // (Score header text is now engraved on the plaque mesh as a
@@ -4419,7 +5317,12 @@ impl SceneBehavior for GameplayScene {
 
         // Non-cmd state — consumed by the renderer's 3D pass and the
         // main loop's input plumbing.
-        frame.hand_tiles = run.hand.to_vec();
+        frame.hand_tiles = run
+            .hand
+            .iter()
+            .copied()
+            .map(|tile| Self::display_tile(tile, &run.tile_debuffs))
+            .collect();
         frame.hand_slots = hand_slots;
         frame.focus = focus;
         frame.selected_tiles = run.selected.clone();
@@ -4485,11 +5388,7 @@ impl SceneBehavior for GameplayScene {
         // order. Compiled out of release builds.
         debug_assert_marker_uniqueness(&frame);
 
-        insert_structure_before_hand(
-            frame,
-            structure_showcase,
-            structure_pile_tokens,
-        )
+        insert_structure_before_hand(frame, structure_showcase, structure_pile_tokens)
     }
 }
 
@@ -4574,7 +5473,7 @@ fn yaku_card_shape_text(yk: crate::core::yaku::YakuKind) -> &'static str {
         YakuKind::Toitoi => {
             "All triplets and kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
         }
-        YakuKind::FullHand => "Complete 14-tile hand: 4 melds + 1 pair",
+        YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair), not 2x7",
         YakuKind::Yakuhai => {
             "Triplet of any dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})"
         }
@@ -4700,4 +5599,65 @@ fn push_tooltip(
         window_h,
         ui_scale,
     );
+}
+
+fn relic_tooltip_copy_detail(
+    relic_id: crate::core::relic::RelicId,
+    relic_index: usize,
+    run: &crate::game::run::RunState,
+) -> Option<String> {
+    use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
+
+    fn relic_name(id: RelicId) -> &'static str {
+        all_relic_defs()
+            .iter()
+            .find(|d| d.id == id)
+            .map(|d| d.name)
+            .unwrap_or("Unknown Relic")
+    }
+
+    fn copy_target_block(target: RelicId, run: &crate::game::run::RunState) -> String {
+        format!(
+            "Copying: {}\n{}",
+            relic_name(target),
+            relic_description_live(target, &run.relic_counters, run.total_score_earned)
+        )
+    }
+
+    fn incompatible_block(reason: &str) -> String {
+        format!("Incompatible copy target.\n{reason}")
+    }
+
+    match relic_id {
+        RelicId::MirrorTile => {
+            let target = run.relics.active.get(relic_index + 1).copied();
+            Some(match target {
+                Some(RelicId::MirrorTile | RelicId::ShadowHand) => incompatible_block(
+                    "Mirror Tile cannot resolve another copy relic to its right.",
+                ),
+                Some(target) => copy_target_block(target, run),
+                None => incompatible_block("Mirror Tile needs a relic immediately to its right."),
+            })
+        }
+        RelicId::ShadowHand => {
+            let target = run.relics.active.first().copied();
+            Some(match target {
+                Some(RelicId::ShadowHand | RelicId::MirrorTile) => incompatible_block(
+                    "Shadow Hand needs a non-copy relic in the first inventory slot.",
+                ),
+                Some(target) => copy_target_block(target, run),
+                None => {
+                    incompatible_block("Shadow Hand needs a relic in the first inventory slot.")
+                }
+            })
+        }
+        _ => None,
+    }
+    .map(|detail| {
+        if run.relics.is_debuffed(relic_id) {
+            format!("Disabled this round.\n\n{detail}")
+        } else {
+            detail
+        }
+    })
 }

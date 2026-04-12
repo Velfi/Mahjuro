@@ -7,7 +7,7 @@ Mahjuro has three main progression layers:
 | Layer                     | Description                                            | Examples                                                              |
 | ------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | **In-Run Progression**    | Things you acquire **during a run** to affect that run | Relics, tile pool modifiers, temporary rule changes                   |
-| **Meta Progression**      | Things you unlock **between runs**                     | New relics, tile types, rule modifiers, starting loadouts             |
+| **Meta Progression**      | Things you unlock **between runs**                     | New relics, yaku, tile types, rule modifiers                          |
 | **Knowledge Progression** | Player learning over time                              | Understanding patterns, scoring combos, multipliers, hand recognition |
 
 ---
@@ -90,11 +90,10 @@ Relics modify scoring, tile behavior, or rules. Stackable and often chaotic:
 
 * New relics (see above)
 * New tile types: flowers, seasons
-* New starting loadouts:
-
-  * Sequence-focused (more chows)
-  * Triplet-focused (more pongs)
-  * Risky (more wild tiles)
+* New yaku unlocks
+* New relics (including stronger late-run relic pools)
+* New tile types: flowers, seasons
+* New rule modifiers and boss pressure
 
 ---
 

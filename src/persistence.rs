@@ -340,6 +340,8 @@ pub struct AppSettings {
     pub hdr_enabled: bool,
     #[serde(default)]
     pub swap_ab: bool,
+    #[serde(default = "default_true")]
+    pub auto_cash_in_on_full_structure: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
 }
@@ -383,6 +385,7 @@ impl Default for AppSettings {
             ssr_enabled: true,
             hdr_enabled: false,
             swap_ab: false,
+            auto_cash_in_on_full_structure: true,
             ui_scale: 1.0,
         }
     }
@@ -442,7 +445,7 @@ pub struct ProfileSummary {
     pub exists: bool,
     pub level: u32,
     pub runs_completed: u32,
-    pub high_score: u32,
+    pub high_score: u64,
     /// Whether a saved run is on disk for this profile.
     pub has_saved_run: bool,
 }

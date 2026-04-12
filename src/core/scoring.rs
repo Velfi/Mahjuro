@@ -39,6 +39,9 @@ pub struct ScoreStep {
     /// Human-readable source, e.g. "Triplet Boost".
     pub source: String,
     pub kind: StepKind,
+    /// Tile ids visually associated with this step. Used by the gameplay
+    /// scene to pulse the contributing tiles while the cascade reveals it.
+    pub tile_ids: Vec<u32>,
     /// Running chip total *after* this step. Exposed for richer cascade UIs
     /// that want to render the chip and mult counters separately rather than
     /// just the combined `running_total`.
@@ -49,7 +52,7 @@ pub struct ScoreStep {
     pub running_mult: f64,
     /// Running combined score (`running_chips × running_mult`, floored).
     /// Cascades that just want a single ticking number read this.
-    pub running_total: i32,
+    pub running_total: u64,
 }
 
 /// Rich scoring breakdown for cascade animations.
@@ -60,6 +63,9 @@ pub struct ScoreBreakdown {
     /// Backwards-compatible alias for `base_chips`. Some UI code still reads
     /// `base_points`; keeping the field avoids a wider rename.
     pub base_points: i32,
+    /// Base-phase reveal steps (meld by meld) that land before the main
+    /// chips/mult steps.
+    pub base_steps: Vec<ScoreStep>,
     /// Each contribution that fired, in cascade order.
     pub steps: Vec<ScoreStep>,
     /// Yaku patterns detected in this hand.
@@ -72,7 +78,7 @@ pub struct ScoreBreakdown {
     #[allow(dead_code)]
     pub final_mult: f64,
     /// Final score = `final_chips × final_mult` (floored).
-    pub total: i32,
+    pub total: u64,
     /// Gold awarded by flower effects (Bamboo). Applied by the caller, not
     /// during the chips×mult cascade.
     pub flower_gold: i32,
@@ -101,14 +107,37 @@ fn meld_chip_bonus(kind: SetKind) -> i32 {
     }
 }
 
+fn describe_set(tiles: &[Tile], set: &DetectedSet) -> String {
+    let label = match set.kind {
+        SetKind::Pair => "Pair",
+        SetKind::Sequence => "Sequence",
+        SetKind::Triplet => "Triplet",
+        SetKind::Kong => "Kong",
+    };
+    let faces = set
+        .tile_ids
+        .iter()
+        .filter_map(|id| tile_by_id(tiles, *id))
+        .map(Tile::label)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{label}  {faces}")
+}
+
 fn tile_by_id<'a>(tiles: &'a [Tile], id: u32) -> Option<&'a Tile> {
     tiles.iter().find(|t| t.id == id)
 }
 
+fn tile_is_debuffed(tile: &Tile, debuffs: &[crate::core::debuff::TileDebuff]) -> bool {
+    debuffs.iter().any(|debuff| debuff.matches(tile))
+}
+
 /// Multiply chips by mult, flooring to i32. Negative chips are clamped to 0
 /// before multiplication so an aggressive nerf can't underflow into a positive.
-fn combine(chips: i32, mult: f64) -> i32 {
-    (chips.max(0) as f64 * mult).floor() as i32
+fn combine(chips: i32, mult: f64) -> u64 {
+    ((chips.max(0) as f64) * mult)
+        .floor()
+        .clamp(0.0, u64::MAX as f64) as u64
 }
 
 /// Score detected sets and return a rich breakdown for cascade display.
@@ -142,6 +171,7 @@ fn score_sets_inner(
     original_tiles: Option<&[Tile]>,
 ) -> ScoreBreakdown {
     let mut steps: Vec<ScoreStep> = Vec::new();
+    let mut base_steps: Vec<ScoreStep> = Vec::new();
     // chips starts at base_chips (computed below); mult starts at the
     // identity ×1 so the cascade reads as +N mult / +N mult / ... .
     let mut chips: i32;
@@ -154,6 +184,13 @@ fn score_sets_inner(
     let sequences_halved = rules.contains(&RuleModifier::SequencesHalved);
     let middle_tiles_zero = rules.contains(&RuleModifier::MiddleTilesZero);
     let censor_repeats = rules.contains(&RuleModifier::CensorRepeats);
+    let effective_point_value = |t: &Tile| -> i32 {
+        if tile_is_debuffed(t, ctx.tile_debuffs) {
+            0
+        } else {
+            t.point_value() as i32
+        }
+    };
 
     // Mirror Tile copies the relic immediately AFTER it in inventory.
     // Shadow Hand copies the FIRST relic in inventory.
@@ -190,6 +227,7 @@ fn score_sets_inner(
             steps.push(ScoreStep {
                 source: $source.into(),
                 kind: StepKind::Chips,
+                tile_ids: Vec::new(),
                 running_chips: chips,
                 running_mult: mult,
                 running_total: combine(chips, mult),
@@ -203,6 +241,7 @@ fn score_sets_inner(
             steps.push(ScoreStep {
                 source: $source.into(),
                 kind: StepKind::Mult,
+                tile_ids: Vec::new(),
                 running_chips: chips,
                 running_mult: mult,
                 running_total: combine(chips, mult),
@@ -219,6 +258,7 @@ fn score_sets_inner(
             steps.push(ScoreStep {
                 source: $source.into(),
                 kind: StepKind::Gold,
+                tile_ids: Vec::new(),
                 running_chips: chips,
                 running_mult: mult,
                 running_total: combine(chips, mult),
@@ -241,7 +281,7 @@ fn score_sets_inner(
         let mut meld_contrib = meld_chip_bonus(s.kind);
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
-                let mut v = t.point_value() as i32;
+                let mut v = effective_point_value(t);
                 if middle_tiles_zero && t.rank == 5 {
                     v = 0;
                 }
@@ -255,6 +295,14 @@ fn score_sets_inner(
             meld_contrib /= 2;
         }
         base_chips += meld_contrib;
+        base_steps.push(ScoreStep {
+            source: describe_set(tiles, s),
+            kind: StepKind::Chips,
+            tile_ids: s.tile_ids.clone(),
+            running_chips: base_chips,
+            running_mult: 1.0,
+            running_total: combine(base_chips, 1.0),
+        });
     }
     chips = base_chips;
 
@@ -291,6 +339,7 @@ fn score_sets_inner(
                 .tile_ids
                 .iter()
                 .filter_map(|id| tile_by_id(tiles, *id))
+                .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
                 .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
                 .count() as i32;
             if honor_count > 0 {
@@ -312,6 +361,9 @@ fn score_sets_inner(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
+                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                    continue;
+                }
                 if has_jade_serpent && t.suit == Suit::Bamboos {
                     push_chips!("Jade Serpent", 8);
                 }
@@ -363,7 +415,7 @@ fn score_sets_inner(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid) {
-                    retrigger_chips += t.point_value() as i32;
+                    retrigger_chips += effective_point_value(t);
                 }
             }
         }
@@ -377,7 +429,7 @@ fn score_sets_inner(
         let mut retrigger = 0i32;
         for s in sets {
             if let Some(t) = s.tile_ids.first().and_then(|id| tile_by_id(tiles, *id)) {
-                retrigger += t.point_value() as i32;
+                retrigger += effective_point_value(t);
             }
         }
         if retrigger > 0 {
@@ -394,7 +446,7 @@ fn score_sets_inner(
                     if matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
                         && t.rank <= 4
                     {
-                        retrigger += t.point_value() as i32;
+                        retrigger += effective_point_value(t);
                     }
                 }
             }
@@ -417,7 +469,7 @@ fn score_sets_inner(
             for s in sets {
                 for &tid in &s.tile_ids {
                     if let Some(t) = tile_by_id(tiles, tid) {
-                        retrigger += t.point_value() as i32;
+                        retrigger += effective_point_value(t);
                     }
                 }
             }
@@ -474,6 +526,9 @@ fn score_sets_inner(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
+                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                    continue;
+                }
                 let Some(enh) = t.enhancement else { continue };
                 match enh {
                     TileEnhancement::Jade => {
@@ -533,7 +588,7 @@ fn score_sets_inner(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
-                if t.suit != Suit::Flower {
+                if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tile_debuffs) {
                     continue;
                 }
                 for trig in 0..triggers {
@@ -569,7 +624,7 @@ fn score_sets_inner(
                 let mut c = meld_chip_bonus(s.kind);
                 for &tid in &s.tile_ids {
                     if let Some(t) = tile_by_id(tiles, tid) {
-                        c += t.point_value() as i32;
+                        c += effective_point_value(t);
                     }
                 }
                 c
@@ -613,6 +668,7 @@ fn score_sets_inner(
     if !ctx.dora_faces.is_empty() {
         let dora_count = tiles
             .iter()
+            .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
             .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
             .count() as i32;
         if dora_count > 0 {
@@ -623,6 +679,12 @@ fn score_sets_inner(
             steps.push(ScoreStep {
                 source: format!("Dora ×{dora_count}"),
                 kind: StepKind::Chips,
+                tile_ids: tiles
+                    .iter()
+                    .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
+                    .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
+                    .map(|t| t.id)
+                    .collect(),
                 running_chips: chips,
                 running_mult: mult,
                 running_total: combine(chips, mult),
@@ -647,27 +709,15 @@ fn score_sets_inner(
         }
     }
     // Patch B finishing: each yaku contributes both chips and mult, scaled by
-    // its current level (default 1) from `ctx.yaku_levels`. Yaku outside the
-    // active loadout score at half strength — except FullHand and Yakuhai,
-    // which are always at full strength as the universal incentives.
+    // its current level (default 1) from `ctx.yaku_levels`.
     let level_of =
         |y: YakuKind| -> u32 { ctx.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
-    let in_loadout = |y: YakuKind| -> bool {
-        ctx.yaku_loadout.is_empty()
-            || ctx.yaku_loadout.contains(&y)
-            || matches!(y, YakuKind::FullHand | YakuKind::Yakuhai)
-    };
     for yaku in &detected_yaku {
         let level = level_of(*yaku);
-        let chip = yaku.chip_bonus_at(level);
         let mut mult_bonus = yaku.mult_bonus_at(level);
-        let mut chip_bonus = chip;
-        if !in_loadout(*yaku) {
-            chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
-            mult_bonus *= 0.5;
-        }
+        let mut chip_bonus = yaku.chip_bonus_at(level);
         // The Censor: any yaku that has already fired this round contributes
-        // at half strength, stacking with the loadout half if applicable.
+        // at half strength.
         if censor_repeats && ctx.played_yaku_this_round.contains(yaku) {
             chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
             mult_bonus *= 0.5;
@@ -836,7 +886,11 @@ fn score_sets_inner(
         let flower_count = sets
             .iter()
             .flat_map(|s| &s.tile_ids)
-            .filter(|id| tile_by_id(tiles, **id).is_some_and(|t| t.suit == Suit::Flower))
+            .filter(|id| {
+                tile_by_id(tiles, **id).is_some_and(|t| {
+                    t.suit == Suit::Flower && !tile_is_debuffed(t, ctx.tile_debuffs)
+                })
+            })
             .count();
         if flower_count >= 2 {
             push_mult!("Ikebana", 6.0);
@@ -849,6 +903,7 @@ fn score_sets_inner(
             .iter()
             .flat_map(|s| &s.tile_ids)
             .filter_map(|id| tile_by_id(tiles, *id))
+            .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
             .filter(|t| {
                 matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank == 7
             })
@@ -872,7 +927,7 @@ fn score_sets_inner(
         // inventory, which is a real swing for a Rare. (Earlier Patch C
         // tuning had this at +0.3 — too weak once dead-stub relics were
         // pulled from the pool.)
-        let bonus = 0.5 * ctx.relics.active.len() as f64;
+        let bonus = 0.5 * ctx.relics.enabled_len() as f64;
         if bonus > 0.0 {
             push_mult!("Multiplier Master", bonus);
         }
@@ -907,9 +962,9 @@ fn score_sets_inner(
         }
     }
 
-    // Snowball: +0.1 mult per 100 total score earned this run, max +5.
+    // Snowball: +0.1 mult per 100 total score earned this run.
     if has(RelicId::Snowball) {
-        let bonus = (ctx.total_score as f64 / 100.0 * 0.1).min(5.0);
+        let bonus = ctx.total_score as f64 / 1000.0;
         if bonus > 0.0 {
             push_mult!("Snowball", bonus);
         }
@@ -1102,6 +1157,7 @@ fn score_sets_inner(
             kind: StepKind,
             chip_delta: i32,
             mult_delta: f64,
+            tile_ids: Vec<u32>,
         }
         let mut deltas: Vec<Delta> = Vec::with_capacity(steps.len());
         let mut prev_c = base_chips;
@@ -1112,6 +1168,7 @@ fn score_sets_inner(
                 kind: s.kind,
                 chip_delta: s.running_chips - prev_c,
                 mult_delta: s.running_mult - prev_m,
+                tile_ids: s.tile_ids.clone(),
             });
             prev_c = s.running_chips;
             prev_m = s.running_mult;
@@ -1136,21 +1193,11 @@ fn score_sets_inner(
             steps.push(ScoreStep {
                 source: d.source,
                 kind: d.kind,
+                tile_ids: d.tile_ids,
                 running_chips: rc,
                 running_mult: rm,
                 running_total: combine(rc, rm),
             });
-        }
-    }
-
-    if let Some(st) = &ctx.structure {
-        if st.early_cashout_mult < 1.0 - 1e-9 {
-            let new_m = mult * st.early_cashout_mult;
-            let delta = new_m - mult;
-            mult = new_m;
-            if delta.abs() > 1e-9 {
-                push_mult!("Early cashout", delta);
-            }
         }
     }
 
@@ -1162,6 +1209,7 @@ fn score_sets_inner(
     steps.push(ScoreStep {
         source: format!("{} × {}", final_chips, fmt_mult(final_mult)),
         kind: StepKind::Final,
+        tile_ids: Vec::new(),
         running_chips: final_chips,
         running_mult: final_mult,
         running_total: total,
@@ -1170,6 +1218,7 @@ fn score_sets_inner(
     ScoreBreakdown {
         base_chips,
         base_points: base_chips,
+        base_steps,
         steps,
         detected_yaku,
         final_chips,
@@ -1197,7 +1246,7 @@ pub struct ScorePreview {
     pub detected_yaku: Vec<YakuKind>,
     /// Estimated total score = `chips × mult` (floored). Excludes relics and
     /// rules so the cascade still has surprises.
-    pub estimated_total: i32,
+    pub estimated_total: u64,
 }
 
 #[allow(dead_code)]
@@ -1205,6 +1254,7 @@ pub fn preview_score(
     tiles: &[Tile],
     sets: &[DetectedSet],
     available_yaku: &[YakuKind],
+    tile_debuffs: &[crate::core::debuff::TileDebuff],
     original_tiles: Option<&[Tile]>,
 ) -> ScorePreview {
     let mut chips: i32 = 0;
@@ -1212,7 +1262,9 @@ pub fn preview_score(
         chips += meld_chip_bonus(s.kind);
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
-                chips += t.point_value() as i32;
+                if !tile_is_debuffed(t, tile_debuffs) {
+                    chips += t.point_value() as i32;
+                }
             }
         }
     }
@@ -1247,14 +1299,14 @@ fn fmt_mult(m: f64) -> String {
     }
 }
 
-/// Convenience: get just the total as i32 (for tests and simple callers).
+/// Convenience: get just the total as u64 (for tests and simple callers).
 #[allow(dead_code)]
 pub fn score_sets_total(
     tiles: &[Tile],
     sets: &[DetectedSet],
     ctx: &ScoreContext<'_>,
     rules: &[RuleModifier],
-) -> i32 {
+) -> u64 {
     score_sets(tiles, sets, ctx, rules).total
 }
 
@@ -1298,15 +1350,28 @@ pub fn tile_effective_value(
     tile: &Tile,
     relics: &crate::core::relic::RelicState,
     dora_faces: &[(Suit, u8)],
+    tile_debuffs: &[crate::core::debuff::TileDebuff],
 ) -> TileEffectiveValue {
     use crate::core::tile::TileEnhancement;
 
     let mut out = TileEffectiveValue {
-        base_chips: tile.point_value() as i32,
+        base_chips: if tile_is_debuffed(tile, tile_debuffs) {
+            0
+        } else {
+            tile.point_value() as i32
+        },
         bonus_chips: 0,
         mult_bonus: 0.0,
         sources: Vec::new(),
     };
+
+    if tile_is_debuffed(tile, tile_debuffs) {
+        out.sources.push((
+            "Debuffed",
+            "This tile still forms hands, but scores 0 tile points".into(),
+        ));
+        return out;
+    }
 
     // ── Talisman enhancements ───────────────────────────────────────────
     // Optimistic: assume the tile lands in a non-pair meld so the
@@ -1367,6 +1432,7 @@ mod tests {
     fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
         ScoreContext {
             relics,
+            tile_debuffs: &[],
             scored_last_turn,
             dora_faces: vec![],
             available_yaku: vec![],
@@ -1375,7 +1441,6 @@ mod tests {
             plays_used: 0,
             riichi_active: false,
             yaku_levels: None,
-            yaku_loadout: vec![],
             played_yaku_this_round: vec![],
             gold: 0,
             total_score: 0,
@@ -1470,10 +1535,8 @@ mod tests {
     // ── Pair Power (chip + mult side) ───────────────────────────────
 
     #[test]
-    fn yaku_loadout_halves_off_loadout_yaku() {
+    fn stacked_yaku_score_full_value_without_loadout_gating() {
         // Bamboo flush full hand: detects FullHand + Chinitsu + Ittsu.
-        // With a loadout containing only Chinitsu, FullHand and Yakuhai are
-        // always full strength but Ittsu drops to 50%.
         let hand = vec![
             Tile::new(Suit::Bamboos, 1, 0),
             Tile::new(Suit::Bamboos, 2, 1),
@@ -1515,6 +1578,7 @@ mod tests {
         let r = RelicState::default();
         let ctx = ScoreContext {
             relics: &r,
+            tile_debuffs: &[],
             scored_last_turn: false,
             dora_faces: vec![],
             available_yaku: vec![],
@@ -1523,7 +1587,6 @@ mod tests {
             plays_used: 0,
             riichi_active: false,
             yaku_levels: None,
-            yaku_loadout: vec![crate::core::yaku::YakuKind::Chinitsu],
             played_yaku_this_round: vec![],
             gold: 0,
             total_score: 0,
@@ -1535,13 +1598,12 @@ mod tests {
             structure: None,
         };
         let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-        // Off-loadout: Ittsu (4 mult, 50 chips) → halved to (2 mult, 25 chips).
-        // In-loadout / always-active: Chinitsu (6, 80) + FullHand (5, 60) full.
-        //   chip adds = 60 + 80 + 25 = 165 ; base = 226 → final_chips = 391
-        //   mult = 1 + 5 + 6 + 2 = 14
-        //   total = 391 × 14 = 5474
-        assert_eq!(breakdown.final_chips, 391);
-        assert_eq!(breakdown.final_mult, 14.0);
+        // Full value on all three yaku:
+        //   chip adds = 60 + 80 + 50 = 190 ; base = 226 → final_chips = 416
+        //   mult = 1 + 5 + 6 + 4 = 16
+        //   total = 416 × 16 = 6656
+        assert_eq!(breakdown.final_chips, 416);
+        assert_eq!(breakdown.final_mult, 16.0);
     }
 
     #[test]
@@ -1576,6 +1638,7 @@ mod tests {
         levels.levels.insert(crate::core::yaku::YakuKind::Toitoi, 3);
         let ctx = ScoreContext {
             relics: &r,
+            tile_debuffs: &[],
             scored_last_turn: false,
             dora_faces: vec![],
             available_yaku: vec![],
@@ -1584,7 +1647,6 @@ mod tests {
             plays_used: 0,
             riichi_active: false,
             yaku_levels: Some(levels),
-            yaku_loadout: vec![],
             played_yaku_this_round: vec![],
             gold: 0,
             total_score: 0,
@@ -1620,6 +1682,57 @@ mod tests {
         assert_eq!(breakdown.final_chips, 62);
         assert_eq!(breakdown.final_mult, 2.0);
         assert_eq!(breakdown.total, 124);
+    }
+
+    #[test]
+    fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
+        let hand = vec![
+            Tile::new(Suit::Circles, 1, 0),
+            Tile::new(Suit::Circles, 1, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let r = RelicState::default();
+        let ctx = ScoreContext {
+            relics: &r,
+            tile_debuffs: &[crate::core::debuff::TileDebuff::Class(
+                crate::core::debuff::TileDebuffClass::Terminals,
+            )],
+            scored_last_turn: false,
+            dora_faces: vec![],
+            available_yaku: vec![],
+            round_wind: None,
+            first_full_hand_of_round: false,
+            plays_used: 0,
+            riichi_active: false,
+            yaku_levels: None,
+            played_yaku_this_round: vec![],
+            gold: 0,
+            total_score: 0,
+            is_final_play: false,
+            tile_polisher_bonus: 0,
+            relic_counters: std::collections::BTreeMap::new(),
+            unscored_hand_tiles: 0,
+            river_runner_bonus: 0,
+            structure: None,
+        };
+        let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+        assert_eq!(breakdown.base_chips, 18);
+        assert_eq!(breakdown.total, 18);
+    }
+
+    #[test]
+    fn debuffed_relic_is_disabled_for_scoring() {
+        let hand = vec![
+            Tile::new(Suit::Circles, 7, 0),
+            Tile::new(Suit::Circles, 7, 1),
+        ];
+        let sets = find_pairs_and_triplets(&hand);
+        let mut r = relics(vec![RelicId::PairPower]);
+        r.debuffed.insert(RelicId::PairPower);
+        let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+        assert_eq!(breakdown.final_chips, 32);
+        assert_eq!(breakdown.final_mult, 1.0);
+        assert_eq!(breakdown.total, 32);
     }
 
     // ── White Silence ───────────────────────────────────────────────
@@ -1852,6 +1965,7 @@ mod tests {
         let r = RelicState::default();
         let ctx = ScoreContext {
             relics: &r,
+            tile_debuffs: &[],
             scored_last_turn: false,
             dora_faces: vec![(Suit::Characters, 5)],
             available_yaku: vec![],
@@ -1860,7 +1974,6 @@ mod tests {
             plays_used: 0,
             riichi_active: false,
             yaku_levels: None,
-            yaku_loadout: vec![],
             played_yaku_this_round: vec![],
             gold: 0,
             total_score: 0,

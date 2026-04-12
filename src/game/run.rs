@@ -5,11 +5,12 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::core::boss::{self, BossKind};
+use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::structure::{
     StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
-    chip_pile_tier, early_cashout_factor, is_winning_structure_shape, mult_pile_tier,
+    is_winning_structure_shape,
 };
 
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
@@ -72,6 +73,10 @@ pub const HAND_SIZE: usize = 14;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
 pub const FINAL_ANTE: u32 = 8;
 
+fn default_auto_cash_in_on_full_structure() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunState {
     pub wall: Wall,
@@ -84,7 +89,7 @@ pub struct RunState {
     /// Tile copies held in the structure (same ids as in `structure_sets`).
     #[serde(default)]
     pub structure_tiles: Vec<Tile>,
-    pub round_score: u32,
+    pub round_score: u64,
     pub target_score: u32,
     pub base_target: u32,
     pub relics: RelicState,
@@ -93,7 +98,15 @@ pub struct RunState {
     /// Current ante (1-indexed). Increments after defeating each Boss blind.
     pub ante: u32,
     pub plays_remaining: u32,
+    /// Effective play peg row length for the current round after round-start
+    /// modifiers (bosses, skip tags, relic taxes) have been applied.
+    #[serde(default)]
+    pub plays_max: u32,
     pub discards_remaining: u32,
+    /// Effective discard peg row length for the current round after round-start
+    /// modifiers (bosses, skip tags, relic taxes) have been applied.
+    #[serde(default)]
+    pub discards_max: u32,
     pub gold: i32,
     pub blind: BlindKind,
     /// Next blind the player will face in the Small→Big→Boss cycle.
@@ -121,15 +134,12 @@ pub struct RunState {
     /// in the same capped slot list. Capacity expands via Zodiac Pouch and
     /// Lunar Almanac relics.
     pub consumables: crate::core::consumable::ConsumableInventory,
-    /// Active yaku loadout — these score at full strength. Yaku not in the
-    /// loadout still detect but at 50% chip/mult per Patch B finishing's
-    /// "amplification, not gating" rule. `FullHand` and `Yakuhai` are always
-    /// implicitly full-strength regardless of loadout membership.
-    pub yaku_loadout: Vec<crate::core::yaku::YakuKind>,
-    /// Maximum loadout size (default 3, +1 from Yaku Scholar relic).
-    pub yaku_loadout_capacity: usize,
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
+    /// When true, automatically cash in the structure as soon as it reaches
+    /// a full valid shape.
+    #[serde(default = "default_auto_cash_in_on_full_structure")]
+    pub auto_cash_in_on_full_structure: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
     #[serde(flatten)]
     pub boss: BossState,
@@ -137,6 +147,9 @@ pub struct RunState {
     /// halve repeat-yaku contributions. Reset on round start.
     #[serde(skip)]
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
+    /// Round-scoped tile debuffs applied by the active boss.
+    #[serde(default)]
+    pub tile_debuffs: Vec<TileDebuff>,
     /// Set true the first time this round a scored hand contains a Wind
     /// or Dragon tile. Powers Green Luck's per-round payout — the relic
     /// awards its bonus at round clear iff this stays false. Reset by
@@ -237,6 +250,47 @@ pub struct RunState {
 }
 
 impl RunState {
+    fn round_play_cap(&self) -> u32 {
+        let mut plays = self.mode.starting_plays;
+        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
+            plays += 1;
+        }
+        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
+            plays = plays.saturating_sub(1);
+        }
+        plays
+    }
+
+    fn round_discard_cap(&self) -> u32 {
+        self.mode.starting_discards
+    }
+
+    /// Rebuild round-start plays/discards from current mode + permanent
+    /// round modifiers. This keeps all "per round" bonuses sourced from one
+    /// place so shop-bought relics and material bonuses apply on the next blind.
+    fn reset_round_resources(&mut self) {
+        self.plays_remaining = self.round_play_cap();
+        self.discards_remaining = self.round_discard_cap();
+        self.sync_round_resource_caps();
+    }
+
+    fn sync_round_resource_caps(&mut self) {
+        self.plays_max = self.plays_remaining;
+        self.discards_max = self.discards_remaining;
+    }
+
+    /// Consume skip-tag bonuses that apply to the next blind only.
+    fn apply_pending_round_resource_bonuses(&mut self) {
+        if self.tag_bonus_plays > 0 {
+            self.plays_remaining += self.tag_bonus_plays;
+            self.tag_bonus_plays = 0;
+        }
+        if self.tag_bonus_discards > 0 {
+            self.discards_remaining += self.tag_bonus_discards;
+            self.tag_bonus_discards = 0;
+        }
+    }
+
     pub fn new(mode: GameMode) -> Self {
         let hand_size = mode.hand_size;
         let mut wall = Wall::from_standard_shuffled();
@@ -274,7 +328,9 @@ impl RunState {
             run_number: 1,
             ante: 1,
             plays_remaining: mode.starting_plays,
+            plays_max: mode.starting_plays,
             discards_remaining: mode.starting_discards,
+            discards_max: mode.starting_discards,
             gold: mode.starting_gold as i32,
             blind: BlindKind::Small,
             upcoming_blind: BlindKind::Small,
@@ -290,13 +346,8 @@ impl RunState {
                 items: Vec::new(),
                 capacity: mode.consumable_capacity,
             },
-            yaku_loadout: vec![
-                crate::core::yaku::YakuKind::Tanyao,
-                crate::core::yaku::YakuKind::Toitoi,
-                crate::core::yaku::YakuKind::Chinitsu,
-            ],
-            yaku_loadout_capacity: 3,
             mode,
+            auto_cash_in_on_full_structure: true,
             boss: BossState {
                 pool_remaining: boss_pool_remaining,
                 upcoming: upcoming_boss,
@@ -306,6 +357,7 @@ impl RunState {
                 tax_collector_cost: 0,
             },
             played_yaku_this_round: Vec::new(),
+            tile_debuffs: Vec::new(),
             honors_scored_this_round: false,
             total_score_earned: 0,
             yaku_times_played: std::collections::HashMap::new(),
@@ -336,6 +388,10 @@ impl RunState {
         // invariant "hand always reflects tile_enhancements" holds uniformly.
         state.restamp_hand_enhancements();
         state
+    }
+
+    pub fn set_auto_cash_in_on_full_structure(&mut self, enabled: bool) {
+        self.auto_cash_in_on_full_structure = enabled;
     }
 
     /// Build the `ResolvedBossEffect` for the current `upcoming_boss`. For
@@ -397,7 +453,9 @@ impl RunState {
         self.available_yaku = self.mode.starting_yaku.clone();
         self.target_score = self.mode.base_target;
         self.base_target = self.mode.base_target;
-        self.discards_remaining = self.mode.starting_discards;
+        self.plays_remaining = self.round_play_cap();
+        self.discards_remaining = self.round_discard_cap();
+        self.sync_round_resource_caps();
 
         // Adjust hand size: grow by drawing more tiles if needed.
         let target_hand_size = self.mode.hand_size;
@@ -429,8 +487,7 @@ impl RunState {
         // Reset round state (same blind, same lesson).
         self.round_score = 0;
         self.round_rules.clear();
-        self.plays_remaining = self.mode.starting_plays;
-        self.discards_remaining = self.mode.starting_discards;
+        self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.quickdraw_used = false;
@@ -726,25 +783,11 @@ impl RunState {
             .try_push(crate::core::consumable::Consumable::Zodiac(z))
     }
 
-    /// Replace one yaku in the loadout with another. The new yaku must not
-    /// already be in the loadout. Returns `true` on success.
-    #[allow(dead_code)]
-    pub fn swap_loadout(&mut self, index: usize, replacement: crate::core::yaku::YakuKind) -> bool {
-        if index >= self.yaku_loadout.len() {
-            return false;
-        }
-        if self.yaku_loadout.contains(&replacement) {
-            return false;
-        }
-        self.yaku_loadout[index] = replacement;
-        true
-    }
-
-    /// Recompute consumable inventory capacity and yaku-loadout capacity from
+    /// Recompute consumable inventory capacity from
     /// currently-owned relics. Idempotent — call after any relic add/remove.
     /// The inventory is shared between Zodiacs and Talismans; the base
     /// capacity comes from `GameMode::consumable_capacity` (default 2).
-    /// (Patch C: ZodiacPouch +1, LunarAlmanac +1, YakuScholar loadout +1.)
+    /// (Patch C: ZodiacPouch +1, LunarAlmanac +1.)
     pub fn recompute_capacities(&mut self) {
         let mut consumable_cap = self.mode.consumable_capacity;
         if self.relics.has(RelicId::ZodiacPouch) {
@@ -754,13 +797,6 @@ impl RunState {
             consumable_cap += 1;
         }
         self.consumables.capacity = consumable_cap;
-
-        let loadout_cap = if self.relics.has(RelicId::YakuScholar) {
-            4
-        } else {
-            3
-        };
-        self.yaku_loadout_capacity = loadout_cap;
     }
 
     /// Whether a run is in progress (not a fresh/default state).
@@ -778,6 +814,9 @@ impl RunState {
     pub fn apply_blind(&mut self, blind: BlindKind) {
         self.blind = blind;
         self.round_score = 0;
+        self.reset_round_resources();
+        self.tile_debuffs.clear();
+        self.relics.clear_debuffs();
         let mut target = (self.base_target as f32 * blind.target_multiplier()) as u32;
         // Tutorial adaptive difficulty: lower the target after repeated failures.
         if let Some(ref tut) = self.tutorial {
@@ -803,25 +842,26 @@ impl RunState {
                         self.round_rules.push(m);
                     }
                 }
+                self.tile_debuffs = eff.tile_debuffs.clone();
+                self.relics.set_debuffed(eff.relic_debuffs.iter().copied());
                 if let Some(hook) = eff.on_apply {
                     hook(self);
                 }
                 self.boss.effect = Some(eff);
             }
         }
+        // Fold next-round Wide Hand into the round's effective hand size so
+        // every refill and hand-size check sees the same total for the round.
+        if self.tag_bonus_hand_size != 0 {
+            self.boss.bonus_hand_size += self.tag_bonus_hand_size;
+            self.tag_bonus_hand_size = 0;
+        }
         // ReducedPlays modifier reduces plays from 4 to 3.
         if self.round_rules.contains(&RuleModifier::ReducedPlays) {
             self.plays_remaining = self.plays_remaining.min(3);
         }
-        // Consume tag-granted gameplay bonuses from a prior skip.
-        if self.tag_bonus_plays > 0 {
-            self.plays_remaining += self.tag_bonus_plays;
-            self.tag_bonus_plays = 0;
-        }
-        if self.tag_bonus_discards > 0 {
-            self.discards_remaining += self.tag_bonus_discards;
-            self.tag_bonus_discards = 0;
-        }
+        self.apply_pending_round_resource_bonuses();
+        self.sync_round_resource_caps();
         // Deal the wall and hand for this round.
         let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
         self.wall = Wall::from_filtered_with_packs(
@@ -831,8 +871,7 @@ impl RunState {
             overflow,
         );
         self.hand.clear();
-        let draw_count = (self.mode.hand_size as i32 + self.tag_bonus_hand_size) as usize;
-        self.tag_bonus_hand_size = 0;
+        let draw_count = boss::effective_hand_size(self);
         for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
@@ -847,13 +886,13 @@ impl RunState {
 
     /// Commit selected melds into structure (costs one play). Alias for the
     /// structure-system primary action — same as [`Self::commit_selection_to_structure`].
-    pub fn score_selected_tiles(&mut self, bus: &mut EventBus) -> u32 {
+    pub fn score_selected_tiles(&mut self, bus: &mut EventBus) -> u64 {
         self.commit_selection_to_structure(bus)
     }
 
     /// Move validated melds from hand into **structure**; consumes one play.
     /// Returns points added this step (`0` or `1` success token for UI; real score is on trigger).
-    pub fn commit_selection_to_structure(&mut self, bus: &mut EventBus) -> u32 {
+    pub fn commit_selection_to_structure(&mut self, bus: &mut EventBus) -> u64 {
         if self.plays_remaining == 0 || self.selected_count() == 0 {
             return 0;
         }
@@ -868,12 +907,16 @@ impl RunState {
 
         let (sets, scoring_tiles) = match self.try_validate_with_wildcards(&selected_tiles) {
             Some(result) => result,
-            None => return 0,
+            None => {
+                bus.push(GameEvent::InvalidAction);
+                return 0;
+            }
         };
 
         {
             let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
             if self.tutorial_validate_sets(&set_kinds).is_err() {
+                bus.push(GameEvent::InvalidAction);
                 return 0;
             }
         }
@@ -883,6 +926,11 @@ impl RunState {
         }
 
         if self.mode.structure_bank {
+            let current_tile_count = self.structure_tiles.len();
+            if current_tile_count + scoring_tiles.len() > HAND_SIZE {
+                bus.push(GameEvent::InvalidAction);
+                return 0;
+            }
             for s in &sets {
                 self.structure_sets.push(s.clone());
             }
@@ -975,7 +1023,7 @@ impl RunState {
         self.try_autotrigger_structure_full(bus);
         if self.mode.structure_bank
             && self.plays_remaining == 0
-            && self.round_score < self.target_score
+            && self.round_score < self.target_score as u64
             && !self.structure_sets.is_empty()
         {
             let _ = self.trigger_structure(StructureTriggerKind::AutoNoPlays, bus);
@@ -998,22 +1046,20 @@ impl RunState {
         original_for_wildcard: Vec<Tile>,
         structure_meta: Option<StructureTriggerMeta>,
         bus: &mut EventBus,
-    ) -> u32 {
+    ) -> u64 {
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let ctx = ScoreContext {
             relics: &self.relics,
+            tile_debuffs: &scoring_tile_debuffs,
             scored_last_turn: self.scored_last_turn,
             dora_faces: self.wall.dora_faces(),
             available_yaku: self.available_yaku.clone(),
             round_wind: rw,
             first_full_hand_of_round: !self.full_hand_played_this_round,
-            plays_used: self
-                .mode
-                .starting_plays
-                .saturating_sub(self.plays_remaining),
+            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
             riichi_active: false,
             yaku_levels: Some(self.yaku_levels.clone()),
-            yaku_loadout: self.yaku_loadout.clone(),
             played_yaku_this_round: self.played_yaku_this_round.clone(),
             gold: self.gold,
             total_score: self.total_score_earned,
@@ -1031,9 +1077,9 @@ impl RunState {
             &self.round_rules,
             &original_for_wildcard,
         );
-        let earned = breakdown.total.max(0) as u32;
+        let earned = breakdown.total;
         self.round_score = self.round_score.saturating_add(earned);
-        self.total_score_earned = self.total_score_earned.saturating_add(earned as u64);
+        self.total_score_earned = self.total_score_earned.saturating_add(earned);
 
         if self.relics.has(RelicId::TilePolisher) {
             let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
@@ -1113,6 +1159,23 @@ impl RunState {
         earned
     }
 
+    fn scoring_tile_debuffs(&self, scoring_tiles: &[Tile]) -> Vec<TileDebuff> {
+        let mut debuffs = self.tile_debuffs.clone();
+        let dragon_without_honors = self.blind == BlindKind::Boss
+            && self.boss.upcoming == Some(BossKind::Dragon)
+            && !scoring_tiles
+                .iter()
+                .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
+        if dragon_without_honors {
+            for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles, Suit::Flower] {
+                if scoring_tiles.iter().any(|t| t.suit == suit) {
+                    debuffs.push(TileDebuff::Suit(suit));
+                }
+            }
+        }
+        debuffs
+    }
+
     fn set_magnet_after_score(
         &mut self,
         sets: &[DetectedSet],
@@ -1141,7 +1204,7 @@ impl RunState {
     }
 
     /// Score and clear structure (does not consume a play).
-    pub fn trigger_structure(&mut self, kind: StructureTriggerKind, bus: &mut EventBus) -> u32 {
+    pub fn trigger_structure(&mut self, kind: StructureTriggerKind, bus: &mut EventBus) -> u64 {
         if self.structure_sets.is_empty() {
             return 0;
         }
@@ -1152,6 +1215,7 @@ impl RunState {
                 &self.structure_sets,
                 rw,
                 &self.available_yaku,
+                &self.round_rules,
             )
         {
             return 0;
@@ -1161,15 +1225,9 @@ impl RunState {
         let scoring_tiles = self.structure_tiles.clone();
         let original_for_wildcard = scoring_tiles.clone();
 
-        let early = match kind {
-            StructureTriggerKind::Manual => early_cashout_factor(&scoring_tiles, &sets),
-            StructureTriggerKind::AutoFull | StructureTriggerKind::AutoNoPlays => 1.0,
-        };
-
         let meta = StructureTriggerMeta {
             kind,
             meld_count: sets.len() as u32,
-            early_cashout_mult: early,
             inject_chicken_if_no_yaku: true,
         };
 
@@ -1191,6 +1249,9 @@ impl RunState {
     }
 
     fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
+        if !self.auto_cash_in_on_full_structure {
+            return;
+        }
         if self.structure_sets.is_empty() {
             return;
         }
@@ -1203,6 +1264,7 @@ impl RunState {
             &self.structure_sets,
             rw,
             &self.available_yaku,
+            &self.round_rules,
         ) {
             return;
         }
@@ -1211,10 +1273,10 @@ impl RunState {
 
     fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
         bus.push(GameEvent::ScoreUpdated(self.round_score));
-        if self.round_score >= self.target_score {
+        if self.round_score >= self.target_score as u64 {
             let base_reward = self.blind.clear_reward();
             let unused_play_bonus = self.plays_remaining;
-            let interest = (self.gold.max(0) as u32 / 5).min(5);
+            let interest = (self.gold.max(0) as u32 / 5).min(3);
             let green_luck_bonus =
                 if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
                     self.relic_activations.push(RelicId::GreenLuck);
@@ -1275,14 +1337,6 @@ impl RunState {
         banked_meld_chips(&self.structure_sets)
     }
 
-    pub fn structure_chip_pile_tier(&self) -> u8 {
-        chip_pile_tier(self.structure_banked_meld_chips())
-    }
-
-    pub fn structure_mult_pile_tier(&self) -> u8 {
-        mult_pile_tier(self.structure_sets.len())
-    }
-
     /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).
     pub fn can_trigger_structure_now(&self) -> bool {
         if !self.mode.structure_bank || self.structure_sets.is_empty() {
@@ -1294,14 +1348,15 @@ impl RunState {
             &self.structure_sets,
             rw,
             &self.available_yaku,
+            &self.round_rules,
         )
     }
 
-    /// Read-only preview of points from a manual structure cash-in (no state change).
+    /// Read-only scoring breakdown for a manual structure cash-in (no state change).
     /// RNG-driven relic hooks in a real [`Self::trigger_structure`] may differ slightly.
-    pub fn preview_manual_trigger_total(&self) -> i32 {
+    pub fn preview_manual_trigger_breakdown(&self) -> Option<ScoreBreakdown> {
         if !self.mode.structure_bank || self.structure_sets.is_empty() {
-            return 0;
+            return None;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
         if !can_trigger_structure(
@@ -1309,33 +1364,30 @@ impl RunState {
             &self.structure_sets,
             rw,
             &self.available_yaku,
+            &self.round_rules,
         ) {
-            return 0;
+            return None;
         }
         let sets = self.structure_sets.clone();
         let scoring_tiles = self.structure_tiles.clone();
         let original_for_wildcard = scoring_tiles.clone();
-        let early = early_cashout_factor(&scoring_tiles, &sets);
+        let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let meta = StructureTriggerMeta {
             kind: StructureTriggerKind::Manual,
             meld_count: sets.len() as u32,
-            early_cashout_mult: early,
             inject_chicken_if_no_yaku: true,
         };
         let ctx = ScoreContext {
             relics: &self.relics,
+            tile_debuffs: &scoring_tile_debuffs,
             scored_last_turn: self.scored_last_turn,
             dora_faces: self.wall.dora_faces(),
             available_yaku: self.available_yaku.clone(),
             round_wind: rw,
             first_full_hand_of_round: !self.full_hand_played_this_round,
-            plays_used: self
-                .mode
-                .starting_plays
-                .saturating_sub(self.plays_remaining),
+            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
             riichi_active: false,
             yaku_levels: Some(self.yaku_levels.clone()),
-            yaku_loadout: self.yaku_loadout.clone(),
             played_yaku_this_round: self.played_yaku_this_round.clone(),
             gold: self.gold,
             total_score: self.total_score_earned,
@@ -1346,18 +1398,25 @@ impl RunState {
             river_runner_bonus: self.river_runner_bonus,
             structure: Some(meta),
         };
-        let breakdown = score_sets_with_original(
+        Some(score_sets_with_original(
             &scoring_tiles,
             &sets,
             &ctx,
             &self.round_rules,
             &original_for_wildcard,
-        );
-        breakdown.total.max(0) as i32
+        ))
+    }
+
+    /// Read-only preview of points from a manual structure cash-in (no state change).
+    /// RNG-driven relic hooks in a real [`Self::trigger_structure`] may differ slightly.
+    pub fn preview_manual_trigger_total(&self) -> u64 {
+        self.preview_manual_trigger_breakdown()
+            .map(|breakdown| breakdown.total)
+            .unwrap_or(0)
     }
 
     /// Manual structure cash-in (no play cost) + round resolution events.
-    pub fn trigger_structure_manual(&mut self, bus: &mut EventBus) -> u32 {
+    pub fn trigger_structure_manual(&mut self, bus: &mut EventBus) -> u64 {
         let earned = self.trigger_structure(StructureTriggerKind::Manual, bus);
         self.emit_round_resolution_events(bus);
         earned
@@ -1379,10 +1438,12 @@ impl RunState {
             .map(|(t, _)| *t)
             .collect();
         let (sets, scoring_tiles) = self.try_validate_with_wildcards(&selected_tiles)?;
+        let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         Some(preview_score(
             &scoring_tiles,
             &sets,
             &self.available_yaku,
+            &scoring_tile_debuffs,
             Some(&selected_tiles),
         ))
     }
@@ -1408,21 +1469,30 @@ impl RunState {
         &self,
         tiles: &[Tile],
     ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+        let validation_rules: Vec<RuleModifier> = if self.mode.structure_bank {
+            self.round_rules
+                .iter()
+                .copied()
+                .filter(|rule| *rule != RuleModifier::RequireHonor)
+                .collect()
+        } else {
+            self.round_rules.clone()
+        };
         // Try standard validation first.
-        if let Some(sets) = validate_selection_with_rules(tiles, &self.round_rules) {
+        if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {
             return Some((sets, tiles.to_vec()));
         }
 
         // JokerTile: try substituting one tile with each possible face.
         if self.relics.has(RelicId::JokerTile) && !self.joker_used {
-            if let Some(result) = try_joker_substitution(tiles, &self.round_rules) {
+            if let Some(result) = try_joker_substitution(tiles, &validation_rules) {
                 return Some(result);
             }
         }
 
         // WildWinds: try substituting wind tiles.
         if self.relics.has(RelicId::WildWinds) {
-            if let Some(result) = try_wind_substitution(tiles, &self.round_rules) {
+            if let Some(result) = try_wind_substitution(tiles, &validation_rules) {
                 return Some(result);
             }
         }
@@ -1654,14 +1724,7 @@ impl RunState {
         self.run_number += 1;
         self.target_score = self.base_target; // will be overridden by apply_blind
         self.round_rules.clear();
-        self.plays_remaining = self.mode.starting_plays;
-        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
-            self.plays_remaining += 1;
-        }
-        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
-            self.plays_remaining = self.plays_remaining.saturating_sub(1);
-        }
-        self.discards_remaining = self.mode.starting_discards;
+        self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.quickdraw_used = false;
@@ -1701,10 +1764,11 @@ impl RunState {
             // post-shop run state of the *outgoing* ante (their reveal
             // moment) and pick_blind shows the chosen variant immediately.
             self.resolve_upcoming_boss();
-            // Roll fresh skip-reward tags for the new ante and clear any
-            // unconsumed tag modifiers from the previous ante.
+            // Roll fresh skip-reward tags for the new ante. Shop-oriented
+            // rewards must survive into the post-boss shop, but any
+            // one-blind combat bonuses should expire at the ante boundary.
             self.roll_ante_tags();
-            self.clear_tag_modifiers();
+            self.clear_next_blind_tag_modifiers();
         }
     }
 
@@ -1718,14 +1782,7 @@ impl RunState {
         // ante's base target is unchanged — only the blind multiplier shifts.
         self.target_score = self.base_target;
         self.round_rules.clear();
-        self.plays_remaining = self.mode.starting_plays;
-        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
-            self.plays_remaining += 1;
-        }
-        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
-            self.plays_remaining = self.plays_remaining.saturating_sub(1);
-        }
-        self.discards_remaining = self.mode.starting_discards;
+        self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.quickdraw_used = false;
@@ -1741,7 +1798,6 @@ impl RunState {
         self.selected.clear();
         self.structure_sets.clear();
         self.structure_tiles.clear();
-        self.tag_bonus_hand_size = 0;
     }
 
     // ── Skip-reward tags ──────────────────────────────────────────────
@@ -1805,7 +1861,7 @@ impl RunState {
                 use crate::core::relic::all_relic_defs;
                 use rand::seq::SliceRandom;
                 let defs = all_relic_defs();
-                let mut pool: Vec<_> = defs.iter().filter(|d| !self.relics.has(d.id)).collect();
+                let mut pool: Vec<_> = defs.iter().filter(|d| !self.relics.owns(d.id)).collect();
                 if pool.is_empty() || self.relics.is_full() {
                     self.gold = self.gold.saturating_add(6);
                     return "+6 gold (full)";
@@ -1830,11 +1886,8 @@ impl RunState {
         }
     }
 
-    /// Clear transient tag modifier flags (safety net for ante boundaries).
-    fn clear_tag_modifiers(&mut self) {
-        self.tag_free_reroll = false;
-        self.tag_patron_gift = false;
-        self.tag_rich_stock = false;
+    /// Clear transient skip-tag bonuses that only apply to the very next blind.
+    fn clear_next_blind_tag_modifiers(&mut self) {
         self.tag_bonus_plays = 0;
         self.tag_bonus_discards = 0;
         self.tag_bonus_hand_size = 0;
@@ -1845,6 +1898,7 @@ impl RunState {
 mod tests {
     use super::*;
     use crate::core::deck::build_wall;
+    use crate::core::hand::DetectedSet;
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -1877,6 +1931,7 @@ mod tests {
             boss: BossState::default(),
             consumables: crate::core::consumable::ConsumableInventory::default(),
             discards_remaining: mode.starting_discards,
+            discards_max: mode.starting_discards,
             full_hand_played_this_round: false,
             gold: mode.starting_gold as i32,
             hand,
@@ -1885,10 +1940,13 @@ mod tests {
             joker_used: false,
             last_breakdown: None,
             mode: mode.clone(),
+            auto_cash_in_on_full_structure: true,
             played_yaku_this_round: vec![],
+            tile_debuffs: vec![],
             honors_scored_this_round: false,
             yaku_times_played: std::collections::HashMap::new(),
             plays_remaining: mode.starting_plays,
+            plays_max: mode.starting_plays,
             quickdraw_used: false,
             relics: RelicState::default(),
             round_rules: vec![],
@@ -1902,12 +1960,6 @@ mod tests {
             upcoming_blind: BlindKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
-            yaku_loadout: vec![
-                crate::core::yaku::YakuKind::Tanyao,
-                crate::core::yaku::YakuKind::Toitoi,
-                crate::core::yaku::YakuKind::Chinitsu,
-            ],
-            yaku_loadout_capacity: 3,
             tile_packs: vec![],
             total_score_earned: 0,
             small_blind_tag: None,
@@ -1929,6 +1981,48 @@ mod tests {
 
     fn bus() -> EventBus {
         EventBus::default()
+    }
+
+    fn winning_structure() -> (Vec<Tile>, Vec<DetectedSet>) {
+        let tiles = vec![
+            Tile::new(Suit::Characters, 1, 1),
+            Tile::new(Suit::Characters, 1, 2),
+            Tile::new(Suit::Characters, 2, 3),
+            Tile::new(Suit::Characters, 3, 4),
+            Tile::new(Suit::Characters, 4, 5),
+            Tile::new(Suit::Circles, 2, 6),
+            Tile::new(Suit::Circles, 3, 7),
+            Tile::new(Suit::Circles, 4, 8),
+            Tile::new(Suit::Bamboos, 5, 9),
+            Tile::new(Suit::Bamboos, 6, 10),
+            Tile::new(Suit::Bamboos, 7, 11),
+            Tile::new(Suit::Wind, 1, 12),
+            Tile::new(Suit::Wind, 1, 13),
+            Tile::new(Suit::Wind, 1, 14),
+        ];
+        let sets = vec![
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![12, 13, 14],
+            },
+        ];
+        (tiles, sets)
     }
 
     // ── toggle_select ───────────────────────────────────────────────
@@ -2239,6 +2333,167 @@ mod tests {
         assert_eq!(run.discards_remaining, STARTING_DISCARDS);
     }
 
+    #[test]
+    fn apply_blind_rebuilds_round_resources_from_current_bonuses() {
+        let mut run = test_run();
+        run.plays_remaining = 1;
+        run.discards_remaining = 0;
+        run.relics.active.push(RelicId::SecondWind);
+        run.tag_bonus_plays = 1;
+        run.tag_bonus_discards = 1;
+
+        run.apply_blind(BlindKind::Small);
+
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 2);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 2);
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS + 1);
+        assert_eq!(run.discards_max, STARTING_DISCARDS + 1);
+        assert_eq!(run.tag_bonus_plays, 0);
+        assert_eq!(run.tag_bonus_discards, 0);
+    }
+
+    #[test]
+    fn second_wind_round_cap_does_not_accumulate_across_round_transitions() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.relics.active.push(RelicId::SecondWind);
+
+        run.apply_blind(BlindKind::Small);
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+
+        run.advance_round(&mut bus);
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+
+        run.apply_blind(BlindKind::Big);
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+    }
+
+    #[test]
+    fn second_wind_plays_used_uses_effective_round_cap() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::SecondWind);
+        run.apply_blind(BlindKind::Small);
+        run.plays_remaining -= 2;
+
+        let rw = Some(BlindKind::round_wind_for_ante(run.ante));
+        let ctx = ScoreContext {
+            relics: &run.relics,
+            tile_debuffs: &[],
+            scored_last_turn: run.scored_last_turn,
+            dora_faces: run.wall.dora_faces(),
+            available_yaku: run.available_yaku.clone(),
+            round_wind: rw,
+            first_full_hand_of_round: !run.full_hand_played_this_round,
+            plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
+            riichi_active: false,
+            yaku_levels: Some(run.yaku_levels.clone()),
+            played_yaku_this_round: run.played_yaku_this_round.clone(),
+            gold: run.gold,
+            total_score: run.total_score_earned,
+            is_final_play: run.plays_remaining == 0,
+            tile_polisher_bonus: run.tile_polisher_bonus,
+            relic_counters: run.relic_counters.clone(),
+            unscored_hand_tiles: run.hand.len(),
+            river_runner_bonus: run.river_runner_bonus,
+            structure: None,
+        };
+
+        assert_eq!(ctx.plays_used, 2);
+    }
+
+    #[test]
+    fn apply_blind_uses_material_starting_discards_before_skip_bonus() {
+        let mut run = RunState::new(GameMode::with_material(
+            crate::persistence::TileMaterial::Plastic,
+        ));
+        run.discards_remaining = 0;
+        run.tag_bonus_discards = 1;
+
+        run.apply_blind(BlindKind::Small);
+
+        assert_eq!(run.discards_remaining, 6);
+        assert_eq!(run.discards_max, 6);
+        assert_eq!(run.tag_bonus_discards, 0);
+    }
+
+    #[test]
+    fn apply_blind_tracks_reduced_round_caps_for_boss_taxes() {
+        let mut run = test_run();
+        run.boss.effect = Some(crate::core::boss::ResolvedBossEffect::from_static(
+            &crate::core::boss::BossKind::Drought.def().effect,
+        ));
+
+        run.apply_blind(BlindKind::Boss);
+
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS / 2);
+        assert_eq!(run.discards_max, STARTING_DISCARDS / 2);
+    }
+
+    #[test]
+    fn apply_blind_promotes_wide_hand_bonus_to_round_hand_size() {
+        let mut run = test_run();
+        run.apply_tag(crate::core::tag::TagKind::WideHand);
+
+        run.apply_blind(BlindKind::Small);
+
+        assert_eq!(run.hand.len(), HAND_SIZE + 2);
+        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        assert_eq!(run.tag_bonus_hand_size, 0);
+    }
+
+    #[test]
+    fn skipping_with_wide_hand_carries_bonus_into_next_blind() {
+        let mut run = test_run();
+
+        run.apply_tag(crate::core::tag::TagKind::WideHand);
+        run.skip_to_next_blind();
+
+        assert_eq!(run.tag_bonus_hand_size, 2);
+
+        run.apply_blind(BlindKind::Big);
+
+        assert_eq!(run.hand.len(), HAND_SIZE + 2);
+        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        assert_eq!(run.tag_bonus_hand_size, 0);
+    }
+
+    #[test]
+    fn advance_round_after_boss_preserves_pending_shop_skip_rewards() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.blind = BlindKind::Boss;
+        run.upcoming_blind = BlindKind::Boss;
+        run.tag_free_reroll = true;
+        run.tag_patron_gift = true;
+        run.tag_rich_stock = true;
+
+        run.advance_round(&mut bus);
+
+        assert!(run.tag_free_reroll);
+        assert!(run.tag_patron_gift);
+        assert!(run.tag_rich_stock);
+    }
+
+    #[test]
+    fn advance_round_after_boss_clears_unconsumed_next_blind_skip_bonuses() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.blind = BlindKind::Boss;
+        run.upcoming_blind = BlindKind::Boss;
+        run.tag_bonus_plays = 1;
+        run.tag_bonus_discards = 1;
+        run.tag_bonus_hand_size = 2;
+
+        run.advance_round(&mut bus);
+
+        assert_eq!(run.tag_bonus_plays, 0);
+        assert_eq!(run.tag_bonus_discards, 0);
+        assert_eq!(run.tag_bonus_hand_size, 0);
+    }
+
     // ── score_selected_tiles ──────────────────────────────────────
 
     #[test]
@@ -2275,6 +2530,72 @@ mod tests {
         );
         assert!(run.structure_sets.is_empty());
         assert!(run.structure_tiles.is_empty());
+    }
+
+    #[test]
+    fn dragon_allows_non_honor_play_but_debuffs_its_score() {
+        let mut baseline = test_run();
+        baseline.mode.structure_bank = false;
+        baseline.blind = BlindKind::Boss;
+        baseline.upcoming_blind = BlindKind::Boss;
+        let mut baseline_bus = bus();
+        baseline.toggle_select(0);
+        baseline.toggle_select(1);
+        baseline.toggle_select(2);
+        let baseline_pts = baseline.score_selected_tiles(&mut baseline_bus);
+        assert!(baseline_pts > 0);
+        let baseline_score = baseline.round_score;
+
+        let mut dragon = test_run();
+        dragon.mode.structure_bank = false;
+        dragon.blind = BlindKind::Boss;
+        dragon.upcoming_blind = BlindKind::Boss;
+        dragon.boss.upcoming = Some(BossKind::Dragon);
+        let mut dragon_bus = bus();
+        dragon.toggle_select(0);
+        dragon.toggle_select(1);
+        dragon.toggle_select(2);
+        let dragon_pts = dragon.score_selected_tiles(&mut dragon_bus);
+        assert!(dragon_pts > 0, "Dragon should still allow cycling plays");
+        assert!(
+            dragon.round_score > 0,
+            "debuffed Dragon plays should still score something"
+        );
+        assert!(
+            dragon.round_score < baseline_score,
+            "Dragon should weaken non-honor plays instead of hard-locking them"
+        );
+    }
+
+    #[test]
+    fn full_structure_autocash_can_be_disabled() {
+        let mut run = test_run();
+        run.set_auto_cash_in_on_full_structure(false);
+        let mut bus = bus();
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+
+        run.try_autotrigger_structure_full(&mut bus);
+
+        assert_eq!(run.structure_sets.len(), 5);
+        assert_eq!(run.structure_tiles.len(), 14);
+        assert_eq!(run.round_score, 0);
+    }
+
+    #[test]
+    fn full_structure_autocash_defaults_on() {
+        let mut run = test_run();
+        let mut bus = bus();
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+
+        run.try_autotrigger_structure_full(&mut bus);
+
+        assert!(run.structure_sets.is_empty());
+        assert!(run.structure_tiles.is_empty());
+        assert!(run.round_score > 0);
     }
 
     #[test]

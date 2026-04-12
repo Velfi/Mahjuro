@@ -22,22 +22,32 @@
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
+use crate::core::debuff::{TileDebuff, TileDebuffClass};
 use crate::core::relic::RelicId;
 use crate::core::rules::RuleModifier;
 use crate::game::run::RunState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BossKind {
-    // ── Soft (min_ante 1) ────────────────────────────────────────────────
+    // ── Soft / early bosses ──────────────────────────────────────────────
     Drought,
     Whisper,
     Veil,
     Tribute,
+    Gate,
+    Grove,
+    Coin,
+    Bloom,
     // ── Medium (min_ante 3) ──────────────────────────────────────────────
     Hermit,
     Forest,
     Bureaucrat,
     Drunkard,
+    Ash,
+    Furnace,
+    Relic,
+    Blight,
+    Hex,
     // ── Hard (min_ante 5) ────────────────────────────────────────────────
     Famine,
     Tempest,
@@ -47,6 +57,7 @@ pub enum BossKind {
     // chosen variant is locked in immediately and displayed on the boss card
     // — no mid-blind goalpost-moving. See `on_reveal` on `BossDef`.
     Mirror,
+    Counterweight,
     TaxCollector,
     // ── Final (ante 8 only) ──────────────────────────────────────────────
     Dragon,
@@ -92,6 +103,8 @@ pub struct BossEffect {
     /// scoring/validation paths read these the same way they read starting
     /// rules, so adding category A/B effects is purely a data change.
     pub rule_pushes: &'static [RuleModifier],
+    pub tile_debuffs: &'static [TileDebuff],
+    pub relic_debuffs: &'static [RelicId],
     /// One-shot mutation when the boss applies (start of round). `None` if
     /// the boss is purely rule-based.
     pub on_apply: Option<fn(&mut RunState)>,
@@ -108,6 +121,8 @@ pub struct BossEffect {
 #[derive(Clone, Debug)]
 pub struct ResolvedBossEffect {
     pub rule_pushes: Vec<RuleModifier>,
+    pub tile_debuffs: Vec<TileDebuff>,
+    pub relic_debuffs: Vec<RelicId>,
     pub on_apply: Option<fn(&mut RunState)>,
     pub on_play: Option<fn(&mut RunState)>,
     /// Replaces `BossDef::description` in the UI when present. Reactive
@@ -121,6 +136,8 @@ impl ResolvedBossEffect {
     pub fn from_static(eff: &BossEffect) -> Self {
         Self {
             rule_pushes: eff.rule_pushes.to_vec(),
+            tile_debuffs: eff.tile_debuffs.to_vec(),
+            relic_debuffs: eff.relic_debuffs.to_vec(),
             on_apply: eff.on_apply,
             on_play: eff.on_play,
             description_override: None,
@@ -258,6 +275,8 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
     };
     ResolvedBossEffect {
         rule_pushes: vec![rule],
+        tile_debuffs: vec![],
+        relic_debuffs: vec![],
         on_apply: None,
         on_play: None,
         description_override: Some(format!(
@@ -279,6 +298,8 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
     run.boss.tax_collector_cost = cost;
     ResolvedBossEffect {
         rule_pushes: vec![],
+        tile_debuffs: vec![],
+        relic_debuffs: vec![],
         on_apply: Some(tax_collector_apply),
         on_play: Some(tribute_play),
         description_override: Some(format!("Pay {cost} gold each play (locked at reveal)")),
@@ -289,6 +310,199 @@ fn tax_collector_apply(run: &mut RunState) {
     // The cost was stashed on RunState by `tax_collector_reveal`. Mirror
     // Tribute's path: set gold_cost_per_play and let `tribute_play` drain it.
     run.boss.gold_cost_per_play = run.boss.tax_collector_cost;
+}
+
+fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
+    let candidates = [
+        (
+            TileDebuff::Suit(crate::core::tile::Suit::Characters),
+            run.hand
+                .iter()
+                .filter(|t| t.suit == crate::core::tile::Suit::Characters)
+                .count(),
+        ),
+        (
+            TileDebuff::Suit(crate::core::tile::Suit::Bamboos),
+            run.hand
+                .iter()
+                .filter(|t| t.suit == crate::core::tile::Suit::Bamboos)
+                .count(),
+        ),
+        (
+            TileDebuff::Suit(crate::core::tile::Suit::Circles),
+            run.hand
+                .iter()
+                .filter(|t| t.suit == crate::core::tile::Suit::Circles)
+                .count(),
+        ),
+        (
+            TileDebuff::Class(TileDebuffClass::Honors),
+            run.hand
+                .iter()
+                .filter(|t| TileDebuffClass::Honors.matches(t))
+                .count(),
+        ),
+        (
+            TileDebuff::Class(TileDebuffClass::Terminals),
+            run.hand
+                .iter()
+                .filter(|t| TileDebuffClass::Terminals.matches(t))
+                .count(),
+        ),
+        (
+            TileDebuff::Suit(crate::core::tile::Suit::Flower),
+            run.hand
+                .iter()
+                .filter(|t| t.suit == crate::core::tile::Suit::Flower)
+                .count(),
+        ),
+    ];
+    let chosen = candidates
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(debuff, _)| debuff)
+        .unwrap_or(TileDebuff::Class(TileDebuffClass::Honors));
+    ResolvedBossEffect {
+        rule_pushes: vec![],
+        tile_debuffs: vec![chosen],
+        relic_debuffs: vec![],
+        on_apply: None,
+        on_play: None,
+        description_override: Some(format!(
+            "{} tiles are debuffed: they still form hands, but their tile scoring is 0",
+            chosen.label()
+        )),
+    }
+}
+
+fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
+    let mut characters = 0u32;
+    let mut bamboos = 0u32;
+    let mut circles = 0u32;
+    let mut honors = 0u32;
+    let mut terminals = 0u32;
+    let mut flowers = 0u32;
+
+    for &relic in &run.relics.active {
+        match relic {
+            RelicId::InkBrush => characters += 3,
+            RelicId::JadeSerpent => bamboos += 3,
+            RelicId::PearlDiver => circles += 3,
+            RelicId::HonorFury
+            | RelicId::RedDragonRage
+            | RelicId::GreenLuck
+            | RelicId::WhiteSilence
+            | RelicId::WildWinds
+            | RelicId::DragonEcho
+            | RelicId::RoundCompass => honors += 2,
+            RelicId::EdgeRunner | RelicId::ClosedGate => terminals += 2,
+            RelicId::GardenKeeper | RelicId::Ikebana | RelicId::Hanami => flowers += 2,
+            _ => {}
+        }
+    }
+
+    let fallback = run
+        .hand
+        .iter()
+        .fold(
+            (TileDebuff::Class(TileDebuffClass::Honors), 0usize),
+            |best, tile| {
+                let candidate = match tile.suit {
+                    crate::core::tile::Suit::Characters => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Characters)
+                    }
+                    crate::core::tile::Suit::Bamboos => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Bamboos)
+                    }
+                    crate::core::tile::Suit::Circles => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Circles)
+                    }
+                    crate::core::tile::Suit::Flower => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Flower)
+                    }
+                    crate::core::tile::Suit::Wind | crate::core::tile::Suit::Dragon => {
+                        TileDebuff::Class(TileDebuffClass::Honors)
+                    }
+                    crate::core::tile::Suit::Season => TileDebuff::Class(TileDebuffClass::Honors),
+                };
+                let count = run.hand.iter().filter(|t| candidate.matches(t)).count();
+                if count > best.1 {
+                    (candidate, count)
+                } else {
+                    best
+                }
+            },
+        )
+        .0;
+
+    let chosen = [
+        (
+            TileDebuff::Suit(crate::core::tile::Suit::Characters),
+            characters,
+        ),
+        (TileDebuff::Suit(crate::core::tile::Suit::Bamboos), bamboos),
+        (TileDebuff::Suit(crate::core::tile::Suit::Circles), circles),
+        (TileDebuff::Class(TileDebuffClass::Honors), honors),
+        (TileDebuff::Class(TileDebuffClass::Terminals), terminals),
+        (TileDebuff::Suit(crate::core::tile::Suit::Flower), flowers),
+    ]
+    .into_iter()
+    .max_by_key(|(_, weight)| *weight)
+    .and_then(|(debuff, weight)| (weight > 0).then_some(debuff))
+    .unwrap_or(fallback);
+
+    ResolvedBossEffect {
+        rule_pushes: vec![],
+        tile_debuffs: vec![chosen],
+        relic_debuffs: vec![],
+        on_apply: None,
+        on_play: None,
+        description_override: Some(format!(
+            "Countered your relic loadout: {} tiles are debuffed",
+            chosen.label()
+        )),
+    }
+}
+
+fn hex_reveal(run: &mut RunState) -> ResolvedBossEffect {
+    use crate::core::relic::{Rarity, all_relic_defs};
+
+    let target = run
+        .relics
+        .active
+        .iter()
+        .enumerate()
+        .max_by_key(|(idx, id)| {
+            let rarity = all_relic_defs()
+                .iter()
+                .find(|d| d.id == **id)
+                .map(|d| match d.rarity {
+                    Rarity::Common => 0,
+                    Rarity::Uncommon => 1,
+                    Rarity::Rare => 2,
+                    Rarity::Legendary => 3,
+                })
+                .unwrap_or(0);
+            (rarity, std::cmp::Reverse(*idx))
+        })
+        .map(|(_, &id)| id);
+    let description_override = target.map(|id| {
+        let name = all_relic_defs()
+            .iter()
+            .find(|d| d.id == id)
+            .map(|d| d.name)
+            .unwrap_or("Unknown Relic");
+        format!("{name} is debuffed and disabled this round")
+    });
+    ResolvedBossEffect {
+        rule_pushes: vec![],
+        tile_debuffs: vec![],
+        relic_debuffs: target.into_iter().collect(),
+        on_apply: None,
+        on_play: None,
+        description_override: description_override
+            .or_else(|| Some("No relic to hex this round".to_string())),
+    }
 }
 
 /// Effective hand size after applying any per-round bonus_hand_size delta.
@@ -310,6 +524,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 1,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: Some(drought_apply),
             on_play: None,
         },
@@ -323,6 +539,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 1,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: Some(whisper_apply),
             on_play: None,
         },
@@ -336,6 +554,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 1,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: Some(veil_apply),
             on_play: None,
         },
@@ -349,8 +569,70 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 1,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: Some(tribute_apply),
             on_play: Some(tribute_play),
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Gate,
+        name: "The Ink Gate",
+        description: "Characters are debuffed",
+        tier: BossTier::Soft,
+        min_ante: 2,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Characters)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Grove,
+        name: "The Jade Grove",
+        description: "Bamboos are debuffed",
+        tier: BossTier::Soft,
+        min_ante: 2,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Bamboos)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Coin,
+        name: "The Copper Wheel",
+        description: "Circles are debuffed",
+        tier: BossTier::Soft,
+        min_ante: 2,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Circles)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Bloom,
+        name: "The Bloom Rot",
+        description: "Flowers are debuffed",
+        tier: BossTier::Soft,
+        min_ante: 2,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Flower)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
         },
         on_reveal: None,
     },
@@ -362,6 +644,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 3,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::PairsScoreZero],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
@@ -375,6 +659,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 3,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::SequencesHalved],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
@@ -388,6 +674,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 3,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::MustPlayFive],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
@@ -401,10 +689,87 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 3,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::MiddleTilesZero],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
         on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Ash,
+        name: "The Ash",
+        description: "Simple tiles are debuffed",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Simples)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Furnace,
+        name: "The Furnace",
+        description: "Terminals are debuffed",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Terminals)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Relic,
+        name: "The Shrine",
+        description: "Honors are debuffed",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Honors)],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: None,
+    },
+    BossDef {
+        kind: BossKind::Blight,
+        name: "The Blight",
+        description: "Your most common opening-hand family is debuffed",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: Some(blight_reveal),
+    },
+    BossDef {
+        kind: BossKind::Hex,
+        name: "The Hex",
+        description: "Disables one owned relic for the round",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: Some(hex_reveal),
     },
     BossDef {
         kind: BossKind::Famine,
@@ -414,6 +779,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 5,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: Some(famine_apply),
             on_play: None,
         },
@@ -427,6 +794,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 5,
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: Some(tempest_play),
         },
@@ -440,6 +809,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         min_ante: 5,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::CensorRepeats],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
@@ -457,10 +828,27 @@ pub static ALL_BOSSES: &[BossDef] = &[
         // silenced — locked in at ante reveal so it can't move mid-fight.
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
         on_reveal: Some(mirror_reveal),
+    },
+    BossDef {
+        kind: BossKind::Counterweight,
+        name: "The Counterweight",
+        description: "Debuffs the tile family your relics support most",
+        tier: BossTier::Medium,
+        min_ante: 3,
+        effect: BossEffect {
+            rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
+            on_apply: None,
+            on_play: None,
+        },
+        on_reveal: Some(counterweight_reveal),
     },
     BossDef {
         kind: BossKind::TaxCollector,
@@ -473,6 +861,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
         // `RunState::tax_collector_cost` for `tax_collector_apply` to read.
         effect: BossEffect {
             rule_pushes: &[],
+            tile_debuffs: &[],
+            relic_debuffs: &[],
             on_apply: None,
             on_play: None,
         },
@@ -483,11 +873,13 @@ pub static ALL_BOSSES: &[BossDef] = &[
 pub static FINAL_BOSSES: &[BossDef] = &[BossDef {
     kind: BossKind::Dragon,
     name: "The Dragon",
-    description: "Every play must contain a Wind or Dragon tile",
+    description: "Hands without honors are debuffed",
     tier: BossTier::Final,
     min_ante: 8,
     effect: BossEffect {
-        rule_pushes: &[RuleModifier::RequireHonor],
+        rule_pushes: &[],
+        tile_debuffs: &[],
+        relic_debuffs: &[],
         on_apply: None,
         on_play: None,
     },
@@ -533,4 +925,71 @@ pub fn pick_for_ante(
 pub fn pick_final(rng: &mut impl rand::Rng) -> BossKind {
     let idx = rng.random_range(0..FINAL_BOSSES.len());
     FINAL_BOSSES[idx].kind
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::tile::{Suit, Tile};
+    use crate::game::game_mode::GameMode;
+
+    fn custom_tile(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    #[test]
+    fn static_debuff_bosses_are_in_regular_pool() {
+        let pool = regular_pool();
+        for boss in [
+            BossKind::Gate,
+            BossKind::Grove,
+            BossKind::Coin,
+            BossKind::Bloom,
+            BossKind::Ash,
+            BossKind::Furnace,
+            BossKind::Relic,
+            BossKind::Counterweight,
+        ] {
+            assert!(pool.contains(&boss), "{boss:?} should be rollable");
+        }
+    }
+
+    #[test]
+    fn blight_can_choose_flower_debuffs() {
+        let mut run = RunState::new(GameMode::standard());
+        run.hand = vec![
+            custom_tile(Suit::Flower, 1, 1),
+            custom_tile(Suit::Flower, 2, 2),
+            custom_tile(Suit::Flower, 3, 3),
+            custom_tile(Suit::Characters, 1, 4),
+            custom_tile(Suit::Bamboos, 2, 5),
+        ];
+        run.selected = vec![false; run.hand.len()];
+
+        let effect = blight_reveal(&mut run);
+
+        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Suit(Suit::Flower)]);
+    }
+
+    #[test]
+    fn counterweight_targets_relic_supported_family() {
+        let mut run = RunState::new(GameMode::standard());
+        run.relics.active = vec![RelicId::JadeSerpent, RelicId::GardenKeeper];
+        run.hand = vec![
+            custom_tile(Suit::Characters, 1, 1),
+            custom_tile(Suit::Characters, 2, 2),
+            custom_tile(Suit::Bamboos, 3, 3),
+            custom_tile(Suit::Bamboos, 4, 4),
+            custom_tile(Suit::Flower, 1, 5),
+        ];
+        run.selected = vec![false; run.hand.len()];
+
+        let effect = counterweight_reveal(&mut run);
+
+        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Suit(Suit::Bamboos)]);
+        assert_eq!(
+            effect.description_override.as_deref(),
+            Some("Countered your relic loadout: Bamboos tiles are debuffed")
+        );
+    }
 }

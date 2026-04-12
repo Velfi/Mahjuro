@@ -234,7 +234,7 @@ pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
 /// - `SequenceWrap`: allows wrapping sequences (8-9-1, 9-1-2)
 /// - `NoSequences`: rejects any decomposition containing sequences
 /// - `MustPlayFour`: rejects selections that aren't exactly 4 tiles
-/// - `RequireDragon`: rejects selections without at least one Dragon tile
+/// - `RequireHonor`: rejects decompositions with no honor tile anywhere
 pub fn validate_selection_with_rules(
     tiles: &[Tile],
     rules: &[RuleModifier],
@@ -245,16 +245,6 @@ pub fn validate_selection_with_rules(
     // Pre-validation rejects from boss effects. These run before decomposition
     // so we don't waste cycles on hands the boss already disqualifies.
     if rules.contains(&RuleModifier::MustPlayFive) && tiles.len() != 5 {
-        return None;
-    }
-    if rules.contains(&RuleModifier::RequireHonor)
-        && !tiles.iter().any(|t| {
-            matches!(
-                t.suit,
-                crate::core::tile::Suit::Wind | crate::core::tile::Suit::Dragon
-            )
-        })
-    {
         return None;
     }
     // Partition into regular tiles and flower wildcards.
@@ -284,6 +274,20 @@ pub fn validate_selection_with_rules(
         let mut result = flower_melds;
         if backtrack_decompose_flowers(&regular, &mut wildcards, &mut result, allow_wrap) {
             if no_sequences && result.iter().any(|s| s.kind == SetKind::Sequence) {
+                continue;
+            }
+            if rules.contains(&RuleModifier::RequireHonor)
+                && !result.iter().any(|set| {
+                    set.tile_ids.iter().any(|id| {
+                        tiles.iter().find(|t| t.id == *id).is_some_and(|t| {
+                            matches!(
+                                t.suit,
+                                crate::core::tile::Suit::Wind | crate::core::tile::Suit::Dragon
+                            )
+                        })
+                    })
+                })
+            {
                 continue;
             }
             return Some(result);
@@ -1081,6 +1085,42 @@ mod tests {
         let sets = validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn require_honor_rejects_structure_without_honor() {
+        let tiles = vec![
+            t(Suit::Bamboos, 5, 0),
+            t(Suit::Bamboos, 5, 1),
+            t(Suit::Bamboos, 5, 2),
+        ];
+        assert!(validate_selection_with_rules(&tiles, &[RuleModifier::RequireHonor]).is_none());
+    }
+
+    #[test]
+    fn require_honor_allows_honor_only_structure() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Dragon, 1, 2),
+        ];
+        let sets = validate_selection_with_rules(&tiles, &[RuleModifier::RequireHonor]).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn require_honor_allows_mixed_structure_with_one_honor_meld() {
+        let tiles = vec![
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 2, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Dragon, 1, 3),
+            t(Suit::Dragon, 1, 4),
+            t(Suit::Dragon, 1, 5),
+        ];
+        let sets = validate_selection_with_rules(&tiles, &[RuleModifier::RequireHonor]).unwrap();
+        assert_eq!(sets.len(), 2);
     }
 }
 

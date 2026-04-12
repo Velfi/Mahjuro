@@ -40,8 +40,8 @@ each turn evaluates ~16k bitmasks; debug builds are 10–20× slower.
 | `--bot [N]` | u32 | 100 | Run N games with current overrides and print aggregate stats. |
 | `--sweep` | flag | — | Run a parameter grid (see below) instead of a single config. |
 | `--runs N` | u32 | 40 | Runs per cell when sweeping. |
-| `--base-target N` | u32 | 300 | Ante 1 base score (Small Blind target). |
-| `--target-scale F` | f32 | 1.5 | Multiplier applied to `base_target` when an ante completes. |
+| `--base-target N` | u32 | 350 | Ante 1 base score (Small Blind target). |
+| `--target-scale F` | f32 | 1.7 | Multiplier applied to `base_target` when an ante completes. |
 | `--plays N` | u32 | 4 | `starting_plays` per blind. |
 | `--discards N` | u32 | 3 | `starting_discards` per blind. |
 | `--gold N` | u32 | 4 | `starting_gold`. |

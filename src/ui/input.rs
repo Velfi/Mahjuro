@@ -1,5 +1,7 @@
 //! Unified input: mouse, keyboard, gamepad → semantic actions.
 
+use std::time::Instant;
+
 use gilrs::{Axis, Button, Event as GilEvent, Gilrs};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -25,6 +27,8 @@ pub enum UiAction {
     FocusUp,
     /// Toggle-select the focused tile for discard.
     Confirm,
+    /// Controller-only: release the confirm face button.
+    ConfirmRelease,
     Cancel,
     /// Commit selected melds into the structure (costs one play).
     ScoreHand,
@@ -51,9 +55,17 @@ pub enum UiAction {
     DebugToggleAxes,
 }
 
-/// Active drag state for tile reordering.
+/// What kind of draggable inventory item is currently being rearranged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragSubject {
+    HandTile,
+    Relic,
+}
+
+/// Active drag state for hand-tile or relic reordering.
 #[derive(Clone, Debug)]
 pub struct DragState {
+    pub subject: DragSubject,
     pub from_slot: usize,
     pub start_pos: (f32, f32),
     pub current_pos: (f32, f32),
@@ -68,6 +80,16 @@ pub struct InputState {
     pub drag: Option<DragState>,
     /// When true, gamepad South (A) and East (B) are swapped.
     pub swap_ab: bool,
+    /// Last non-neutral horizontal left-stick direction we emitted:
+    /// -1 = left, +1 = right, 0 = neutral. Prevents a single tilt from
+    /// generating a burst of repeated focus moves.
+    left_stick_x_dir: i8,
+    /// Last non-neutral vertical left-stick direction we emitted:
+    /// -1 = up, +1 = down, 0 = neutral.
+    left_stick_y_dir: i8,
+    /// Timestamp of the latest stick-navigation edge. Kept for future
+    /// tuning / diagnostics and to make the gating behavior explicit.
+    last_stick_nav_at: Instant,
 }
 
 impl InputState {
@@ -81,6 +103,9 @@ impl InputState {
             mode: InputMode::Cursor,
             drag: None,
             swap_ab: settings.swap_ab,
+            left_stick_x_dir: 0,
+            left_stick_y_dir: 0,
+            last_stick_nav_at: Instant::now(),
         })
     }
 
@@ -95,6 +120,7 @@ impl InputState {
             return false;
         };
         let before = actions.len();
+        const STICK_DEADZONE: f32 = 0.65;
         while let Some(GilEvent { event, .. }) = gilrs.next_event() {
             use gilrs::EventType::*;
             match event {
@@ -103,8 +129,18 @@ impl InputState {
                 } else {
                     UiAction::Confirm
                 }),
+                ButtonReleased(Button::South, _) => actions.push(if self.swap_ab {
+                    UiAction::Cancel
+                } else {
+                    UiAction::ConfirmRelease
+                }),
                 ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
                     UiAction::Confirm
+                } else {
+                    UiAction::Cancel
+                }),
+                ButtonReleased(Button::East, _) => actions.push(if self.swap_ab {
+                    UiAction::ConfirmRelease
                 } else {
                     UiAction::Cancel
                 }),
@@ -112,9 +148,41 @@ impl InputState {
                 ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::TriggerStructure),
                 ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),
                 ButtonPressed(Button::North, _) => actions.push(UiAction::CommitDiscard),
-                AxisChanged(Axis::LeftStickX, v, _) if v > 0.5 => actions.push(UiAction::FocusNext),
-                AxisChanged(Axis::LeftStickX, v, _) if v < -0.5 => {
-                    actions.push(UiAction::FocusPrev)
+                AxisChanged(Axis::LeftStickX, v, _) => {
+                    let new_dir = if v >= STICK_DEADZONE {
+                        1
+                    } else if v <= -STICK_DEADZONE {
+                        -1
+                    } else {
+                        0
+                    };
+                    if new_dir != 0 && new_dir != self.left_stick_x_dir {
+                        actions.push(if new_dir > 0 {
+                            UiAction::FocusNext
+                        } else {
+                            UiAction::FocusPrev
+                        });
+                        self.last_stick_nav_at = Instant::now();
+                    }
+                    self.left_stick_x_dir = new_dir;
+                }
+                AxisChanged(Axis::LeftStickY, v, _) => {
+                    let new_dir = if v >= STICK_DEADZONE {
+                        1
+                    } else if v <= -STICK_DEADZONE {
+                        -1
+                    } else {
+                        0
+                    };
+                    if new_dir != 0 && new_dir != self.left_stick_y_dir {
+                        actions.push(if new_dir > 0 {
+                            UiAction::FocusDown
+                        } else {
+                            UiAction::FocusUp
+                        });
+                        self.last_stick_nav_at = Instant::now();
+                    }
+                    self.left_stick_y_dir = new_dir;
                 }
                 ButtonPressed(Button::DPadRight, _) => actions.push(UiAction::FocusNext),
                 ButtonPressed(Button::DPadLeft, _) => actions.push(UiAction::FocusPrev),
@@ -212,6 +280,7 @@ pub fn apply_ui_actions(
                     run.toggle_select(idx);
                 }
             }
+            UiAction::ConfirmRelease => {}
             UiAction::CommitDiscard => {
                 let discarded = run.discard_selected(bus);
                 if discarded > 0 {

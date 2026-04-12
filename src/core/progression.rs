@@ -12,7 +12,7 @@ use crate::core::yaku::YakuKind;
 pub struct PlayerProgress {
     pub unlocked_relics: HashSet<RelicId>,
     pub unlocked_rules: HashSet<RuleModifier>,
-    pub high_scores: Vec<u32>,
+    pub high_scores: Vec<u64>,
     /// Total runs completed (drives level progression).
     #[serde(default)]
     pub runs_completed: u32,
@@ -45,7 +45,7 @@ impl PlayerProgress {
         }
     }
 
-    pub fn record_score(&mut self, score: u32) {
+    pub fn record_score(&mut self, score: u64) {
         self.high_scores.push(score);
         self.high_scores.sort_by(|a, b| b.cmp(a));
         self.high_scores.truncate(10);
@@ -127,9 +127,7 @@ impl PlayerProgress {
 
     /// Yaku patterns available for this player's progression level.
     /// FullHand and Yakuhai are always available; remaining yaku gate on
-    /// progression level. (The Patch B Codex loadout system in run state
-    /// further restricts which of these contribute at full value during a
-    /// given run — see `RunState::yaku_loadout`.)
+    /// progression level.
     pub fn available_yaku(&self) -> Vec<YakuKind> {
         let level = self.current_level();
         let mut available = vec![YakuKind::FullHand, YakuKind::Yakuhai];
@@ -174,7 +172,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TripletBoost,
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
-                RelicId::WallPeek,
                 RelicId::ZodiacPouch,
                 RelicId::JadeSerpent,
                 RelicId::InkBrush,
@@ -201,7 +198,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::ChainReaction,
                 RelicId::SetMagnet,
                 RelicId::RoundCompass,
-                RelicId::YakuScholar,
                 RelicId::MerchantsEye,
                 RelicId::Momentum,
             ],

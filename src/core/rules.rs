@@ -25,7 +25,8 @@ pub enum RuleModifier {
     MiddleTilesZero,
     /// Selection must contain exactly 5 tiles. (The Bureaucrat boss.)
     MustPlayFive,
-    /// Selection must contain at least one Honor (Wind or Dragon) tile.
+    /// Structure in the selection must contain at least one Honor
+    /// (Wind or Dragon) tile somewhere.
     /// (The Dragon final boss.)
     RequireHonor,
     /// Yaku already played this round score at half strength. (The Censor boss.)
@@ -62,7 +63,7 @@ impl RuleModifier {
             RuleModifier::SequencesHalved => "Sequences score half base chips",
             RuleModifier::MiddleTilesZero => "Rank-5 tiles score 0",
             RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
-            RuleModifier::RequireHonor => "Hand must contain a Wind or Dragon tile",
+            RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",
         }
     }

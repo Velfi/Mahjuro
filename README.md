@@ -59,8 +59,8 @@ Every third blind is a **boss** with a special rule that forces you to adapt:
 
 - **The Hermit** -- Pairs score zero
 - **The Forest** -- Sequences are halved
-- **The Bureaucrat** -- You must play exactly 4 tiles
-- **The Dragon** -- Every hand must include an honor tile
+- **The Bureaucrat** -- You must play exactly 5 tiles
+- **The Dragon** -- Structure must contain honors
 
 ## Getting Started
 
@@ -112,6 +112,9 @@ cargo run --release -- --sweep --runs 30
 
 # Custom parameters
 cargo run --release -- --bot 200 --base-target 250 --target-scale 1.3 --plays 5
+
+# Verbose trace for a single run
+cargo run --release -- --bot 1 --bot-log
 ```
 
 Always use `--release` for bot mode -- debug builds are 10-20x slower.

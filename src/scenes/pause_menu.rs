@@ -287,6 +287,9 @@ impl PauseMenu {
 
     fn do_restart(&mut self, run: &mut RunState) -> PauseUpdate {
         *run = RunState::new_demo();
+        run.set_auto_cash_in_on_full_structure(
+            crate::persistence::load_settings().auto_cash_in_on_full_structure,
+        );
         PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(run.run_number, run))))
     }
 

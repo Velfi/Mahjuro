@@ -13,10 +13,10 @@ pub enum YakuKind {
     /// All melds are triplets (or kongs) — no sequences. Tied to the Ox zodiac.
     Toitoi,
     /// Full 14-tile hand: 4 melds + 1 pair. Kongs count as a meld. Tied to the
-    /// Dragon zodiac. Always active regardless of loadout.
+    /// Dragon zodiac.
     FullHand,
     /// Triplet (or kong) of any dragon, or of the current ante's round wind.
-    /// Tied to the Dog zodiac. Always active regardless of loadout.
+    /// Tied to the Dog zodiac.
     Yakuhai,
     /// Two identical sequences in the same suit (e.g. 2-3-4m + 2-3-4m). Tied
     /// to the Rabbit zodiac.

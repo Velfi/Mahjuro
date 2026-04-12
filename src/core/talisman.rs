@@ -78,8 +78,8 @@ impl TalismanKind {
     /// rather than buffing them.
     pub fn shop_price(self) -> u32 {
         match self {
-            TalismanKind::Kiln => 5,
-            _ => 6,
+            TalismanKind::Kiln => 7,
+            _ => 8,
         }
     }
 }

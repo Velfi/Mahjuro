@@ -132,7 +132,7 @@ impl ZodiacKind {
     /// zodiacs in Patch B; the per-zodiac variation can come later if balance
     /// demands it.
     pub fn shop_price() -> u32 {
-        4
+        6
     }
 }
 

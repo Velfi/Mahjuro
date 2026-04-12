@@ -201,6 +201,9 @@ impl SceneBehavior for StartScreenScene {
                     }
                     // Only one material available — skip tile select.
                     *ctx.run = RunState::new_with_material(TileMaterial::default());
+                    ctx.run.set_auto_cash_in_on_full_structure(
+                        persistence::load_settings().auto_cash_in_on_full_structure,
+                    );
                     return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)));
                 }
                 Some(MenuFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
@@ -271,6 +274,7 @@ impl SceneBehavior for StartScreenScene {
                 } else {
                     0.0
                 },
+                rotation_z_deg: 0.0,
                 disabled: false,
             });
         }

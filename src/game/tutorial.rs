@@ -55,13 +55,13 @@ impl FirstEncounter {
         match self {
             Self::BlindTarget => "Reach this score before you run out of plays to clear the blind.",
             Self::GoldPayout => {
-                "You earn gold for clearing blinds. Spend it in the Shop on Relics!"
+                "You earn gold for clearing blinds. Your gold now sits in a loose pile by the score panel. Spend it in the Shop on Relics!"
             }
             Self::YakuTag => {
-                "White tags are yaku \u{2014} special patterns that boost your multiplier. Check the Meld Guide for all of them!"
+                "White tags are yaku \u{2014} special patterns that boost your multiplier. Watch the mult side of the score readout and check the Meld Guide for all of them!"
             }
             Self::RelicEffect => {
-                "Your relic just fired! Relics add chips or mult automatically when their condition is met."
+                "Your relic just fired! Relics add chips or mult automatically when their condition is met, and the score panel updates as the piles build."
             }
         }
     }
@@ -351,16 +351,16 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [0] no selection              → prompt play
     //   [1] has selection             → press Play to bank
     //   [2] structure has melds       → press Trigger to score
-    //   [3] during cascade            → watch breakdown
+    //   [3] during cascade            → watch the piles and panel
     LessonDef {
         id: 5,
         flavor_text: "The secret of every master: multiply your fortune.",
-        intro_text: "Bank your best melds with Play, then press Trigger \u{2014} watch the scoring cascade to see Chips \u{00d7} Mult!",
+        intro_text: "Bank your best melds with Play, then press Trigger. During scoring, watch the chip pile, the mult pile, and the score panel together \u{2014} Chips \u{00d7} Mult!",
         step_prompts: &[
             "Build your best melds and press Play to bank them.",
             "Press Play to bank your melds into the structure!",
-            "Press Trigger to cash in \u{2014} watch the cascade closely!",
-            "Chips \u{00d7} Mult \u{2014} that\u{2019}s your score! More melds banked = bigger multiplier. Next lesson: Yaku!",
+            "Press Trigger to cash in \u{2014} watch the score panel and the two rough piles as they build.",
+            "Chips build on the left, mult builds on the right, and the panel carries the exact running score. More melds banked = a bigger mult pile. Next lesson: Yaku!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -379,7 +379,8 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         recap: &[
             "Scoring: Chips \u{00d7} Mult",
             "Bank melds with Play, then press Trigger to score them all at once.",
-            "More melds in the structure = bigger mult bonus. A Triplet gives 50 chips at \u{00d7}2 mult = 100 pts!",
+            "The scoring lesson is visual now: chip and mult heaps grow as the panel updates, instead of floating exact values over the table.",
+            "More melds in the structure = a bigger mult bonus and a taller mult heap.",
             "Coming up: Yaku \u{2014} special patterns that multiply your score even more!",
         ],
     },
@@ -391,11 +392,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     LessonDef {
         id: 6,
         flavor_text: "A complete hand opens every door.",
-        intro_text: "Bank melds with Play and Trigger to score. If you bank all 14 tiles as 4 melds + 1 pair, you\u{2019}ll trigger FullHand \u{2014} a big multiplier bonus!",
+        intro_text: "A complete 14-tile hand can be either 4+4+4+4+2 (4 melds + 1 pair) or 2x7 (seven pairs). Bank the 4+4+4+4+2 shape with Play and Trigger to score FullHand \u{2014} a big multiplier bonus!",
         step_prompts: &[
-            "Bank pairs, triplets, and sequences. Try for 4 melds + 1 pair to get FullHand!",
+            "A standard complete hand is 4+4+4+4+2: 4 melds plus 1 pair. The other complete shape is 2x7: seven pairs. This lesson is about the 4+4+4+4+2 FullHand.",
             "Press Play to bank! The white tags at Trigger time are yaku \u{2014} bonus patterns that boost your mult.",
-            "FullHand is just one yaku \u{2014} check the Meld Guide (Pause menu) for all 13!",
+            "FullHand is one yaku, and Chiitoitsu is the seven-pairs yaku \u{2014} check the Meld Guide (Pause menu) for all 13!",
             "Great \u{2014} the Meld Guide lists all 13 yaku. Keep banking and scoring to beat this blind!",
         ],
         allowed_sets: &[
@@ -415,7 +416,8 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         recap: &[
             "Yaku Unlocked",
             "Yaku are bonus patterns that boost your mult when scored.",
-            "FullHand: use all 14 tiles as 4 melds + 1 pair. Worth +5 mult and +60 chips!",
+            "Complete hands come in two shapes: 4+4+4+4+2 (4 melds + 1 pair) or 2x7 (seven pairs).",
+            "FullHand is the 4+4+4+4+2 shape. Worth +5 mult and +60 chips!",
         ],
     },
     // ── Lesson 7: Honors & Yakuhai ────────────────────────────────
@@ -446,18 +448,18 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Honor Tiles & Yakuhai",
             "Winds and Dragons are rare honor tiles worth extra chips.",
             "A wind or dragon triplet triggers Yakuhai \u{2014} another yaku multiplier.",
-            "The Shop is next \u{2014} spend gold on more Relics to power up your run!",
+            "Next stop: the Shop \u{2014} spend gold on relics, ribbons, and talismans to power up your run.",
         ],
     },
     // ── Lesson 8: The Shop ────────────────────────────────────────
     //   [0] no selection (gameplay)  [1] has selection → press Play to bank
     LessonDef {
         id: 8,
-        flavor_text: "Gold well spent returns tenfold.",
-        intro_text: "Beat this blind to reach the Shop! You\u{2019}ll spend gold on Relics that boost your scoring.",
+        flavor_text: "Stock your run, then put it to work.",
+        intro_text: "The Shop appears between blinds. Buy relics for passive bonuses, ribbons to level yaku, and talismans to enhance tiles \u{2014} then use your new upgrades to beat this blind.",
         step_prompts: &[
-            "Beat this blind to reach the Shop \u{2014} bank your best melds!",
-            "Press Play to bank, then Trigger to score and earn gold for the Shop!",
+            "Use your new shop upgrades to build your best melds.",
+            "Press Play to bank, then Trigger to score with your upgraded run!",
         ],
         allowed_sets: &[
             SetKind::Pair,
@@ -475,8 +477,9 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         annotated_cascade: false,
         recap: &[
             "The Shop",
-            "After each boss blind, spend gold on Relics in the Shop.",
-            "Relics give permanent scoring bonuses for the rest of the run.",
+            "After boss blinds, spend gold in the Shop before the next round begins.",
+            "Relics give passive bonuses for the rest of the run. Ribbons level up yaku, and talismans enhance your tiles.",
+            "Hover anything to inspect it, buy what helps, and press Next Round when you are ready to continue.",
         ],
     },
     // ── Lesson 9: Graduation ──────────────────────────────────────
