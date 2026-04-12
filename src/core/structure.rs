@@ -1,7 +1,8 @@
 //! Structure scoring: commit melds from hand into a held area, then trigger to score.
 
 use crate::core::hand::DetectedSet;
-use crate::core::tile::Tile;
+use crate::core::rules::RuleModifier;
+use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind, is_complete_winning_hand};
 
 /// How structure scoring was initiated.
@@ -22,8 +23,6 @@ pub struct StructureTriggerMeta {
     #[allow(dead_code)]
     pub kind: StructureTriggerKind,
     pub meld_count: u32,
-    /// Multiply cumulative mult after yaku/relic phases (1.0 = no penalty).
-    pub early_cashout_mult: f64,
     /// If no yaku detected, inject Chicken Hand (base ×1 mult).
     pub inject_chicken_if_no_yaku: bool,
 }
@@ -41,34 +40,6 @@ pub fn banked_meld_chips(sets: &[DetectedSet]) -> i32 {
         .sum()
 }
 
-/// Chip pile tier 0..=5 from plan (banked meld chips only).
-pub fn chip_pile_tier(banked: i32) -> u8 {
-    if banked <= 0 {
-        0
-    } else if banked <= 40 {
-        1
-    } else if banked <= 100 {
-        2
-    } else if banked <= 200 {
-        3
-    } else if banked <= 320 {
-        4
-    } else {
-        5
-    }
-}
-
-/// Mult pile tier 0..=4 from plan (melds in structure).
-pub fn mult_pile_tier(meld_count: usize) -> u8 {
-    match meld_count {
-        0 => 0,
-        1 => 1,
-        2 | 3 => 2,
-        4 | 5 => 3,
-        _ => 4,
-    }
-}
-
 /// +mult per meld after the first, capped (applied at trigger).
 pub fn structure_depth_mult_bonus(meld_count: u32) -> f64 {
     let extra = meld_count.saturating_sub(1) as f64 * 0.1;
@@ -77,6 +48,17 @@ pub fn structure_depth_mult_bonus(meld_count: u32) -> f64 {
 
 pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
     is_complete_winning_hand(tiles, sets)
+}
+
+fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
+    sets.iter().any(|set| {
+        set.tile_ids.iter().any(|id| {
+            tiles
+                .iter()
+                .find(|t| t.id == *id)
+                .is_some_and(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+        })
+    })
 }
 
 fn yaku_non_empty_filtered(
@@ -100,8 +82,12 @@ pub fn can_trigger_structure(
     sets: &[DetectedSet],
     round_wind: Option<u8>,
     available_yaku: &[YakuKind],
+    rules: &[RuleModifier],
 ) -> bool {
     if sets.is_empty() {
+        return false;
+    }
+    if rules.contains(&RuleModifier::RequireHonor) && !structure_contains_honor(tiles, sets) {
         return false;
     }
     if yaku_non_empty_filtered(tiles, sets, round_wind, available_yaku) {
@@ -113,11 +99,81 @@ pub fn can_trigger_structure(
     true
 }
 
-/// Early mult factor when manually triggering before a full winning shape.
-pub fn early_cashout_factor(tiles: &[Tile], sets: &[DetectedSet]) -> f64 {
-    if is_winning_structure_shape(tiles, sets) {
-        return 1.0;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::hand::SetKind;
+
+    fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
     }
-    let n = tiles.len().min(14) as f64;
-    (0.5 + 0.5 * (n / 14.0)).clamp(0.25, 1.0)
+
+    #[test]
+    fn require_honor_blocks_trigger_when_any_set_lacks_honor() {
+        let tiles = vec![
+            tile(Suit::Bamboos, 5, 0),
+            tile(Suit::Bamboos, 5, 1),
+            tile(Suit::Bamboos, 5, 2),
+        ];
+        let sets = vec![DetectedSet {
+            kind: SetKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        }];
+        assert!(!can_trigger_structure(
+            &tiles,
+            &sets,
+            None,
+            &[],
+            &[RuleModifier::RequireHonor],
+        ));
+    }
+
+    #[test]
+    fn require_honor_allows_trigger_when_all_sets_have_honors() {
+        let tiles = vec![
+            tile(Suit::Dragon, 1, 0),
+            tile(Suit::Dragon, 1, 1),
+            tile(Suit::Dragon, 1, 2),
+        ];
+        let sets = vec![DetectedSet {
+            kind: SetKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        }];
+        assert!(can_trigger_structure(
+            &tiles,
+            &sets,
+            None,
+            &[],
+            &[RuleModifier::RequireHonor],
+        ));
+    }
+
+    #[test]
+    fn require_honor_allows_trigger_when_only_one_set_has_honor() {
+        let tiles = vec![
+            tile(Suit::Bamboos, 1, 0),
+            tile(Suit::Bamboos, 2, 1),
+            tile(Suit::Bamboos, 3, 2),
+            tile(Suit::Dragon, 1, 3),
+            tile(Suit::Dragon, 1, 4),
+            tile(Suit::Dragon, 1, 5),
+        ];
+        let sets = vec![
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+        ];
+        assert!(can_trigger_structure(
+            &tiles,
+            &sets,
+            None,
+            &[],
+            &[RuleModifier::RequireHonor],
+        ));
+    }
 }

@@ -21,7 +21,7 @@ pub enum GameEvent {
     TileDiscarded {
         slot_index: usize,
     },
-    ScoreUpdated(u32),
+    ScoreUpdated(u64),
     /// A scoring cascade just revealed step `index` of the breakdown.
     /// Fires once per step, on the frame the reveal edge is crossed.
     ScoreStepRevealed {
@@ -40,7 +40,7 @@ pub enum GameEvent {
     },
     RunComplete,
     GameOver {
-        final_score: u32,
+        final_score: u64,
     },
     /// Tiles permanently destroyed via the Kiln talisman.
     TilesDestroyed {
@@ -67,6 +67,8 @@ pub enum GameEvent {
     StructureCommitted,
     /// Tutorial milestone celebration (first pair, first triplet, etc.).
     TutorialMilestone(crate::game::tutorial::TutorialMilestone),
+    /// An action was rejected as invalid (e.g. bad meld, structure full).
+    InvalidAction,
 }
 
 #[derive(Default)]

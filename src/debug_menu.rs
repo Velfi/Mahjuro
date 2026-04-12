@@ -51,6 +51,8 @@ pub enum DebugAction {
     OpenPack,
     /// Spawn a blank test modal overlay to verify overlay blocking behavior.
     TestOverlay,
+    /// Jump directly to the victory scene for presentation/debugging.
+    ShowVictoryScreen,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -142,6 +144,11 @@ impl DebugMenuBar {
         let test_overlay_item = MenuItem::new("Test Overlay", true, None);
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
         let _ = debug_menu.append(&test_overlay_item);
+
+        // Open the final-ante victory scene directly.
+        let victory_item = MenuItem::new("Show Victory Screen", true, None);
+        mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
+        let _ = debug_menu.append(&victory_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

@@ -180,6 +180,9 @@ pub fn rasterize_tile_face_decal(
             if let Some(enh) = tile.enhancement {
                 draw_enhancement_border(&mut rgba, width, height, enh);
             }
+            if tile.debuffed_visual {
+                draw_debuff_marker(&mut rgba, width, height);
+            }
             return rgba;
         }
     }
@@ -196,6 +199,9 @@ pub fn rasterize_tile_face_decal(
     // Flower tiles use pre-generated decal PNGs instead of font rasterization.
     if tile.suit == Suit::Flower {
         blit_flower_decal(&mut rgba, width, height, tile.rank);
+        if tile.debuffed_visual {
+            draw_debuff_marker(&mut rgba, width, height);
+        }
         return rgba;
     }
 
@@ -219,7 +225,64 @@ pub fn rasterize_tile_face_decal(
         blit_tinted(&band, width, bot_h, &mut rgba, width, 0, band_top, color);
     }
 
+    if tile.debuffed_visual {
+        draw_debuff_marker(&mut rgba, width, height);
+    }
+
     rgba
+}
+
+fn draw_debuff_marker(rgba: &mut [u8], width: u32, height: u32) {
+    let w = width as i32;
+    let h = height as i32;
+    let marker_half = ((width.min(height) as f32) * 0.20).round().max(13.0);
+    let cx = w - marker_half as i32 - ((width as f32) * 0.11).round() as i32;
+    let cy = marker_half as i32 + ((height as f32) * 0.12).round() as i32;
+    let slash_len = marker_half * 1.18;
+    let white_half = (marker_half * 0.30).max(3.5);
+    let red_half = (marker_half * 0.18).max(2.0);
+
+    let blend = |rgba: &mut [u8], x: i32, y: i32, rgb: (u8, u8, u8), alpha: f32| {
+        if x < 0 || y < 0 || x >= w || y >= h {
+            return;
+        }
+        let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+        if a == 0 {
+            return;
+        }
+        let di = ((y as u32 * width + x as u32) * 4) as usize;
+        rgba[di] = rgb.0;
+        rgba[di + 1] = rgb.1;
+        rgba[di + 2] = rgb.2;
+        rgba[di + 3] = rgba[di + 3].saturating_add(a);
+    };
+
+    let outer = slash_len + white_half + 2.0;
+    for y in (cy - outer as i32)..=(cy + outer as i32) {
+        for x in (cx - outer as i32)..=(cx + outer as i32) {
+            let dx = x - cx;
+            let dy = y - cy;
+            let line_dist = (dy + dx).abs() as f32 / std::f32::consts::SQRT_2;
+            let along = (dy - dx).abs() as f32 / std::f32::consts::SQRT_2;
+            if along > slash_len {
+                continue;
+            }
+
+            // White underpaint keeps the decal legible over suit glyphs.
+            if line_dist <= white_half {
+                let edge = 1.0 - line_dist / (white_half + 0.01);
+                let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.35);
+                blend(rgba, x, y, (255, 248, 238), 0.28 + edge * taper * 0.72);
+            }
+
+            // Red center stroke so the mark reads as red-on-white.
+            if line_dist <= red_half {
+                let edge = 1.0 - line_dist / (red_half + 0.01);
+                let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.15);
+                blend(rgba, x, y, (195, 26, 26), 0.42 + edge * taper * 0.58);
+            }
+        }
+    }
 }
 
 /// Load and blit a pre-generated flower decal PNG onto `dst`.
@@ -591,6 +654,16 @@ pub fn rasterize_ofuda_decal(
     let approx_glyph_w = rule_px_target * 0.55;
     let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(8);
     let wrapped_rule = wrap_text(rule, chars_per_line);
+    let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
+    let rule_px = fit_multiline_font_px(
+        font,
+        None,
+        &wrapped_rule_lines,
+        inner_w,
+        rule_h,
+        rule_px_target,
+        18.0,
+    );
 
     let title_band = rasterize_label_styled(
         font,
@@ -605,7 +678,7 @@ pub fn rasterize_ofuda_decal(
         &wrapped_rule,
         inner_w,
         rule_h,
-        Some(rule_px_target),
+        Some(rule_px),
         LabelAlign::Center,
     );
 
@@ -662,6 +735,64 @@ fn wrap_text(text: &str, max_chars: usize) -> String {
         lines.push(current);
     }
     lines.join("\n")
+}
+
+/// Pick the largest font size up to `target_px` that keeps a multi-line block
+/// within both the supplied width and height.
+fn fit_multiline_font_px(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    lines: &[&str],
+    width: u32,
+    height: u32,
+    target_px: f32,
+    min_px: f32,
+) -> f32 {
+    fn fits(
+        font: &fontdue::Font,
+        emoji_font: Option<&fontdue::Font>,
+        lines: &[&str],
+        width: u32,
+        height: u32,
+        font_px: f32,
+    ) -> bool {
+        let line_h = font
+            .horizontal_line_metrics(font_px)
+            .map(|lm| lm.new_line_size)
+            .unwrap_or(font_px * 1.2);
+        if line_h * lines.len() as f32 > height as f32 {
+            return false;
+        }
+
+        lines.iter().all(|line| {
+            let advance: f32 = line
+                .chars()
+                .map(|ch| {
+                    pick_font(font, emoji_font, ch)
+                        .metrics(ch, font_px)
+                        .advance_width
+                })
+                .sum();
+            advance <= width as f32
+        })
+    }
+
+    let min_px = min_px.max(8.0).min(target_px.max(8.0));
+    if lines.is_empty() || fits(font, emoji_font, lines, width, height, target_px) {
+        return target_px.max(8.0);
+    }
+
+    let mut lo = min_px;
+    let mut hi = target_px.max(min_px);
+    for _ in 0..10 {
+        let mid = (lo + hi) * 0.5;
+        if fits(font, emoji_font, lines, width, height, mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
 }
 
 /// Paint a soft inner border + corner gem onto an RGBA8 decal to mark a tile

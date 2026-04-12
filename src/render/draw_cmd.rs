@@ -316,6 +316,8 @@ pub struct YakuTabletPlacement {
     pub world_pos: TableSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
+    /// Roll about table/world Z in degrees.
+    pub rotation_z_deg: f32,
     /// Yaku display name (engraved on the face via decal).
     pub name: String,
     /// Progress toward this yaku in [0, 1] — drives the inlay glow strip.
@@ -341,6 +343,9 @@ pub struct WoodTabletPlacement {
     pub pressed: f32,
     /// Hover lift envelope in [0, 1].
     pub hover: f32,
+    /// Rotation around the local Z axis in degrees. Used for excited idle
+    /// wiggles such as the gameplay cash-in prompt when a full structure is ready.
+    pub rotation_z_deg: f32,
     /// True if the action is currently disabled (e.g. no tiles selected).
     pub disabled: bool,
 }
@@ -568,6 +573,8 @@ pub enum DrawCmd {
     EmberDrift,
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
+    /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
+    MoonlitWater,
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
@@ -787,6 +794,9 @@ impl UiFrame {
     pub fn golden_dust(&mut self) {
         self.cmds.push(DrawCmd::GoldenDust);
     }
+    pub fn moonlit_water(&mut self) {
+        self.cmds.push(DrawCmd::MoonlitWater);
+    }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
     }
@@ -917,6 +927,7 @@ impl UiFrame {
                 | DrawCmd::Starfield
                 | DrawCmd::EmberDrift
                 | DrawCmd::GoldenDust
+                | DrawCmd::MoonlitWater
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::HandTileBackdrop
                 | DrawCmd::HandTileFaces

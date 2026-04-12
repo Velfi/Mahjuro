@@ -274,7 +274,7 @@ pub(crate) struct HandTileGpu {
     /// Includes the talisman enhancement so stamping a tile triggers a fresh
     /// decal upload (the enhancement is baked into the texture as a coloured
     /// border + corner gem in `rasterize_tile_face_decal`).
-    pub tile_id: (Suit, u8, Option<TileEnhancement>),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
     /// Main label (number or name) for the tile face.
     pub symbol: String,
     /// Emoji suit indicator rendered below the main label.
@@ -294,7 +294,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub shadow_uniform_buffer: wgpu::Buffer,
     pub shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (Suit, u8, Option<TileEnhancement>),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
     #[allow(dead_code)]
     pub decal_texture: wgpu::Texture,
 }
@@ -449,7 +449,7 @@ pub const MAX_DORA_STAND_SLOTS: usize = 2;
 /// Maximum number of cascade scoring tokens per frame across all batches.
 /// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
 /// strip adds 2 more during an active cascade.
-pub const MAX_CASCADE_TOKEN_SLOTS: usize = 16;
+pub const MAX_CASCADE_TOKEN_SLOTS: usize = 32;
 /// Maximum number of physical falling-bone instances in flight at once.
 /// Sized to comfortably hold a multi-step cascade's worth of bursts (each
 /// scoring step spawns a small handful) without overflowing the pool.

@@ -74,7 +74,7 @@ impl TilePackKind {
             Self::Terminals => "+6 terminal tiles to the wall (1s and 9s)",
             Self::Flowers => "+4 flower wildcards to the wall",
             Self::BambooGrove => "+8 bamboo tiles to the wall",
-            Self::CoinCache => "+8 circle tiles to the wall",
+            Self::CoinCache => "+8 dots tiles to the wall",
             Self::ScrollLibrary => "+8 character tiles to the wall",
         }
     }
@@ -93,10 +93,10 @@ impl TilePackKind {
 
     pub fn shop_price(self) -> u32 {
         match self {
-            Self::Honors => 7,
-            Self::Terminals => 8,
-            Self::Flowers => 6,
-            Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 8,
+            Self::Flowers => 9,
+            Self::Honors => 10,
+            Self::Terminals => 11,
+            Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 11,
         }
     }
 

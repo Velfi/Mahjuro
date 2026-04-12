@@ -50,11 +50,23 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     vertices[17].uv = [1.0, 1.0];
     vertices[18].uv = [1.0, 0.0];
     vertices[19].uv = [0.0, 0.0];
+    // Also map the -Z broad face. The ofuda now hangs upright on the back
+    // wall, and depending on camera/layout tweaks the visible side can flip;
+    // keeping the ink on both paper faces avoids a blank charm if we end up
+    // seeing the back. The -Z corner order pushed by `push_box` is:
+    //   v20 = (x1, y0, z0)  bottom-right
+    //   v21 = (x0, y0, z0)  bottom-left
+    //   v22 = (x0, y1, z0)  top-left
+    //   v23 = (x1, y1, z0)  top-right
+    vertices[20].uv = [1.0, 1.0];
+    vertices[21].uv = [0.0, 1.0];
+    vertices[22].uv = [0.0, 0.0];
+    vertices[23].uv = [1.0, 0.0];
     // Every other slab face samples the transparent (0,0) corner of the
-    // decal so the title/rule only appears on the front face. The shader
-    // composites decal as `mix(albedo, tex_rgb, tex.a)`, so alpha=0
-    // leaves the paper albedo untouched on the back/edges.
-    for i in (0..16).chain(20..24) {
+    // decal so the title/rule only appears on the broad paper faces. The
+    // shader composites decal as `mix(albedo, tex_rgb, tex.a)`, so alpha=0
+    // leaves the paper albedo untouched on the edges.
+    for i in 0..16 {
         vertices[i].uv = [0.0, 0.0];
     }
 

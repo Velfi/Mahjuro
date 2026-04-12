@@ -77,6 +77,7 @@ enum Row {
     Ssr,
     Hdr,
     SwapAb,
+    AutoCashInOnFullStructure,
 }
 
 impl Row {
@@ -113,6 +114,7 @@ const ROWS: &[Row] = &[
     Row::Ssr,
     Row::Hdr,
     Row::SwapAb,
+    Row::AutoCashInOnFullStructure,
 ];
 
 // ── Content slots (section headers interspersed with rows) ─────────────
@@ -143,6 +145,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Hdr),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
+    ContentSlot::Row(Row::AutoCashInOnFullStructure),
 ];
 
 fn content_index_of_row(row: Row) -> usize {
@@ -288,6 +291,7 @@ pub struct OptionsScene {
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
     pub swap_ab: bool,
+    pub auto_cash_in_on_full_structure: bool,
     pub ui_scale: f32,
 }
 
@@ -312,6 +316,7 @@ impl OptionsScene {
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
+            auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             ui_scale: settings.ui_scale,
         }
     }
@@ -332,6 +337,7 @@ impl OptionsScene {
         settings.ssr_enabled = self.ssr_enabled;
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
+        settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
     }
@@ -422,6 +428,9 @@ impl OptionsScene {
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::AutoCashInOnFullStructure => {
+                self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
+            }
             _ => return,
         }
         self.save_settings();
@@ -445,6 +454,9 @@ impl OptionsScene {
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::AutoCashInOnFullStructure => {
+                self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
+            }
             _ => return,
         }
         self.save_settings();
@@ -504,6 +516,10 @@ impl OptionsScene {
             }
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
+                self.save_settings();
+            }
+            Row::AutoCashInOnFullStructure => {
+                self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
                 self.save_settings();
             }
         }
@@ -968,6 +984,14 @@ impl OptionsScene {
                         if self.hdr_enabled { "ON" } else { "OFF" }
                     ),
                     Row::SwapAb => format!("Swap A/B: {}", if self.swap_ab { "ON" } else { "OFF" }),
+                    Row::AutoCashInOnFullStructure => format!(
+                        "Auto Cash-In on Full Structure: {}",
+                        if self.auto_cash_in_on_full_structure {
+                            "ON"
+                        } else {
+                            "OFF"
+                        }
+                    ),
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {

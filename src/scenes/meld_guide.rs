@@ -579,7 +579,7 @@ fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             ]),
         ),
         YakuKind::FullHand => (
-            "Complete 14-tile hand: 4 melds + 1 pair.",
+            "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair), not 2x7 seven pairs.",
             meld_groups(&[
                 (
                     "Seq",
@@ -907,7 +907,7 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         YakuKind::Toitoi => {
             "All triplets/kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
         }
-        YakuKind::FullHand => "Complete 14-tile hand: 4 melds + 1 pair",
+        YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair), not 2x7",
         YakuKind::Yakuhai => {
             "Triplet of any dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})"
         }

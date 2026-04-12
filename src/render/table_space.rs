@@ -19,18 +19,8 @@ use glam::Vec3;
 
 /// Maps a layout pixel anchor and height above the table into world space.
 #[inline]
-pub fn pixel_to_table_world(
-    window_w: f32,
-    window_h: f32,
-    px: f32,
-    py: f32,
-    lift_y: f32,
-) -> Vec3 {
-    Vec3::new(
-        px - window_w * 0.5,
-        lift_y,
-        py - window_h * 0.5,
-    )
+pub fn pixel_to_table_world(window_w: f32, window_h: f32, px: f32, py: f32, lift_y: f32) -> Vec3 {
+    Vec3::new(px - window_w * 0.5, lift_y, py - window_h * 0.5)
 }
 
 /// Screen-space anchor for a mesh sitting on or above the table, before packing into

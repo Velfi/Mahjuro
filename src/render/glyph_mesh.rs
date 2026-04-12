@@ -17,7 +17,11 @@ use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Half-extent of a glyph along the extrusion (depth) axis.
-const DEPTH: f32 = 0.10;
+const DEPTH: f32 = 0.032;
+/// Inset distance for the polished top bevel.
+const BEVEL_INSET: f32 = 0.020;
+/// How far the beveled shoulder drops from the top face.
+const BEVEL_DEPTH: f32 = 0.012;
 
 /// Number of line segments per quarter-turn when flattening bezier curves.
 const CURVE_SUBDIVISIONS: usize = 4;
@@ -143,6 +147,54 @@ fn point_in_contour(poly: &[(f32, f32)], pt: (f32, f32)) -> bool {
     inside
 }
 
+fn vec2_normalize(v: (f32, f32)) -> (f32, f32) {
+    let len = (v.0 * v.0 + v.1 * v.1).sqrt().max(1e-6);
+    (v.0 / len, v.1 / len)
+}
+
+fn inset_contour(pts: &[(f32, f32)], inset: f32) -> Vec<(f32, f32)> {
+    let n = pts.len();
+    if n < 3 {
+        return pts.to_vec();
+    }
+    let ccw = signed_area(pts) > 0.0;
+    let inward = |dx: f32, dy: f32| {
+        if ccw {
+            vec2_normalize((-dy, dx))
+        } else {
+            vec2_normalize((dy, -dx))
+        }
+    };
+
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let prev = pts[(i + n - 1) % n];
+        let cur = pts[i];
+        let next = pts[(i + 1) % n];
+        let prev_edge = (cur.0 - prev.0, cur.1 - prev.1);
+        let next_edge = (next.0 - cur.0, next.1 - cur.1);
+        let prev_len = (prev_edge.0 * prev_edge.0 + prev_edge.1 * prev_edge.1)
+            .sqrt()
+            .max(1e-6);
+        let next_len = (next_edge.0 * next_edge.0 + next_edge.1 * next_edge.1)
+            .sqrt()
+            .max(1e-6);
+        let in_prev = inward(cur.0 - prev.0, cur.1 - prev.1);
+        let in_next = inward(next.0 - cur.0, next.1 - cur.1);
+        let bis_raw = (in_prev.0 + in_next.0, in_prev.1 + in_next.1);
+        let bis = if bis_raw.0.abs() < 1e-5 && bis_raw.1.abs() < 1e-5 {
+            in_prev
+        } else {
+            vec2_normalize(bis_raw)
+        };
+        let denom = (bis.0 * in_prev.0 + bis.1 * in_prev.1).abs().max(1e-4);
+        let max_d = prev_len.min(next_len) * 0.45;
+        let d = (inset / denom).min(max_d);
+        out.push((cur.0 + bis.0 * d, cur.1 + bis.1 * d));
+    }
+    out
+}
+
 /// Ensure a contour has the requested winding (CCW if `want_ccw`, CW otherwise).
 fn ensure_winding(pts: &[(f32, f32)], want_ccw: bool) -> Vec<(f32, f32)> {
     let area = signed_area(pts);
@@ -246,27 +298,57 @@ fn extrude_group(group: &ContourGroup, vertices: &mut Vec<Vertex3dTex>, indices:
         }
     }
 
+    let inner_outer = inset_contour(&group.outer, BEVEL_INSET);
+    let inner_holes: Vec<Vec<(f32, f32)>> = group
+        .holes
+        .iter()
+        .map(|hole| inset_contour(hole, BEVEL_INSET))
+        .collect();
+
+    // Triangulate the inset top cap.
+    let mut inner_coords: Vec<f64> = Vec::new();
+    let mut inner_hole_indices: Vec<usize> = Vec::new();
+    for &(x, y) in &inner_outer {
+        inner_coords.push(x as f64);
+        inner_coords.push(y as f64);
+    }
+    for hole in &inner_holes {
+        inner_hole_indices.push(inner_coords.len() / 2);
+        for &(x, y) in hole {
+            inner_coords.push(x as f64);
+            inner_coords.push(y as f64);
+        }
+    }
+
     // Triangulate
     let tri_indices = match earcutr::earcut(&coords, &hole_indices, 2) {
         Ok(idx) => idx,
         Err(_) => return, // triangulation failed — skip this component
+    };
+    let inner_tri_indices = match earcutr::earcut(&inner_coords, &inner_hole_indices, 2) {
+        Ok(idx) => idx,
+        Err(_) => return,
     };
 
     let all_pts: Vec<(f32, f32)> = coords
         .chunks_exact(2)
         .map(|c| (c[0] as f32, c[1] as f32))
         .collect();
+    let inner_pts: Vec<(f32, f32)> = inner_coords
+        .chunks_exact(2)
+        .map(|c| (c[0] as f32, c[1] as f32))
+        .collect();
 
-    // Front cap (z = +DEPTH), normal pointing +Z
+    // Top cap (slightly inset), normal pointing +Z
     let base = vertices.len() as u32;
-    for &(x, y) in &all_pts {
+    for &(x, y) in &inner_pts {
         vertices.push(Vertex3dTex {
             position: [x, y, DEPTH],
             normal: [0.0, 0.0, 1.0],
             uv: [0.0, 0.0],
         });
     }
-    for &i in &tri_indices {
+    for &i in &inner_tri_indices {
         indices.push(base + i as u32);
     }
 
@@ -285,6 +367,66 @@ fn extrude_group(group: &ContourGroup, vertices: &mut Vec<Vertex3dTex>, indices:
         indices.push(base2 + tri[1] as u32);
     }
 
+    let mut build_bevel = |outer: &[(f32, f32)], inner: &[(f32, f32)]| {
+        let n = outer.len().min(inner.len());
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let p0 = outer[i];
+            let p1 = outer[j];
+            let q0 = inner[i];
+            let q1 = inner[j];
+            let e1 = [p1.0 - p0.0, p1.1 - p0.1, 0.0];
+            let e2 = [q0.0 - p0.0, q0.1 - p0.1, -BEVEL_DEPTH];
+            let normal = {
+                let nx = e1[1] * e2[2] - e1[2] * e2[1];
+                let ny = e1[2] * e2[0] - e1[0] * e2[2];
+                let nz = e1[0] * e2[1] - e1[1] * e2[0];
+                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+                [nx / len, ny / len, nz / len]
+            };
+            let base_b = vertices.len() as u32;
+            vertices.push(Vertex3dTex {
+                position: [p0.0, p0.1, DEPTH],
+                normal,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [p1.0, p1.1, DEPTH],
+                normal,
+                uv: [1.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [q1.0, q1.1, DEPTH - BEVEL_DEPTH],
+                normal,
+                uv: [1.0, 1.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [q0.0, q0.1, DEPTH - BEVEL_DEPTH],
+                normal,
+                uv: [0.0, 1.0],
+            });
+            indices.extend_from_slice(&[
+                base_b,
+                base_b + 1,
+                base_b + 2,
+                base_b,
+                base_b + 2,
+                base_b + 3,
+                base_b,
+                base_b + 2,
+                base_b + 1,
+                base_b,
+                base_b + 3,
+                base_b + 2,
+            ]);
+        }
+    };
+
+    build_bevel(&group.outer, &inner_outer);
+    for (hole, inner_hole) in group.holes.iter().zip(inner_holes.iter()) {
+        build_bevel(hole, inner_hole);
+    }
+
     // Side walls — extrude each contour edge
     let mut build_walls = |pts: &[(f32, f32)]| {
         let n = pts.len();
@@ -301,12 +443,12 @@ fn extrude_group(group: &ContourGroup, vertices: &mut Vec<Vertex3dTex>, indices:
 
             let base_w = vertices.len() as u32;
             vertices.push(Vertex3dTex {
-                position: [x0, y0, DEPTH],
+                position: [x0, y0, DEPTH - BEVEL_DEPTH],
                 normal,
                 uv: [0.0, 0.0],
             });
             vertices.push(Vertex3dTex {
-                position: [x1, y1, DEPTH],
+                position: [x1, y1, DEPTH - BEVEL_DEPTH],
                 normal,
                 uv: [1.0, 0.0],
             });

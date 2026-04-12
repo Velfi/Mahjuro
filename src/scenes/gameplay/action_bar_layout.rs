@@ -78,9 +78,7 @@ pub fn compute_action_bar(
     let suit_btn_rect = (sort_container_x, btn_y, btn_w, btn_h);
     let rank_btn_rect = (sort_container_x + btn_w + btn_gap, btn_y, btn_w, btn_h);
 
-    let yaku_panel_h = (33.0 * layout_scale)
-        .max(24.0)
-        .min(layout.window_h * 0.10);
+    let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
     let bowl_diam = (yaku_panel_h * 2.4).min(layout.window_h * 0.18);
     let rack_bottom = hand_slots
         .first()
@@ -116,26 +114,26 @@ pub fn compute_action_bar(
     );
 
     let trigger_gap = 10.0 * layout_scale;
-    let trigger_diam = (bowl_diam * 0.52).max(34.0 * layout_scale);
+    let trigger_w = (btn_w * 1.15)
+        .max(bowl_diam * 0.90)
+        .max(84.0 * layout_scale);
+    let trigger_h = (btn_h * 1.10)
+        .max(bowl_diam * 0.42)
+        .max(28.0 * layout_scale);
     let trigger_btn_rect = if has_structure {
         let meld_center_y = structure_strip_top + structure_tag_h + structure_meld_h * 0.5;
         let mut bx = container_x + container_w + trigger_gap;
-        let max_bx = layout.window_w - trigger_diam - (8.0 * layout_scale).max(4.0);
+        let max_bx = layout.window_w - trigger_w - (8.0 * layout_scale).max(4.0);
         if bx > max_bx {
             bx = max_bx;
         }
-        (
-            bx,
-            meld_center_y - trigger_diam * 0.5,
-            trigger_diam,
-            trigger_diam,
-        )
+        (bx, meld_center_y - trigger_h * 0.5, trigger_w, trigger_h)
     } else {
         (
-            mirror_cx - trigger_diam * 0.5,
-            mirror_cy - bowl_diam * 0.5 - trigger_gap - trigger_diam,
-            trigger_diam,
-            trigger_diam,
+            mirror_cx - trigger_w * 0.5,
+            mirror_cy - bowl_diam * 0.5 - trigger_gap - trigger_h,
+            trigger_w,
+            trigger_h,
         )
     };
 

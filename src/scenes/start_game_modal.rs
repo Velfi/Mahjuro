@@ -90,12 +90,18 @@ impl TileSelectScene {
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
         if self.tutorial_mode {
             *run = RunState::new_tutorial();
+            run.set_auto_cash_in_on_full_structure(
+                crate::persistence::load_settings().auto_cash_in_on_full_structure,
+            );
             // Show tile literacy intro before the first tutorial lesson.
             Some(Scene::TileLiteracy(
                 super::tile_literacy::TileLiteracyScene::new(),
             ))
         } else {
             *run = RunState::new_with_material(self.material);
+            run.set_auto_cash_in_on_full_structure(
+                crate::persistence::load_settings().auto_cash_in_on_full_structure,
+            );
             Some(Scene::Shop(ShopScene::new(run.run_number, run)))
         }
     }

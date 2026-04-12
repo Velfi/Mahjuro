@@ -19,13 +19,13 @@ use std::time::Instant;
 use crate::core::rules::BlindKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::render::draw_cmd::{
-    CameraParams, CoinPlacement, DishExplicit, ShrinePlacement, UiFrame, ZodiacRibbonPlacement,
+    CameraParams, CoinPlacement, DishExplicit, OfudaPlacement, PlaquePlacement, ShrinePlacement,
+    UiFrame, ZodiacRibbonPlacement,
 };
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
-use crate::ui::widget::{self, PanelVariant};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::gameplay::GameplayScene;
@@ -44,8 +44,6 @@ struct ZodiacCelebration {
 }
 
 impl ZodiacCelebration {
-    const DURATION: f32 = 2.0;
-
     fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
         Self {
             kind,
@@ -63,7 +61,7 @@ impl ZodiacCelebration {
     }
 
     fn is_done(&self) -> bool {
-        self.dismissed || self.elapsed() >= Self::DURATION
+        self.dismissed
     }
 }
 
@@ -195,6 +193,66 @@ fn upcoming_index(blind: BlindKind) -> usize {
     }
 }
 
+/// Estimate how many wrapped lines `text` will occupy under a simple
+/// character-budget word wrap. Mirrors the ofuda decal's greedy wrap well
+/// enough for scene-side sizing without coupling to renderer internals.
+fn estimated_wrapped_lines(text: &str, max_chars: usize) -> usize {
+    let max_chars = max_chars.max(1);
+    let mut lines: usize = 0;
+    let mut current_len: usize = 0;
+
+    for word in text.split_whitespace() {
+        let word_len = word.chars().count();
+        if current_len == 0 {
+            lines += word_len.div_ceil(max_chars).max(1);
+            current_len = word_len % max_chars;
+            if current_len == 0 && word_len > 0 {
+                current_len = max_chars;
+            }
+        } else if current_len + 1 + word_len <= max_chars {
+            current_len += 1 + word_len;
+        } else {
+            lines += word_len.div_ceil(max_chars).max(1);
+            current_len = word_len % max_chars;
+            if current_len == 0 && word_len > 0 {
+                current_len = max_chars;
+            }
+        }
+    }
+
+    if lines == 0 { 1 } else { lines }
+}
+
+/// Pick-blind shrine ofuda sizing. Boss names and rule overrides vary a lot
+/// in length, so the paper grows to fit the expected wrapped line count
+/// instead of using one fixed aspect for every boss.
+fn auto_size_shrine_ofuda(plaque_w: f32, plaque_h: f32, title: &str, rule: &str) -> (f32, f32) {
+    let title_chars = title.chars().count();
+    let longest_rule_word = rule
+        .split_whitespace()
+        .map(|word| word.chars().count())
+        .max()
+        .unwrap_or(0);
+
+    let width_scale = (0.42
+        + (title_chars.saturating_sub(12) as f32) * 0.012
+        + (longest_rule_word.saturating_sub(10) as f32) * 0.010)
+        .clamp(0.48, 0.66);
+    let ofuda_w = plaque_w * width_scale;
+
+    // Approximate the decal's title/rule wrapping budgets from the chosen
+    // paper width. Wider papers let both bands use larger line budgets.
+    let title_chars_per_line = ((ofuda_w / plaque_h.max(1.0)) * 8.0).round() as usize;
+    let rule_chars_per_line = ((ofuda_w / plaque_h.max(1.0)) * 13.0).round() as usize;
+    let title_lines = estimated_wrapped_lines(title, title_chars_per_line.max(10));
+    let rule_lines = estimated_wrapped_lines(rule, rule_chars_per_line.max(14));
+
+    let line_units = title_lines as f32 * 1.15 + rule_lines as f32;
+    let height_scale = (0.92 + line_units * 0.34).clamp(1.45, 2.70);
+    let ofuda_h = plaque_h * height_scale;
+    (ofuda_w, ofuda_h)
+}
+
 /// Visual state of one of the three shrines, derived from `upcoming_blind`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShrineState {
@@ -231,9 +289,6 @@ struct PickBlindLayout {
     floor_anchor_px: (f32, f32),
     /// Floor plane extents (width × thickness × depth) in world units.
     floor_extents: [f32; 3],
-    /// Bottom info-panel rect in screen pixels: shows the upcoming
-    /// blind's name, target, reward, and (boss-only) rule description.
-    info_panel_rect: [f32; 4],
     /// 3D Play altar anchor (px, py) — sits in front of the shrines on
     /// the floor, left of center. World_y for the dish base is 0.
     play_dish_anchor_px: (f32, f32),
@@ -300,15 +355,6 @@ impl PickBlindLayout {
         // dominating the scene.
         let floor_extents = [w * 0.95, layout.mm(6.0), h * 0.30];
 
-        // ── Bottom info panel (text only — no buttons; Play and Skip
-        // are 3D objects on the floor in front of the shrines).
-        let panel_pad = 16.0_f32;
-        let panel_w = (w * 0.86).min(1100.0);
-        let panel_h = (h * 0.18).clamp(120.0, 200.0);
-        let panel_x = (w - panel_w) * 0.5;
-        let panel_y = h - panel_h - panel_pad;
-        let info_panel_rect = [panel_x, panel_y, panel_w, panel_h];
-
         // ── 3D Play / Skip altars BELOW the upcoming shrine ─────────
         // The two altars sit side by side below the upcoming shrine's
         // base, centered on its horizontal position. They move with the
@@ -338,7 +384,6 @@ impl PickBlindLayout {
             shrine_extents,
             floor_anchor_px,
             floor_extents,
-            info_panel_rect,
             play_dish_anchor_px,
             play_dish_extents,
             skip_dish_anchor_px,
@@ -389,7 +434,7 @@ impl SceneBehavior for PickBlindScene {
             }
         }
 
-        // Zodiac ribbon close-up — swallow input until dismissed or timed out.
+        // Zodiac ribbon close-up — swallow input until the player dismisses it.
         if let Some(ref mut celeb) = self.zodiac_celebration {
             let has_input = ctx.actions.iter().any(|a| {
                 matches!(
@@ -652,6 +697,15 @@ impl SceneBehavior for PickBlindScene {
         let (up_px, up_py) = layout.shrine_pixel_anchor(upcoming_idx);
         let up_ext = layout.shrine_extents(upcoming_idx);
         let spot = layout.spotlight_pos(upcoming_idx);
+        // The floating wood plaque sits above the upcoming shrine and needs
+        // its own narrow key so the engraved lettering reads independently of
+        // the shrine spotlight. Keep the pool tight enough that it brightens
+        // the plaque/ofuda cluster without washing the stone roof below.
+        let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
+        let plaque_h = (h * 0.26).clamp(190.0, 300.0);
+        let plaque_px = up_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
+        let plaque_py = up_py + up_ext[2] * 0.10;
+        let plaque_world_y = up_ext[1] * 1.45;
         point_lights.push(PointLight {
             pos: spot,
             radius: up_ext[1] * 2.20,
@@ -677,6 +731,25 @@ impl SceneBehavior for PickBlindScene {
             radius: up_ext[0] * 1.80,
             color: [1.00, 0.76, 0.40],
             intensity: 0.90,
+        });
+        // Plaque accent: a smaller, slightly brighter warm-white light
+        // hovering just in front of the sign band. Shift a touch left on boss
+        // blinds so the boss ofuda shares the highlight without needing its
+        // own extra light slot.
+        let plaque_light_x = if upcoming == BlindKind::Boss {
+            plaque_px - plaque_w * 0.10
+        } else {
+            plaque_px
+        };
+        point_lights.push(PointLight {
+            pos: [
+                plaque_light_x,
+                plaque_py - plaque_h * 0.06,
+                plaque_world_y + plaque_h * 0.22,
+            ],
+            radius: plaque_w * 0.46,
+            color: [1.00, 0.93, 0.80],
+            intensity: 1.45 * focus_boost,
         });
 
         // ── Play altar spotlight ─────────────────────────────────────
@@ -734,6 +807,11 @@ impl SceneBehavior for PickBlindScene {
         let desc_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
         let base_target = ctx.run.base_target;
         for (i, &blind) in blinds.iter().enumerate() {
+            // The upcoming shrine's label is replaced by the 3D plaque
+            // below; skip it here to avoid redundancy.
+            if i == upcoming_idx {
+                continue;
+            }
             let state = shrine_state(i, upcoming_idx);
             let title_color = match state {
                 ShrineState::Upcoming => color::CHAMPAGNE,
@@ -814,75 +892,83 @@ impl SceneBehavior for PickBlindScene {
             }
         }
 
-        // ── Bottom info panel ─────────────────────────────────────────
-        // Shows the upcoming blind's full details: name, target chip
-        // count, gold reward, and (boss-only) the rule description +
-        // tier label. The buttons live in the bottom row of this panel.
-        let panel_rect = layout.info_panel_rect;
-        widget::push_panel(&mut quads, panel_rect, PanelVariant::Hero);
+        // ── Plaque above the upcoming shrine ─────────────────────────
+        // Replaces the old bottom info panel: a 3D wood plaque floats
+        // above the lit shrine with the blind name + ante on the top
+        // line and target / reward / gold on the bottom line.
+        {
+            let (shrine_px, shrine_py) = layout.shrine_anchors_px[upcoming_idx];
+            let shrine_ext = layout.shrine_extents[upcoming_idx];
+            // Camera sits at h*1.25 depth so the plaque needs to be
+            // much larger than a typical close-up plaque to read well.
+            let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
+            let plaque_h = (h * 0.26).clamp(190.0, 300.0);
+            let plaque_px = shrine_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
+            // Keep the plaque above the shrine, but not so high that it
+            // climbs into the top letterbox area and becomes hard to read.
+            // A slight screen-space drop plus a lower vertical lift keeps it
+            // visually attached to the boss shrine while staying centered in
+            // the player's eyeline.
+            let plaque_py = shrine_py + shrine_ext[2] * 0.10;
+            let plaque_world_y = shrine_ext[1] * 1.45;
 
-        let panel_pad = 16.0_f32;
-        let panel_inner_x = panel_rect[0] + panel_pad;
-        let panel_inner_y = panel_rect[1] + panel_pad;
-        let panel_inner_w = panel_rect[2] - panel_pad * 2.0;
-        let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.6;
-        let line_h = typography::size(typography::CAPTION, h, ui_scale) * 1.6;
-
-        // Title: upcoming blind name + ante header
-        let title_text = if upcoming == BlindKind::Boss {
-            ctx.run
-                .boss
-                .upcoming
-                .map(|k| k.def().name.to_string())
-                .unwrap_or_else(|| "Boss Blind".to_string())
-        } else {
-            upcoming.name().to_string()
-        };
-        texts.push(TextLabel {
-            rect: [panel_inner_x, panel_inner_y, panel_inner_w, title_h],
-            text: format!(
-                "ANTE {}/{} · {}",
-                ctx.run.ante,
-                crate::game::run::FINAL_ANTE,
-                title_text
-            ),
-            color: color::CHAMPAGNE,
-            ..Default::default()
-        });
-
-        // Target + reward summary
-        let target_value = (base_target as f32 * upcoming.target_multiplier()) as u32;
-        let summary_y = panel_inner_y + title_h + 6.0;
-        texts.push(TextLabel {
-            rect: [panel_inner_x, summary_y, panel_inner_w, line_h],
-            text: format!(
-                "Target {}   ·   Reward ${}   ·   Gold {}",
-                target_value,
-                upcoming.clear_reward(),
-                ctx.run.gold,
-            ),
-            color: color::PARCHMENT,
-            ..Default::default()
-        });
-
-        // Boss-only rule description + tier on the next line.
-        if upcoming == BlindKind::Boss {
-            if let Some(kind) = ctx.run.boss.upcoming {
-                let def = kind.def();
-                let description: &str = ctx
-                    .run
+            let blind_name = if upcoming == BlindKind::Boss {
+                ctx.run
                     .boss
-                    .effect
-                    .as_ref()
-                    .and_then(|e| e.description_override.as_deref())
-                    .unwrap_or(def.description);
-                let desc_y = summary_y + line_h + 4.0;
-                texts.push(TextLabel {
-                    rect: [panel_inner_x, desc_y, panel_inner_w, line_h],
-                    text: format!("{}   [{}]", description, def.tier.label()),
-                    color: color::AMBER,
-                    ..Default::default()
-                });
+                    .upcoming
+                    .map(|k| k.def().name.to_string())
+                    .unwrap_or_else(|| "Boss Blind".to_string())
+            } else {
+                upcoming.name().to_string()
+            };
+            let target_value = (base_target as f32 * upcoming.target_multiplier()) as u32;
+
+            frame.plaque(PlaquePlacement {
+                center_pos: [plaque_px, plaque_py, plaque_world_y],
+                extents: [plaque_w, plaque_h, 10.0],
+                rotation_y_deg: 0.0,
+                top_text: format!(
+                    "ANTE {}/{} · {}",
+                    ctx.run.ante,
+                    crate::game::run::FINAL_ANTE,
+                    blind_name
+                ),
+                bot_text: format!(
+                    "Target {}   ·   Reward ${}   ·   Gold {}",
+                    target_value,
+                    upcoming.clear_reward(),
+                    ctx.run.gold,
+                ),
+            });
+
+            // Boss blinds get an ofuda beside the plaque showing the rule
+            // description + tier — the plaque's two lines are already full.
+            if upcoming == BlindKind::Boss {
+                if let Some(kind) = ctx.run.boss.upcoming {
+                    let def = kind.def();
+                    let description: &str = ctx
+                        .run
+                        .boss
+                        .effect
+                        .as_ref()
+                        .and_then(|e| e.description_override.as_deref())
+                        .unwrap_or(def.description);
+                    let (ofuda_w, ofuda_h) =
+                        auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+                    // Position to the left of the plaque, but keep it tucked
+                    // close enough to share the plaque accent light.
+                    let ofuda_px =
+                        (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 4.0).max(ofuda_w * 0.5 + 8.0);
+                    let ofuda_py = plaque_py + shrine_ext[2] * 0.15;
+                    let ofuda_world_y = plaque_world_y * 0.86;
+                    frame.ofuda(OfudaPlacement {
+                        center_pos: [ofuda_px, ofuda_py, ofuda_world_y],
+                        extents: [ofuda_w, ofuda_h, 3.0],
+                        rotation_y_deg: 0.0,
+                        title: def.name.to_string(),
+                        rule: description.to_string(),
+                    });
+                }
             }
         }
 
