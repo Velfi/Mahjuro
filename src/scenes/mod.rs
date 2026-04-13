@@ -45,13 +45,10 @@ use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
-use crate::render::decal::load_ui_font;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::theme::{color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::GpuInstance;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::layout::{LayoutResult, Rect};
-use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 /// Per-element visibility flags driven by the debug visibility modal.
 /// Plumbed through `DrawCtx` so scenes can skip pushing draw cmds at the
@@ -228,131 +225,6 @@ impl ButtonDef {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct ChickenMascotState {
-    bubble_visible: bool,
-    line_index: usize,
-}
-
-impl ChickenMascotState {
-    pub fn advance(&mut self, lines: &[&str]) {
-        if lines.is_empty() {
-            self.bubble_visible = false;
-            self.line_index = 0;
-            return;
-        }
-        if self.bubble_visible {
-            self.line_index = (self.line_index + 1) % lines.len();
-        } else {
-            self.bubble_visible = true;
-            self.line_index = 0;
-        }
-    }
-
-    pub fn current_line<'a>(&self, lines: &'a [&'a str]) -> Option<&'a str> {
-        self.bubble_visible
-            .then(|| lines.get(self.line_index).copied())
-            .flatten()
-    }
-}
-
-pub fn chicken_mascot_rect(window_w: f32, window_h: f32, ui_scale: f32) -> [f32; 4] {
-    let size = (window_h * 0.18 * ui_scale).clamp(96.0, 180.0);
-    let x = (window_w * 0.035).clamp(16.0, window_w - size - 16.0);
-    let y = (window_h - size - (24.0 * ui_scale).max(16.0)).clamp(16.0, window_h - size - 16.0);
-    [x, y, size, size]
-}
-
-pub fn push_chicken_mascot_bubble(
-    quads: &mut Vec<GpuInstance>,
-    texts: &mut Vec<TextLabel>,
-    buttons: &mut Vec<ButtonDef>,
-    state: &ChickenMascotState,
-    lines: &[&str],
-    click_id: u32,
-    mascot_rect: [f32; 4],
-    window_w: f32,
-    window_h: f32,
-    ui_scale: f32,
-) {
-    buttons.push(ButtonDef::scene(
-        (
-            mascot_rect[0],
-            mascot_rect[1],
-            mascot_rect[2],
-            mascot_rect[3],
-        ),
-        click_id,
-    ));
-
-    let Some(line) = state.current_line(lines) else {
-        return;
-    };
-
-    let pad_x = (14.0 * ui_scale).max(10.0);
-    let pad_y = (12.0 * ui_scale).max(8.0);
-    let line_h = typography::size(typography::BODY, window_h, ui_scale).max(14.0);
-    let max_text_w = (window_w * 0.34).clamp(150.0, 360.0);
-    let wrapped_lines = widget::wrap_text(line, max_text_w, line_h);
-    let max_line_w = load_ui_font()
-        .map(|font| {
-            wrapped_lines
-                .iter()
-                .map(|line| {
-                    line.chars()
-                        .map(|c| font.metrics(c, (line_h * 0.99).max(8.0)).advance_width)
-                        .sum::<f32>()
-                })
-                .fold(0.0, f32::max)
-        })
-        .unwrap_or(max_text_w * 0.7);
-    let bubble_w = (max_line_w + pad_x * 2.0).clamp(140.0, max_text_w + pad_x * 2.0);
-    let bubble_h = (wrapped_lines.len().max(1) as f32 * line_h * 1.4 + pad_y * 2.0)
-        .clamp(52.0, window_h * 0.26);
-    let bubble_x = (mascot_rect[0] + mascot_rect[2] * 0.62).clamp(16.0, window_w - bubble_w - 16.0);
-    let bubble_y = (mascot_rect[1] - bubble_h * 0.58).clamp(16.0, window_h - bubble_h - 16.0);
-    let bubble_rect = [bubble_x, bubble_y, bubble_w, bubble_h];
-
-    widget::push_panel(quads, bubble_rect, PanelVariant::Hero);
-    let tail_border = [
-        bubble_x + 18.0 * ui_scale,
-        bubble_y + bubble_h - 2.0,
-        20.0,
-        14.0,
-    ];
-    let tail_fill = [
-        tail_border[0] + 2.0,
-        tail_border[1],
-        tail_border[2] - 4.0,
-        tail_border[3] - 2.0,
-    ];
-    quads.push(GpuInstance {
-        rect: tail_border,
-        color: color::GOLD,
-    });
-    quads.push(GpuInstance {
-        rect: tail_fill,
-        color: color::TWILIGHT,
-    });
-    widget::push_text_block(
-        texts,
-        [
-            bubble_x + pad_x,
-            bubble_y + pad_y,
-            bubble_w - pad_x * 2.0,
-            bubble_h - pad_y * 2.0,
-        ],
-        line,
-        TextStyle {
-            tier: typography::BODY,
-            color: color::CHAMPAGNE,
-            padding: 0.0,
-            align: TextAlign::Left,
-        },
-        window_h,
-        ui_scale,
-    );
-}
 
 /// Screen rect of relic badge slot `slot_idx` inside the relic strip.
 /// Single source of truth for badge layout — used by `relic_row` and by
