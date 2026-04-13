@@ -6,7 +6,7 @@ use std::time::Instant;
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
-use crate::persistence::{self, TileMaterial};
+use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{CameraParams, PlaquePlacement, UiFrame, WoodTabletPlacement};
 use crate::render::theme::{color, metrics, typography};
@@ -22,9 +22,7 @@ use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
 use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
-use super::{
-    BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx,
-};
+use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Menu items ──────────────────────────────────────────────────────────
 
@@ -104,6 +102,22 @@ impl StartScreenScene {
             last_frame: Instant::now(),
             last_focus_rects: RefCell::new(Vec::new()),
             cursor_pos: (0.0, 0.0),
+        }
+    }
+
+    fn continue_scene(resume_scene: ResumeScene, run: &mut RunState) -> Scene {
+        match resume_scene {
+            ResumeScene::Gameplay => Scene::Gameplay(GameplayScene::new()),
+            ResumeScene::Shop => {
+                if run.onboarding.as_ref().is_some_and(|o| {
+                    matches!(o.phase, crate::game::onboarding::OnboardingPhase::Shop)
+                }) {
+                    Scene::Shop(ShopScene::new_tutorial(run))
+                } else {
+                    Scene::Shop(ShopScene::new(run.run_number, run))
+                }
+            }
+            ResumeScene::PickBlind => Scene::PickBlind(super::pick_blind::PickBlindScene::new()),
         }
     }
 }
@@ -202,7 +216,9 @@ impl SceneBehavior for StartScreenScene {
         if activated {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             match self.focus {
-                Some(MenuFocus::Continue) => return Some(Scene::Gameplay(GameplayScene::new())),
+                Some(MenuFocus::Continue) => {
+                    return Some(Self::continue_scene(ctx.resume_scene, ctx.run));
+                }
                 Some(MenuFocus::NewGame) => {
                     if ctx.tutorial_eligible {
                         return Some(Scene::TileSelect(TileSelectScene::new_tutorial()));
@@ -212,6 +228,7 @@ impl SceneBehavior for StartScreenScene {
                     }
                     // Only one material available — skip tile select.
                     *ctx.run = RunState::new_with_material(TileMaterial::default());
+                    ctx.run.apply_progression(ctx.progress);
                     ctx.run.set_auto_cash_in_on_full_structure(
                         persistence::load_settings().auto_cash_in_on_full_structure,
                     );

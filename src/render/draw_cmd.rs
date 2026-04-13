@@ -581,6 +581,8 @@ pub enum DrawCmd {
     GoldenDust,
     /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
     MoonlitWater,
+    /// Procedural sun hovering above rippling water (fullscreen triangle, no data).
+    SunlitWater,
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
@@ -803,6 +805,9 @@ impl UiFrame {
     pub fn moonlit_water(&mut self) {
         self.cmds.push(DrawCmd::MoonlitWater);
     }
+    pub fn sunlit_water(&mut self) {
+        self.cmds.push(DrawCmd::SunlitWater);
+    }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
     }
@@ -935,6 +940,7 @@ impl UiFrame {
                 | DrawCmd::EmberDrift
                 | DrawCmd::GoldenDust
                 | DrawCmd::MoonlitWater
+                | DrawCmd::SunlitWater
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::HandTileBackdrop
                 | DrawCmd::HandTileFaces

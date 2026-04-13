@@ -9,7 +9,7 @@ use rand::{RngExt, SeedableRng};
 
 use crate::core::consumable::Consumable;
 use crate::core::hand::suggest_completions;
-use crate::core::relic::{RelicId, relic_sell_price_live};
+use crate::core::relic::{relic_sell_price_live, RelicId};
 use crate::core::scoring::StepKind;
 use crate::core::structure::is_winning_structure_shape;
 use crate::core::yaku::yaku_preview;
@@ -24,17 +24,17 @@ use crate::render::flying_coins::FlyingCoinSystem;
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::table_space::TableAnchorPx;
-use crate::render::theme::{ButtonState, ButtonVariant, typography};
+use crate::render::theme::{typography, ButtonState, ButtonVariant};
 use crate::render::wgpu_renderer::{
-    GpuInstance, PointLight, TextAlign, TextLabel, build_instances_from_layout,
+    build_instances_from_layout, GpuInstance, PointLight, TextAlign, TextLabel,
 };
-use crate::ui::input::{UiAction, apply_ui_actions};
+use crate::ui::input::{apply_ui_actions, UiAction};
 use crate::ui::widget::{self, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-use action_bar_layout::{ActionBarLayout, action_hud_world_z_py_nudge, compute_action_bar};
+use action_bar_layout::{action_hud_world_z_py_nudge, compute_action_bar, ActionBarLayout};
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
@@ -114,7 +114,7 @@ enum FocusTarget {
     Dora,
 }
 
-use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
+use crate::ui::focus_nav::{focus_target_at_cursor, pick_neighbor, push_focus_ring, FocusDir};
 
 const ALL_BUTTONS: [GameplayButton; 5] = [
     GameplayButton::SortSuit,
@@ -164,6 +164,44 @@ fn structure_preview_mult_stack_count(final_mult: f64) -> usize {
     } else {
         final_mult.ceil().clamp(1.0, 10.0) as usize
     }
+}
+
+fn hand_slots_for_count(
+    layout: &crate::ui::layout::LayoutResult,
+    hand_len: usize,
+) -> Vec<(f32, f32, f32, f32)> {
+    if hand_len == 0 {
+        return Vec::new();
+    }
+
+    let base_slots = &layout.hand_slots;
+    let base_count = base_slots.len();
+    if hand_len <= base_count {
+        let visible_count = hand_len;
+        let slot_w = base_slots.first().map(|r| r.w).unwrap_or(0.0);
+        let center_offset = if visible_count < base_count {
+            ((base_count - visible_count) as f32 * slot_w) * 0.5
+        } else {
+            0.0
+        };
+        return base_slots
+            .iter()
+            .take(hand_len)
+            .map(|r| (r.x + center_offset, r.y, r.w, r.h))
+            .collect();
+    }
+
+    let slot_w = layout.hand_strip.w / hand_len as f32;
+    (0..hand_len)
+        .map(|i| {
+            (
+                layout.hand_strip.x + i as f32 * slot_w,
+                layout.hand_strip.y,
+                slot_w,
+                layout.hand_strip.h,
+            )
+        })
+        .collect()
 }
 
 fn push_structure_preview_pile(
@@ -797,11 +835,7 @@ impl GameplayScene {
         run: &crate::game::run::RunState,
         cascade_showcase: Option<&CascadeShowcase>,
     ) -> (f32, f32) {
-        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
-            .hand_slots
-            .iter()
-            .map(|r| (r.x, r.y, r.w, r.h))
-            .collect();
+        let hand_slots = hand_slots_for_count(layout, run.hand.len());
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
         let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
@@ -874,11 +908,7 @@ impl GameplayScene {
         run: &crate::game::run::RunState,
         cascade_showcase: Option<&CascadeShowcase>,
     ) -> (f32, f32) {
-        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
-            .hand_slots
-            .iter()
-            .map(|r| (r.x, r.y, r.w, r.h))
-            .collect();
+        let hand_slots = hand_slots_for_count(layout, run.hand.len());
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
         let showcase_present = has_structure || cascade_showcase.is_some();
@@ -962,11 +992,7 @@ impl GameplayScene {
         } else {
             return None;
         };
-        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
-            .hand_slots
-            .iter()
-            .map(|r| (r.x, r.y, r.w, r.h))
-            .collect();
+        let hand_slots = hand_slots_for_count(layout, run.hand.len());
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let has_structure = run.uses_structure_bank() && !run.structure_sets.is_empty();
         let showcase_present = has_structure || cascade_showcase.is_some();
@@ -2392,21 +2418,7 @@ impl SceneBehavior for GameplayScene {
             run.discards_max,
         );
 
-        // Center the hand horizontally when fewer tiles than full slots are present.
-        let max_slots = layout.hand_slots.len();
-        let visible_count = run.hand.len().min(max_slots);
-        let slot_w = layout.hand_slots.first().map(|r| r.w).unwrap_or(0.0);
-        let center_offset = if visible_count < max_slots {
-            ((max_slots - visible_count) as f32 * slot_w) * 0.5
-        } else {
-            0.0
-        };
-        let hand_slots: Vec<(f32, f32, f32, f32)> = layout
-            .hand_slots
-            .iter()
-            .take(run.hand.len())
-            .map(|r| (r.x + center_offset, r.y, r.w, r.h))
-            .collect();
+        let hand_slots = hand_slots_for_count(layout, run.hand.len());
 
         // Use cascade's displayed score if active, otherwise real score.
         let shown_score = if self.cascade.is_some() {
@@ -4003,6 +4015,7 @@ impl SceneBehavior for GameplayScene {
         // footlight. Each: 3D wax + wick, additive `Flame` quad, `PointLight`.
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
+        let mut boss_ofuda_light: Option<PointLight> = None;
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
         let _relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
         // `scale_c` is still used by per-candle jitter offsets below; the
@@ -4049,9 +4062,9 @@ impl SceneBehavior for GameplayScene {
         // wick projected into the same screen band as the tiles.
         let bottom_pad = edge_pad + candle_w * 1.6;
         let bottom_z_back = candle_h * 0.55; // shift back along table-Z
-        // The two score-panel candles sit at the back of the table. Push
-        // them one candle-width further from the camera (smaller pixel-y →
-        // greater table-z) so they read as the rear pair in depth.
+                                             // The two score-panel candles sit at the back of the table. Push
+                                             // them one candle-width further from the camera (smaller pixel-y →
+                                             // greater table-z) so they read as the rear pair in depth.
         let back_z_push = candle_w;
         let cy_hand_upper = strip_y - bottom_z_back;
         let cy_hand_lower = rack_bottom + candle_w * 0.5 + edge_pad * 0.5;
@@ -4747,17 +4760,17 @@ impl SceneBehavior for GameplayScene {
                                 let f = (c as f32 + 0.5) / COLS as f32;
                                 let cx = span_min + (span_max - span_min) * f;
                                 let edge_bias = (f - 0.5) * 2.0; // -1..1
-                                // Velocity tuned against the curtain density
-                                // below: previous values (28 lateral / -55 z)
-                                // were too gentle to push the curtain off-
-                                // grid before the overlay finished fading,
-                                // leaving the round draped in residual smoke
-                                // that took the natural dissipation many
-                                // seconds to clear. The debug `B` gust uses
-                                // 1400 lateral / -120 z; we sit well below
-                                // that so this still reads as a soft breath
-                                // rather than a hurricane, but well above the
-                                // old values so the field actually clears.
+                                                                 // Velocity tuned against the curtain density
+                                                                 // below: previous values (28 lateral / -55 z)
+                                                                 // were too gentle to push the curtain off-
+                                                                 // grid before the overlay finished fading,
+                                                                 // leaving the round draped in residual smoke
+                                                                 // that took the natural dissipation many
+                                                                 // seconds to clear. The debug `B` gust uses
+                                                                 // 1400 lateral / -120 z; we sit well below
+                                                                 // that so this still reads as a soft breath
+                                                                 // rather than a hurricane, but well above the
+                                                                 // old values so the field actually clears.
                                 let lateral = 220.0 * edge_bias * envelope * row_strength;
                                 wind_gusts.push(crate::render::draw_cmd::WindGust {
                                     center_px: (cx, cy),
@@ -4945,6 +4958,19 @@ impl SceneBehavior for GameplayScene {
                 rotation_y_deg: 0.0,
                 title: ofuda_title_text,
                 rule: ofuda_rule_text,
+            });
+            // Give the boss ofuda its own warm key light so the paper reads
+            // as a separate focal object instead of borrowing the plaque's
+            // candle spill and falling into the back-wall shadows.
+            boss_ofuda_light = Some(PointLight {
+                pos: [
+                    ofuda_cx - ofuda_w * 0.08,
+                    ofuda_cy + ofuda_h * 0.04,
+                    ofuda_lift + ofuda_w * 0.4,
+                ],
+                radius: ofuda_h * 1.15,
+                color: [1.0, 0.92, 0.78],
+                intensity: 2.1 * self.light_ramp.max(0.35),
             });
         }
         // Plays/discards pip indicators are a *physical* peg block
@@ -5331,6 +5357,13 @@ impl SceneBehavior for GameplayScene {
         // to the volumetric lightbake shader as the analytic flame envelope
         // height in world units.
         frame.flame_height_world = layout.mm(30.0);
+        if let Some(light) = boss_ofuda_light {
+            let budget =
+                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
+            if budget > 0 {
+                point_lights.push(light);
+            }
+        }
         frame.point_lights = point_lights;
         frame.wind_gusts = wind_gusts;
         // Catch-all 3D-hit dispatcher: a full-screen `ButtonDef::scene`
@@ -5604,7 +5637,7 @@ fn relic_tooltip_copy_detail(
     relic_index: usize,
     run: &crate::game::run::RunState,
 ) -> Option<String> {
-    use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
+    use crate::core::relic::{all_relic_defs, relic_description_live, RelicId};
 
     fn relic_name(id: RelicId) -> &'static str {
         all_relic_defs()
@@ -5658,4 +5691,38 @@ fn relic_tooltip_copy_detail(
             detail
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hand_slots_for_count;
+
+    #[test]
+    fn hand_slots_for_count_centers_short_hands() {
+        let mut layout = crate::ui::layout::UiLayout::new();
+        let solved = layout.solve(1400.0, 900.0);
+
+        let base_first_x = solved.hand_slots.first().unwrap().x;
+        let base_slot_w = solved.hand_slots.first().unwrap().w;
+        let centered = hand_slots_for_count(&solved, 10);
+
+        assert_eq!(centered.len(), 10);
+        assert!((centered[0].0 - (base_first_x + base_slot_w * 2.0)).abs() < 0.01);
+        assert!((centered[0].2 - base_slot_w).abs() < 0.01);
+    }
+
+    #[test]
+    fn hand_slots_for_count_compresses_wide_hands_into_strip() {
+        let mut layout = crate::ui::layout::UiLayout::new();
+        let solved = layout.solve(1400.0, 900.0);
+
+        let slots = hand_slots_for_count(&solved, 16);
+
+        assert_eq!(slots.len(), 16);
+        assert!(slots[0].0 >= solved.hand_strip.x - 0.01);
+        assert!(
+            (slots[15].0 + slots[15].2 - (solved.hand_strip.x + solved.hand_strip.w)).abs() < 0.01
+        );
+        assert!(slots[0].2 < solved.hand_slots[0].w);
+    }
 }

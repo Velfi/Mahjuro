@@ -181,6 +181,7 @@ impl PauseMenu {
             let result = self.update(
                 ctx.actions,
                 ctx.button_clicks,
+                ctx.progress,
                 ctx.run,
                 ctx.bus,
                 ctx.cursor_pos,
@@ -215,6 +216,7 @@ impl PauseMenu {
         &mut self,
         actions: &[UiAction],
         button_clicks: &[u32],
+        progress: &crate::core::progression::PlayerProgress,
         run: &mut RunState,
         bus: &mut EventBus,
         cursor_pos: (f32, f32),
@@ -285,7 +287,7 @@ impl PauseMenu {
             }
             Some(PauseAction::Restart) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                self.do_restart(run)
+                self.do_restart(run, progress)
             }
             Some(PauseAction::MeldGuide) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -314,8 +316,13 @@ impl PauseMenu {
         }
     }
 
-    fn do_restart(&mut self, run: &mut RunState) -> PauseUpdate {
+    fn do_restart(
+        &mut self,
+        run: &mut RunState,
+        progress: &crate::core::progression::PlayerProgress,
+    ) -> PauseUpdate {
         *run = RunState::new_demo();
+        run.apply_progression(progress);
         run.set_auto_cash_in_on_full_structure(
             crate::persistence::load_settings().auto_cash_in_on_full_structure,
         );

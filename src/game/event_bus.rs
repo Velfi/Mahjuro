@@ -3,6 +3,21 @@
 use crate::audio::SfxId;
 use crate::core::tile::Tile;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GameOverReason {
+    OutOfPlays,
+    NoActionsRemaining,
+}
+
+impl GameOverReason {
+    pub fn loss_summary(self) -> &'static str {
+        match self {
+            Self::OutOfPlays => "No plays remaining",
+            Self::NoActionsRemaining => "No legal actions remained",
+        }
+    }
+}
+
 /// Itemized breakdown of the gold awarded for clearing a blind. Mirrors
 /// the calculation in `RunState::play_selected` so the celebration UI can
 /// show the player exactly where each coin came from.
@@ -42,6 +57,7 @@ pub enum GameEvent {
     RunComplete,
     GameOver {
         final_score: u64,
+        reason: GameOverReason,
     },
     /// Tiles permanently destroyed via the Kiln talisman.
     TilesDestroyed {

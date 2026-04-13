@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use chrono::{NaiveDate, Utc};
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -62,6 +63,15 @@ struct Globals {
     cursor_pos: [f32; 2],
     transition_progress: f32,
     quality_level: f32,
+    moon_phase: f32,
+    _globals_pad: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct BloomParams {
+    data0: [f32; 4],
+    data1: [f32; 4],
 }
 
 #[repr(C)]
@@ -118,6 +128,17 @@ struct TileOccludersBuf {
     /// `count.x` = number of active occluders; rest is std140 padding.
     count: [u32; 4],
     boxes: [TileOccluderGpu; MAX_TILE_OCCLUDERS],
+}
+
+fn current_moon_phase() -> f32 {
+    let known_new_moon = NaiveDate::from_ymd_opt(2000, 1, 6)
+        .expect("valid new moon reference date")
+        .and_hms_opt(18, 14, 0)
+        .expect("valid new moon reference time");
+    let days_since_reference =
+        (Utc::now().naive_utc() - known_new_moon).num_seconds() as f64 / 86_400.0;
+    let synodic_month_days = 29.530_588_853_f64;
+    (days_since_reference.rem_euclid(synodic_month_days) / synodic_month_days) as f32
 }
 
 impl TileOccludersBuf {
@@ -456,6 +477,10 @@ pub struct WgpuRenderer {
     ember_drift_pipeline: wgpu::RenderPipeline,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
+    #[allow(dead_code)]
+    moon_albedo_texture: wgpu::Texture,
+    moon_albedo_bind_group: wgpu::BindGroup,
+    sunlit_water_pipeline: wgpu::RenderPipeline,
     shooting_star_cascade_pipeline: wgpu::RenderPipeline,
     #[allow(dead_code)]
     tile_pipeline: wgpu::RenderPipeline,
@@ -592,6 +617,25 @@ pub struct WgpuRenderer {
     /// lacquered floor as the SSR source.
     scene_prev_texture: wgpu::Texture,
     scene_prev_view: wgpu::TextureView,
+    /// Current frame's full scene color, rendered offscreen before bloom
+    /// and final composite into the swapchain.
+    scene_color_texture: wgpu::Texture,
+    scene_color_view: wgpu::TextureView,
+    bloom_extract_pipeline: wgpu::RenderPipeline,
+    bloom_blur_pipeline: wgpu::RenderPipeline,
+    bloom_composite_pipeline: wgpu::RenderPipeline,
+    bloom_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_composite_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_params_buffer: wgpu::Buffer,
+    bloom_sampler: wgpu::Sampler,
+    bloom_scene_bind_group: wgpu::BindGroup,
+    bloom_ping_bind_group: wgpu::BindGroup,
+    bloom_pong_bind_group: wgpu::BindGroup,
+    bloom_composite_bind_group: wgpu::BindGroup,
+    bloom_ping_texture: wgpu::Texture,
+    bloom_ping_view: wgpu::TextureView,
+    bloom_pong_texture: wgpu::Texture,
+    bloom_pong_view: wgpu::TextureView,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -1368,6 +1412,57 @@ fn create_scene_prev(
     (tex, view)
 }
 
+fn create_scene_color(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("scene-color"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+    (tex, view)
+}
+
+fn create_post_texture(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+    label: &'static str,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+    (tex, view)
+}
+
 /// Sibling depth texture used as a sampleable snapshot of the scene depth
 /// between the pre-smoke and post-smoke render passes.
 fn create_depth_copy(
@@ -1763,6 +1858,8 @@ impl WgpuRenderer {
                 cursor_pos: [size.width as f32 * 0.5, size.height as f32 * 0.5],
                 transition_progress: 0.0,
                 quality_level: 2.0,
+                moon_phase: current_moon_phase(),
+                _globals_pad: [0.0; 3],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -1917,6 +2014,56 @@ impl WgpuRenderer {
             label: Some("quad-pl"),
             bind_group_layouts: &[Some(&globals_layout)],
             immediate_size: 0,
+        });
+
+        // ---- Moon albedo texture (LRO WAC real heightmap) ----
+        let moon_albedo_tex_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("moon-albedo-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let moonlit_water_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("moonlit-water-pl"),
+            bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
+            immediate_size: 0,
+        });
+        let (moon_albedo_texture, moon_albedo_view) =
+            crate::render::texture_upload::load_metal_heightmap(
+                &device,
+                &queue,
+                "textures/moon_albedo.png",
+                "moon-albedo",
+            );
+        let moon_albedo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("moon-albedo-bg"),
+            layout: &moon_albedo_tex_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&moon_albedo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&tile_sampler),
+                },
+            ],
         });
 
         // ---- Shadow map resources (depth texture + sampler + layouts) ----
@@ -2265,11 +2412,64 @@ impl WgpuRenderer {
                 "/shaders/golden_dust.wgsl"
             )),
         );
-        let moonlit_water_pipeline = vignette_pipeline(
-            "moonlit-water-pipeline",
+        // moonlit_water gets its own pipeline so it can bind the moon albedo
+        // texture at group 1 in addition to the globals at group 0.
+        let moonlit_water_pipeline = {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("moonlit-water-pipeline"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/shaders/moonlit_water.wgsl"
+                    ))
+                    .into(),
+                ),
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("moonlit-water-pipeline"),
+                layout: Some(&moonlit_water_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let sunlit_water_pipeline = vignette_pipeline(
+            "sunlit-water-pipeline",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/shaders/moonlit_water.wgsl"
+                "/shaders/sunlit_water.wgsl"
             )),
         );
         let shooting_star_cascade_pipeline = vignette_pipeline(
@@ -2469,6 +2669,32 @@ impl WgpuRenderer {
         });
         let (scene_prev_texture, scene_prev_view) =
             create_scene_prev(&device, format, size.width.max(1), size.height.max(1));
+        let (scene_color_texture, scene_color_view) =
+            create_scene_color(&device, format, size.width.max(1), size.height.max(1));
+        let bloom_w = (size.width.max(1) / 2).max(1);
+        let bloom_h = (size.height.max(1) / 2).max(1);
+        let (bloom_ping_texture, bloom_ping_view) =
+            create_post_texture(&device, format, bloom_w, bloom_h, "bloom-ping");
+        let (bloom_pong_texture, bloom_pong_view) =
+            create_post_texture(&device, format, bloom_w, bloom_h, "bloom-pong");
+        let bloom_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("bloom-params"),
+            contents: bytemuck::bytes_of(&BloomParams {
+                data0: [1.1, 0.0, 1.0 / bloom_w as f32, 1.0 / bloom_h as f32],
+                data1: [1.0, 0.0, 0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bloom-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
         let lit_mesh_ssr_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lit-mesh-ssr-bg"),
             layout: &lit_mesh_ssr_layout,
@@ -2691,6 +2917,261 @@ impl WgpuRenderer {
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
+        });
+
+        let bloom_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bloom-bg-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let bloom_composite_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bloom-composite-bg-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let bloom_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bloom-pl"),
+            bind_group_layouts: &[Some(&bloom_bind_group_layout)],
+            immediate_size: 0,
+        });
+        let bloom_extract_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom-extract-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/bloom_extract.wgsl").into(),
+            ),
+        });
+        let bloom_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom-blur-shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/bloom_blur.wgsl").into()),
+        });
+        let bloom_extract_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bloom-extract-pipeline"),
+                layout: Some(&bloom_layout),
+                vertex: wgpu::VertexState {
+                    module: &bloom_extract_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &bloom_extract_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        let bloom_blur_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bloom-blur-pipeline"),
+            layout: Some(&bloom_layout),
+            vertex: wgpu::VertexState {
+                module: &bloom_blur_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &bloom_blur_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let bloom_composite_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("bloom-composite-pl"),
+                bind_group_layouts: &[Some(&bloom_composite_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let bloom_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom-composite-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../shaders/bloom_composite.wgsl").into(),
+            ),
+        });
+        let bloom_composite_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bloom-composite-pipeline"),
+                layout: Some(&bloom_composite_layout),
+                vertex: wgpu::VertexState {
+                    module: &bloom_composite_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &bloom_composite_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        let bloom_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-scene-bg"),
+            layout: &bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+            ],
+        });
+        let bloom_ping_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-ping-bg"),
+            layout: &bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&bloom_ping_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+            ],
+        });
+        let bloom_pong_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-pong-bg"),
+            layout: &bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&bloom_pong_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+            ],
+        });
+        let bloom_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-composite-bg"),
+            layout: &bloom_composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&bloom_ping_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+            ],
         });
 
         log::info!("shaders + pipelines compiled in {:?}", t0.elapsed());
@@ -3055,6 +3536,9 @@ impl WgpuRenderer {
             ember_drift_pipeline,
             golden_dust_pipeline,
             moonlit_water_pipeline,
+            moon_albedo_texture,
+            moon_albedo_bind_group,
+            sunlit_water_pipeline,
             shooting_star_cascade_pipeline,
             tile_pipeline,
             tile_outline_pipeline,
@@ -3169,6 +3653,23 @@ impl WgpuRenderer {
             lit_mesh_ssr_sampler,
             scene_prev_texture,
             scene_prev_view,
+            scene_color_texture,
+            scene_color_view,
+            bloom_extract_pipeline,
+            bloom_blur_pipeline,
+            bloom_composite_pipeline,
+            bloom_bind_group_layout,
+            bloom_composite_bind_group_layout,
+            bloom_params_buffer,
+            bloom_sampler,
+            bloom_scene_bind_group,
+            bloom_ping_bind_group,
+            bloom_pong_bind_group,
+            bloom_composite_bind_group,
+            bloom_ping_texture,
+            bloom_ping_view,
+            bloom_pong_texture,
+            bloom_pong_view,
             lit_mesh_pipeline,
             lit_mesh_white_tex,
             lit_mesh_white_view,
@@ -4073,6 +4574,37 @@ impl WgpuRenderer {
         );
         self.scene_prev_texture = spt;
         self.scene_prev_view = spv;
+        self.scene_color_texture.destroy();
+        let (sct, scv) = create_scene_color(
+            &self.device,
+            self.config.format,
+            new_size.width,
+            new_size.height,
+        );
+        self.scene_color_texture = sct;
+        self.scene_color_view = scv;
+        self.bloom_ping_texture.destroy();
+        self.bloom_pong_texture.destroy();
+        let bloom_w = (new_size.width.max(1) / 2).max(1);
+        let bloom_h = (new_size.height.max(1) / 2).max(1);
+        let (bpt, bpv) = create_post_texture(
+            &self.device,
+            self.config.format,
+            bloom_w,
+            bloom_h,
+            "bloom-ping",
+        );
+        self.bloom_ping_texture = bpt;
+        self.bloom_ping_view = bpv;
+        let (bot, bov) = create_post_texture(
+            &self.device,
+            self.config.format,
+            bloom_w,
+            bloom_h,
+            "bloom-pong",
+        );
+        self.bloom_pong_texture = bot;
+        self.bloom_pong_view = bov;
         self.lit_mesh_ssr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lit-mesh-ssr-bg"),
             layout: &self.lit_mesh_ssr_layout,
@@ -4095,6 +4627,83 @@ impl WgpuRenderer {
                 },
             ],
         });
+        self.bloom_scene_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-scene-bg"),
+            layout: &self.bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        self.bloom_ping_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-ping-bg"),
+            layout: &self.bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        self.bloom_pong_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-pong-bg"),
+            layout: &self.bloom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.bloom_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.bloom_pong_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        self.bloom_composite_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bloom-composite-bg"),
+                layout: &self.bloom_composite_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.bloom_params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                    },
+                ],
+            });
 
         self.queue.write_buffer(
             &self.globals_buffer,
@@ -4107,6 +4716,16 @@ impl WgpuRenderer {
                 cursor_pos: [new_size.width as f32 * 0.5, new_size.height as f32 * 0.5],
                 transition_progress: 0.0,
                 quality_level: 2.0,
+                moon_phase: current_moon_phase(),
+                _globals_pad: [0.0; 3],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0: [1.1, 0.0, 1.0 / bloom_w as f32, 1.0 / bloom_h as f32],
+                data1: [1.0, 0.0, 0.0, 0.0],
             }),
         );
 
@@ -4138,6 +4757,7 @@ impl WgpuRenderer {
         frame: &UiFrame,
         smoke_intensity: crate::persistence::SmokeIntensity,
         smoke_detail: crate::persistence::SmokeDetail,
+        smoke_sim_quality: crate::persistence::SmokeSimQuality,
         effects_quality: crate::persistence::EffectsQuality,
         tile_preset: crate::persistence::TilePreset,
         tile_material: crate::persistence::TileMaterial,
@@ -4176,6 +4796,11 @@ impl WgpuRenderer {
         let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let scene_view = &self.scene_color_view;
+        let bloom_active = frame
+            .cmds
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCmd::MoonlitWater));
 
         let _w = self.size.width.max(1) as f32;
         let _h = self.size.height.max(1) as f32;
@@ -4225,6 +4850,8 @@ impl WgpuRenderer {
                 cursor_pos: [cx, cy],
                 transition_progress: frame.transition_progress,
                 quality_level: effects_quality.quality_level_f32(),
+                moon_phase: current_moon_phase(),
+                _globals_pad: [0.0; 3],
             }),
         );
 
@@ -4570,6 +5197,8 @@ impl WgpuRenderer {
                                     delta * inv_dt * 0.45,
                                     tile_short_px * 0.55,
                                     speed * 0.04,
+                                    0.0,
+                                    0.0,
                                 );
                             }
                         }
@@ -5010,6 +5639,7 @@ impl WgpuRenderer {
             EmberDrift,
             GoldenDust,
             MoonlitWater,
+            SunlitWater,
             ShootingStarCascade,
             Table,
             Dish,
@@ -5106,6 +5736,12 @@ impl WgpuRenderer {
                 DrawCmd::MoonlitWater => {
                     if effects_quality >= crate::persistence::EffectsQuality::Medium {
                         ops.push(RenderOp::MoonlitWater);
+                    }
+                    i += 1;
+                }
+                DrawCmd::SunlitWater => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::SunlitWater);
                     }
                     i += 1;
                 }
@@ -7228,7 +7864,7 @@ impl WgpuRenderer {
             // emit a steady upward velocity + density at every wick tip.
             for cmd in frame.cmds.iter() {
                 if let DrawCmd::CandleBatch(placements) = cmd {
-                    for p in placements.iter() {
+                    for (candle_idx, p) in placements.iter().enumerate() {
                         let tip = pixel_to_table_world(
                             w,
                             h,
@@ -7236,15 +7872,31 @@ impl WgpuRenderer {
                             p.world_pos[1],
                             crate::render::candle_mesh::WICK_TIP_Y * p.scale * p.height_scale,
                         );
-                        // Soft hot point source: barely any kinetic launch
-                        // velocity — buoyancy in the advect step does the
-                        // lifting, and the height-attenuated curl field
-                        // turns the rising column into a spreading plume.
-                        // Pumping a hard upward velocity here used to
-                        // produce a tight rocket pillar that the curl
-                        // couldn't bend; the new injection is dominated
-                        // by density (heat) rather than momentum.
-                        fluid.inject_impulse(tip, glam::Vec3::new(0.0, 6.0, 0.0), 18.0, 0.10);
+                        let phase = candle_idx as f32 * 1.618_034
+                            + p.world_pos[0] * 0.011
+                            + p.world_pos[1] * 0.007;
+                        let cross =
+                            glam::Vec3::new((phase * 1.7).sin(), 0.0, (phase * 1.3).cos()) * 3.5;
+                        // Small dense soot core right at the wick.
+                        fluid.inject_impulse(
+                            tip + glam::Vec3::new(0.0, 1.8, 0.0),
+                            glam::Vec3::new(0.0, 2.0, 0.0) + cross * 0.2,
+                            6.5,
+                            0.075,
+                            0.10,
+                            phase,
+                        );
+                        // Hot cap above the wick. This contributes more heat
+                        // than visible density so the plume rises, widens, and
+                        // bends without reading like a fat rocket jet.
+                        fluid.inject_impulse(
+                            tip + glam::Vec3::new(0.0, 8.0, 0.0),
+                            glam::Vec3::new(0.0, 7.5, 0.0) + cross,
+                            11.5,
+                            0.020,
+                            0.36,
+                            phase + 0.73,
+                        );
                     }
                 }
             }
@@ -7261,7 +7913,9 @@ impl WgpuRenderer {
                     pos,
                     glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]),
                     g.radius,
-                    g.density,
+                    g.density * 0.35,
+                    0.0,
+                    0.0,
                 );
             }
 
@@ -7285,8 +7939,8 @@ impl WgpuRenderer {
                     if t > 0.0 {
                         let hit = near3 + dir * t;
                         if let Some(prev) = self.prev_cursor_world {
-                            let delta = hit - prev;
-                            let speed = delta.length();
+                            let raw_delta = hit - prev;
+                            let jump = raw_delta.length();
                             // Scale the cursor puff with window size so it
                             // reads at a similar visual proportion at every
                             // resolution. 1 px ≈ 1 world unit here, so a
@@ -7294,28 +7948,44 @@ impl WgpuRenderer {
                             // large displays. Baseline is 1080p — matches
                             // how `cam_pos` and the fluid grid bounds scale.
                             let win_scale = (h / 1080.0).max(0.5);
-                            let speed_threshold = 1.0 * win_scale;
-                            if speed > speed_threshold {
-                                let inv_dt = 1.0 / dt.max(1.0 / 120.0);
-                                // Density needs to be in the same regime as
-                                // the candle injection (~0.1) so the volume
-                                // raymarcher actually picks it up. The old
-                                // `speed * 0.018` value made each puff one
-                                // or two orders of magnitude fainter than
-                                // the candle plumes — invisible against
-                                // the now-properly-rising columns. Use a
-                                // saturating curve so fast cursor flicks
-                                // don't blow out, plus a small upward kick
-                                // so the puff actually lifts off the table
-                                // instead of sitting at hit point until
-                                // buoyancy slowly catches up.
-                                let puff_density = (speed * 0.032).min(0.12);
-                                fluid.inject_impulse(
-                                    hit + glam::Vec3::new(0.0, 3.0 * win_scale, 0.0),
-                                    delta * inv_dt * 0.22 + glam::Vec3::new(0.0, 8.0, 0.0),
-                                    22.0 * win_scale,
-                                    puff_density,
-                                );
+                            // On oblique menu cameras, a modest screen-space
+                            // cursor move near the far edge of the table can
+                            // project to an enormous world-space jump on the
+                            // y=5 plane. Treat those as discontinuities rather
+                            // than wind so we don't inject a giant impulse
+                            // that makes the plume look unstable.
+                            let max_jump = 42.0 * win_scale;
+                            if jump.is_finite() && jump <= max_jump {
+                                let delta = raw_delta;
+                                let speed = jump;
+                                let speed_threshold = 1.0 * win_scale;
+                                if speed > speed_threshold {
+                                    let inv_dt = 1.0 / dt.max(1.0 / 120.0);
+                                    // Density needs to be in the same regime as
+                                    // the candle injection (~0.1) so the volume
+                                    // raymarcher actually picks it up. The old
+                                    // `speed * 0.018` value made each puff one
+                                    // or two orders of magnitude fainter than
+                                    // the candle plumes — invisible against
+                                    // the now-properly-rising columns. Use a
+                                    // saturating curve so fast cursor flicks
+                                    // don't blow out, plus a small upward kick
+                                    // so the puff actually lifts off the table
+                                    // instead of sitting at hit point until
+                                    // buoyancy slowly catches up.
+                                    let puff_density = (speed * 0.006).min(0.022);
+                                    let vel = (delta * inv_dt * 0.22)
+                                        .clamp_length_max(72.0 * win_scale)
+                                        + glam::Vec3::new(0.0, 8.0, 0.0);
+                                    fluid.inject_impulse(
+                                        hit + glam::Vec3::new(0.0, 3.0 * win_scale, 0.0),
+                                        vel,
+                                        22.0 * win_scale,
+                                        puff_density,
+                                        0.0,
+                                        0.0,
+                                    );
+                                }
                             }
                         }
                         self.prev_cursor_world = Some(hit);
@@ -7344,7 +8014,13 @@ impl WgpuRenderer {
 
             // Upload the per-frame camera uniform consumed by the volume
             // raymarch shader.
-            fluid.upload_camera_uniform(&self.queue, view_proj, cam_pos, smoke_intensity);
+            fluid.upload_camera_uniform(
+                &self.queue,
+                view_proj,
+                cam_pos,
+                smoke_intensity,
+                smoke_sim_quality,
+            );
         }
 
         // Garbage-collect stale per-tile world cache entries — drop any uid
@@ -7987,7 +8663,13 @@ impl WgpuRenderer {
         // headroom for the semi-Lagrangian step to stay stable.
         if let Some(ref mut fluid) = self.fluid {
             let step_dt = dt.max(1.0 / 120.0);
-            fluid.step(&mut encoder, &self.queue, step_dt, smoke_intensity);
+            fluid.step(
+                &mut encoder,
+                &self.queue,
+                step_dt,
+                smoke_intensity,
+                smoke_sim_quality,
+            );
         }
 
         // ── Shadow pre-pass ─────────────────────────────────────────────
@@ -8334,6 +9016,12 @@ impl WgpuRenderer {
                 }
                 RenderOp::MoonlitWater => {
                     pass.set_pipeline(&self.moonlit_water_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &self.moon_albedo_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                RenderOp::SunlitWater => {
+                    pass.set_pipeline(&self.sunlit_water_pipeline);
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -9132,7 +9820,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -9204,7 +9892,7 @@ impl WgpuRenderer {
         // (with-plaques) depth via its own `depth_copy_texture` copy.
         encoder.copy_texture_to_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &surface_frame.texture,
+                texture: &self.scene_color_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -9252,7 +9940,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("plaque-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -9368,7 +10056,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("post-smoke-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -9394,6 +10082,202 @@ impl WgpuRenderer {
                 }
                 process_op(&mut pass, op);
             }
+        }
+
+        let bloom_w = (self.size.width.max(1) / 2).max(1);
+        let bloom_h = (self.size.height.max(1) / 2).max(1);
+        let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
+        let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
+        let make_bloom_bg =
+            |label: &'static str, params: BloomParams, texture_view: &wgpu::TextureView| {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::bytes_of(&params),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &self.bloom_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(texture_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                        },
+                    ],
+                });
+                (buffer, bind_group)
+            };
+        let extract_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [0.0; 4],
+        };
+        let blur_h_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [1.0, 0.0, 0.0, 0.0],
+        };
+        let blur_v_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [0.0, 1.0, 0.0, 0.0],
+        };
+        let composite_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [0.0; 4],
+        };
+        let (_extract_params_buf, bloom_scene_bg) = make_bloom_bg(
+            "bloom-scene-pass-bg",
+            extract_params,
+            &self.scene_color_view,
+        );
+        let (_blur_h_params_buf, bloom_ping_bg) =
+            make_bloom_bg("bloom-ping-pass-bg", blur_h_params, &self.bloom_ping_view);
+        let (_blur_v_params_buf, bloom_pong_bg) =
+            make_bloom_bg("bloom-pong-pass-bg", blur_v_params, &self.bloom_pong_view);
+        let composite_params_buf =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bloom-composite-params"),
+                    contents: bytemuck::bytes_of(&composite_params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        let bloom_composite_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-composite-pass-bg"),
+            layout: &self.bloom_composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: composite_params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+
+        if bloom_active {
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-extract-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_ping_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_extract_pipeline);
+                pass.set_bind_group(0, &bloom_scene_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-blur-h-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_pong_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_blur_pipeline);
+                pass.set_bind_group(0, &bloom_ping_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-blur-v-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_ping_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_blur_pipeline);
+                pass.set_bind_group(0, &bloom_pong_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-composite-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.bloom_composite_pipeline);
+            pass.set_bind_group(0, &bloom_composite_bg, &[]);
+            pass.draw(0..3, 0..1);
         }
 
         // (The SSR colour + depth snapshots that used to live here have

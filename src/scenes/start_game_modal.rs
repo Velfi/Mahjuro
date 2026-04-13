@@ -129,9 +129,14 @@ impl TileSelectScene {
         Tree::vertical_menu(items).with_anchor([menu_x, start_y, btn_w, block_h])
     }
 
-    fn start_game(&self, run: &mut RunState) -> SceneTransition {
+    fn start_game(
+        &self,
+        run: &mut RunState,
+        progress: &crate::core::progression::PlayerProgress,
+    ) -> SceneTransition {
         if self.tutorial_mode {
             *run = RunState::new_onboarding();
+            run.apply_progression(progress);
             run.set_auto_cash_in_on_full_structure(
                 crate::persistence::load_settings().auto_cash_in_on_full_structure,
             );
@@ -140,6 +145,7 @@ impl TileSelectScene {
             ))
         } else {
             *run = RunState::new_with_material(self.material);
+            run.apply_progression(progress);
             run.set_auto_cash_in_on_full_structure(
                 crate::persistence::load_settings().auto_cash_in_on_full_structure,
             );
@@ -251,12 +257,13 @@ impl SceneBehavior for TileSelectScene {
         match action {
             Some(ModalAction::Play) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                self.start_game(ctx.run)
+                self.start_game(ctx.run, ctx.progress)
             }
             Some(ModalAction::SkipTutorial) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.complete_onboarding = true;
                 *ctx.run = RunState::new_with_material(TileMaterial::default());
+                ctx.run.apply_progression(ctx.progress);
                 ctx.run.set_auto_cash_in_on_full_structure(
                     crate::persistence::load_settings().auto_cash_in_on_full_structure,
                 );

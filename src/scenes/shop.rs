@@ -43,9 +43,7 @@ use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
-use super::{
-    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx,
-};
+use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShopAction {
@@ -793,6 +791,7 @@ const PICK_TILE_PACK: u32 = 4;
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
 fn generate_shop_stock(
     relics: &RelicState,
+    available_relics: &[RelicId],
     extra_relics: usize,
 ) -> (
     Vec<ShopItem>,
@@ -848,7 +847,11 @@ fn generate_shop_stock(
     let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
     let mut relic_pool: Vec<&_> = defs
         .iter()
-        .filter(|d| !relics.owns(d.id) && !shop_excluded.contains(&d.id))
+        .filter(|d| {
+            available_relics.contains(&d.id)
+                && !relics.owns(d.id)
+                && !shop_excluded.contains(&d.id)
+        })
         .collect();
     relic_pool.shuffle(&mut rng);
     let items: Vec<ShopItem> = relic_pool
@@ -955,7 +958,7 @@ impl ShopScene {
         let (mut items, zodiac_items, talisman_items, pack_item) = if mode == ShopMode::Tutorial {
             tutorial_shop_stock()
         } else {
-            generate_shop_stock(&run.relics, extra_relics)
+            generate_shop_stock(&run.relics, &run.available_relics, extra_relics)
         };
 
         // PatronGift: zero out one random relic's price.
@@ -1071,7 +1074,8 @@ impl ShopScene {
         }
         run.gold -= self.reroll_cost as i32;
         self.reroll_cost += REROLL_COST_INCREMENT;
-        let (items, zodiac_items, talisman_items, pack_item) = generate_shop_stock(&run.relics, 0);
+        let (items, zodiac_items, talisman_items, pack_item) =
+            generate_shop_stock(&run.relics, &run.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -1081,7 +1085,8 @@ impl ShopScene {
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
-        let (items, zodiac_items, talisman_items, pack_item) = generate_shop_stock(&run.relics, 0);
+        let (items, zodiac_items, talisman_items, pack_item) =
+            generate_shop_stock(&run.relics, &run.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -1587,6 +1592,37 @@ fn coin_display_layout(
     (bars, coins)
 }
 
+fn shop_plaque_lines(scene: &ShopScene, run: &crate::game::run::RunState) -> (String, String) {
+    let top = format!(
+        "Shop  ·  Round {}  ·  Gold {}g",
+        scene.came_from_round,
+        run.gold.max(0)
+    );
+    let bottom = if scene.mode == ShopMode::Tutorial {
+        "Buy a relic, zodiac, talisman, or pack, then continue".to_string()
+    } else {
+        let reroll = if scene.reroll_cost == 0 {
+            "FREE reroll".to_string()
+        } else {
+            format!("Reroll {}g", scene.reroll_cost)
+        };
+        let pack = if scene.pack_item.is_some() {
+            "1 pack"
+        } else {
+            "No pack"
+        };
+        format!(
+            "{} relics  ·  {} zodiacs  ·  {} talismans  ·  {}  ·  {}",
+            scene.items.len(),
+            scene.zodiac_items.len(),
+            scene.talisman_items.len(),
+            pack,
+            reroll,
+        )
+    };
+    (top, bottom)
+}
+
 impl SceneBehavior for ShopScene {
     fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
         self.pause_menu.options_overlay()
@@ -2036,6 +2072,16 @@ impl SceneBehavior for ShopScene {
         frame.ember_drift();
         frame.camera_override = Some(layout.camera);
 
+        // Hanging shop plaque stays fixed above the cabinet and needs its
+        // own sizing/lighting budget because it's the only always-on read.
+        let plaque_world_y = layout.cabinet_world_y + layout.cabinet_extents[1] * 0.57;
+        let plaque_pixel_x = w * 0.5;
+        let plaque_pixel_y = layout.cabinet_pixel_y + layout.cabinet_extents[2] * 0.68;
+        let plaque_world_w = (w * 0.40).clamp(320.0, 560.0);
+        let plaque_world_h = (h * 0.135).clamp(92.0, 148.0);
+        let plaque_world_t = 10.0_f32;
+        let (plaque_top_text, plaque_bot_text) = shop_plaque_lines(self, ctx.run);
+
         // ── Curio cabinet (back wall) ──────────────────────────────────
         frame.curio_cabinet(CurioCabinetPlacement {
             center_pos: [
@@ -2393,6 +2439,18 @@ impl SceneBehavior for ShopScene {
                 color: [1.00, 0.90, 0.64],
                 intensity: 2.40,
             },
+            // Dedicated plaque light so the engraved shop summary stays
+            // readable against the dark cabinet backdrop.
+            PointLight {
+                pos: [
+                    plaque_pixel_x,
+                    plaque_pixel_y + h * 0.05,
+                    plaque_world_y + h * 0.28,
+                ],
+                radius: h * 0.55,
+                color: [1.00, 0.93, 0.68],
+                intensity: 3.10,
+            },
         ];
 
         // ── Hover spotlight: literal point light on the picked object ──
@@ -2552,18 +2610,12 @@ impl SceneBehavior for ShopScene {
         // (Putting it in the local `texts` vec used to leak above
         // tooltips because that vec gets flushed AFTER the global
         // tooltip overlay's quads in some draw paths.)
-        let plaque_world_y = layout.cabinet_world_y + layout.cabinet_extents[1] * 0.55;
-        let plaque_pixel_x = w * 0.5;
-        let plaque_pixel_y = layout.cabinet_pixel_y + layout.cabinet_extents[2] * 0.6;
-        let plaque_world_w = (w * 0.34).clamp(260.0, 480.0);
-        let plaque_world_h = (h * 0.11).clamp(72.0, 120.0);
-        let plaque_world_t = 10.0_f32;
         frame.plaque(PlaquePlacement {
             center_pos: [plaque_pixel_x, plaque_pixel_y, plaque_world_y],
             extents: [plaque_world_w, plaque_world_h, plaque_world_t],
             rotation_y_deg: 0.0,
-            top_text: format!("SHOP  ·  Round {}", self.came_from_round),
-            bot_text: String::new(),
+            top_text: plaque_top_text,
+            bot_text: plaque_bot_text,
         });
         // Previous-frame projection of the plaque face (1-frame lag,
         // same pattern as relic/ribbon rects). Empty on the first frame
@@ -3602,5 +3654,16 @@ mod tests {
 
         assert!(shop.items.len() >= 2);
         assert!(!run.tag_rich_stock);
+    }
+
+    #[test]
+    fn shop_only_rolls_unlocked_relics() {
+        let relics = RelicState::default();
+        let available_relics = vec![RelicId::PairPower];
+
+        let (items, _, _, _) = generate_shop_stock(&relics, &available_relics, 1);
+
+        assert!(!items.is_empty());
+        assert!(items.iter().all(|item| item.relic == RelicId::PairPower));
     }
 }

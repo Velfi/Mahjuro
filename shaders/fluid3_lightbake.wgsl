@@ -34,6 +34,7 @@ struct FluidUniforms {
     grid_max:     vec4<f32>,
     inv_extent:   vec4<f32>,
     params:       vec4<f32>,
+    force_params: vec4<f32>,
 };
 
 struct VolumeCamera {
@@ -42,6 +43,7 @@ struct VolumeCamera {
     cam_pos:       vec4<f32>,
     grid_min:      vec4<f32>,
     grid_max:      vec4<f32>,
+    grid_size:     vec4<f32>,
     // x=max_alpha, y=step_count, z=light_strength, w=ambient.
     // We only consume z and w here.
     params:        vec4<f32>,
@@ -60,9 +62,10 @@ struct PointLights {
 
 @group(0) @binding(0) var<uniform> u: FluidUniforms;
 @group(0) @binding(1) var src_vd: texture_3d<f32>;
-@group(0) @binding(2) var dst_lit: texture_storage_3d<rgba16float, write>;
-@group(0) @binding(3) var<uniform> cam: VolumeCamera;
-@group(0) @binding(4) var<uniform> lights: PointLights;
+@group(0) @binding(2) var src_temp: texture_3d<f32>;
+@group(0) @binding(3) var dst_lit: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(4) var<uniform> cam: VolumeCamera;
+@group(0) @binding(5) var<uniform> lights: PointLights;
 
 fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     let uvw = (c + vec3<f32>(0.5)) / u.grid_size.xyz;
@@ -80,6 +83,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Density lives in the W channel of the velocity-density texture.
     let vd_sample = textureLoad(src_vd, coord, 0);
     let density = max(vd_sample.w, 0.0);
+    let temperature = max(textureLoad(src_temp, coord, 0).x, 0.0);
 
     // World-space center of the voxel — same `cell_to_world` convention
     // every other fluid pass uses, so the lighting matches the actual
@@ -89,6 +93,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let light_strength = cam.params.z;
     let ambient = cam.params.w;
     let lcount = lights.count.x;
+    let height_frac = clamp((pos.y - u.grid_min.y) / max(u.grid_max.y - u.grid_min.y, 1e-3), 0.0, 1.0);
 
     // ── Lighting (verbatim from the original fragment shader) ──────────
     // Two non-obvious deviations from a naïve `(1 - dist/radius)²`
@@ -119,7 +124,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Reinhard so overlapping candle radii don't push past the smoke's
     // own albedo and clip to white.
     lit = lit / (vec3<f32>(1.0) + lit * 0.6);
-    let smoke_color = vec3<f32>(0.42, 0.40, 0.37) * lit;
+    let density_band = smoothstep(0.02, 0.22, density);
+    let thermal_band = smoothstep(0.02, 0.28, temperature);
+    let core_albedo = vec3<f32>(0.25, 0.24, 0.23);
+    let edge_albedo = vec3<f32>(0.50, 0.47, 0.43);
+    let warm_tint = vec3<f32>(1.02, 0.99, 0.95);
+    let cool_tint = vec3<f32>(0.92, 0.95, 1.00);
+    let base_albedo = mix(edge_albedo, core_albedo, density_band);
+    let thermal_tint = mix(cool_tint, warm_tint, thermal_band);
+    let height_tint = mix(vec3<f32>(1.0), vec3<f32>(0.90, 0.92, 0.96), smoothstep(0.35, 1.0, height_frac));
+    let smoke_color = base_albedo * thermal_tint * height_tint * lit;
 
     // Always write smoke_color, even when density is zero — the bilinear
     // sampler in the raymarch interpolates between neighbouring voxels,

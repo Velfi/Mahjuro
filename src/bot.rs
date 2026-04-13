@@ -25,9 +25,10 @@ use crate::core::structure::{StructureTriggerKind, StructureTriggerMeta};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
 use crate::core::zodiac::{YakuLevels, ZodiacKind};
+use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
-use crate::game::run::RunState;
+use crate::game::run::{FINAL_ANTE, RunState};
 
 macro_rules! bot_log {
     ($enabled:expr, $($arg:tt)*) => {
@@ -113,6 +114,7 @@ struct HandOptionAnalysis {
 #[derive(Clone, Copy, Debug)]
 enum TerminalIssueCause {
     OutOfPlays,
+    NoActionsRemaining,
     RejectedChosenPlay,
     NoDiscardsRemaining,
     EmptyHand,
@@ -122,6 +124,7 @@ impl TerminalIssueCause {
     fn label(self) -> &'static str {
         match self {
             Self::OutOfPlays => "out-of-plays",
+            Self::NoActionsRemaining => "no-actions-remaining",
             Self::RejectedChosenPlay => "rejected-chosen-play",
             Self::NoDiscardsRemaining => "no-discards-remaining",
             Self::EmptyHand => "empty-hand",
@@ -194,7 +197,7 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
     } else if analysis.positive_score_count == 0 {
         format!("other:{}:all-committable-zero-score", cause.label())
     } else {
-        format!("other:{}:mixed-options-still-stuck", cause.label())
+        format!("other:{}:playable-lines-remained", cause.label())
     };
     *stats.bot_issues_by_reason.entry(issue_key).or_insert(0) += 1;
 
@@ -229,7 +232,8 @@ pub struct RunStats {
     pub antes_cleared: u32,
     /// Whether the bot survived all `FINAL_ANTE` antes.
     pub victory: bool,
-    /// The ante the bot died on (or `FINAL_ANTE+1` on victory).
+    /// The last real ante reached in this run. On losses this is the ante the
+    /// bot died on; on victories this is the final cleared ante.
     pub died_on_ante: u32,
     /// The blind the bot died on (only meaningful if `!victory`).
     pub died_on_blind: BlindKind,
@@ -399,8 +403,8 @@ impl AggregateStats {
         for (reason, count) in &s.bot_issues_by_reason {
             *self.bot_issues_by_reason.entry(reason.clone()).or_insert(0) += *count;
         }
-        *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
         if !s.victory {
+            *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
             *self
                 .deaths_by_blind
                 .entry(s.died_on_blind.name())
@@ -681,12 +685,19 @@ fn best_play_in_hand(
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
 ) -> Option<(u64, Vec<usize>)> {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct PlayRank {
+        score: u64,
+        meld_count: usize,
+        tile_count: usize,
+    }
+
     let n = hand.len();
     if n < 2 || n > 20 {
         return None;
     }
     let relics = relics_override.unwrap_or(&run.relics);
-    let mut best: Option<(u64, Vec<usize>)> = None;
+    let mut best: Option<(PlayRank, Vec<usize>)> = None;
     for mask in enumerate_candidate_play_masks(hand, rules) {
         let count = mask.count_ones() as usize;
         let mut tiles: Vec<Tile> = Vec::with_capacity(count);
@@ -718,16 +729,21 @@ fn best_play_in_hand(
         if breakdown.total <= 0 {
             continue;
         }
+        let rank = PlayRank {
+            score: breakdown.total,
+            meld_count: sets.len(),
+            tile_count: tiles.len(),
+        };
+        let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
         if best
             .as_ref()
-            .map(|(s, _)| breakdown.total > *s)
+            .map(|(best_rank, _)| rank > *best_rank)
             .unwrap_or(true)
         {
-            let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
-            best = Some((breakdown.total, indices));
+            best = Some((rank, indices));
         }
     }
-    best
+    best.map(|(rank, indices)| (rank.score, indices))
 }
 
 #[derive(Clone, Copy)]
@@ -1171,10 +1187,12 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
             );
             return true;
         }
-        if run.plays_remaining == 0 {
-            if run.round_score < run.target_score as u64 {
-                record_terminal_hand_issue(stats, run, TerminalIssueCause::OutOfPlays);
-            }
+        if let Some(reason) = run.round_failure_reason() {
+            let cause = match reason {
+                GameOverReason::OutOfPlays => TerminalIssueCause::OutOfPlays,
+                GameOverReason::NoActionsRemaining => TerminalIssueCause::NoActionsRemaining,
+            };
+            record_terminal_hand_issue(stats, run, cause);
             bot_log!(
                 log,
                 "    blind failed after {} turns with score {}/{}",
@@ -1351,7 +1369,8 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        best_play_in_hand, enumerate_candidate_play_masks, pick_best_play, talisman_marginal_value,
+        best_play_in_hand, enumerate_candidate_play_masks, pick_best_play,
+        remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
         use_bot_consumables, zodiac_marginal_value,
     };
     use crate::core::consumable::Consumable;
@@ -1359,11 +1378,18 @@ mod tests {
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
-    use crate::game::run::{HAND_SIZE, RunState};
+    use crate::game::run::{FINAL_ANTE, HAND_SIZE, RunState};
 
     fn brute_force_best_play_in_hand(run: &RunState) -> Option<(u64, Vec<usize>)> {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        struct PlayRank {
+            score: u64,
+            meld_count: usize,
+            tile_count: usize,
+        }
+
         let n = run.hand.len();
-        let mut best: Option<(u64, Vec<usize>)> = None;
+        let mut best: Option<(PlayRank, Vec<usize>)> = None;
         let limit: u32 = 1u32 << n;
         for mask in 1u32..limit {
             let count = mask.count_ones() as usize;
@@ -1403,12 +1429,21 @@ mod tests {
             if total <= 0 {
                 continue;
             }
+            let rank = PlayRank {
+                score: total,
+                meld_count: sets.len(),
+                tile_count: tiles.len(),
+            };
             let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
-            if best.as_ref().map(|(s, _)| total > *s).unwrap_or(true) {
-                best = Some((total, indices));
+            if best
+                .as_ref()
+                .map(|(best_rank, _)| rank > *best_rank)
+                .unwrap_or(true)
+            {
+                best = Some((rank, indices));
             }
         }
-        best
+        best.map(|(rank, indices)| (rank.score, indices))
     }
 
     fn t(suit: Suit, rank: u8, id: u32) -> Tile {
@@ -1529,6 +1564,29 @@ mod tests {
     }
 
     #[test]
+    fn bot_prefers_more_melds_when_score_ties() {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+        struct PlayRank {
+            score: u64,
+            meld_count: usize,
+            tile_count: usize,
+        }
+
+        let single_meld = PlayRank {
+            score: 120,
+            meld_count: 1,
+            tile_count: 3,
+        };
+        let double_meld = PlayRank {
+            score: 120,
+            meld_count: 2,
+            tile_count: 6,
+        };
+
+        assert!(double_meld > single_meld);
+    }
+
+    #[test]
     fn zodiac_value_is_positive_when_it_levels_a_relevant_yaku() {
         let run = scoring_test_run();
         assert!(zodiac_marginal_value(&run, ZodiacKind::Ox) > 0);
@@ -1538,6 +1596,41 @@ mod tests {
     fn talisman_value_is_positive_when_it_buffs_a_scoring_hand() {
         let run = scoring_test_run();
         assert!(talisman_marginal_value(&run, TalismanKind::Jade) > 0);
+    }
+
+    #[test]
+    fn remaining_antes_helper_tracks_final_ante() {
+        assert_eq!(remaining_antes_including_current(1), FINAL_ANTE);
+        assert_eq!(remaining_antes_including_current(FINAL_ANTE), 1);
+        assert_eq!(remaining_antes_including_current(FINAL_ANTE + 1), 0);
+    }
+
+    #[test]
+    fn long_term_value_scales_down_late_in_the_run() {
+        let baseline = FINAL_ANTE as i32 * 10;
+        assert_eq!(scale_long_term_value_for_ante(baseline, 1), baseline);
+        assert_eq!(scale_long_term_value_for_ante(baseline, FINAL_ANTE), 10);
+        assert!(
+            scale_long_term_value_for_ante(baseline, FINAL_ANTE)
+                < scale_long_term_value_for_ante(baseline, 2)
+        );
+    }
+
+    #[test]
+    fn aggregate_stats_do_not_count_victories_as_deaths() {
+        let mut agg = super::AggregateStats::default();
+        let win = super::RunStats {
+            victory: true,
+            died_on_ante: FINAL_ANTE,
+            antes_cleared: FINAL_ANTE,
+            ..Default::default()
+        };
+        agg.record(&win);
+
+        assert_eq!(agg.victories, 1);
+        assert_eq!(agg.max_ante_reached, FINAL_ANTE);
+        assert!(agg.deaths_by_ante.is_empty());
+        assert!(agg.deaths_by_blind.is_empty());
     }
 
     #[test]
@@ -1615,6 +1708,23 @@ fn best_play_score_for_hand(
 /// Wall-mutating relics (`Overflow`, `SetMagnet`, `QuickDraw`, `WildWinds`,
 /// `JokerTile`) are still under-valued because we don't simulate draws between
 /// plays. Rarity tie-break compensates.
+fn remaining_antes_including_current(ante: u32) -> u32 {
+    if ante > FINAL_ANTE {
+        0
+    } else {
+        FINAL_ANTE - ante + 1
+    }
+}
+
+fn scale_long_term_value_for_ante(raw_value: i32, ante: u32) -> i32 {
+    if raw_value <= 0 {
+        return raw_value;
+    }
+    let remaining = remaining_antes_including_current(ante) as i64;
+    let scaled = (raw_value as i64 * remaining + FINAL_ANTE as i64 - 1) / FINAL_ANTE as i64;
+    scaled as i32
+}
+
 fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     if run.relics.owns(candidate) {
         return -1;
@@ -1640,7 +1750,7 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
         sample_count += 1;
     }
 
-    (delta_sum / sample_count) as i32
+    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
 fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
@@ -1659,7 +1769,7 @@ fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
         sample_count += 1;
     }
 
-    (delta_sum / sample_count) as i32
+    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
 fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
@@ -1741,7 +1851,11 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool) {
     let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
     let mut pool: Vec<RelicId> = defs
         .iter()
-        .filter(|d| !run.relics.owns(d.id) && !shop_excluded.contains(&d.id))
+        .filter(|d| {
+            run.available_relics.contains(&d.id)
+                && !run.relics.owns(d.id)
+                && !shop_excluded.contains(&d.id)
+        })
         .map(|d| d.id)
         .collect();
     pool.shuffle(&mut rand::rng());
@@ -2032,7 +2146,7 @@ impl BotConfig {
 }
 
 /// Play one full bot run from a fresh `RunState` until the bot busts or wins.
-/// Mirrors the actual game flow: 8 antes × (Small → Big → Boss), with `advance_round`
+/// Mirrors the actual game flow: 7 antes × (Small → Big → Boss), with `advance_round`
 /// (which scales `base_target` by `target_scaling` and rolls to the next blind) called
 /// after every cleared blind. Run ends on bust or when ante > FINAL_ANTE.
 pub fn play_run_with(config: BotConfig) -> RunStats {
@@ -2065,8 +2179,12 @@ fn play_run_with_options(
     loop {
         if run.is_run_complete() {
             stats.victory = true;
-            stats.died_on_ante = run.ante;
-            bot_log!(log, "== bot run complete: victory at ante {} ==", run.ante);
+            stats.died_on_ante = FINAL_ANTE;
+            bot_log!(
+                log,
+                "== bot run complete: victory at ante {} ==",
+                FINAL_ANTE
+            );
             break;
         }
         let blind = run.upcoming_blind;

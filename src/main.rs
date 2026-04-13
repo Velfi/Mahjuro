@@ -58,6 +58,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 struct RenderSettings {
     smoke_intensity: crate::persistence::SmokeIntensity,
     smoke_detail: crate::persistence::SmokeDetail,
+    smoke_sim_quality: crate::persistence::SmokeSimQuality,
     effects_quality: crate::persistence::EffectsQuality,
     tile_preset: crate::persistence::TilePreset,
     tile_material: crate::persistence::TileMaterial,
@@ -397,6 +398,7 @@ struct App {
     scroll_delta: f32,
     active_buttons: Vec<ButtonDef>,
     scene: Scene,
+    resume_scene: persistence::ResumeScene,
     progress: crate::core::progression::PlayerProgress,
     active_profile: usize,
     audio: audio::AudioManager,
@@ -424,6 +426,15 @@ struct App {
 }
 
 impl App {
+    fn saved_resume_scene_for(scene: &Scene) -> Option<persistence::ResumeScene> {
+        match scene {
+            Scene::Shop(_) => Some(persistence::ResumeScene::Shop),
+            Scene::PickBlind(_) => Some(persistence::ResumeScene::PickBlind),
+            Scene::Gameplay(_) => Some(persistence::ResumeScene::Gameplay),
+            _ => None,
+        }
+    }
+
     /// Single source of truth for "is anything modal-like up right now?"
     ///
     /// **The modal-blocking pattern.** Any overlay that should block input
@@ -491,10 +502,16 @@ impl App {
         // Prefer a saved-on-quit run for this profile (resume). If none
         // exists or it was written by a previous build version, fall back
         // to a fresh demo run. `load_run` deletes stale/corrupt saves.
-        let mut run = persistence::load_run(active_profile).unwrap_or_else(RunState::new_demo);
+        let loaded_run = persistence::load_run(active_profile);
+        let resume_scene = loaded_run
+            .as_ref()
+            .map(|saved| saved.scene)
+            .unwrap_or(persistence::ResumeScene::Gameplay);
+        let mut run = loaded_run
+            .map(|saved| saved.run)
+            .unwrap_or_else(RunState::new_demo);
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        run.available_yaku = progress.available_yaku();
-        run.available_rules = progress.available_rules();
+        run.apply_progression(&progress);
         let mut audio = audio::AudioManager::new();
         audio.set_master_volume(settings.master_volume);
         audio.set_sfx_volume(settings.sfx_volume);
@@ -519,6 +536,7 @@ impl App {
             scroll_delta: 0.0,
             active_buttons: Vec::new(),
             scene: Scene::Splash(SplashScene::new()),
+            resume_scene,
             progress,
             active_profile,
             audio,
@@ -536,6 +554,7 @@ impl App {
             gfx: RenderSettings {
                 smoke_intensity: settings.smoke_intensity,
                 smoke_detail: settings.smoke_detail,
+                smoke_sim_quality: settings.smoke_sim_quality,
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
@@ -609,12 +628,18 @@ impl App {
         self.progress = persistence::load_profile(new_index);
         // Resume the new profile's saved run if it has one — otherwise a
         // fresh demo run, exactly like first-launch behavior.
-        self.run = persistence::load_run(new_index).unwrap_or_else(RunState::new_demo);
+        let loaded_run = persistence::load_run(new_index);
+        self.resume_scene = loaded_run
+            .as_ref()
+            .map(|saved| saved.scene)
+            .unwrap_or(persistence::ResumeScene::Gameplay);
+        self.run = loaded_run
+            .map(|saved| saved.run)
+            .unwrap_or_else(RunState::new_demo);
         let mut settings = persistence::load_settings();
         self.run
             .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        self.run.available_yaku = self.progress.available_yaku();
-        self.run.available_rules = self.progress.available_rules();
+        self.run.apply_progression(&self.progress);
         // Persist the active profile choice.
         settings.active_profile = new_index;
         let _ = persistence::save_settings(&settings);
@@ -628,7 +653,8 @@ impl App {
     /// linger and we'd resume into a stale run on next launch.
     fn persist_run_if_in_progress(&self) {
         if self.run.is_in_progress() {
-            if let Err(e) = persistence::save_run(self.active_profile, &self.run) {
+            let scene = Self::saved_resume_scene_for(&self.scene).unwrap_or(self.resume_scene);
+            if let Err(e) = persistence::save_run(self.active_profile, &self.run, scene) {
                 log::warn!("save_run failed: {e}");
             }
         } else {
@@ -663,8 +689,6 @@ impl App {
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run.gold = self.run.gold.saturating_add(payout.total as i32);
                 self.audio.play_sfx(audio::SfxId::RoundWin);
-                let final_score = self.run.round_score;
-                let target = self.run.target_score;
                 // Capture the tutorial lesson *before* advancing so the
                 // recap scene can show what was just learned.
                 let tutorial_lesson_before = self
@@ -745,7 +769,7 @@ impl App {
                     let _ = self.progress.check_level_up();
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
-                    Scene::GameOver(GameOverScene::victory(final_score, target))
+                    Scene::GameOver(GameOverScene::victory(&self.run))
                 } else if let Some(lesson) = tutorial_lesson_before {
                     // Tutorial: show a recap of the completed lesson.
                     let shop_follows = self.run.tutorial_shop_enabled();
@@ -757,7 +781,7 @@ impl App {
                 });
                 self.transition_alpha = 1.0;
             }
-            GameEvent::GameOver { .. } => {
+            GameEvent::GameOver { reason, .. } => {
                 if self.run.onboarding_active() {
                     let round_score = self.run.round_score;
                     let target_score = self.run.target_score;
@@ -899,10 +923,7 @@ impl App {
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
-                    self.run.round_score,
-                    self.run.target_score,
-                )));
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
             }
             _ => {}
@@ -1239,6 +1260,7 @@ impl App {
             &frame,
             self.gfx.smoke_intensity,
             self.gfx.smoke_detail,
+            self.gfx.smoke_sim_quality,
             self.gfx.effects_quality,
             self.gfx.tile_preset,
             active_material,
@@ -1268,8 +1290,7 @@ impl App {
                 };
                 self.progress.runs_completed = runs;
                 self.progress.check_level_up();
-                self.run.available_yaku = self.progress.available_yaku();
-                self.run.available_rules = self.progress.available_rules();
+                self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
                 log::info!(
                     "[Debug] Set player level to {} (runs_completed={})",
@@ -1424,12 +1445,18 @@ impl App {
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::victory(
-                    self.run.round_score,
-                    self.run.target_score,
-                )));
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::victory(&self.run)));
                 self.transition_alpha = 1.0;
                 log::info!("[Debug] Showing victory screen");
+            }
+            DebugAction::ShowDefeatScreen => {
+                while self.modals.dismiss() {}
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
+                    &self.run,
+                    crate::game::event_bus::GameOverReason::OutOfPlays,
+                )));
+                self.transition_alpha = 1.0;
+                log::info!("[Debug] Showing defeat screen");
             }
         }
         // Request redraw to reflect changes immediately.
@@ -1706,16 +1733,17 @@ impl ApplicationHandler for App {
                     // We feed `update_pointer_hover` synthetic slots so only
                     // the picked tile contains the cursor — the rest are
                     // collapsed off-screen so they can't compete.
-                    let mut slots: Vec<(f32, f32, f32, f32)> = layout
-                        .hand_slots
-                        .iter()
-                        .map(|_| (-9999.0, -9999.0, 0.0, 0.0))
-                        .collect();
+                    let hand_slot_count = self.run.hand.len().max(layout.hand_slots.len());
+                    let mut slots: Vec<(f32, f32, f32, f32)> =
+                        vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
                     let picked = self
                         .renderer
                         .as_ref()
                         .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
                     if let Some(idx) = picked {
+                        if idx >= slots.len() {
+                            slots.resize(idx + 1, (-9999.0, -9999.0, 0.0, 0.0));
+                        }
                         if let Some(s) = slots.get_mut(idx) {
                             *s = (
                                 input.last_cursor.0 - 1.0,
@@ -1730,12 +1758,8 @@ impl ApplicationHandler for App {
                     // 3. Update focus slot (App-level, shared across scenes).
                     for a in &actions {
                         match a {
-                            UiAction::FocusNext => {
-                                input.focus_slot = (input.focus_slot + 1)
-                                    .min(game::run::HAND_SIZE.saturating_sub(1));
-                            }
-                            UiAction::FocusPrev => {
-                                input.focus_slot = input.focus_slot.saturating_sub(1);
+                            UiAction::FocusNext | UiAction::FocusPrev => {
+                                input.wrap_focus_slot(*a, self.run.hand.len());
                             }
                             _ => {}
                         }
@@ -1897,6 +1921,7 @@ impl ApplicationHandler for App {
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
+                    progress: &self.progress,
                     run: &mut self.run,
                     bus: &mut self.bus,
                     anim: &mut self.anim,
@@ -1922,6 +1947,7 @@ impl ApplicationHandler for App {
                     tutorial_eligible: self.progress.runs_completed == 0
                         && !self.progress.tutorial_completed,
                     multiple_materials: self.progress.plastic_unlocked(),
+                    resume_scene: self.resume_scene,
                     transitioning: self.pending_scene.is_some(),
                 };
                 if let Some(mut next_scene) = self.scene.update(ctx) {
@@ -1989,6 +2015,7 @@ impl ApplicationHandler for App {
                     self.audio.set_enabled(opts.sfx_enabled);
                     self.gfx.smoke_intensity = opts.smoke_intensity;
                     self.gfx.smoke_detail = opts.smoke_detail;
+                    self.gfx.smoke_sim_quality = opts.smoke_sim_quality;
                     self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
                     self.gfx.tile_material = opts.tile_material;
@@ -2029,10 +2056,15 @@ impl ApplicationHandler for App {
                     // returns a fresh default since the file is gone).
                     if idx == self.active_profile {
                         self.progress = persistence::load_profile(idx);
-                        self.run = persistence::load_run(idx)
+                        let loaded_run = persistence::load_run(idx);
+                        self.resume_scene = loaded_run
+                            .as_ref()
+                            .map(|saved| saved.scene)
+                            .unwrap_or(persistence::ResumeScene::Gameplay);
+                        self.run = loaded_run
+                            .map(|saved| saved.run)
                             .unwrap_or_else(crate::game::run::RunState::new_demo);
-                        self.run.available_yaku = self.progress.available_yaku();
-                        self.run.available_rules = self.progress.available_rules();
+                        self.run.apply_progression(&self.progress);
                     }
                 }
 
@@ -2082,6 +2114,9 @@ impl ApplicationHandler for App {
                                     | (Scene::Shop(_), Scene::PickBlind(_))
                             );
                             self.scene = next;
+                            if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
+                                self.resume_scene = scene;
+                            }
                             if clear_smoke {
                                 if let Some(r) = self.renderer.as_mut() {
                                     r.clear_smoke();
@@ -2254,16 +2289,17 @@ impl ApplicationHandler for App {
                         .layout_engine
                         .solve(size.width as f32, size.height as f32);
                     // Same raycast-based pick as the per-frame update path.
-                    let mut slots: Vec<(f32, f32, f32, f32)> = layout
-                        .hand_slots
-                        .iter()
-                        .map(|_| (-9999.0, -9999.0, 0.0, 0.0))
-                        .collect();
+                    let hand_slot_count = self.run.hand.len().max(layout.hand_slots.len());
+                    let mut slots: Vec<(f32, f32, f32, f32)> =
+                        vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
                     let picked = self
                         .renderer
                         .as_ref()
                         .and_then(|r| r.pick_hand_tile(input.last_cursor.0, input.last_cursor.1));
                     if let Some(idx) = picked {
+                        if idx >= slots.len() {
+                            slots.resize(idx + 1, (-9999.0, -9999.0, 0.0, 0.0));
+                        }
                         if let Some(s) = slots.get_mut(idx) {
                             *s = (
                                 input.last_cursor.0 - 1.0,

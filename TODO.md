@@ -1,7 +1,8 @@
-- Fix the explicit navigation for game UI lower screen stuff
-- relic re-arranging not implemented on shop screen
-  - investigate the mirror and shadow hand items when you fix this.
-- fortune's favor should live update values
-- second wind seems to be accumulating
-- -wild winds is perhaps too good
-- 
+# Current TODO
+
+- Improve explicit navigation for lower-screen gameplay controls.
+- Revisit relic rearranging on the shop screen.
+- Investigate mirror- and shadow-hand interactions while touching shop relic order.
+- Make Fortune's Favor update displayed values live.
+- Investigate `SecondWind`; it appears to accumulate unexpectedly.
+- Rebalance `WildWinds`; it may still be too strong.

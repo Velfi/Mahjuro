@@ -17,7 +17,8 @@ use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
-use crate::game::event_bus::{EventBus, GameEvent};
+use crate::core::yaku::YakuKind;
+use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
 use crate::game::tutorial::TutorialState;
@@ -72,10 +73,398 @@ pub enum ConsumableUseResult {
 
 pub const HAND_SIZE: usize = 14;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
-pub const FINAL_ANTE: u32 = 8;
+pub const FINAL_ANTE: u32 = 7;
 
 fn default_auto_cash_in_on_full_structure() -> bool {
     true
+}
+
+fn default_available_relics() -> Vec<RelicId> {
+    crate::core::relic::all_relic_defs()
+        .iter()
+        .map(|def| def.id)
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct IndexedTile {
+    hand_index: usize,
+    tile: Tile,
+}
+
+fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
+    let mut regular = Vec::with_capacity(hand.len());
+    let mut flowers = Vec::new();
+    for (hand_index, &tile) in hand.iter().enumerate() {
+        let indexed = IndexedTile { hand_index, tile };
+        if tile.is_flower() {
+            flowers.push(indexed);
+        } else {
+            regular.push(indexed);
+        }
+    }
+    regular.sort_by_key(|it| it.tile);
+    flowers.sort_by_key(|it| it.tile);
+
+    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
+    let no_sequences = rules.contains(&RuleModifier::NoSequences);
+    let require_honor = rules.contains(&RuleModifier::RequireHonor);
+    let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
+
+    let mut masks = std::collections::HashSet::new();
+    enumerate_regular_subsets(
+        &regular,
+        &flowers,
+        0,
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+        0,
+        &mut masks,
+    );
+    let mut out: Vec<u32> = masks.into_iter().collect();
+    out.sort_unstable();
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enumerate_regular_subsets(
+    remaining: &[IndexedTile],
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    allow_wrap: bool,
+    no_sequences: bool,
+    require_honor: bool,
+    must_play_five: bool,
+    current_tile_count: usize,
+    out: &mut std::collections::HashSet<u32>,
+) {
+    if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
+        return;
+    }
+
+    if remaining.is_empty() {
+        emit_leaf_masks(
+            flowers,
+            current_mask,
+            current_tile_count,
+            must_play_five,
+            out,
+        );
+        return;
+    }
+
+    let first = remaining[0];
+    enumerate_regular_subsets(
+        &remaining[1..],
+        flowers,
+        current_mask,
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+        current_tile_count,
+        out,
+    );
+
+    if remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
+            enumerate_regular_subsets(
+                &remaining[2..],
+                flowers,
+                current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 2,
+                out,
+            );
+        }
+    }
+
+    if remaining.len() >= 3
+        && same_face(first.tile, remaining[1].tile)
+        && same_face(first.tile, remaining[2].tile)
+    {
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]) {
+            enumerate_regular_subsets(
+                &remaining[3..],
+                flowers,
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << remaining[2].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+
+    if remaining.len() >= 4
+        && same_face(first.tile, remaining[1].tile)
+        && same_face(first.tile, remaining[2].tile)
+        && same_face(first.tile, remaining[3].tile)
+    {
+        if !require_honor
+            || tiles_have_honor(&[
+                first.tile,
+                remaining[1].tile,
+                remaining[2].tile,
+                remaining[3].tile,
+            ])
+        {
+            enumerate_regular_subsets(
+                &remaining[4..],
+                flowers,
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << remaining[2].hand_index)
+                    | (1 << remaining[3].hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 4,
+                out,
+            );
+        }
+    }
+
+    if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
+        let flower = flowers[0];
+        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
+            enumerate_regular_subsets(
+                &remaining[2..],
+                &flowers[1..],
+                current_mask
+                    | (1 << first.hand_index)
+                    | (1 << remaining[1].hand_index)
+                    | (1 << flower.hand_index),
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+
+    if !no_sequences && first.tile.is_number_tile() && !require_honor {
+        for seq in sequence_candidates(remaining, allow_wrap, !flowers.is_empty(), first) {
+            let mut next_mask = current_mask | (1 << first.hand_index);
+            let mut remove = vec![0usize];
+            for idx in seq.regular_indices {
+                next_mask |= 1 << remaining[idx].hand_index;
+                remove.push(idx);
+            }
+            if seq.uses_flower {
+                let flower = flowers[0];
+                next_mask |= 1 << flower.hand_index;
+            }
+            let rest = remove_indices(remaining, &remove);
+            enumerate_regular_subsets(
+                &rest,
+                if seq.uses_flower {
+                    &flowers[1..]
+                } else {
+                    flowers
+                },
+                next_mask,
+                allow_wrap,
+                no_sequences,
+                require_honor,
+                must_play_five,
+                current_tile_count + 3,
+                out,
+            );
+        }
+    }
+}
+
+fn emit_leaf_masks(
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    current_tile_count: usize,
+    must_play_five: bool,
+    out: &mut std::collections::HashSet<u32>,
+) {
+    for extra_mask in flower_only_masks(flowers) {
+        let total_mask = current_mask | extra_mask;
+        let total_count = total_mask.count_ones() as usize;
+        if total_count == 0 {
+            continue;
+        }
+        if must_play_five {
+            if total_count == 5 {
+                out.insert(total_mask);
+            }
+        } else if total_count >= current_tile_count {
+            out.insert(total_mask);
+        }
+    }
+}
+
+fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+    let mut masks = vec![0];
+    if flowers.len() >= 2 {
+        masks.push((1 << flowers[0].hand_index) | (1 << flowers[1].hand_index));
+    }
+    if flowers.len() >= 3 {
+        masks.push(
+            (1 << flowers[0].hand_index)
+                | (1 << flowers[1].hand_index)
+                | (1 << flowers[2].hand_index),
+        );
+    }
+    if flowers.len() >= 4 {
+        masks.push(
+            (1 << flowers[0].hand_index)
+                | (1 << flowers[1].hand_index)
+                | (1 << flowers[2].hand_index)
+                | (1 << flowers[3].hand_index),
+        );
+    }
+    masks
+}
+
+fn same_face(a: Tile, b: Tile) -> bool {
+    a.suit == b.suit && a.rank == b.rank
+}
+
+fn tiles_have_honor(tiles: &[Tile]) -> bool {
+    tiles
+        .iter()
+        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+}
+
+fn remove_indices(remaining: &[IndexedTile], remove: &[usize]) -> Vec<IndexedTile> {
+    let mut remove_flags = vec![false; remaining.len()];
+    for &idx in remove {
+        remove_flags[idx] = true;
+    }
+    remaining
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, tile)| (!remove_flags[idx]).then_some(*tile))
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct SequenceCandidate {
+    regular_indices: [usize; 2],
+    uses_flower: bool,
+}
+
+fn sequence_candidates(
+    remaining: &[IndexedTile],
+    allow_wrap: bool,
+    can_use_flower: bool,
+    first: IndexedTile,
+) -> Vec<SequenceCandidate> {
+    let mut out = Vec::new();
+    push_sequence_candidate(
+        remaining,
+        first.tile.suit,
+        [first.tile.rank + 1, first.tile.rank + 2],
+        false,
+        &mut out,
+    );
+    if can_use_flower {
+        push_sequence_candidate(
+            remaining,
+            first.tile.suit,
+            [first.tile.rank + 1],
+            true,
+            &mut out,
+        );
+        push_sequence_candidate(
+            remaining,
+            first.tile.suit,
+            [first.tile.rank + 2],
+            true,
+            &mut out,
+        );
+    }
+    if allow_wrap {
+        for needs in wrap_sequence_needs(first.tile.rank) {
+            push_sequence_candidate(remaining, first.tile.suit, *needs, false, &mut out);
+        }
+        if can_use_flower {
+            for needs in wrap_sequence_needs(first.tile.rank) {
+                push_sequence_candidate(remaining, first.tile.suit, [needs[0]], true, &mut out);
+                push_sequence_candidate(remaining, first.tile.suit, [needs[1]], true, &mut out);
+            }
+        }
+    }
+    out
+}
+
+fn push_sequence_candidate(
+    remaining: &[IndexedTile],
+    suit: Suit,
+    needed_ranks: impl AsRef<[u8]>,
+    uses_flower: bool,
+    out: &mut Vec<SequenceCandidate>,
+) {
+    let needed_ranks = needed_ranks.as_ref();
+    let mut found = Vec::with_capacity(needed_ranks.len());
+    for &rank in needed_ranks {
+        let Some((idx, _)) = remaining.iter().enumerate().skip(1).find(|(_, tile)| {
+            tile.tile.suit == suit && tile.tile.rank == rank && !found.contains(&tile.hand_index)
+        }) else {
+            return;
+        };
+        found.push(remaining[idx].hand_index);
+    }
+
+    let mut regular_indices = [0usize; 2];
+    for (i, found_hand_index) in found.iter().enumerate() {
+        let Some((remaining_idx, _)) = remaining
+            .iter()
+            .enumerate()
+            .find(|(_, tile)| tile.hand_index == *found_hand_index)
+        else {
+            return;
+        };
+        regular_indices[i] = remaining_idx;
+    }
+    out.push(SequenceCandidate {
+        regular_indices,
+        uses_flower,
+    });
+}
+
+fn wrap_sequence_needs(rank: u8) -> &'static [[u8; 2]] {
+    match rank {
+        1 => &[[2, 3], [9, 2], [8, 9]],
+        2 => &[[3, 4], [1, 3], [9, 1]],
+        3 => &[[4, 5], [2, 4], [1, 2]],
+        4 => &[[5, 6], [3, 5], [2, 3]],
+        5 => &[[6, 7], [4, 6], [3, 4]],
+        6 => &[[7, 8], [5, 7], [4, 5]],
+        7 => &[[8, 9], [6, 8], [5, 6]],
+        8 => &[[9, 1], [7, 9], [6, 7]],
+        9 => &[[8, 1], [1, 2], [7, 8]],
+        _ => &[],
+    }
+}
+
+fn structure_label_from_yaku(yaku: &[YakuKind]) -> String {
+    if yaku.is_empty() {
+        return "No Yaku".to_string();
+    }
+    yaku.iter()
+        .map(|y| y.name())
+        .collect::<Vec<_>>()
+        .join(" + ")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -120,6 +509,11 @@ pub struct RunState {
     pub available_yaku: Vec<crate::core::yaku::YakuKind>,
     /// Rules available at the player's progression level.
     pub available_rules: Vec<RuleModifier>,
+    /// Relics that were unlocked when this run started. Shop rolls and
+    /// random relic rewards use this snapshot so new unlocks wait until
+    /// the next game.
+    #[serde(default = "default_available_relics")]
+    pub available_relics: Vec<RelicId>,
     /// Whether the player scored on their last play (for ChainReaction relic).
     pub scored_last_turn: bool,
     /// Whether QuickDraw extra tile was used this round.
@@ -165,6 +559,21 @@ pub struct RunState {
     /// (defaults to empty for old saves).
     #[serde(default)]
     pub yaku_times_played: std::collections::HashMap<crate::core::yaku::YakuKind, u32>,
+    /// Cumulative tiles committed from hand into scored plays / structure.
+    #[serde(default)]
+    pub tiles_played: u32,
+    /// Cumulative tiles thrown away via the discard action.
+    #[serde(default)]
+    pub tiles_discarded: u32,
+    /// Number of times the hand was replenished after spending tiles.
+    #[serde(default)]
+    pub times_restocked: u32,
+    /// Highest score earned by a single scored hand / structure cash-in.
+    #[serde(default)]
+    pub best_structure_score: u64,
+    /// Display label for the highest-scoring structure.
+    #[serde(default)]
+    pub best_structure_name: String,
     /// Per-run tile enhancement map, keyed by tile id. Talismans stamp every
     /// hand tile's id into this map; whenever tiles are drawn (initial deal,
     /// post-play refill, mid-round draws, new-round redeals), we re-apply the
@@ -341,6 +750,7 @@ impl RunState {
             last_breakdown: None,
             available_yaku: mode.starting_yaku.clone(),
             available_rules: mode.starting_rules.clone(),
+            available_relics: default_available_relics(),
             scored_last_turn: false,
             quickdraw_used: false,
             joker_used: false,
@@ -365,6 +775,11 @@ impl RunState {
             honors_scored_this_round: false,
             total_score_earned: 0,
             yaku_times_played: std::collections::HashMap::new(),
+            tiles_played: 0,
+            tiles_discarded: 0,
+            times_restocked: 0,
+            best_structure_score: 0,
+            best_structure_name: String::new(),
             tile_enhancements: BTreeMap::new(),
             removed_tile_ids: std::collections::HashSet::new(),
             tile_packs: Vec::new(),
@@ -397,6 +812,12 @@ impl RunState {
 
     pub fn set_auto_cash_in_on_full_structure(&mut self, enabled: bool) {
         self.auto_cash_in_on_full_structure = enabled;
+    }
+
+    pub fn apply_progression(&mut self, progress: &crate::core::progression::PlayerProgress) {
+        self.available_yaku = progress.available_yaku();
+        self.available_rules = progress.available_rules();
+        self.available_relics = progress.available_relics();
     }
 
     /// Build the `ResolvedBossEffect` for the current `upcoming_boss`. For
@@ -999,6 +1420,7 @@ impl RunState {
             self.joker_used = true;
             self.relic_activations.push(RelicId::JokerTile);
         }
+        self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
         if self.mode.structure_bank {
             let current_tile_count = self.structure_tiles.len();
@@ -1071,10 +1493,15 @@ impl RunState {
         } else {
             effective
         };
+        let mut restocked = false;
         while self.hand.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
+            restocked = true;
+        }
+        if restocked {
+            self.times_restocked = self.times_restocked.saturating_add(1);
         }
 
         self.hand.sort();
@@ -1155,6 +1582,10 @@ impl RunState {
         let earned = breakdown.total;
         self.round_score = self.round_score.saturating_add(earned);
         self.total_score_earned = self.total_score_earned.saturating_add(earned);
+        if earned > self.best_structure_score {
+            self.best_structure_score = earned;
+            self.best_structure_name = structure_label_from_yaku(&breakdown.detected_yaku);
+        }
 
         if self.relics.has(RelicId::TilePolisher) {
             let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
@@ -1400,9 +1831,10 @@ impl RunState {
                     total: gold_earned,
                 },
             });
-        } else if self.plays_remaining == 0 {
+        } else if let Some(reason) = self.round_failure_reason() {
             bus.push(GameEvent::GameOver {
                 final_score: self.round_score,
+                reason,
             });
         }
     }
@@ -1538,13 +1970,8 @@ impl RunState {
         self.try_validate_with_wildcards(&selected_tiles).is_some()
     }
 
-    /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
-    /// Returns the decomposition and the (possibly modified) tiles used for scoring.
-    pub fn try_validate_with_wildcards(
-        &self,
-        tiles: &[Tile],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
-        let validation_rules: Vec<RuleModifier> = if self.mode.structure_bank {
+    fn validation_rules_for_current_mode(&self) -> Vec<RuleModifier> {
+        if self.mode.structure_bank {
             self.round_rules
                 .iter()
                 .copied()
@@ -1552,7 +1979,65 @@ impl RunState {
                 .collect()
         } else {
             self.round_rules.clone()
-        };
+        }
+    }
+
+    fn has_any_committable_play(&self) -> bool {
+        if self.plays_remaining == 0 {
+            return false;
+        }
+        let hand_len = self.hand.len();
+        if !(2..=20).contains(&hand_len) {
+            return false;
+        }
+
+        let rules = self.validation_rules_for_current_mode();
+        for mask in enumerate_candidate_play_masks(&self.hand, &rules) {
+            let indices: Vec<usize> = (0..hand_len).filter(|i| mask & (1 << i) != 0).collect();
+            let tiles: Vec<Tile> = indices.iter().map(|&i| self.hand[i]).collect();
+            let Some((_, scoring_tiles)) = self.try_validate_with_wildcards(&tiles) else {
+                continue;
+            };
+
+            if self.uses_structure_bank()
+                && self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE
+            {
+                continue;
+            }
+            return true;
+        }
+        false
+    }
+
+    fn no_actions_remaining(&self) -> bool {
+        if self.round_score >= self.target_score as u64 || self.plays_remaining == 0 {
+            return false;
+        }
+
+        let can_discard =
+            self.discards_remaining > 0 && !self.hand.is_empty() && self.tutorial_discard_allowed();
+        !self.has_any_committable_play() && !self.can_trigger_structure_now() && !can_discard
+    }
+
+    pub fn round_failure_reason(&self) -> Option<GameOverReason> {
+        if self.round_score >= self.target_score as u64 {
+            None
+        } else if self.plays_remaining == 0 {
+            Some(GameOverReason::OutOfPlays)
+        } else if self.no_actions_remaining() {
+            Some(GameOverReason::NoActionsRemaining)
+        } else {
+            None
+        }
+    }
+
+    /// Try validating tiles, applying JokerTile / WildWinds substitutions if needed.
+    /// Returns the decomposition and the (possibly modified) tiles used for scoring.
+    pub fn try_validate_with_wildcards(
+        &self,
+        tiles: &[Tile],
+    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+        let validation_rules = self.validation_rules_for_current_mode();
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {
             return Some((sets, tiles.to_vec()));
@@ -1634,6 +2119,7 @@ impl RunState {
             bus.push(GameEvent::TileDiscarded { slot_index: i });
         }
         self.discards_remaining -= 1;
+        self.tiles_discarded = self.tiles_discarded.saturating_add(count as u32);
         self.selected = vec![false; self.hand.len()];
 
         // Tutorial milestone: celebrate the first discard.
@@ -1664,10 +2150,12 @@ impl RunState {
     /// hand-size shrinks (e.g. The Whisper).
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
         let target = boss::effective_hand_size(self);
+        let mut restocked = false;
         while self.hand.len() < target {
             let Some(t) = self.wall.draw() else { break };
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
+            restocked = true;
         }
         // Shanten Shove: if the refilled hand is at tenpai, draw 1 bonus tile.
         if self.relics.has(crate::core::relic::RelicId::ShantenShove)
@@ -1678,7 +2166,11 @@ impl RunState {
                 bus.push(GameEvent::TileDrawn(t));
                 self.relic_activations
                     .push(crate::core::relic::RelicId::ShantenShove);
+                restocked = true;
             }
+        }
+        if restocked {
+            self.times_restocked = self.times_restocked.saturating_add(1);
         }
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
@@ -1687,6 +2179,7 @@ impl RunState {
         self.seed_tutorial_hand();
         // Re-apply persistent enhancements to any newly-drawn tiles.
         self.restamp_hand_enhancements();
+        self.emit_round_resolution_events(bus);
     }
 
     /// Swap two tiles in the hand by index. Clears selection afterward.
@@ -1936,7 +2429,12 @@ impl RunState {
                 use crate::core::relic::all_relic_defs;
                 use rand::seq::SliceRandom;
                 let defs = all_relic_defs();
-                let mut pool: Vec<_> = defs.iter().filter(|d| !self.relics.owns(d.id)).collect();
+                let mut pool: Vec<_> = defs
+                    .iter()
+                    .filter(|d| {
+                        self.available_relics.contains(&d.id) && !self.relics.owns(d.id)
+                    })
+                    .collect();
                 if pool.is_empty() || self.relics.is_full() {
                     self.gold = self.gold.saturating_add(6);
                     return "+6 gold (full)";
@@ -2001,6 +2499,7 @@ mod tests {
             ante: 1,
             available_rules: vec![],
             available_yaku: vec![],
+            available_relics: default_available_relics(),
             base_target: mode.base_target,
             blind: BlindKind::Small,
             boss: BossState::default(),
@@ -2020,6 +2519,11 @@ mod tests {
             tile_debuffs: vec![],
             honors_scored_this_round: false,
             yaku_times_played: std::collections::HashMap::new(),
+            tiles_played: 0,
+            tiles_discarded: 0,
+            times_restocked: 0,
+            best_structure_score: 0,
+            best_structure_name: String::new(),
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
             quickdraw_used: false,
@@ -2699,6 +3203,78 @@ mod tests {
     }
 
     #[test]
+    fn refill_hand_ends_round_when_no_actions_remain() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.hand = vec![
+            Tile::new(Suit::Characters, 1, 1),
+            Tile::new(Suit::Characters, 3, 2),
+            Tile::new(Suit::Characters, 5, 3),
+            Tile::new(Suit::Characters, 7, 4),
+            Tile::new(Suit::Characters, 9, 5),
+            Tile::new(Suit::Bamboos, 2, 6),
+            Tile::new(Suit::Bamboos, 4, 7),
+            Tile::new(Suit::Bamboos, 6, 8),
+            Tile::new(Suit::Bamboos, 8, 9),
+            Tile::new(Suit::Circles, 1, 10),
+            Tile::new(Suit::Circles, 3, 11),
+            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Wind, 1, 13),
+            Tile::new(Suit::Dragon, 1, 14),
+        ];
+        run.selected = vec![false; run.hand.len()];
+        run.discards_remaining = 0;
+        run.plays_remaining = 3;
+        run.structure_sets.clear();
+        run.structure_tiles.clear();
+
+        run.refill_hand(&mut bus);
+
+        assert!(matches!(
+            bus.queue.last(),
+            Some(GameEvent::GameOver {
+                reason: GameOverReason::NoActionsRemaining,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn out_of_plays_loss_takes_precedence_over_dead_round_reason() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.hand = vec![
+            Tile::new(Suit::Characters, 1, 1),
+            Tile::new(Suit::Characters, 3, 2),
+            Tile::new(Suit::Characters, 5, 3),
+            Tile::new(Suit::Characters, 7, 4),
+            Tile::new(Suit::Characters, 9, 5),
+            Tile::new(Suit::Bamboos, 2, 6),
+            Tile::new(Suit::Bamboos, 4, 7),
+            Tile::new(Suit::Bamboos, 6, 8),
+            Tile::new(Suit::Bamboos, 8, 9),
+            Tile::new(Suit::Circles, 1, 10),
+            Tile::new(Suit::Circles, 3, 11),
+            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Wind, 1, 13),
+            Tile::new(Suit::Dragon, 1, 14),
+        ];
+        run.selected = vec![false; run.hand.len()];
+        run.discards_remaining = 0;
+        run.plays_remaining = 0;
+
+        run.refill_hand(&mut bus);
+
+        assert!(matches!(
+            bus.queue.last(),
+            Some(GameEvent::GameOver {
+                reason: GameOverReason::OutOfPlays,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn score_selected_removes_tiles_from_hand() {
         let mut run = test_run();
         let mut bus = bus();
@@ -3043,5 +3619,30 @@ mod wild_wind_tests {
         }
         // Should NOT include 1m (too far)
         assert!(!candidates.contains(&(Suit::Characters, 1)));
+    }
+}
+
+#[cfg(test)]
+mod progression_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn run_relic_unlocks_only_change_when_a_new_run_applies_progression() {
+        let mut progress = crate::core::progression::PlayerProgress::new();
+        progress.runs_completed = 6;
+        progress.check_level_up();
+
+        let mut current_run = RunState::new_demo();
+        current_run.apply_progression(&progress);
+        assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
+
+        progress.runs_completed = 10;
+        let result = progress.check_level_up().expect("level 5 should unlock relics");
+        assert!(result.relics.contains(&RelicId::JokerTile));
+        assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
+
+        let mut next_run = RunState::new_demo();
+        next_run.apply_progression(&progress);
+        assert!(next_run.available_relics.contains(&RelicId::JokerTile));
     }
 }
