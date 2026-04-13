@@ -5,7 +5,7 @@ use std::time::Instant;
 use gilrs::{Axis, Button, Event as GilEvent, Gilrs};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::game::run::{HAND_SIZE, RunState};
+use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
 
 /// Which input device was used most recently.
@@ -110,7 +110,26 @@ impl InputState {
     }
 
     pub fn focused_index(&self) -> usize {
-        self.focus_slot.min(HAND_SIZE.saturating_sub(1))
+        self.focus_slot
+    }
+
+    pub fn wrap_focus_slot(&mut self, action: UiAction, hand_len: usize) {
+        if hand_len == 0 {
+            self.focus_slot = 0;
+            return;
+        }
+
+        self.focus_slot = match action {
+            UiAction::FocusNext => (self.focus_slot + 1) % hand_len,
+            UiAction::FocusPrev => {
+                if self.focus_slot == 0 {
+                    hand_len - 1
+                } else {
+                    self.focus_slot - 1
+                }
+            }
+            _ => self.focus_slot.min(hand_len - 1),
+        };
     }
 
     /// Poll gilrs; returns emitted actions.  Sets mode to Controller if any
@@ -256,6 +275,31 @@ impl InputState {
                 self.focus_slot = i;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InputState, UiAction};
+
+    #[test]
+    fn wrap_focus_slot_wraps_forward() {
+        let mut input = InputState::new().expect("input state");
+        input.focus_slot = 15;
+
+        input.wrap_focus_slot(UiAction::FocusNext, 16);
+
+        assert_eq!(input.focus_slot, 0);
+    }
+
+    #[test]
+    fn wrap_focus_slot_wraps_backward() {
+        let mut input = InputState::new().expect("input state");
+        input.focus_slot = 0;
+
+        input.wrap_focus_slot(UiAction::FocusPrev, 16);
+
+        assert_eq!(input.focus_slot, 15);
     }
 }
 

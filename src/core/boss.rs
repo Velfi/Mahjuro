@@ -59,7 +59,7 @@ pub enum BossKind {
     Mirror,
     Counterweight,
     TaxCollector,
-    // ── Final (ante 8 only) ──────────────────────────────────────────────
+    // ── Final (final ante only) ──────────────────────────────────────────
     Dragon,
 }
 
@@ -776,7 +776,7 @@ pub static ALL_BOSSES: &[BossDef] = &[
         name: "The Famine",
         description: "Target doubled",
         tier: BossTier::Hard,
-        min_ante: 5,
+        min_ante: 4,
         effect: BossEffect {
             rule_pushes: &[],
             tile_debuffs: &[],
@@ -791,7 +791,7 @@ pub static ALL_BOSSES: &[BossDef] = &[
         name: "The Tempest",
         description: "Wall burns 1 tile after each play",
         tier: BossTier::Hard,
-        min_ante: 5,
+        min_ante: 4,
         effect: BossEffect {
             rule_pushes: &[],
             tile_debuffs: &[],
@@ -806,7 +806,7 @@ pub static ALL_BOSSES: &[BossDef] = &[
         name: "The Censor",
         description: "Repeated yaku score at half",
         tier: BossTier::Hard,
-        min_ante: 5,
+        min_ante: 4,
         effect: BossEffect {
             rule_pushes: &[RuleModifier::CensorRepeats],
             tile_debuffs: &[],
@@ -875,7 +875,7 @@ pub static FINAL_BOSSES: &[BossDef] = &[BossDef {
     name: "The Dragon",
     description: "Hands without honors are debuffed",
     tier: BossTier::Final,
-    min_ante: 8,
+    min_ante: 7,
     effect: BossEffect {
         rule_pushes: &[],
         tile_debuffs: &[],

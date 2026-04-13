@@ -71,6 +71,7 @@ enum Row {
     Gamma,
     Smoke,
     SmokeDetail,
+    SmokeSimQuality,
     Effects,
     Tile,
     TileMaterial,
@@ -108,6 +109,7 @@ const ROWS: &[Row] = &[
     Row::Gamma,
     Row::Smoke,
     Row::SmokeDetail,
+    Row::SmokeSimQuality,
     Row::Effects,
     Row::Tile,
     Row::TileMaterial,
@@ -137,6 +139,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Gamma),
     ContentSlot::Row(Row::Smoke),
     ContentSlot::Row(Row::SmokeDetail),
+    ContentSlot::Row(Row::SmokeSimQuality),
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::TileMaterial),
@@ -289,6 +292,7 @@ pub struct OptionsScene {
     pub sfx_enabled: bool,
     pub smoke_intensity: crate::persistence::SmokeIntensity,
     pub smoke_detail: crate::persistence::SmokeDetail,
+    pub smoke_sim_quality: crate::persistence::SmokeSimQuality,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
@@ -317,6 +321,7 @@ impl OptionsScene {
             sfx_enabled: settings.sfx_enabled,
             smoke_intensity: settings.smoke_intensity,
             smoke_detail: settings.smoke_detail,
+            smoke_sim_quality: settings.smoke_sim_quality,
             effects_quality: settings.effects_quality,
             tile_preset: settings.tile_preset,
             tile_material: settings.tile_material,
@@ -338,6 +343,7 @@ impl OptionsScene {
         settings.sfx_enabled = self.sfx_enabled;
         settings.smoke_intensity = self.smoke_intensity;
         settings.smoke_detail = self.smoke_detail;
+        settings.smoke_sim_quality = self.smoke_sim_quality;
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tile_material = self.tile_material;
@@ -448,6 +454,7 @@ impl OptionsScene {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
             Row::Smoke => self.smoke_intensity = self.smoke_intensity.next(),
             Row::SmokeDetail => self.smoke_detail = self.smoke_detail.next(),
+            Row::SmokeSimQuality => self.smoke_sim_quality = self.smoke_sim_quality.next(),
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::TileMaterial => self.tile_material = self.tile_material.next(),
@@ -474,6 +481,7 @@ impl OptionsScene {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
             Row::Smoke => self.smoke_intensity = self.smoke_intensity.prev(),
             Row::SmokeDetail => self.smoke_detail = self.smoke_detail.prev(),
+            Row::SmokeSimQuality => self.smoke_sim_quality = self.smoke_sim_quality.prev(),
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::TileMaterial => self.tile_material = self.tile_material.prev(),
@@ -515,6 +523,10 @@ impl OptionsScene {
             }
             Row::SmokeDetail => {
                 self.smoke_detail = self.smoke_detail.next();
+                self.save_settings();
+            }
+            Row::SmokeSimQuality => {
+                self.smoke_sim_quality = self.smoke_sim_quality.next();
                 self.save_settings();
             }
             Row::Effects => {
@@ -1000,6 +1012,9 @@ impl OptionsScene {
                     Row::Smoke => format!("Smoke: {}", self.smoke_intensity.label()),
                     Row::SmokeDetail => {
                         format!("Smoke Detail: {}", self.smoke_detail.label())
+                    }
+                    Row::SmokeSimQuality => {
+                        format!("Smoke Sim: {}", self.smoke_sim_quality.label())
                     }
                     Row::Effects => {
                         format!("Effects: {}", self.effects_quality.label())

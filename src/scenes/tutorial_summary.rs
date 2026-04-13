@@ -88,6 +88,7 @@ impl SceneBehavior for TutorialSummaryScene {
             Some(SummaryAction::Continue) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.run = RunState::new_demo();
+                ctx.run.apply_progression(ctx.progress);
                 ctx.run.set_auto_cash_in_on_full_structure(
                     persistence::load_settings().auto_cash_in_on_full_structure,
                 );

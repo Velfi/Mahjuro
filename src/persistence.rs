@@ -9,6 +9,20 @@ use serde::{Deserialize, Serialize};
 use crate::core::progression::PlayerProgress;
 use crate::game::run::RunState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ResumeScene {
+    #[default]
+    Gameplay,
+    Shop,
+    PickBlind,
+}
+
+#[derive(Debug)]
+pub struct LoadedRun {
+    pub run: RunState,
+    pub scene: ResumeScene,
+}
+
 const MAX_PROFILES: usize = 3;
 const SETTINGS_NAME: &str = "settings.json";
 const APP_DIR: &str = "Mahjuro";
@@ -130,6 +144,46 @@ fn default_smoke_detail() -> SmokeDetail {
     // Half-resolution is the sweet spot: ~4× cheaper than native with no
     // visible quality loss on the candle plumes that drove this work.
     SmokeDetail::Half
+}
+
+/// Simulation quality for the volumetric smoke field itself. This is
+/// independent from [`SmokeDetail`], which only controls the resolution of
+/// the offscreen raymarch/composite target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmokeSimQuality {
+    Standard,
+    High,
+    Ultra,
+}
+
+impl SmokeSimQuality {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Standard => Self::High,
+            Self::High => Self::Ultra,
+            Self::Ultra => Self::Standard,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Standard => Self::Ultra,
+            Self::High => Self::Standard,
+            Self::Ultra => Self::High,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+}
+
+fn default_smoke_sim_quality() -> SmokeSimQuality {
+    SmokeSimQuality::High
 }
 
 /// Controls the quality of fullscreen vignette effects (starfield, ember
@@ -324,6 +378,8 @@ pub struct AppSettings {
     pub smoke_intensity: SmokeIntensity,
     #[serde(default = "default_smoke_detail")]
     pub smoke_detail: SmokeDetail,
+    #[serde(default = "default_smoke_sim_quality")]
+    pub smoke_sim_quality: SmokeSimQuality,
     #[serde(default = "default_effects_quality")]
     pub effects_quality: EffectsQuality,
     #[serde(default = "default_tile_preset")]
@@ -377,6 +433,7 @@ impl Default for AppSettings {
             sfx_enabled: true,
             smoke_intensity: SmokeIntensity::Subtle,
             smoke_detail: SmokeDetail::Half,
+            smoke_sim_quality: SmokeSimQuality::High,
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
@@ -468,12 +525,15 @@ pub fn has_saved_run(index: usize) -> bool {
 #[derive(Serialize)]
 struct SavedRunRef<'a> {
     version: &'a str,
+    scene: ResumeScene,
     run: &'a RunState,
 }
 
 #[derive(Deserialize)]
 struct SavedRunOwned {
     version: String,
+    #[serde(default)]
+    scene: ResumeScene,
     run: RunState,
 }
 
@@ -483,9 +543,10 @@ fn current_save_version() -> &'static str {
 
 /// Persist an in-progress run for the given profile. Best-effort: any IO or
 /// serialization failure is logged and swallowed so quit paths never block.
-pub fn save_run(index: usize, run: &RunState) -> anyhow::Result<()> {
+pub fn save_run(index: usize, run: &RunState, scene: ResumeScene) -> anyhow::Result<()> {
     let payload = SavedRunRef {
         version: current_save_version(),
+        scene,
         run,
     };
     let json = serde_json::to_string_pretty(&payload).context("serialize saved run")?;
@@ -495,7 +556,7 @@ pub fn save_run(index: usize, run: &RunState) -> anyhow::Result<()> {
 /// Load the saved run for `index`. Returns `None` if no save exists, the
 /// file is corrupt, or the save was written by a different build version
 /// (in which case the stale file is deleted on the spot).
-pub fn load_run(index: usize) -> Option<RunState> {
+pub fn load_run(index: usize) -> Option<LoadedRun> {
     let path = saved_run_path(index);
     if !path.exists() {
         return None;
@@ -530,7 +591,23 @@ pub fn load_run(index: usize) -> Option<RunState> {
     // change between save and reload, the result matches the original pick.
     let mut run = saved.run;
     run.resolve_upcoming_boss();
-    Some(run)
+    let mut scene = saved.scene;
+    // Repair stale/bad scene markers from older builds: a gameplay resume
+    // must have an active dealt hand. If the snapshot is still in the
+    // pre-blind state, land in the shop instead of the black gameplay shell.
+    if matches!(scene, ResumeScene::Gameplay)
+        && run.hand.is_empty()
+        && run.blind == run.upcoming_blind
+    {
+        log::warn!(
+            "load_run: repairing saved scene marker from Gameplay to Shop (profile {}, round {}, blind {:?})",
+            index,
+            run.run_number,
+            run.blind
+        );
+        scene = ResumeScene::Shop;
+    }
+    Some(LoadedRun { run, scene })
 }
 
 /// Remove the saved run for a profile (e.g. after a run ends or a new run

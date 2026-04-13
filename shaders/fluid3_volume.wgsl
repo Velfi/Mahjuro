@@ -24,6 +24,7 @@ struct VolumeCamera {
     cam_pos:       vec4<f32>,   // xyz = world camera origin
     grid_min:      vec4<f32>,
     grid_max:      vec4<f32>,
+    grid_size:     vec4<f32>,
     params:        vec4<f32>,   // x=max_alpha, y=step_count (z/w consumed by lightbake)
     mode:          vec4<f32>,   // x=0 both, 1 smoke only, 2 flames only
 };
@@ -50,11 +51,19 @@ struct PointLights {
 
 // Convert a world position to a voxel texel coordinate for textureLoad.
 fn world_to_texel(world: vec3<f32>, grid_min: vec3<f32>, grid_max: vec3<f32>) -> vec3<i32> {
-    let dims = textureDimensions(lit_density_tex);
-    let grid_size = vec3<f32>(f32(dims.x), f32(dims.y), f32(dims.z));
+    let grid_size = cam.grid_size.xyz;
     let uvw = (world - grid_min) / (grid_max - grid_min);
     let cell = clamp(uvw * grid_size, vec3<f32>(0.0), grid_size - vec3<f32>(1.0));
     return vec3<i32>(i32(cell.x), i32(cell.y), i32(cell.z));
+}
+
+fn active_sample_uvw(uvw: vec3<f32>) -> vec3<f32> {
+    let dims = textureDimensions(lit_density_tex);
+    let full_dims = vec3<f32>(f32(dims.x), f32(dims.y), f32(dims.z));
+    let active_dims = cam.grid_size.xyz;
+    let min_uvw = 0.5 / full_dims;
+    let max_uvw = (active_dims - 0.5) / full_dims;
+    return mix(min_uvw, max_uvw, uvw);
 }
 
 struct VsOut {
@@ -292,7 +301,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let step = span / f32(nsteps);
 
     // Jitter to break up banding.
-    let jitter = fract(sin(dot(in.clip_pos.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    let jitter = fract(sin(dot(in.clip_pos.xy + vec2<f32>(globals.time * 17.0, globals.time * 31.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
     var t = t_near + step * jitter;
 
     var color = vec3<f32>(0.0);
@@ -309,10 +318,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let pos = origin + dir * t;
         let uvw = (pos - cam.grid_min.xyz) * inv_extent;
         if (all(uvw >= vec3<f32>(0.0)) && all(uvw <= vec3<f32>(1.0))) {
-            let sample = textureSampleLevel(lit_density_tex, density_samp, uvw, 0.0);
+            let sample = textureSampleLevel(lit_density_tex, density_samp, active_sample_uvw(uvw), 0.0);
             let density = max(sample.a, 0.0);
             if (density > 0.001) {
-                let absorb = 1.0 - exp(-density * step * 0.01);
+                let wispy = pow(clamp(density, 0.0, 1.0), 0.72);
+                let absorb = 1.0 - exp(-wispy * step * 0.016);
                 color = color + transmittance * sample.rgb * absorb;
                 transmittance = transmittance * (1.0 - absorb);
             }

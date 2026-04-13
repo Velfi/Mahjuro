@@ -44,6 +44,7 @@ use crate::core::relic::{RelicId, RelicState};
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
+use crate::persistence::ResumeScene;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::wgpu_renderer::GpuInstance;
@@ -101,6 +102,7 @@ pub struct UpdateCtx<'a> {
     /// clicked. Scenes interpret these ids however they like — typically by
     /// matching against named const values local to the scene.
     pub button_clicks: &'a [u32],
+    pub progress: &'a crate::core::progression::PlayerProgress,
     pub run: &'a mut RunState,
     pub bus: &'a mut EventBus,
     pub anim: &'a mut AnimationController,
@@ -151,6 +153,8 @@ pub struct UpdateCtx<'a> {
     /// Whether the player has unlocked multiple tile materials (i.e., has won
     /// at least once). When false, the tile-select scene is skipped.
     pub multiple_materials: bool,
+    /// Scene the app should restore when the player chooses Continue.
+    pub resume_scene: ResumeScene,
     /// `true` while a scene transition is pending (fade-out in progress).
     /// Scenes should skip input processing but continue running animations.
     pub transitioning: bool,
@@ -224,7 +228,6 @@ impl ButtonDef {
         }
     }
 }
-
 
 /// Screen rect of relic badge slot `slot_idx` inside the relic strip.
 /// Single source of truth for badge layout — used by `relic_row` and by

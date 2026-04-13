@@ -53,6 +53,8 @@ pub enum DebugAction {
     TestOverlay,
     /// Jump directly to the victory scene for presentation/debugging.
     ShowVictoryScreen,
+    /// Jump directly to the defeat scene for presentation/debugging.
+    ShowDefeatScreen,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -149,6 +151,10 @@ impl DebugMenuBar {
         let victory_item = MenuItem::new("Show Victory Screen", true, None);
         mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
         let _ = debug_menu.append(&victory_item);
+
+        let defeat_item = MenuItem::new("Show Defeat Screen", true, None);
+        mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
+        let _ = debug_menu.append(&defeat_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

@@ -6,6 +6,7 @@ struct FluidUniforms {
     grid_max:     vec4<f32>,
     inv_extent:   vec4<f32>,
     params:       vec4<f32>,
+    force_params: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> fluid: FluidUniforms;
@@ -31,8 +32,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let yr = vec3<i32>(c.x, min(c.y + 1, dims.y - 1), c.z);
     let zl = vec3<i32>(c.x, c.y, max(c.z - 1, 0));
     let zr = vec3<i32>(c.x, c.y, min(c.z + 1, dims.z - 1));
+    let inv_cell = fluid.grid_size.xyz * fluid.inv_extent.xyz;
+    let ax = inv_cell.x * inv_cell.x;
+    let ay = inv_cell.y * inv_cell.y;
+    let az = inv_cell.z * inv_cell.z;
 
     let div = textureLoad(div_src, c, 0).x;
-    let p_new = (p(xl) + p(xr) + p(yl) + p(yr) + p(zl) + p(zr) - div) * (1.0 / 6.0);
+    let p_new = (
+        (p(xl) + p(xr)) * ax +
+        (p(yl) + p(yr)) * ay +
+        (p(zl) + p(zr)) * az -
+        div
+    ) / (2.0 * (ax + ay + az));
     textureStore(p_dst, c, vec4<f32>(p_new, 0.0, 0.0, 0.0));
 }

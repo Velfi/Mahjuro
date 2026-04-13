@@ -8,11 +8,13 @@ struct FluidUniforms {
     grid_max:     vec4<f32>, // xyz = world max,         w = unused
     inv_extent:   vec4<f32>, // xyz = 1/(max-min),       w = unused
     params:       vec4<f32>, // x=dt, y=density_dis, z=velocity_dis, w=buoyancy
+    force_params: vec4<f32>,
 };
 
 struct InjectionPoint {
     pos_radius: vec4<f32>,   // xyz=world pos,  w=radius (world units)
     vel_density: vec4<f32>,  // xyz=world vel,  w=density strength
+    temperature_phase: vec4<f32>, // x=temperature, y=phase
 };
 
 // Must stay in sync with `MAX_INJECTIONS` in `src/render/fluid.rs`.
@@ -25,7 +27,9 @@ struct InjectionParams {
 @group(0) @binding(0) var<uniform> fluid: FluidUniforms;
 @group(0) @binding(1) var<uniform> injection: InjectionParams;
 @group(0) @binding(2) var src_vd: texture_3d<f32>;
-@group(0) @binding(3) var dst_vd: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(3) var src_temp: texture_3d<f32>;
+@group(0) @binding(4) var dst_vd: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(5) var dst_temp: texture_storage_3d<r32float, write>;
 
 fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     let uvw = (c + vec3<f32>(0.5)) / fluid.grid_size.xyz;
@@ -40,6 +44,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let coord = vec3<i32>(i32(gid.x), i32(gid.y), i32(gid.z));
     var vd = textureLoad(src_vd, coord, 0);
+    var temp = textureLoad(src_temp, coord, 0).x;
 
     let world = cell_to_world(vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)));
 
@@ -53,6 +58,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r2 = radius * radius;
         let gauss = exp(-dist2 / (2.0 * r2));
         if (gauss > 0.0001) {
+            let up = max(pt.vel_density.y, 0.0);
             vd.x = vd.x + pt.vel_density.x * gauss;
             vd.y = vd.y + pt.vel_density.y * gauss;
             vd.z = vd.z + pt.vel_density.z * gauss;
@@ -69,8 +75,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             // here keeps negative impulses doing their job (subtracting from
             // existing positive density) without letting them dig wells.
             vd.w = max(vd.w + pt.vel_density.w * gauss, 0.0);
+            // Temperature is explicitly authored per source so we can
+            // separate hot-but-thin plumes from dense-but-cool soot.
+            let temp_src = max(pt.temperature_phase.x, 0.0) + up * 0.003;
+            temp = max(temp + temp_src * gauss, 0.0);
         }
     }
 
     textureStore(dst_vd, coord, vd);
+    textureStore(dst_temp, coord, vec4<f32>(temp, 0.0, 0.0, 0.0));
 }
