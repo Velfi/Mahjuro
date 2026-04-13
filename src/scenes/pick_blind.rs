@@ -241,7 +241,11 @@ fn estimated_wrapped_lines(text: &str, max_chars: usize) -> usize {
         }
     }
 
-    if lines == 0 { 1 } else { lines }
+    if lines == 0 {
+        1
+    } else {
+        lines
+    }
 }
 
 /// Pick-blind shrine ofuda sizing. Boss names and rule overrides vary a lot
@@ -757,17 +761,11 @@ impl SceneBehavior for PickBlindScene {
             intensity: 0.90,
         });
         // Plaque accent: a smaller, slightly brighter warm-white light
-        // hovering just in front of the sign band. Shift a touch left on boss
-        // blinds so the boss ofuda shares the highlight without needing its
-        // own extra light slot.
-        let plaque_light_x = if upcoming == BlindKind::Boss {
-            plaque_px - plaque_w * 0.10
-        } else {
-            plaque_px
-        };
+        // hovering just in front of the sign band so the engraved text
+        // reads independently of the shrine roof spotlight.
         point_lights.push(PointLight {
             pos: [
-                plaque_light_x,
+                plaque_px,
                 plaque_py - plaque_h * 0.06,
                 plaque_world_y + plaque_h * 0.22,
             ],
@@ -775,6 +773,34 @@ impl SceneBehavior for PickBlindScene {
             color: [1.00, 0.93, 0.80],
             intensity: 1.45 * focus_boost,
         });
+        if upcoming == BlindKind::Boss {
+            if let Some(kind) = ctx.run.boss.upcoming {
+                let def = kind.def();
+                let description: &str = ctx
+                    .run
+                    .boss
+                    .effect
+                    .as_ref()
+                    .and_then(|e| e.description_override.as_deref())
+                    .unwrap_or(def.description);
+                let (ofuda_w, ofuda_h) =
+                    auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+                let ofuda_px =
+                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 4.0).max(ofuda_w * 0.5 + 8.0);
+                let ofuda_py = plaque_py + up_ext[2] * 0.15;
+                let ofuda_world_y = plaque_world_y * 0.86;
+                point_lights.push(PointLight {
+                    pos: [
+                        ofuda_px - ofuda_w * 0.06,
+                        ofuda_py + ofuda_h * 0.03,
+                        ofuda_world_y + ofuda_w * 0.32,
+                    ],
+                    radius: ofuda_h * 1.10,
+                    color: [1.00, 0.95, 0.82],
+                    intensity: 1.35 * focus_boost,
+                });
+            }
+        }
 
         // ── Play altar spotlight ─────────────────────────────────────
         // Always-on warm key on the play altar so the golden coin reads

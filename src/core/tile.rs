@@ -94,6 +94,10 @@ pub struct Tile {
     /// from run state.
     #[serde(default)]
     pub debuffed_visual: bool,
+    /// Transient render-only flag used by bosses like The Veil to flip the
+    /// tile over without affecting scoring or tile identity.
+    #[serde(default)]
+    pub face_down_visual: bool,
 }
 
 impl Tile {
@@ -104,6 +108,7 @@ impl Tile {
             id,
             enhancement: None,
             debuffed_visual: false,
+            face_down_visual: false,
         }
     }
 

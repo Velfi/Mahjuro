@@ -177,6 +177,9 @@ pub fn rasterize_tile_face_decal(
         if blit_set_decal(&mut rgba, width, height, tile, set_name) {
             // Talisman accent border drawn *after* the set decal so it
             // composites on top and stays visible.
+            if tile.face_down_visual {
+                return vec![0u8; (width * height * 4) as usize];
+            }
             if let Some(enh) = tile.enhancement {
                 draw_enhancement_border(&mut rgba, width, height, enh);
             }
@@ -185,6 +188,10 @@ pub fn rasterize_tile_face_decal(
             }
             return rgba;
         }
+    }
+
+    if tile.face_down_visual {
+        return rgba;
     }
 
     // Talisman accent border. Drawn first so the symbol/emoji blits sit on

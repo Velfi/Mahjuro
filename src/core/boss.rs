@@ -207,13 +207,6 @@ fn whisper_apply(run: &mut RunState) {
     run.selected = vec![false; run.hand.len()];
 }
 
-fn veil_apply(run: &mut RunState) {
-    // Burn half of current gold. Pure economy tax — doesn't touch scoring or
-    // resources, so it's the "softest" of the soft bosses. A poor player feels
-    // it less than a rich one, which we like (Balatro's Tooth/Wheel pattern).
-    run.gold /= 2;
-}
-
 fn tribute_apply(run: &mut RunState) {
     run.boss.gold_cost_per_play = 1;
 }
@@ -549,14 +542,14 @@ pub static ALL_BOSSES: &[BossDef] = &[
     BossDef {
         kind: BossKind::Veil,
         name: "The Veil",
-        description: "Lose half your gold",
+        description: "Half your hand is face down",
         tier: BossTier::Soft,
         min_ante: 1,
         effect: BossEffect {
             rule_pushes: &[],
             tile_debuffs: &[],
             relic_debuffs: &[],
-            on_apply: Some(veil_apply),
+            on_apply: None,
             on_play: None,
         },
         on_reveal: None,

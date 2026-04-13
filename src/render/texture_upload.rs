@@ -657,7 +657,13 @@ pub(crate) fn make_hand_tile_gpu(
         outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+        tile_id: (
+            tile.suit,
+            tile.rank,
+            tile.enhancement,
+            tile.debuffed_visual,
+            tile.face_down_visual,
+        ),
         symbol,
         suit_emoji,
         suit_color,
@@ -751,7 +757,13 @@ pub(crate) fn make_showcase_tile_gpu(
         bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+        tile_id: (
+            tile.suit,
+            tile.rank,
+            tile.enhancement,
+            tile.debuffed_visual,
+            tile.face_down_visual,
+        ),
         decal_texture,
     }
 }

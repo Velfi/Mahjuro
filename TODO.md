@@ -1,6 +1,5 @@
 # Current TODO
 
-- Improve explicit navigation for lower-screen gameplay controls.
 - Revisit relic rearranging on the shop screen.
 - Investigate mirror- and shadow-hand interactions while touching shop relic order.
 - Make Fortune's Favor update displayed values live.
