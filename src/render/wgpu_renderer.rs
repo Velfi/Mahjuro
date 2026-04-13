@@ -347,7 +347,7 @@ struct HandTileGpu {
     /// Includes the talisman enhancement so stamping a tile triggers a fresh
     /// decal upload (the enhancement is baked into the texture as a coloured
     /// border + corner gem in `rasterize_tile_face_decal`).
-    tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
+    tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool, bool),
     /// Main label (number or name) for the tile face.
     symbol: String,
     /// Emoji suit indicator rendered below the main label.
@@ -367,7 +367,7 @@ struct ShowcaseTileGpu {
     shadow_uniform_buffer: wgpu::Buffer,
     shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
+    tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool, bool),
     #[allow(dead_code)]
     decal_texture: wgpu::Texture,
 }
@@ -1623,7 +1623,13 @@ fn make_hand_tile_gpu(
         outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+        tile_id: (
+            tile.suit,
+            tile.rank,
+            tile.enhancement,
+            tile.debuffed_visual,
+            tile.face_down_visual,
+        ),
         symbol,
         suit_emoji,
         suit_color,
@@ -1717,7 +1723,13 @@ fn make_showcase_tile_gpu(
         bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+        tile_id: (
+            tile.suit,
+            tile.rank,
+            tile.enhancement,
+            tile.debuffed_visual,
+            tile.face_down_visual,
+        ),
         decal_texture,
     }
 }
@@ -4407,7 +4419,13 @@ impl WgpuRenderer {
         let mut new_tile_order: usize = 0;
 
         for (i, tile) in tiles.iter().enumerate() {
-            let id = (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual);
+            let id = (
+                tile.suit,
+                tile.rank,
+                tile.enhancement,
+                tile.debuffed_visual,
+                tile.face_down_visual,
+            );
             let uid = tile.id;
             let is_new = self.tile_uids[i] != uid;
             self.tile_uids[i] = uid;
@@ -5332,6 +5350,11 @@ impl WgpuRenderer {
                         tile_thickness_px / LOCAL_Y_EXTENT, // local Y → world Y (thickness)
                         tile_short_px / LOCAL_Z_EXTENT, // local Z (short) → world X (left-right)
                     );
+                    let face_orientation = if htg.tile_id.4 {
+                        Mat4::from_rotation_z(std::f32::consts::PI)
+                    } else {
+                        Mat4::IDENTITY
+                    };
                     // Pack enhancement kind into .z so the tile shader can
                     // apply fresnel-masked sheen effects per-enhancement.
                     let mut bcf = self.tile_base_color_factor;
@@ -5353,6 +5376,7 @@ impl WgpuRenderer {
                         let outline_model = Mat4::from_translation(world)
                             * tilt
                             * tile_basis
+                            * face_orientation
                             * Mat4::from_scale(outline_scale);
                         self.queue.write_buffer(
                             &htg.outline_uniform_buffer,
@@ -5367,8 +5391,11 @@ impl WgpuRenderer {
                     // `tilt` was computed above the projection block so
                     // both the model matrix and the overlay anchors share
                     // the same rotation.
-                    let model =
-                        Mat4::from_translation(world) * tilt * tile_basis * Mat4::from_scale(scale);
+                    let model = Mat4::from_translation(world)
+                        * tilt
+                        * tile_basis
+                        * face_orientation
+                        * Mat4::from_scale(scale);
                     // Snapshot for next frame's cursor pick.
                     tile_pick_models.push((i, model));
                     self.queue.write_buffer(
@@ -8459,6 +8486,7 @@ impl WgpuRenderer {
                         p.tile.rank,
                         p.tile.enhancement,
                         p.tile.debuffed_visual,
+                        p.tile.face_down_visual,
                     );
                     // Re-rasterise decal if the tile identity changed.
                     if self.showcase_tiles[slot_cursor].tile_id != wanted_id {
@@ -8500,10 +8528,16 @@ impl WgpuRenderer {
                         p.rotation[1],
                         p.rotation[2],
                     );
+                    let face_orientation = if p.tile.face_down_visual {
+                        Mat4::from_rotation_z(std::f32::consts::PI)
+                    } else {
+                        Mat4::IDENTITY
+                    };
 
                     let model = Mat4::from_translation(center)
                         * rotation
                         * tile_basis
+                        * face_orientation
                         * Mat4::from_scale(scale);
 
                     let stg = &self.showcase_tiles[slot_cursor];

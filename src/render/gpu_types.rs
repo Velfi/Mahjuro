@@ -274,7 +274,7 @@ pub(crate) struct HandTileGpu {
     /// Includes the talisman enhancement so stamping a tile triggers a fresh
     /// decal upload (the enhancement is baked into the texture as a coloured
     /// border + corner gem in `rasterize_tile_face_decal`).
-    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool, bool),
     /// Main label (number or name) for the tile face.
     pub symbol: String,
     /// Emoji suit indicator rendered below the main label.
@@ -294,7 +294,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub shadow_uniform_buffer: wgpu::Buffer,
     pub shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool, bool),
     #[allow(dead_code)]
     pub decal_texture: wgpu::Texture,
 }

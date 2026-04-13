@@ -513,22 +513,41 @@ fn gameplay_sell_consumable(run: &mut crate::game::run::RunState, idx: usize) ->
 }
 
 impl GameplayScene {
+    fn veil_hides_tile(run: &crate::game::run::RunState, tile: crate::core::tile::Tile) -> bool {
+        if !matches!(run.blind, crate::core::rules::BlindKind::Boss)
+            || !matches!(run.boss.upcoming, Some(crate::core::boss::BossKind::Veil))
+        {
+            return false;
+        }
+
+        let tile_hash = |tile: crate::core::tile::Tile| {
+            tile.id
+                .wrapping_mul(2_654_435_761)
+                .rotate_left((run.ante % 31) as u32)
+        };
+        let mut hidden: Vec<u32> = run.hand.iter().map(|tile| tile_hash(*tile)).collect();
+        hidden.sort_unstable_by(|a, b| b.cmp(a));
+        hidden.truncate(run.hand.len() / 2);
+        hidden.contains(&tile_hash(tile))
+    }
+
     fn display_tile(
         tile: crate::core::tile::Tile,
-        tile_debuffs: &[crate::core::debuff::TileDebuff],
+        run: &crate::game::run::RunState,
     ) -> crate::core::tile::Tile {
         let mut tile = tile;
-        tile.debuffed_visual = tile_debuffs.iter().any(|debuff| debuff.matches(&tile));
+        tile.debuffed_visual = run.tile_debuffs.iter().any(|debuff| debuff.matches(&tile));
+        tile.face_down_visual = Self::veil_hides_tile(run, tile);
         tile
     }
 
     fn display_tiles(
         tiles: impl IntoIterator<Item = crate::core::tile::Tile>,
-        tile_debuffs: &[crate::core::debuff::TileDebuff],
+        run: &crate::game::run::RunState,
     ) -> Vec<crate::core::tile::Tile> {
         tiles
             .into_iter()
-            .map(|tile| Self::display_tile(tile, tile_debuffs))
+            .map(|tile| Self::display_tile(tile, run))
             .collect()
     }
 
@@ -986,7 +1005,7 @@ impl GameplayScene {
             showcase.clone()
         } else if run.uses_structure_bank() && !run.structure_sets.is_empty() {
             CascadeShowcase {
-                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs),
+                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), run),
                 sets: run.structure_sets.clone(),
             }
         } else {
@@ -2165,11 +2184,11 @@ impl SceneBehavior for GameplayScene {
                                 if ctx.run.uses_structure_bank() {
                                     let mut tiles = Self::display_tiles(
                                         ctx.run.structure_tiles.iter().copied(),
-                                        &ctx.run.tile_debuffs,
+                                        ctx.run,
                                     );
                                     tiles.extend(Self::display_tiles(
                                         scoring_tiles,
-                                        &ctx.run.tile_debuffs,
+                                        ctx.run,
                                     ));
                                     let mut all_sets = ctx.run.structure_sets.clone();
                                     all_sets.extend(sets);
@@ -2181,7 +2200,7 @@ impl SceneBehavior for GameplayScene {
                                     CascadeShowcase {
                                         tiles: Self::display_tiles(
                                             scoring_tiles,
-                                            &ctx.run.tile_debuffs,
+                                            ctx.run,
                                         ),
                                         sets,
                                     }
@@ -2245,7 +2264,7 @@ impl SceneBehavior for GameplayScene {
                         let cascade_showcase = Some(CascadeShowcase {
                             tiles: Self::display_tiles(
                                 ctx.run.structure_tiles.iter().copied(),
-                                &ctx.run.tile_debuffs,
+                                ctx.run,
                             ),
                             sets: ctx.run.structure_sets.clone(),
                         });
@@ -2763,31 +2782,31 @@ impl SceneBehavior for GameplayScene {
         if run.uses_structure_bank() {
             if selected_tiles_for_yaku.is_empty() {
                 yaku_preview_original_tiles =
-                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                    Self::display_tiles(run.structure_tiles.iter().copied(), run);
                 yaku_preview_effective_tiles =
-                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                    Self::display_tiles(run.structure_tiles.iter().copied(), run);
                 yaku_preview_sets = run.structure_sets.clone();
             } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
                 yaku_preview_original_tiles =
-                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                    Self::display_tiles(run.structure_tiles.iter().copied(), run);
                 yaku_preview_original_tiles.extend(Self::display_tiles(
                     selected_tiles_for_yaku.iter().copied(),
-                    &run.tile_debuffs,
+                    run,
                 ));
                 yaku_preview_effective_tiles =
-                    Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs);
+                    Self::display_tiles(run.structure_tiles.iter().copied(), run);
                 yaku_preview_effective_tiles.extend(Self::display_tiles(
                     selected_scoring_tiles.iter().copied(),
-                    &run.tile_debuffs,
+                    run,
                 ));
                 yaku_preview_sets = run.structure_sets.clone();
                 yaku_preview_sets.extend(selected_sets.iter().cloned());
             }
         } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
             yaku_preview_original_tiles =
-                Self::display_tiles(selected_tiles_for_yaku.iter().copied(), &run.tile_debuffs);
+                Self::display_tiles(selected_tiles_for_yaku.iter().copied(), run);
             yaku_preview_effective_tiles =
-                Self::display_tiles(selected_scoring_tiles.iter().copied(), &run.tile_debuffs);
+                Self::display_tiles(selected_scoring_tiles.iter().copied(), run);
             yaku_preview_sets = selected_sets.clone();
         }
 
@@ -2810,7 +2829,7 @@ impl SceneBehavior for GameplayScene {
         // just-scored tiles visible long enough to pulse them in sequence.
         let showcase_data = self.cascade_showcase.clone().or_else(|| {
             has_structure.then(|| CascadeShowcase {
-                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), &run.tile_debuffs),
+                tiles: Self::display_tiles(run.structure_tiles.iter().copied(), run),
                 sets: run.structure_sets.clone(),
             })
         });
@@ -4015,7 +4034,6 @@ impl SceneBehavior for GameplayScene {
         // footlight. Each: 3D wax + wick, additive `Flame` quad, `PointLight`.
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
-        let mut boss_ofuda_light: Option<PointLight> = None;
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
         let _relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
         // `scale_c` is still used by per-candle jitter offsets below; the
@@ -4959,19 +4977,6 @@ impl SceneBehavior for GameplayScene {
                 title: ofuda_title_text,
                 rule: ofuda_rule_text,
             });
-            // Give the boss ofuda its own warm key light so the paper reads
-            // as a separate focal object instead of borrowing the plaque's
-            // candle spill and falling into the back-wall shadows.
-            boss_ofuda_light = Some(PointLight {
-                pos: [
-                    ofuda_cx - ofuda_w * 0.08,
-                    ofuda_cy + ofuda_h * 0.04,
-                    ofuda_lift + ofuda_w * 0.4,
-                ],
-                radius: ofuda_h * 1.15,
-                color: [1.0, 0.92, 0.78],
-                intensity: 2.1 * self.light_ramp.max(0.35),
-            });
         }
         // Plays/discards pip indicators are a *physical* peg block
         // floating in front of the hanging score plaque. Two rows of
@@ -5345,7 +5350,7 @@ impl SceneBehavior for GameplayScene {
             .hand
             .iter()
             .copied()
-            .map(|tile| Self::display_tile(tile, &run.tile_debuffs))
+            .map(|tile| Self::display_tile(tile, run))
             .collect();
         frame.hand_slots = hand_slots;
         frame.focus = focus;
@@ -5357,13 +5362,6 @@ impl SceneBehavior for GameplayScene {
         // to the volumetric lightbake shader as the analytic flame envelope
         // height in world units.
         frame.flame_height_world = layout.mm(30.0);
-        if let Some(light) = boss_ofuda_light {
-            let budget =
-                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
-            if budget > 0 {
-                point_lights.push(light);
-            }
-        }
         frame.point_lights = point_lights;
         frame.wind_gusts = wind_gusts;
         // Catch-all 3D-hit dispatcher: a full-screen `ButtonDef::scene`
