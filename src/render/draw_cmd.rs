@@ -23,7 +23,7 @@ use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::candle_mesh::CandlePlacement;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel, UiImage};
 use crate::scenes::{BackgroundId, ButtonDef};
 
 /// Per-frame camera override supplied by a scene that wants to draw the 3D
@@ -372,6 +372,12 @@ pub struct MirrorPlacement {
     pub extents: [f32; 3],
     /// Hover lift envelope in [0, 1].
     pub hover: f32,
+    /// Base pitch toward/away from the camera in degrees. Positive tips the
+    /// reflective face toward the player before hover animation is applied.
+    pub rotation_x_deg: f32,
+    /// Roll around the local Z axis in degrees. Used for scene-authored idle
+    /// wobble without affecting the shared hover envelope.
+    pub rotation_z_deg: f32,
 }
 
 /// The plays/discards remaining peg block. The block itself is a single
@@ -651,6 +657,8 @@ pub enum DrawCmd {
     Text(TextLabel),
     /// Pre-loaded relic icon texture.
     RelicIcon(RelicIcon),
+    /// Generic embedded UI image.
+    UiImage(UiImage),
     // ── Skeuomorphic gameplay HUD ──
     /// Hanging blind/score plaque (gameplay HUD). Single placement per cmd.
     Plaque(PlaquePlacement),
@@ -905,6 +913,10 @@ impl UiFrame {
     pub fn relic_icons<I: IntoIterator<Item = RelicIcon>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::RelicIcon));
     }
+
+    pub fn ui_image(&mut self, image: UiImage) {
+        self.cmds.push(DrawCmd::UiImage(image));
+    }
     pub fn glossary_anchor(&mut self, rect: [f32; 4], term: &'static str) {
         self.cmds.push(DrawCmd::GlossaryAnchor { rect, term });
     }
@@ -944,6 +956,7 @@ impl UiFrame {
                 | DrawCmd::TalismanBatch(_)
                 | DrawCmd::CoinBatch(_)
                 | DrawCmd::RelicIcon(_)
+                | DrawCmd::UiImage(_)
                 | DrawCmd::Plaque(_)
                 | DrawCmd::Ofuda(_)
                 | DrawCmd::YakuTabletBatch(_)

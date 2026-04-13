@@ -2,12 +2,15 @@
 //! shop. Left/right arrows cycle through tile materials; each material
 //! displays its name and gameplay bonus. Play starts the run.
 
+use crate::audio::SfxId;
 use crate::core::tile::{Suit, Tile};
+use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
 use crate::render::theme::{ButtonVariant, color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{
     self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
 };
@@ -21,6 +24,7 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
     Play,
+    SkipTutorial,
     Back,
 }
 
@@ -60,42 +64,79 @@ impl TileSelectScene {
     fn build_tree(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Tree<ModalAction> {
         let scale = metrics::scene_scale(window_w, window_h, ui_scale);
         let panel_w = window_w * 0.38;
-        let btn_w = (240.0 * scale).min(panel_w * 0.85);
+        let btn_w = if self.tutorial_mode {
+            (220.0 * scale).min(panel_w * 0.78)
+        } else {
+            (240.0 * scale).min(panel_w * 0.85)
+        };
 
-        let btn_h = (44.0 * scale).max(28.0);
-        let btn_gap = (12.0 * scale).max(6.0);
+        let btn_h = if self.tutorial_mode {
+            (38.0 * scale).max(26.0)
+        } else {
+            (44.0 * scale).max(28.0)
+        };
+        let btn_gap = if self.tutorial_mode {
+            (10.0 * scale).max(6.0)
+        } else {
+            (12.0 * scale).max(6.0)
+        };
 
-        let block_h = 2.0 * btn_h + btn_gap;
-        let start_y = window_h * 0.55;
+        let start_y = if self.tutorial_mode {
+            window_h * 0.62
+        } else {
+            window_h * 0.55
+        };
         let menu_x = (panel_w - btn_w) * 0.5;
 
-        let items = vec![
-            wt::button_id(
-                ModalAction::Play.id(),
-                "Play",
-                ModalAction::Play,
-                ButtonVariant::Primary,
-            ),
-            wt::button_id(
-                ModalAction::Back.id(),
-                "Back",
-                ModalAction::Back,
-                ButtonVariant::Default,
-            ),
-        ];
-
+        let items = if self.tutorial_mode {
+            vec![
+                wt::button_id(
+                    ModalAction::Play.id(),
+                    "Play Tutorial",
+                    ModalAction::Play,
+                    ButtonVariant::Primary,
+                ),
+                wt::button_id(
+                    ModalAction::SkipTutorial.id(),
+                    "Skip Tutorial",
+                    ModalAction::SkipTutorial,
+                    ButtonVariant::Default,
+                ),
+                wt::button_id(
+                    ModalAction::Back.id(),
+                    "Back",
+                    ModalAction::Back,
+                    ButtonVariant::Default,
+                ),
+            ]
+        } else {
+            vec![
+                wt::button_id(
+                    ModalAction::Play.id(),
+                    "Play",
+                    ModalAction::Play,
+                    ButtonVariant::Primary,
+                ),
+                wt::button_id(
+                    ModalAction::Back.id(),
+                    "Back",
+                    ModalAction::Back,
+                    ButtonVariant::Default,
+                ),
+            ]
+        };
+        let block_h = items.len() as f32 * btn_h + (items.len().saturating_sub(1) as f32) * btn_gap;
         Tree::vertical_menu(items).with_anchor([menu_x, start_y, btn_w, block_h])
     }
 
     fn start_game(&self, run: &mut RunState) -> SceneTransition {
         if self.tutorial_mode {
-            *run = RunState::new_tutorial();
+            *run = RunState::new_onboarding();
             run.set_auto_cash_in_on_full_structure(
                 crate::persistence::load_settings().auto_cash_in_on_full_structure,
             );
-            // Show tile literacy intro before the first tutorial lesson.
-            Some(Scene::TileLiteracy(
-                super::tile_literacy::TileLiteracyScene::new(),
+            Some(Scene::TutorialCampaign(
+                super::tutorial_campaign::TutorialCampaignScene::new(),
             ))
         } else {
             *run = RunState::new_with_material(self.material);
@@ -183,6 +224,7 @@ impl SceneBehavior for TileSelectScene {
                 UiAction::FocusNext => self.material = self.material.next(),
                 UiAction::FocusPrev => self.material = self.material.prev(),
                 UiAction::Cancel | UiAction::Pause => {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                     return Some(Scene::StartScreen(StartScreenScene::new()));
                 }
                 other => filtered.push(other),
@@ -202,10 +244,28 @@ impl SceneBehavior for TileSelectScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
 
         match action {
-            Some(ModalAction::Play) => self.start_game(ctx.run),
-            Some(ModalAction::Back) => Some(Scene::StartScreen(StartScreenScene::new())),
+            Some(ModalAction::Play) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                self.start_game(ctx.run)
+            }
+            Some(ModalAction::SkipTutorial) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                *ctx.complete_onboarding = true;
+                *ctx.run = RunState::new_with_material(TileMaterial::default());
+                ctx.run.set_auto_cash_in_on_full_structure(
+                    crate::persistence::load_settings().auto_cash_in_on_full_structure,
+                );
+                Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)))
+            }
+            Some(ModalAction::Back) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                Some(Scene::StartScreen(StartScreenScene::new()))
+            }
             None => None,
         }
     }
@@ -237,41 +297,86 @@ impl SceneBehavior for TileSelectScene {
         let hint_h = hint_px * 1.4;
 
         let text_block_h = title_h + gap_sm + name_h + gap_sm + bonus_h;
-        let mut cursor_y = (h * 0.5 - text_block_h) * 0.5 + h * 0.05;
+        let mut cursor_y = if self.tutorial_mode {
+            h * 0.22
+        } else {
+            (h * 0.5 - text_block_h) * 0.5 + h * 0.05
+        };
         let text_x = panel_w * 0.05;
         let text_w = panel_w * 0.90;
 
+        let title_text = if self.tutorial_mode {
+            "First-Time Tutorial"
+        } else {
+            "Choose Your Tiles"
+        };
         text_labels.push(TextLabel {
             rect: [text_x, cursor_y, text_w, title_h],
-            text: "Choose Your Tiles".into(),
+            text: title_text.into(),
             color: color::CHAMPAGNE,
             font_px: Some(title_px),
             ..Default::default()
         });
         cursor_y += title_h + gap_lg;
 
-        text_labels.push(TextLabel {
-            rect: [text_x, cursor_y, text_w, name_h],
-            text: self.material.label().into(),
-            color: color::CHAMPAGNE,
-            font_px: Some(name_px),
-            ..Default::default()
-        });
-        cursor_y += name_h + gap_sm;
+        if self.tutorial_mode {
+            let intro_h = 90.0 * scale;
+            widget::push_text_block(
+                &mut text_labels,
+                [text_x, cursor_y, text_w, intro_h],
+                "A short guided campaign teaches melds, structure scoring, relics, bosses, and the shop before one final practice fight.",
+                TextStyle {
+                    tier: typography::HEADING,
+                    color: color::MIST,
+                    padding: 0.0,
+                    align: TextAlign::Left,
+                },
+                h,
+                ui_scale,
+            );
+            cursor_y += intro_h + 10.0 * scale;
+            let skip_h = 50.0 * scale;
+            widget::push_text_block(
+                &mut text_labels,
+                [text_x, cursor_y, text_w, skip_h],
+                "Skip marks the tutorial complete for this profile and starts a normal run immediately.",
+                TextStyle {
+                    tier: typography::CAPTION,
+                    color: color::PARCHMENT,
+                    padding: 0.0,
+                    align: TextAlign::Left,
+                },
+                h,
+                ui_scale,
+            );
+        } else {
+            text_labels.push(TextLabel {
+                rect: [text_x, cursor_y, text_w, name_h],
+                text: self.material.label().into(),
+                color: color::CHAMPAGNE,
+                font_px: Some(name_px),
+                ..Default::default()
+            });
+            cursor_y += name_h + gap_sm;
 
-        text_labels.push(TextLabel {
-            rect: [text_x, cursor_y, text_w, bonus_h],
-            text: self.material.bonus_description().into(),
-            color: color::MIST,
-            font_px: Some(bonus_px),
-            ..Default::default()
-        });
+            text_labels.push(TextLabel {
+                rect: [text_x, cursor_y, text_w, bonus_h],
+                text: self.material.bonus_description().into(),
+                color: color::MIST,
+                font_px: Some(bonus_px),
+                ..Default::default()
+            });
+        }
 
         // Hint at the bottom of the panel.
         let hint_y = h - hint_h - (12.0 * scale);
         text_labels.push(TextLabel {
             rect: [text_x, hint_y, text_w, hint_h],
-            text: "\u{25C0}  \u{25B6}  Change tiles   |   Enter to play".into(),
+            text: if self.tutorial_mode {
+                "Enter to confirm the focused option".into()
+            } else {
+                "\u{25C0}  \u{25B6}  Change tiles   |   Enter to play".into()
+            },
             color: color::SLATE,
             font_px: Some(hint_px),
             ..Default::default()
@@ -303,8 +408,19 @@ impl SceneBehavior for TileSelectScene {
         frame.quads(instances);
         frame.hand_tile_faces();
         frame.texts(text_labels);
-        frame.hand_tiles = hand_tiles;
-        frame.hand_slots = hand_slots;
+        frame.hand_tiles = if self.tutorial_mode {
+            hand_tiles
+                .into_iter()
+                .filter(|t| !matches!(t.suit, Suit::Flower))
+                .collect()
+        } else {
+            hand_tiles
+        };
+        frame.hand_slots = if self.tutorial_mode {
+            hand_slots.into_iter().take(34).collect()
+        } else {
+            hand_slots
+        };
         frame.focus = usize::MAX;
         frame.tile_material_override = Some(self.material);
         frame.point_lights = vec![PointLight {
@@ -315,7 +431,11 @@ impl SceneBehavior for TileSelectScene {
         }];
         frame.fluid_smoke();
         frame.buttons = buttons;
-        frame.window_title = "Mahjuro — Choose Tiles".into();
+        frame.window_title = if self.tutorial_mode {
+            "Mahjuro — Tutorial Prompt".into()
+        } else {
+            "Mahjuro — Choose Tiles".into()
+        };
         frame
     }
 }

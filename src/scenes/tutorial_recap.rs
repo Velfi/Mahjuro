@@ -3,6 +3,8 @@
 //! Summarises what the player just learned and previews the next lesson
 //! before transitioning to gameplay (or shop).
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::game::tutorial::{LESSON_COUNT, lesson_def};
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
@@ -54,7 +56,11 @@ impl SceneBehavior for TutorialRecapScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
         if action.is_some() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             return Some(if self.shop_follows {
                 Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run))
             } else {

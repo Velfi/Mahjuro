@@ -3276,6 +3276,8 @@ impl SceneBehavior for GameplayScene {
                         world_pos: action_anchor.to_draw_cmd_triple(),
                         extents: [diam, diam, diam],
                         hover: target,
+                        rotation_x_deg: 0.0,
+                        rotation_z_deg: 0.0,
                     });
                     // Gold "Play hand" label superimposed on the mirror
                     // when it's the active selection. Same projected-mesh
@@ -4902,42 +4904,38 @@ impl SceneBehavior for GameplayScene {
             });
         }
         // Ofuda only appears on boss blinds (where there's a rule to show).
-        // Positioned on the LEFT flank of the score plaque, well outboard
-        // of the left score-panel candle so the paper face never visually
-        // collides with the wax. The previous anchor (right edge of the
-        // modifier strip) sat directly behind the right candle and the
-        // candle silhouette ate the title/rule decal. Hung high enough on
-        // the back wall to read as a posted notice rather than a charm
-        // dangling onto the action row.
+        // Anchor it from the plaque's *actual* left edge instead of the raw
+        // score-panel bounds: perspective projection pulls taller / higher
+        // objects inward on screen, so a naive "some pixels left of
+        // score_panel.x" anchor can still drift back over the wood plaque
+        // and obscure the gold count.
         if !ofuda_title_text.is_empty() {
             let sp = layout.score_panel;
             let ms_rect = layout.modifier_strip;
-            // Width/height of the ofuda paper face. Give it a bit more
-            // physical presence than the first pass so the boss name/rule
-            // reads as a posted warning, not a tiny charm tucked behind the
-            // plaque.
-            let ofuda_w = ms_rect.w * 0.27;
-            let ofuda_h = ms_rect.h * 1.9;
-            // Park the right edge of the paper a clear gap to the left of
-            // the left score-panel candle. The candle stands at roughly
-            // `sp.x - candle_w * 0.5 - edge_pad` (see candle layout above)
-            // with `candle_w ≈ 83 * scale_c`, so a `100 * scale_c` clearance
-            // keeps the paper outside the candle's footprint even with
-            // jitter, and the `max(...)` clamp keeps it on-screen on
-            // narrow windows where the score panel is already near the
-            // left edge.
+            // Keep the gameplay ofuda slimmer than the shrine-screen paper:
+            // the main plaque also needs room for score + gold + wind, so a
+            // full-width warning card feels crowding here.
+            let ofuda_w = ms_rect.w * 0.22;
+            let ofuda_h = ms_rect.h * 1.7;
             let scale_c = (layout.window_w / 600.0).max(0.5);
-            let candle_clearance = 132.0 * scale_c;
+            let plaque_w = sp.w * 0.95;
+            let plaque_left = sp.x + (sp.w - plaque_w) * 0.5;
+            // Give the paper extra berth from the plaque itself, not just
+            // from the candle footprint. That keeps the plaque text readable
+            // even after the taller paper projects inward toward center.
+            let plaque_gap = 26.0 * scale_c;
+            let candle_clearance = 120.0 * scale_c;
+            let right_edge = (plaque_left - plaque_gap).min(sp.x - candle_clearance);
             let min_left_margin = ofuda_w * 0.5 + 12.0;
-            let ofuda_cx = (sp.x - candle_clearance - ofuda_w * 0.5).max(min_left_margin);
+            let ofuda_cx = (right_edge - ofuda_w * 0.5).max(min_left_margin);
             // Push it up the back wall: smaller pixel-y → farther into z
             // (recessed against the wall behind the table) and a taller
             // lift so the paper hangs above the score-plaque elevation
             // rather than beside it. The mesh is now upright (no
             // toward-camera tilt — see ofuda_tilt_x in the renderer), so
             // raising it visually moves it up the back wall on screen.
-            let ofuda_cy = sp.y - sp.h * 0.5;
-            let ofuda_lift = layout.window_h * 0.43;
+            let ofuda_cy = sp.y - sp.h * 0.68;
+            let ofuda_lift = layout.window_h * 0.45;
             frame.ofuda(crate::render::draw_cmd::OfudaPlacement {
                 center_pos: [ofuda_cx, ofuda_cy, ofuda_lift],
                 // Real washi paper is ~0.1mm but the ofuda needs visible

@@ -381,6 +381,9 @@ fn action_id<A: Copy>(action: A) -> u32 {
 pub struct TreeState {
     /// Currently focused item id. Resolved against the latest layout cache.
     focused: Option<FocusId>,
+    /// Latched true during `update()` / `update_flat()` when user input moves
+    /// focus to a different item. Cleared by `take_focus_changed()`.
+    focus_changed: bool,
     /// Layout cache built during `update()` and reused by `draw()`. Each entry
     /// is `(item id, rect, kind tag)`. Decorations are not cached.
     layout: Vec<LaidOut>,
@@ -412,6 +415,7 @@ impl TreeState {
     pub fn new() -> Self {
         Self {
             focused: None,
+            focus_changed: false,
             layout: Vec::new(),
             last_window: (0.0, 0.0),
             last_ui_scale: 1.0,
@@ -426,6 +430,14 @@ impl TreeState {
     /// in and wants the cursor on a specific row).
     pub fn set_focus(&mut self, id: FocusId) {
         self.focused = Some(id);
+    }
+
+    /// Return whether focus changed during the most recent update pass, then
+    /// clear the latch.
+    pub fn take_focus_changed(&mut self) -> bool {
+        let changed = self.focus_changed;
+        self.focus_changed = false;
+        changed
     }
 
     /// Returns the currently focused item id, if any.
@@ -445,6 +457,7 @@ impl TreeState {
         items: &[FlatItem<A>],
         input: TreeInput<'_>,
     ) -> Option<A> {
+        self.focus_changed = false;
         self.last_window = input.window;
         // Build the layout cache from the explicit rects.
         self.layout.clear();
@@ -470,7 +483,7 @@ impl TreeState {
             for l in &self.layout {
                 let [x, y, w, h] = l.rect;
                 if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
-                    self.focused = Some(l.id);
+                    self.set_focus_changed(Some(l.id));
                     break;
                 }
             }
@@ -852,6 +865,7 @@ fn child_height<A: Copy>(
 impl TreeState {
     /// Lay out the tree, run input, return the activated action (if any).
     pub fn update<A: Copy>(&mut self, tree: &Tree<A>, input: TreeInput<'_>) -> Option<A> {
+        self.focus_changed = false;
         self.last_window = input.window;
         self.last_ui_scale = input.ui_scale;
         let info = layout_tree(tree, input.window, input.ui_scale, &mut self.layout);
@@ -904,7 +918,7 @@ impl TreeState {
             for l in &self.layout {
                 let [x, y, w, h] = l.rect;
                 if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
-                    self.focused = Some(l.id);
+                    self.set_focus_changed(Some(l.id));
                     break;
                 }
             }
@@ -989,12 +1003,19 @@ impl TreeState {
             .unwrap_or(0);
         let n = self.layout.len() as i32;
         let next = ((cur as i32 + delta).rem_euclid(n)) as usize;
-        self.focused = Some(self.layout[next].id);
+        self.set_focus_changed(Some(self.layout[next].id));
     }
 
     fn activate_id<A: Copy>(&mut self, tree: &Tree<A>, id: FocusId) -> Option<A> {
         // Walk the tree to find the matching item.
         find_item(&tree.root, id).and_then(|item| activate_item(item, id))
+    }
+
+    fn set_focus_changed(&mut self, next: Option<FocusId>) {
+        if self.focused != next {
+            self.focused = next;
+            self.focus_changed = true;
+        }
     }
 }
 

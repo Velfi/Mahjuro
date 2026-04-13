@@ -17,6 +17,7 @@ use rand::seq::SliceRandom;
 
 use std::time::Instant;
 
+use crate::audio::SfxId;
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
     Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price,
@@ -26,6 +27,7 @@ use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
+use crate::game::onboarding::OnboardingPhase;
 use crate::render::curio_cabinet_mesh::{NICHE_COLS, NICHE_ROWS, niche_centers_local};
 use crate::render::draw_cmd::{
     BookPlacement, CameraParams, CoinPlacement, CurioCabinetPlacement, DishExplicit,
@@ -35,14 +37,19 @@ use crate::render::draw_cmd::{
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{
+    GpuInstance, PointLight, ShopHit, TextAlign, TextLabel, UiImage, UiImageId,
+};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, PanelVariant, TextStyle};
 
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, ChickenMascotState, DrawCtx, Scene, SceneBehavior, SceneTransition,
+    UpdateCtx, chicken_mascot_rect, push_chicken_mascot_bubble,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShopAction {
@@ -89,6 +96,12 @@ enum ShopFocus {
     NextRound,
     /// The 2D "Reroll" button at the bottom of the screen.
     Reroll,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShopMode {
+    Standard,
+    Tutorial,
 }
 
 impl ShopFocus {
@@ -443,10 +456,12 @@ fn live_shop_hit(
             i < talisman_items.len()
                 + owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)))
         }
-        ShopHit::Dish(id) => matches!(
-            id,
-            PICK_RELIC_DISH | PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_TILE_PACK
-        ) && (id != PICK_TILE_PACK || pack_item.is_some()),
+        ShopHit::Dish(id) => {
+            matches!(
+                id,
+                PICK_RELIC_DISH | PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_TILE_PACK
+            ) && (id != PICK_TILE_PACK || pack_item.is_some())
+        }
         ShopHit::TilePack(id) => id == PICK_TILE_PACK && pack_item.is_some(),
     };
     valid.then_some(hit)
@@ -707,6 +722,7 @@ impl ZodiacCelebration {
 
 pub struct ShopScene {
     pub came_from_round: u32,
+    mode: ShopMode,
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
     talisman_items: Vec<ConsumableShopItem>,
@@ -743,6 +759,7 @@ pub struct ShopScene {
     /// drained from the run state (e.g. Bonfire on relic sell, RitualBlade
     /// on destroy). Drives glow + wiggle on owned relics in the shop.
     relic_glow_starts: std::collections::HashMap<RelicId, Instant>,
+    mascot: ChickenMascotState,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -758,6 +775,8 @@ const SHOP_REROLL_ID: u32 = 0x9400;
 const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
 /// Floating sell button for hovered owned consumables.
 const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
+/// Click id for the shop mascot.
+const SHOP_MASCOT_ID: u32 = 0x9700;
 /// Base gold cost for the first shop reroll.
 const REROLL_BASE_COST: u32 = 5;
 /// How long a relic glow + wiggle lasts after activation.
@@ -776,6 +795,12 @@ const PICK_COIN_DISH: u32 = 2;
 const PICK_JOURNAL_BOOK: u32 = 3;
 /// Pick id for the for-sale tile pack on the shop shelf.
 const PICK_TILE_PACK: u32 = 4;
+
+const SHOP_MASCOT_LINES: &[&str] = &[
+    "Spend with purpose. Gold is a resource, not a lifestyle.",
+    "If you cannot afford everything, congratulations: the shop is working.",
+    "Hover first, peck second. That's how we avoid buying emotional support junk.",
+];
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
@@ -885,19 +910,69 @@ fn generate_shop_stock(
     (items, zodiac_items, talisman_items, pack_item)
 }
 
+fn tutorial_shop_stock() -> (
+    Vec<ShopItem>,
+    Vec<ConsumableShopItem>,
+    Vec<ConsumableShopItem>,
+    Option<TilePackShopItem>,
+) {
+    let defs = all_relic_defs();
+    let pair_power = defs
+        .iter()
+        .find(|d| d.id == RelicId::PairPower)
+        .expect("Pair Power relic def should exist");
+    (
+        vec![ShopItem {
+            relic: pair_power.id,
+            name: pair_power.name,
+            description: pair_power.description,
+            rarity: pair_power.rarity,
+            price: relic_shop_price(pair_power.id, &RelicState::default()),
+            sold: false,
+        }],
+        vec![ConsumableShopItem {
+            consumable: Consumable::Zodiac(ZodiacKind::Dragon),
+            sold: false,
+        }],
+        vec![ConsumableShopItem {
+            consumable: Consumable::Talisman(TalismanKind::Jade),
+            sold: false,
+        }],
+        Some(TilePackShopItem {
+            kind: TilePackKind::ScrollLibrary,
+            sold: false,
+        }),
+    )
+}
+
 impl ShopScene {
     pub fn new(came_from_round: u32, run: &mut crate::game::run::RunState) -> Self {
+        Self::new_with_mode(came_from_round, run, ShopMode::Standard)
+    }
+
+    pub fn new_tutorial(run: &mut crate::game::run::RunState) -> Self {
+        Self::new_with_mode(run.run_number, run, ShopMode::Tutorial)
+    }
+
+    fn new_with_mode(
+        came_from_round: u32,
+        run: &mut crate::game::run::RunState,
+        mode: ShopMode,
+    ) -> Self {
         let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
         let extra_relics = if run.tag_patron_gift {
             extra_relics.max(1)
         } else {
             extra_relics
         };
-        let (mut items, zodiac_items, talisman_items, pack_item) =
-            generate_shop_stock(&run.relics, extra_relics);
+        let (mut items, zodiac_items, talisman_items, pack_item) = if mode == ShopMode::Tutorial {
+            tutorial_shop_stock()
+        } else {
+            generate_shop_stock(&run.relics, extra_relics)
+        };
 
         // PatronGift: zero out one random relic's price.
-        if run.tag_patron_gift && !items.is_empty() {
+        if mode == ShopMode::Standard && run.tag_patron_gift && !items.is_empty() {
             use rand::prelude::IndexedMutRandom;
             let mut rng = rand::rng();
             if let Some(item) = items.choose_mut(&mut rng) {
@@ -905,7 +980,9 @@ impl ShopScene {
             }
         }
 
-        let reroll_cost = if run.tag_free_reroll {
+        let reroll_cost = if mode == ShopMode::Tutorial {
+            u32::MAX
+        } else if run.tag_free_reroll {
             0
         } else {
             REROLL_BASE_COST
@@ -918,6 +995,7 @@ impl ShopScene {
 
         Self {
             came_from_round,
+            mode,
             items,
             zodiac_items,
             talisman_items,
@@ -934,6 +1012,19 @@ impl ShopScene {
             last_frame: Instant::now(),
             age_secs: 0.0,
             relic_glow_starts: std::collections::HashMap::new(),
+            mascot: ChickenMascotState::default(),
+        }
+    }
+
+    fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
+        if self.mode == ShopMode::Tutorial {
+            if let Some(ref mut onboarding) = run.onboarding {
+                onboarding.phase = OnboardingPhase::Finale;
+            }
+            run.begin_onboarding_finale();
+            Scene::Gameplay(super::gameplay::GameplayScene::new())
+        } else {
+            Scene::PickBlind(PickBlindScene::new())
         }
     }
 
@@ -989,6 +1080,9 @@ impl ShopScene {
 
     /// Replace all unsold stock with fresh random items and bump the cost.
     fn reroll(&mut self, run: &mut crate::game::run::RunState) {
+        if self.mode == ShopMode::Tutorial {
+            return;
+        }
         run.gold -= self.reroll_cost as i32;
         self.reroll_cost += REROLL_COST_INCREMENT;
         let (items, zodiac_items, talisman_items, pack_item) = generate_shop_stock(&run.relics, 0);
@@ -1536,6 +1630,13 @@ impl SceneBehavior for ShopScene {
         self.relic_glow_starts
             .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
 
+        if ctx.button_clicks.contains(&SHOP_MASCOT_ID) {
+            self.mascot.advance(SHOP_MASCOT_LINES);
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::UiSound(SfxId::TilePlace));
+            return None;
+        }
+
         // Help action opens the Meld Guide scene.
         for &cid in ctx.button_clicks {
             if cid == SHOP_HELP_BADGE_ID {
@@ -1794,9 +1895,11 @@ impl SceneBehavior for ShopScene {
             if matches!(a, UiAction::Confirm) {
                 if let Some(focus) = self.focus {
                     if matches!(focus, ShopFocus::NextRound) {
-                        return Some(Scene::PickBlind(PickBlindScene::new()));
+                        return Some(self.continue_scene(ctx.run));
                     }
-                    if matches!(focus, ShopFocus::Reroll) && ctx.run.gold >= self.reroll_cost as i32
+                    if matches!(focus, ShopFocus::Reroll)
+                        && self.mode == ShopMode::Standard
+                        && ctx.run.gold >= self.reroll_cost as i32
                     {
                         self.reroll(ctx.run);
                         continue;
@@ -1839,7 +1942,7 @@ impl SceneBehavior for ShopScene {
         // the legacy keybind still works regardless of where focus is.
         for a in ctx.actions {
             if matches!(a, UiAction::CommitDiscard) {
-                return Some(Scene::PickBlind(PickBlindScene::new()));
+                return Some(self.continue_scene(ctx.run));
             }
         }
         for &cid in ctx.button_clicks {
@@ -1874,9 +1977,12 @@ impl SceneBehavior for ShopScene {
                 return None;
             }
             if cid == SHOP_NEXT_ROUND_ID {
-                return Some(Scene::PickBlind(PickBlindScene::new()));
+                return Some(self.continue_scene(ctx.run));
             }
-            if cid == SHOP_REROLL_ID && ctx.run.gold >= self.reroll_cost as i32 {
+            if cid == SHOP_REROLL_ID
+                && self.mode == ShopMode::Standard
+                && ctx.run.gold >= self.reroll_cost as i32
+            {
                 self.reroll(ctx.run);
                 return None;
             }
@@ -2949,157 +3055,162 @@ impl SceneBehavior for ShopScene {
         // a hint banner at the top of the screen guiding the player through
         // the shop UI — mirroring the gameplay scene's tutorial overlay
         // style.
-        if let Some(ref tut) = ctx.run.tutorial {
-            if tut.is_active() && tut.current_lesson_def().shop_enabled {
-                let n_for_sale_relics = self.items.len().min(layout.niche_count);
-                let n_for_sale_zodiacs = self.zodiac_items.len();
-                let n_for_sale_talismans = self.talisman_items.len();
-                let has_bought = tut
-                    .celebrated
-                    .contains(&crate::game::tutorial::TutorialMilestone::FirstShopBuy);
-                let (flavor, hint) = if has_bought {
-                    (
-                        "Your upgrades are live.",
-                        "Relics work passively for the rest of the run. Hover items in the lower dish to sell them, or press Next Round when you are ready to test your new build.",
-                    )
-                } else if self.items.is_empty() {
-                    (
-                        "The cabinet is bare\u{2026}",
-                        "Press Next Round to move on.",
-                    )
-                } else if let Some(hit) = hover {
-                    match hit {
-                        ShopHit::Relic(i) if i < n_for_sale_relics => (
-                            "Relics are permanent run upgrades.",
-                            "This cabinet sells passive relics. Read the tooltip, check the gold cost, and buy the one that best helps your scoring plan.",
-                        ),
-                        ShopHit::Relic(_) => (
-                            "Owned relics live in the lower dish.",
-                            "Hover a relic in the dish to review its effect. Use the Sell button or press LB / [ to cash it out if you want to pivot your build.",
-                        ),
-                        ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => (
-                            "Ribbons level up a yaku.",
-                            "Buying a ribbon boosts one scoring pattern for the rest of the run. They are great when you already know which yaku you want to chase.",
-                        ),
-                        ShopHit::Talisman(i) if i < n_for_sale_talismans => (
-                            "Talismans are consumable upgrades.",
-                            "Talismans go into your consumable tray and modify tiles or scoring. They are flexible pickups when you do not want to commit to a relic.",
-                        ),
-                        ShopHit::Ribbon(_) => (
-                            "Owned ribbons can be used here.",
-                            "Hover an owned ribbon in the tray and click Use to apply its yaku level-up before the next blind.",
-                        ),
-                        ShopHit::Talisman(_) => (
-                            "Owned talismans can be sold back.",
-                            "Hover an owned talisman in the tray to inspect it or sell it for gold if you need room.",
-                        ),
-                        ShopHit::Dish(id) if id == PICK_TILE_PACK => (
-                            "Tile packs change the wall.",
-                            "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
-                        ),
-                        ShopHit::TilePack(_) => (
-                            "Tile packs change the wall.",
-                            "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
-                        ),
-                        _ => (
-                            "Take a look around the Shop.",
-                            "Hover any item to inspect it. The tooltip tells you what it does and whether you can buy, use, or sell it.",
-                        ),
-                    }
-                } else {
-                    (
-                        "Welcome to the Shop!",
-                        "Left cabinet: relics for passive bonuses. Hanging ribbons: yaku level-ups. Jade tablets: talismans. Hover anything to inspect it, then buy what helps before pressing Next Round.",
-                    )
-                };
+        if self.mode == ShopMode::Tutorial {
+            let n_for_sale_relics = self.items.len().min(layout.niche_count);
+            let n_for_sale_zodiacs = self.zodiac_items.len();
+            let n_for_sale_talismans = self.talisman_items.len();
+            let has_bought = !ctx.run.relics.active.is_empty()
+                || !ctx.run.consumables.items.is_empty()
+                || ctx
+                    .run
+                    .yaku_levels
+                    .level_of(crate::core::yaku::YakuKind::FullHand)
+                    > 1
+                || self.pack_item.as_ref().is_some_and(|p| p.sold);
+            let (flavor, hint) = if has_bought {
+                (
+                    "Your loadout is ready.",
+                    "Try selling an owned item if you want to see the refund flow, or use LB / RB on owned relics to reorder them before you face The Iconoclast.",
+                )
+            } else if self.items.is_empty() {
+                (
+                    "The cabinet is bare\u{2026}",
+                    "Press Next Round to move on.",
+                )
+            } else if let Some(hit) = hover {
+                match hit {
+                    ShopHit::Relic(i) if i < n_for_sale_relics => (
+                        "Relics are permanent run upgrades.",
+                        "This cabinet sells passive relics. Read the tooltip, check the gold cost, and buy the one that best helps your scoring plan.",
+                    ),
+                    ShopHit::Relic(_) => (
+                        "Owned relics live in the lower dish.",
+                        "Hover a relic in the dish to review its effect. Use the Sell button or press LB / [ to cash it out if you want to pivot your build.",
+                    ),
+                    ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => (
+                        "Ribbons level up a yaku.",
+                        "Buying a ribbon boosts one scoring pattern for the rest of the run. They are great when you already know which yaku you want to chase.",
+                    ),
+                    ShopHit::Talisman(i) if i < n_for_sale_talismans => (
+                        "Talismans are consumable upgrades.",
+                        "Talismans go into your consumable tray and modify tiles or scoring. They are flexible pickups when you do not want to commit to a relic.",
+                    ),
+                    ShopHit::Ribbon(_) => (
+                        "Owned ribbons can be used here.",
+                        "Hover an owned ribbon in the tray and click Use to apply its yaku level-up before the next blind.",
+                    ),
+                    ShopHit::Talisman(_) => (
+                        "Owned talismans can be sold back.",
+                        "Hover an owned talisman in the tray to inspect it or sell it for gold if you need room.",
+                    ),
+                    ShopHit::Dish(id) if id == PICK_TILE_PACK => (
+                        "Tile packs change the wall.",
+                        "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
+                    ),
+                    ShopHit::TilePack(_) => (
+                        "Tile packs change the wall.",
+                        "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
+                    ),
+                    _ => (
+                        "Take a look around the Shop.",
+                        "Hover any item to inspect it. The tooltip tells you what it does and whether you can buy, use, or sell it.",
+                    ),
+                }
+            } else {
+                (
+                    "Welcome to the Shop!",
+                    "Left cabinet: relics for passive bonuses. Hanging ribbons: yaku level-ups. Jade tablets: talismans. Hover anything to inspect it, then buy what helps before pressing Next Round.",
+                )
+            };
 
-                let alpha = 1.0_f32;
-                let flavor_px = typography::size(typography::HEADING, h, ui_scale);
-                let hint_px = typography::size(typography::TITLE, h, ui_scale);
-                let pad = (16.0 * ui_scale).max(10.0);
+            let alpha = 1.0_f32;
+            let flavor_px = typography::size(typography::BODY, h, ui_scale).max(15.0);
+            let hint_px = typography::size(typography::BODY, h, ui_scale).max(15.0);
+            let pad = (16.0 * ui_scale).max(10.0);
 
-                // Right-side vertical panel — sits below the zodiac area so
-                // it never overlaps relic tooltips in the upper-left.
-                let banner_w = (w * 0.24).clamp(260.0, 420.0);
-                let banner_x = w - banner_w - w * 0.02;
-                let banner_y = h * 0.45;
-                let text_w = banner_w - pad * 2.0;
+            // Right-side vertical panel — sits below the zodiac area so
+            // it never overlaps relic tooltips in the upper-left.
+            let banner_w = (w * 0.30).clamp(320.0, 460.0);
+            let banner_x = w - banner_w - w * 0.02;
+            let banner_y = h * 0.40;
+            let text_w = banner_w - pad * 2.0;
 
-                // Pre-wrap both text blocks to compute dynamic height.
-                let flavor_line_h = flavor_px * 1.4;
-                let flavor_lines = widget::wrap_text(flavor, text_w, flavor_px);
-                let flavor_h = flavor_lines.len().max(1) as f32 * flavor_line_h;
-                let hint_line_h = hint_px * 1.4;
-                let hint_lines = widget::wrap_text(hint, text_w, hint_px);
-                let hint_h = hint_lines.len().max(1) as f32 * hint_line_h;
-                let banner_h = pad + flavor_h + pad * 0.5 + hint_h + pad;
+            // Pre-wrap both text blocks to compute dynamic height.
+            let flavor_line_h = flavor_px * 1.4;
+            let flavor_lines = widget::wrap_text(flavor, text_w, flavor_px);
+            let flavor_h = flavor_lines.len().max(1) as f32 * flavor_line_h;
+            let hint_line_h = hint_px * 1.4;
+            let hint_lines = widget::wrap_text(hint, text_w, hint_px);
+            let hint_h = hint_lines.len().max(1) as f32 * hint_line_h;
+            let banner_h = (pad + flavor_h + pad * 0.5 + hint_h + pad)
+                .min(h - banner_y - (92.0 * ui_scale).max(72.0));
 
-                // Gold border.
-                let border = 2.0;
-                quads.push(GpuInstance {
-                    rect: [
-                        banner_x - border,
-                        banner_y - border,
-                        banner_w + border * 2.0,
-                        banner_h + border * 2.0,
-                    ],
+            // Gold border.
+            let border = 2.0;
+            quads.push(GpuInstance {
+                rect: [
+                    banner_x - border,
+                    banner_y - border,
+                    banner_w + border * 2.0,
+                    banner_h + border * 2.0,
+                ],
+                color: [
+                    color::BRASS[0],
+                    color::BRASS[1],
+                    color::BRASS[2],
+                    0.4 * alpha,
+                ],
+            });
+            // Dark panel.
+            quads.push(GpuInstance {
+                rect: [banner_x, banner_y, banner_w, banner_h],
+                color: [
+                    color::MIDNIGHT[0],
+                    color::MIDNIGHT[1],
+                    color::MIDNIGHT[2],
+                    0.88 * alpha,
+                ],
+            });
+            // Flavor text (gold, left-aligned for narrow panel).
+            let flavor_y = banner_y + pad;
+            widget::push_text_block(
+                &mut texts,
+                [banner_x + pad, flavor_y, text_w, flavor_h],
+                flavor,
+                TextStyle {
+                    tier: typography::BODY,
+                    color: [color::GOLD[0], color::GOLD[1], color::GOLD[2], 0.8 * alpha],
+                    padding: 0.0,
+                    align: TextAlign::Left,
+                },
+                h,
+                ui_scale,
+            );
+            // Hint text (champagne, left-aligned).
+            let hint_y = flavor_y + flavor_h + pad * 0.5;
+            widget::push_text_block(
+                &mut texts,
+                [banner_x + pad, hint_y, text_w, hint_h],
+                hint,
+                TextStyle {
+                    tier: typography::BODY,
                     color: [
-                        color::BRASS[0],
-                        color::BRASS[1],
-                        color::BRASS[2],
-                        0.4 * alpha,
+                        color::CHAMPAGNE[0],
+                        color::CHAMPAGNE[1],
+                        color::CHAMPAGNE[2],
+                        alpha,
                     ],
-                });
-                // Dark panel.
-                quads.push(GpuInstance {
-                    rect: [banner_x, banner_y, banner_w, banner_h],
-                    color: [
-                        color::MIDNIGHT[0],
-                        color::MIDNIGHT[1],
-                        color::MIDNIGHT[2],
-                        0.88 * alpha,
-                    ],
-                });
-                // Flavor text (gold, left-aligned for narrow panel).
-                let flavor_y = banner_y + pad;
-                widget::push_text_block(
-                    &mut texts,
-                    [banner_x + pad, flavor_y, text_w, flavor_h],
-                    flavor,
-                    TextStyle {
-                        tier: typography::HEADING,
-                        color: [color::GOLD[0], color::GOLD[1], color::GOLD[2], 0.8 * alpha],
-                        padding: 0.0,
-                        align: TextAlign::Left,
-                    },
-                    h,
-                    ui_scale,
-                );
-                // Hint text (champagne, left-aligned).
-                let hint_y = flavor_y + flavor_h + pad * 0.5;
-                widget::push_text_block(
-                    &mut texts,
-                    [banner_x + pad, hint_y, text_w, hint_h],
-                    hint,
-                    TextStyle {
-                        tier: typography::TITLE,
-                        color: [
-                            color::CHAMPAGNE[0],
-                            color::CHAMPAGNE[1],
-                            color::CHAMPAGNE[2],
-                            alpha,
-                        ],
-                        padding: 0.0,
-                        align: TextAlign::Left,
-                    },
-                    h,
-                    ui_scale,
-                );
-            }
+                    padding: 0.0,
+                    align: TextAlign::Left,
+                },
+                h,
+                ui_scale,
+            );
         }
 
         // ── Reroll + Next Round buttons (always-visible, 2D) ──────────
         let scale = metrics::scene_scale(w, h, ui_scale);
+        let mascot_rect = chicken_mascot_rect(w, h, ui_scale);
         let btn_w = (180.0 * scale).max(120.0);
         let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = 12.0 * scale;
@@ -3108,13 +3219,18 @@ impl SceneBehavior for ShopScene {
         let btn_y = h - btn_h - (16.0 * scale);
 
         // Reroll button (left).
-        let reroll_affordable = ctx.run.gold >= self.reroll_cost as i32;
+        let reroll_affordable =
+            self.mode == ShopMode::Standard && ctx.run.gold >= self.reroll_cost as i32;
         let reroll_state = if reroll_affordable {
             ButtonState::Rest
         } else {
             ButtonState::Disabled
         };
-        let reroll_label = format!("Restock ${}g", self.reroll_cost);
+        let reroll_label = if self.mode == ShopMode::Tutorial {
+            "Curated Stock".to_string()
+        } else {
+            format!("Restock ${}g", self.reroll_cost)
+        };
         widget::push_button(
             &mut quads,
             &mut texts,
@@ -3139,7 +3255,11 @@ impl SceneBehavior for ShopScene {
             &mut texts,
             &mut buttons,
             [btn_x, btn_y, btn_w, btn_h],
-            "Next Round",
+            if self.mode == ShopMode::Tutorial {
+                "Face Boss"
+            } else {
+                "Next Round"
+            },
             ButtonVariant::Primary,
             ButtonState::Rest,
             UiAction::CommitDiscard,
@@ -3226,6 +3346,18 @@ impl SceneBehavior for ShopScene {
         // The `?` glossary badge has been removed — the glossary is
         // reachable from the pause menu's "Glossary" entry. The keyboard
         // `Help` action shortcut still works for power users.
+        push_chicken_mascot_bubble(
+            &mut quads,
+            &mut texts,
+            &mut buttons,
+            &self.mascot,
+            SHOP_MASCOT_LINES,
+            SHOP_MASCOT_ID,
+            mascot_rect,
+            w,
+            h,
+            ui_scale,
+        );
 
         // ── Catch-all 3D-hit dispatcher ───────────────────────────────
         // Full-screen button registered LAST so it only wins if no other
@@ -3265,6 +3397,10 @@ impl SceneBehavior for ShopScene {
         // Push 2D layers onto the frame after all 3D content.
         frame.quads(quads);
         frame.texts(texts);
+        frame.ui_image(UiImage {
+            rect: mascot_rect,
+            image_id: UiImageId::ChickenHand,
+        });
 
         // ── Zodiac ribbon close-up celebration overlay ──────────────
         if let Some(ref celeb) = self.zodiac_celebration {

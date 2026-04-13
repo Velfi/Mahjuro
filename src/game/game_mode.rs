@@ -45,6 +45,7 @@ impl GameMode {
     /// Tutorial mode for first-time players. Starts with a tiny hand,
     /// low targets, no yaku, no discards, and no consumables. Lessons
     /// progressively unlock mechanics via `apply_lesson()`.
+    #[allow(dead_code)]
     pub fn tutorial() -> Self {
         Self {
             starting_gold: 4,

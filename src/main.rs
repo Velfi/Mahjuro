@@ -36,6 +36,7 @@ use scenes::gameplay::GameplayScene;
 use scenes::shop::ShopScene;
 use scenes::splash::SplashScene;
 use scenes::tutorial_recap::TutorialRecapScene;
+use scenes::tutorial_summary::TutorialSummaryScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
 use serde::{Deserialize, Serialize};
 use ui::input::{InputMode, InputState, UiAction};
@@ -123,7 +124,7 @@ impl DebugState {
 enum TransitionKind {
     /// Default fast fade (~0.2 s).
     Quick,
-    /// Dramatic shooting-star cascade (~2.8 s total).
+    /// Dramatic shooting-star cascade (~1.7 s total before extra score steps).
     ShootingStarCascade,
 }
 
@@ -648,6 +649,16 @@ impl App {
         let wh = win_size.height as f32;
         match ev {
             GameEvent::RoundComplete { payout, .. } => {
+                if self.run.onboarding_active() {
+                    self.run.gold = self.run.gold.saturating_add(payout.total as i32);
+                    self.progress.tutorial_completed = true;
+                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    persistence::delete_saved_run(self.active_profile);
+                    self.pending_scene =
+                        Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
+                    self.transition_alpha = 1.0;
+                    return;
+                }
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run.gold = self.run.gold.saturating_add(payout.total as i32);
@@ -747,6 +758,25 @@ impl App {
                 self.transition_alpha = 1.0;
             }
             GameEvent::GameOver { .. } => {
+                if self.run.onboarding_active() {
+                    let round_score = self.run.round_score;
+                    let target_score = self.run.target_score;
+                    let discards_left = self.run.discards_remaining;
+                    let last = self.run.last_breakdown.as_ref();
+                    let feedback = crate::game::onboarding::finale_failure_feedback(
+                        round_score,
+                        target_score,
+                        discards_left,
+                        last,
+                    );
+                    self.run.retry_onboarding_finale();
+                    self.audio.play_sfx(audio::SfxId::GameOver);
+                    let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
+                    self.modals.push(modal);
+                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::new()));
+                    self.transition_alpha = 1.0;
+                    return;
+                }
                 // Tutorial retry: if the tutorial is active and the player
                 // hasn't reached the graduation zone, restart the current
                 // blind with adaptive difficulty instead of ending the run.
@@ -1555,6 +1585,9 @@ impl ApplicationHandler for App {
                         GameEvent::InvalidAction => {
                             self.audio.play_sfx(audio::SfxId::InvalidAction);
                         }
+                        GameEvent::UiSound(id) => {
+                            self.audio.play_sfx(id);
+                        }
                         GameEvent::TutorialMilestone(milestone) => {
                             use crate::game::tutorial::TutorialMilestone;
                             let (title, body) = match milestone {
@@ -1841,6 +1874,7 @@ impl ApplicationHandler for App {
                 let mut quit_requested = false;
                 let mut switch_profile_req: Option<usize> = None;
                 let mut delete_profile_req: Option<usize> = None;
+                let mut complete_onboarding = false;
                 let cursor_pos = self
                     .input
                     .as_ref()
@@ -1871,6 +1905,7 @@ impl ApplicationHandler for App {
                     quit_requested: &mut quit_requested,
                     switch_profile: &mut switch_profile_req,
                     delete_profile: &mut delete_profile_req,
+                    complete_onboarding: &mut complete_onboarding,
                     cursor_pos,
                     loading_done,
                     cascade_tuning: &self.cascade_tuning,
@@ -1915,7 +1950,7 @@ impl ApplicationHandler for App {
                         (Scene::StartScreen(_), Scene::TileSelect(_))
                             | (Scene::StartScreen(_), Scene::Shop(_))
                             | (Scene::TileSelect(_), Scene::Shop(_))
-                            | (Scene::TileSelect(_), Scene::TileLiteracy(_))
+                            | (Scene::TileSelect(_), Scene::TutorialCampaign(_))
                     );
                     if use_cascade {
                         self.transition_kind = TransitionKind::ShootingStarCascade;
@@ -1928,6 +1963,11 @@ impl ApplicationHandler for App {
                     // Start fade-out transition.
                     self.pending_scene = Some(next_scene);
                     self.transition_alpha = 1.0;
+                }
+
+                if complete_onboarding {
+                    self.progress.tutorial_completed = true;
+                    let _ = persistence::save_profile(self.active_profile, &self.progress);
                 }
 
                 // Sync live audio/graphics settings whenever the player has
@@ -2038,6 +2078,7 @@ impl ApplicationHandler for App {
                             let clear_smoke = matches!(
                                 (&self.scene, &next),
                                 (Scene::TileSelect(_), Scene::Shop(_))
+                                    | (Scene::TutorialCampaign(_), Scene::Shop(_))
                                     | (Scene::Shop(_), Scene::PickBlind(_))
                             );
                             self.scene = next;

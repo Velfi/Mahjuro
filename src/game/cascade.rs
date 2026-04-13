@@ -63,10 +63,10 @@ fn default_wind_duration_ms() -> u64 {
 impl Default for CascadeTuning {
     fn default() -> Self {
         Self {
-            base_hold_ms: 600,
-            step_hold_ms: 500,
-            total_hold_ms: 900,
-            tick_duration_ms: 350,
+            base_hold_ms: 420,
+            step_hold_ms: 240,
+            total_hold_ms: 520,
+            tick_duration_ms: 170,
             depart_lifetime_ms: 700,
             draw_settle_ms: 500,
             sort_settle_ms: 400,
@@ -80,12 +80,12 @@ impl Default for CascadeTuning {
 /// total beat. Acts as a poor-man's time dilation: the screen briefly
 /// freezes on the previous step's values so the player anticipates the
 /// closing crescendo.
-const PRE_TOTAL_FREEZE_MS: u64 = 140;
+const PRE_TOTAL_FREEZE_MS: u64 = 70;
 
 impl CascadeTuning {
-    /// Slow-motion cascade for tutorial lesson 5 — 2× durations so the
-    /// player can read each step. The gameplay scene injects annotation
-    /// text into the `CascadeFrame` when this is active.
+    /// Slow-motion cascade for tutorial lesson 5. Kept intentionally
+    /// generous so the player can read each step while the gameplay
+    /// scene injects annotation text into the `CascadeFrame`.
     pub fn tutorial_slow() -> Self {
         Self {
             base_hold_ms: 1200,

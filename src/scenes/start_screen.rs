@@ -3,12 +3,16 @@
 use std::cell::RefCell;
 use std::time::Instant;
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, TileMaterial};
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{CameraParams, PlaquePlacement, UiFrame, WoodTabletPlacement};
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GameplayPick, GpuInstance, PointLight, TextLabel};
+use crate::render::wgpu_renderer::{
+    GameplayPick, GpuInstance, PointLight, TextLabel, UiImage, UiImageId,
+};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
@@ -20,7 +24,17 @@ use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
 use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
-use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ChickenMascotState, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx,
+    chicken_mascot_rect, push_chicken_mascot_bubble,
+};
+
+const START_SCREEN_MASCOT_ID: u32 = 0xA100;
+const START_SCREEN_MASCOT_LINES: &[&str] = &[
+    "Pick a tablet. I will pretend this was all part of the plan.",
+    "Play bold. If it fails, we call it poultry variance.",
+    "Collection is nice, but pecking the big button is nicer.",
+];
 
 // ── Menu items ──────────────────────────────────────────────────────────
 
@@ -90,6 +104,7 @@ pub struct StartScreenScene {
     /// Cached cursor position from the most recent `update()` for the
     /// starfield parallax effect in `draw_frame()`.
     cursor_pos: (f32, f32),
+    mascot: ChickenMascotState,
 }
 
 impl StartScreenScene {
@@ -100,6 +115,7 @@ impl StartScreenScene {
             last_frame: Instant::now(),
             last_focus_rects: RefCell::new(Vec::new()),
             cursor_pos: (0.0, 0.0),
+            mascot: ChickenMascotState::default(),
         }
     }
 }
@@ -114,11 +130,17 @@ impl SceneBehavior for StartScreenScene {
 
         let in_progress = ctx.run.is_in_progress();
         let items = menu_items(in_progress);
+        if ctx.button_clicks.contains(&START_SCREEN_MASCOT_ID) {
+            self.mascot.advance(START_SCREEN_MASCOT_LINES);
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            return None;
+        }
 
         // Ensure we have a valid focus.
         if self.focus.is_none() || !items.contains(&self.focus.unwrap()) {
             self.focus = Some(default_focus(in_progress));
         }
+        let prev_focus = self.focus;
 
         let focus_rects = self.last_focus_rects.borrow().clone();
 
@@ -161,6 +183,7 @@ impl SceneBehavior for StartScreenScene {
                 }
                 UiAction::Confirm => activated = true,
                 UiAction::Cancel | UiAction::Pause => {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                     *ctx.quit_requested = true;
                 }
                 _ => {}
@@ -188,8 +211,13 @@ impl SceneBehavior for StartScreenScene {
             *anim += (target - *anim) * (speed * dt).min(1.0);
         }
 
+        if self.focus != prev_focus {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+
         // ── Activate focused item ───────────────────────────────────────
         if activated {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             match self.focus {
                 Some(MenuFocus::Continue) => return Some(Scene::Gameplay(GameplayScene::new())),
                 Some(MenuFocus::NewGame) => {
@@ -376,18 +404,32 @@ impl SceneBehavior for StartScreenScene {
         // ── Navigation hint text ────────────────────────────────────────
         let hint_h = (typography::size(typography::MICRO, h, ui_scale) * 1.7).max(16.0);
         let hint_y = h - hint_h - (12.0 * scale);
-        let text_labels = vec![TextLabel {
+        let mut text_labels = vec![TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: "Arrow keys to navigate  |  Enter/Space to select".into(),
             color: color::SLATE,
             ..Default::default()
         }];
+        let mascot_rect = chicken_mascot_rect(w, h, ui_scale);
 
         // ── Catch-all click target (full-screen invisible button) ───────
-        let buttons = vec![super::ButtonDef {
+        let mut buttons = Vec::new();
+        push_chicken_mascot_bubble(
+            &mut quads,
+            &mut text_labels,
+            &mut buttons,
+            &self.mascot,
+            START_SCREEN_MASCOT_LINES,
+            START_SCREEN_MASCOT_ID,
+            mascot_rect,
+            w,
+            h,
+            ui_scale,
+        );
+        buttons.push(super::ButtonDef {
             rect: (0.0, 0.0, w, h),
             action: super::ButtonAction::Scene(0),
-        }];
+        });
 
         // ── Assemble the frame ──────────────────────────────────────────
         let mut frame = UiFrame::new();
@@ -401,6 +443,10 @@ impl SceneBehavior for StartScreenScene {
         frame.fluid_smoke();
         frame.quads(quads);
         frame.texts(text_labels);
+        frame.ui_image(UiImage {
+            rect: mascot_rect,
+            image_id: UiImageId::ChickenHand,
+        });
 
         frame.point_lights = point_lights;
         frame.candle_light_count = 2;
