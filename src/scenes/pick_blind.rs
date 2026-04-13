@@ -16,8 +16,10 @@
 use std::cell::Cell;
 use std::time::Instant;
 
+use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
 use crate::core::zodiac::ZodiacKind;
+use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, CoinPlacement, DishExplicit, OfudaPlacement, PlaquePlacement, ShrinePlacement,
     UiFrame, ZodiacRibbonPlacement,
@@ -166,6 +168,25 @@ impl PickBlindScene {
     fn play_focused(&self) -> bool {
         self.tree.focused() == Some(BlindAction::PlayBlind.id())
     }
+}
+
+/// Shared placement for the floating plaque above the upcoming shrine.
+/// Keeping the light and the physical plaque on the same anchor avoids
+/// "fixing" the mesh position while leaving its highlight behind.
+fn upcoming_plaque_anchor(
+    upcoming: BlindKind,
+    shrine_px: f32,
+    shrine_py: f32,
+    shrine_ext: [f32; 3],
+) -> (f32, f32, f32) {
+    let (py_factor, world_y_factor) = if upcoming == BlindKind::Small {
+        (-0.06, 1.62)
+    } else {
+        (0.10, 1.45)
+    };
+    let plaque_py = shrine_py + shrine_ext[2] * py_factor;
+    let plaque_world_y = shrine_ext[1] * world_y_factor;
+    (shrine_px, plaque_py, plaque_world_y)
 }
 
 /// Inflate a tight projected screen rect into a generous click target.
@@ -483,6 +504,9 @@ impl SceneBehavior for PickBlindScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
 
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip {
@@ -703,9 +727,9 @@ impl SceneBehavior for PickBlindScene {
         // the plaque/ofuda cluster without washing the stone roof below.
         let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
         let plaque_h = (h * 0.26).clamp(190.0, 300.0);
-        let plaque_px = up_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
-        let plaque_py = up_py + up_ext[2] * 0.10;
-        let plaque_world_y = up_ext[1] * 1.45;
+        let (raw_plaque_px, plaque_py, plaque_world_y) =
+            upcoming_plaque_anchor(upcoming, up_px, up_py, up_ext);
+        let plaque_px = raw_plaque_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
         point_lights.push(PointLight {
             pos: spot,
             radius: up_ext[1] * 2.20,
@@ -903,14 +927,9 @@ impl SceneBehavior for PickBlindScene {
             // much larger than a typical close-up plaque to read well.
             let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
             let plaque_h = (h * 0.26).clamp(190.0, 300.0);
-            let plaque_px = shrine_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
-            // Keep the plaque above the shrine, but not so high that it
-            // climbs into the top letterbox area and becomes hard to read.
-            // A slight screen-space drop plus a lower vertical lift keeps it
-            // visually attached to the boss shrine while staying centered in
-            // the player's eyeline.
-            let plaque_py = shrine_py + shrine_ext[2] * 0.10;
-            let plaque_world_y = shrine_ext[1] * 1.45;
+            let (raw_plaque_px, plaque_py, plaque_world_y) =
+                upcoming_plaque_anchor(upcoming, shrine_px, shrine_py, shrine_ext);
+            let plaque_px = raw_plaque_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
 
             let blind_name = if upcoming == BlindKind::Boss {
                 ctx.run

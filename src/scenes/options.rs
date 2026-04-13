@@ -6,6 +6,8 @@
 //! keeps every visible row fully on-screen — the renderer has no scissor
 //! support.
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
@@ -273,6 +275,10 @@ pub struct OptionsScene {
     focused: Row,
     /// When true the Back button (below the scroll area) has keyboard focus.
     back_focused: bool,
+    /// Latched when user input changes focus to a different row/back button.
+    focus_changed: bool,
+    confirm_requested: bool,
+    cancel_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
 
@@ -301,6 +307,9 @@ impl OptionsScene {
         Self {
             focused: Row::Master,
             back_focused: false,
+            focus_changed: false,
+            confirm_requested: false,
+            cancel_requested: false,
             scroll: SmoothScroll::new(),
             master_volume: settings.master_volume,
             sfx_volume: settings.sfx_volume,
@@ -340,6 +349,24 @@ impl OptionsScene {
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
+    }
+
+    pub fn take_focus_changed(&mut self) -> bool {
+        let changed = self.focus_changed;
+        self.focus_changed = false;
+        changed
+    }
+
+    pub fn take_confirm_requested(&mut self) -> bool {
+        let requested = self.confirm_requested;
+        self.confirm_requested = false;
+        requested
+    }
+
+    pub fn take_cancel_requested(&mut self) -> bool {
+        let requested = self.cancel_requested;
+        self.cancel_requested = false;
+        requested
     }
 
     /// Range (min, max, step) for a slider row.
@@ -539,8 +566,12 @@ impl OptionsScene {
         window_h: f32,
         scroll_lines: f32,
     ) -> bool {
+        self.focus_changed = false;
+        self.confirm_requested = false;
+        self.cancel_requested = false;
         let layout = compute_layout(window_w, window_h, self.ui_scale);
         self.sync_scroll(&layout);
+        let prev_focus = (self.focused, self.back_focused);
 
         // ── Scroll wheel ───────────────────────────────────────────────
         // Apply when the cursor is over the content area.
@@ -604,11 +635,13 @@ impl OptionsScene {
             }
             if cid == BACK_ID {
                 self.save_settings();
+                self.cancel_requested = true;
                 return true;
             }
             if let Some(row) = Row::from_click_id(cid) {
                 self.focused = row;
                 self.back_focused = false;
+                self.confirm_requested = true;
                 return self.apply_click(row, &layout, cursor_pos);
             }
         }
@@ -655,20 +688,24 @@ impl OptionsScene {
                 }
                 UiAction::Confirm | UiAction::CommitDiscard if self.back_focused => {
                     self.save_settings();
+                    self.cancel_requested = true;
                     return true;
                 }
                 UiAction::Confirm | UiAction::CommitDiscard => {
+                    self.confirm_requested = true;
                     if self.apply_click(self.focused, &layout, cursor_pos) {
                         return true;
                     }
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     self.save_settings();
+                    self.cancel_requested = true;
                     return true;
                 }
                 _ => {}
             }
         }
+        self.focus_changed = prev_focus != (self.focused, self.back_focused);
         false
     }
 
@@ -1017,7 +1054,16 @@ impl SceneBehavior for OptionsScene {
             ctx.layout.window_h,
             ctx.scroll_lines,
         ) {
+            if self.take_cancel_requested() {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            }
             return Some(Scene::StartScreen(StartScreenScene::new()));
+        }
+        if self.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+        if self.take_confirm_requested() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
         }
         None
     }

@@ -1,5 +1,6 @@
 //! Simple event queue for UI and core.
 
+use crate::audio::SfxId;
 use crate::core::tile::Tile;
 
 /// Itemized breakdown of the gold awarded for clearing a blind. Mirrors
@@ -69,6 +70,8 @@ pub enum GameEvent {
     TutorialMilestone(crate::game::tutorial::TutorialMilestone),
     /// An action was rejected as invalid (e.g. bad meld, structure full).
     InvalidAction,
+    /// Play a one-shot UI / tutorial sound (no gameplay side effects).
+    UiSound(SfxId),
 }
 
 #[derive(Default)]

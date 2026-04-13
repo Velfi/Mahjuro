@@ -1,5 +1,7 @@
 //! Game over scene — shown when the player exhausts plays without reaching the target.
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::theme::color;
@@ -61,7 +63,11 @@ impl SceneBehavior for GameOverScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
         if action.is_some() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.run = RunState::new_demo();
             ctx.run.set_auto_cash_in_on_full_structure(
                 persistence::load_settings().auto_cash_in_on_full_structure,

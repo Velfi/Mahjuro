@@ -10,6 +10,8 @@ use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 /// Sound effect identifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SfxId {
+    UiConfirm,
+    UiCancel,
     TileClick,
     TilePlace,
     TileDiscard,
@@ -52,6 +54,8 @@ pub enum SfxId {
 /// startup loader and the debug "Sound Effects Test" overlay so they can't drift.
 pub fn all_sfx_ids() -> &'static [SfxId] {
     &[
+        SfxId::UiConfirm,
+        SfxId::UiCancel,
         SfxId::TileClick,
         SfxId::TilePlace,
         SfxId::TileDiscard,
@@ -81,6 +85,8 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
 impl SfxId {
     pub(crate) fn filename(self) -> &'static str {
         match self {
+            SfxId::UiConfirm => "kenney_interface-sounds/Audio/confirmation_001.ogg",
+            SfxId::UiCancel => "kenney_interface-sounds/Audio/back_001.ogg",
             SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
             SfxId::TilePlace => "Snap.ogg",
             SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",

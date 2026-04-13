@@ -1,5 +1,7 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
+use crate::audio::SfxId;
+use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
@@ -180,6 +182,7 @@ impl PauseMenu {
                 ctx.actions,
                 ctx.button_clicks,
                 ctx.run,
+                ctx.bus,
                 ctx.cursor_pos,
                 ctx.layout.window_w,
                 ctx.layout.window_h,
@@ -213,6 +216,7 @@ impl PauseMenu {
         actions: &[UiAction],
         button_clicks: &[u32],
         run: &mut RunState,
+        bus: &mut EventBus,
         cursor_pos: (f32, f32),
         window_w: f32,
         window_h: f32,
@@ -234,12 +238,24 @@ impl PauseMenu {
             ) {
                 self.options_overlay = None;
             }
+            if let Some(opts) = self.options_overlay.as_mut() {
+                if opts.take_focus_changed() {
+                    bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                }
+                if opts.take_confirm_requested() {
+                    bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                }
+            }
+            if self.options_overlay.is_none() {
+                bus.push(GameEvent::UiSound(SfxId::UiCancel));
+            }
             return PauseUpdate::StayPaused;
         }
 
         // Esc/Cancel resume the underlying scene.
         for a in actions {
             if matches!(a, UiAction::Pause | UiAction::Cancel) {
+                bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 self.paused = false;
                 return PauseUpdate::Resume;
             }
@@ -258,13 +274,21 @@ impl PauseMenu {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
         match action {
             Some(PauseAction::Resume) => {
+                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.paused = false;
                 PauseUpdate::Resume
             }
-            Some(PauseAction::Restart) => self.do_restart(run),
+            Some(PauseAction::Restart) => {
+                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                self.do_restart(run)
+            }
             Some(PauseAction::MeldGuide) => {
+                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 // Set the one-shot flag and close the pause menu so the
                 // owning scene can transition to the Meld Guide on the
                 // next frame. The scene drains the flag via
@@ -274,13 +298,18 @@ impl PauseMenu {
                 PauseUpdate::Resume
             }
             Some(PauseAction::Options) => {
+                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.options_overlay = Some(OptionsScene::new());
                 PauseUpdate::StayPaused
             }
             Some(PauseAction::MainMenu) => {
+                bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 PauseUpdate::Transition(Some(Scene::StartScreen(StartScreenScene::new())))
             }
-            Some(PauseAction::Exit) => PauseUpdate::Quit,
+            Some(PauseAction::Exit) => {
+                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                PauseUpdate::Quit
+            }
             None => PauseUpdate::StayPaused,
         }
     }

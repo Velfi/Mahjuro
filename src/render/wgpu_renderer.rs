@@ -234,6 +234,35 @@ pub struct RelicIcon {
     pub relic_id: crate::core::relic::RelicId,
 }
 
+/// Embedded UI sprite id for the generic 2D image-quad path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UiImageId {
+    ChickenHand,
+}
+
+impl UiImageId {
+    pub fn asset_path(self) -> &'static str {
+        match self {
+            Self::ChickenHand => "chicken_hand.png",
+        }
+    }
+
+    pub fn debug_name(self) -> &'static str {
+        match self {
+            Self::ChickenHand => "ui-image-chicken-hand",
+        }
+    }
+}
+
+/// A textured UI image drawn as a screen-space quad.
+#[derive(Clone, Copy, Debug)]
+pub struct UiImage {
+    /// Position in screen pixels: [x, y, w, h].
+    pub rect: [f32; 4],
+    /// Which embedded sprite to display.
+    pub image_id: UiImageId,
+}
+
 /// Horizontal alignment of text inside its rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextAlign {
@@ -555,6 +584,8 @@ pub struct WgpuRenderer {
     pack_textures: HashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.
     background_textures: HashMap<BackgroundId, BackgroundTextureGpu>,
+    /// Cached generic UI image textures, loaded synchronously at init.
+    ui_image_textures: HashMap<UiImageId, BackgroundTextureGpu>,
     /// Receives decoded background image data from the background loader thread.
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// Wall-clock start of the background load pipeline (spawn → last GPU upload).
@@ -1312,6 +1343,56 @@ fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
         .expect("failed to spawn bg-loader thread");
 
     rx
+}
+
+fn load_ui_image_textures(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    text_layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+) -> HashMap<UiImageId, BackgroundTextureGpu> {
+    let mut map = HashMap::new();
+    for image_id in [UiImageId::ChickenHand] {
+        let Some(file) = crate::asset_path::get(image_id.asset_path()) else {
+            log::warn!(
+                "ui image not found in embedded assets: {}",
+                image_id.asset_path()
+            );
+            continue;
+        };
+        let img = match image::load_from_memory(file.data.as_ref()) {
+            Ok(img) => img.into_rgba8(),
+            Err(err) => {
+                log::warn!("failed to decode ui image {}: {err}", image_id.asset_path());
+                continue;
+            }
+        };
+        let (w, h) = img.dimensions();
+        let (texture, view) =
+            upload_rgba_texture(device, queue, image_id.debug_name(), img.as_raw(), w, h);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(image_id.debug_name()),
+            layout: text_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        map.insert(
+            image_id,
+            BackgroundTextureGpu {
+                texture,
+                bind_group,
+            },
+        );
+    }
+    map
 }
 
 fn create_depth(
@@ -2779,6 +2860,8 @@ impl WgpuRenderer {
         let relic_rx = Some(spawn_relic_loader());
         let pack_textures_map =
             load_pack_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
+        let ui_image_textures =
+            load_ui_image_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
         // Kick off background image loading (non-blocking).
         let background_load_start = Some(Instant::now());
         let background_rx = Some(spawn_background_loader());
@@ -3156,6 +3239,7 @@ impl WgpuRenderer {
             relic_load_start,
             pack_textures: pack_textures_map,
             background_textures: HashMap::new(),
+            ui_image_textures,
             background_rx,
             background_load_start,
             fluid,
@@ -4669,59 +4753,6 @@ impl WgpuRenderer {
                     });
                 }
 
-                // Debuffed tiles need a much louder affordance than the
-                // tiny face decal stamp alone, especially once the hand is
-                // tilted back under perspective. Draw a crimson outline in
-                // screen space plus a small badge so the state reads at a
-                // glance without competing with the gold selection glow.
-                if let Some(htg) = self.hand_tiles.get(i) {
-                    if htg.tile_id.3 {
-                        let outline = (overlay_w.min(overlay_h) * 0.10).clamp(3.0, 8.0);
-                        let rim = [0.73, 0.13, 0.13, 0.92];
-                        tile_quads.push(GpuInstance {
-                            rect: [
-                                overlay_x - outline,
-                                overlay_y - outline,
-                                overlay_w + outline * 2.0,
-                                outline,
-                            ],
-                            color: rim,
-                        });
-                        tile_quads.push(GpuInstance {
-                            rect: [
-                                overlay_x - outline,
-                                overlay_y + overlay_h,
-                                overlay_w + outline * 2.0,
-                                outline,
-                            ],
-                            color: rim,
-                        });
-                        tile_quads.push(GpuInstance {
-                            rect: [overlay_x - outline, overlay_y, outline, overlay_h],
-                            color: rim,
-                        });
-                        tile_quads.push(GpuInstance {
-                            rect: [overlay_x + overlay_w, overlay_y, outline, overlay_h],
-                            color: rim,
-                        });
-
-                        let badge_w = (overlay_w * 0.34).clamp(18.0, 28.0);
-                        let badge_h = (overlay_h * 0.24).clamp(14.0, 22.0);
-                        let badge_x = overlay_x + overlay_w - badge_w - outline * 0.5;
-                        let badge_y = overlay_y - badge_h * 0.10;
-                        tile_quads.push(GpuInstance {
-                            rect: [badge_x, badge_y, badge_w, badge_h],
-                            color: [0.45, 0.05, 0.05, 0.94],
-                        });
-                        tile_labels.push(TextLabel {
-                            rect: [badge_x, badge_y - badge_h * 0.02, badge_w, badge_h],
-                            text: "X".to_string(),
-                            color: [1.0, 0.94, 0.84, 1.0],
-                            ..Default::default()
-                        });
-                    }
-                }
-
                 // Hint tiles get a vertical light beam (built below) but no
                 // border-style halo — the rectangular halo reads as a
                 // selection indicator and confused which tiles are actually
@@ -5052,9 +5083,9 @@ impl WgpuRenderer {
         // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
         // ── ordered op list, batching contiguous Quad runs into a single ──
         // ── instanced draw. ────────────────────────────────────────────────
-        struct RelicDraw {
+        struct ImageDraw {
             inst_buf: wgpu::Buffer,
-            relic_id: RelicId,
+            bind_group: wgpu::BindGroup,
         }
 
         enum RenderOp {
@@ -5081,6 +5112,7 @@ impl WgpuRenderer {
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
             RelicIconDraw(usize),
+            UiImageDraw(usize),
             HandTileBackdrop,
             HandTileFaces,
             FluidSmoke,
@@ -5103,7 +5135,7 @@ impl WgpuRenderer {
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
-        let mut relic_draws: Vec<RelicDraw> = Vec::new();
+        let mut image_draws: Vec<ImageDraw> = Vec::new();
         let mut candle_batches: Vec<&[CandlePlacement]> = Vec::new();
         let mut relic_batches: Vec<&[RelicPlacement]> = Vec::new();
         let mut pack_batches: Vec<&[PackPlacement]> = Vec::new();
@@ -5441,12 +5473,34 @@ impl WgpuRenderer {
                                     contents: bytemuck::cast_slice(&[inst]),
                                     usage: wgpu::BufferUsages::VERTEX,
                                 });
-                        let idx = relic_draws.len();
-                        relic_draws.push(RelicDraw {
+                        let idx = image_draws.len();
+                        image_draws.push(ImageDraw {
                             inst_buf,
-                            relic_id: icon.relic_id,
+                            bind_group: self.relic_textures[&icon.relic_id].bind_group.clone(),
                         });
                         ops.push(RenderOp::RelicIconDraw(idx));
+                    }
+                    i += 1;
+                }
+                DrawCmd::UiImage(image) => {
+                    if let Some(tex) = self.ui_image_textures.get(&image.image_id) {
+                        let inst = GpuInstance {
+                            rect: image.rect,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        };
+                        let inst_buf =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("ui-image-inst"),
+                                    contents: bytemuck::cast_slice(&[inst]),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                        let idx = image_draws.len();
+                        image_draws.push(ImageDraw {
+                            inst_buf,
+                            bind_group: tex.bind_group.clone(),
+                        });
+                        ops.push(RenderOp::UiImageDraw(idx));
                     }
                     i += 1;
                 }
@@ -6890,7 +6944,7 @@ impl WgpuRenderer {
             // Tilt the polished face toward the camera so the cast
             // four-spirit relief catches more candle light at hover.
             // Same Rx sign rationale as the bowl above.
-            let tilt = anim * 22.0_f32.to_radians();
+            let tilt = (m.rotation_x_deg + anim * 22.0).to_radians();
             let center = pixel_to_table_world(
                 w,
                 h,
@@ -6899,6 +6953,7 @@ impl WgpuRenderer {
                 m.world_pos[2] + m.extents[1] * 0.5 + lift,
             );
             let model = Mat4::from_translation(center)
+                * Mat4::from_rotation_z(m.rotation_z_deg.to_radians())
                 * Mat4::from_rotation_x(tilt)
                 * Mat4::from_scale(glam::Vec3::new(m.extents[0], m.extents[1], m.extents[2]));
             self.mirror_instances[slot_i].write_uniform(
@@ -9164,19 +9219,24 @@ impl WgpuRenderer {
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
                 RenderOp::RelicIconDraw(idx) => {
-                    let rd = &relic_draws[*idx];
-                    if let Some(rtex) = self.relic_textures.get(&rd.relic_id) {
-                        pass.set_pipeline(&self.image_pipeline);
-                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                        pass.set_bind_group(1, &rtex.bind_group, &[]);
-                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                        pass.set_vertex_buffer(1, rd.inst_buf.slice(..));
-                        pass.set_index_buffer(
-                            self.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint16,
-                        );
-                        pass.draw_indexed(0..6, 0, 0..1);
-                    }
+                    let image = &image_draws[*idx];
+                    pass.set_pipeline(&self.image_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &image.bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, image.inst_buf.slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
+                RenderOp::UiImageDraw(idx) => {
+                    let image = &image_draws[*idx];
+                    pass.set_pipeline(&self.image_pipeline);
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &image.bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, image.inst_buf.slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..6, 0, 0..1);
                 }
             }
         }; // end process_op closure

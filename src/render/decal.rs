@@ -235,12 +235,12 @@ pub fn rasterize_tile_face_decal(
 fn draw_debuff_marker(rgba: &mut [u8], width: u32, height: u32) {
     let w = width as i32;
     let h = height as i32;
-    let marker_half = ((width.min(height) as f32) * 0.20).round().max(13.0);
-    let cx = w - marker_half as i32 - ((width as f32) * 0.11).round() as i32;
-    let cy = marker_half as i32 + ((height as f32) * 0.12).round() as i32;
-    let slash_len = marker_half * 1.18;
-    let white_half = (marker_half * 0.30).max(3.5);
-    let red_half = (marker_half * 0.18).max(2.0);
+    let marker_half = ((width.min(height) as f32) * 0.28).round().max(18.0);
+    let cx = (width as f32 * 0.5).round() as i32;
+    let cy = (height as f32 * 0.48).round() as i32;
+    let slash_len = marker_half * 1.22;
+    let white_half = (marker_half * 0.24).max(4.0);
+    let red_half = (marker_half * 0.15).max(2.5);
 
     let blend = |rgba: &mut [u8], x: i32, y: i32, rgb: (u8, u8, u8), alpha: f32| {
         if x < 0 || y < 0 || x >= w || y >= h {
@@ -262,24 +262,35 @@ fn draw_debuff_marker(rgba: &mut [u8], width: u32, height: u32) {
         for x in (cx - outer as i32)..=(cx + outer as i32) {
             let dx = x - cx;
             let dy = y - cy;
-            let line_dist = (dy + dx).abs() as f32 / std::f32::consts::SQRT_2;
-            let along = (dy - dx).abs() as f32 / std::f32::consts::SQRT_2;
-            if along > slash_len {
-                continue;
-            }
+            let strokes = [
+                (
+                    (dy + dx).abs() as f32 / std::f32::consts::SQRT_2,
+                    (dy - dx).abs() as f32 / std::f32::consts::SQRT_2,
+                ),
+                (
+                    (dy - dx).abs() as f32 / std::f32::consts::SQRT_2,
+                    (dy + dx).abs() as f32 / std::f32::consts::SQRT_2,
+                ),
+            ];
 
-            // White underpaint keeps the decal legible over suit glyphs.
-            if line_dist <= white_half {
-                let edge = 1.0 - line_dist / (white_half + 0.01);
-                let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.35);
-                blend(rgba, x, y, (255, 248, 238), 0.28 + edge * taper * 0.72);
-            }
+            for (line_dist, along) in strokes {
+                if along > slash_len {
+                    continue;
+                }
 
-            // Red center stroke so the mark reads as red-on-white.
-            if line_dist <= red_half {
-                let edge = 1.0 - line_dist / (red_half + 0.01);
-                let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.15);
-                blend(rgba, x, y, (195, 26, 26), 0.42 + edge * taper * 0.58);
+                // White underpaint keeps the decal legible over suit glyphs.
+                if line_dist <= white_half {
+                    let edge = 1.0 - line_dist / (white_half + 0.01);
+                    let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.35);
+                    blend(rgba, x, y, (255, 248, 238), 0.24 + edge * taper * 0.76);
+                }
+
+                // Red center stroke so the mark reads as a bold X.
+                if line_dist <= red_half {
+                    let edge = 1.0 - line_dist / (red_half + 0.01);
+                    let taper = 1.0 - (along / (slash_len + 0.01)).powf(1.15);
+                    blend(rgba, x, y, (204, 24, 24), 0.40 + edge * taper * 0.60);
+                }
             }
         }
     }
@@ -620,7 +631,10 @@ pub fn rasterize_ofuda_decal(
     let Some(font) = ui_font else {
         return rgba;
     };
-    let pad_x = (w as f32 * 0.08) as u32;
+    // Keep the paper margins visibly present, but let the calligraphy occupy
+    // more of the sheet. The previous 8% inset left the body copy floating in
+    // an overly narrow center column on portrait boss ofuda.
+    let pad_x = (w as f32 * 0.05) as u32;
     let pad_y = (h as f32 * 0.06) as u32;
     let inner_w = w.saturating_sub(pad_x * 2).max(1);
     let inner_h = h.saturating_sub(pad_y * 2).max(1);
@@ -647,12 +661,12 @@ pub fn rasterize_ofuda_decal(
     // vertical room after the title and gap.
     let rule_h = inner_h.saturating_sub(title_h + gap_h).max(1);
     // Aim for ~3 lines of body copy at maximum (most boss rules wrap to 1–2),
-    // with a tall clamp ceiling so short rules render at full size and fill
-    // the paper face rather than floating as thin strokes after the bilinear
-    // stretch onto the ofuda mesh.
+    // but bias the width estimate a little wider than the raw glyph heuristic
+    // so the body text actually uses the broad paper face instead of collapsing
+    // into a skinny center column with oversized side gutters.
     let rule_px_target = (rule_h as f32 / 3.0).clamp(48.0, 140.0);
-    let approx_glyph_w = rule_px_target * 0.55;
-    let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(8);
+    let approx_glyph_w = rule_px_target * 0.45;
+    let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(10);
     let wrapped_rule = wrap_text(rule, chars_per_line);
     let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
     let rule_px = fit_multiline_font_px(

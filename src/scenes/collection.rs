@@ -5,12 +5,14 @@
 
 use std::time::Instant;
 
+use crate::audio::SfxId;
 use crate::core::boss::{ALL_BOSSES, FINAL_BOSSES};
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::rules::RuleModifier;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
+use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{CameraParams, TalismanPlacement, UiFrame, ZodiacRibbonPlacement};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::TextAlign;
@@ -191,6 +193,9 @@ impl SceneBehavior for CollectionScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
 
         // Keyboard tab cycling stays separate from the flat-tree's linear nav
         // (which would otherwise fight with page-flip arrows).
@@ -213,6 +218,7 @@ impl SceneBehavior for CollectionScene {
                     self.page = self.page.saturating_sub(1);
                 }
                 UiAction::Cancel | UiAction::Pause | UiAction::CommitDiscard => {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                     return Some(Scene::StartScreen(StartScreenScene::new()));
                 }
                 _ => {}
@@ -221,16 +227,20 @@ impl SceneBehavior for CollectionScene {
 
         match action {
             Some(CollectionAction::SelectTab(t)) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.tab = t;
                 self.page = 0;
             }
             Some(CollectionAction::PrevPage) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.page = self.page.saturating_sub(1);
             }
             Some(CollectionAction::NextPage) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.page = self.page.saturating_add(1);
             }
             Some(CollectionAction::Back) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 return Some(Scene::StartScreen(StartScreenScene::new()));
             }
             None => {}

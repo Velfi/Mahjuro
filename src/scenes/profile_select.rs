@@ -1,5 +1,7 @@
 //! Profile selection screen — pick one of three profile slots.
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
@@ -124,9 +126,13 @@ impl SceneBehavior for ProfileSelectScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
 
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 return Some(Scene::StartScreen(StartScreenScene::new()));
             }
             if matches!(a, UiAction::Delete) {
@@ -139,6 +145,7 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         if let Some(PickProfile(idx)) = action {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.switch_profile = Some(idx);
             return Some(Scene::StartScreen(StartScreenScene::new()));
         }

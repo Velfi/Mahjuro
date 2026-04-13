@@ -3,6 +3,8 @@
 //! Shown once at the very start of the tutorial (before Lesson 1) to teach
 //! new players how to read tiles: number suits, honor tiles, and matching.
 
+use crate::audio::SfxId;
+use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -19,6 +21,7 @@ pub struct TileLiteracyScene {
 }
 
 impl TileLiteracyScene {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             tree: TreeState::new(),
@@ -45,7 +48,11 @@ impl SceneBehavior for TileLiteracyScene {
                 scroll_lines: 0.0,
             },
         );
+        if self.tree.take_focus_changed() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
         if action.is_some() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             return Some(Scene::Gameplay(GameplayScene::new()));
         }
         None

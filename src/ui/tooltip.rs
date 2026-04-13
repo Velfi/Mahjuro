@@ -357,22 +357,39 @@ fn build_tooltip(
     let tooltip_w = (280.0 * scale).max(160.0);
     let line_h = (22.0 * scale).max(14.0);
     let content_w = tooltip_w - padding * 2.0;
+    let margin = 4.0;
+    let gap = 6.0;
 
     let font_px = (line_h * 0.55).max(8.0);
     let lines = wrap_text(font, description, font_px, content_w);
 
     let tooltip_h = padding * 2.0 + line_h + padding * 0.5 + lines.len() as f32 * line_h;
 
-    // Position to the right of the anchor, vertically aligned.
-    let mut tx = anchor[0] + anchor[2] + 4.0;
-    let mut ty = anchor[1];
+    let anchor_center_x = anchor[0] + anchor[2] * 0.5;
+    let centered_x =
+        (anchor_center_x - tooltip_w * 0.5).clamp(margin, (win_w - tooltip_w - margin).max(margin));
 
-    if tx + tooltip_w > win_w {
-        tx = (anchor[0] - tooltip_w - 4.0).max(4.0);
-    }
-    if ty + tooltip_h > win_h {
-        ty = (win_h - tooltip_h - 4.0).max(4.0);
-    }
+    // Prefer a "popover" feel: above the hovered term first, then below,
+    // then fall back to the old side placement when vertical space is tight.
+    let fits_above = anchor[1] >= tooltip_h + gap + margin;
+    let fits_below = anchor[1] + anchor[3] + gap + tooltip_h <= win_h - margin;
+    let fits_right = anchor[0] + anchor[2] + gap + tooltip_w <= win_w - margin;
+
+    let (tx, ty) = if fits_above {
+        (centered_x, anchor[1] - tooltip_h - gap)
+    } else if fits_below {
+        (centered_x, anchor[1] + anchor[3] + gap)
+    } else if fits_right {
+        (
+            anchor[0] + anchor[2] + gap,
+            anchor[1].clamp(margin, (win_h - tooltip_h - margin).max(margin)),
+        )
+    } else {
+        (
+            (anchor[0] - tooltip_w - gap).max(margin),
+            anchor[1].clamp(margin, (win_h - tooltip_h - margin).max(margin)),
+        )
+    };
 
     let rect = [tx, ty, tooltip_w, tooltip_h];
 
@@ -415,7 +432,7 @@ fn draw_tooltip_into(entry: &TooltipEntry, frame: &mut UiFrame) {
     // Background — Midnight Gold deep panel.
     frame.quad(GpuInstance {
         rect: [tx, ty, tw, th],
-        color: themec::alpha(themec::MIDNIGHT, 0.96),
+        color: themec::MIDNIGHT,
     });
 
     // Gold border.

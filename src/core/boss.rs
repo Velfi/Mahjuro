@@ -728,8 +728,8 @@ pub static ALL_BOSSES: &[BossDef] = &[
     },
     BossDef {
         kind: BossKind::Relic,
-        name: "The Shrine",
-        description: "Honors are debuffed",
+        name: "The Iconoclast",
+        description: "Honor tiles score for less",
         tier: BossTier::Medium,
         min_ante: 3,
         effect: BossEffect {
