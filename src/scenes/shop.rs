@@ -17,7 +17,6 @@ use rand::seq::SliceRandom;
 
 use std::time::Instant;
 
-use crate::audio::SfxId;
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
     Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price,
@@ -37,9 +36,7 @@ use crate::render::draw_cmd::{
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
-use crate::render::wgpu_renderer::{
-    GpuInstance, PointLight, ShopHit, TextAlign, TextLabel, UiImage, UiImageId,
-};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, PanelVariant, TextStyle};
@@ -47,8 +44,7 @@ use crate::ui::widget::{self, PanelVariant, TextStyle};
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
 use super::{
-    BackgroundId, ButtonDef, ChickenMascotState, DrawCtx, Scene, SceneBehavior, SceneTransition,
-    UpdateCtx, chicken_mascot_rect, push_chicken_mascot_bubble,
+    BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -759,7 +755,6 @@ pub struct ShopScene {
     /// drained from the run state (e.g. Bonfire on relic sell, RitualBlade
     /// on destroy). Drives glow + wiggle on owned relics in the shop.
     relic_glow_starts: std::collections::HashMap<RelicId, Instant>,
-    mascot: ChickenMascotState,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -775,8 +770,6 @@ const SHOP_REROLL_ID: u32 = 0x9400;
 const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
 /// Floating sell button for hovered owned consumables.
 const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
-/// Click id for the shop mascot.
-const SHOP_MASCOT_ID: u32 = 0x9700;
 /// Base gold cost for the first shop reroll.
 const REROLL_BASE_COST: u32 = 5;
 /// How long a relic glow + wiggle lasts after activation.
@@ -795,12 +788,6 @@ const PICK_COIN_DISH: u32 = 2;
 const PICK_JOURNAL_BOOK: u32 = 3;
 /// Pick id for the for-sale tile pack on the shop shelf.
 const PICK_TILE_PACK: u32 = 4;
-
-const SHOP_MASCOT_LINES: &[&str] = &[
-    "Spend with purpose. Gold is a resource, not a lifestyle.",
-    "If you cannot afford everything, congratulations: the shop is working.",
-    "Hover first, peck second. That's how we avoid buying emotional support junk.",
-];
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
@@ -1012,7 +999,6 @@ impl ShopScene {
             last_frame: Instant::now(),
             age_secs: 0.0,
             relic_glow_starts: std::collections::HashMap::new(),
-            mascot: ChickenMascotState::default(),
         }
     }
 
@@ -1629,13 +1615,6 @@ impl SceneBehavior for ShopScene {
         }
         self.relic_glow_starts
             .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
-
-        if ctx.button_clicks.contains(&SHOP_MASCOT_ID) {
-            self.mascot.advance(SHOP_MASCOT_LINES);
-            ctx.bus
-                .push(crate::game::event_bus::GameEvent::UiSound(SfxId::TilePlace));
-            return None;
-        }
 
         // Help action opens the Meld Guide scene.
         for &cid in ctx.button_clicks {
@@ -3210,7 +3189,6 @@ impl SceneBehavior for ShopScene {
 
         // ── Reroll + Next Round buttons (always-visible, 2D) ──────────
         let scale = metrics::scene_scale(w, h, ui_scale);
-        let mascot_rect = chicken_mascot_rect(w, h, ui_scale);
         let btn_w = (180.0 * scale).max(120.0);
         let btn_h = (44.0 * scale).max(28.0);
         let btn_gap = 12.0 * scale;
@@ -3346,19 +3324,6 @@ impl SceneBehavior for ShopScene {
         // The `?` glossary badge has been removed — the glossary is
         // reachable from the pause menu's "Glossary" entry. The keyboard
         // `Help` action shortcut still works for power users.
-        push_chicken_mascot_bubble(
-            &mut quads,
-            &mut texts,
-            &mut buttons,
-            &self.mascot,
-            SHOP_MASCOT_LINES,
-            SHOP_MASCOT_ID,
-            mascot_rect,
-            w,
-            h,
-            ui_scale,
-        );
-
         // ── Catch-all 3D-hit dispatcher ───────────────────────────────
         // Full-screen button registered LAST so it only wins if no other
         // (smaller) button matched the cursor first.
@@ -3397,10 +3362,6 @@ impl SceneBehavior for ShopScene {
         // Push 2D layers onto the frame after all 3D content.
         frame.quads(quads);
         frame.texts(texts);
-        frame.ui_image(UiImage {
-            rect: mascot_rect,
-            image_id: UiImageId::ChickenHand,
-        });
 
         // ── Zodiac ribbon close-up celebration overlay ──────────────
         if let Some(ref celeb) = self.zodiac_celebration {

@@ -234,35 +234,6 @@ pub struct RelicIcon {
     pub relic_id: crate::core::relic::RelicId,
 }
 
-/// Embedded UI sprite id for the generic 2D image-quad path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UiImageId {
-    ChickenHand,
-}
-
-impl UiImageId {
-    pub fn asset_path(self) -> &'static str {
-        match self {
-            Self::ChickenHand => "chicken_hand.png",
-        }
-    }
-
-    pub fn debug_name(self) -> &'static str {
-        match self {
-            Self::ChickenHand => "ui-image-chicken-hand",
-        }
-    }
-}
-
-/// A textured UI image drawn as a screen-space quad.
-#[derive(Clone, Copy, Debug)]
-pub struct UiImage {
-    /// Position in screen pixels: [x, y, w, h].
-    pub rect: [f32; 4],
-    /// Which embedded sprite to display.
-    pub image_id: UiImageId,
-}
-
 /// Horizontal alignment of text inside its rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextAlign {
@@ -584,8 +555,6 @@ pub struct WgpuRenderer {
     pack_textures: HashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.
     background_textures: HashMap<BackgroundId, BackgroundTextureGpu>,
-    /// Cached generic UI image textures, loaded synchronously at init.
-    ui_image_textures: HashMap<UiImageId, BackgroundTextureGpu>,
     /// Receives decoded background image data from the background loader thread.
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// Wall-clock start of the background load pipeline (spawn → last GPU upload).
@@ -1343,56 +1312,6 @@ fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
         .expect("failed to spawn bg-loader thread");
 
     rx
-}
-
-fn load_ui_image_textures(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    text_layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
-) -> HashMap<UiImageId, BackgroundTextureGpu> {
-    let mut map = HashMap::new();
-    for image_id in [UiImageId::ChickenHand] {
-        let Some(file) = crate::asset_path::get(image_id.asset_path()) else {
-            log::warn!(
-                "ui image not found in embedded assets: {}",
-                image_id.asset_path()
-            );
-            continue;
-        };
-        let img = match image::load_from_memory(file.data.as_ref()) {
-            Ok(img) => img.into_rgba8(),
-            Err(err) => {
-                log::warn!("failed to decode ui image {}: {err}", image_id.asset_path());
-                continue;
-            }
-        };
-        let (w, h) = img.dimensions();
-        let (texture, view) =
-            upload_rgba_texture(device, queue, image_id.debug_name(), img.as_raw(), w, h);
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(image_id.debug_name()),
-            layout: text_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        });
-        map.insert(
-            image_id,
-            BackgroundTextureGpu {
-                texture,
-                bind_group,
-            },
-        );
-    }
-    map
 }
 
 fn create_depth(
@@ -2860,8 +2779,6 @@ impl WgpuRenderer {
         let relic_rx = Some(spawn_relic_loader());
         let pack_textures_map =
             load_pack_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
-        let ui_image_textures =
-            load_ui_image_textures(&device, &queue, &text_bind_group_layout, &tile_sampler);
         // Kick off background image loading (non-blocking).
         let background_load_start = Some(Instant::now());
         let background_rx = Some(spawn_background_loader());
@@ -3239,7 +3156,6 @@ impl WgpuRenderer {
             relic_load_start,
             pack_textures: pack_textures_map,
             background_textures: HashMap::new(),
-            ui_image_textures,
             background_rx,
             background_load_start,
             fluid,
@@ -5112,7 +5028,6 @@ impl WgpuRenderer {
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
             RelicIconDraw(usize),
-            UiImageDraw(usize),
             HandTileBackdrop,
             HandTileFaces,
             FluidSmoke,
@@ -5479,28 +5394,6 @@ impl WgpuRenderer {
                             bind_group: self.relic_textures[&icon.relic_id].bind_group.clone(),
                         });
                         ops.push(RenderOp::RelicIconDraw(idx));
-                    }
-                    i += 1;
-                }
-                DrawCmd::UiImage(image) => {
-                    if let Some(tex) = self.ui_image_textures.get(&image.image_id) {
-                        let inst = GpuInstance {
-                            rect: image.rect,
-                            color: [1.0, 1.0, 1.0, 1.0],
-                        };
-                        let inst_buf =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("ui-image-inst"),
-                                    contents: bytemuck::cast_slice(&[inst]),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
-                        let idx = image_draws.len();
-                        image_draws.push(ImageDraw {
-                            inst_buf,
-                            bind_group: tex.bind_group.clone(),
-                        });
-                        ops.push(RenderOp::UiImageDraw(idx));
                     }
                     i += 1;
                 }
@@ -9219,16 +9112,6 @@ impl WgpuRenderer {
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
                 RenderOp::RelicIconDraw(idx) => {
-                    let image = &image_draws[*idx];
-                    pass.set_pipeline(&self.image_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &image.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, image.inst_buf.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
-                }
-                RenderOp::UiImageDraw(idx) => {
                     let image = &image_draws[*idx];
                     pass.set_pipeline(&self.image_pipeline);
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
