@@ -154,6 +154,7 @@ pub struct FluidSim {
     divergence_pipeline: wgpu::ComputePipeline,
     jacobi_pipeline: wgpu::ComputePipeline,
     project_pipeline: wgpu::ComputePipeline,
+    vorticity_pipeline: wgpu::ComputePipeline,
     /// Per-voxel pre-lighting bake. Reads the post-project `vd[0]` and
     /// writes pre-lit colour into `lit_density`.
     lightbake_pipeline: wgpu::ComputePipeline,
@@ -174,6 +175,8 @@ pub struct FluidSim {
     jacobi_bgs: [wgpu::BindGroup; 2],
     /// project_bg: read vd[0]+pressure[0], write vd[1]
     project_bg: wgpu::BindGroup,
+    /// vorticity_bg: read projected vd[1], write confined vd[0]
+    vorticity_bg: wgpu::BindGroup,
 
     // Volume render pipeline. Renders into an offscreen Rgba16Float target
     // (NOT the swap chain) using REPLACE blending — the offscreen target is
@@ -377,6 +380,13 @@ impl FluidSim {
                 "/shaders/fluid3_project.wgsl"
             )),
         );
+        let vorticity_shader = make_shader(
+            "fluid3-vorticity",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_vorticity.wgsl"
+            )),
+        );
         let volume_shader = make_shader(
             "fluid3-volume",
             include_str!(concat!(
@@ -438,6 +448,14 @@ impl FluidSim {
                 bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
             ],
         });
+        let vorticity_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-vorticity-bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_tex3d_float(1),
+                bgl_storage3d(2, wgpu::TextureFormat::Rgba16Float),
+            ],
+        });
         // Lightbake reads vd[0] (filterable so it can also be sampled by
         // the raymarch elsewhere — for the bake we use textureLoad which
         // doesn't care about filterability), writes lit_density as a
@@ -478,6 +496,8 @@ impl FluidSim {
             make_compute("fluid3-div-pl", &divergence_shader, &divergence_layout);
         let jacobi_pipeline = make_compute("fluid3-jacobi-pl", &jacobi_shader, &jacobi_layout);
         let project_pipeline = make_compute("fluid3-project-pl", &project_shader, &project_layout);
+        let vorticity_pipeline =
+            make_compute("fluid3-vorticity-pl", &vorticity_shader, &vorticity_layout);
         let lightbake_pipeline =
             make_compute("fluid3-lightbake-pl", &lightbake_shader, &lightbake_layout);
 
@@ -544,6 +564,15 @@ impl FluidSim {
                 bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
                 bge(2, wgpu::BindingResource::TextureView(&pressure_view[0])),
                 bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
+            ],
+        });
+        let vorticity_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fluid3-vorticity-bg"),
+            layout: &vorticity_layout,
+            entries: &[
+                bge(0, fluid_uniforms_buf.as_entire_binding()),
+                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
+                bge(2, wgpu::BindingResource::TextureView(&vd_view[0])),
             ],
         });
 
@@ -781,6 +810,7 @@ impl FluidSim {
             divergence_pipeline,
             jacobi_pipeline,
             project_pipeline,
+            vorticity_pipeline,
             lightbake_pipeline,
             lightbake_layout,
             lightbake_bg: None,
@@ -789,6 +819,7 @@ impl FluidSim {
             divergence_bg,
             jacobi_bgs,
             project_bg,
+            vorticity_bg,
             render_pipeline,
             render_layout,
             render_bg: None,
@@ -1027,7 +1058,6 @@ impl FluidSim {
                 params: [dt_clamped, density_dis_step, vel_dis_step, buoyancy],
             }),
         );
-
         // ── Pack impulses ──────────────────────────────────────────────
         let mut injection = InjectionParamsGpu {
             points: [InjectionPointGpu {
@@ -1115,26 +1145,19 @@ impl FluidSim {
             p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
 
-        // 6. Copy vd[1] → vd[0] so the next frame's inject reads the latest state.
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.vd[1],
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.vd[0],
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                width: GRID_X,
-                height: GRID_Y,
-                depth_or_array_layers: GRID_Z,
-            },
-        );
+        // 6. Vorticity confinement. Reads the divergence-free projected field
+        // from vd[1] and writes a curl-boosted result into vd[0]. This gives
+        // the coarse grid livelier rolling turbulence without relying on an
+        // unstable inverse-advection estimate.
+        {
+            let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("fluid3-vorticity"),
+                timestamp_writes: None,
+            });
+            p.set_pipeline(&self.vorticity_pipeline);
+            p.set_bind_group(0, &self.vorticity_bg, &[]);
+            p.dispatch_workgroups(wg_x, wg_y, wg_z);
+        }
 
         // 7. Lightbake: walk every voxel of the freshly-projected vd[0],
         // evaluate every candle point light at the voxel center, and
