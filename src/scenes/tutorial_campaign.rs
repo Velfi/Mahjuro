@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio::SfxId;
 use crate::core::relic::RelicId;
+use crate::core::relic::relic_visual;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
@@ -11,12 +12,13 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::game::onboarding::OnboardingPhase;
 use crate::render::draw_cmd::{
-    CameraParams, DrawCmd, MirrorPlacement, PackPlacement, ShowcaseTilePlacement,
+    CameraParams, DrawCmd, MirrorPlacement, PackPlacement, RelicShowcasePlacement,
+    ShowcaseTilePlacement,
     TalismanPlacement, UiFrame, WoodTabletPlacement, ZodiacRibbonPlacement,
 };
-use crate::render::table_space::TableAnchorPx;
+use crate::render::world_space::LayoutAnchorPx;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -780,11 +782,15 @@ impl TutorialCampaignScene {
                     placements.push(ShowcaseTilePlacement {
                         tile,
                         center_pos: [x, row_y, 0.0],
-                        rotation: [0.0, 0.0, 0.0],
+                        rotation: [0.0, 0.0, std::f32::consts::PI],
                         scale: 1.0,
                         size_px: tile_size,
                         brightness: 1.08,
                         selected: false,
+                        hovered: false,
+                        outline: false,
+                        glow: false,
+                        pick_id: None,
                     });
                     next_id += 1;
                     x += step;
@@ -892,7 +898,7 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut bg_quads = Vec::new();
         let mut fg_quads = Vec::new();
         let mut texts = Vec::new();
-        let mut relic_icons = Vec::new();
+        let mut relic_showcases = Vec::new();
         let mut ribbon_placements = Vec::new();
         let mut talisman_placements = Vec::new();
         let mut pack_placements = Vec::new();
@@ -905,9 +911,9 @@ impl SceneBehavior for TutorialCampaignScene {
         frame.golden_dust();
         let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
-            eye: [0.0, 1960.0 * cam_scale, 220.0 * cam_scale],
-            target: [0.0, 0.0, 40.0 * cam_scale],
-            up: [0.0, 1.0, 0.0],
+            eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
+            target: [0.0, -40.0 * cam_scale, 0.0],
+            up: [0.0, 0.0, 1.0],
             fovy_deg: 45.0,
         });
 
@@ -1010,14 +1016,19 @@ impl SceneBehavior for TutorialCampaignScene {
             let center_x =
                 |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
             let relic_size = 42.0 * scale;
-            relic_icons.push(RelicIcon {
-                rect: [
-                    center_x(0) - relic_size * 0.5,
-                    item_y + 2.0 * scale,
-                    relic_size,
-                    relic_size,
-                ],
-                relic_id: RelicId::MerchantsEye,
+            let relic_id = RelicId::MerchantsEye;
+            let visual = relic_visual(relic_id);
+            let face = relic_size * 0.82;
+            let thick = relic_size * 0.28 * visual.thickness_scale;
+            relic_showcases.push(RelicShowcasePlacement {
+                center_pos: [center_x(0), item_y + relic_size * 0.55, relic_size * 0.35],
+                extents: [face, face, thick],
+                rotation_y_deg: 30.0,
+                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
+                rotation_z_deg: 0.0,
+                color: crate::render::theme::color::rarity(0),
+                relic_id,
+                glow: 0.0,
             });
             ribbon_placements.push(Self::shop_preview_ribbon(center_x(1), item_y, h, scale));
             talisman_placements.push(Self::shop_preview_talisman(center_x(2), item_y, h, scale));
@@ -1027,14 +1038,19 @@ impl SceneBehavior for TutorialCampaignScene {
             let center_x =
                 |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
             let relic_size = 48.0 * scale;
-            relic_icons.push(RelicIcon {
-                rect: [
-                    center_x(0) - relic_size * 0.5,
-                    item_y,
-                    relic_size,
-                    relic_size,
-                ],
-                relic_id: RelicId::MerchantsEye,
+            let relic_id = RelicId::MerchantsEye;
+            let visual = relic_visual(relic_id);
+            let face = relic_size * 0.88;
+            let thick = relic_size * 0.30 * visual.thickness_scale;
+            relic_showcases.push(RelicShowcasePlacement {
+                center_pos: [center_x(0), item_y + relic_size * 0.5, relic_size * 0.38],
+                extents: [face, face, thick],
+                rotation_y_deg: 24.0,
+                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
+                rotation_z_deg: 0.0,
+                color: crate::render::theme::color::rarity(0),
+                relic_id,
+                glow: 0.0,
             });
         }
 
@@ -1068,10 +1084,10 @@ impl SceneBehavior for TutorialCampaignScene {
                 .max(layout.play_rect[3] * 1.8)
                 .max(72.0 * scale);
             mirror_placement = Some(MirrorPlacement {
-                world_pos: TableAnchorPx {
+                world_pos: LayoutAnchorPx {
                     px: play_center_x,
                     py: play_center_y + try_it_world_z_py_nudge,
-                    lift_y: try_it_lift,
+                    lift_z: try_it_lift,
                 }
                 .to_draw_cmd_triple(),
                 extents: [mirror_diam, mirror_diam, mirror_diam],
@@ -1080,10 +1096,10 @@ impl SceneBehavior for TutorialCampaignScene {
                 rotation_z_deg: (wobble_t * 2.4).sin() * 7.5,
             });
             wood_tablet_placements.push(WoodTabletPlacement {
-                world_pos: TableAnchorPx {
+                world_pos: LayoutAnchorPx {
                     px: trigger_center_x,
                     py: trigger_center_y + try_it_world_z_py_nudge,
-                    lift_y: try_it_lift,
+                    lift_z: try_it_lift,
                 }
                 .to_draw_cmd_triple(),
                 extents: [
@@ -1305,7 +1321,9 @@ impl SceneBehavior for TutorialCampaignScene {
         if !showcase_tiles.is_empty() {
             frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles));
         }
-        frame.relic_icons(relic_icons);
+        if !relic_showcases.is_empty() {
+            frame.relic_showcase_batch(relic_showcases);
+        }
         if !ribbon_placements.is_empty() {
             frame.zodiac_batch(ribbon_placements);
         }

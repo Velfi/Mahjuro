@@ -30,10 +30,10 @@ use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame};
-use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
+use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
-use scenes::shop::ShopScene;
+use scenes::shop::{ShopScene, SHOP_DRAG_DROP_ID};
 use scenes::splash::SplashScene;
 use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::tutorial_summary::TutorialSummaryScene;
@@ -69,6 +69,44 @@ struct RenderSettings {
     ui_scale: f32,
 }
 
+/// State for the arrange-mode debug feature. Activated via Debug > Arrange
+/// Mode. The user clicks an object to select it, then uses WASD to nudge
+/// position (forward/back/left/right), Q/E to nudge up/down, Shift+WASD/QE
+/// to rotate in those axes. Enter confirms and copies the result to clipboard;
+/// R resets the selected placement to its compiled-in default; Escape cancels.
+struct ArrangeModeState {
+    /// Name of the selected object or group. Either a click-pickable name
+    /// (e.g. "Counter") or a hierarchy node name (e.g. "shop.for_sale").
+    /// Group names apply their delta to every descendant leaf on save.
+    object_name: String,
+    /// Accumulated nudge in layout pixels along X (right = positive).
+    /// Because world_x = pixel_x − w/2, a pixel delta maps 1:1 to world X.
+    delta_px: f32,
+    /// Accumulated nudge in layout pixels along Y (down = positive in pixel
+    /// space, i.e. toward the player). world_y = h/2 − pixel_y so a positive
+    /// delta_py moves the object toward the player (−world_y).
+    delta_py: f32,
+    /// Accumulated nudge in world Z (lift above the felt).
+    delta_lift: f32,
+    /// Accumulated rotation delta around Z, degrees (Shift+A/D).
+    delta_rz_deg: f32,
+    /// Accumulated rotation delta around X, degrees (Shift+W/S).
+    delta_rx_deg: f32,
+    /// Accumulated rotation delta around Y, degrees (Shift+Q/E).
+    delta_ry_deg: f32,
+    /// World-space translation of the placement at the moment it was
+    /// selected — used by click-to-move so each click computes a fresh
+    /// world delta from the object's original position (so repeated clicks
+    /// don't accumulate).
+    selected_world_origin: glam::Vec3,
+    /// Translation step in layout pixels per key press. Toggled by pressing
+    /// 1/2/3/4 (1 / 5 / 25 / 100 px) while an object is selected.
+    trans_step_px: f32,
+    /// Rotation step in degrees per key press. Toggled by pressing 1/2/3/4
+    /// (1° / 15° / 45° / 90°) while an object is selected.
+    rot_step_deg: f32,
+}
+
 /// Debug-only state: overlays, visibility toggles, FPS counter, and the
 /// one-shot object-hit-test picker.
 struct DebugState {
@@ -87,6 +125,14 @@ struct DebugState {
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     object_hit_test_armed: bool,
+    /// Arrange-mode state. `Some` while arrange mode is active (waiting for
+    /// a click to select an object, or actively editing one). `None` when
+    /// arrange mode is off.
+    ///
+    /// - `None` outer                 → mode is off
+    /// - `Some(None)` inner           → mode on, waiting for click to select
+    /// - `Some(Some(state))` inner    → object selected, editing in progress
+    arrange_mode: Option<Option<ArrangeModeState>>,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     last_effective_camera: CameraParams,
@@ -108,6 +154,7 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             object_hit_test_armed: false,
+            arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }
@@ -248,6 +295,8 @@ struct BotGraphSnapshot {
     avg_blinds: f64,
     avg_antes: f64,
     avg_total_score_m: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    avg_surplus_per_blind: Option<f64>,
     avg_plays: f64,
     avg_discards: f64,
     avg_skips: f64,
@@ -266,6 +315,201 @@ struct BotGraphSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     avg_final_gold: Option<f64>,
     deaths_by_ante: std::collections::BTreeMap<u32, u32>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    overscore_by_slot: std::collections::BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    cleared_by_slot: std::collections::BTreeMap<String, u64>,
+}
+
+
+/// Apply arrange-mode deltas to the matching field in the scene's positions struct
+/// and save the result to JSON.
+///
+/// `delta_px` / `delta_py` are in layout pixel space (not normalised yet).
+/// `window_w` / `window_h` are the current surface dimensions used to compute `nx`/`ny`.
+fn apply_arrange_to_layout(
+    name: &str,
+    delta_px: f32,
+    delta_py: f32,
+    delta_lift: f32,
+    delta_rz_deg: f32,
+    delta_rx_deg: f32,
+    delta_ry_deg: f32,
+    window_w: f32,
+    window_h: f32,
+    scene: &mut crate::Scene,
+) {
+    use crate::ui::placement::apply_arrange;
+    use crate::ui::scene_layout::{save_gameplay_positions, save_shop_positions};
+
+    // Every placement now uses the same responsive coordinate system:
+    // nx/ny are window fractions, lift_mm is physical mm, rotations are deg.
+    // Pixel deltas from the keyboard simply normalize by window size.
+    let dnx = delta_px / window_w;
+    let dny = delta_py / window_h;
+    // `delta_lift` is in layout pixels (Q/E step size = screen px), which
+    // the live preview applies as raw world units. Convert to `lift_mm` so
+    // that at the *current* window, `layout.mm(d_lift_mm)` reproduces
+    // `delta_lift` world units on the next frame.
+    // `layout.mm(n) = (w * HAND_SLOT_W_RATIO / TILE_WIDTH_MM) * n`, so the
+    // correct inverse uses the live `window_w` (not a canonical constant —
+    // otherwise lift scales with window width on commit and the object
+    // "applies the delta twice" at non-canonical widths).
+    let d_lift_mm = delta_lift * crate::ui::scene_layout::HFRAC_TO_MM / window_w;
+
+    let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
+        crate::Scene::Gameplay(gp) => {
+            let p = &mut gp.positions;
+            let ok = apply_arrange(
+                p, name, dnx, dny, d_lift_mm,
+                delta_rx_deg, delta_ry_deg, delta_rz_deg,
+            );
+            (ok, ok.then(|| save_gameplay_positions(p)))
+        }
+        crate::Scene::Shop(shop) => {
+            let p = &mut shop.positions;
+            let ok = apply_arrange(
+                p, name, dnx, dny, d_lift_mm,
+                delta_rx_deg, delta_ry_deg, delta_rz_deg,
+            );
+            (ok, ok.then(|| save_shop_positions(p)))
+        }
+        _ => (false, None),
+    };
+
+    if matched {
+        if let Some(Err(e)) = save_result {
+            log::error!("[Arrange] Failed to save layout: {e}");
+        } else {
+            log::info!("[Arrange] Saved layout (object: {name})");
+        }
+    } else {
+        log::info!("[Arrange] '{name}' has no layout field mapping — clipboard only");
+    }
+}
+
+/// Read-only lookup of the placement registered under `name` in whichever
+/// scene is active. Returns `None` for group names, unknown names, or scenes
+/// that don't implement [`ArrangeTarget`] (start / pick-blind / end).
+fn sample_arrange_placement(
+    name: &str,
+    scene: &crate::Scene,
+) -> Option<crate::ui::placement::Placement> {
+    use crate::ui::placement::ArrangeTarget;
+    match scene {
+        crate::Scene::Gameplay(gp) => gp.positions.placement(name).copied(),
+        crate::Scene::Shop(shop) => shop.positions.placement(name).copied(),
+        _ => None,
+    }
+}
+
+/// Reset the placement(s) under `name` to their compiled-in defaults and
+/// persist the scene's positions struct to disk. Works for leaves and groups.
+fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
+    use crate::ui::placement::reset_arrange;
+    use crate::ui::scene_layout::{save_gameplay_positions, save_shop_positions};
+
+    let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
+        crate::Scene::Gameplay(gp) => {
+            let p = &mut gp.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_gameplay_positions(p)))
+        }
+        crate::Scene::Shop(shop) => {
+            let p = &mut shop.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_shop_positions(p)))
+        }
+        _ => (false, None),
+    };
+
+    if matched {
+        if let Some(Err(e)) = save_result {
+            log::error!("[Arrange] Failed to save layout after reset: {e}");
+        } else {
+            log::info!("[Arrange] Reset '{name}' to default");
+        }
+    } else {
+        log::info!("[Arrange] '{name}' has no layout field mapping — cannot reset");
+    }
+}
+
+/// Build a map of `arrange_name` → `[rx_deg, ry_deg, rz_deg]` for every leaf
+/// placement in the active scene. The renderer consumes this each frame so
+/// rotation committed into a Placement by arrange mode is applied uniformly
+/// to all arrange-tagged draws — no per-site wiring needed.
+fn collect_committed_rotations(
+    scene: &crate::Scene,
+) -> std::collections::HashMap<String, [f32; 3]> {
+    use crate::ui::placement::{all_leaf_names, ArrangeTarget};
+    let mut out = std::collections::HashMap::new();
+    let (hierarchy, lookup): (
+        &'static [crate::ui::placement::Node],
+        Box<dyn Fn(&str) -> Option<crate::ui::placement::Placement>>,
+    ) = match scene {
+        crate::Scene::Gameplay(gp) => (
+            gp.positions.hierarchy(),
+            Box::new(move |n| gp.positions.placement(n).copied()),
+        ),
+        crate::Scene::Shop(shop) => (
+            shop.positions.hierarchy(),
+            Box::new(move |n| shop.positions.placement(n).copied()),
+        ),
+        _ => return out,
+    };
+    for name in all_leaf_names(hierarchy) {
+        if let Some(p) = lookup(name) {
+            if p.rx_deg != 0.0 || p.ry_deg != 0.0 || p.rz_deg != 0.0 {
+                out.insert(name.to_string(), [p.rx_deg, p.ry_deg, p.rz_deg]);
+            }
+        }
+    }
+    out
+}
+
+/// One entry in the flattened arrange-mode hierarchy list (one per Node).
+struct HierarchyEntry {
+    name: &'static str,
+    label: &'static str,
+    depth: usize,
+    is_group: bool,
+}
+
+/// Walk the active scene's arrange-mode hierarchy in document order. The
+/// arrange-mode picker uses this to build a Tab-cycleable list.
+fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
+    use crate::ui::placement::{ArrangeTarget, Node};
+
+    fn walk(nodes: &'static [Node], depth: usize, out: &mut Vec<HierarchyEntry>) {
+        for n in nodes {
+            match n {
+                Node::Leaf { name, label } => out.push(HierarchyEntry {
+                    name,
+                    label,
+                    depth,
+                    is_group: false,
+                }),
+                Node::Group { name, label, children } => {
+                    out.push(HierarchyEntry {
+                        name,
+                        label,
+                        depth,
+                        is_group: true,
+                    });
+                    walk(children, depth + 1, out);
+                }
+            }
+        }
+    }
+
+    let hierarchy: &'static [Node] = match scene {
+        crate::Scene::Shop(s) => s.positions.hierarchy(),
+        crate::Scene::Gameplay(g) => g.positions.hierarchy(),
+        _ => &[],
+    };
+    let mut out = Vec::new();
+    walk(hierarchy, 0, &mut out);
+    out
 }
 
 fn avg_u64(total: u64, runs: u32) -> f64 {
@@ -326,6 +570,11 @@ fn build_bot_graph_snapshot(
         avg_blinds: avg_u64(agg.blinds_cleared_total, runs),
         avg_antes: avg_u64(agg.antes_cleared_total, runs),
         avg_total_score_m: avg_u64(agg.total_score, runs) / 1_000_000.0,
+        avg_surplus_per_blind: if agg.blinds_cleared_total == 0 {
+            Some(0.0)
+        } else {
+            Some(agg.total_overscore as f64 / agg.blinds_cleared_total as f64)
+        },
         avg_plays: avg_u64(agg.total_plays, runs),
         avg_discards: avg_u64(agg.total_discards, runs),
         avg_skips: avg_u64(agg.total_blinds_skipped, runs),
@@ -341,6 +590,8 @@ fn build_bot_graph_snapshot(
         clear_relics: Some(avg_u64(agg.total_gold_from_clear_relics, runs)),
         avg_final_gold: Some(avg_i64(agg.total_final_gold, runs)),
         deaths_by_ante: agg.deaths_by_ante.clone(),
+        overscore_by_slot: agg.overscore_by_slot.clone(),
+        cleared_by_slot: agg.cleared_by_slot.clone(),
     }
 }
 
@@ -423,6 +674,11 @@ struct App {
     deferred_round_end: Option<GameEvent>,
     update_checker: update_check::UpdateChecker,
     modifiers: ModifiersState,
+    /// Shop drag-to-sell: the 3D hit that started a mouse-drag over an owned
+    /// shop item, plus the cursor position at drag start.  Set on mouse-down;
+    /// if the cursor moves far enough and is over the sell tray on mouse-up,
+    /// a `SHOP_DRAG_DROP_ID` click is injected.
+    shop_drag_start: Option<(crate::render::wgpu_renderer::ShopHit, (f32, f32))>,
 }
 
 impl App {
@@ -570,6 +826,7 @@ impl App {
             cascade_tuning: CascadeTuning::default(),
             update_checker: update_check::UpdateChecker::spawn(),
             modifiers: ModifiersState::default(),
+            shop_drag_start: None::<(ShopHit, (f32, f32))>,
         }
     }
 
@@ -697,6 +954,10 @@ impl App {
                     .as_ref()
                     .filter(|t| t.is_active())
                     .map(|t| t.current_lesson);
+                // Capture round_score / target_score before advance_round
+                // clobbers target_score with base_target for the next blind.
+                let cleared_round_score = self.run.round_score;
+                let cleared_target_score = self.run.target_score;
                 self.run.advance_round(&mut self.bus);
 
                 // First-encounter tooltip: gold payout.
@@ -742,7 +1003,7 @@ impl App {
                 if tutorial_lesson_before.is_none() {
                     let mut lines = vec![format!(
                         "Score: {} / {}",
-                        self.run.round_score, self.run.target_score
+                        cleared_round_score, cleared_target_score
                     )];
                     lines.push(format!("Base reward  +${}", payout.base_reward));
                     if payout.unused_play_bonus > 0 {
@@ -857,17 +1118,6 @@ impl App {
                     log::info!("Level up! Now level {}", result.new_level);
                     let mut pages = Vec::new();
 
-                    // Yaku pages.
-                    for yk in &result.yaku {
-                        pages.push(UnlockPage {
-                            category: "New Yaku".into(),
-                            name: yk.name().into(),
-                            description: yk.description().into(),
-                            relic_id: None,
-                            accent_color: render::theme::color::TWILIGHT,
-                        });
-                    }
-
                     // Relic pages.
                     let relic_defs = core::relic::all_relic_defs();
                     for rid in &result.relics {
@@ -896,17 +1146,6 @@ impl App {
                             description: rm.description().into(),
                             relic_id: None,
                             accent_color: render::theme::color::AMBER,
-                        });
-                    }
-
-                    // Dora page.
-                    if result.dora {
-                        pages.push(UnlockPage {
-                            category: "Bonus".into(),
-                            name: "Dora Tiles".into(),
-                            description: "Red-highlighted tiles now appear in the wall, granting bonus chips when scored.".into(),
-                            relic_id: None,
-                            accent_color: render::theme::color::CHAMPAGNE,
                         });
                     }
 
@@ -1020,17 +1259,6 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Spawn departure animations before updating hand tiles (old data still in renderer).
-        if !frame.departing_indices.is_empty() {
-            let depart_lifetime = self.cascade_tuning.depart_lifetime_ms as f32 / 1000.0;
-            renderer.depart_tiles(
-                &frame.departing_indices,
-                depart_lifetime,
-                self.gfx.tile_preset,
-            );
-        }
-        renderer.update_hand_tiles(&frame.hand_tiles);
-
         // Snapshot the scene's text labels and relic icons for the
         // tooltip overlay's glossary-hover scanning, by walking the
         // scene's portion of `frame.cmds` (everything pushed up to
@@ -1103,13 +1331,25 @@ impl App {
 
         let size = win.inner_size();
         self.modals.update();
-        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_icons)) = self
+        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_showcases)) = self
             .modals
             .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
-            frame.relic_icons(modal_relic_icons);
+            if !modal_relic_showcases.is_empty() {
+                // Use a near-orthographic top-down camera so pixel_to_world
+                // positions map cleanly onto screen space without perspective
+                // warp — same approach as the collection scene's relic cards.
+                let h = size.height as f32;
+                frame.camera_override = Some(CameraParams {
+                    eye: [0.0, 0.0, h * 3.0],
+                    target: [0.0, 0.0, 0.0],
+                    up: [0.0, 1.0, 0.0],
+                    fovy_deg: 20.0,
+                });
+                frame.relic_showcase_batch(modal_relic_showcases);
+            }
             // Replace scene buttons with modal buttons so only dismiss works.
             self.active_buttons = modal_buttons;
         }
@@ -1207,6 +1447,74 @@ impl App {
             });
         }
 
+        // Arrange-mode label in the lower-left — shows what's currently
+        // selected (or "select an object" prompt when the mode is armed but
+        // nothing is picked yet). Mirrors the FPS HUD sizing in the
+        // upper-right.
+        if let Some(ref inner) = self.debug.arrange_mode {
+            let size = self
+                .window
+                .as_ref()
+                .map(|w| w.inner_size())
+                .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
+            let w = size.width as f32;
+            let h = size.height as f32;
+            let label_h = (h * 0.09).max(60.0);
+            let label_w = (label_h * 16.0).min(w * 0.95);
+            let margin = label_h * 0.3;
+            let y = h - label_h - margin;
+            let (text, color) = match inner {
+                Some(state) => {
+                    // Show resolved coords (current on-disk + staged delta) so
+                    // the HUD matches what Enter will commit. Falls back to a
+                    // delta-only string for groups (no single leaf to sample).
+                    let sampled = sample_arrange_placement(&state.object_name, &self.scene);
+                    let text = if let Some(p) = sampled {
+                        let dnx = state.delta_px / w;
+                        let dny = state.delta_py / h;
+                        let d_lift_mm = state.delta_lift
+                            * crate::ui::scene_layout::HFRAC_TO_MM
+                            / crate::ui::scene_layout::CANONICAL_WINDOW_W;
+                        format!(
+                            "Arrange: {}  nx={:.4} ny={:.4} lift={:.2}mm  rx={:+.1}° ry={:+.1}° rz={:+.1}°  [step {:.0}px/{:.0}°]",
+                            state.object_name,
+                            p.nx + dnx,
+                            p.ny + dny,
+                            p.lift_mm + d_lift_mm,
+                            p.rx_deg + state.delta_rx_deg,
+                            p.ry_deg + state.delta_ry_deg,
+                            p.rz_deg + state.delta_rz_deg,
+                            state.trans_step_px,
+                            state.rot_step_deg,
+                        )
+                    } else {
+                        format!(
+                            "Arrange: {} (group)  Δpx={:+.1} Δpy={:+.1} Δz={:+.1}  Δrx={:+.1}° Δry={:+.1}° Δrz={:+.1}°  [step {:.0}px/{:.0}°]",
+                            state.object_name,
+                            state.delta_px, state.delta_py, state.delta_lift,
+                            state.delta_rx_deg, state.delta_ry_deg, state.delta_rz_deg,
+                            state.trans_step_px, state.rot_step_deg,
+                        )
+                    };
+                    (text, [0.95, 0.85, 0.35, 1.0])
+                }
+                None => (
+                    "Arrange: click an object or press Tab".to_string(),
+                    [0.8, 0.8, 0.8, 1.0],
+                ),
+            };
+            frame.quad(GpuInstance {
+                rect: [margin, y, label_w, label_h],
+                color: [0.0, 0.0, 0.0, 0.6],
+            });
+            frame.text(TextLabel {
+                rect: [margin + label_h * 0.2, y, label_w, label_h],
+                text,
+                color,
+                ..Default::default()
+            });
+        }
+
         // Debug: drop draw cmds for hidden HUD elements so we can inspect the
         // procedural 3D scene underneath. The blind plaque, scoring placard,
         // and candles are gated at the *call site* in `gameplay.rs` (via
@@ -1222,7 +1530,7 @@ impl App {
             let hide_inv = self.debug.hide_inventory;
             frame.cmds.retain(|c| {
                 use crate::render::draw_cmd::DrawCmd;
-                if hide_tiles && matches!(c, DrawCmd::HandTileBackdrop | DrawCmd::HandTileFaces) {
+                if hide_tiles && matches!(c, DrawCmd::ShowcaseTileBatch(_)) {
                     return false;
                 }
                 if hide_inv
@@ -1256,6 +1564,39 @@ impl App {
                 self.gfx.tile_material
             }
         });
+        // Tell the renderer which scene is active so shared mesh pipelines
+        // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
+        // prefixed canonical pickable names for arrange mode.
+        let active_scene_key: Option<&'static str> = match &self.scene {
+            Scene::Shop(_) => Some("shop"),
+            Scene::Gameplay(_) => Some("gameplay"),
+            _ => None,
+        };
+        renderer.set_active_scene(active_scene_key);
+
+        // Push the committed rotation map so every arrange-tagged draw picks
+        // up its Placement's rx/ry/rz_deg without each scene site having to
+        // wire it into its own rotation matrix.
+        renderer.set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+
+        // Push arrange-mode override so the renderer draws the selected object
+        // at the edited position/rotation this frame.
+        renderer.set_arrange_override(
+            if let Some(Some(ref state)) = self.debug.arrange_mode {
+                Some(DebugArrangeOverride {
+                    name: state.object_name.clone(),
+                    delta_px: state.delta_px,
+                    delta_py: state.delta_py,
+                    delta_lift: state.delta_lift,
+                    delta_rz_deg: state.delta_rz_deg,
+                    delta_rx_deg: state.delta_rx_deg,
+                    delta_ry_deg: state.delta_ry_deg,
+                })
+            } else {
+                None
+            },
+        );
+
         if let Err(e) = renderer.render(
             &frame,
             self.gfx.smoke_intensity,
@@ -1457,6 +1798,37 @@ impl App {
                 )));
                 self.transition_alpha = 1.0;
                 log::info!("[Debug] Showing defeat screen");
+            }
+            DebugAction::ToggleArrangeMode => {
+                if self.debug.arrange_mode.is_some() {
+                    self.debug.arrange_mode = None;
+                    log::info!("[Debug] Arrange mode DEACTIVATED");
+                } else {
+                    self.debug.arrange_mode = Some(None);
+                    log::info!(
+                        "[Debug] Arrange mode ARMED — click an object OR press Tab to browse the hierarchy"
+                    );
+                }
+            }
+            DebugAction::SaveShopLayout => {
+                if let Scene::Shop(shop) = &self.scene {
+                    match shop.save_current_layout() {
+                        Ok(()) => log::info!("[Debug] Shop layout saved"),
+                        Err(e) => log::error!("[Debug] Failed to save shop layout: {e}"),
+                    }
+                } else {
+                    log::warn!("[Debug] SaveShopLayout: not in shop scene");
+                }
+            }
+            DebugAction::SaveGameplayRelicLayout => {
+                if let Scene::Gameplay(gp) = &self.scene {
+                    match crate::ui::scene_layout::save_gameplay_positions(&gp.positions) {
+                        Ok(()) => log::info!("[Debug] Gameplay relic layout saved"),
+                        Err(e) => log::error!("[Debug] Failed to save gameplay relic layout: {e}"),
+                    }
+                } else {
+                    log::warn!("[Debug] SaveGameplayRelicLayout: not in gameplay scene");
+                }
             }
         }
         // Request redraw to reflect changes immediately.
@@ -1978,9 +2350,19 @@ impl ApplicationHandler for App {
                             | (Scene::TileSelect(_), Scene::Shop(_))
                             | (Scene::TileSelect(_), Scene::TutorialCampaign(_))
                     );
+                    // Restart from the pause menu is the only path from
+                    // Gameplay straight back to Shop; give it a deliberate
+                    // fade-to-black instead of the snappy default.
+                    let slow_fade = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::Gameplay(_), Scene::Shop(_))
+                    );
                     if use_cascade {
                         self.transition_kind = TransitionKind::ShootingStarCascade;
                         self.transition_speed = 0.012;
+                    } else if slow_fade {
+                        self.transition_kind = TransitionKind::Quick;
+                        self.transition_speed = 0.025;
                     } else {
                         self.transition_kind = TransitionKind::Quick;
                         self.transition_speed = 0.08;
@@ -2201,8 +2583,95 @@ impl ApplicationHandler for App {
                             return;
                         }
 
+                        // Arrange mode: consume all clicks for 3D object
+                        // picking — buttons fire their scene actions (restock,
+                        // leave, etc.) which is never what you want while
+                        // arranging, so suppress them too.
+                        if self.debug.arrange_mode.is_some() {
+                            // Only try to select an object when nothing is
+                            // selected yet (inner = None).
+                            if matches!(self.debug.arrange_mode, Some(None)) {
+                                let picked = self
+                                    .renderer
+                                    .as_ref()
+                                    .and_then(|r| {
+                                        r.pick_debug_object_with_model(cursor.0, cursor.1)
+                                    });
+                                match picked {
+                                    Some((name, Some(model))) => {
+                                        // Start with zero deltas — the override
+                                        // is additive on top of the scene's own
+                                        // placement, so no decomposition needed.
+                                        let origin = model.transform_point3(glam::Vec3::ZERO);
+                                        self.debug.arrange_mode =
+                                            Some(Some(ArrangeModeState {
+                                                object_name: name.to_string(),
+                                                selected_world_origin: origin,
+                                                delta_px: 0.0,
+                                                delta_py: 0.0,
+                                                delta_lift: 0.0,
+                                                delta_rz_deg: 0.0,
+                                                delta_rx_deg: 0.0,
+                                                delta_ry_deg: 0.0,
+                                                trans_step_px: 1.0,
+                                                rot_step_deg: 1.0,
+                                            }));
+                                        log::info!(
+                                            "[Arrange] Selected '{}' — all deltas zero, ready to nudge",
+                                            name,
+                                        );
+                                        log::info!(
+                                            "[Arrange] Arrow keys: move X/Y | Shift+Arrow: rotate Z/X | Enter: confirm+copy | Esc: cancel"
+                                        );
+                                    }
+                                    Some((name, None)) => {
+                                        // Hand tile or object without a model — just log
+                                        log::info!(
+                                            "[Arrange] Hit '{}' — no placement matrix available (hand tile?), cannot arrange",
+                                            name
+                                        );
+                                    }
+                                    None => {
+                                        log::info!("[Arrange] No object under cursor — click on an object to select it");
+                                    }
+                                }
+                            } else if let Some(Some(ref mut st)) = self.debug.arrange_mode {
+                                // Object already selected — click teleports it to
+                                // the cursor's world-space hit point. Preserves
+                                // lift (Z) so dragging across the felt behaves
+                                // like a top-down nudge. Selection is locked —
+                                // Tab or Escape to change it.
+                                let hit = self
+                                    .renderer
+                                    .as_ref()
+                                    .and_then(|r| r.pick_debug_world_point(cursor.0, cursor.1));
+                                match hit {
+                                    Some(h) => {
+                                        // world_x = px - w/2 (linear). Delta in
+                                        // world X == delta in px; world_y inverts
+                                        // sign vs py.
+                                        st.delta_px = h.x - st.selected_world_origin.x;
+                                        st.delta_py = -(h.y - st.selected_world_origin.y);
+                                        log::info!(
+                                            "[Arrange] Click-move '{}' → world ({:.1}, {:.1}) | Δpx={:+.1} Δpy={:+.1}",
+                                            st.object_name, h.x, h.y, st.delta_px, st.delta_py,
+                                        );
+                                    }
+                                    None => {
+                                        log::info!("[Arrange] Click missed all pickables — no move");
+                                    }
+                                }
+                            }
+                            self.mouse_clicked = false;
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+
                         // Check if click hit any button.
                         let mut hit = false;
+                        let mut hit_shop_3d = false;
                         for btn in &self.active_buttons {
                             let (bx, by, bw, bh) = btn.rect;
                             if cursor.0 >= bx
@@ -2212,24 +2681,45 @@ impl ApplicationHandler for App {
                             {
                                 match btn.action {
                                     ButtonAction::Ui(a) => self.mouse_actions.push(a),
-                                    ButtonAction::Scene(id) => self.mouse_button_clicks.push(id),
+                                    ButtonAction::Scene(id) => {
+                                        if id == scenes::shop::SHOP_3D_HIT_ID {
+                                            hit_shop_3d = true;
+                                        }
+                                        self.mouse_button_clicks.push(id);
+                                    }
                                 }
                                 hit = true;
                                 break;
                             }
                         }
+                        // Shop drag-to-sell: on mouse-down over a 3D shop object, record
+                        // which item was under the cursor so that a drag onto the sell
+                        // tray (detected on mouse-up) can sell the right item.
+                        if hit_shop_3d {
+                            if let Some(renderer) = self.renderer.as_ref() {
+                                let picked = renderer.pick_shop_object(cursor.0, cursor.1);
+                                self.shop_drag_start = match picked {
+                                    Some(ShopHit::Relic(_))
+                                    | Some(ShopHit::Ribbon(_))
+                                    | Some(ShopHit::Talisman(_)) => {
+                                        picked.map(|h| (h, cursor))
+                                    }
+                                    _ => None,
+                                };
+                            }
+                        } else {
+                            self.shop_drag_start = None;
+                        }
                         if !hit {
                             // Check if we're clicking on a hand tile to start drag.
                             let clicked_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
                             if let Some(input) = self.input.as_mut() {
-                                if let Some(slot) = input.pointer_slot {
-                                    input.drag = Some(ui::input::DragState {
-                                        subject: ui::input::DragSubject::HandTile,
-                                        from_slot: slot,
-                                        start_pos: cursor,
-                                        current_pos: cursor,
-                                    });
-                                    // Only confirm (toggle-select tile) if a hand tile was clicked.
+                                if input.pointer_slot.is_some() {
+                                    // Hand tile click: gameplay scene's
+                                    // marquee handler picks this up. No
+                                    // drag-to-swap state is recorded — the
+                                    // gesture is now hold-to-multi-select,
+                                    // not click-and-drag-to-reorder.
                                     self.mouse_actions.push(UiAction::Confirm);
                                 } else if let Some(slot) = clicked_relic_slot {
                                     input.drag = Some(ui::input::DragState {
@@ -2242,7 +2732,29 @@ impl ApplicationHandler for App {
                             }
                         }
                     } else if state == ElementState::Released {
-                        // End drag — swap tiles if dropped on a different slot.
+                        // Shop drag-to-sell: if a drag started on an owned item and the
+                        // cursor moved far enough and is now over the sell tray, inject
+                        // a drop event so the shop can complete the sale.
+                        if let Some((_, start)) = self.shop_drag_start.take() {
+                            if matches!(&self.scene, Scene::Shop(_)) {
+                                let dx = cursor.0 - start.0;
+                                let dy = cursor.1 - start.1;
+                                let dist = (dx * dx + dy * dy).sqrt();
+                                if dist > 10.0 {
+                                    if let Some(renderer) = self.renderer.as_ref() {
+                                        const SELL_TRAY_PICK: u32 = 8; // PICK_SELL_TRAY
+                                        let over_sell_tray = matches!(
+                                            renderer.pick_shop_object(cursor.0, cursor.1),
+                                            Some(ShopHit::Dish(id)) if id == SELL_TRAY_PICK
+                                        );
+                                        if over_sell_tray {
+                                            self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // End drag — swap relics if dropped on a different slot.
                         // Require minimum drag distance to avoid accidental swaps.
                         let dropped_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
                         if let Some(input) = self.input.as_mut() {
@@ -2252,14 +2764,6 @@ impl ApplicationHandler for App {
                                 let dist = (dx * dx + dy * dy).sqrt();
                                 if dist > 10.0 {
                                     match drag.subject {
-                                        ui::input::DragSubject::HandTile => {
-                                            if let Some(target_slot) = input.pointer_slot {
-                                                if target_slot != drag.from_slot {
-                                                    self.run
-                                                        .swap_tiles(drag.from_slot, target_slot);
-                                                }
-                                            }
-                                        }
                                         ui::input::DragSubject::Relic => {
                                             if let Some(target_slot) = dropped_relic_slot {
                                                 if target_slot != drag.from_slot {
@@ -2273,6 +2777,10 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
+                        // LMB release ends a marquee multi-select gesture.
+                        // Always emit; the gameplay scene clears its marquee
+                        // state on ConfirmRelease and other scenes ignore it.
+                        self.mouse_actions.push(UiAction::ConfirmRelease);
                     }
                     if let Some(w) = self.window.as_ref() {
                         w.request_redraw();
@@ -2343,6 +2851,257 @@ impl ApplicationHandler for App {
                         w.request_redraw();
                     }
                 } else if event.state == ElementState::Pressed {
+                    // Arrange mode: Escape while waiting for a click exits the
+                    // mode entirely.
+                    if matches!(self.debug.arrange_mode, Some(None)) {
+                        if event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                            self.debug.arrange_mode = None;
+                            log::info!("[Arrange] Mode exited");
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+                    }
+
+                    // Arrange mode: Tab / Shift+Tab cycles through the active
+                    // scene's placement hierarchy. Works whether an object is
+                    // already selected or not — picking a group applies deltas
+                    // to every descendant leaf on save.
+                    if self.debug.arrange_mode.is_some()
+                        && event.physical_key == PhysicalKey::Code(KeyCode::Tab)
+                    {
+                        let flat = arrange_hierarchy_flat(&self.scene);
+                        if flat.is_empty() {
+                            log::info!("[Arrange] Current scene has no hierarchy");
+                        } else {
+                            let current_name = match &self.debug.arrange_mode {
+                                Some(Some(s)) => Some(s.object_name.as_str()),
+                                _ => None,
+                            };
+                            let current_idx = current_name
+                                .and_then(|n| flat.iter().position(|e| e.name == n));
+                            let reverse = self.modifiers.shift_key();
+                            let next_idx = match (current_idx, reverse) {
+                                (None, false) => 0,
+                                (None, true) => flat.len() - 1,
+                                (Some(i), false) => (i + 1) % flat.len(),
+                                (Some(i), true) => (i + flat.len() - 1) % flat.len(),
+                            };
+                            let entry = &flat[next_idx];
+                            let origin = self
+                                .renderer
+                                .as_ref()
+                                .and_then(|r| r.debug_object_origin(entry.name))
+                                .unwrap_or(glam::Vec3::ZERO);
+                            self.debug.arrange_mode = Some(Some(ArrangeModeState {
+                                object_name: entry.name.to_string(),
+                                selected_world_origin: origin,
+                                delta_px: 0.0,
+                                delta_py: 0.0,
+                                delta_lift: 0.0,
+                                delta_rz_deg: 0.0,
+                                delta_rx_deg: 0.0,
+                                delta_ry_deg: 0.0,
+                                trans_step_px: 1.0,
+                                rot_step_deg: 1.0,
+                            }));
+                            let indent = "  ".repeat(entry.depth);
+                            let marker = if entry.is_group { "▸" } else { "•" };
+                            log::info!(
+                                "[Arrange] {}{} {} ({}) — {}/{} in hierarchy",
+                                indent,
+                                marker,
+                                entry.label,
+                                entry.name,
+                                next_idx + 1,
+                                flat.len(),
+                            );
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                        }
+                        return;
+                    }
+
+                    // Arrange mode: when an object is selected, consume arrow
+                    // keys (move X/Y), Shift+arrows (rotate Z/X), Enter
+                    // (confirm+copy), and Escape (cancel selection). Normal
+                    // input path is skipped so gameplay doesn't also fire.
+                    if let Some(Some(ref mut state)) = self.debug.arrange_mode {
+                        let shift = self.modifiers.shift_key();
+                        let step_px = state.trans_step_px;   // pixels per key press
+                        let step_deg = state.rot_step_deg;   // degrees per key press
+                        let mut handled = true;
+                        let mut nudged = false;
+                        let mut escape_pending = false;
+                        if let PhysicalKey::Code(code) = event.physical_key {
+                            match code {
+                                KeyCode::Digit1 => {
+                                    state.trans_step_px = 1.0;
+                                    state.rot_step_deg = 1.0;
+                                    log::info!("[Arrange] Step 1 (1 px / 1°)");
+                                }
+                                KeyCode::Digit2 => {
+                                    state.trans_step_px = 5.0;
+                                    state.rot_step_deg = 15.0;
+                                    log::info!("[Arrange] Step 2 (5 px / 15°)");
+                                }
+                                KeyCode::Digit3 => {
+                                    state.trans_step_px = 25.0;
+                                    state.rot_step_deg = 45.0;
+                                    log::info!("[Arrange] Step 3 (25 px / 45°)");
+                                }
+                                KeyCode::Digit4 => {
+                                    state.trans_step_px = 100.0;
+                                    state.rot_step_deg = 90.0;
+                                    log::info!("[Arrange] Step 4 (100 px / 90°)");
+                                }
+                                // Translation: WASD = forward/left/back/right, Q/E = down/up
+                                KeyCode::KeyD if !shift => { state.delta_px += step_px; nudged = true; }
+                                KeyCode::KeyA if !shift => { state.delta_px -= step_px; nudged = true; }
+                                KeyCode::KeyS if !shift => { state.delta_py += step_px; nudged = true; }
+                                KeyCode::KeyW if !shift => { state.delta_py -= step_px; nudged = true; }
+                                KeyCode::KeyQ if !shift => { state.delta_lift -= step_px; nudged = true; }
+                                KeyCode::KeyE if !shift => { state.delta_lift += step_px; nudged = true; }
+                                // Rotation: Shift+A/D = rz, Shift+W/S = rx, Shift+Q/E = ry
+                                KeyCode::KeyD if shift => { state.delta_rz_deg += step_deg; nudged = true; }
+                                KeyCode::KeyA if shift => { state.delta_rz_deg -= step_deg; nudged = true; }
+                                KeyCode::KeyW if shift => { state.delta_rx_deg -= step_deg; nudged = true; }
+                                KeyCode::KeyS if shift => { state.delta_rx_deg += step_deg; nudged = true; }
+                                KeyCode::KeyQ if shift => { state.delta_ry_deg -= step_deg; nudged = true; }
+                                KeyCode::KeyE if shift => { state.delta_ry_deg += step_deg; nudged = true; }
+                                KeyCode::Enter | KeyCode::NumpadEnter => {
+                                    // Confirm: convert pixel deltas to proportional fractions
+                                    // so the output is screen-size independent.
+                                    let size = self.window.as_ref()
+                                        .map(|w| w.inner_size())
+                                        .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
+                                    let ww = size.width as f32;
+                                    let wh = size.height as f32;
+                                    let dnx = state.delta_px / ww;
+                                    let dny = state.delta_py / wh;
+                                    let text = format!(
+                                        "// [Arrange] object: {}\nnx += {:.6};\nny += {:.6};\nlift_z += {:.3};\nrotation_z_deg += {:.2};\nrotation_x_deg += {:.2};\nrotation_y_deg += {:.2};",
+                                        state.object_name,
+                                        dnx,
+                                        dny,
+                                        state.delta_lift,
+                                        state.delta_rz_deg,
+                                        state.delta_rx_deg,
+                                        state.delta_ry_deg,
+                                    );
+                                    match arboard::Clipboard::new() {
+                                        Ok(mut cb) => {
+                                            if let Err(e) = cb.set_text(&text) {
+                                                log::error!("[Arrange] Clipboard write failed: {e}");
+                                            } else {
+                                                log::info!("[Arrange] Copied to clipboard:\n{text}");
+                                            }
+                                        }
+                                        Err(e) => log::error!("[Arrange] Could not open clipboard: {e}"),
+                                    }
+                                    // Apply deltas to the scene's positions struct and save to JSON.
+                                    apply_arrange_to_layout(
+                                        &state.object_name,
+                                        state.delta_px,
+                                        state.delta_py,
+                                        state.delta_lift,
+                                        state.delta_rz_deg,
+                                        state.delta_rx_deg,
+                                        state.delta_ry_deg,
+                                        ww,
+                                        wh,
+                                        &mut self.scene,
+                                    );
+                                    // apply_arrange_to_layout already mutated the
+                                    // scene's positions struct in-place, so no reload
+                                    // is needed — reloading from disk risks returning
+                                    // defaults if the save failed or the file is absent.
+                                    log::info!(
+                                        "[Arrange] Confirmed '{}': Δnx={:.6} Δny={:.6} Δlift={:.3} Δrz={:.2}° Δrx={:.2}° Δry={:.2}°",
+                                        state.object_name,
+                                        dnx, dny, state.delta_lift,
+                                        state.delta_rz_deg, state.delta_rx_deg, state.delta_ry_deg,
+                                    );
+                                    state.delta_px = 0.0;
+                                    state.delta_py = 0.0;
+                                    state.delta_lift = 0.0;
+                                    state.delta_rz_deg = 0.0;
+                                    state.delta_rx_deg = 0.0;
+                                    state.delta_ry_deg = 0.0;
+                                }
+                                KeyCode::KeyR if !shift => {
+                                    // Reset: restore compiled-in defaults for the
+                                    // selected placement (or every descendant of a
+                                    // selected group) and drop any accumulated
+                                    // deltas so the on-screen preview matches disk.
+                                    reset_arrange_to_default(&state.object_name, &mut self.scene);
+                                    state.delta_px = 0.0;
+                                    state.delta_py = 0.0;
+                                    state.delta_lift = 0.0;
+                                    state.delta_rz_deg = 0.0;
+                                    state.delta_rx_deg = 0.0;
+                                    state.delta_ry_deg = 0.0;
+                                }
+                                KeyCode::Escape => {
+                                    // Cancel selection, go back to waiting for click.
+                                    // Deferred so the borrow of `state` (above) ends
+                                    // cleanly before we overwrite the enum.
+                                    escape_pending = true;
+                                }
+                                _ => { handled = false; }
+                            }
+                        } else {
+                            handled = false;
+                        }
+                        if nudged {
+                            // Log the resolved placement (on-disk + staged delta)
+                            // so both HUD and log agree on what Enter will commit.
+                            let size = self.window.as_ref()
+                                .map(|w| w.inner_size())
+                                .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
+                            let ww = size.width as f32;
+                            let wh = size.height as f32;
+                            let name = state.object_name.clone();
+                            let dpx = state.delta_px;
+                            let dpy = state.delta_py;
+                            let dlift = state.delta_lift;
+                            let drx = state.delta_rx_deg;
+                            let dry = state.delta_ry_deg;
+                            let drz = state.delta_rz_deg;
+                            if let Some(p) = sample_arrange_placement(&name, &self.scene) {
+                                let dnx = dpx / ww;
+                                let dny = dpy / wh;
+                                let d_lift_mm = dlift
+                                    * crate::ui::scene_layout::HFRAC_TO_MM
+                                    / crate::ui::scene_layout::CANONICAL_WINDOW_W;
+                                log::info!(
+                                    "[Arrange] {} nx={:.4} ny={:.4} lift={:.2}mm rx={:+.1}° ry={:+.1}° rz={:+.1}°",
+                                    name,
+                                    p.nx + dnx, p.ny + dny, p.lift_mm + d_lift_mm,
+                                    p.rx_deg + drx, p.ry_deg + dry, p.rz_deg + drz,
+                                );
+                            } else {
+                                log::info!(
+                                    "[Arrange] {} (group) Δpx={:+.1} Δpy={:+.1} Δlift={:+.1} Δrx={:+.1}° Δry={:+.1}° Δrz={:+.1}°",
+                                    name, dpx, dpy, dlift, drx, dry, drz,
+                                );
+                            }
+                        }
+                        if escape_pending {
+                            log::info!("[Arrange] Selection cancelled — click another object or use Debug > Arrange Mode to exit");
+                            self.debug.arrange_mode = Some(None);
+                        }
+                        if handled {
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+                        // Fall through for unhandled keys (e.g. fullscreen).
+                    }
+
                     let mut v = Vec::new();
                     let mode_changed = if let Some(input) = self.input.as_mut() {
                         input.on_key(event.physical_key, &mut v)
@@ -2358,6 +3117,13 @@ impl ApplicationHandler for App {
                     if let Some(w) = self.window.as_ref() {
                         w.request_redraw();
                     }
+                } else if event.state == ElementState::Released {
+                    // Confirm-key release drives marquee multi-select commit.
+                    let mut v = Vec::new();
+                    if let Some(input) = self.input.as_mut() {
+                        input.on_key_release(event.physical_key, &mut v);
+                    }
+                    self.mouse_actions.extend(v);
                 }
             }
             _ => {}
@@ -2375,6 +3141,10 @@ impl ApplicationHandler for App {
         let cascade_active = matches!(&self.scene, Scene::Gameplay(g) if g.is_animating());
         let collection_3d = matches!(&self.scene, Scene::Collection(c) if c.has_3d_tab());
         let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
+        let gameplay_active = matches!(&self.scene, Scene::Gameplay(_));
+        let shop_active = matches!(&self.scene, Scene::Shop(_));
+        let splash_active = matches!(&self.scene, Scene::Splash(_));
+        let start_screen_active = matches!(&self.scene, Scene::StartScreen(_));
         let needs_redraw = !self.anim.is_idle()
             || self
                 .renderer
@@ -2386,7 +3156,11 @@ impl ApplicationHandler for App {
             || transitioning
             || self.modals.needs_redraw()
             || self.gfx.smoke_intensity != crate::persistence::SmokeIntensity::Off
-            || self.tooltips.is_active();
+            || self.tooltips.is_active()
+            || gameplay_active
+            || shop_active
+            || splash_active
+            || start_screen_active;
         if needs_redraw {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();

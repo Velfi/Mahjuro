@@ -1,0 +1,367 @@
+//! Odometer-style floating score reel.
+//!
+//! Displays the current score as a row of 7 digit columns (expandable if the
+//! score overflows). Each column shows a single digit glyph; when the digit
+//! changes the column spins upward through 0–9 like an odometer reel, with
+//! only the columns whose digit actually changed animating. Higher-order
+//! columns that carry-over spin with a brief cascade delay so the roll reads
+//! right-to-left like a mechanical counter.
+//!
+//! The reel is positioned in 3D using the same `(pixel_x, pixel_y, lift)`
+//! convention as every other placement in the renderer. The caller passes the
+//! plaque's pixel anchor and lift each frame; the reel tiles its columns
+//! horizontally around that center.
+//!
+//! ## Slot budget
+//!
+//! Each column renders three glyph meshes stacked vertically (prev, current,
+//! next) so that the spin transition clips naturally. With 7 columns that is
+//! 21 slots. The caller is responsible for ensuring `MAX_EXTRUDED_GLYPH_SLOTS`
+//! is large enough.
+
+use std::time::Instant;
+
+use crate::render::draw_cmd::ExtrudedGlyphPlacement;
+
+// ── Tuning constants ──────────────────────────────────────────────────────
+
+/// Number of digit columns when the score fits within 7 digits (0–9 999 999).
+const BASE_COLUMNS: usize = 7;
+
+/// World-unit width of one digit column (controls spacing between digits).
+const COLUMN_WIDTH: f32 = 90.0;
+
+/// World-unit height of one digit slot (the vertical travel distance for one
+/// reel step). Should match the visual cap-height of the glyph at `DIGIT_SCALE`.
+const SLOT_HEIGHT: f32 = 110.0;
+
+/// Uniform scale applied to every digit glyph. The glyph meshes are
+/// normalised to ~1.0 height in font space; this scales them to world units.
+const DIGIT_SCALE: f32 = 95.0;
+
+/// Duration of one digit spin in seconds.
+const SPIN_DURATION: f32 = 0.22;
+
+/// Per-column cascade delay (seconds). Column 0 is the ones place; each
+/// higher-order column starts its spin this many seconds later.
+const CASCADE_DELAY: f32 = 0.04;
+
+/// Spring overshoot: the reel momentarily shows `(digit + 1) % 10` at the
+/// apex before settling back. Expressed as a fraction of `SLOT_HEIGHT`.
+const OVERSHOOT: f32 = 0.18;
+
+/// Colour of all digit glyphs (warm gold matching the existing score style).
+const DIGIT_COLOR: [f32; 4] = [1.00, 0.91, 0.66, 1.0];
+
+/// Emissive boost while a column is actively spinning.
+const EMISSIVE_SPIN: f32 = 0.9;
+/// Emissive level when idle.
+const EMISSIVE_IDLE: f32 = 0.25;
+
+/// Pitch (radians) passed as `rotation_x` through to the extruded-glyph
+/// pipeline. The renderer bakes in a `-π/2` base rotation (so score popups
+/// lie flat on the table), so setting `PITCH = π/2` cancels that and leaves
+/// the digits standing upright facing the camera — which is what the reel
+/// wants since it floats in front of the vertical-ish score plaque. A small
+/// forward lean (reduce by ~0.08 rad) keeps them catching the key light
+/// instead of looking like a billboard.
+const PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.08;
+
+// ── Internal state ────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+struct ReelColumn {
+    /// The digit currently displayed (0–9).
+    current: u8,
+    /// The digit being rolled away from (source of the spin).
+    prev: u8,
+    /// When this column's spin started. `None` = idle.
+    spin_start: Option<Instant>,
+}
+
+impl ReelColumn {
+    fn new(digit: u8) -> Self {
+        Self {
+            current: digit,
+            prev: digit,
+            spin_start: None,
+        }
+    }
+
+    /// Trigger a spin to `new_digit`. No-op if already at that value.
+    fn spin_to(&mut self, new_digit: u8, start: Instant) {
+        if new_digit == self.current {
+            return;
+        }
+        self.prev = self.current;
+        self.current = new_digit;
+        self.spin_start = Some(start);
+    }
+
+    /// Normalised spin progress in [0, 1]. Returns 0 when idle.
+    fn progress(&self, now: Instant) -> f32 {
+        match self.spin_start {
+            None => 1.0,
+            Some(t) => {
+                let elapsed = now.saturating_duration_since(t).as_secs_f32();
+                (elapsed / SPIN_DURATION).clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    fn is_spinning(&self, now: Instant) -> bool {
+        self.spin_start
+            .map(|t| now.saturating_duration_since(t).as_secs_f32() < SPIN_DURATION)
+            .unwrap_or(false)
+    }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────
+
+pub struct ScoreReel {
+    columns: Vec<ReelColumn>,
+    /// The score value the reel currently represents.
+    displayed: u64,
+}
+
+impl ScoreReel {
+    pub fn new() -> Self {
+        let columns = (0..BASE_COLUMNS).map(|_| ReelColumn::new(0)).collect();
+        Self {
+            columns,
+            displayed: 0,
+        }
+    }
+
+    /// Drive the reel to show `score`. Changed digit columns spin with a
+    /// right-to-left cascade delay so carries look mechanical.
+    ///
+    /// `now` is the current frame timestamp (used to stagger spin starts).
+    pub fn set_score(&mut self, score: u64, now: Instant) {
+        // Grow columns if the score overflows the current width.
+        let needed = digits_needed(score);
+        if needed > self.columns.len() {
+            let extra = needed - self.columns.len();
+            for _ in 0..extra {
+                self.columns.push(ReelColumn::new(0));
+            }
+        }
+
+        if score == self.displayed {
+            return;
+        }
+
+        // Decompose both old and new score into per-column digits (ones first).
+        let new_digits = decompose(score, self.columns.len());
+        let _old_digits = decompose(self.displayed, self.columns.len());
+
+        // Spin only the columns whose digit changed. Higher-order columns that
+        // carry get a small additional delay so the roll cascades right-to-left.
+        let mut carry_delay = 0.0_f32;
+        for col in 0..self.columns.len() {
+            let new_d = new_digits[col];
+            if new_d != self.columns[col].current {
+                let spin_at = now + std::time::Duration::from_secs_f32(carry_delay);
+                self.columns[col].spin_to(new_d, spin_at);
+                carry_delay += CASCADE_DELAY;
+            }
+        }
+
+        self.displayed = score;
+    }
+
+    /// Instantly snap all columns to `score` with no spin animation.
+    /// Use this on scene init or round start to avoid a spurious roll from 0.
+    /// No-op if already displaying `score`.
+    pub fn snap(&mut self, score: u64) {
+        if score == self.displayed {
+            return;
+        }
+        let needed = digits_needed(score);
+        let n = needed.max(BASE_COLUMNS);
+        let digits = decompose(score, n);
+        self.columns = digits.iter().map(|&d| ReelColumn::new(d)).collect();
+        self.displayed = score;
+    }
+
+    pub fn is_animating(&self, now: Instant) -> bool {
+        self.columns.iter().any(|c| c.is_spinning(now))
+    }
+
+    /// Build the per-frame `ExtrudedGlyphPlacement` list.
+    ///
+    /// `anchor_px`, `anchor_py` — pixel-space center of the reel (matches the
+    /// plaque center so the reel floats in front of it).
+    /// `lift` — world-Z lift (same as plaque lift, bump slightly forward).
+    /// `rot_y` — yaw inherited from the plaque's camera-facing rotation.
+    pub fn placements(
+        &self,
+        now: Instant,
+        anchor_px: f32,
+        anchor_py: f32,
+        lift: f32,
+        rot_y: f32,
+    ) -> Vec<ExtrudedGlyphPlacement> {
+        let n = self.columns.len();
+        // Total reel width in world units; center it on the anchor.
+        let total_w = n as f32 * COLUMN_WIDTH;
+        // Columns are ordered ones-first internally; display most-significant on left.
+        let mut out = Vec::with_capacity(n * 3);
+
+        for col in 0..n {
+            // Display index: most-significant digit on the left.
+            let display_idx = n - 1 - col;
+            let col_center_x =
+                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * COLUMN_WIDTH);
+
+            let c = &self.columns[col];
+            let t = c.progress(now);
+            let spinning = c.is_spinning(now);
+
+            // Spring easing: overshoot then settle.
+            let y_offset = if t < 1.0 {
+                let eased = spring_ease(t);
+                eased * SLOT_HEIGHT
+            } else {
+                0.0
+            };
+
+            let emissive = if spinning {
+                EMISSIVE_SPIN
+            } else {
+                EMISSIVE_IDLE
+            };
+            let mut color = DIGIT_COLOR;
+
+            // Fade leading zeros that are above the most-significant non-zero
+            // column to a dimmer alpha so they read as placeholders. The
+            // ones-place (col 0) always renders at full alpha so a score of
+            // zero still shows a readable "0" rather than fading to nothing.
+            let is_leading_zero = col > 0
+                && c.current == 0
+                && self.columns[col + 1..].iter().all(|cc| cc.current == 0);
+            if is_leading_zero {
+                color[3] = 0.25;
+            }
+
+            if spinning {
+                // During spin: show prev digit scrolling out (upward) and
+                // current digit rolling in from below. A third "next" ghost
+                // (current+1 wrapped) peeks in from below for visual continuity.
+                let prev_label = digit_label(c.prev);
+                let cur_label = digit_label(c.current);
+
+                // prev moves up (+Z) and out: starts at 0, exits at +SLOT_HEIGHT
+                let prev_z = y_offset;
+                // current rolls in from below (-Z): starts at -SLOT_HEIGHT, lands at 0
+                let cur_z = y_offset - SLOT_HEIGHT;
+
+                out.push(make_placement(
+                    &prev_label,
+                    col_center_x,
+                    anchor_py,
+                    lift,
+                    prev_z,
+                    rot_y,
+                    color,
+                    emissive,
+                ));
+                out.push(make_placement(
+                    &cur_label,
+                    col_center_x,
+                    anchor_py,
+                    lift,
+                    cur_z,
+                    rot_y,
+                    color,
+                    emissive,
+                ));
+            } else {
+                // Idle: just the current digit, centred.
+                let cur_label = digit_label(c.current);
+                out.push(make_placement(
+                    &cur_label,
+                    col_center_x,
+                    anchor_py,
+                    lift,
+                    0.0,
+                    rot_y,
+                    color,
+                    emissive,
+                ));
+            }
+        }
+
+        out
+    }
+}
+
+impl Default for ScoreReel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/// Decompose `score` into per-column digits, ones first, padded to `n` columns.
+fn decompose(score: u64, n: usize) -> Vec<u8> {
+    let mut v = Vec::with_capacity(n);
+    let mut s = score;
+    for _ in 0..n {
+        v.push((s % 10) as u8);
+        s /= 10;
+    }
+    v
+}
+
+/// Minimum number of digit columns needed to represent `score`.
+fn digits_needed(score: u64) -> usize {
+    if score == 0 {
+        return BASE_COLUMNS;
+    }
+    let d = score.ilog10() as usize + 1;
+    d.max(BASE_COLUMNS)
+}
+
+fn digit_label(d: u8) -> String {
+    char::from_digit(d as u32, 10)
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "0".to_string())
+}
+
+/// Spring easing with overshoot. `t` in [0, 1], output in [0, 1] with a brief
+/// excursion above 1.0 near `t ≈ 0.7` to simulate mechanical momentum.
+fn spring_ease(t: f32) -> f32 {
+    // Critically-damped-ish spring approximation using a sine envelope.
+    // Peaks slightly above 1.0 at t≈0.65, then settles to 1.0 at t=1.0.
+    let base = 1.0 - (1.0 - t).powi(3); // smooth approach
+    let overshoot = OVERSHOOT * (t * std::f32::consts::PI).sin() * (1.0 - t);
+    (base + overshoot).min(1.0 + OVERSHOOT)
+}
+
+/// Build one `ExtrudedGlyphPlacement` for a single digit.
+///
+/// `z_offset` — vertical offset in world Z units (+Z = up). Used during spin
+/// to move the two travelling glyphs above/below the column anchor.
+#[inline]
+fn make_placement(
+    label: &str,
+    col_px: f32,
+    anchor_py: f32,
+    lift: f32,
+    z_offset: f32,
+    rot_y: f32,
+    color: [f32; 4],
+    emissive: f32,
+) -> ExtrudedGlyphPlacement {
+    ExtrudedGlyphPlacement {
+        world_pos: [col_px, anchor_py, lift + z_offset],
+        scale: DIGIT_SCALE,
+        rotation_x: PITCH,
+        rotation_y: rot_y,
+        label: label.to_string(),
+        color,
+        emissive,
+    }
+}

@@ -919,24 +919,19 @@ impl CameraDebugOverlay {
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
-        // Dim background.
-        instances.push(GpuInstance {
-            rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.55],
-        });
-
         let row_h = (36.0 * scale).max(24.0);
         let row_gap = (6.0 * scale).max(3.0);
         let title_h = (48.0 * scale).max(28.0);
         let hint_h = (22.0 * scale).max(14.0);
         let pad = (16.0 * scale).max(8.0);
+        let margin = (12.0 * scale).max(6.0);
         let rows = self.rows();
 
         let panel_w = (480.0 * scale).min(window_w * 0.85);
         let panel_h =
             pad + title_h + pad + (rows.len() as f32) * (row_h + row_gap) + pad + hint_h + pad;
-        let panel_x = (window_w - panel_w) * 0.5;
-        let panel_y = (window_h - panel_h) * 0.5;
+        let panel_x = window_w - panel_w - margin;
+        let panel_y = margin;
 
         // Border.
         let border = 3.0;

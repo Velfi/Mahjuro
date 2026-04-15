@@ -1,8 +1,12 @@
 //! 3D extruded font glyphs for floating score popups.
 //!
-//! Uses `ttf-parser` to extract Cormorant Garamond outlines and `earcutr`
-//! to triangulate the front/back caps. Side walls are built by extruding
-//! each edge of the flattened contour.
+//! Uses `ttf-parser` to extract Cormorant Garamond outlines and
+//! `lyon_tessellation` to triangulate the front/back caps with a nonzero
+//! fill rule (the rule TrueType outlines are authored against). Side walls
+//! and the top bevel are derived from the boundary edges of the fill
+//! tessellation — edges adjacent to exactly one triangle — so self-
+//! intersecting outlines (e.g. `8`) and unions of overlapping sub-paths
+//! (e.g. the two crossing rectangles of `+`) all extrude correctly.
 //!
 //! Supported characters: any glyph present in the font. Missing glyphs
 //! are silently skipped.
@@ -12,6 +16,12 @@
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
+
+use lyon_path::Path;
+use lyon_path::math::Point;
+use lyon_tessellation::{
+    BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex, VertexBuffers,
+};
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
@@ -23,82 +33,68 @@ const BEVEL_INSET: f32 = 0.020;
 /// How far the beveled shoulder drops from the top face.
 const BEVEL_DEPTH: f32 = 0.012;
 
-/// Number of line segments per quarter-turn when flattening bezier curves.
-const CURVE_SUBDIVISIONS: usize = 4;
+/// Flatness tolerance for curve approximation (in normalised em units).
+/// Smaller = smoother glyphs, more triangles.
+const FLATTEN_TOLERANCE: f32 = 0.0015;
 
 // ---------------------------------------------------------------------------
-// Outline collection via ttf-parser
+// Outline collection via ttf-parser → lyon path
 // ---------------------------------------------------------------------------
 
-struct OutlineCollector {
-    contours: Vec<Vec<(f32, f32)>>,
-    current: Vec<(f32, f32)>,
+struct LyonPathBuilder {
+    builder: lyon_path::path::Builder,
+    has_subpath: bool,
+    first: Option<(f32, f32)>,
 }
 
-impl OutlineCollector {
+impl LyonPathBuilder {
     fn new() -> Self {
         Self {
-            contours: Vec::new(),
-            current: Vec::new(),
+            builder: Path::builder(),
+            has_subpath: false,
+            first: None,
+        }
+    }
+
+    fn finish_open_subpath(&mut self) {
+        if self.has_subpath {
+            self.builder.end(false);
+            self.has_subpath = false;
+            self.first = None;
         }
     }
 }
 
-impl ttf_parser::OutlineBuilder for OutlineCollector {
+impl ttf_parser::OutlineBuilder for LyonPathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
-        if self.current.len() > 2 {
-            self.contours.push(std::mem::take(&mut self.current));
-        } else {
-            self.current.clear();
-        }
-        self.current.push((x, y));
+        self.finish_open_subpath();
+        self.builder.begin(Point::new(x, y));
+        self.has_subpath = true;
+        self.first = Some((x, y));
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        self.current.push((x, y));
+        self.builder.line_to(Point::new(x, y));
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let (px, py) = *self.current.last().unwrap_or(&(0.0, 0.0));
-        for i in 1..=CURVE_SUBDIVISIONS {
-            let t = i as f32 / CURVE_SUBDIVISIONS as f32;
-            let mt = 1.0 - t;
-            let qx = mt * mt * px + 2.0 * mt * t * x1 + t * t * x;
-            let qy = mt * mt * py + 2.0 * mt * t * y1 + t * t * y;
-            self.current.push((qx, qy));
-        }
+        self.builder
+            .quadratic_bezier_to(Point::new(x1, y1), Point::new(x, y));
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let (px, py) = *self.current.last().unwrap_or(&(0.0, 0.0));
-        for i in 1..=CURVE_SUBDIVISIONS {
-            let t = i as f32 / CURVE_SUBDIVISIONS as f32;
-            let mt = 1.0 - t;
-            let cx =
-                mt * mt * mt * px + 3.0 * mt * mt * t * x1 + 3.0 * mt * t * t * x2 + t * t * t * x;
-            let cy =
-                mt * mt * mt * py + 3.0 * mt * mt * t * y1 + 3.0 * mt * t * t * y2 + t * t * t * y;
-            self.current.push((cx, cy));
-        }
+        self.builder.cubic_bezier_to(
+            Point::new(x1, y1),
+            Point::new(x2, y2),
+            Point::new(x, y),
+        );
     }
 
     fn close(&mut self) {
-        // Remove duplicate closing vertex (some fonts line_to back to the
-        // start before calling close, creating a zero-length edge that
-        // breaks earcut).
-        if self.current.len() > 3 {
-            let first = self.current[0];
-            let last = *self.current.last().unwrap();
-            let dx = (first.0 - last.0).abs();
-            let dy = (first.1 - last.1).abs();
-            if dx < 1e-4 && dy < 1e-4 {
-                self.current.pop();
-            }
-        }
-        if self.current.len() > 2 {
-            self.contours.push(std::mem::take(&mut self.current));
-        } else {
-            self.current.clear();
+        if self.has_subpath {
+            self.builder.end(true);
+            self.has_subpath = false;
+            self.first = None;
         }
     }
 }
@@ -115,11 +111,14 @@ fn load_font_data() -> Option<&'static [u8]> {
 }
 
 // ---------------------------------------------------------------------------
-// Triangulation helpers
+// Geometry helpers
 // ---------------------------------------------------------------------------
 
-/// Signed area of a contour (positive = CCW in the flipped-Y coordinate
-/// space used by the glyph meshes).
+fn vec2_normalize(v: (f32, f32)) -> (f32, f32) {
+    let len = (v.0 * v.0 + v.1 * v.1).sqrt().max(1e-6);
+    (v.0 / len, v.1 / len)
+}
+
 fn signed_area(pts: &[(f32, f32)]) -> f64 {
     let n = pts.len();
     let mut a = 0.0_f64;
@@ -130,39 +129,21 @@ fn signed_area(pts: &[(f32, f32)]) -> f64 {
     a * 0.5
 }
 
-/// Point-in-polygon test (ray-casting). Returns true if `pt` is inside `poly`.
-fn point_in_contour(poly: &[(f32, f32)], pt: (f32, f32)) -> bool {
-    let (px, py) = pt;
-    let mut inside = false;
-    let n = poly.len();
-    let mut j = n - 1;
-    for i in 0..n {
-        let (xi, yi) = poly[i];
-        let (xj, yj) = poly[j];
-        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
-fn vec2_normalize(v: (f32, f32)) -> (f32, f32) {
-    let len = (v.0 * v.0 + v.1 * v.1).sqrt().max(1e-6);
-    (v.0 / len, v.1 / len)
-}
-
-fn inset_contour(pts: &[(f32, f32)], inset: f32) -> Vec<(f32, f32)> {
+/// Inset a closed polyline inward by `inset` along the vertex bisector.
+///
+/// Caller passes the boundary loop's winding via `ccw` (true when the loop
+/// is visually CCW in the current coordinate space — i.e. the interior lies
+/// to the right of each edge in Y-down space, or to the left in Y-up).
+fn inset_contour(pts: &[(f32, f32)], inset: f32, ccw: bool) -> Vec<(f32, f32)> {
     let n = pts.len();
     if n < 3 {
         return pts.to_vec();
     }
-    let ccw = signed_area(pts) > 0.0;
     let inward = |dx: f32, dy: f32| {
         if ccw {
-            vec2_normalize((-dy, dx))
-        } else {
             vec2_normalize((dy, -dx))
+        } else {
+            vec2_normalize((-dy, dx))
         }
     };
 
@@ -179,8 +160,8 @@ fn inset_contour(pts: &[(f32, f32)], inset: f32) -> Vec<(f32, f32)> {
         let next_len = (next_edge.0 * next_edge.0 + next_edge.1 * next_edge.1)
             .sqrt()
             .max(1e-6);
-        let in_prev = inward(cur.0 - prev.0, cur.1 - prev.1);
-        let in_next = inward(next.0 - cur.0, next.1 - cur.1);
+        let in_prev = inward(prev_edge.0, prev_edge.1);
+        let in_next = inward(next_edge.0, next_edge.1);
         let bis_raw = (in_prev.0 + in_next.0, in_prev.1 + in_next.1);
         let bis = if bis_raw.0.abs() < 1e-5 && bis_raw.1.abs() < 1e-5 {
             in_prev
@@ -195,298 +176,292 @@ fn inset_contour(pts: &[(f32, f32)], inset: f32) -> Vec<(f32, f32)> {
     out
 }
 
-/// Ensure a contour has the requested winding (CCW if `want_ccw`, CW otherwise).
-fn ensure_winding(pts: &[(f32, f32)], want_ccw: bool) -> Vec<(f32, f32)> {
-    let area = signed_area(pts);
-    let is_ccw = area > 0.0;
-    if is_ccw == want_ccw {
-        pts.to_vec()
-    } else {
-        pts.iter().copied().rev().collect()
-    }
-}
+// ---------------------------------------------------------------------------
+// Cap tessellation + boundary loop extraction
+// ---------------------------------------------------------------------------
 
-/// A single outer boundary contour paired with its interior holes.
-struct ContourGroup {
-    outer: Vec<(f32, f32)>,
-    holes: Vec<Vec<(f32, f32)>>,
-}
-
-/// Partition a glyph's contours into groups of (outer boundary + holes).
+/// Triangulated cap and the boundary loops that define its silhouette.
 ///
-/// Some glyphs have multiple disconnected outer boundaries (e.g. 'i' has
-/// the stem and the dot). We can't just pick the largest contour as "the"
-/// outer boundary and treat everything else as holes — a contour that
-/// isn't geometrically inside another is its own outer boundary.
-fn group_contours(contours: &[Vec<(f32, f32)>]) -> Vec<ContourGroup> {
-    if contours.is_empty() {
-        return Vec::new();
+/// The boundary loops are reconstructed from the tessellation: an edge that
+/// belongs to exactly one triangle is a boundary edge, and these edges chain
+/// into closed loops. This works correctly for self-intersecting or
+/// overlapping sub-paths because lyon resolves the fill rule before we ever
+/// see the geometry.
+struct GlyphCap {
+    positions: Vec<(f32, f32)>,
+    triangles: Vec<[u32; 3]>,
+    /// Closed boundary loops, each a sequence of vertex indices into
+    /// `positions`. Loop winding follows the tessellator's output (CCW in
+    /// Y-up; after our Y-flip, CW visually, i.e. `signed_area` < 0).
+    loops: Vec<Vec<u32>>,
+}
+
+fn tessellate_glyph(path: &Path) -> Option<GlyphCap> {
+    let mut buffers: VertexBuffers<(f32, f32), u32> = VertexBuffers::new();
+    let mut tess = FillTessellator::new();
+    let options = FillOptions::tolerance(FLATTEN_TOLERANCE).with_fill_rule(FillRule::NonZero);
+    let result = tess.tessellate_path(
+        path,
+        &options,
+        &mut BuffersBuilder::new(&mut buffers, |v: FillVertex| {
+            let p = v.position();
+            (p.x, p.y)
+        }),
+    );
+    if result.is_err() || buffers.indices.is_empty() {
+        return None;
     }
 
-    // Compute absolute area for sorting and signed area for winding.
-    let mut info: Vec<(usize, f64)> = contours
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (i, signed_area(c)))
+    let triangles: Vec<[u32; 3]> = buffers
+        .indices
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
         .collect();
-    // Sort by descending absolute area so we process larger contours first.
-    info.sort_by(|a, b| {
-        b.1.abs()
-            .partial_cmp(&a.1.abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
 
-    let mut groups: Vec<ContourGroup> = Vec::new();
-    let mut assigned = vec![false; contours.len()];
+    let loops = extract_boundary_loops(&triangles);
 
-    // First pass: identify outer boundaries (contours not inside any other).
-    for &(idx, _area) in &info {
-        if assigned[idx] {
-            continue;
+    Some(GlyphCap {
+        positions: buffers.vertices,
+        triangles,
+        loops,
+    })
+}
+
+/// Build closed boundary loops from a triangulation. A boundary edge is one
+/// used by exactly one triangle; boundary edges chain head-to-tail into
+/// loops because the triangulation is a manifold with boundary.
+fn extract_boundary_loops(triangles: &[[u32; 3]]) -> Vec<Vec<u32>> {
+    use std::collections::HashMap;
+
+    // Count how many times each directed edge appears. In a consistently
+    // oriented manifold each interior edge appears once forward and once
+    // reversed; boundary edges appear only in one direction.
+    let mut edge_count: HashMap<(u32, u32), i32> = HashMap::new();
+    for tri in triangles {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+            let key = if a < b { (a, b) } else { (b, a) };
+            let sign = if a < b { 1 } else { -1 };
+            *edge_count.entry(key).or_insert(0) += sign;
         }
-        // Check if this contour sits inside any already-identified outer
-        // boundary. Use the contour's centroid as the sample point — the
-        // first vertex often lies exactly on the outer boundary edge (shared
-        // vertices in serif fonts like 'H', 'k'), which makes the ray-cast
-        // indeterminate.
-        let c = &contours[idx];
-        let inv = 1.0 / c.len() as f32;
-        let sample = c.iter().fold((0.0_f32, 0.0_f32), |acc, &(x, y)| {
-            (acc.0 + x * inv, acc.1 + y * inv)
-        });
-        let mut is_hole_of = None;
-        for (gi, group) in groups.iter().enumerate() {
-            if point_in_contour(&group.outer, sample) {
-                is_hole_of = Some(gi);
-                break;
+    }
+
+    // Collect boundary edges in their original (oriented) direction.
+    let mut boundary: HashMap<u32, Vec<u32>> = HashMap::new();
+    for tri in triangles {
+        for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+            let key = if a < b { (a, b) } else { (b, a) };
+            // A boundary edge appears exactly once across all triangles.
+            // Check by seeing whether the edge's reverse also appears —
+            // if edge_count is ±1 it's on the boundary (unmatched).
+            if edge_count.get(&key).copied().unwrap_or(0).abs() == 1 {
+                boundary.entry(a).or_default().push(b);
             }
         }
-
-        if let Some(gi) = is_hole_of {
-            // This contour is inside an existing outer — add it as a hole.
-            let hole = ensure_winding(&contours[idx], false); // holes = CW
-            groups[gi].holes.push(hole);
-        } else {
-            // This contour is a new outer boundary.
-            let outer = ensure_winding(&contours[idx], true); // outer = CCW
-            groups.push(ContourGroup {
-                outer,
-                holes: Vec::new(),
-            });
-        }
-        assigned[idx] = true;
     }
 
-    groups
+    let mut loops: Vec<Vec<u32>> = Vec::new();
+    while let Some((&start, _)) = boundary.iter().find(|(_, v)| !v.is_empty()) {
+        let mut loop_pts = vec![start];
+        let mut cur = start;
+        loop {
+            let next = match boundary.get_mut(&cur).and_then(|v| v.pop()) {
+                Some(n) => n,
+                None => break,
+            };
+            if next == start {
+                break;
+            }
+            loop_pts.push(next);
+            cur = next;
+            if loop_pts.len() > 100_000 {
+                break; // safety valve
+            }
+        }
+        if loop_pts.len() >= 3 {
+            loops.push(loop_pts);
+        }
+    }
+
+    loops
 }
 
-/// Build front/back cap triangles and side walls for one contour group
-/// (outer boundary + holes).
-fn extrude_group(group: &ContourGroup, vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
-    let mut coords: Vec<f64> = Vec::new();
-    let mut hole_indices: Vec<usize> = Vec::new();
+// ---------------------------------------------------------------------------
+// Extrusion
+// ---------------------------------------------------------------------------
 
-    for &(x, y) in &group.outer {
-        coords.push(x as f64);
-        coords.push(y as f64);
-    }
-    for hole in &group.holes {
-        hole_indices.push(coords.len() / 2);
-        for &(x, y) in hole {
-            coords.push(x as f64);
-            coords.push(y as f64);
+fn extrude_cap(
+    cap: &GlyphCap,
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+) {
+    // Build the inset top cap: offset each boundary loop inward and
+    // re-tessellate the inset polygon.
+    let mut inset_path = Path::builder();
+    for lp in &cap.loops {
+        let pts: Vec<(f32, f32)> = lp.iter().map(|&i| cap.positions[i as usize]).collect();
+        // `signed_area > 0` is CCW in the standard (Y-up) sense. Our glyph
+        // coords are Y-down (we flipped Y earlier), so the trapezoid variant
+        // used by `signed_area` gives negative values for visually-CW loops.
+        // Lyon emits a consistently oriented manifold so each loop has a
+        // well-defined winding; pass it straight to `inset_contour`.
+        let area = signed_area(&pts);
+        let ccw = area > 0.0;
+        let inset = inset_contour(&pts, BEVEL_INSET, ccw);
+        if inset.len() < 3 {
+            continue;
         }
-    }
-
-    let inner_outer = inset_contour(&group.outer, BEVEL_INSET);
-    let inner_holes: Vec<Vec<(f32, f32)>> = group
-        .holes
-        .iter()
-        .map(|hole| inset_contour(hole, BEVEL_INSET))
-        .collect();
-
-    // Triangulate the inset top cap.
-    let mut inner_coords: Vec<f64> = Vec::new();
-    let mut inner_hole_indices: Vec<usize> = Vec::new();
-    for &(x, y) in &inner_outer {
-        inner_coords.push(x as f64);
-        inner_coords.push(y as f64);
-    }
-    for hole in &inner_holes {
-        inner_hole_indices.push(inner_coords.len() / 2);
-        for &(x, y) in hole {
-            inner_coords.push(x as f64);
-            inner_coords.push(y as f64);
+        inset_path.begin(Point::new(inset[0].0, inset[0].1));
+        for &(x, y) in &inset[1..] {
+            inset_path.line_to(Point::new(x, y));
         }
+        inset_path.end(true);
     }
+    let inset_path = inset_path.build();
 
-    // Triangulate
-    let tri_indices = match earcutr::earcut(&coords, &hole_indices, 2) {
-        Ok(idx) => idx,
-        Err(_) => return, // triangulation failed — skip this component
-    };
-    let inner_tri_indices = match earcutr::earcut(&inner_coords, &inner_hole_indices, 2) {
-        Ok(idx) => idx,
-        Err(_) => return,
+    let inset_cap = match tessellate_glyph(&inset_path) {
+        Some(c) => c,
+        None => return,
     };
 
-    let all_pts: Vec<(f32, f32)> = coords
-        .chunks_exact(2)
-        .map(|c| (c[0] as f32, c[1] as f32))
-        .collect();
-    let inner_pts: Vec<(f32, f32)> = inner_coords
-        .chunks_exact(2)
-        .map(|c| (c[0] as f32, c[1] as f32))
-        .collect();
-
-    // Top cap (slightly inset), normal pointing +Z
-    let base = vertices.len() as u32;
-    for &(x, y) in &inner_pts {
+    // Top cap (inset), normal +Z.
+    let base_top = vertices.len() as u32;
+    for &(x, y) in &inset_cap.positions {
         vertices.push(Vertex3dTex {
             position: [x, y, DEPTH],
             normal: [0.0, 0.0, 1.0],
             uv: [0.0, 0.0],
         });
     }
-    for &i in &inner_tri_indices {
-        indices.push(base + i as u32);
+    for tri in &inset_cap.triangles {
+        indices.push(base_top + tri[0]);
+        indices.push(base_top + tri[1]);
+        indices.push(base_top + tri[2]);
     }
 
-    // Back cap (z = -DEPTH), normal pointing -Z, reverse winding
-    let base2 = vertices.len() as u32;
-    for &(x, y) in &all_pts {
+    // Back cap (full outline), normal -Z, reverse winding.
+    let base_back = vertices.len() as u32;
+    for &(x, y) in &cap.positions {
         vertices.push(Vertex3dTex {
             position: [x, y, -DEPTH],
             normal: [0.0, 0.0, -1.0],
             uv: [0.0, 0.0],
         });
     }
-    for tri in tri_indices.chunks(3) {
-        indices.push(base2 + tri[0] as u32);
-        indices.push(base2 + tri[2] as u32);
-        indices.push(base2 + tri[1] as u32);
+    for tri in &cap.triangles {
+        indices.push(base_back + tri[0]);
+        indices.push(base_back + tri[2]);
+        indices.push(base_back + tri[1]);
     }
 
-    let mut build_bevel = |outer: &[(f32, f32)], inner: &[(f32, f32)]| {
-        let n = outer.len().min(inner.len());
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let p0 = outer[i];
-            let p1 = outer[j];
-            let q0 = inner[i];
-            let q1 = inner[j];
-            let e1 = [p1.0 - p0.0, p1.1 - p0.1, 0.0];
-            let e2 = [q0.0 - p0.0, q0.1 - p0.1, -BEVEL_DEPTH];
-            let normal = {
-                let nx = e1[1] * e2[2] - e1[2] * e2[1];
-                let ny = e1[2] * e2[0] - e1[0] * e2[2];
-                let nz = e1[0] * e2[1] - e1[1] * e2[0];
-                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
-                [nx / len, ny / len, nz / len]
-            };
-            let base_b = vertices.len() as u32;
-            vertices.push(Vertex3dTex {
-                position: [p0.0, p0.1, DEPTH],
-                normal,
-                uv: [0.0, 0.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [p1.0, p1.1, DEPTH],
-                normal,
-                uv: [1.0, 0.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [q1.0, q1.1, DEPTH - BEVEL_DEPTH],
-                normal,
-                uv: [1.0, 1.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [q0.0, q0.1, DEPTH - BEVEL_DEPTH],
-                normal,
-                uv: [0.0, 1.0],
-            });
-            indices.extend_from_slice(&[
-                base_b,
-                base_b + 1,
-                base_b + 2,
-                base_b,
-                base_b + 2,
-                base_b + 3,
-                base_b,
-                base_b + 2,
-                base_b + 1,
-                base_b,
-                base_b + 3,
-                base_b + 2,
-            ]);
+    // Bevel + side walls built per boundary loop.
+    for lp in &cap.loops {
+        let outer: Vec<(f32, f32)> = lp.iter().map(|&i| cap.positions[i as usize]).collect();
+        let area = signed_area(&outer);
+        let ccw = area > 0.0;
+        let inner = inset_contour(&outer, BEVEL_INSET, ccw);
+        if inner.len() != outer.len() {
+            continue;
         }
-    };
-
-    build_bevel(&group.outer, &inner_outer);
-    for (hole, inner_hole) in group.holes.iter().zip(inner_holes.iter()) {
-        build_bevel(hole, inner_hole);
-    }
-
-    // Side walls — extrude each contour edge
-    let mut build_walls = |pts: &[(f32, f32)]| {
-        let n = pts.len();
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let (x0, y0) = pts[i];
-            let (x1, y1) = pts[j];
-            let dx = x1 - x0;
-            let dy = y1 - y0;
-            let len = (dx * dx + dy * dy).sqrt().max(1e-8);
-            let nx = dy / len;
-            let ny = -dx / len;
-            let normal = [nx, ny, 0.0];
-
-            let base_w = vertices.len() as u32;
-            vertices.push(Vertex3dTex {
-                position: [x0, y0, DEPTH - BEVEL_DEPTH],
-                normal,
-                uv: [0.0, 0.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [x1, y1, DEPTH - BEVEL_DEPTH],
-                normal,
-                uv: [1.0, 0.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [x1, y1, -DEPTH],
-                normal,
-                uv: [1.0, 1.0],
-            });
-            vertices.push(Vertex3dTex {
-                position: [x0, y0, -DEPTH],
-                normal,
-                uv: [0.0, 1.0],
-            });
-            indices.extend_from_slice(&[
-                base_w,
-                base_w + 1,
-                base_w + 2,
-                base_w,
-                base_w + 2,
-                base_w + 3,
-            ]);
-        }
-    };
-
-    build_walls(&group.outer);
-    for hole in &group.holes {
-        build_walls(hole);
+        build_bevel(&outer, &inner, vertices, indices);
+        build_walls(&outer, vertices, indices);
     }
 }
 
-/// Build front and back cap triangles plus side walls for a set of contours.
-fn extrude_contours(
-    contours: &[Vec<(f32, f32)>],
+fn build_bevel(
+    outer: &[(f32, f32)],
+    inner: &[(f32, f32)],
     vertices: &mut Vec<Vertex3dTex>,
     indices: &mut Vec<u32>,
 ) {
-    for group in group_contours(contours) {
-        extrude_group(&group, vertices, indices);
+    let n = outer.len().min(inner.len());
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let p0 = outer[i];
+        let p1 = outer[j];
+        let q0 = inner[i];
+        let q1 = inner[j];
+        let e1 = [p1.0 - p0.0, p1.1 - p0.1, 0.0];
+        let e2 = [q0.0 - p0.0, q0.1 - p0.1, -BEVEL_DEPTH];
+        let normal = {
+            let nx = e1[1] * e2[2] - e1[2] * e2[1];
+            let ny = e1[2] * e2[0] - e1[0] * e2[2];
+            let nz = e1[0] * e2[1] - e1[1] * e2[0];
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+            [nx / len, ny / len, nz / len]
+        };
+        let base = vertices.len() as u32;
+        vertices.push(Vertex3dTex {
+            position: [p0.0, p0.1, DEPTH],
+            normal,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [p1.0, p1.1, DEPTH],
+            normal,
+            uv: [1.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [q1.0, q1.1, DEPTH - BEVEL_DEPTH],
+            normal,
+            uv: [1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [q0.0, q0.1, DEPTH - BEVEL_DEPTH],
+            normal,
+            uv: [0.0, 1.0],
+        });
+        indices.extend_from_slice(&[
+            base,
+            base + 1,
+            base + 2,
+            base,
+            base + 2,
+            base + 3,
+            base,
+            base + 2,
+            base + 1,
+            base,
+            base + 3,
+            base + 2,
+        ]);
+    }
+}
+
+fn build_walls(pts: &[(f32, f32)], vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
+    let n = pts.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (x0, y0) = pts[i];
+        let (x1, y1) = pts[j];
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let len = (dx * dx + dy * dy).sqrt().max(1e-8);
+        let nx = dy / len;
+        let ny = -dx / len;
+        let normal = [nx, ny, 0.0];
+
+        let base = vertices.len() as u32;
+        vertices.push(Vertex3dTex {
+            position: [x0, y0, DEPTH - BEVEL_DEPTH],
+            normal,
+            uv: [0.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [x1, y1, DEPTH - BEVEL_DEPTH],
+            normal,
+            uv: [1.0, 0.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [x1, y1, -DEPTH],
+            normal,
+            uv: [1.0, 1.0],
+        });
+        vertices.push(Vertex3dTex {
+            position: [x0, y0, -DEPTH],
+            normal,
+            uv: [0.0, 1.0],
+        });
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 }
 
@@ -556,35 +531,53 @@ fn build_label_mesh(label: &str) -> Option<MeshCpu> {
             .unwrap_or(units_per_em as u16) as f32
             * scale;
 
-        let mut collector = OutlineCollector::new();
+        let mut collector = LyonPathBuilder::new();
         if face.outline_glyph(glyph_id, &mut collector).is_none() {
             // No outline (e.g. space) — just advance the cursor.
             cursor_x += advance;
             continue;
         }
-        // Flush any trailing open contour.
-        if collector.current.len() > 2 {
-            collector.contours.push(collector.current);
-        }
-        if collector.contours.is_empty() {
-            cursor_x += advance;
-            continue;
-        }
+        collector.finish_open_subpath();
+        let raw_path = collector.builder.build();
 
-        // Scale and translate contour points.
+        // Transform path into label space: scale to em-normalised, flip Y,
+        // and offset by the horizontal cursor.
         let offset_x = cursor_x;
-        let contours: Vec<Vec<(f32, f32)>> = collector
-            .contours
-            .iter()
-            .map(|c| {
-                c.iter()
-                    .map(|&(x, y)| (x * scale + offset_x, -y * scale))
-                    .collect()
-            })
-            .collect();
+        let mut shaped = Path::builder();
+        let mut sub_started = false;
+        for event in raw_path.iter() {
+            use lyon_path::Event;
+            let tx = |p: Point| Point::new(p.x * scale + offset_x, -p.y * scale);
+            match event {
+                Event::Begin { at } => {
+                    shaped.begin(tx(at));
+                    sub_started = true;
+                }
+                Event::Line { to, .. } => {
+                    shaped.line_to(tx(to));
+                }
+                Event::Quadratic { ctrl, to, .. } => {
+                    shaped.quadratic_bezier_to(tx(ctrl), tx(to));
+                }
+                Event::Cubic {
+                    ctrl1, ctrl2, to, ..
+                } => {
+                    shaped.cubic_bezier_to(tx(ctrl1), tx(ctrl2), tx(to));
+                }
+                Event::End { close, .. } => {
+                    if sub_started {
+                        shaped.end(close);
+                        sub_started = false;
+                    }
+                }
+            }
+        }
+        let shaped = shaped.build();
 
-        extrude_contours(&contours, &mut vertices, &mut indices);
-        emitted = true;
+        if let Some(cap) = tessellate_glyph(&shaped) {
+            extrude_cap(&cap, &mut vertices, &mut indices);
+            emitted = true;
+        }
         cursor_x += advance;
     }
 
@@ -594,7 +587,6 @@ fn build_label_mesh(label: &str) -> Option<MeshCpu> {
 
     // Recentre the mesh around the origin.
     let half_w = cursor_x * 0.5;
-    // Find vertical bounds to centre vertically too.
     let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
     for v in &vertices {
         min_y = min_y.min(v.position[1]);
@@ -640,5 +632,24 @@ mod tests {
     fn empty_string_returns_none() {
         let mut cache = GlyphMeshCache::new();
         assert!(cache.mesh_for("").is_none());
+    }
+
+    #[test]
+    fn problem_glyphs_produce_nonempty_meshes() {
+        let mut cache = GlyphMeshCache::new();
+        for label in ["w", "+", "8", "www", "+++", "888"] {
+            let mesh = cache.mesh_for(label);
+            assert!(mesh.is_some(), "mesh_for({label:?}) returned None");
+            let mesh = mesh.unwrap();
+            assert!(
+                mesh.vertices.len() >= 12,
+                "mesh_for({label:?}) produced suspiciously few vertices: {}",
+                mesh.vertices.len()
+            );
+            assert!(
+                mesh.indices.len() % 3 == 0,
+                "mesh_for({label:?}) index count not divisible by 3"
+            );
+        }
     }
 }

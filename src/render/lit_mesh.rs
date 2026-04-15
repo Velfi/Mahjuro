@@ -50,6 +50,13 @@ pub enum MaterialKind {
     /// light sweeps across the surface. Specular is high and tinted by
     /// the albedo so the foil reads as a reflective metallic wrapper.
     Foil = 8,
+    /// Faux glass / glazed crystal. Still rendered in the opaque pass, but
+    /// shaded with a strong Fresnel rim and cool internal glow so small props
+    /// read as translucent under the scene lighting.
+    Glass = 9,
+    /// Hard-enamel lapel pin look: color from `albedo_tex`; height/ridge from
+    /// `relief_tex` (binding 3, linear grayscale).
+    Enamel = 10,
 }
 
 /// Compact per-mesh material parameters.
@@ -174,7 +181,8 @@ impl LitMeshInstance {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         shadow_caster_layout: &wgpu::BindGroupLayout,
-        white_view: &wgpu::TextureView,
+        albedo_view: &wgpu::TextureView,
+        relief_view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
     ) -> Self {
         let identity = glam::Mat4::IDENTITY.to_cols_array();
@@ -198,11 +206,15 @@ impl LitMeshInstance {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(white_view),
+                    resource: wgpu::BindingResource::TextureView(albedo_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(relief_view),
                 },
             ],
         });
@@ -244,6 +256,7 @@ impl LitMeshInstance {
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         sampler: &wgpu::Sampler,
+        relief_view: &wgpu::TextureView,
         rgba: &[u8],
         width: u32,
         height: u32,
@@ -310,6 +323,10 @@ impl LitMeshInstance {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(relief_view),
+                },
             ],
         });
     }
@@ -321,7 +338,8 @@ impl LitMeshInstance {
         &mut self,
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
-        view: &wgpu::TextureView,
+        albedo_view: &wgpu::TextureView,
+        relief_view: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
     ) {
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -334,11 +352,15 @@ impl LitMeshInstance {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(view),
+                    resource: wgpu::BindingResource::TextureView(albedo_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(relief_view),
                 },
             ],
         });
@@ -412,6 +434,31 @@ impl LitMeshInstance {
                 material.specular_strength,
                 material.specular_power,
                 params_w,
+            ],
+        };
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
+    }
+
+    /// Write with an explicit RGBA `base_color` override, bypassing the
+    /// material's default. Used by ghost/trail passes that need per-instance
+    /// alpha + tint without mutating the shared mesh material.
+    pub fn write_uniform_tinted(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: [f32; 16],
+        model: glam::Mat4,
+        material: MaterialParams,
+        base_color: [f32; 4],
+    ) {
+        let u = MeshUniform {
+            view_proj,
+            model: model.to_cols_array(),
+            base_color,
+            material_params: [
+                material.kind as u32 as f32,
+                material.specular_strength,
+                material.specular_power,
+                0.0,
             ],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
@@ -549,7 +596,7 @@ pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
 /// Append a colored axis-aligned box to (vertices, indices). 6 quads, 24
 /// verts (each face has its own normal so the lit shader reads flat).
 /// Shared helper for procedural mesh builders that compose from boxes
-/// (plaque, ofuda, tablets, peg block, dora stand). The standalone curio
+/// (plaque, ofuda, tablets, peg block). The standalone curio
 /// cabinet keeps its own private copy because it predates this helper.
 pub fn push_box(
     vertices: &mut Vec<Vertex3dTex>,
@@ -607,6 +654,33 @@ pub fn push_box(
     }
 }
 
+/// Append a single flat quad to (vertices, indices) with explicit corners
+/// and a shared face normal. UVs are zeroed so decal textures don't bleed;
+/// callers can overwrite them after the fact if they want a mapped face.
+///
+/// Corners must be wound counter-clockwise when viewed from the direction
+/// the normal points. Used by procedural meshes that need non-axis-aligned
+/// faces (e.g. chamfered bevels).
+pub fn push_quad(
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+    v0: [f32; 3],
+    v1: [f32; 3],
+    v2: [f32; 3],
+    v3: [f32; 3],
+    normal: [f32; 3],
+) {
+    let base = vertices.len() as u32;
+    for pos in [v0, v1, v2, v3] {
+        vertices.push(Vertex3dTex {
+            position: pos,
+            normal,
+            uv: [0.0, 0.0],
+        });
+    }
+    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
 /// Build the bind-group layout shared by every lit-mesh primitive.
 pub fn create_lit_mesh_material_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -636,6 +710,18 @@ pub fn create_lit_mesh_material_layout(device: &wgpu::Device) -> wgpu::BindGroup
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            // Grayscale relief / height for relic enamel (binding 1 = color).
+            // Other materials bind a 1×1 mid-gray stub.
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
                 count: None,
             },
         ],

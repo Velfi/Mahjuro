@@ -5,7 +5,9 @@ use std::time::Instant;
 use rand::RngExt;
 
 use crate::core::relic::RelicId;
-use crate::render::wgpu_renderer::{GpuInstance, RelicIcon, TextLabel};
+use crate::core::relic::relic_visual;
+use crate::render::draw_cmd::RelicShowcasePlacement;
+use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
 use crate::ui::widget::wrap_text;
@@ -390,7 +392,8 @@ impl ModalQueue {
         }
     }
 
-    /// Generate GPU instances, text labels, relic icons, and buttons for the active modal.
+    /// Generate GPU instances, text labels, 3D relic placements, and buttons
+    /// for the active modal.
     /// Returns `None` if no modal is active.
     pub fn draw(
         &self,
@@ -401,7 +404,7 @@ impl ModalQueue {
         Vec<GpuInstance>,
         Vec<TextLabel>,
         Vec<ButtonDef>,
-        Vec<RelicIcon>,
+        Vec<RelicShowcasePlacement>,
     )> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
@@ -410,7 +413,7 @@ impl ModalQueue {
         let mut instances = Vec::new();
         let mut labels = Vec::new();
         let mut buttons = Vec::new();
-        let mut relic_icons = Vec::new();
+        let mut relic_showcases = Vec::new();
 
         // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
         let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
@@ -428,7 +431,7 @@ impl ModalQueue {
                 window_h,
                 &mut instances,
                 &mut labels,
-                &mut relic_icons,
+                &mut relic_showcases,
             );
         } else {
             self.draw_simple(
@@ -455,7 +458,7 @@ impl ModalQueue {
             UiAction::Confirm,
         ));
 
-        Some((instances, labels, buttons, relic_icons))
+        Some((instances, labels, buttons, relic_showcases))
     }
 
     /// Draw a simple title+body modal (original behavior).
@@ -560,7 +563,7 @@ impl ModalQueue {
         window_h: f32,
         instances: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
-        relic_icons: &mut Vec<RelicIcon>,
+        relic_showcases: &mut Vec<RelicShowcasePlacement>,
     ) {
         let page = &modal.pages[modal.current_page];
         let padding = (20.0 * scale).max(10.0);
@@ -636,9 +639,22 @@ impl ModalQueue {
         if let Some(relic_id) = page.relic_id {
             let icon_size = icon_h.min(content_w * 0.4);
             let icon_x = card_x + (card_w - icon_size) * 0.5;
-            relic_icons.push(RelicIcon {
-                rect: [icon_x, y, icon_size, icon_size],
+            let visual = relic_visual(relic_id);
+            let face = icon_size * 0.80;
+            let thick = icon_size * 0.12 * visual.thickness_scale;
+            relic_showcases.push(RelicShowcasePlacement {
+                center_pos: [icon_x + icon_size * 0.5, y + icon_size * 0.5, icon_size * 0.38],
+                extents: [face, face, thick],
+                rotation_y_deg: (Instant::now()
+                    .saturating_duration_since(modal.shown_at)
+                    .as_secs_f32()
+                    * visual.ui_spin_rate_deg)
+                    % 360.0,
+                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
+                rotation_z_deg: 0.0,
+                color: page.accent_color,
                 relic_id,
+                glow: alpha * 0.35,
             });
             y += icon_h + icon_gap;
         }

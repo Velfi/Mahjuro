@@ -121,9 +121,9 @@ impl SceneBehavior for MeldGuideScene {
         // ── Camera ────────────────────────────────────────────────
         let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
-            eye: [0.0, 2040.0 * cam_scale, 200.0 * cam_scale],
-            target: [0.0, 0.0, 50.0 * cam_scale],
-            up: [0.0, 1.0, 0.0],
+            eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],
+            target: [0.0, -50.0 * cam_scale, 0.0],
+            up: [0.0, 0.0, 1.0],
             fovy_deg: 45.0,
         });
 
@@ -873,11 +873,15 @@ fn layout_tile_groups(
             placements.push(ShowcaseTilePlacement {
                 tile: *tile,
                 center_pos: [px, py, 0.0],
-                rotation: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, std::f32::consts::PI],
                 scale: 1.0,
                 size_px: tile_size,
                 brightness: 1.0,
                 selected: false,
+                hovered: false,
+                outline: false,
+                glow: false,
+                pick_id: None,
             });
             cursor_x += tile_size;
         }

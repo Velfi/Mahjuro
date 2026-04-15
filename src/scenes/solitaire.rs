@@ -296,9 +296,9 @@ impl SceneBehavior for SolitaireScene {
         // scale proportionally from that reference.
         let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
-            eye: [0.0, 2040.0 * cam_scale, 200.0 * cam_scale],
-            target: [0.0, 0.0, 50.0 * cam_scale],
-            up: [0.0, 1.0, 0.0],
+            eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],
+            target: [0.0, -50.0 * cam_scale, 0.0],
+            up: [0.0, 0.0, 1.0],
             fovy_deg: 45.0,
         });
 
@@ -390,11 +390,15 @@ impl SceneBehavior for SolitaireScene {
             placements.push(ShowcaseTilePlacement {
                 tile: face.to_tile(i as u32),
                 center_pos: [px, py, lift],
-                rotation: [0.0, 0.0, 0.0],
+                rotation: [0.0, 0.0, std::f32::consts::PI],
                 scale: 1.0,
                 size_px: tile_w,
                 brightness: if free { 1.0 } else { 0.55 },
                 selected: self.selected == Some(i),
+                hovered: false,
+                outline: false,
+                glow: false,
+                pick_id: None,
             });
 
             // Hit-test button for free tiles.

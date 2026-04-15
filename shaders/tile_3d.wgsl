@@ -2,6 +2,8 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
     base_color_factor: vec4<f32>,
+    cam_pos: vec3<f32>,
+    _pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
@@ -230,8 +232,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Project decal UVs from model-space position onto the front face.
     // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
     // by the renderer); local Z is the short axis (extent 0.734, screen-horizontal).
-    // Decal U follows the on-screen horizontal (local Z) and V follows on-screen
-    // vertical (local X), so the rasterised glyph appears upright on the tile.
+    // Decal U follows local Z (horizontal on the face) and V follows local X
+    // (vertical). Hand-rack decals are mirrored once at CPU rasterise time
+    // (`rasterize_tile_face_decal` flip_decal_h) so this linear map matches
+    // left-to-right glyph layout; showcase tiles pass flip_decal_h = false.
     let decal_uv = vec2<f32>(in.local_pos.z * 1.362 + 0.5, in.local_pos.x + 0.5);
     let decal = textureSample(decal_tex, base_sampler, decal_uv);
     let in_uv = decal_uv.x >= 0.0 && decal_uv.x <= 1.0 && decal_uv.y >= 0.0 && decal_uv.y <= 1.0;
@@ -292,9 +296,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let enh = cam.base_color_factor.z;
     let has_enh = enh > 0.5;
 
-    // Approximate camera direction for fresnel/view-dependent effects.
-    let cam_pos = vec3<f32>(0.0, 0.0, 4000.0);
-    let view_dir = normalize(cam_pos - in.world_pos);
+    // View direction from the actual camera position passed via uniform.
+    let view_dir = normalize(cam.cam_pos - in.world_pos);
     let ndv_global = max(dot(n_world, view_dir), 0.0);
 
     var point_contrib = vec3<f32>(0.0);
@@ -413,16 +416,24 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         lit_rgb = mix(lit_rgb, vec3<f32>(lum), 0.35) * brightness;
     }
 
-    // ── Selection highlight (solitaire) ────────────────────────────
-    // base_color_factor.y: 1.0 = selected, 0.0 = not selected.
-    // Warm champagne-gold brighten + fresnel rim to echo the Midnight
-    // Gold theme without needing outline geometry.
+    // ── Hover / selection fresnel ───────────────────────────────────
+    // base_color_factor.y: 0.0 = none, 0.5 = hovered, 1.0 = selected.
+    // Hover: cool silver-white rim (thin, tight).
+    // Selected: warm champagne-gold rim (wider, brighter).
     let sel = cam.base_color_factor.y;
-    if (sel > 0.5) {
-        let gold = vec3<f32>(1.00, 0.84, 0.42);
-        lit_rgb = lit_rgb * 1.20 + gold * 0.08;
-        let rim = pow(1.0 - ndv_global, 2.5) * 0.15;
-        lit_rgb = lit_rgb + gold * rim;
+    if (sel > 0.25) {
+        let edge = 1.0 - ndv_global;
+        if (sel < 0.75) {
+            // Hover — cool blue-white fresnel, tight falloff.
+            let cool = vec3<f32>(0.75, 0.88, 1.00);
+            let rim = pow(edge, 3.5) * 0.9;
+            lit_rgb = lit_rgb + cool * rim;
+        } else {
+            // Selected — warm gold fresnel, wider.
+            let gold = vec3<f32>(1.00, 0.84, 0.42);
+            let rim = pow(edge, 2.5) * 1.2;
+            lit_rgb = lit_rgb + gold * rim;
+        }
     }
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);

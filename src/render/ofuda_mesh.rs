@@ -36,32 +36,28 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     );
 
     // The slab face we want the title/rule decal to appear on is +Z (the
-    // broad paper face that tilts toward the camera). `push_box` emits
-    // faces in order +X, -X, +Y, -Y, +Z, -Z, with 4 verts per face — so
-    // the +Z face occupies vertices 16..20. Reorient that face's UVs so
-    // the texture's +u runs along local +X and +v runs along local -Y
-    // (top of the texture sits at the top of the visible paper face).
+    // broad paper face). Standard Z-up, camera right=+X, camera at large -Y.
+    // For the flat-lying ofuda (+Z face up): screen-right = local +X, screen-top = local +Y.
+    // Texture V=0 at top (local +Y), V=1 at bottom (local -Y). U=0 at left, U=1 at right.
     // The +Z corner order pushed by `push_box` is:
-    //   v16 = (x0, y0, z1)  bottom-left
-    //   v17 = (x1, y0, z1)  bottom-right
-    //   v18 = (x1, y1, z1)  top-right
-    //   v19 = (x0, y1, z1)  top-left
+    //   v16 = (x0, y0, z1)  screen-left,  screen-bottom → [0, 1]
+    //   v17 = (x1, y0, z1)  screen-right, screen-bottom → [1, 1]
+    //   v18 = (x1, y1, z1)  screen-right, screen-top    → [1, 0]
+    //   v19 = (x0, y1, z1)  screen-left,  screen-top    → [0, 0]
     vertices[16].uv = [0.0, 1.0];
     vertices[17].uv = [1.0, 1.0];
     vertices[18].uv = [1.0, 0.0];
     vertices[19].uv = [0.0, 0.0];
-    // Also map the -Z broad face. The ofuda now hangs upright on the back
-    // wall, and depending on camera/layout tweaks the visible side can flip;
-    // keeping the ink on both paper faces avoids a blank charm if we end up
-    // seeing the back. The -Z corner order pushed by `push_box` is:
-    //   v20 = (x1, y0, z0)  bottom-right
-    //   v21 = (x0, y0, z0)  bottom-left
-    //   v22 = (x0, y1, z0)  top-left
-    //   v23 = (x1, y1, z0)  top-right
-    vertices[20].uv = [1.0, 1.0];
-    vertices[21].uv = [0.0, 1.0];
-    vertices[22].uv = [0.0, 0.0];
-    vertices[23].uv = [1.0, 0.0];
+    // Also map the -Z broad face (mirrored U so it reads correctly from that side).
+    // The -Z corner order pushed by `push_box` is:
+    //   v20 = (x1, y0, z0)  screen-right, screen-bottom → [0, 1]  (mirrored U)
+    //   v21 = (x0, y0, z0)  screen-left,  screen-bottom → [1, 1]
+    //   v22 = (x0, y1, z0)  screen-left,  screen-top    → [1, 0]
+    //   v23 = (x1, y1, z0)  screen-right, screen-top    → [0, 0]
+    vertices[20].uv = [0.0, 1.0];
+    vertices[21].uv = [1.0, 1.0];
+    vertices[22].uv = [1.0, 0.0];
+    vertices[23].uv = [0.0, 0.0];
     // Every other slab face samples the transparent (0,0) corner of the
     // decal so the title/rule only appears on the broad paper faces. The
     // shader composites decal as `mix(albedo, tex_rgb, tex.a)`, so alpha=0

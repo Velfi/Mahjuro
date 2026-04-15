@@ -408,27 +408,49 @@ impl SceneBehavior for TileSelectScene {
         let hand_tiles = preview_tiles();
         let hand_slots = grid_slots(grid_x, grid_y, grid_w, grid_h);
 
+        // Build tile preview placements for the showcase pipeline.
+        let preview_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> = {
+            let tiles: Vec<Tile> = if self.tutorial_mode {
+                hand_tiles.into_iter().filter(|t| !matches!(t.suit, Suit::Flower)).collect()
+            } else {
+                hand_tiles
+            };
+            let slots: Vec<(f32, f32, f32, f32)> = if self.tutorial_mode {
+                hand_slots.into_iter().take(34).collect()
+            } else {
+                hand_slots
+            };
+            tiles
+                .into_iter()
+                .zip(slots.into_iter())
+                .map(|(tile, (sx, sy, sw, sh))| {
+                    let cx = sx + sw * 0.5;
+                    let cy = sy + sh * 0.5;
+                    crate::render::draw_cmd::ShowcaseTilePlacement {
+                        tile,
+                        center_pos: [cx, cy, 0.0],
+                        rotation: [0.0, 0.0, std::f32::consts::PI],
+                        scale: 1.0,
+                        size_px: sw,
+                        brightness: 1.0,
+                        selected: false,
+                        hovered: false,
+                        outline: false,
+                        glow: false,
+                        pick_id: None,
+                    }
+                })
+                .collect()
+        };
+
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
         frame.table();
-        frame.hand_tile_backdrop();
+        if !preview_placements.is_empty() {
+            frame.showcase_tile_batch(preview_placements);
+        }
         frame.quads(instances);
-        frame.hand_tile_faces();
         frame.texts(text_labels);
-        frame.hand_tiles = if self.tutorial_mode {
-            hand_tiles
-                .into_iter()
-                .filter(|t| !matches!(t.suit, Suit::Flower))
-                .collect()
-        } else {
-            hand_tiles
-        };
-        frame.hand_slots = if self.tutorial_mode {
-            hand_slots.into_iter().take(34).collect()
-        } else {
-            hand_slots
-        };
-        frame.focus = usize::MAX;
         frame.tile_material_override = Some(self.material);
         frame.point_lights = vec![PointLight {
             pos: [w * 0.5, h * 0.05, h * 0.55],

@@ -1,19 +1,24 @@
+#![allow(dead_code)]
 //! Physical scoring bones that tumble onto the play space during a cascade.
 //!
 //! Spawned as each scoring step reveals (chips or mult), each bone falls under
 //! a constant gravity in world-y, tumbling on three axes, lands on the table
 //! plane, and is cleared when the cascade ends. Pixel-space (px, py) is
 //! pinned per bone — only world_y evolves under gravity — so the renderer's
-//! `pixel_to_world` mapping places each bone at a stable spot on the table
+//! [`crate::render::world_space::pixel_to_world`] places each bone at a stable spot on the table
 //! while it falls. The renderer reuses the bone-tablet mesh + lit-mesh
 //! pipeline; only the per-instance model matrix and tint vary.
+//!
+//! [`FallingBonePlacement::rotation`](crate::render::draw_cmd::FallingBonePlacement::rotation)
+//! is consumed as **`Ry * Rx * Rz`** by the renderer — see
+//! [`crate::render::table_transform::rot_ry_rx_rz_rad`].
 
 use rand::RngExt;
 
 use crate::render::draw_cmd::{CascadeTokenKind, FallingBonePlacement};
 
 /// World-y gravity acceleration (units / s²). Negative because world_y grows
-/// upward in `pixel_to_world`'s output. Sized in concert with `SPAWN_HEIGHT`
+/// upward in [`crate::render::world_space::pixel_to_world`]'s output. Sized in concert with `SPAWN_HEIGHT`
 /// so a fresh bone takes roughly 0.85s to hit the table — long enough to
 /// read the tumble, short enough that a multi-step cascade isn't waiting on
 /// the previous burst to finish.
@@ -71,7 +76,7 @@ fn highest_support_below(landed: &[LandedFootprint], b: &FallingBone, floor_y: f
 /// One physical scoring bone in flight or at rest on the table.
 #[derive(Clone, Debug)]
 struct FallingBone {
-    /// Pinned screen-pixel anchor (maps to world xz via `pixel_to_world`).
+    /// Pinned screen-pixel anchor (maps to world xz via [`crate::render::world_space::pixel_to_world`]).
     px: f32,
     py: f32,
     /// Height above the table — falls under `GRAVITY` until it hits `TABLE_Y`.
@@ -189,10 +194,8 @@ impl FallingBoneSystem {
                 self.spawn_one(p.anchor_px, p.anchor_py, p.kind);
             }
         }
-        // Snapshot every currently-landed bone's footprint so the in-flight
-        // bones in the loop below can stack on top of them. We can't borrow
-        // `self.bones` immutably and mutably in the same loop, so a one-pass
-        // copy of just the data we need is the cheapest workaround.
+        // Landed footprints for stacking: must be collected before the
+        // mutable pass over `self.bones` (collision + integration).
         let landed_snapshot: Vec<LandedFootprint> = self
             .bones
             .iter()

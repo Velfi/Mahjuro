@@ -57,7 +57,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, y, front_z],
             normal: front_normal,
-            uv: [x / HALF_W * 0.5 + 0.5, 0.5 - y / HALF_H * 0.5],
+            uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
         });
     }
     for i in 0..SIDES {
@@ -80,7 +80,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         vertices.push(Vertex3dTex {
             position: [x, y, back_z],
             normal: back_normal,
-            uv: [x / HALF_W * 0.5 + 0.5, 0.5 - y / HALF_H * 0.5],
+            uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
         });
     }
     for i in 0..SIDES {

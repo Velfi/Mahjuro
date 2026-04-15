@@ -97,8 +97,6 @@ impl PlayerProgress {
                 new_level: level,
                 relics: new_relics,
                 rules: new_rules,
-                yaku: unlocks.yaku,
-                dora: unlocks.dora,
             })
         } else {
             None
@@ -125,16 +123,9 @@ impl PlayerProgress {
         available
     }
 
-    /// Yaku patterns available for this player's progression level.
-    /// FullHand and Yakuhai are always available; remaining yaku gate on
-    /// progression level.
+    /// All yaku patterns are always available.
     pub fn available_yaku(&self) -> Vec<YakuKind> {
-        let level = self.current_level();
-        let mut available = vec![YakuKind::FullHand, YakuKind::Yakuhai];
-        for l in 1..=level {
-            available.extend(unlocks_for_level(l).yaku);
-        }
-        available
+        YakuKind::all().to_vec()
     }
 
     /// Whether the Plastic tile material is unlocked (requires first victory).
@@ -161,8 +152,6 @@ pub struct LevelUpResult {
     pub new_level: u32,
     pub relics: Vec<RelicId>,
     pub rules: Vec<RuleModifier>,
-    pub yaku: Vec<YakuKind>,
-    pub dora: bool,
 }
 
 fn unlocks_for_level(level: u32) -> LevelUnlocks {
@@ -294,9 +283,6 @@ mod tests {
         let result = result.unwrap();
         assert_eq!(result.new_level, 2);
         assert!(result.relics.contains(&RelicId::MultiplierMaster));
-        assert!(result.yaku.contains(&YakuKind::Toitoi));
-        assert!(result.yaku.contains(&YakuKind::Tanyao));
-        assert!(!result.dora);
         assert!(p.unlocked_relics.contains(&RelicId::MultiplierMaster));
     }
 

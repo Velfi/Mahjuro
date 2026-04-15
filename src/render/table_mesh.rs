@@ -1,8 +1,7 @@
-//! Procedural tessellated quad for the gameplay-scene wood table.
+//! Procedural tessellated quad for the gameplay-scene wood table (one object in world space).
 //!
-//! The mesh is a flat plane in the XY plane (`z = 0` in local space). The
-//! renderer scales it to fill the screen and pushes it back along `-z` so it
-//! sits behind the floating tiles. The tessellation is intentionally dense
+//! The mesh is a flat plane in local **XY** with normal **+Z** — the Z-up world
+//! table uses it directly (see [`crate::render::world_space::pixel_to_world`] + [`crate::render::table_transform::table_mesh_lay_flat`]). The tessellation is intentionally dense
 //! (200×200) so the lacquered-wood vertex shader can displace the surface
 //! along the grain and recompute analytical normals from a finite-difference
 //! gradient — the dense grid is what turns the procedural noise into actual

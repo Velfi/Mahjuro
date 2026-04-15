@@ -28,6 +28,18 @@ pub enum TalismanKind {
     /// Destroy any number of tiles from your hand. They are permanently
     /// removed from the wall for the rest of the run.
     Kiln,
+    /// Convert selected numbered tiles to bamboo; winds and dragons unchanged.
+    Bamboo,
+    /// Convert selected numbered tiles to dots (circles); honors unchanged.
+    Dots,
+    /// Convert selected numbered tiles to characters; honors unchanged.
+    Characters,
+    /// Convert selected numbered tiles to random honors; honors unchanged.
+    Honors,
+    /// Convert every selected tile to a flower tile.
+    Wildflower,
+    /// Make every selected tile match the leftmost selected tile's face.
+    Conformity,
 }
 
 impl TalismanKind {
@@ -38,7 +50,28 @@ impl TalismanKind {
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
             TalismanKind::Kiln,
+            TalismanKind::Bamboo,
+            TalismanKind::Dots,
+            TalismanKind::Characters,
+            TalismanKind::Honors,
+            TalismanKind::Wildflower,
+            TalismanKind::Conformity,
         ]
+    }
+
+    /// Talismans that apply to the current hand selection (at least one tile
+    /// must be selected to use).
+    pub fn acts_on_selection(self) -> bool {
+        matches!(
+            self,
+            TalismanKind::Kiln
+                | TalismanKind::Bamboo
+                | TalismanKind::Dots
+                | TalismanKind::Characters
+                | TalismanKind::Honors
+                | TalismanKind::Wildflower
+                | TalismanKind::Conformity
+        )
     }
 
     pub fn name(self) -> &'static str {
@@ -48,6 +81,12 @@ impl TalismanKind {
             TalismanKind::Gilded => "Gilded Talisman",
             TalismanKind::Polychrome => "Polychrome Talisman",
             TalismanKind::Kiln => "Kiln",
+            TalismanKind::Bamboo => "Bamboo Talisman",
+            TalismanKind::Dots => "Dots Talisman",
+            TalismanKind::Characters => "Characters Talisman",
+            TalismanKind::Honors => "Honors Talisman",
+            TalismanKind::Wildflower => "Wildflower Talisman",
+            TalismanKind::Conformity => "Conformity Talisman",
         }
     }
 
@@ -58,27 +97,56 @@ impl TalismanKind {
             TalismanKind::Pearl => "Every tile in hand: +30 flat chips when scored.",
             TalismanKind::Gilded => "Every tile in hand: +0.5 mult when scored in a meld.",
             TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
-            TalismanKind::Kiln => "Destroy any tiles from your hand. They never return.",
+            TalismanKind::Kiln => {
+                "Select tiles, then use: destroy them permanently. They never return."
+            }
+            TalismanKind::Bamboo => {
+                "Select tiles, then use: numbered tiles become bamboo; honors unchanged."
+            }
+            TalismanKind::Dots => {
+                "Select tiles, then use: numbered tiles become dots; honors unchanged."
+            }
+            TalismanKind::Characters => {
+                "Select tiles, then use: numbered tiles become characters; honors unchanged."
+            }
+            TalismanKind::Honors => {
+                "Select tiles, then use: numbered tiles become random honors; honors unchanged."
+            }
+            TalismanKind::Wildflower => "Select tiles, then use: every selected tile becomes a flower.",
+            TalismanKind::Conformity => {
+                "Select tiles, then use: every selected tile becomes the leftmost selected tile."
+            }
         }
     }
 
     /// The enhancement this talisman stamps onto each hand tile.
-    /// Returns `None` for Kiln (which destroys tiles instead of enhancing).
+    /// Returns `None` for talismans that transform or destroy tiles instead.
     pub fn enhancement(self) -> Option<TileEnhancement> {
         match self {
             TalismanKind::Jade => Some(TileEnhancement::Jade),
             TalismanKind::Pearl => Some(TileEnhancement::Pearl),
             TalismanKind::Gilded => Some(TileEnhancement::Gilded),
             TalismanKind::Polychrome => Some(TileEnhancement::Polychrome),
-            TalismanKind::Kiln => None,
+            TalismanKind::Kiln
+            | TalismanKind::Bamboo
+            | TalismanKind::Dots
+            | TalismanKind::Characters
+            | TalismanKind::Honors
+            | TalismanKind::Wildflower
+            | TalismanKind::Conformity => None,
         }
     }
 
-    /// Flat shop price in gold. Kiln is cheaper because it costs you tiles
-    /// rather than buffing them.
+    /// Flat shop price in gold. Selection talismans are priced like Kiln.
     pub fn shop_price(self) -> u32 {
         match self {
-            TalismanKind::Kiln => 7,
+            TalismanKind::Kiln
+            | TalismanKind::Bamboo
+            | TalismanKind::Dots
+            | TalismanKind::Characters
+            | TalismanKind::Honors
+            | TalismanKind::Wildflower
+            | TalismanKind::Conformity => 7,
             _ => 8,
         }
     }

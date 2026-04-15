@@ -4,3 +4,4 @@ mahjuro_profile_0.json
 mahjuro_settings.json
 /.claude
 .DS_Store
+/.pycache

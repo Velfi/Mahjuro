@@ -67,9 +67,15 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    // Polished champagne gold base — warm, slightly desaturated so the
-    // candle highlights read as specular instead of saturating to orange.
-    let gold = vec3<f32>(1.00, 0.78, 0.34);
+    // base_color_factor.y encodes hover/select state:
+    //   >= 0.75 → selected (warm gold rim)
+    //    < 0.75 → hovered  (cool blue-white rim)
+    let sel = cam.base_color_factor.y;
+    let base_color = select(
+        vec3<f32>(0.72, 0.88, 1.00),   // hovered: cool blue-white
+        vec3<f32>(1.00, 0.78, 0.34),   // selected: polished champagne gold
+        sel >= 0.75,
+    );
 
     // Local-space directional ambient + diffuse so the rim has shape even
     // when no candles are lit. Mirrors tile_3d.wgsl's key-light direction.
@@ -111,7 +117,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let shadow_dummy = textureSampleCompare(shadow_map, shadow_samp, shadow_uv, 1.0);
     let shadow_keep = shadow_globals.params.x * 0.0 + shadow_dummy * 0.0;
 
-    let lit = gold * base_shade + gold * contrib;
+    let lit = base_color * base_shade + base_color * contrib;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(lit, vec3<f32>(inv_g)) + vec3<f32>(shadow_keep);
     return vec4<f32>(out_rgb, 1.0);

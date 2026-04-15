@@ -1,4 +1,9 @@
 //! Cassowary layout: root window → score, modifier strip, hand strip + slots.
+//!
+//! Relics are no longer a horizontal strip in this layout. They are placed as a
+//! left-sidebar column in 3D world space (see `gameplay.rs` relic placement block).
+//! The `relic_strip` field was removed; `hand_top` is now anchored directly below
+//! the modifier strip, reclaiming ~12% vertical height for the hand area.
 
 use cassowary::WeightedRelation::*;
 use cassowary::strength::{REQUIRED, STRONG};
@@ -22,7 +27,6 @@ pub struct LayoutResult {
     pub window_h: f32,
     pub score_panel: Rect,
     pub modifier_strip: Rect,
-    pub relic_strip: Rect,
     pub hand_strip: Rect,
     /// `HAND_SIZE` equal-width slots inside hand (top-left, size).
     pub hand_slots: Vec<Rect>,
@@ -69,15 +73,15 @@ impl LayoutResult {
     }
 }
 
-/// Score panel / modifier strip / relic strip are proportional to window height.
-const SCORE_H_RATIO: f64 = 0.12; // 12% of window height (72px at 600px)
-const MOD_H_RATIO: f64 = 0.08; //  8% of window height (48px at 600px)
-const RELIC_H_RATIO: f64 = 0.12; // 12% of window height
-/// Horizontal inset (per side) of the hand strip relative to the window. The
-/// tiles are drawn through a perspective camera that spreads the silhouettes
-/// of the leftmost/rightmost tiles outward beyond their flat slot rects, so
-/// the strip needs a margin or the edge tiles get clipped by the window.
-const HAND_X_PAD_RATIO: f64 = 0.07;
+/// Score panel and modifier strip are proportional to window height.
+/// Relics live in a left-sidebar 3D column — not a layout strip.
+const SCORE_H_RATIO: f64 = 0.09; //  9% of window height (54px at 600px)
+const MOD_H_RATIO: f64 = 0.05; //  5% of window height (30px at 600px)
+/// Horizontal inset (per side) of the hand strip relative to the window.
+/// Reduced from 22% → 16% to widen the tile rack. The relic sidebar column
+/// is centered at ~10% so 16% still clears it; the perspective camera spreads
+/// edge-tile silhouettes outward so a small margin remains necessary.
+const HAND_X_PAD_RATIO: f64 = 0.16;
 
 /// Where the **3D hand tile mesh** is anchored vertically within each tall slot (fraction from top).
 /// Higher values move the rack toward the bottom of the slot — nearer the player in table space —
@@ -99,10 +103,6 @@ pub struct UiLayout {
     mod_top: Variable,
     mod_w: Variable,
     mod_h: Variable,
-    relic_left: Variable,
-    relic_top: Variable,
-    relic_w: Variable,
-    relic_h: Variable,
     hand_left: Variable,
     hand_top: Variable,
     hand_w: Variable,
@@ -124,10 +124,6 @@ impl UiLayout {
         let mod_top = Variable::new();
         let mod_w = Variable::new();
         let mod_h = Variable::new();
-        let relic_left = Variable::new();
-        let relic_top = Variable::new();
-        let relic_w = Variable::new();
-        let relic_h = Variable::new();
         let hand_left = Variable::new();
         let hand_top = Variable::new();
         let hand_w = Variable::new();
@@ -144,12 +140,9 @@ impl UiLayout {
                 mod_left | EQ(REQUIRED) | 0.0,
                 mod_w | EQ(REQUIRED) | win_w,
                 mod_top | EQ(REQUIRED) | score_top + score_h,
-                relic_left | EQ(REQUIRED) | 0.0,
-                relic_w | EQ(REQUIRED) | win_w,
-                relic_top | EQ(REQUIRED) | mod_top + mod_h,
                 hand_left | EQ(REQUIRED) | win_w * HAND_X_PAD_RATIO,
                 hand_w | EQ(REQUIRED) | win_w * (1.0 - 2.0 * HAND_X_PAD_RATIO),
-                hand_top | EQ(REQUIRED) | relic_top + relic_h,
+                hand_top | EQ(REQUIRED) | mod_top + mod_h,
                 hand_h | EQ(REQUIRED) | win_h - hand_top,
             ])
             .expect("layout constraints");
@@ -165,9 +158,6 @@ impl UiLayout {
             .add_edit_variable(score_h, STRONG)
             .expect("edit score_h");
         solver.add_edit_variable(mod_h, STRONG).expect("edit mod_h");
-        solver
-            .add_edit_variable(relic_h, STRONG)
-            .expect("edit relic_h");
 
         Self {
             solver,
@@ -181,10 +171,6 @@ impl UiLayout {
             mod_top,
             mod_w,
             mod_h,
-            relic_left,
-            relic_top,
-            relic_w,
-            relic_h,
             hand_left,
             hand_top,
             hand_w,
@@ -196,8 +182,6 @@ impl UiLayout {
     pub fn solve(&mut self, width: f32, height: f32) -> LayoutResult {
         let sh = (height as f64 * SCORE_H_RATIO).max(36.0);
         let mh = (height as f64 * MOD_H_RATIO).max(24.0);
-        let rh = (height as f64 * RELIC_H_RATIO).max(48.0);
-
         self.solver
             .suggest_value(self.win_w, width as f64)
             .expect("suggest w");
@@ -210,9 +194,6 @@ impl UiLayout {
         self.solver
             .suggest_value(self.mod_h, mh)
             .expect("suggest mod_h");
-        self.solver
-            .suggest_value(self.relic_h, rh)
-            .expect("suggest relic_h");
 
         let ww = width;
         let hh = height;
@@ -229,12 +210,6 @@ impl UiLayout {
             y: g(self.mod_top),
             w: g(self.mod_w),
             h: g(self.mod_h),
-        };
-        let relic_strip = Rect {
-            x: g(self.relic_left),
-            y: g(self.relic_top),
-            w: g(self.relic_w),
-            h: g(self.relic_h),
         };
         let hand_strip = Rect {
             x: g(self.hand_left),
@@ -262,7 +237,6 @@ impl UiLayout {
             window_h: hh,
             score_panel,
             modifier_strip,
-            relic_strip,
             hand_strip,
             hand_slots,
         }

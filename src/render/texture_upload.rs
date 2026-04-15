@@ -10,7 +10,6 @@ use std::time::Instant;
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
-use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::decal::{rasterize_tile_face_decal, tile_short_label, tile_suit_emoji};
@@ -234,7 +233,7 @@ pub(crate) fn load_zodiac_ribbon_textures(
                     slug: &str,
                     part: &str|
      -> wgpu::TextureView {
-        let path = format!("textures/zodiac_{}_{}.png", slug, part);
+        let path = format!("textures/zodiacs/zodiac_{}_{}.png", slug, part);
         let label = format!("zodiac-ribbon-{}-{}", slug, part);
         let (tex, view) = match crate::asset_path::get(&path) {
             Some(file) => match image::load_from_memory(&file.data) {
@@ -271,69 +270,6 @@ pub(crate) fn load_zodiac_ribbon_textures(
     }
 }
 
-/// Spawn a background thread that decodes all relic PNGs and sends the RGBA
-/// data back over a channel.  The main thread uploads to the GPU as results
-/// arrive (see `poll_relic_textures`).
-pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
-    use crate::core::relic::all_relic_defs;
-
-    let (tx, rx) = mpsc::channel();
-
-    // Collect the static data we need before moving into the thread.
-    let defs: Vec<(RelicId, &'static str, String)> = all_relic_defs()
-        .iter()
-        .map(|d| {
-            let asset_path = format!("textures/relics/{}", d.id.asset_filename());
-            (d.id, d.name, asset_path)
-        })
-        .collect();
-
-    std::thread::Builder::new()
-        .name("relic-loader".into())
-        .spawn(move || {
-            let t_thread = Instant::now();
-            let mut decoded = 0usize;
-            let mut decode_time = std::time::Duration::ZERO;
-            for (id, name, asset_path) in defs {
-                let bytes = match crate::asset_path::get(&asset_path) {
-                    Some(file) => file.data.to_vec(),
-                    None => {
-                        log::warn!("relic icon not found in embedded assets: {asset_path}");
-                        continue;
-                    }
-                };
-                let t_decode = Instant::now();
-                let img = match image::load_from_memory(&bytes) {
-                    Ok(img) => img.into_rgba8(),
-                    Err(e) => {
-                        log::warn!("failed to decode relic icon {asset_path}: {e}");
-                        continue;
-                    }
-                };
-                decode_time += t_decode.elapsed();
-                decoded += 1;
-                let (w, h) = img.dimensions();
-                let msg = DecodedRelicImage {
-                    id,
-                    name,
-                    rgba: img.into_raw(),
-                    width: w,
-                    height: h,
-                };
-                if tx.send(msg).is_err() {
-                    break; // receiver dropped, renderer shut down
-                }
-            }
-            log::info!(
-                "relic-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
-                t_thread.elapsed(),
-            );
-        })
-        .expect("failed to spawn relic-loader thread");
-
-    rx
-}
-
 /// Load tile-pack box art textures synchronously at init. There are at most 7
 /// packs and only a handful have art, so the blocking decode is trivial.
 pub(crate) fn load_pack_textures(
@@ -341,6 +277,7 @@ pub(crate) fn load_pack_textures(
     queue: &wgpu::Queue,
     text_layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
+    default_relief_view: &wgpu::TextureView,
 ) -> HashMap<TilePackKind, RelicTextureGpu> {
     let mut map = HashMap::new();
     for &kind in TilePackKind::all() {
@@ -381,6 +318,8 @@ pub(crate) fn load_pack_textures(
                 view,
                 texture: tex,
                 bind_group,
+                relief_texture: None,
+                relief_view: default_relief_view.clone(),
             },
         );
     }
@@ -556,7 +495,15 @@ pub(crate) fn make_hand_tile_gpu(
     // stretching doesn't distort the rasterised glyphs.
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set);
+    let rgba = rasterize_tile_face_decal(
+        tile,
+        ui_font,
+        emoji_font,
+        DECAL_W,
+        DECAL_H,
+        tile_set,
+        true,
+    );
     let (decal_texture, decal_view) =
         upload_rgba_texture(device, queue, "hand-tile-decal", &rgba, DECAL_W, DECAL_H);
 
@@ -662,7 +609,6 @@ pub(crate) fn make_hand_tile_gpu(
             tile.rank,
             tile.enhancement,
             tile.debuffed_visual,
-            tile.face_down_visual,
         ),
         symbol,
         suit_emoji,
@@ -697,7 +643,15 @@ pub(crate) fn make_showcase_tile_gpu(
 
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set);
+    let rgba = rasterize_tile_face_decal(
+        tile,
+        ui_font,
+        emoji_font,
+        DECAL_W,
+        DECAL_H,
+        tile_set,
+        false,
+    );
     let (decal_texture, decal_view) = upload_rgba_texture(
         device,
         queue,
@@ -762,7 +716,6 @@ pub(crate) fn make_showcase_tile_gpu(
             tile.rank,
             tile.enhancement,
             tile.debuffed_visual,
-            tile.face_down_visual,
         ),
         decal_texture,
     }

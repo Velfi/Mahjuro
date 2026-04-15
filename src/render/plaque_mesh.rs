@@ -8,8 +8,12 @@
 //! Local space spans `-0.5..+0.5` on each axis so a per-instance scale matrix
 //! sizes it via the `PlaquePlacement.extents`.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
 use crate::render::tile_glb::Vertex3dTex;
+
+/// Width of the chamfered bevel strips on the four long edges of the slab
+/// (in local units, where the slab spans −0.5..+0.5).
+const BEVEL: f32 = 0.04;
 
 /// Half-thickness of the plaque slab in local units.
 const HALF_Z: f32 = 0.06;
@@ -38,15 +42,16 @@ pub fn build_plaque_mesh() -> MeshCpu {
     // The slab face we want the engraved-text decal to appear on is +Z
     // (the broad face that tilts toward the camera). `push_box` emits faces
     // in order +X, -X, +Y, -Y, +Z, -Z, with 4 verts per face — so the +Z
-    // face occupies vertices 16..20. Reorient that face's UVs so the
-    // texture's +u runs along local +X (decal reads landscape across the
-    // long axis) and +v runs along local -Y (top of the texture sits at
-    // the top of the visible plaque face). The +Z corner order pushed by
-    // `push_box` is:
-    //   v16 = (x0, y0, z1)  bottom-left
-    //   v17 = (x1, y0, z1)  bottom-right
-    //   v18 = (x1, y1, z1)  top-right
-    //   v19 = (x0, y1, z1)  top-left
+    // face occupies vertices 16..20.
+    //
+    // Standard Z-up world, camera right=+X, camera at large −Y looking toward +Y.
+    // For the flat-lying plaque (+Z face up): screen-right = local +X, screen-top = local +Y.
+    // Texture V=0 at top, V=1 at bottom (standard). U=0 at left, U=1 at right.
+    // The +Z corner order pushed by `push_box` is:
+    //   v16 = (x0, y0, z1)  screen-left,  screen-bottom → [0, 1]
+    //   v17 = (x1, y0, z1)  screen-right, screen-bottom → [1, 1]
+    //   v18 = (x1, y1, z1)  screen-right, screen-top    → [1, 0]
+    //   v19 = (x0, y1, z1)  screen-left,  screen-top    → [0, 0]
     vertices[16].uv = [0.0, 1.0];
     vertices[17].uv = [1.0, 1.0];
     vertices[18].uv = [1.0, 0.0];
@@ -59,6 +64,52 @@ pub fn build_plaque_mesh() -> MeshCpu {
     for i in (0..16).chain(20..24) {
         vertices[i].uv = [0.0, 0.0];
     }
+
+    // Chamfered bevel strips on the four long edges of the slab front face.
+    // Each strip is a quad with a 45° normal so the lit shader catches glancing
+    // light and the plaque reads as having a physical beveled edge rather than
+    // a knife-sharp corner.  UVs stay at (0,0) so the decal does not bleed.
+    let s = std::f32::consts::FRAC_1_SQRT_2; // sin/cos 45° ≈ 0.7071
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // Top bevel: connects front-face top edge to +Y side face.
+        [-0.5,  0.5 - BEVEL, HALF_Z],
+        [ 0.5,  0.5 - BEVEL, HALF_Z],
+        [ 0.5,  0.5,         HALF_Z - BEVEL],
+        [-0.5,  0.5,         HALF_Z - BEVEL],
+        [0.0, s, s],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // Bottom bevel: connects front-face bottom edge to −Y side face.
+        [-0.5, -0.5,         HALF_Z - BEVEL],
+        [ 0.5, -0.5,         HALF_Z - BEVEL],
+        [ 0.5, -0.5 + BEVEL, HALF_Z],
+        [-0.5, -0.5 + BEVEL, HALF_Z],
+        [0.0, -s, s],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // Left bevel: connects front-face left edge to −X side face.
+        [-0.5,         -0.5, HALF_Z - BEVEL],
+        [-0.5 + BEVEL, -0.5, HALF_Z],
+        [-0.5 + BEVEL,  0.5, HALF_Z],
+        [-0.5,          0.5, HALF_Z - BEVEL],
+        [-s, 0.0, s],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // Right bevel: connects front-face right edge to +X side face.
+        [0.5 - BEVEL, -0.5, HALF_Z],
+        [0.5,         -0.5, HALF_Z - BEVEL],
+        [0.5,          0.5, HALF_Z - BEVEL],
+        [0.5 - BEVEL,  0.5, HALF_Z],
+        [s, 0.0, s],
+    );
 
     // Left chain nub.
     push_box(
@@ -82,7 +133,7 @@ pub fn build_plaque_mesh() -> MeshCpu {
         -HALF_Z * 0.5,
         HALF_Z * 0.5,
     );
-    // Chain-nub vertices (24..72) all sample the transparent corner so
+    // Bevel and chain-nub vertices all sample the transparent (0,0) corner so
     // the engraved decal doesn't bleed onto them. The wood material is
     // procedural and unaffected.
     for i in 24..vertices.len() {

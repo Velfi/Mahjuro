@@ -94,10 +94,6 @@ pub struct Tile {
     /// from run state.
     #[serde(default)]
     pub debuffed_visual: bool,
-    /// Transient render-only flag used by bosses like The Veil to flip the
-    /// tile over without affecting scoring or tile identity.
-    #[serde(default)]
-    pub face_down_visual: bool,
 }
 
 impl Tile {
@@ -108,7 +104,6 @@ impl Tile {
             id,
             enhancement: None,
             debuffed_visual: false,
-            face_down_visual: false,
         }
     }
 
@@ -257,5 +252,46 @@ impl Tile {
             // Seasons — cool teal, distinct from flowers.
             Suit::Season => [0.30, 0.70, 0.65, 1.0],
         }
+    }
+}
+
+/// Stable ordering for rack sorts: **suit → rank → id** only.
+///
+/// Kept explicit so the hand strip always follows face order; [`Tile`]'s derived
+/// [`Ord`] also includes enhancement / visual flags after `id`.
+#[inline]
+pub fn cmp_sort_order(a: &Tile, b: &Tile) -> std::cmp::Ordering {
+    a.suit
+        .cmp(&b.suit)
+        .then(a.rank.cmp(&b.rank))
+        .then(a.id.cmp(&b.id))
+}
+
+#[cfg(test)]
+mod sort_order_tests {
+    use super::{cmp_sort_order, Suit, Tile};
+
+    #[test]
+    fn cmp_sort_order_ranks_ascending_within_suit() {
+        let mut v = vec![
+            Tile::new(Suit::Circles, 7, 1),
+            Tile::new(Suit::Circles, 2, 2),
+            Tile::new(Suit::Circles, 5, 3),
+        ];
+        v.sort_by(cmp_sort_order);
+        assert_eq!(v[0].rank, 2);
+        assert_eq!(v[1].rank, 5);
+        assert_eq!(v[2].rank, 7);
+    }
+
+    #[test]
+    fn cmp_sort_order_places_circles_before_dragons() {
+        let mut v = vec![
+            Tile::new(Suit::Dragon, 1, 1),
+            Tile::new(Suit::Circles, 5, 2),
+        ];
+        v.sort_by(cmp_sort_order);
+        assert_eq!(v[0].suit, Suit::Circles);
+        assert_eq!(v[1].suit, Suit::Dragon);
     }
 }

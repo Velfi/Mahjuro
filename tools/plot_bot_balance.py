@@ -57,6 +57,8 @@ def legacy_snapshot(payload: dict) -> dict:
         "clear_relics": avg(aggregate.get("total_gold_from_clear_relics", 0), runs),
         "avg_final_gold": avg(aggregate.get("total_final_gold", 0), runs),
         "deaths_by_ante": aggregate.get("deaths_by_ante", {}),
+        "overscore_by_slot": aggregate.get("overscore_by_slot", {}),
+        "cleared_by_slot": aggregate.get("cleared_by_slot", {}),
     }
 
 
@@ -266,6 +268,57 @@ def plot_economy(runs: list[dict], out_path: Path) -> None:
     plt.close(fig)
 
 
+BLIND_ORDER = {"Small Blind": 0, "Big Blind": 1, "Boss Blind": 2}
+BLIND_SHORT = {"Small Blind": "S", "Big Blind": "B", "Boss Blind": "X"}
+
+
+def slot_sort_key(slot: str) -> tuple[int, int]:
+    ante_str, _, blind = slot.partition("-")
+    try:
+        ante = int(ante_str)
+    except ValueError:
+        ante = 99
+    return (ante, BLIND_ORDER.get(blind, 99))
+
+
+def plot_surplus_per_blind(runs: list[dict], out_path: Path) -> None:
+    surplus_runs = [r for r in runs if r.get("cleared_by_slot")]
+    if not surplus_runs:
+        return
+
+    all_slots = sorted(
+        {slot for r in surplus_runs for slot in r.get("cleared_by_slot", {})},
+        key=slot_sort_key,
+    )
+    xs = list(range(len(all_slots)))
+    tick_labels = [
+        f"A{int(s.split('-', 1)[0])}{BLIND_SHORT.get(s.split('-', 1)[1], '?')}"
+        for s in all_slots
+    ]
+
+    fig, ax = plt.subplots(figsize=(max(14, len(all_slots) * 0.35), 8), constrained_layout=True)
+    fig.suptitle("Average Score Surplus Per Blind", fontsize=16, fontweight="bold")
+
+    for run in surplus_runs:
+        overscore = run.get("overscore_by_slot", {})
+        cleared = run.get("cleared_by_slot", {})
+        ys = []
+        for slot in all_slots:
+            count = cleared.get(slot, 0)
+            ys.append(overscore.get(slot, 0) / count if count else np.nan)
+        ax.plot(xs, ys, marker="o", linewidth=2.0, label=run["label"])
+
+    ax.set_yscale("symlog", linthresh=1000)
+    ax.set_xticks(xs, tick_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("Avg surplus (score over target, log scale)")
+    ax.set_xlabel("Ante / Blind (S=Small, B=Big, X=Boss)")
+    ax.grid(alpha=0.25, which="both")
+    ax.legend(fontsize=9)
+
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
 def main() -> None:
     runs = load_runs()
     docs = ROOT / "docs"
@@ -274,6 +327,7 @@ def main() -> None:
     plot_economy(runs, docs / "bot_balance_economy.png")
     plot_survival_heatmap(runs, docs / "bot_balance_survival_heatmap.png")
     plot_snapshot_tradeoffs(runs, docs / "bot_balance_snapshot_tradeoffs.png")
+    plot_surplus_per_blind(runs, docs / "bot_balance_surplus_per_blind.png")
 
 
 if __name__ == "__main__":

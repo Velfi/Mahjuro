@@ -161,13 +161,13 @@ fn eval_flame(pos: vec3<f32>, wick: vec3<f32>, flame_h: f32, time: f32, idx: f32
     // in the wind direction, with a quadratic falloff (the tip bends
     // most). We work in wick-local space and shift the evaluation
     // point *against* the wind so the envelope effectively leans.
-    let norm_y_raw = clamp(to_raw.y / flame_h, 0.0, 1.5);
+    let norm_z_raw = clamp(to_raw.z / flame_h, 0.0, 1.5);
     let bend_strength = 0.12;
-    let bend = vec2<f32>(wind.x, wind.z) * norm_y_raw * norm_y_raw * bend_strength;
-    let to = vec3<f32>(to_raw.x - bend.x, to_raw.y, to_raw.z - bend.y);
+    let bend = vec2<f32>(wind.x, wind.y) * norm_z_raw * norm_z_raw * bend_strength;
+    let to = vec3<f32>(to_raw.x - bend.x, to_raw.y - bend.y, to_raw.z);
 
-    let height = to.y;
-    let radial = length(vec2<f32>(to.x, to.z));
+    let height = to.z;
+    let radial = length(vec2<f32>(to.x, to.y));
 
     if (height < -flame_h * 0.05 || height > flame_h) {
         return vec4<f32>(0.0);
@@ -175,7 +175,7 @@ fn eval_flame(pos: vec3<f32>, wick: vec3<f32>, flame_h: f32, time: f32, idx: f32
     let norm_h = clamp(height / flame_h, 0.0, 1.0);
 
     // Wind magnitude drives extra flicker and envelope smearing.
-    let wind_mag = clamp(length(vec2<f32>(wind.x, wind.z)) * 0.02, 0.0, 1.5);
+    let wind_mag = clamp(length(vec2<f32>(wind.x, wind.y)) * 0.02, 0.0, 1.5);
 
     // ── Teardrop profile ────────────────────────────────────────────
     // Widest at ~30% up from the base (real votive flame proportions).
@@ -197,8 +197,8 @@ fn eval_flame(pos: vec3<f32>, wick: vec3<f32>, flame_h: f32, time: f32, idx: f32
     let phase = idx * 6.2831853;
     let n_coord = vec3<f32>(
         to.x * 0.12 + sin(time * 1.7 + phase) * 0.15 - wind.x * norm_h * 0.04,
+        to.y * 0.12 + cos(time * 2.1 + phase) * 0.15 - wind.y * norm_h * 0.04,
         norm_h * 3.0 - time * 3.0 + phase,
-        to.z * 0.12 + cos(time * 2.1 + phase) * 0.15 - wind.z * norm_h * 0.04,
     );
     let noise = fbm3(n_coord) - 0.5;
     // Noise amplitude grows with height (base is stable, tip dances).
@@ -321,8 +321,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let sample = textureSampleLevel(lit_density_tex, density_samp, active_sample_uvw(uvw), 0.0);
             let density = max(sample.a, 0.0);
             if (density > 0.001) {
-                let wispy = pow(clamp(density, 0.0, 1.0), 0.72);
-                let absorb = 1.0 - exp(-wispy * step * 0.016);
+                // Linear-in-density extinction with a realistic coefficient:
+                // wispy edges stay translucent via low density, dense cores
+                // actually occlude. Previous pow(density, 0.72) flattened
+                // the high end and coefficient 0.016 made dense smoke look
+                // like fog — silhouettes never read as solid.
+                let sigma_t = clamp(density, 0.0, 1.0) * 0.065;
+                let absorb = 1.0 - exp(-sigma_t * step);
                 color = color + transmittance * sample.rgb * absorb;
                 transmittance = transmittance * (1.0 - absorb);
             }
@@ -377,27 +382,27 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         var best_wind_sq: f32 = 0.0;
         for (var si: i32 = 0; si < 3; si = si + 1) {
             let frac = f32(si) * 0.25;   // 0.0, 0.25, 0.50 of wick height
-            let sample_y = mix(cam.grid_min.y + 2.0, wick.y, frac);
-            let sp = vec3<f32>(wick.x, sample_y, wick.z);
+            let sample_z = mix(cam.grid_min.z + 2.0, wick.z, frac);
+            let sp = vec3<f32>(wick.x, wick.y, sample_z);
             let tx = world_to_texel(sp, cam.grid_min.xyz, cam.grid_max.xyz);
             let vs = textureLoad(velocity_tex, tx, 0);
-            let hz = vs.x * vs.x + vs.z * vs.z;
+            let hz = vs.x * vs.x + vs.y * vs.y;
             if (hz > best_wind_sq) {
                 best_wind_sq = hz;
-                best_wind = vec3<f32>(vs.x, 0.0, vs.z);
+                best_wind = vec3<f32>(vs.x, vs.y, 0.0);
             }
         }
         // DEBUG: gentle idle sway so the flame always looks alive,
         // plus any sampled fluid velocity on top.
         let idle_sway = vec3<f32>(
             sin(flame_time * 1.1 + f32(ci) * 2.1) * 40.0,
-            0.0,
             cos(flame_time * 0.9 + f32(ci) * 3.7) * 30.0,
+            0.0,
         );
         let wind = idle_sway + vec3<f32>(
             clamp(best_wind.x, -120.0, 120.0),
+            clamp(best_wind.y, -120.0, 120.0),
             0.0,
-            clamp(best_wind.z, -120.0, 120.0),
         );
 
         // Fine sub-march through the flame zone.

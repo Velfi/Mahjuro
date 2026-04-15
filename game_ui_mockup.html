@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mahjuro World UI Mockup</title>
+  <style>
+    :root {
+      --bg: #17130f;
+      --line: #d9b779;
+      --text: #f6e6c8;
+      --muted: #d7c19c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #1a1410;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+
+    .screen {
+      width: 95vw;
+      max-width: 1600px;
+      aspect-ratio: 16 / 9;
+      position: relative;
+      border: 2px solid var(--line);
+      border-radius: 20px;
+    }
+
+    .box {
+      position: absolute;
+      border: 2px dashed var(--line);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text);
+      padding: 10px;
+      font-weight: 700;
+    }
+
+    .small { font-size: 14px; }
+
+  </style>
+</head>
+<body>
+  <div class="screen">
+
+    <!-- Score panel: 0–9% -->
+    <div class="box small" style="left:1%;top:1%;width:8%;height:8%;">CANDLES</div>
+    <div class="box small" style="left:10%;top:1%;width:42%;height:8%;">ROUND / BOSS / WIND / DORA / TILES (plaque)</div>
+    <div class="box small" style="right:10%;top:1%;width:14%;height:8%;">GOLD (coin pile)</div>
+    <div class="box small" style="right:1%;top:1%;width:8%;height:8%;">CANDLES + PEGS</div>
+
+    <!-- Modifier strip: 9–14% -->
+    <div class="box small" style="left:1%;top:10%;width:98%;height:4%;">MODIFIER STRIP (chips / mult tokens)</div>
+
+    <!-- Left sidebar: relic wall 14–75% -->
+    <div class="box" style="left:1%;top:15%;width:14%;height:60%;">RELIC WALL (3D column)</div>
+
+    <!-- Right sidebar: consumables 14–75% -->
+    <div class="box" style="right:1%;top:15%;width:14%;height:30%;">TALISMANS</div>
+    <div class="box" style="right:1%;top:47%;width:14%;height:28%;">RIBBONS</div>
+
+    <!-- Center: structure / yaku / hand — 14–75% between the sidebars -->
+    <div class="box" style="left:16%;top:15%;width:68%;height:18%;">STRUCTURE ROW / YAKU TABLETS</div>
+    <div class="box" style="left:16%;top:35%;width:68%;height:38%;">PLAYER HAND (14 tiles)</div>
+
+    <!-- Bottom action row: bowl, mirror, sort, journal -->
+    <div class="box" style="left:2%;bottom:2%;width:12%;height:20%;">DISCARD BOWL</div>
+    <div class="box small" style="left:16%;bottom:2%;width:8%;height:9%;">SORT SUIT</div>
+    <div class="box small" style="left:25%;bottom:2%;width:8%;height:9%;">SORT RANK</div>
+    <div class="box small" style="left:34%;bottom:2%;width:8%;height:9%;">JOURNAL</div>
+    <div class="box" style="right:2%;bottom:2%;width:12%;height:20%;">PLAY (MIRROR)</div>
+
+  </div>
+</body>
+</html>
