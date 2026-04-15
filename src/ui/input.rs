@@ -58,17 +58,42 @@ pub enum UiAction {
 /// What kind of draggable inventory item is currently being rearranged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DragSubject {
-    HandTile,
     Relic,
 }
 
-/// Active drag state for hand-tile or relic reordering.
+/// Active drag state for relic reordering.
 #[derive(Clone, Debug)]
 pub struct DragState {
     pub subject: DragSubject,
     pub from_slot: usize,
     pub start_pos: (f32, f32),
     pub current_pos: (f32, f32),
+}
+
+/// Marquee multi-select state for the hand strip.
+///
+/// While the player holds Confirm (LMB / Space / Enter / gamepad A), the
+/// `selected` array on the run is rewritten each time `current_slot` changes:
+/// every index in `[min(start, current), max(start, current)]` is forced to
+/// `!snapshot[i]`, and every index outside that range is forced back to
+/// `snapshot[i]`. This gives standard marquee semantics — drag forward to
+/// flip more tiles, drag back to revert ones you swept past.
+#[derive(Clone, Debug)]
+pub struct MarqueeSelect {
+    pub start_slot: usize,
+    pub current_slot: usize,
+    pub snapshot: Vec<bool>,
+}
+
+impl MarqueeSelect {
+    pub fn apply(&self, selected: &mut [bool]) {
+        let lo = self.start_slot.min(self.current_slot);
+        let hi = self.start_slot.max(self.current_slot);
+        for (i, slot) in selected.iter_mut().enumerate() {
+            let snap = self.snapshot.get(i).copied().unwrap_or(false);
+            *slot = if i >= lo && i <= hi { !snap } else { snap };
+        }
+    }
 }
 
 pub struct InputState {
@@ -260,6 +285,22 @@ impl InputState {
         false
     }
 
+    /// Mirror of [`Self::on_key`] for key-release events. Currently only
+    /// emits `ConfirmRelease` when Space/Enter goes up — the marquee
+    /// multi-select gesture needs a release edge for keyboard parity with
+    /// the gamepad South button.
+    pub fn on_key_release(&mut self, key: PhysicalKey, actions: &mut Vec<UiAction>) {
+        let PhysicalKey::Code(code) = key else {
+            return;
+        };
+        if matches!(
+            code,
+            KeyCode::Space | KeyCode::Enter | KeyCode::NumpadEnter
+        ) {
+            actions.push(UiAction::ConfirmRelease);
+        }
+    }
+
     /// Hit-test hand slots; `slots` are world rects in same space as cursor.
     pub fn update_pointer_hover(
         &mut self,
@@ -280,7 +321,55 @@ impl InputState {
 
 #[cfg(test)]
 mod tests {
-    use super::{InputState, UiAction};
+    use super::{InputState, MarqueeSelect, UiAction};
+
+    fn marquee(start: usize, current: usize, snapshot: Vec<bool>) -> MarqueeSelect {
+        MarqueeSelect {
+            start_slot: start,
+            current_slot: current,
+            snapshot,
+        }
+    }
+
+    #[test]
+    fn marquee_flips_swept_range_from_empty_snapshot() {
+        let mut sel = vec![false; 6];
+        marquee(2, 4, vec![false; 6]).apply(&mut sel);
+        assert_eq!(sel, vec![false, false, true, true, true, false]);
+    }
+
+    #[test]
+    fn marquee_dragging_back_reverts_unswept_tiles() {
+        // Press at 2, sweep to 5 (selects 2,3,4,5), then drag back to 3.
+        // Tiles 4 and 5 are now outside the swept range and revert to snapshot.
+        let mut sel = vec![false; 6];
+        marquee(2, 3, vec![false; 6]).apply(&mut sel);
+        assert_eq!(sel, vec![false, false, true, true, false, false]);
+    }
+
+    #[test]
+    fn marquee_flips_pre_selected_tiles_off() {
+        // Mixed initial state: tiles 2 and 3 already selected. Press on 3,
+        // sweep to 5. Range [3,5] flips, others keep snapshot.
+        let snapshot = vec![false, false, true, true, false, false];
+        let mut sel = snapshot.clone();
+        marquee(3, 5, snapshot).apply(&mut sel);
+        assert_eq!(sel, vec![false, false, true, false, true, true]);
+    }
+
+    #[test]
+    fn marquee_zero_length_range_flips_only_start() {
+        let mut sel = vec![true, true, true, true];
+        marquee(1, 1, vec![true, true, true, true]).apply(&mut sel);
+        assert_eq!(sel, vec![true, false, true, true]);
+    }
+
+    #[test]
+    fn marquee_sweep_left_works_same_as_sweep_right() {
+        let mut sel = vec![false; 5];
+        marquee(4, 1, vec![false; 5]).apply(&mut sel);
+        assert_eq!(sel, vec![false, true, true, true, true]);
+    }
 
     #[test]
     fn wrap_focus_slot_wraps_forward() {

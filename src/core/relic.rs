@@ -273,12 +273,117 @@ pub enum Rarity {
     Legendary,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RelicRenderMaterial {
+    Metal,
+    Plastic,
+    Glass,
+    Wax,
+}
+
 #[derive(Clone, Debug)]
 pub struct RelicDef {
     pub id: RelicId,
     pub name: &'static str,
     pub description: &'static str,
     pub rarity: Rarity,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub struct RelicVisualDef {
+    pub material: RelicRenderMaterial,
+    pub ui_tilt_x_deg: f32,
+    pub ui_spin_rate_deg: f32,
+    pub thickness_scale: f32,
+}
+
+impl RelicId {
+    #[allow(dead_code)]
+    /// Runtime albedo texture used by the 3D relic meshes.
+    ///
+    /// **Load order** for the renderer (albedo → mask → height) is documented on
+    /// [`crate::render::relic_pipeline`].
+    pub fn render_texture_path(self) -> String {
+        format!("textures/relics/{}", self.asset_filename())
+    }
+
+    #[allow(dead_code)]
+    /// Offline-generated transparent object render used as the source of truth
+    /// for relic visual development and future mesh/height derivation.
+    pub fn source_object_path(self) -> String {
+        let stem = self.asset_filename().trim_end_matches(".png");
+        format!("textures/relics/source/{}_object.png", stem)
+    }
+
+    #[allow(dead_code)]
+    /// Optional binary or transparent silhouette image used to derive the
+    /// runtime relic mesh more deterministically than the shaded object render.
+    pub fn source_mask_path(self) -> String {
+        let stem = self.asset_filename().trim_end_matches(".png");
+        format!("textures/relics/source/{}_mask.png", stem)
+    }
+
+    #[allow(dead_code)]
+    /// Optional offline-generated grayscale relief source for future embossed
+    /// or carved detailing on the 3D relic mesh.
+    pub fn source_heightmap_path(self) -> String {
+        let stem = self.asset_filename().trim_end_matches(".png");
+        format!("textures/relics/source/{}_height.png", stem)
+    }
+
+    #[allow(dead_code)]
+    /// Derived runtime silhouette used when the offline workflow emits a
+    /// cleaned-up alpha mask alongside the visible relic texture.
+    pub fn render_mask_path(self) -> String {
+        let stem = self.asset_filename().trim_end_matches(".png");
+        format!("textures/relics/{}_mask.png", stem)
+    }
+}
+
+pub fn relic_visual(id: RelicId) -> RelicVisualDef {
+    use RelicId::*;
+    use RelicRenderMaterial::{Glass, Metal, Plastic, Wax};
+
+    let material = match id {
+        GlassCannon | WhiteSilence | MeltingIce | MirrorTile | PearlDiver => Glass,
+        PaperLantern | TeaCeremony | SmokeBomb | Hanami | GreenLuck => Wax,
+        JokerTile
+        | Overflow
+        | QuickDraw
+        | ChainReaction
+        | MultiplierMaster
+        | SetMagnet
+        | WildWinds
+        | ShantenShove
+        | RoundCompass
+        | ZodiacPouch
+        | LunarAlmanac
+        | EdgeRunner
+        | LuckySeven
+        | Momentum
+        | Minimalist
+        | TurtleShell
+        | NestEgg
+        | CrackedTile
+        | StarTile
+        | PhantomRelic => Plastic,
+        _ => Metal,
+    };
+
+    let (ui_tilt_x_deg, ui_spin_rate_deg, thickness_scale) = match material {
+        Metal => (-18.0, 28.0, 1.0),
+        Plastic => (-16.0, 32.0, 0.92),
+        Glass => (-22.0, 24.0, 0.86),
+        Wax => (-14.0, 20.0, 1.08),
+    };
+
+    RelicVisualDef {
+        material,
+        ui_tilt_x_deg,
+        ui_spin_rate_deg,
+        thickness_scale,
+    }
 }
 
 /// Gold cost to buy a relic in the shop. Stable (deterministic) per relic id so
@@ -490,7 +595,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::SetMagnet,
             name: "Set Magnet",
-            description: "Scoring a triplet draws a matching tile",
+            description: "Drawing a 3rd copy of a tile pulls the 4th from the wall",
             rarity: Rarity::Uncommon,
         },
         RelicDef {

@@ -240,6 +240,7 @@ pub fn build_curio_cabinet_mesh() -> MeshCpu {
 /// `n` is clamped to `NICHE_COLS * NICHE_ROWS`. The Z component is the niche
 /// floor (slightly in front of the niche back panel) so a relic placed there
 /// reads as "sitting in" the compartment.
+#[allow(dead_code)] // Retained for future scenes; shop kiosk uses its own layout.
 pub fn niche_centers_local(n: usize) -> Vec<[f32; 3]> {
     let xmin = -0.5;
     let ymin = -0.5;

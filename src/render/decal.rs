@@ -14,6 +14,32 @@ use crate::core::tile::{Suit, Tile, TileEnhancement};
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Mirror RGBA image horizontally in place (fixes decal vs mesh +Z chirality).
+fn flip_rgba_h_in_place(rgba: &mut [u8], width: u32, height: u32) {
+    let bpp = 4usize;
+    let w = width as usize;
+    let h = height as usize;
+    let row_stride = w * bpp;
+    for y in 0..h {
+        let row = y * row_stride;
+        for x in 0..w / 2 {
+            let a = row + x * bpp;
+            let b = row + (w - 1 - x) * bpp;
+            for i in 0..bpp {
+                rgba.swap(a + i, b + i);
+            }
+        }
+    }
+}
+
+#[inline]
+fn finish_tile_decal_rgba(mut rgba: Vec<u8>, width: u32, height: u32, flip_h: bool) -> Vec<u8> {
+    if flip_h {
+        flip_rgba_h_in_place(&mut rgba, width, height);
+    }
+    rgba
+}
+
 /// Short ASCII label used when the Unicode glyph isn't available.
 pub fn tile_short_label(tile: &Tile) -> String {
     match tile.suit {
@@ -162,6 +188,10 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
 /// When `tile_set` is `Some("original")` (or another set name), the function
 /// loads a pre-made PNG from `assets/sets/<name>/` instead of rasterizing
 /// glyphs. Falls back to font rasterization if the asset is missing.
+///
+/// `flip_decal_h`: set `true` for **hand** tiles (table rack). The mesh → world
+/// pose makes the procedural UV map read backwards unless the atlas is mirrored
+/// horizontally once. Showcase / pack tiles use `false` with their own pose.
 pub fn rasterize_tile_face_decal(
     tile: &Tile,
     ui_font: Option<&fontdue::Font>,
@@ -169,6 +199,7 @@ pub fn rasterize_tile_face_decal(
     width: u32,
     height: u32,
     tile_set: Option<&str>,
+    flip_decal_h: bool,
 ) -> Vec<u8> {
     let mut rgba = vec![0u8; (width * height * 4) as usize];
 
@@ -177,21 +208,14 @@ pub fn rasterize_tile_face_decal(
         if blit_set_decal(&mut rgba, width, height, tile, set_name) {
             // Talisman accent border drawn *after* the set decal so it
             // composites on top and stays visible.
-            if tile.face_down_visual {
-                return vec![0u8; (width * height * 4) as usize];
-            }
             if let Some(enh) = tile.enhancement {
                 draw_enhancement_border(&mut rgba, width, height, enh);
             }
             if tile.debuffed_visual {
                 draw_debuff_marker(&mut rgba, width, height);
             }
-            return rgba;
+            return finish_tile_decal_rgba(rgba, width, height, flip_decal_h);
         }
-    }
-
-    if tile.face_down_visual {
-        return rgba;
     }
 
     // Talisman accent border. Drawn first so the symbol/emoji blits sit on
@@ -209,7 +233,7 @@ pub fn rasterize_tile_face_decal(
         if tile.debuffed_visual {
             draw_debuff_marker(&mut rgba, width, height);
         }
-        return rgba;
+        return finish_tile_decal_rgba(rgba, width, height, flip_decal_h);
     }
 
     let color = tile.suit_color();
@@ -236,7 +260,7 @@ pub fn rasterize_tile_face_decal(
         draw_debuff_marker(&mut rgba, width, height);
     }
 
-    rgba
+    finish_tile_decal_rgba(rgba, width, height, flip_decal_h)
 }
 
 fn draw_debuff_marker(rgba: &mut [u8], width: u32, height: u32) {
@@ -646,63 +670,6 @@ pub fn rasterize_ofuda_decal(
     let inner_w = w.saturating_sub(pad_x * 2).max(1);
     let inner_h = h.saturating_sub(pad_y * 2).max(1);
 
-    // Pick a title font size from a *nominal* title band (~28% of inner_h),
-    // then build a tight title band sized just to the chosen glyphs. The
-    // wrapped rule body gets whatever's left after a small inter-block gap,
-    // and the whole stack is centred vertically — same pattern as the
-    // gameplay plaque so spacing collapses to a thin breathing margin.
-    let nominal_title_h = (inner_h as f32 * 0.28) as u32;
-    let title_chars = title.chars().count().max(1) as f32;
-    let title_px = (nominal_title_h as f32 * 0.78)
-        .min(inner_w as f32 * 1.5 / title_chars)
-        .max(14.0);
-    let title_h = ((title_px * 1.15) as u32).min(inner_h).max(1);
-
-    // Tiny inter-block gap — just enough to keep the title from kissing the
-    // first line of body copy. A few texels at this scale read as a thin
-    // breathing margin once stretched onto the paper face.
-    let gap_h: u32 = 6;
-
-    // Rule: word-wrap on a rough character budget per line so the body
-    // reads as 2–3 stacked lines. The wrapped block gets the remaining
-    // vertical room after the title and gap.
-    let rule_h = inner_h.saturating_sub(title_h + gap_h).max(1);
-    // Aim for ~3 lines of body copy at maximum (most boss rules wrap to 1–2),
-    // but bias the width estimate a little wider than the raw glyph heuristic
-    // so the body text actually uses the broad paper face instead of collapsing
-    // into a skinny center column with oversized side gutters.
-    let rule_px_target = (rule_h as f32 / 3.0).clamp(48.0, 140.0);
-    let approx_glyph_w = rule_px_target * 0.45;
-    let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(10);
-    let wrapped_rule = wrap_text(rule, chars_per_line);
-    let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
-    let rule_px = fit_multiline_font_px(
-        font,
-        None,
-        &wrapped_rule_lines,
-        inner_w,
-        rule_h,
-        rule_px_target,
-        18.0,
-    );
-
-    let title_band = rasterize_label_styled(
-        font,
-        title,
-        inner_w,
-        title_h,
-        Some(title_px),
-        LabelAlign::Center,
-    );
-    let rule_band = rasterize_label_styled(
-        font,
-        &wrapped_rule,
-        inner_w,
-        rule_h,
-        Some(rule_px),
-        LabelAlign::Center,
-    );
-
     // Sumi-ink calligraphy: warm-black body with a soft brown drop shadow so
     // the strokes lift off the parchment background even when the candle
     // light desaturates the paper.
@@ -714,11 +681,80 @@ pub fn rasterize_ofuda_decal(
         blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, ink);
     };
 
-    // Centre the (title + gap + rule) stack vertically inside `inner_h`.
-    let stack_h = title_h + gap_h + rule_h;
-    let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
-    stamp(&title_band, title_h, stack_top, &mut rgba);
-    stamp(&rule_band, rule_h, stack_top + title_h + gap_h, &mut rgba);
+    if rule.is_empty() {
+        // Title-only mode: fill the full inner height.
+        let title_chars = title.chars().count().max(1) as f32;
+        let title_px = (inner_h as f32 * 0.78)
+            .min(inner_w as f32 / (title_chars * 0.55))
+            .max(14.0);
+        let title_h = ((title_px * 1.15) as u32).min(inner_h).max(1);
+        let title_band = rasterize_label_styled(
+            font,
+            title,
+            inner_w,
+            title_h,
+            Some(title_px),
+            LabelAlign::Center,
+        );
+        let y_off = pad_y + inner_h.saturating_sub(title_h) / 2;
+        stamp(&title_band, title_h, y_off, &mut rgba);
+    } else {
+        // Pick a title font size from a *nominal* title band (~35% of inner_h),
+        // then build a tight title band sized just to the chosen glyphs. The
+        // wrapped rule body gets whatever's left after a small inter-block gap,
+        // and the whole stack is centred vertically.
+        let nominal_title_h = (inner_h as f32 * 0.35) as u32;
+        let title_chars = title.chars().count().max(1) as f32;
+        let title_px = (nominal_title_h as f32 * 0.78)
+            .min(inner_w as f32 * 1.5 / title_chars)
+            .max(14.0);
+        let title_h = ((title_px * 1.15) as u32).min(inner_h).max(1);
+
+        // Tiny inter-block gap.
+        let gap_h: u32 = 6;
+
+        // Rule: word-wrap on a rough character budget per line so the body
+        // reads as 2–3 stacked lines. The wrapped block gets the remaining
+        // vertical room after the title and gap.
+        let rule_h = inner_h.saturating_sub(title_h + gap_h).max(1);
+        let rule_px_target = (rule_h as f32 / 3.0).clamp(48.0, 140.0);
+        let approx_glyph_w = rule_px_target * 0.45;
+        let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(10);
+        let wrapped_rule = wrap_text(rule, chars_per_line);
+        let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
+        let rule_px = fit_multiline_font_px(
+            font,
+            None,
+            &wrapped_rule_lines,
+            inner_w,
+            rule_h,
+            rule_px_target,
+            22.0,
+        );
+
+        let title_band = rasterize_label_styled(
+            font,
+            title,
+            inner_w,
+            title_h,
+            Some(title_px),
+            LabelAlign::Center,
+        );
+        let rule_band = rasterize_label_styled(
+            font,
+            &wrapped_rule,
+            inner_w,
+            rule_h,
+            Some(rule_px),
+            LabelAlign::Center,
+        );
+
+        // Centre the (title + gap + rule) stack vertically inside `inner_h`.
+        let stack_h = title_h + gap_h + rule_h;
+        let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
+        stamp(&title_band, title_h, stack_top, &mut rgba);
+        stamp(&rule_band, rule_h, stack_top + title_h + gap_h, &mut rgba);
+    }
     rgba
 }
 

@@ -44,9 +44,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var vd = textureLoad(src_vd, c, 0);
     vd = vec4<f32>(vd.xyz - grad, vd.w);
 
-    // Solid floor at min Y: clamp downward velocity, hold smoke up.
-    if (c.y == 0) {
-        vd.y = max(vd.y, 0.0);
+    // Solid floor at min Z: clamp downward velocity, hold smoke up.
+    if (c.z == 0) {
+        vd.z = max(vd.z, 0.0);
     }
 
     textureStore(dst_vd, c, vd);

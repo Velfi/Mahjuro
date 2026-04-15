@@ -21,9 +21,9 @@ use crate::core::rules::BlindKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
-    CameraParams, CoinPlacement, DishExplicit, OfudaPlacement, PlaquePlacement, ShrinePlacement,
-    UiFrame, ZodiacRibbonPlacement,
+    CameraParams, DishExplicit, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
+use crate::render::table_transform::{mesh_y_thickness_along_local_y_to_z_up, rot_rz_ry_rx_deg, rot_z_rad};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
@@ -46,6 +46,11 @@ struct ZodiacCelebration {
 }
 
 impl ZodiacCelebration {
+    /// Minimum on-screen time before the player can dismiss the celebration.
+    /// Filters out stale input (e.g. the Confirm that triggered the scene
+    /// transition into pick-blind) so the overlay doesn't close on frame 1.
+    const DISMISS_GRACE: f32 = 0.35;
+
     fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
         Self {
             kind,
@@ -60,6 +65,10 @@ impl ZodiacCelebration {
         Instant::now()
             .saturating_duration_since(self.started_at)
             .as_secs_f32()
+    }
+
+    fn can_dismiss(&self) -> bool {
+        self.elapsed() >= Self::DISMISS_GRACE
     }
 
     fn is_done(&self) -> bool {
@@ -336,9 +345,9 @@ impl PickBlindLayout {
         // towering, and the target sits low+forward so the floor plane
         // catches the spotlight nicely.
         let camera = CameraParams {
-            eye: [0.0, h * 0.50, h * 1.25],
-            target: [0.0, h * 0.18, -h * 0.05],
-            up: [0.0, 1.0, 0.0],
+            eye: [0.0, -h * 1.25, h * 0.50],
+            target: [0.0, h * 0.05, h * 0.18],
+            up: [0.0, 0.0, 1.0],
             fovy_deg: 55.0,
         };
 
@@ -467,7 +476,7 @@ impl SceneBehavior for PickBlindScene {
                     UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
                 )
             }) || !ctx.button_clicks.is_empty();
-            if has_input {
+            if has_input && celeb.can_dismiss() {
                 celeb.dismissed = true;
             }
             if celeb.is_done() {
@@ -561,7 +570,7 @@ impl SceneBehavior for PickBlindScene {
         frame.camera_override = Some(layout.camera);
 
         // ── 3D shrines ────────────────────────────────────────────────
-        let mut shrine_placements: Vec<ShrinePlacement> = Vec::with_capacity(3);
+        let mut shrine_objects: Vec<Object3d> = Vec::with_capacity(3);
         for (i, &blind) in blinds.iter().enumerate() {
             let (px, py) = layout.shrine_pixel_anchor(i);
             let extents = layout.shrine_extents(i);
@@ -608,14 +617,20 @@ impl SceneBehavior for PickBlindScene {
                 0.0
             };
 
-            shrine_placements.push(ShrinePlacement {
-                world_pos: [px, py, 0.0],
+            shrine_objects.push(Object3d {
+                pos: [px, py, 0.0],
                 extents,
+                rotation: glam::Mat4::IDENTITY,
                 color: base_color,
-                glow,
-            });
+                kind: Object3dKind::Shrine { glow },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            });
         }
-        frame.shrine_batch(shrine_placements);
+        frame.object3d_batch(shrine_objects);
 
         // ── Floor plane under the shrines ────────────────────────────
         // A wide flat slab the shrines stand on, drawn via a giant
@@ -627,6 +642,9 @@ impl SceneBehavior for PickBlindScene {
             center_pos: [fx, fy, 0.0],
             extents: layout.floor_extents,
             pick_id: None,
+            rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            arrange_name: None,
+            round: false,
         });
 
         // ── Play + Skip altars on the floor in front of the shrines ─
@@ -642,16 +660,24 @@ impl SceneBehavior for PickBlindScene {
             center_pos: [play_px, play_py, 0.0],
             extents: play_dext,
             pick_id: Some(PICK_PLAY_DISH),
+            rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            arrange_name: None,
+            round: false,
         });
         // Single large golden coin in the center of the play dish.
         let play_dish_top_y = play_dext[1] + 2.0;
-        frame.coin_batch(vec![CoinPlacement {
-            world_pos: [play_px, play_py, play_dish_top_y],
-            rotation_y: 0.4,
-            radius: 14.0,
-            thickness: 5.5,
+        frame.object3d_batch(vec![Object3d {
+            pos: [play_px, play_py, play_dish_top_y],
+            extents: [14.0 * 2.0, 5.5, 14.0 * 2.0],
+            rotation: rot_z_rad(0.4),
             color: [1.00, 0.84, 0.30, 1.0],
-        }]);
+            kind: Object3dKind::Coin,
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,        }]);
 
         if can_skip {
             let (skip_px, skip_py) = layout.skip_dish_anchor_px;
@@ -660,6 +686,9 @@ impl SceneBehavior for PickBlindScene {
                 center_pos: [skip_px, skip_py, 0.0],
                 extents: skip_dext,
                 pick_id: Some(PICK_SKIP_DISH),
+                rotation: mesh_y_thickness_along_local_y_to_z_up(),
+                arrange_name: None,
+                round: false,
             });
             // Single token on the skip dish, tinted by tag rarity.
             let dish_top_y = skip_dext[1] + 2.0;
@@ -668,13 +697,18 @@ impl SceneBehavior for PickBlindScene {
                 Some(crate::core::tag::TagRarity::Uncommon) => [0.55, 0.85, 0.55, 1.0], // jade
                 _ => [0.82, 0.82, 0.88, 1.0],                                       // silver
             };
-            frame.coin_batch(vec![CoinPlacement {
-                world_pos: [skip_px, skip_py, dish_top_y],
-                rotation_y: 0.4,
-                radius: 12.0,
-                thickness: 4.5,
+            frame.object3d_batch(vec![Object3d {
+                pos: [skip_px, skip_py, dish_top_y],
+                extents: [12.0 * 2.0, 4.5, 12.0 * 2.0],
+                rotation: rot_z_rad(0.4),
                 color: tag_color,
-            }]);
+                kind: Object3dKind::Coin,
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            }]);
         }
 
         // ── Lighting: temple hall at night ────────────────────────────
@@ -856,6 +890,7 @@ impl SceneBehavior for PickBlindScene {
         let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
         let desc_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
         let base_target = ctx.run.base_target;
+        let upcoming_run_number = ctx.run.run_number;
         for (i, &blind) in blinds.iter().enumerate() {
             // The upcoming shrine's label is replaced by the 3D plaque
             // below; skip it here to avoid redundancy.
@@ -966,25 +1001,36 @@ impl SceneBehavior for PickBlindScene {
             } else {
                 upcoming.name().to_string()
             };
-            let target_value = (base_target as f32 * upcoming.target_multiplier()) as u32;
+            let target_value = base_target.saturating_mul(upcoming_run_number);
 
-            frame.plaque(PlaquePlacement {
-                center_pos: [plaque_px, plaque_py, plaque_world_y],
+            let cam_rot = glam::Mat4::from_rotation_x((-60.0_f32).to_radians())
+                * camera_facing_rotation(layout.camera.eye, layout.camera.target);
+            frame.object3d(Object3d {
+                pos: [plaque_px, plaque_py, plaque_world_y],
                 extents: [plaque_w, plaque_h, 10.0],
-                rotation_y_deg: 0.0,
-                top_text: format!(
-                    "ANTE {}/{} · {}",
-                    ctx.run.ante,
-                    crate::game::run::FINAL_ANTE,
-                    blind_name
-                ),
-                bot_text: format!(
-                    "Target {}   ·   Reward ${}   ·   Gold {}",
-                    target_value,
-                    upcoming.clear_reward(),
-                    ctx.run.gold,
-                ),
-            });
+                rotation: cam_rot,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Plaque {
+                    top: format!(
+                        "ANTE {}/{} · {}",
+                        ctx.run.ante,
+                        crate::game::run::FINAL_ANTE,
+                        blind_name
+                    ),
+                    bot: format!(
+                        "Target {}   ·   Reward ${}   ·   Gold {}",
+                        target_value,
+                        upcoming.clear_reward(),
+                        ctx.run.gold,
+                    ),
+                    pick_id: None,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            });
 
             // Boss blinds get an ofuda beside the plaque showing the rule
             // description + tier — the plaque's two lines are already full.
@@ -1004,15 +1050,24 @@ impl SceneBehavior for PickBlindScene {
                     // close enough to share the plaque accent light.
                     let ofuda_px =
                         (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 4.0).max(ofuda_w * 0.5 + 8.0);
-                    let ofuda_py = plaque_py + shrine_ext[2] * 0.15;
+                    let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 18.0;
                     let ofuda_world_y = plaque_world_y * 0.86;
-                    frame.ofuda(OfudaPlacement {
-                        center_pos: [ofuda_px, ofuda_py, ofuda_world_y],
+                    frame.object3d(Object3d {
+                        pos: [ofuda_px, ofuda_py, ofuda_world_y],
                         extents: [ofuda_w, ofuda_h, 3.0],
-                        rotation_y_deg: 0.0,
-                        title: def.name.to_string(),
-                        rule: description.to_string(),
-                    });
+                        rotation: cam_rot,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::Ofuda {
+                            title: def.name.to_string(),
+                            rule: description.to_string(),
+                            pick_id: None,
+                        },
+                        focusable: false,
+                        scene_shaded: true,
+                        own_light: None,
+                        hover_target: 0.0,
+                        anim_id: 0,
+                        arrange_name: None,                    });
                 }
             }
         }
@@ -1242,16 +1297,18 @@ impl SceneBehavior for PickBlindScene {
             let tilt = 8.0 + (t * 1.2).sin() * 3.0;
             let alpha = (t / 0.3).clamp(0.0, 1.0);
 
-            frame.zodiac_batch(vec![ZodiacRibbonPlacement {
-                anchor_pos: [cx, cy, lift],
-                length: ribbon_l,
-                width: ribbon_w,
-                rotation_y_deg: sway_yaw,
-                rotation_x_deg: tilt,
-                rotation_z_deg: sway_roll,
+            frame.object3d_batch(vec![Object3d {
+                pos: [cx, cy, lift],
+                extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
+                rotation: rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll),
                 color: [1.0, 1.0, 1.0, alpha],
-                kind: Some(celeb.kind),
-            }]);
+                kind: Object3dKind::ZodiacRibbon { kind: Some(celeb.kind) },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            }]);
 
             let title_font = (h * 0.04).max(24.0);
             let title_y = h * 0.10;

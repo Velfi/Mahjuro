@@ -48,7 +48,7 @@ const BOUNCE_THRESHOLD: f32 = 40.0;
 
 #[derive(Clone, Debug)]
 struct FlyingCoin {
-    /// Pixel-space anchor (maps to world xz via `pixel_to_world`).
+    /// Pixel-space anchor (maps to world xz via [`crate::render::world_space::pixel_to_world`]).
     px: f32,
     py: f32,
     /// Height above the table surface. Evolves under gravity.

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Generate trading-card-pack cover art for TilePackKind booster packs.
+"""Generate booster-pack cover art for TilePackKind booster packs.
 
 Each tile pack is a booster pack the player can buy in the shop to
-permanently add extra tiles to their wall. The cover art evokes the
-feeling of tearing open a collectible trading-card foil pack — glossy,
-vivid, and slightly mysterious.
+permanently add extra tiles to their wall. The cover art must be
+instantly recognizable at thumbnail size — the player identifies a
+pack by its silhouette and its one signature color, not by reading it.
 
-Style: retro-TCG foil packs from the late 1990s / early 2000s. Think
-Pokémon booster packs, Yu-Gi-Oh!, or Magic: The Gathering — a narrow
-vertical portrait with a dramatic illustration, a stylized logo area,
-and holographic / metallic sheen. The pack art lives in the "Midnight
-Gold" universe of Mahjuro: deep indigo-black backgrounds, metallic gold
-accents, and silk-ribbon energy.
+Style: "Flat Icon Sigil". One bold centered sigil per pack on a
+pack-unique flat color background, wrapped in a shared frame. Modern
+trading-card minimalism (MTG mana symbols, Slay the Spire relics,
+Balatro booster packs) rather than '90s foil wrappers. Shiny effects,
+if wanted, are applied later as an in-engine shader pass — not baked
+into the PNG.
 
 Outputs `pack_<slug>.png` into assets/textures/packs/.
 
@@ -56,122 +56,135 @@ FINAL_SIZE = (256, 384)  # tall portrait, matches a booster-pack aspect ratio
 # ---------------------------------------------------------------------------
 
 STYLE_PREFIX = (
-    "Cover art for a collectible trading-card booster pack in a 'Midnight "
-    "Gold' mahjong roguelite video game. The image is a TALL VERTICAL "
-    "PORTRAIT (2:3 aspect) depicting the front face of a sealed foil pack. "
-    "\n\n"
-    "STYLE RULES:\n"
-    "- Late-1990s / early-2000s TCG booster pack aesthetic: glossy "
-    "metallic wrapper with holographic shimmer, dramatic central "
-    "illustration, stylized title area across the top.\n"
-    "- The pack wrapper has a faint foil-crinkle texture and catches "
-    "light along diagonal creases.\n"
-    "- Background color is deep midnight indigo (#0e1225) fading to "
-    "black at the edges.\n"
-    "- Gold metallic accents: a thin decorative border, corner "
-    "flourishes, and the title lettering.\n"
-    "- The central illustration floats inside an ornate gold frame "
-    "or medallion shape on the pack face.\n"
-    "- Any visible text MUST be in a made-up nonsense language (NOT "
-    "real words in any real language). The pack title area should have "
-    "one or two lines of stylized nonsense-script that evoke the pack "
-    "name without being readable.\n"
-    "- A small nonsense-text tagline at the bottom of the pack in "
-    "smaller font (like a card count: 'Karthun ×7' style).\n"
-    "- The wrapper has a subtle tear-notch at the top edge.\n"
-    "- No real brand names, no real language, no watermarks.\n"
-    "- Flat front-on view, no perspective, as if the pack is laid on "
-    "a scanner.\n"
+    "A booster-pack cover for a mahjong roguelite video game. TALL "
+    "VERTICAL PORTRAIT, 2:3 aspect. 'FLAT ICON SIGIL' style: one bold "
+    "centered sigil on a flat pack-color background, wrapped in a "
+    "shared frame. Flat vector look, like a modern trading-card pack "
+    "icon (think MTG mana symbols, Slay the Spire relics, Balatro "
+    "booster packs). Orthographic front-on view, no perspective.\n\n"
+    "SHARED FRAME (identical across every pack — this is the 'brand'):\n"
+    "- The full image is a rounded-corner rectangle, 2:3 portrait, "
+    "filling the frame edge-to-edge with the pack-specific background "
+    "color.\n"
+    "- A thin gold (#d9b35a) hairline border sits just inside the "
+    "rounded edge, 2–3 px thick, evenly offset from the outer edge.\n"
+    "- A small V-shaped tear notch is cut into the top edge, centered "
+    "horizontally — a subtle visual cue that this is a pack to open.\n"
+    "- A short gold (#d9b35a) hairline bar spans the bottom quarter "
+    "of the frame, dividing the sigil area above from a blank title "
+    "bar region below. The title bar region is left EMPTY (no text, "
+    "no glyphs, no script — the engine overlays a real title later).\n"
+    "- The sigil sits in the upper three-quarters of the frame, "
+    "centered horizontally, comfortably inset from the gold border.\n\n"
+    "HARD STYLE RULES — non-negotiable:\n"
+    "- Pure flat color fills. Every region is ONE flat RGB value with "
+    "crisp hard edges between regions.\n"
+    "- NO gradients. NO shading. NO highlights. NO shadows. NO ambient "
+    "occlusion. NO volumetric lighting. NO glow. NO bloom.\n"
+    "- NO textures of any kind: no foil crinkle, no paper, no grain, "
+    "no noise, no brushstrokes, no creases.\n"
+    "- NO holographic shimmer, NO iridescence, NO reflections.\n"
+    "- NO text, NO letters, NO numerals, NO logos, NO runes, NO script "
+    "of any kind anywhere in the image.\n"
+    "- The sigil must be silhouette-first — identifiable from its "
+    "shape alone at 32×32. Bold, simple, iconic. Not a scene, not a "
+    "painting, not an illustration with depth. One symbol.\n"
+    "- Small unifying flourish allowed: 2–3 tiny flat gold (#d9b35a) "
+    "dots drifting in negative space near the sigil. That's it.\n"
+    "- No watermarks, no mockup, no surface beneath the pack.\n"
 )
 
 # ---------------------------------------------------------------------------
 # Per-pack definitions
 # ---------------------------------------------------------------------------
 
-# (slug, display_name, illustration_prompt, pack_color_accent)
+# Each pack owns ONE background color and ONE sigil. Silhouette-first:
+# the sigil must be identifiable at 32×32. No scenes, no painterly detail.
+#
+# (slug, display_name, sigil_prompt, background_color)
 PACKS = [
     (
         "honors",
         "Honors Pack",
-        "The central illustration shows four wind-compass roses stacked "
-        "vertically, each glowing a different elemental color (ice-blue, "
-        "ember-orange, jade-green, storm-violet), with three dragon "
-        "silhouettes coiling around them — one red, one green, one white. "
-        "Ethereal mist swirls between the symbols. The overall mood is "
-        "ceremonial and ancient.",
-        "Pack wrapper is deep navy (#0e1838) with silver-white holographic "
-        "shimmer and gold border accents.",
+        "SIGIL: a single bold 8-pointed compass rose, flat ivory "
+        "(#f2ead6), centered. Four long cardinal points (N/E/S/W) and "
+        "four shorter diagonal points, all crisp straight triangles "
+        "meeting at a small ivory circle at the center. The compass "
+        "occupies about 55% of the sigil area. Nothing else.",
+        "Pack background: deep navy #0e1838, one flat fill edge-to-edge.",
     ),
     (
         "polychrome",
         "Polychrome Pack",
-        "The central illustration shows a single mahjong tile exploding "
-        "into prismatic shards of rainbow light, each shard refracting "
-        "into a different saturated color. The tile itself is cracking "
-        "open like an egg to reveal iridescent crystal inside. Scattered "
-        "smaller tiles orbit the burst, each trailing a different-colored "
-        "comet tail.",
-        "Pack wrapper shifts between magenta, violet, and teal in a "
-        "holographic oil-slick rainbow effect. Gold border accents.",
+        "SIGIL: a single upright rounded-rectangle mahjong-tile "
+        "silhouette, flat white (#f8f8f8), centered, occupying about "
+        "45% of the sigil-area height. From behind the tile, 8 flat "
+        "triangular shards radiate outward in a symmetric starburst, "
+        "each a different pure flat color, clockwise from top: red "
+        "(#e23b3b), orange (#e88a2a), yellow (#e8d23a), green "
+        "(#3aa84e), teal (#3ae8c4), blue (#3a6ee8), violet (#8a3ae8), "
+        "magenta (#e83ac4). Hard triangular edges, no blur.",
+        "Pack background: pure black #000000, one flat fill edge-to-edge.",
     ),
     (
         "terminals",
         "Terminals Pack",
-        "The central illustration shows two massive stone pillars — one "
-        "carved with the numeral 1 and one with 9 (in stylized nonsense "
-        "script, not real numbers) — flanking a narrow gate. Between "
-        "the pillars, a beam of golden light shoots upward into a "
-        "star-filled sky. Tiles are stacked at the base of each pillar "
-        "like offerings. Ancient, monumental.",
-        "Pack wrapper is warm obsidian-black (#1a1412) with amber-gold "
-        "holographic shimmer and gold border accents.",
+        "SIGIL: a simple symmetric gateway silhouette in flat amber "
+        "(#e8a84a). Two thick vertical trapezoidal pillars (wider at "
+        "base) flank a narrow dark gap; a flat horizontal amber lintel "
+        "bridges the tops. The overall shape reads as a Π / torii / "
+        "gate glyph. Strong bilateral symmetry. One color (amber) "
+        "against the background. Nothing else.",
+        "Pack background: warm obsidian #1a1412, one flat fill "
+        "edge-to-edge.",
     ),
     (
         "flowers",
         "Flowers Pack",
-        "The central illustration shows four flowers arranged in a "
-        "diamond pattern — plum blossom, orchid, chrysanthemum, and "
-        "bamboo stalk — each rendered in luminous white-and-pink ink "
-        "wash. Petals drift between them, caught in an invisible breeze. "
-        "A faint full moon hangs behind the arrangement. Delicate, "
-        "serene, East Asian woodblock energy.",
-        "Pack wrapper is soft plum-black (#1c0f1e) with pearlescent "
-        "pink holographic shimmer and rose-gold border accents.",
+        "SIGIL: a single bold stylized 5-petal plum blossom, flat "
+        "pink (#f2a6c0), centered, with a small flat gold (#e8c46a) "
+        "round center. Five rounded petals arranged symmetrically "
+        "around the center, each petal a simple convex flat shape. "
+        "The blossom occupies about 55% of the sigil area. One "
+        "blossom only — no grid, no scene, no scatter.",
+        "Pack background: plum-black #1c0f1e, one flat fill edge-to-edge.",
     ),
     (
         "bamboo_grove",
         "Bamboo Grove",
-        "The central illustration shows a dense grove of bamboo stalks "
-        "rising from misty ground, receding into darkness. Each stalk "
-        "has faintly glowing segments etched with tile-rank symbols. "
-        "A narrow path winds between the stalks toward a distant golden "
-        "lantern. Fireflies dot the scene. Lush, mysterious, green-on-"
-        "black.",
-        "Pack wrapper is deep forest-black (#0a1a0e) with emerald-green "
-        "holographic shimmer and gold border accents.",
+        "SIGIL: a single upright bamboo stalk silhouette, flat jade-"
+        "green (#3aa84e), centered, running most of the sigil area's "
+        "height. The stalk is segmented by 4–5 thin darker green "
+        "(#1a6a2e) horizontal bands at even intervals. Two small flat "
+        "jade-green pointed leaf shapes angle outward from near the "
+        "top. One stalk only — no grove, no scene.",
+        "Pack background: deep forest-black #0a1a0e, one flat fill "
+        "edge-to-edge.",
     ),
     (
         "coin_cache",
         "Coin Cache",
-        "The central illustration shows a cascade of ancient coins "
-        "tumbling from an overturned lacquered chest. Each coin has a "
-        "square hole at its center and faintly glowing concentric-circle "
-        "tile symbols on its face. The coins catch golden light as they "
-        "fall. A velvet cloth beneath. Opulent, weighty.",
-        "Pack wrapper is rich burgundy-black (#1a0e12) with warm gold "
-        "holographic shimmer and gold border accents.",
+        "SIGIL: a single bold round Chinese cash-coin silhouette, "
+        "flat gold (#e8c46a), centered, occupying about 55% of the "
+        "sigil area. A square hole is punched out of the center, "
+        "revealing the burgundy-black pack background through it. "
+        "The coin's outer edge is a clean circle; the inner square "
+        "is axis-aligned. One coin only — no cascade, no chest.",
+        "Pack background: burgundy-black #1a0e12, one flat fill "
+        "edge-to-edge.",
     ),
     (
         "scroll_library",
         "Scroll Library",
-        "The central illustration shows a towering wall of wooden "
-        "cubbyholes, each holding a rolled scroll. Several scrolls are "
-        "pulled halfway out, unfurling to reveal brushstroke tile-rank "
-        "characters (nonsense script) in red and black ink. A scholar's "
-        "hand reaches for one from the bottom of the frame. Candlelit, "
-        "scholarly, warm amber atmosphere.",
-        "Pack wrapper is deep sepia-black (#1a140a) with warm amber "
-        "holographic shimmer and gold border accents.",
+        "SIGIL: a single partly-unrolled scroll silhouette, flat "
+        "cream (#f2ead6), centered, horizontally oriented. Two flat "
+        "cream cylindrical rolls sit at the left and right ends; "
+        "between them a flat cream rectangular sheet spans across, "
+        "slightly taller than the rolls. Thin amber (#e8b86a) end-caps "
+        "on each roll. The sheet is blank — NO text, NO script, NO "
+        "glyphs. One scroll only.",
+        "Pack background: sepia-black #1a140a, one flat fill "
+        "edge-to-edge.",
     ),
 ]
 
@@ -180,8 +193,16 @@ PACKS = [
 # Prompt building
 # ---------------------------------------------------------------------------
 
-def build_prompt(illustration: str, color_accent: str) -> str:
-    return f"{STYLE_PREFIX}\n\nCentral illustration: {illustration}\n\nWrapper color: {color_accent}"
+def build_prompt(sigil: str, bg_color: str) -> str:
+    return (
+        f"{STYLE_PREFIX}\n"
+        f"{bg_color}\n\n"
+        f"{sigil}\n\n"
+        "Reminder: shared frame (rounded 2:3 rect, thin gold hairline "
+        "border, top center tear-notch, bottom gold hairline bar with "
+        "empty title region below) must be present. Flat fills only. "
+        "No gradients, no shading, no textures, no text, no script."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -210,27 +231,6 @@ def generate_image(client: OpenAI, prompt: str, model: str, size: str) -> Image.
         img_bytes = requests.get(url, timeout=120).content
 
     return Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-
-
-def add_foil_sheen(img: Image.Image) -> Image.Image:
-    """Overlay a subtle diagonal holographic sheen."""
-    import math
-
-    w, h = img.size
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    op = overlay.load()
-
-    for y in range(h):
-        for x in range(w):
-            # Diagonal wave.
-            t = math.sin((x + y) * math.pi / 120) * 0.5 + 0.5
-            # Subtle iridescent tint cycling R/G/B.
-            r = int(200 + 55 * math.sin(t * math.pi * 2))
-            g = int(200 + 55 * math.sin(t * math.pi * 2 + 2.1))
-            b = int(200 + 55 * math.sin(t * math.pi * 2 + 4.2))
-            op[x, y] = (r, g, b, 18)
-
-    return Image.alpha_composite(img, overlay)
 
 
 # ---------------------------------------------------------------------------
@@ -271,11 +271,6 @@ def main() -> None:
         type=str,
         default="1024x1536",
         help="Generation size (default: 1024x1536, portrait).",
-    )
-    parser.add_argument(
-        "--no-sheen",
-        action="store_true",
-        help="Skip the holographic sheen post-processing.",
     )
     parser.add_argument(
         "--preview",
@@ -325,8 +320,8 @@ def main() -> None:
     skipped = 0
     failed = 0
 
-    for idx, (slug, name, illustration, color_accent) in targets:
-        prompt = build_prompt(illustration, color_accent)
+    for idx, (slug, name, sigil, bg_color) in targets:
+        prompt = build_prompt(sigil, bg_color)
         output_path = out_dir / f"pack_{slug}.png"
 
         print(f"\n[{idx + 1}/{len(PACKS)}] {name}")
@@ -347,9 +342,6 @@ def main() -> None:
         try:
             assert client is not None
             img = generate_image(client, prompt, args.model, args.size)
-
-            if not args.no_sheen:
-                img = add_foil_sheen(img)
 
             if not args.preview:
                 img = img.resize(FINAL_SIZE, Image.LANCZOS)

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
-use crate::core::hand::{detect_all_sets, validate_selection_with_rules};
+use crate::core::hand::{SetKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_shop_price};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
@@ -152,10 +152,18 @@ fn analyze_hand_options(
 
         analysis.valid_count += 1;
 
-        if run.uses_structure_bank()
-            && run.structure_tiles.len() + scoring_tiles.len() > crate::game::run::HAND_SIZE
-        {
-            continue;
+        if run.uses_structure_bank() {
+            let kongs_after = run
+                .structure_sets
+                .iter()
+                .chain(sets.iter())
+                .filter(|s| s.kind == SetKind::Kong)
+                .count();
+            if run.structure_tiles.len() + scoring_tiles.len()
+                > crate::game::run::HAND_SIZE + kongs_after
+            {
+                continue;
+            }
         }
         analysis.committable_count += 1;
 
@@ -284,6 +292,10 @@ pub struct RunStats {
     pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
     pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
     pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
+    /// Sum of score surplus on cleared blinds, keyed by "{ante:02}-{Small|Big|Boss}".
+    pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
+    /// Count of cleared blinds, keyed by the same slot as `overscore_by_slot`.
+    pub cleared_by_slot: std::collections::BTreeMap<String, u32>,
 }
 
 impl Default for RunStats {
@@ -321,6 +333,8 @@ impl Default for RunStats {
             bot_issues_by_reason: std::collections::BTreeMap::new(),
             bot_issues_by_blind: std::collections::BTreeMap::new(),
             bot_issues_by_boss: std::collections::BTreeMap::new(),
+            overscore_by_slot: std::collections::BTreeMap::new(),
+            cleared_by_slot: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -365,6 +379,10 @@ pub struct AggregateStats {
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
     pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
+    /// Summed score surplus on cleared blinds, keyed by "{ante:02}-{Small|Big|Boss}".
+    pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
+    /// Summed cleared-blind counts matching `overscore_by_slot` keys.
+    pub cleared_by_slot: std::collections::BTreeMap<String, u64>,
 }
 
 impl AggregateStats {
@@ -419,6 +437,12 @@ impl AggregateStats {
         for (boss, count) in &s.bot_issues_by_boss {
             *self.bot_issues_by_boss.entry(boss.clone()).or_insert(0) += *count;
         }
+        for (slot, overscore) in &s.overscore_by_slot {
+            *self.overscore_by_slot.entry(slot.clone()).or_insert(0) += *overscore;
+        }
+        for (slot, count) in &s.cleared_by_slot {
+            *self.cleared_by_slot.entry(slot.clone()).or_insert(0) += *count as u64;
+        }
     }
 
     fn merge_in(&mut self, other: AggregateStats) {
@@ -469,9 +493,27 @@ impl AggregateStats {
         for (boss, count) in other.bot_issues_by_boss {
             *self.bot_issues_by_boss.entry(boss).or_insert(0) += count;
         }
+        for (slot, overscore) in other.overscore_by_slot {
+            *self.overscore_by_slot.entry(slot).or_insert(0) += overscore;
+        }
+        for (slot, count) in other.cleared_by_slot {
+            *self.cleared_by_slot.entry(slot).or_insert(0) += count;
+        }
     }
 
     pub fn print_summary(&self) {
+        fn slot_sort_key(slot: &str) -> (u32, u32) {
+            let (ante_str, rest) = slot.split_once('-').unwrap_or((slot, ""));
+            let ante = ante_str.parse::<u32>().unwrap_or(99);
+            let blind_order = match rest {
+                "Small Blind" => 0,
+                "Big Blind" => 1,
+                "Boss Blind" => 2,
+                _ => 99,
+            };
+            (ante, blind_order)
+        }
+
         println!("\n=== Bot Stats ({} runs) ===", self.runs);
         if self.runs == 0 {
             return;
@@ -552,6 +594,45 @@ impl AggregateStats {
         for (blind, count) in &self.deaths_by_blind {
             let pct = *count as f64 * 100.0 / self.runs as f64;
             println!("  {:<12} {:>4} ({:>5.1}%)", blind, count, pct);
+        }
+        if !self.cleared_by_slot.is_empty() {
+            println!("\navg score surplus per blind (log-scaled bars):");
+            let mut slots: Vec<(&String, u64, u64)> = self
+                .cleared_by_slot
+                .iter()
+                .map(|(slot, count)| {
+                    let overscore = *self.overscore_by_slot.get(slot).unwrap_or(&0);
+                    (slot, *count, overscore)
+                })
+                .collect();
+            slots.sort_by_key(|(slot, _, _)| slot_sort_key(slot));
+            let avgs: Vec<f64> = slots
+                .iter()
+                .map(|(_, count, overscore)| {
+                    if *count == 0 {
+                        0.0
+                    } else {
+                        *overscore as f64 / *count as f64
+                    }
+                })
+                .collect();
+            let log_max = avgs
+                .iter()
+                .copied()
+                .map(|v| (v + 1.0).ln())
+                .fold(0.0_f64, f64::max)
+                .max(1.0);
+            for ((slot, count, _), avg) in slots.iter().zip(avgs.iter()) {
+                let bar_len = ((((*avg + 1.0).ln()) / log_max) * 40.0).round() as usize;
+                let bar = "#".repeat(bar_len.min(40));
+                println!(
+                    "  {:<18} (n={:>5}) {:>10}  {}",
+                    slot,
+                    count,
+                    human_readable_score(*avg),
+                    bar
+                );
+            }
         }
         if !self.skipped_tags.is_empty() {
             println!("\nskip tags taken:");
@@ -709,10 +790,17 @@ fn best_play_in_hand(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
-        if run.uses_structure_bank()
-            && run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE
-        {
-            continue;
+        if run.uses_structure_bank() {
+            let kongs_after = run
+                .structure_sets
+                .iter()
+                .chain(sets.iter())
+                .filter(|s| s.kind == SetKind::Kong)
+                .count();
+            if run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE + kongs_after
+            {
+                continue;
+            }
         }
         let mut merged_sets = run.structure_sets.clone();
         merged_sets.extend(sets.iter().cloned());
@@ -900,22 +988,23 @@ fn enumerate_regular_subsets(
     }
 
     if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        let flower = flowers[0];
         if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                &flowers[1..],
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << flower.hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 3,
-                out,
-            );
+            for (flower_idx, flower) in flowers.iter().copied().enumerate() {
+                enumerate_regular_subsets(
+                    &remaining[2..],
+                    &remove_flower(flowers, flower_idx),
+                    current_mask
+                        | (1 << first.hand_index)
+                        | (1 << remaining[1].hand_index)
+                        | (1 << flower.hand_index),
+                    allow_wrap,
+                    no_sequences,
+                    require_honor,
+                    must_play_five,
+                    current_tile_count + 3,
+                    out,
+                );
+            }
         }
     }
 
@@ -927,26 +1016,34 @@ fn enumerate_regular_subsets(
                 next_mask |= 1 << remaining[idx].hand_index;
                 remove.push(idx);
             }
-            if seq.uses_flower {
-                let flower = flowers[0];
-                next_mask |= 1 << flower.hand_index;
-            }
             let rest = remove_indices(remaining, &remove);
-            enumerate_regular_subsets(
-                &rest,
-                if seq.uses_flower {
-                    &flowers[1..]
-                } else {
-                    flowers
-                },
-                next_mask,
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 3,
-                out,
-            );
+            if seq.uses_flower {
+                for (flower_idx, flower) in flowers.iter().copied().enumerate() {
+                    enumerate_regular_subsets(
+                        &rest,
+                        &remove_flower(flowers, flower_idx),
+                        next_mask | (1 << flower.hand_index),
+                        allow_wrap,
+                        no_sequences,
+                        require_honor,
+                        must_play_five,
+                        current_tile_count + 3,
+                        out,
+                    );
+                }
+            } else {
+                enumerate_regular_subsets(
+                    &rest,
+                    flowers,
+                    next_mask,
+                    allow_wrap,
+                    no_sequences,
+                    require_honor,
+                    must_play_five,
+                    current_tile_count + 3,
+                    out,
+                );
+            }
         }
     }
 }
@@ -976,25 +1073,43 @@ fn emit_leaf_masks(
 
 fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
     let mut masks = vec![0];
-    if flowers.len() >= 2 {
-        masks.push((1 << flowers[0].hand_index) | (1 << flowers[1].hand_index));
+
+    for select_count in 2..=flowers.len().min(4) {
+        collect_flower_masks(flowers, select_count, 0, 0, &mut masks);
     }
-    if flowers.len() >= 3 {
-        masks.push(
-            (1 << flowers[0].hand_index)
-                | (1 << flowers[1].hand_index)
-                | (1 << flowers[2].hand_index),
-        );
-    }
-    if flowers.len() >= 4 {
-        masks.push(
-            (1 << flowers[0].hand_index)
-                | (1 << flowers[1].hand_index)
-                | (1 << flowers[2].hand_index)
-                | (1 << flowers[3].hand_index),
-        );
-    }
+
     masks
+}
+
+fn collect_flower_masks(
+    flowers: &[IndexedTile],
+    select_count: usize,
+    start: usize,
+    current_mask: u32,
+    out: &mut Vec<u32>,
+) {
+    if select_count == 0 {
+        out.push(current_mask);
+        return;
+    }
+
+    for idx in start..=flowers.len() - select_count {
+        collect_flower_masks(
+            flowers,
+            select_count - 1,
+            idx + 1,
+            current_mask | (1 << flowers[idx].hand_index),
+            out,
+        );
+    }
+}
+
+fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
+    flowers
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, flower)| (idx != remove_idx).then_some(*flower))
+        .collect()
 }
 
 fn same_face(a: Tile, b: Tile) -> bool {
@@ -1393,7 +1508,11 @@ mod tests {
         let limit: u32 = 1u32 << n;
         for mask in 1u32..limit {
             let count = mask.count_ones() as usize;
-            if matches!(count, 0 | 1 | 4 | 7 | 10 | 13) {
+            // `validate_selection_with_rules` accepts several sizes (e.g. 3 = one meld,
+            // 4 = kong or two flower pairs, 6 = two melds). Do not skip by count —
+            // an old `4`-tile exclusion caused brute force to disagree with
+            // `enumerate_candidate_play_masks` / `best_play_in_hand`.
+            if matches!(count, 0 | 1) {
                 continue;
             }
             let mut tiles = Vec::with_capacity(count);
@@ -1407,10 +1526,18 @@ mod tests {
             else {
                 continue;
             };
-            if run.uses_structure_bank()
-                && run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE
-            {
-                continue;
+            if run.uses_structure_bank() {
+                let kongs_after = run
+                    .structure_sets
+                    .iter()
+                    .chain(sets.iter())
+                    .filter(|s| s.kind == SetKind::Kong)
+                    .count();
+                if run.structure_tiles.len() + tiles.len()
+                    > crate::game::run::HAND_SIZE + kongs_after
+                {
+                    continue;
+                }
             }
             let mut merged_sets = run.structure_sets.clone();
             merged_sets.extend(sets.iter().cloned());
@@ -1561,6 +1688,39 @@ mod tests {
                 run.hand
             );
         }
+    }
+
+    #[test]
+    fn candidate_masks_include_each_flower_identity_for_wildcard_melds() {
+        let mut run = RunState::new_demo();
+        run.hand = vec![
+            t(Suit::Characters, 5, 1),
+            t(Suit::Characters, 5, 2),
+            t(Suit::Flower, 1, 3),
+            t(Suit::Flower, 2, 4),
+        ];
+        run.hand.sort();
+
+        let masks = enumerate_candidate_play_masks(&run.hand, &run.round_rules);
+        let selected_ids: Vec<Vec<u32>> = masks
+            .iter()
+            .map(|mask| {
+                run.hand
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, tile)| (mask & (1 << idx) != 0).then_some(tile.id))
+                    .collect()
+            })
+            .collect();
+
+        assert!(
+            selected_ids.contains(&vec![1, 2, 3]),
+            "expected masks to include 5m-5m with flower 1, got {selected_ids:?}"
+        );
+        assert!(
+            selected_ids.contains(&vec![1, 2, 4]),
+            "expected masks to include 5m-5m with flower 2, got {selected_ids:?}"
+        );
     }
 
     #[test]
@@ -1773,6 +1933,9 @@ fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
 }
 
 fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
+    if talisman.acts_on_selection() {
+        return 0;
+    }
     let Some(_) = talisman.enhancement() else {
         return 0;
     };
@@ -1796,7 +1959,7 @@ fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
             Consumable::Zodiac(z) => z,
             Consumable::Talisman(_) => unreachable!(),
         };
-        let _ = run.use_consumable(idx);
+        let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
         bot_log!(log, "      action: use zodiac {:?}", zodiac);
         used_any = true;
     }
@@ -1821,7 +1984,7 @@ fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
     }
 
     if let Some((idx, kind, delta)) = best_talisman {
-        let _ = run.use_consumable(idx);
+        let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
         bot_log!(
             log,
             "      action: use talisman {:?} (+{} projected best-play value from {})",
@@ -2062,7 +2225,7 @@ fn should_skip_blind(run: &RunState, blind: BlindKind) -> bool {
     if matches!(blind, BlindKind::Boss) {
         return false;
     }
-    let target = (run.base_target as f32 * blind.target_multiplier()) as u32;
+    let target = run.base_target.saturating_mul(run.run_number);
     let best = pick_best_play(run).map(|(s, _)| s).unwrap_or(0);
     if best == 0 {
         return false;
@@ -2236,7 +2399,11 @@ fn play_run_with_options(
             break;
         }
         stats.blinds_cleared += 1;
-        stats.total_overscore += run.round_score.saturating_sub(run.target_score as u64);
+        let blind_overscore = run.round_score.saturating_sub(run.target_score as u64);
+        stats.total_overscore += blind_overscore;
+        let slot_key = format!("{:02}-{}", run.ante, blind.name());
+        *stats.overscore_by_slot.entry(slot_key.clone()).or_insert(0) += blind_overscore;
+        *stats.cleared_by_slot.entry(slot_key).or_insert(0) += 1;
         if matches!(blind, BlindKind::Boss) {
             stats.antes_cleared += 1;
         }

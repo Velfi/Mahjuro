@@ -41,9 +41,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // tile's long axis (which is screen-vertical for hand tiles).
     let scaled = vec2<f32>(d.x, d.y * 0.85);
     let r = length(scaled);
-    // Soft falloff: bright core, long warm spill toward the edge.
-    let core = pow(max(1.0 - r, 0.0), 2.2);
-    let spill = pow(max(1.0 - r, 0.0), 4.5) * 0.6;
+    // Tight falloff: narrow rim, minimal spill — just enough to read as
+    // a selection indicator without overpowering the tile face.
+    let core = pow(max(1.0 - r, 0.0), 4.5) * 0.45;
+    let spill = pow(max(1.0 - r, 0.0), 8.0) * 0.15;
     let falloff = core + spill;
     // Gentle ~1.5 Hz breathing pulse so selected tiles feel "alive".
     let pulse = 0.82 + 0.18 * sin(globals.time * 3.0);

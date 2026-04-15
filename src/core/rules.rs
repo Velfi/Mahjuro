@@ -78,17 +78,6 @@ pub enum BlindKind {
 }
 
 impl BlindKind {
-    /// Multiplier applied to the base target score. Small/Big trimmed from
-    /// 1.0/1.5 to 0.85/1.35 — most "stuck" runs die early to draw variance, not
-    /// skill, so the early curve is softer while Boss tension stays intact.
-    pub fn target_multiplier(self) -> f32 {
-        match self {
-            BlindKind::Small => 0.85,
-            BlindKind::Big => 1.35,
-            BlindKind::Boss => 1.5,
-        }
-    }
-
     /// Round wind for the given ante (1-indexed): East → South → West → North,
     /// cycling. The round wind tile becomes Yakuhai (a triplet/kong of it grants
     /// the Yakuhai yaku) and is shown on the blind card.
@@ -142,9 +131,9 @@ impl BlindKind {
     #[allow(dead_code)]
     pub fn description(self) -> &'static str {
         match self {
-            BlindKind::Small => "×0.85 target · ×1 gold",
-            BlindKind::Big => "×1.35 target · ×1.5 gold",
-            BlindKind::Boss => "×1.5 target · boss effect · ×2.5 gold",
+            BlindKind::Small => "×1 gold",
+            BlindKind::Big => "×1.5 gold",
+            BlindKind::Boss => "boss effect · ×2.5 gold",
         }
     }
 

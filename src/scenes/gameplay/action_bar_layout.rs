@@ -1,11 +1,11 @@
 //! Bottom action bar: sort tablets, discard bowl, play mirror, optional cash-in, journal lift.
 //!
-//! Pixel rects and [`crate::render::draw_cmd::TableSurfaceAnchor`] lift share one place so
-//! spacing / height above the felt stay in sync with [`crate::render::table_space`].
+//! Pixel rects and [`crate::render::draw_cmd::WorldSurfaceAnchor`] lift share one place so
+//! spacing / height above the felt stay in sync with [`crate::render::world_space`].
 //!
-//! **World +Z (playerward):** [`crate::render::table_space::pixel_to_table_world`] maps layout
-//! `py` → world `z`. Add [`action_hud_world_z_py_nudge`] to the anchor’s `py` when building
-//! [`crate::render::draw_cmd::TableSurfaceAnchor`] — **not** to the lift component (that is world +Y).
+//! **Depth (−Y playerward):** [`crate::render::world_space::pixel_to_world`] maps larger layout
+//! `py` to **more negative** world `y`. Add [`action_hud_world_z_py_nudge`] to the anchor’s `py` when building
+//! [`crate::render::draw_cmd::WorldSurfaceAnchor`] — **not** to the lift component (that is world +Z).
 
 use crate::ui::layout::LayoutResult;
 
@@ -20,15 +20,15 @@ const HAND_TO_BOWL_ROW_GAP_MIN: f32 = 30.0;
 /// Clearance between bowl/mirror row and sort row when vertical space is tight (scaled / min).
 const BOWL_TO_SORT_CLEARANCE_SCALE: f32 = 0.5;
 const BOWL_TO_SORT_CLEARANCE_MIN: f32 = 0.5;
-/// Third component of [`crate::render::draw_cmd::TableSurfaceAnchor`] for wood tablets / bowl / mirror.
+/// Third component of [`crate::render::draw_cmd::WorldSurfaceAnchor`] for wood tablets / bowl / mirror.
 const ACTION_HUD_TABLE_LIFT_SCALE: f32 = 44.0;
 const ACTION_HUD_TABLE_LIFT_MIN: f32 = 32.0;
 const ACTION_HUD_WORLDZ_PY_NUDGE_SCALE: f32 = 100.0;
 const ACTION_HUD_WORLDZ_PY_NUDGE_MIN: f32 = 14.0;
 
-/// Extra **screen Y** for bottom-action [`TableSurfaceAnchor`] `py`. Maps to **world +Z** via
-/// [`crate::render::table_space::pixel_to_table_world`] — pulls bowl/mirror/sort/journal toward the
-/// player along the table without changing world height (`lift_y`).
+/// Extra **screen Y** for bottom-action [`WorldSurfaceAnchor`] `py`. Maps toward **−Y** (playerward)
+/// via [`crate::render::world_space::pixel_to_world`] — pulls bowl/mirror/sort/journal toward the
+/// player along the table without changing world height (`lift_z`).
 #[inline]
 pub fn action_hud_world_z_py_nudge(layout_scale: f32) -> f32 {
     (ACTION_HUD_WORLDZ_PY_NUDGE_SCALE * layout_scale).max(ACTION_HUD_WORLDZ_PY_NUDGE_MIN)
@@ -43,10 +43,13 @@ pub struct ActionBarLayout {
     pub container_x: f32,
     pub suit_btn_rect: (f32, f32, f32, f32),
     pub rank_btn_rect: (f32, f32, f32, f32),
+    /// Center-x and half-width for the Journal button in the centered sort row.
+    pub journal_btn_cx: f32,
+    pub journal_btn_w: f32,
     pub discard_btn_rect: (f32, f32, f32, f32),
     pub play_btn_rect: (f32, f32, f32, f32),
     pub trigger_btn_rect: (f32, f32, f32, f32),
-    /// Height above table for [`crate::render::draw_cmd::TableSurfaceAnchor`] on action meshes.
+    /// Height above table for [`crate::render::draw_cmd::WorldSurfaceAnchor`] on action meshes.
     pub action_hud_table_lift: f32,
 }
 
@@ -68,15 +71,21 @@ pub fn compute_action_bar(
     let btn_h = (32.0 * layout_scale).max(20.0);
     let btn_gap = 12.0 * layout_scale;
     let container_w = (btn_w * 4.0 + btn_gap * 3.0).min(layout.window_w * 0.92);
-    let container_x = (layout.window_w - container_w) * 0.5;
+    // Anchor container left edge to hand strip left (same 22% inset) so sort
+    // tablets, structure, and hand all share the same left margin.
+    let container_x = layout.hand_strip.x;
     let btn_y = layout.window_h
         - btn_h
         - (ACTION_BAR_BOTTOM_INSET_SCALE * layout_scale).max(ACTION_BAR_BOTTOM_INSET_MIN);
 
-    let sort_container_w = btn_w * 2.0 + btn_gap;
-    let sort_container_x = (layout.window_w - sort_container_w) * 0.5;
-    let suit_btn_rect = (sort_container_x, btn_y, btn_w, btn_h);
-    let rank_btn_rect = (sort_container_x + btn_w + btn_gap, btn_y, btn_w, btn_h);
+    // Sort + Journal row: 3 buttons centered across the full window width.
+    // Journal width is slightly narrower (55% of btn_w) — match the placement in gameplay.rs.
+    let journal_btn_w = btn_w * 0.55;
+    let row_total_w = btn_w + btn_gap + btn_w + btn_gap + journal_btn_w;
+    let row_start_x = (layout.window_w - row_total_w) * 0.5;
+    let suit_btn_rect = (row_start_x, btn_y, btn_w, btn_h);
+    let rank_btn_rect = (row_start_x + btn_w + btn_gap, btn_y, btn_w, btn_h);
+    let journal_btn_cx = row_start_x + btn_w + btn_gap + btn_w + btn_gap + journal_btn_w * 0.5;
 
     let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
     let bowl_diam = (yaku_panel_h * 2.4).min(layout.window_h * 0.18);
@@ -93,11 +102,14 @@ pub fn compute_action_bar(
     if bowl_cy > max_cy {
         bowl_cy = max_cy;
     }
-    let bowl_inset = bowl_diam * 0.30;
-    let mut bowl_cx = container_x + bowl_inset + bowl_diam * 0.5;
-    let mut mirror_cx = container_x + container_w - bowl_inset - bowl_diam * 0.5;
-    bowl_cx = bowl_cx.max(bowl_diam * 0.5 + 4.0);
-    mirror_cx = mirror_cx.min(layout.window_w - bowl_diam * 0.5 - 4.0);
+    // Bowl sits just left of the sort-row left edge; mirror just right of the journal.
+    // The sort row is centered and renders correctly in 3D — anchor relative to it
+    // so bowl/mirror stay within the camera frustum at the table's near depth.
+    let sort_row_left = row_start_x;
+    let sort_row_right = journal_btn_cx + journal_btn_w * 0.5;
+    let side_gap = btn_gap * 2.0;
+    let bowl_cx = (sort_row_left - side_gap - bowl_diam * 0.5).max(bowl_diam * 0.5 + 4.0);
+    let mirror_cx = (sort_row_right + side_gap + bowl_diam * 0.5).min(layout.window_w - bowl_diam * 0.5 - 4.0);
     let mirror_cy = bowl_cy;
 
     let discard_btn_rect = (
@@ -122,7 +134,8 @@ pub fn compute_action_bar(
         .max(28.0 * layout_scale);
     let trigger_btn_rect = if has_structure {
         let meld_center_y = structure_strip_top + structure_tag_h + structure_meld_h * 0.5;
-        let mut bx = container_x + container_w + trigger_gap;
+        // Trigger button sits just right of the mirror (which is at right:15%).
+        let mut bx = mirror_cx + bowl_diam * 0.5 + trigger_gap;
         let max_bx = layout.window_w - trigger_w - (8.0 * layout_scale).max(4.0);
         if bx > max_bx {
             bx = max_bx;
@@ -146,6 +159,8 @@ pub fn compute_action_bar(
         container_x,
         suit_btn_rect,
         rank_btn_rect,
+        journal_btn_cx,
+        journal_btn_w,
         discard_btn_rect,
         play_btn_rect,
         trigger_btn_rect,

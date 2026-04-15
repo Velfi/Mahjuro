@@ -3,6 +3,8 @@ pub mod glossary;
 pub mod input;
 pub mod layout;
 pub mod modal;
+pub mod placement;
+pub mod scene_layout;
 pub mod smooth_scroll;
 pub mod tooltip;
 pub mod widget;

@@ -2,7 +2,7 @@
 //!
 //! Provides debug shortcuts for setting player level, gold, relics, and card inventory.
 
-use muda::{Menu, MenuEvent, MenuId, MenuItem, Submenu};
+use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
 use crate::core::boss::{ALL_BOSSES, BossKind, FINAL_BOSSES};
 use crate::core::relic::{RelicId, all_relic_defs};
@@ -55,6 +55,15 @@ pub enum DebugAction {
     ShowVictoryScreen,
     /// Jump directly to the defeat scene for presentation/debugging.
     ShowDefeatScreen,
+    /// Enter (or exit) arrange mode: click an object, then use arrow keys to
+    /// nudge its position (X/Y) or Shift+arrow to rotate it (Z/X). Press
+    /// Enter to confirm and copy the result to the clipboard.
+    ToggleArrangeMode,
+    /// Save the current shop scene's [`ShopPositions`] to JSON so they can be
+    /// hand-edited and reloaded without recompiling.
+    SaveShopLayout,
+    /// Save the current gameplay scene [`GameplayPositions`] to JSON.
+    SaveGameplayRelicLayout,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -78,6 +87,7 @@ impl DebugMenuBar {
 
         let mut mappings = Vec::new();
 
+        // ── View / Overlays ──────────────────────────────────────────────────
         // Show FPS toggle.
         let fps_item = MenuItem::new("Show FPS", true, None);
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
@@ -103,15 +113,18 @@ impl DebugMenuBar {
         mappings.push((tuning_item.id().clone(), DebugAction::OpenTuning));
         let _ = debug_menu.append(&tuning_item);
 
-        // Sound effects test overlay.
-        let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
-        mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
-        let _ = debug_menu.append(&sfx_item);
-
         // Camera debug overlay.
         let camera_item = MenuItem::new("Camera Debug...", true, None);
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
         let _ = debug_menu.append(&camera_item);
+
+        // ── Scene / FX ───────────────────────────────────────────────────────
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+
+        // Sound effects test overlay.
+        let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
+        mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
+        let _ = debug_menu.append(&sfx_item);
 
         // Spawn a strong wind gust at the candle row so the flame's
         // wind reaction is observable on demand. Mirrors pressing `B`
@@ -119,6 +132,9 @@ impl DebugMenuBar {
         let wind_item = MenuItem::new("Blow Wind Gust", true, None);
         mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
         let _ = debug_menu.append(&wind_item);
+
+        // ── Performance / Picking ─────────────────────────────────────────────
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
         // Capture GPU pass timings over the next 100 frames. Result is
         // logged via `log::info!`.
@@ -132,20 +148,25 @@ impl DebugMenuBar {
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
         let _ = debug_menu.append(&hit_test_item);
 
-        // Free shop reroll (bypasses gold cost).
-        let reroll_item = MenuItem::new("Reroll Shop", true, None);
-        mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
-        let _ = debug_menu.append(&reroll_item);
+        // Arrange mode: click an object to select it, then nudge with arrow
+        // keys, confirm with Enter to copy position/rotation to clipboard.
+        let arrange_item = MenuItem::new("Arrange Mode", true, None);
+        mappings.push((arrange_item.id().clone(), DebugAction::ToggleArrangeMode));
+        let _ = debug_menu.append(&arrange_item);
 
-        // Force-open a tile pack celebration (free).
-        let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
-        mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
-        let _ = debug_menu.append(&open_pack_item);
+        // ── Layout Save ───────────────────────────────────────────────────────
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
-        // Spawn a blank test modal to verify overlay input blocking.
-        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
-        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
-        let _ = debug_menu.append(&test_overlay_item);
+        let save_shop_item = MenuItem::new("Save Shop Layout", true, None);
+        mappings.push((save_shop_item.id().clone(), DebugAction::SaveShopLayout));
+        let _ = debug_menu.append(&save_shop_item);
+
+        let save_relic_item = MenuItem::new("Save Gameplay Layout", true, None);
+        mappings.push((save_relic_item.id().clone(), DebugAction::SaveGameplayRelicLayout));
+        let _ = debug_menu.append(&save_relic_item);
+
+        // ── Scene Jumps / Test UI ─────────────────────────────────────────────
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
         // Open the final-ante victory scene directly.
         let victory_item = MenuItem::new("Show Victory Screen", true, None);
@@ -155,6 +176,24 @@ impl DebugMenuBar {
         let defeat_item = MenuItem::new("Show Defeat Screen", true, None);
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
         let _ = debug_menu.append(&defeat_item);
+
+        // Spawn a blank test modal to verify overlay input blocking.
+        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
+        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
+        let _ = debug_menu.append(&test_overlay_item);
+
+        // ── Gameplay Cheats ───────────────────────────────────────────────────
+        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+
+        // Free shop reroll (bypasses gold cost).
+        let reroll_item = MenuItem::new("Reroll Shop", true, None);
+        mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
+        let _ = debug_menu.append(&reroll_item);
+
+        // Force-open a tile pack celebration (free).
+        let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
+        mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
+        let _ = debug_menu.append(&open_pack_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);

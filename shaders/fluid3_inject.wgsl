@@ -58,7 +58,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r2 = radius * radius;
         let gauss = exp(-dist2 / (2.0 * r2));
         if (gauss > 0.0001) {
-            let up = max(pt.vel_density.y, 0.0);
+            let up = max(pt.vel_density.z, 0.0);
             vd.x = vd.x + pt.vel_density.x * gauss;
             vd.y = vd.y + pt.vel_density.y * gauss;
             vd.z = vd.z + pt.vel_density.z * gauss;

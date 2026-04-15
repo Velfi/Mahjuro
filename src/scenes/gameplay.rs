@@ -9,7 +9,7 @@ use rand::{RngExt, SeedableRng};
 
 use crate::core::consumable::Consumable;
 use crate::core::hand::suggest_completions;
-use crate::core::relic::{relic_sell_price_live, RelicId};
+use crate::core::relic::{relic_sell_price_live, relic_visual, RelicId};
 use crate::core::scoring::StepKind;
 use crate::core::structure::is_winning_structure_shape;
 use crate::core::yaku::yaku_preview;
@@ -17,13 +17,14 @@ use crate::game::cascade::ScoringCascade;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
 use crate::render::draw_cmd::{
-    CascadeTokenKind, CascadeTokenPlacement, DrawCmd, ShowcaseTilePlacement, UiFrame,
+    CameraParams, CascadeTokenKind, CascadeTokenPlacement, DrawCmd, Object3d, Object3dKind,
+    RelicShowcasePlacement, ShowcaseTilePlacement, UiFrame, camera_facing_rotation,
 };
-use crate::render::falling_bones::FallingBoneSystem;
 use crate::render::flying_coins::FlyingCoinSystem;
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
-use crate::render::table_space::TableAnchorPx;
+use crate::render::score_reel::ScoreReel;
+use crate::render::world_space::LayoutAnchorPx;
 use crate::render::theme::{typography, ButtonState, ButtonVariant};
 use crate::render::wgpu_renderer::{
     build_instances_from_layout, GpuInstance, PointLight, TextAlign, TextLabel,
@@ -306,10 +307,6 @@ pub struct GameplayScene {
     prev_displayed_score: u64,
     /// Particle effects for scoring.
     particles: ParticleSystem,
-    /// Physical scoring bones that tumble onto the play space during a
-    /// cascade. Spawned by each step reveal, integrated under gravity, and
-    /// cleared when the cascade ends.
-    falling_bones: FallingBoneSystem,
     /// Animated coins that fly into/out of the dish when gold changes.
     flying_coins: FlyingCoinSystem,
     /// Gold value last frame — compared each update to detect changes.
@@ -318,6 +315,8 @@ pub struct GameplayScene {
     /// Spawned at the source of each cascade step (relic rect or modifier
     /// strip centre) and drift toward the score panel before despawning.
     score_popups: ScorePopupSystem,
+    /// Odometer-style floating digit reel showing the current score.
+    score_reel: ScoreReel,
     /// When set, the gameplay scene draws a fullscreen gold-tinted quad
     /// fading out from this timestamp. Triggered on the cascade's
     /// `ShowTotal` edge so the screen flashes gold as the final beat lands.
@@ -414,12 +413,6 @@ pub struct GameplayScene {
     /// camera target so we can see which direction is +X / +Y / +Z while
     /// dialing in placements. Toggled from the native Debug menu.
     debug_show_axes: bool,
-    /// When true, the player is selecting tiles to destroy via the Kiln
-    /// talisman. Tile clicks toggle selection; Confirm destroys the selected
-    /// tiles. Cancel exits without destroying anything.
-    kiln_mode: bool,
-    /// Maximum tiles the player can still select in this Kiln activation.
-    kiln_picks_remaining: usize,
     /// Candle flare intensity — spikes when a single hand scores more than
     /// the entire blind target, then decays exponentially back to 0.0.
     /// Multiplied into candle intensity, radius, and flame brightness so
@@ -429,6 +422,11 @@ pub struct GameplayScene {
     /// navigation moves the focused drop target and releasing A commits the
     /// swap if focus is on another relic.
     held_relic_drag: Option<usize>,
+    /// Hand-strip marquee multi-select. `Some` while Confirm is held over a
+    /// hand tile (LMB / Space / Enter / gamepad A). Each focus or pointer
+    /// movement updates `current_slot` and re-applies the marquee against
+    /// the snapshot taken at press time. Released on `ConfirmRelease`.
+    marquee: Option<crate::ui::input::MarqueeSelect>,
     /// Tutorial hint overlay — shows banners and highlights during the
     /// onboarding flow. `None` for non-tutorial runs.
     tutorial_overlay: Option<super::tutorial_overlay::TutorialOverlay>,
@@ -436,6 +434,19 @@ pub struct GameplayScene {
     tutorial_affinity_indices: Vec<usize>,
     /// One-shot FoV pop triggered when a placement completes the structure.
     final_tiles_fov_pop_at: Option<Instant>,
+    /// Per-slot tile identity tracker for pop-in animation. Each entry is
+    /// the raw `u32` id of the tile in that slot; when it changes (deal,
+    /// refill) we reset the pop-in tween for that slot.
+    hand_tile_uids: Vec<u32>,
+    /// Vertical pop-in offset per slot (0 → 1 ramps up on new deal, then
+    /// held at 1 when settled). Multiplied by slot height to get world offset.
+    hand_slide_y: Vec<f32>,
+    /// Horizontal shuffle offset per slot (in pixels). Used when tiles are
+    /// sorted so they slide smoothly into their new positions.
+    hand_slide_x: Vec<f32>,
+    /// Normalized screen-relative positions for the gameplay scene.
+    /// Loaded from JSON on construction; falls back to compiled defaults.
+    pub positions: crate::ui::scene_layout::GameplayPositions,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -513,31 +524,12 @@ fn gameplay_sell_consumable(run: &mut crate::game::run::RunState, idx: usize) ->
 }
 
 impl GameplayScene {
-    fn veil_hides_tile(run: &crate::game::run::RunState, tile: crate::core::tile::Tile) -> bool {
-        if !matches!(run.blind, crate::core::rules::BlindKind::Boss)
-            || !matches!(run.boss.upcoming, Some(crate::core::boss::BossKind::Veil))
-        {
-            return false;
-        }
-
-        let tile_hash = |tile: crate::core::tile::Tile| {
-            tile.id
-                .wrapping_mul(2_654_435_761)
-                .rotate_left((run.ante % 31) as u32)
-        };
-        let mut hidden: Vec<u32> = run.hand.iter().map(|tile| tile_hash(*tile)).collect();
-        hidden.sort_unstable_by(|a, b| b.cmp(a));
-        hidden.truncate(run.hand.len() / 2);
-        hidden.contains(&tile_hash(tile))
-    }
-
     fn display_tile(
         tile: crate::core::tile::Tile,
         run: &crate::game::run::RunState,
     ) -> crate::core::tile::Tile {
         let mut tile = tile;
         tile.debuffed_visual = run.tile_debuffs.iter().any(|debuff| debuff.matches(&tile));
-        tile.face_down_visual = Self::veil_hides_tile(run, tile);
         tile
     }
 
@@ -555,8 +547,8 @@ impl GameplayScene {
     pub fn is_animating(&self) -> bool {
         self.cascade.is_some()
             || self.particles.is_active()
-            || self.falling_bones.is_active()
             || self.flying_coins.is_active()
+            || self.score_reel.is_animating(Instant::now())
             || self.pending_refill.is_some()
             || !self.relic_glow_starts.is_empty()
             || self.post_deal_gust_active()
@@ -615,10 +607,10 @@ impl GameplayScene {
             displayed_score: 0,
             prev_displayed_score: 0,
             particles: ParticleSystem::new(),
-            falling_bones: FallingBoneSystem::new(),
             flying_coins: FlyingCoinSystem::new(),
             prev_gold: 0,
             score_popups: ScorePopupSystem::new(),
+            score_reel: ScoreReel::new(),
             gold_flash_at: None,
             last_frame: Instant::now(),
             pause_menu: PauseMenu::new(),
@@ -651,13 +643,16 @@ impl GameplayScene {
             light_ramp: 0.0,
             light_ramp_anchor: None,
             debug_show_axes: false,
-            kiln_mode: false,
-            kiln_picks_remaining: 0,
             candle_flare: 0.0,
             held_relic_drag: None,
+            marquee: None,
             tutorial_overlay: None,
             tutorial_affinity_indices: Vec::new(),
             final_tiles_fov_pop_at: None,
+            hand_tile_uids: Vec::new(),
+            hand_slide_y: Vec::new(),
+            hand_slide_x: Vec::new(),
+            positions: crate::ui::scene_layout::load_gameplay_positions(),
         }
     }
 
@@ -811,42 +806,17 @@ impl GameplayScene {
             return None;
         }
 
-        let row_y = layout.score_panel.y + layout.score_panel.h + layout.window_h * 0.08;
-        let cell_w = layout.mm(45.0);
-        let total_w = cell_w * active_ids.len() as f32;
-        let row_center_x_default = layout.window_w * 0.38;
-        let inv_margin = layout.mm(8.0);
-        let max_right = match Self::consumable_dish_strip(layout, run) {
-            Some((sx, _, _, _)) => (sx - inv_margin).max(layout.mm(20.0)),
-            None => layout.window_w - layout.mm(8.0),
-        };
-        let mut row_center_x = row_center_x_default;
-        let row_right = row_center_x + total_w * 0.5;
-        if row_right > max_right {
-            row_center_x -= row_right - max_right;
-        }
-        let start_x = row_center_x - total_w * 0.5 + cell_w * 0.5;
-        Some((start_x + idx as f32 * cell_w, row_y))
-    }
-
-    fn consumable_dish_strip(
-        layout: &crate::ui::layout::LayoutResult,
-        run: &crate::game::run::RunState,
-    ) -> Option<(f32, f32, f32, f32)> {
-        let consumables = &run.consumables;
-        if consumables.capacity == 0 {
-            return None;
-        }
-        let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
-        let slot_w = (140.0 * zscale).max(120.0);
-        let slot_h = (56.0 * zscale).max(48.0);
-        let gap = (6.0 * zscale).max(3.0);
-        let total_w = (slot_w * consumables.capacity as f32
-            + gap * (consumables.capacity as f32 - 1.0))
-            .min(layout.window_w * 0.65);
-        let strip_x = (layout.window_w - total_w - (48.0 * zscale)).max(4.0);
-        let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
-        Some((strip_x, strip_y, total_w, slot_h))
+        // Mirror the vertical left-column layout from draw_frame.
+        let col_x = layout.window_w * 0.10;
+        let col_top_y = layout.window_h * 0.20;
+        let col_bottom_y = layout.window_h * 0.60;
+        let cell_h = layout.mm(45.0);
+        let col_span = col_bottom_y - col_top_y;
+        let n = active_ids.len() as f32;
+        let total_h = cell_h * n;
+        let start_y = (col_top_y + (col_span - total_h) * 0.5 + cell_h * 0.5)
+            .clamp(col_top_y, col_bottom_y);
+        Some((col_x, start_y + idx as f32 * cell_h))
     }
 
     fn yaku_popup_center(
@@ -1143,9 +1113,34 @@ impl SceneBehavior for GameplayScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.particles.update(dt);
-        self.falling_bones.update(dt);
         self.flying_coins.update(dt);
         self.score_popups.update(now);
+        // When idle (no cascade), snap the reel to the real score so scene
+        // init and round transitions display the correct value immediately.
+        if self.cascade.is_none() {
+            self.score_reel.snap(ctx.run.round_score);
+        }
+
+        // Hand tile animation state: resize vecs to current hand length,
+        // detect newly dealt tiles (uid mismatch), and advance slide_y tween.
+        {
+            let hand_len = ctx.run.hand.len();
+            self.hand_tile_uids.resize(hand_len, u32::MAX);
+            self.hand_slide_y.resize(hand_len, 1.0);
+            self.hand_slide_x.resize(hand_len, 0.0);
+            for i in 0..hand_len {
+                let uid = ctx.run.hand[i].id;
+                if self.hand_tile_uids[i] != uid {
+                    self.hand_tile_uids[i] = uid;
+                    self.hand_slide_y[i] = 0.0; // trigger pop-in
+                }
+                // Animate slide_y toward 1.0 (settled position).
+                let speed = 6.0_f32; // slots per second
+                self.hand_slide_y[i] = (self.hand_slide_y[i] + dt * speed).min(1.0);
+                // Decay slide_x toward 0 (sort shuffle settles).
+                self.hand_slide_x[i] *= (1.0_f32 - dt * 12.0).max(0.0);
+            }
+        }
         // Cursor position is captured every frame for cursor-mode hit-test
         // and tooltip placement. The legacy `cursor_moved` guard that used
         // to drop stale controller focus on mouse motion is gone — Phase A
@@ -1219,17 +1214,12 @@ impl SceneBehavior for GameplayScene {
             let layout = ctx.layout;
             let coin_radius = layout.mm(11.3);
             let coin_thickness = layout.mm(3.5).max(2.0);
-            let coin_candle_w = layout.mm(78.0) * 0.72;
-            let coin_edge_pad = layout.mm(12.0);
-            let coin_back_z_push = coin_candle_w;
             let scatter_half = coin_radius * 3.0;
-            let dish_half_w = scatter_half + coin_radius * 2.0;
-            let coin_sp = layout.score_panel;
-            let right_candle_x = (coin_sp.x + coin_sp.w + coin_candle_w + coin_edge_pad)
-                .min(layout.window_w - coin_candle_w * 0.5 - 4.0);
-            let right_candle_y = coin_sp.y + coin_sp.h * 0.5 - coin_back_z_push;
-            let pile_cx = right_candle_x + coin_candle_w * 0.5 + dish_half_w + coin_edge_pad;
-            let pile_cy = right_candle_y;
+            let coin_back_z_push = scatter_half * 0.5;
+            let pile_cx = self.positions.coin_pile.nx * layout.window_w;
+            let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
+                - coin_back_z_push
+                - layout.window_h * self.positions.coin_pile.ny;
             let dish_rim = (coin_thickness * 2.5).max(10.0);
             // Scale coin count with the magnitude of the change so bigger
             // payouts produce a more dramatic shower.
@@ -1424,6 +1414,7 @@ impl SceneBehavior for GameplayScene {
             cascade.update(now);
             let frame = cascade.frame(now);
             self.displayed_score = frame.displayed_score;
+            self.score_reel.set_score(self.displayed_score, now);
 
             // Pulse the score panel on each reveal beat.
             if frame.reveal_ordinal.is_some() {
@@ -1519,28 +1510,7 @@ impl SceneBehavior for GameplayScene {
                                 self.score_popups.spawn_debuff_x(source_xy, magnitude);
                             }
                         }
-                        // Rain a burst of physical scoring bones onto the
-                        // play area below the modifier strip — chips on the
-                        // left half of the strip, mult on the right half, so
-                        // the falling pile reads back to the HUD token that
-                        // just popped. Final-beat steps spawn from center.
-                        let bone_kind = match step.kind {
-                            StepKind::Chips => Some(CascadeTokenKind::Chips),
-                            StepKind::Mult => Some(CascadeTokenKind::Mult),
-                            StepKind::Gold | StepKind::Final => None,
-                        };
-                        if let Some(kind) = bone_kind {
-                            let ms = ctx.layout.modifier_strip;
-                            let anchor_px = match kind {
-                                CascadeTokenKind::Chips => ms.x + ms.w * 0.30,
-                                CascadeTokenKind::Mult => ms.x + ms.w * 0.70,
-                            };
-                            let anchor_py = ms.y + ms.h + 20.0;
-                            self.falling_bones.burst(anchor_px, anchor_py, 6, kind);
-                        }
-
-                        // The pile/bone motion already communicates scoring
-                        // momentum. Avoid piling exact numeric deltas into the
+                        // Avoid piling exact numeric deltas into the
                         // play space while the cascade is in motion.
                     }
                 }
@@ -1578,24 +1548,23 @@ impl SceneBehavior for GameplayScene {
             if !frame.active {
                 // Cascade finished — snap to real score and clear.
                 self.displayed_score = ctx.run.round_score;
+                self.score_reel.set_score(self.displayed_score, now);
                 self.cascade = None;
                 self.cascade_showcase = None;
                 self.last_revealed_step = None;
                 self.cascade_final_emitted = false;
-                // Wipe the physical bones + score popups the moment scoring
-                // ends so the play space clears for the next hand.
-                self.falling_bones.clear();
+                // Wipe score popups the moment scoring ends.
                 self.score_popups.clear();
             } else {
                 // Allow skip on any key press during cascade.
                 if !ctx.actions.is_empty() {
                     cascade.skip();
                     self.displayed_score = ctx.run.round_score;
+                    self.score_reel.set_score(self.displayed_score, now);
                     self.cascade = None;
                     self.cascade_showcase = None;
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
-                    self.falling_bones.clear();
                     self.score_popups.clear();
                 }
                 return None;
@@ -1629,7 +1598,7 @@ impl SceneBehavior for GameplayScene {
                     self.score_popups.spawn(
                         format!("+{refund}g"),
                         ctx.cursor_pos,
-                        (ctx.cursor_pos.0, ctx.cursor_pos.1 - 120.0),
+                        ctx.cursor_pos,
                         StepKind::Gold,
                         refund as f32,
                     );
@@ -1643,7 +1612,7 @@ impl SceneBehavior for GameplayScene {
                     self.score_popups.spawn(
                         format!("+{refund}g"),
                         ctx.cursor_pos,
-                        (ctx.cursor_pos.0, ctx.cursor_pos.1 - 120.0),
+                        ctx.cursor_pos,
                         StepKind::Gold,
                         refund as f32,
                     );
@@ -1653,16 +1622,15 @@ impl SceneBehavior for GameplayScene {
             }
             if cid >= ZODIAC_USE_BASE && cid < ZODIAC_USE_BASE + 16 {
                 let idx = (cid - ZODIAC_USE_BASE) as usize;
-                match ctx.run.use_consumable(idx) {
+                match ctx.run.use_consumable(idx, ctx.bus) {
                     Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) => {
                         log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level);
                         let label = format!("{} Lvl.{}", yaku.name(), new_level);
                         let src = ctx.cursor_pos;
-                        let dest = (src.0, src.1 - 200.0);
                         self.score_popups.spawn(
                             label,
                             src,
-                            dest,
+                            src,
                             crate::core::scoring::StepKind::Gold,
                             new_level as f32,
                         );
@@ -1672,20 +1640,14 @@ impl SceneBehavior for GameplayScene {
                             .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                     }
                     Some(crate::game::run::ConsumableUseResult::Talisman { kind }) => {
-                        log::info!(
-                            "Used {} — every tile in hand stamped with {:?}",
-                            kind.name(),
-                            kind.enhancement()
-                        );
-                    }
-                    Some(crate::game::run::ConsumableUseResult::KilnMode) => {
-                        let hand_len = ctx.run.hand.len();
-                        log::info!("Kiln activated — select up to {hand_len} tiles to destroy");
-                        self.kiln_mode = true;
-                        self.kiln_picks_remaining = hand_len;
-                        // Clear current selection so tile clicks start fresh.
-                        for s in ctx.run.selected.iter_mut() {
-                            *s = false;
+                        if let Some(enh) = kind.enhancement() {
+                            log::info!(
+                                "Used {} — every tile in hand stamped with {:?}",
+                                kind.name(),
+                                enh
+                            );
+                        } else {
+                            log::info!("Used {}", kind.name());
                         }
                     }
                     None => {}
@@ -1776,6 +1738,25 @@ impl SceneBehavior for GameplayScene {
             self.focus = new_focus;
         }
 
+        // Marquee multi-select drag: while LMB is held, the cursor's hovered
+        // hand tile drives `current_slot` every frame. Same logic the focus
+        // path runs for keyboard/gamepad — kept here so cursor sweeps don't
+        // require a Focus action to fire.
+        if let (Some(m), Some(FocusTarget::HandTile(idx))) =
+            (self.marquee.as_mut(), self.focus)
+        {
+            if !ctx.run.hand.is_empty() {
+                let clamped = idx.min(ctx.run.hand.len() - 1);
+                if clamped != m.current_slot {
+                    m.current_slot = clamped;
+                    if ctx.run.selected.len() < ctx.run.hand.len() {
+                        ctx.run.selected.resize(ctx.run.hand.len(), false);
+                    }
+                    m.apply(&mut ctx.run.selected);
+                }
+            }
+        }
+
         // Resolve the screen-space rect for the currently focused target
         // (if any) so the spatial picker has a starting position. The
         // target may have been added or removed since last frame, in
@@ -1857,11 +1838,28 @@ impl SceneBehavior for GameplayScene {
                         _ => None,
                     };
                     let hand_wrap = wrap_hand_tile_focus(self.focus, dir, &focus_rects);
-                    if let Some(next) = overridden.or(spatial).or(hand_wrap) {
+                    if let Some(next) = overridden.or(hand_wrap).or(spatial) {
                         self.focus = Some(next);
                     }
                 } else if let Some((first, _)) = focus_rects.first() {
                     self.focus = Some(*first);
+                }
+                // Marquee: if Confirm is held and focus moved to a hand
+                // tile, extend the swept range to that tile and re-apply
+                // against the press-time snapshot.
+                if let (Some(m), Some(FocusTarget::HandTile(idx))) =
+                    (self.marquee.as_mut(), self.focus)
+                {
+                    if !ctx.run.hand.is_empty() {
+                        let clamped = idx.min(ctx.run.hand.len() - 1);
+                        if clamped != m.current_slot {
+                            m.current_slot = clamped;
+                            if ctx.run.selected.len() < ctx.run.hand.len() {
+                                ctx.run.selected.resize(ctx.run.hand.len(), false);
+                            }
+                            m.apply(&mut ctx.run.selected);
+                        }
+                    }
                 }
                 continue;
             }
@@ -1890,7 +1888,7 @@ impl SceneBehavior for GameplayScene {
                             self.score_popups.spawn(
                                 format!("+{refund}g"),
                                 src,
-                                (src.0, src.1 - 120.0),
+                                src,
                                 StepKind::Gold,
                                 refund as f32,
                             );
@@ -1904,7 +1902,7 @@ impl SceneBehavior for GameplayScene {
                             self.score_popups.spawn(
                                 format!("+{refund}g"),
                                 src,
-                                (src.0, src.1 - 120.0),
+                                src,
                                 StepKind::Gold,
                                 refund as f32,
                             );
@@ -1945,7 +1943,22 @@ impl SceneBehavior for GameplayScene {
                         Some(FocusTarget::HandTile(i)) => {
                             if !ctx.run.hand.is_empty() {
                                 let idx = i.min(ctx.run.hand.len() - 1);
-                                ctx.run.toggle_select(idx);
+                                // Make sure `selected` is sized to the hand —
+                                // this is normally the case but protect the
+                                // marquee snapshot path.
+                                if ctx.run.selected.len() < ctx.run.hand.len() {
+                                    ctx.run
+                                        .selected
+                                        .resize(ctx.run.hand.len(), false);
+                                }
+                                let snapshot = ctx.run.selected.clone();
+                                let m = crate::ui::input::MarqueeSelect {
+                                    start_slot: idx,
+                                    current_slot: idx,
+                                    snapshot,
+                                };
+                                m.apply(&mut ctx.run.selected);
+                                self.marquee = Some(m);
                             }
                         }
                         Some(FocusTarget::Button(GameplayButton::Journal)) => {
@@ -1961,7 +1974,7 @@ impl SceneBehavior for GameplayScene {
                             }
                         }
                         Some(FocusTarget::Consumable(i)) => {
-                            if let Some(result) = ctx.run.use_consumable(i) {
+                            if let Some(result) = ctx.run.use_consumable(i, ctx.bus) {
                                 match result {
                                     crate::game::run::ConsumableUseResult::Zodiac {
                                         yaku,
@@ -1974,11 +1987,10 @@ impl SceneBehavior for GameplayScene {
                                         );
                                         let label = format!("{} Lvl.{}", yaku.name(), new_level);
                                         let src = ctx.cursor_pos;
-                                        let dest = (src.0, src.1 - 200.0);
                                         self.score_popups.spawn(
                                             label,
                                             src,
-                                            dest,
+                                            src,
                                             crate::core::scoring::StepKind::Gold,
                                             new_level as f32,
                                         );
@@ -1993,21 +2005,14 @@ impl SceneBehavior for GameplayScene {
                                             .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                                     }
                                     crate::game::run::ConsumableUseResult::Talisman { kind } => {
-                                        log::info!(
-                                            "Used {} — every tile in hand stamped with {:?}",
-                                            kind.name(),
-                                            kind.enhancement(),
-                                        );
-                                    }
-                                    crate::game::run::ConsumableUseResult::KilnMode => {
-                                        let hand_len = ctx.run.hand.len();
-                                        log::info!(
-                                            "Kiln activated — select up to {hand_len} tiles to destroy"
-                                        );
-                                        self.kiln_mode = true;
-                                        self.kiln_picks_remaining = hand_len;
-                                        for s in ctx.run.selected.iter_mut() {
-                                            *s = false;
+                                        if let Some(enh) = kind.enhancement() {
+                                            log::info!(
+                                                "Used {} — every tile in hand stamped with {:?}",
+                                                kind.name(),
+                                                enh,
+                                            );
+                                        } else {
+                                            log::info!("Used {}", kind.name());
                                         }
                                     }
                                 }
@@ -2034,12 +2039,17 @@ impl SceneBehavior for GameplayScene {
                             }
                         }
                     }
+                    // Commit the marquee multi-select. The snapshot was applied
+                    // every focus tick; releasing simply drops the bookkeeping
+                    // so the next Confirm starts fresh.
+                    self.marquee = None;
                     continue;
                 }
                 // Cancel: clear focus AND let the existing
                 // clear_selection path run via apply_ui_actions.
                 UiAction::Cancel => {
                     self.held_relic_drag = None;
+                    self.marquee = None;
                     self.focus = None;
                     actions_for_scene.push(a);
                     continue;
@@ -2111,53 +2121,6 @@ impl SceneBehavior for GameplayScene {
                 "[debug] world-axes overlay {}",
                 if self.debug_show_axes { "ON" } else { "OFF" }
             );
-        }
-
-        // ── Kiln mode: intercept actions before normal input ─────────
-        // While the Kiln talisman is active, tile clicks toggle selection,
-        // ScoreHand confirms the destruction, and Cancel
-        // aborts without destroying anything. All other actions are
-        // swallowed so the player can't play/discard while the kiln is
-        // active.
-        if self.kiln_mode {
-            for a in &actions_for_scene {
-                match a {
-                    UiAction::ScoreHand => {
-                        let count = ctx.run.selected.iter().filter(|&&s| s).count();
-                        if count > 0 {
-                            let destroyed = ctx.run.destroy_selected_tiles(ctx.bus);
-                            log::info!("Kiln destroyed {} tiles", destroyed);
-                        }
-                        self.kiln_mode = false;
-                        self.kiln_picks_remaining = 0;
-                    }
-                    UiAction::Cancel => {
-                        for s in ctx.run.selected.iter_mut() {
-                            *s = false;
-                        }
-                        self.kiln_mode = false;
-                        self.kiln_picks_remaining = 0;
-                    }
-                    UiAction::Confirm => {
-                        // Toggle the focused hand tile, respecting the
-                        // 3-tile cap.
-                        if let Some(FocusTarget::HandTile(i)) = self.focus {
-                            let idx = i.min(ctx.run.hand.len().saturating_sub(1));
-                            if idx < ctx.run.selected.len() {
-                                if ctx.run.selected[idx] {
-                                    ctx.run.selected[idx] = false;
-                                    self.kiln_picks_remaining += 1;
-                                } else if self.kiln_picks_remaining > 0 {
-                                    ctx.run.selected[idx] = true;
-                                    self.kiln_picks_remaining -= 1;
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            return None;
         }
 
         // Normal input handling when no cascade is active.
@@ -2249,7 +2212,7 @@ impl SceneBehavior for GameplayScene {
                                     "Structure grows".to_string()
                                 },
                                 (px, py),
-                                (px, py - 48.0),
+                                (px, py),
                                 StepKind::Chips,
                                 d as f32,
                             );
@@ -2407,7 +2370,6 @@ impl SceneBehavior for GameplayScene {
                 (0.0, 0.0, layout.window_w, layout.window_h),
                 u32::MAX,
             ));
-            frame.focus = focus;
             frame.window_title = window_title;
             return frame;
         }
@@ -2438,13 +2400,6 @@ impl SceneBehavior for GameplayScene {
         );
 
         let hand_slots = hand_slots_for_count(layout, run.hand.len());
-
-        // Use cascade's displayed score if active, otherwise real score.
-        let shown_score = if self.cascade.is_some() {
-            self.displayed_score
-        } else {
-            run.round_score
-        };
 
         // Score panel text.
         let tiles_left = run.wall.remaining();
@@ -2499,8 +2454,8 @@ impl SceneBehavior for GameplayScene {
             run.blind.name().to_string()
         };
         let score_text_top = format!(
-            "{}  ·  R{}  ·  {} / {}",
-            blind_label, run.run_number, shown_score, run.target_score,
+            "{}  ·  R{}  ·  / {}",
+            blind_label, run.run_number, run.target_score,
         );
         let score_text_bot = format!(
             "${}  ·  Wall {}  ·  Wind {}  ·  {}{}",
@@ -2693,6 +2648,8 @@ impl SceneBehavior for GameplayScene {
             container_x,
             suit_btn_rect,
             rank_btn_rect,
+            journal_btn_cx,
+            journal_btn_w,
             discard_btn_rect,
             play_btn_rect,
             trigger_btn_rect,
@@ -2894,11 +2851,15 @@ impl SceneBehavior for GameplayScene {
                     structure_showcase.push(ShowcaseTilePlacement {
                         tile,
                         center_pos: [px, center_py, 3.0 + lift],
-                        rotation: [0.0, 0.0, 0.0],
+                        rotation: [0.0, 0.0, std::f32::consts::PI],
                         scale,
                         size_px: tile_size,
                         brightness,
                         selected: false,
+                        hovered: false,
+                        outline: false,
+                        glow: false,
+                        pick_id: None,
                     });
                     x_cursor += tile_size + intra_gap;
                 }
@@ -2989,8 +2950,18 @@ impl SceneBehavior for GameplayScene {
         // text labels stay as a screen-space overlay until the engraved
         // decal pass lands; hover tracking still uses the original screen
         // rect (the cards live in the same pixel region as before).
-        let mut yaku_tablet_placements: Vec<crate::render::draw_cmd::YakuTabletPlacement> =
-            Vec::new();
+        let cam_rot = {
+            let cam = CameraParams::default_table_camera(layout.window_h);
+            camera_facing_rotation(cam.eye, cam.target)
+        };
+        // Yaku-tablet placement rotation (rx/ry/rz_deg) is applied centrally
+        // by the renderer via `committed_arrange_rotations`; only the
+        // camera-facing orientation is baked into the base matrix here.
+        let yaku_tablet_rot = cam_rot;
+        let yaku_tablet_px_dx = self.positions.yaku_tablet.nx * layout.window_w;
+        let yaku_tablet_px_dy = self.positions.yaku_tablet.ny * layout.window_h;
+        let yaku_tablet_lift_dz = layout.mm(self.positions.yaku_tablet.lift_mm);
+        let mut yaku_tablet_placements: Vec<Object3d> = Vec::new();
         if !visible_previews.is_empty() || is_chicken_hand {
             let panel_h = yaku_panel_h;
             let panel_y = yaku_row_y;
@@ -3022,15 +2993,23 @@ impl SceneBehavior for GameplayScene {
                     ctx.picked_gameplay_object,
                     Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(0))
                 );
-                yaku_tablet_placements.push(crate::render::draw_cmd::YakuTabletPlacement {
-                    world_pos: [center_px, center_py, 0.0],
+                yaku_tablet_placements.push(Object3d {
+                    pos: [center_px + yaku_tablet_px_dx, center_py + yaku_tablet_px_dy, yaku_tablet_lift_dz],
                     extents: [card_w, tablet_thickness, panel_h],
-                    rotation_z_deg: 0.0,
-                    name: "\u{1F414} Chicken Hand".to_string(),
-                    progress: 0.0,
-                    active: true,
-                    hover: if hovered_now { 1.0 } else { 0.0 },
-                });
+                    rotation: yaku_tablet_rot,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::YakuTablet {
+                        label: "\u{1F414} Chicken Hand".to_string(),
+                        active: true,
+                        hover: if hovered_now { 1.0 } else { 0.0 },
+                        progress: 0.0,
+                    },
+                    focusable: true,
+                    scene_shaded: true,
+                    own_light: None,
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: None,                });
                 if hovered_now {
                     let (ax, ay) = match ctx.proj.yaku_tablet_rects.first().copied() {
                         Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
@@ -3056,15 +3035,23 @@ impl SceneBehavior for GameplayScene {
                         Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j))
                             if j == i,
                     );
-                    yaku_tablet_placements.push(crate::render::draw_cmd::YakuTabletPlacement {
-                        world_pos: [center_px, center_py, 0.0],
+                    yaku_tablet_placements.push(Object3d {
+                        pos: [center_px + yaku_tablet_px_dx, center_py + yaku_tablet_px_dy, yaku_tablet_lift_dz],
                         extents: [card_w, tablet_thickness, panel_h],
-                        rotation_z_deg: 0.0,
-                        name: p.kind.name().to_string(),
-                        progress: p.progress,
-                        active: p.active,
-                        hover: if hovered_now { 1.0 } else { 0.0 },
-                    });
+                        rotation: yaku_tablet_rot,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::YakuTablet {
+                            label: p.kind.name().to_string(),
+                            active: p.active,
+                            hover: if hovered_now { 1.0 } else { 0.0 },
+                            progress: p.progress,
+                        },
+                        focusable: true,
+                        scene_shaded: true,
+                        own_light: None,
+                        hover_target: 0.0,
+                        anim_id: 0,
+                        arrange_name: None,                    });
                     // The yaku name is now engraved directly on the bone tablet
                     // via a per-instance decal texture (see the renderer's tablet
                     // pass), so no 2D text overlay is pushed here.
@@ -3137,15 +3124,15 @@ impl SceneBehavior for GameplayScene {
         ];
         // Phase 4: action row is now physical objects.
         //   - Sort by Suit / Sort by Rank → carved wood tablets
-        //   - Discard / Play              → bowl + mirror (row below hand, above sort)
+        //   - Discard / Play              → bowl + mirror (row below hand, above sort;
+        //                                    mirror play left, discard bowl right)
         // The flat slate-blue button background quads are gone; only the
         // focus-highlight border remains as a 2D affordance for keyboard
         // navigation.
-        let mut wood_tablet_placements: Vec<crate::render::draw_cmd::WoodTabletPlacement> =
-            Vec::new();
+        let mut wood_tablet_placements: Vec<Object3d> = Vec::new();
         let mut discard_bowl_placement: Option<crate::render::draw_cmd::BowlPlacement> = None;
         let mut bronze_mirror_placement: Option<crate::render::draw_cmd::MirrorPlacement> = None;
-        // `action_hud_table_lift`: third component of [`crate::render::draw_cmd::TableSurfaceAnchor`]
+        // `action_hud_table_lift`: third component of [`crate::render::draw_cmd::WorldSurfaceAnchor`]
         // (height above felt); set in [`action_bar_layout::compute_action_bar`].
         let play_enabled = selection_valid && run.plays_remaining > 0;
         let trigger_enabled = run.can_trigger_structure_now();
@@ -3227,35 +3214,50 @@ impl SceneBehavior for GameplayScene {
             // at the end of `draw_frame` via `push_focus_ring`.
             let center_px = bx + bw * 0.5;
             let center_py = by + bh * 0.5;
-            let action_anchor = TableAnchorPx {
+            let action_anchor = LayoutAnchorPx {
                 px: center_px,
                 py: center_py + action_world_z_py,
-                lift_y: action_hud_table_lift,
+                lift_z: action_hud_table_lift,
             };
             let tablet_thickness = (bh * 0.35).max(8.0);
             match i {
                 0 | 1 => {
-                    let label = match i {
-                        0 => "Sort by Suit",
-                        _ => "Sort by Rank",
+                    let (label, tp) = match i {
+                        0 => ("Sort by Suit", &self.positions.tablet_sort_suit),
+                        _ => ("Sort by Rank", &self.positions.tablet_sort_rank),
                     };
                     let _tablet_idx = wood_tablet_placements.len();
-                    wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
-                        world_pos: action_anchor.to_draw_cmd_triple(),
+                    let anchor = action_anchor.to_draw_cmd_triple();
+                    wood_tablet_placements.push(Object3d {
+                        pos: [
+                            anchor[0] + tp.nx * layout.window_w,
+                            anchor[1] + tp.ny * layout.window_h,
+                            anchor[2] + layout.mm(tp.lift_mm),
+                        ],
                         extents: [bw, tablet_thickness, bh],
-                        label: label.to_string(),
-                        pressed: 0.0,
-                        hover: if hovered { 1.0 } else { 0.0 },
-                        rotation_z_deg: 0.0,
-                        disabled: false,
-                    });
+                        // Placement rotation applied centrally via
+                        // `committed_arrange_rotations`.
+                        rotation: cam_rot,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::WoodTablet {
+                            label: label.to_string(),
+                            hover: if hovered { 1.0 } else { 0.0 },
+                            pressed: 0.0,
+                            disabled: false,
+                        },
+                        focusable: true,
+                        scene_shaded: true,
+                        own_light: None,
+                        hover_target: 0.0,
+                        anim_id: 0,
+                        arrange_name: None,                    });
                     // Gold overlay label superimposed on the sort tablet
                     // when it's the active selection. Anchored on the
                     // The label is engraved directly on the wood tablet
                     // via a per-instance decal texture — no 2D overlay.
                 }
                 2 => {
-                    // Discard bowl — left side of the discard/play row under the rack.
+                    // Discard bowl — right side of the discard/play row under the rack.
                     // The synthesized
                     // `discard_btn_rect` above is already a square sized to
                     // the desired bowl diameter and centered at the
@@ -3273,9 +3275,18 @@ impl SceneBehavior for GameplayScene {
                     let target = if hovered && discard_enabled { 1.0 } else { 0.0 };
                     let diam = bw.min(bh);
                     discard_bowl_placement = Some(crate::render::draw_cmd::BowlPlacement {
-                        world_pos: action_anchor.to_draw_cmd_triple(),
+                        world_pos: {
+                            let t = action_anchor.to_draw_cmd_triple();
+                            let bowl = &self.positions.bowl;
+                            [
+                                t[0] + bowl.nx * layout.window_w,
+                                t[1] + bowl.ny * layout.window_h,
+                                t[2] + layout.mm(bowl.lift_mm),
+                            ]
+                        },
                         extents: [diam, diam, diam],
                         hover: target,
+                        rotation_x_deg: 90.0,
                     });
                     // Gold "Discard tiles" label superimposed on the river
                     // when it's the active selection (cursor hover or
@@ -3296,7 +3307,7 @@ impl SceneBehavior for GameplayScene {
                     }
                 }
                 3 => {
-                    // Bronze mirror — right side of that same row (paired with the bowl).
+                    // Bronze mirror — left side of that same row (paired with the bowl).
                     // Same square `play_btn_rect` convention as the bowl,
                     // and the same binary-target → renderer-eased envelope
                     // pattern. The renderer's `mirror_hover_anim` field
@@ -3304,10 +3315,18 @@ impl SceneBehavior for GameplayScene {
                     let target = if hovered && play_enabled { 1.0 } else { 0.0 };
                     let diam = bw.min(bh);
                     bronze_mirror_placement = Some(crate::render::draw_cmd::MirrorPlacement {
-                        world_pos: action_anchor.to_draw_cmd_triple(),
+                        world_pos: {
+                            let t = action_anchor.to_draw_cmd_triple();
+                            let mirror = &self.positions.mirror;
+                            [
+                                t[0] + mirror.nx * layout.window_w,
+                                t[1] + mirror.ny * layout.window_h,
+                                t[2] + layout.mm(mirror.lift_mm),
+                            ]
+                        },
                         extents: [diam, diam, diam],
                         hover: target,
-                        rotation_x_deg: 0.0,
+                        rotation_x_deg: 90.0,
                         rotation_z_deg: 0.0,
                     });
                     // Gold "Play hand" label superimposed on the mirror
@@ -3342,15 +3361,32 @@ impl SceneBehavior for GameplayScene {
                         0.0
                     };
                     let _tablet_idx = wood_tablet_placements.len();
-                    wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
-                        world_pos: action_anchor.to_draw_cmd_triple(),
+                    let wiggle = glam::Mat4::from_rotation_z(wiggle_deg.to_radians());
+                    let tp = &self.positions.tablet_cash_in;
+                    let anchor = action_anchor.to_draw_cmd_triple();
+                    wood_tablet_placements.push(Object3d {
+                        pos: [
+                            anchor[0] + tp.nx * layout.window_w,
+                            anchor[1] + tp.ny * layout.window_h,
+                            anchor[2] + layout.mm(tp.lift_mm),
+                        ],
                         extents: [bw, tablet_thickness, bh],
-                        label: "Cash in".to_string(),
-                        pressed: 0.0,
-                        hover: target,
-                        rotation_z_deg: wiggle_deg,
-                        disabled: !trigger_enabled,
-                    });
+                        // Placement rotation applied centrally via
+                        // `committed_arrange_rotations`.
+                        rotation: wiggle * cam_rot,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::WoodTablet {
+                            label: "Cash in".to_string(),
+                            hover: target,
+                            pressed: 0.0,
+                            disabled: !trigger_enabled,
+                        },
+                        focusable: true,
+                        scene_shaded: true,
+                        own_light: None,
+                        hover_target: 0.0,
+                        anim_id: 0,
+                        arrange_name: None,                    });
                     if let Some(r) = ctx.proj.wood_tablet_rects.get(2).filter(|_| hovered) {
                         let label_h = (r[3] * 0.38).max(28.0);
                         hover_text.push(TextLabel {
@@ -3390,32 +3426,44 @@ impl SceneBehavior for GameplayScene {
                 ctx.picked_gameplay_object,
                 Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(idx)) if idx == journal_pick_idx,
             );
-        let (rbx, rby, rbw, rbh) = rank_btn_rect;
-        let book_w = rbw * 0.55;
+        let (_, rby, _, rbh) = rank_btn_rect;
+        let book_w = journal_btn_w;
         let book_h = rbh * 0.95;
-        // Anchor the book to the right of the rightmost sort tablet with
-        // a generous gap so it reads as a separate object on the felt
-        // rather than a third button in the row. Stays inside the window
-        // even at narrow widths via a clamp against the right edge.
+        // Journal is the third button in the centered sort row — position
+        // comes directly from action_bar_layout's centered group calculation.
         let book_cy = rby + rbh * 0.5;
-        let desired_cx = rbx + rbw + (32.0 * layout_scale).max(16.0) + book_w * 0.5;
-        let max_cx = layout.window_w - book_w * 0.5 - (12.0 * layout_scale);
-        let book_cx = desired_cx.min(max_cx);
+        let book_cx = journal_btn_cx;
         let book_thickness = (book_h * 0.45).max(8.0);
-        wood_tablet_placements.push(crate::render::draw_cmd::WoodTabletPlacement {
-            world_pos: TableAnchorPx {
-                px: book_cx,
-                py: book_cy + action_world_z_py,
-                lift_y: action_hud_table_lift,
-            }
-            .to_draw_cmd_triple(),
+        let journal_anchor = LayoutAnchorPx {
+            px: book_cx,
+            py: book_cy + action_world_z_py,
+            lift_z: action_hud_table_lift,
+        }
+        .to_draw_cmd_triple();
+        let tp = &self.positions.tablet_journal;
+        wood_tablet_placements.push(Object3d {
+            pos: [
+                journal_anchor[0] + tp.nx * layout.window_w,
+                journal_anchor[1] + tp.ny * layout.window_h,
+                journal_anchor[2] + layout.mm(tp.lift_mm),
+            ],
             extents: [book_w, book_thickness, book_h],
-            label: "Journal".to_string(),
-            pressed: 0.0,
-            hover: if journal_hovered { 1.0 } else { 0.0 },
-            rotation_z_deg: 0.0,
-            disabled: false,
-        });
+            // Placement rotation applied centrally via
+            // `committed_arrange_rotations`.
+            rotation: cam_rot,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::WoodTablet {
+                label: "Journal".to_string(),
+                hover: if journal_hovered { 1.0 } else { 0.0 },
+                pressed: 0.0,
+                disabled: false,
+            },
+            focusable: true,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,        });
         // Anchor the Journal button's keyboard-nav focus rect on the
         // renderer's projected wood-tablet rect for the journal slot.
         // Same one-frame stale snapshot pattern as the other action
@@ -3445,18 +3493,11 @@ impl SceneBehavior for GameplayScene {
         // — keeping the focus ring, hover tooltip, and physical pile
         // visually locked together as the score panel resizes. `None`
         // when there's no gold to display (no pile is drawn).
-        // Dora indicator screen rect. Mirrored against the actual draw
-        // call further down in `draw_frame` (search "Dora indicator
-        // stand —"). Pre-computed up here so the focus rect graph entry
-        // and the focus tooltip can both use it. Note: the dora stand is
-        // a 3D mesh, but we're not projecting its AABB through the
-        // camera — we just use its 2D pixel anchor directly because
-        // gameplay's `pixel_to_world` projects the X/Y inputs as on-
-        // screen pixel coordinates, which keeps the rect aligned with
-        // the visible plinth.
+        // Dora indicator screen rect. Pre-computed up here so the focus
+        // rect graph entry and the focus tooltip can both use it.
         let dora_rect: [f32; 4] = {
-            let dora_x = layout.window_w * 0.94;
-            let dora_y = layout.window_h * 0.22;
+            let dora_x = self.positions.dora.nx * layout.window_w;
+            let dora_y = self.positions.dora.ny * layout.window_h;
             let dora_w = layout.mm(30.0);
             let dora_h = layout.mm(40.0);
             [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
@@ -3464,16 +3505,12 @@ impl SceneBehavior for GameplayScene {
 
         let coin_pile_rect: Option<[f32; 4]> = if run.gold > 0 {
             let coin_radius = layout.mm(11.3);
-            let coin_candle_w = layout.mm(78.0) * 0.72;
-            let coin_edge_pad = layout.mm(12.0);
-            let coin_back_z_push = coin_candle_w;
-            let right_candle_x = (sp.x + sp.w + coin_candle_w + coin_edge_pad)
-                .min(layout.window_w - coin_candle_w * 0.5 - 4.0);
-            let right_candle_y = sp.y + sp.h * 0.5 - coin_back_z_push;
             let scatter_half = coin_radius * 3.0;
-            let dish_half_w = scatter_half + coin_radius * 2.0;
-            let pile_cx = right_candle_x + coin_candle_w * 0.5 + dish_half_w + coin_edge_pad;
-            let pile_cy = right_candle_y;
+            let coin_back_z_push = scatter_half * 0.5;
+            let pile_cx = self.positions.coin_pile.nx * layout.window_w;
+            let pile_cy = sp.y + sp.h * 0.5
+                - coin_back_z_push
+                - layout.window_h * self.positions.coin_pile.ny;
             let pile_half_w = scatter_half + coin_radius * 2.0;
             let pile_half_h = scatter_half + coin_radius * 2.0;
             Some([
@@ -3552,8 +3589,10 @@ impl SceneBehavior for GameplayScene {
             let total_w = (slot_w * consumables.capacity as f32
                 + gap * (consumables.capacity as f32 - 1.0))
                 .min(layout.window_w * 0.65);
-            let strip_x = (layout.window_w - total_w - (48.0 * zscale)).max(4.0);
-            let strip_y = layout.score_panel.y + layout.score_panel.h + (8.0 * zscale);
+            // Mockup: TALISMANS right:2% top:18% width:16% height:16%.
+            // Anchor the strip to right:2%, clamped so it doesn't go off-screen.
+            let strip_x = (layout.window_w * 0.98 - total_w).max(4.0);
+            let strip_y = layout.window_h * 0.18;
             talisman_dish_strip = Some((strip_x, strip_y, total_w, slot_h));
 
             // ── Projection-aware slot rects ──────────────────────────────
@@ -3602,13 +3641,20 @@ impl SceneBehavior for GameplayScene {
                 (raw_x, raw_y, slot_w, slot_h)
             };
 
+            // Pendants must track the dish's arrange-mode nudge, otherwise
+            // they render at the raw strip anchor while the dish drifts off
+            // to its tweaked position — talismans float next to the tray
+            // instead of sitting on it.
+            let td = &self.positions.talisman_dish;
+            let dish_nudge_x = td.nx * layout.window_w;
+            let dish_nudge_y = td.ny * layout.window_h;
             for slot_idx in 0..consumables.capacity {
                 // Pendant placement still uses the raw pixel anchors
                 // (those get re-projected by the renderer for rendering).
                 // The 2D overlays use the projected slot rect derived
                 // from the dish.
-                let zx = strip_x + slot_idx as f32 * (slot_w + gap);
-                let zy = strip_y;
+                let zx = strip_x + slot_idx as f32 * (slot_w + gap) + dish_nudge_x;
+                let zy = strip_y + dish_nudge_y;
                 let (slot_sx, slot_sy, slot_sw, slot_sh) = slot_screen_rect(slot_idx);
                 // Shrink the focus rect to match the visual item extents
                 // so the hover/click region hugs the pendant, not the
@@ -3654,12 +3700,13 @@ impl SceneBehavior for GameplayScene {
                         crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
                         crate::core::consumable::Consumable::Talisman(_) => [0.92, 0.78, 0.32, 1.0],
                     };
-                    // Lift the pendant above the dish. The dish rim
-                    // height is `layout.mm(10.0)` world units (scales
-                    // with window size), so we park the pendant center
-                    // a few units above that so it rests visibly on top.
-                    let dish_h = layout.mm(10.0);
-                    let pendant_y = dish_h + 8.0;
+                    // Rest the pendant on the dish's rim. The dish is
+                    // centered at `mm(td.lift_mm)` with full rim extent
+                    // `mm(10.0)` (rotated so the rim height becomes world
+                    // Z), so the top surface sits at `mm(td.lift_mm + 5.0)`.
+                    // Add a small extra lift so the pendant reads as
+                    // resting *on* the rim rather than clipping into it.
+                    let pendant_y = layout.mm(td.lift_mm + 5.0) + 2.0;
                     match item {
                         crate::core::consumable::Consumable::Zodiac(z) => {
                             // Ribbon thickness = width × 0.15 (set by the
@@ -3680,16 +3727,19 @@ impl SceneBehavior for GameplayScene {
                             );
                         }
                         crate::core::consumable::Consumable::Talisman(tk) => {
+                            // Gameplay world is +Z up; the tablet mesh's front
+                            // normal is already +Z, so rotation_x = 0 keeps it
+                            // face-up. Roll 90° about Z so the mesh's long
+                            // local-Y axis lies along world X (the slot's long
+                            // side) — then extents map width→local-Y, height
+                            // →local-X without distorting the tablet.
                             talisman_dish_placements.push(
                                 crate::render::draw_cmd::TalismanPlacement {
                                     center_pos: [zx + slot_w * 0.5, zy + slot_h * 0.5, pendant_y],
-                                    extents: [slot_w * 0.55, slot_h * 0.85, 14.0],
+                                    extents: [slot_h * 0.85, slot_w * 0.55, 14.0],
                                     rotation_y_deg: 0.0,
-                                    // Lay flat on the dish (face up). -90
-                                    // around X rotates the tablet's front
-                                    // normal from +Z to +Y.
-                                    rotation_x_deg: -90.0,
-                                    rotation_z_deg: 0.0,
+                                    rotation_x_deg: 0.0,
+                                    rotation_z_deg: 90.0,
                                     color: pendant_color,
                                     kind: tk,
                                 },
@@ -3853,7 +3903,8 @@ impl SceneBehavior for GameplayScene {
             };
 
             if let Some(idx) = hovered_idx {
-                if let Some(tile) = run.hand.get(idx) {
+                if let Some(&raw_tile) = run.hand.get(idx) {
+                    let tile = Self::display_tile(raw_tile, run);
                     // Resolve the anchor rect: prefer the projected rect for
                     // this index, otherwise the flat slot rect.
                     let anchor: (f32, f32, f32, f32) = ctx
@@ -3867,47 +3918,50 @@ impl SceneBehavior for GameplayScene {
                     let (ax, ay, aw, ah) = anchor;
 
                     // ── Build the lines ───────────────────────────────
-                    // Show the tile's *effective* value: base point worth
-                    // plus every per-tile bonus that doesn't depend on the
-                    // surrounding meld structure (talisman enhancements,
-                    // dora, owned chip relics). The total chips line is the
-                    // headline; the per-source breakdown follows so the
-                    // player can see *why* the tile is worth what it is.
-                    let dora_faces = run.wall.dora_faces();
-                    let eff = crate::core::scoring::tile_effective_value(
-                        tile,
-                        &run.relics,
-                        &dora_faces,
-                        &run.tile_debuffs,
-                    );
-                    let name = tile.full_name();
-                    let category = tile.category();
-                    let is_selected = run.selected.get(idx).copied().unwrap_or(false);
+                    let lines: Vec<String> = {
+                        // Show the tile's *effective* value: base point worth
+                        // plus every per-tile bonus that doesn't depend on the
+                        // surrounding meld structure (talisman enhancements,
+                        // dora, owned chip relics). The total chips line is the
+                        // headline; the per-source breakdown follows so the
+                        // player can see *why* the tile is worth what it is.
+                        let dora_faces = run.wall.dora_faces();
+                        let eff = crate::core::scoring::tile_effective_value(
+                            &tile,
+                            &run.relics,
+                            &dora_faces,
+                            &run.tile_debuffs,
+                        );
+                        let name = tile.full_name();
+                        let category = tile.category();
+                        let is_selected = run.selected.get(idx).copied().unwrap_or(false);
 
-                    let mut lines: Vec<String> = Vec::new();
-                    lines.push(name);
-                    if eff.bonus_chips != 0 || eff.mult_bonus != 0.0 {
-                        // Effective chips (base + bonuses).
-                        lines.push(format!(
-                            "{category} · {} pts (base {})",
-                            eff.total_chips(),
-                            eff.base_chips,
-                        ));
-                    } else {
-                        lines.push(format!("{category} · {} pts", eff.base_chips));
-                    }
-                    if eff.mult_bonus != 0.0 {
-                        lines.push(format!("+{:.1} mult", eff.mult_bonus));
-                    }
-                    for (src, body) in &eff.sources {
-                        lines.push(format!("{src}: {body}"));
-                    }
-                    if let Some(fx) = tile.flower_effect_label() {
-                        lines.push(format!("flower: {fx}"));
-                    }
-                    if is_selected {
-                        lines.push("selected".to_string());
-                    }
+                        let mut v: Vec<String> = Vec::new();
+                        v.push(name);
+                        if eff.bonus_chips != 0 || eff.mult_bonus != 0.0 {
+                            // Effective chips (base + bonuses).
+                            v.push(format!(
+                                "{category} · {} pts (base {})",
+                                eff.total_chips(),
+                                eff.base_chips,
+                            ));
+                        } else {
+                            v.push(format!("{category} · {} pts", eff.base_chips));
+                        }
+                        if eff.mult_bonus != 0.0 {
+                            v.push(format!("+{:.1} mult", eff.mult_bonus));
+                        }
+                        for (src, body) in &eff.sources {
+                            v.push(format!("{src}: {body}"));
+                        }
+                        if let Some(fx) = tile.flower_effect_label() {
+                            v.push(format!("flower: {fx}"));
+                        }
+                        if is_selected {
+                            v.push("selected".to_string());
+                        }
+                        v
+                    };
 
                     // ── Geometry ──────────────────────────────────────
                     let line_h = 18.0 * scale;
@@ -3917,16 +3971,17 @@ impl SceneBehavior for GameplayScene {
                     let tw = (widest * 7.5 * scale + pad_x * 2.0).max(120.0 * scale);
                     let th = line_h * lines.len() as f32 + pad_y * 2.0;
 
-                    // Position: centred horizontally over the anchor,
-                    // floating just above its top edge. Flip below the
-                    // anchor if there isn't room above.
+                    // Position: below the anchor's bottom edge (the tile
+                    // face is nearest camera at the AABB bottom, so placing
+                    // the tooltip above the AABB would land on the face).
+                    // Flip above if there isn't room below.
                     let mut tx = ax + (aw - tw) * 0.5;
-                    let mut ty = ay - th - 6.0 * scale;
-                    if ty < 4.0 {
-                        ty = ay + ah + 6.0 * scale;
-                    }
+                    let mut ty = ay + ah + 6.0 * scale;
                     if ty + th > layout.window_h - 4.0 {
-                        ty = (layout.window_h - th - 4.0).max(4.0);
+                        ty = ay - th - 6.0 * scale;
+                    }
+                    if ty < 4.0 {
+                        ty = 4.0;
                     }
                     if tx + tw > layout.window_w - 4.0 {
                         tx = layout.window_w - tw - 4.0;
@@ -4035,7 +4090,6 @@ impl SceneBehavior for GameplayScene {
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
         let mut point_lights: Vec<PointLight> = Vec::new();
         let mut candle_placements: Vec<CandlePlacement> = Vec::new();
-        let _relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
         // `scale_c` is still used by per-candle jitter offsets below; the
         // jitters are positional fudges, not physical mesh sizes, so they
         // stay in pixel space.
@@ -4079,11 +4133,8 @@ impl SceneBehavior for GameplayScene {
         // above the table — putting them at strip_y meant the candle's
         // wick projected into the same screen band as the tiles.
         let bottom_pad = edge_pad + candle_w * 1.6;
-        let bottom_z_back = candle_h * 0.55; // shift back along table-Z
-                                             // The two score-panel candles sit at the back of the table. Push
-                                             // them one candle-width further from the camera (smaller pixel-y →
-                                             // greater table-z) so they read as the rear pair in depth.
-        let back_z_push = candle_w;
+        let bottom_z_back = candle_h * self.positions.candle_bottom_z_back_candle_h_frac;
+        let back_z_push = candle_w * self.positions.candle_back_z_push_candle_w_frac;
         let cy_hand_upper = strip_y - bottom_z_back;
         let cy_hand_lower = rack_bottom + candle_w * 0.5 + edge_pad * 0.5;
         let candle_centers: [(f32, f32); 7] = [
@@ -4306,68 +4357,35 @@ impl SceneBehavior for GameplayScene {
         // tile_outline_pipeline (which catches candlelight), so no 2D
         // selection overlay is added here.
 
-        // ── Physical relic placeholders sitting in a dish on the table ──
-        // Each active relic becomes a small colored box in a row toward the
-        // back of the table. Sizes are deterministic-but-varied so the row
-        // reads as a collection of distinct objects rather than a uniform
-        // line of cubes. The renderer draws a brass dish under them.
-        let mut relic_placements: Vec<crate::render::draw_cmd::RelicPlacement> = Vec::new();
+        // ── Relic badges in the sidebar column ──────────────────────────
+        // Each active relic renders as a face-on medallion (badge appearance)
+        // using the showcase path — same mesh/material as the collection
+        // screen, just positioned in the left sidebar column.
+        let mut relic_placements: Vec<RelicShowcasePlacement> = Vec::new();
         let active_ids = &run.relics.active;
         if !active_ids.is_empty() {
             use crate::core::relic::all_relic_defs;
             let defs = all_relic_defs();
-            // Lay the row out in pixel coordinates so the renderer's
-            // pixel_to_world helper places them on the table plane. We sit
-            // them just above the score-panel band, in front of the
-            // back-edge candles.
-            let row_y = layout.score_panel.y + layout.score_panel.h + layout.window_h * 0.08;
+            let gp = &self.positions;
+            let col_x = gp.relic_col.nx * layout.window_w;
+            let col_top_y = gp.relic_col_top_ny * layout.window_h;
+            let col_bottom_y = gp.relic_col_bottom_ny * layout.window_h;
+            let cell_h = layout.mm(gp.relic_cell_height_mm);
+            let col_span = col_bottom_y - col_top_y;
+            // Center the stack within the column span.
             let n = active_ids.len() as f32;
-            // Default centered, but if the consumable inventory strip in the
-            // top-right would clash with the right end of the row, shift the
-            // row left so the two never overlap. The inventory anchors in
-            // raw pixel space (line ~1739) — same coordinate system used
-            // here before the renderer projects through the gameplay camera.
-            let row_center_x_default = layout.window_w * 0.38;
-            // Scale relic-dish geometry with window size so the dish reads the
-            // same proportionally at every resolution. The constants below were
-            // tuned at the 1920x1080 design size, so a window-height ratio of
-            // 1.0 at 1080 keeps them unchanged and shrinks them on smaller
-            // windows along with the rest of the layout.
-            // Each relic is sized like a real desk-trinket: roughly the
-            // footprint of a small carved figurine (~30mm cube), with ±10mm
-            // jitter on each axis so the row reads as a varied collection
-            // rather than uniform blocks. The dish cell is sized to fit
-            // the largest possible relic plus a little breathing room.
-            let cell_w = layout.mm(45.0);
-            let total_w = cell_w * n;
-            // Clamp the row's right edge to stay clear of the inventory
-            // strip's left edge (with a small breathing margin). If shifting
-            // left would push the row off the left side, just clamp to the
-            // available space.
-            let inv_margin = layout.mm(8.0);
-            let max_right = match talisman_dish_strip {
-                Some((sx, _, _, _)) => (sx - inv_margin).max(layout.mm(20.0)),
-                None => layout.window_w - layout.mm(8.0),
-            };
-            let mut row_center_x = row_center_x_default;
-            let row_right = row_center_x + total_w * 0.5;
-            if row_right > max_right {
-                row_center_x -= row_right - max_right;
-            }
-            let start_x = row_center_x - total_w * 0.5 + cell_w * 0.5;
-            for (i, &rid) in active_ids.iter().enumerate() {
-                // Pseudo-random per-relic size variation, deterministic on id.
-                let seed = (rid as u32).wrapping_mul(2654435761) ^ 0x9E3779B9;
-                let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
-                let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
-                // Front face (x × y) is square to match 1:1 relic textures.
-                let face = layout.mm(13.0 + r0 * 5.0);
-                let half_x = face;
-                let half_y = face;
-                let half_z = layout.mm(10.0 + r2 * 4.0);
+            let total_h = cell_h * n;
+            let start_y = (col_top_y + (col_span - total_h) * 0.5 + cell_h * 0.5)
+                .clamp(col_top_y, col_bottom_y);
 
-                // Color tracks the relic's rarity tier so similar-rarity
-                // relics share a visual family.
+            for (i, &rid) in active_ids.iter().enumerate() {
+                let visual = relic_visual(rid);
+                // Face size: fixed per cell, thickness scaled by material.
+                let face = cell_h * 0.72;
+                let thick = face * 0.12 * visual.thickness_scale;
+                let tilt = visual.ui_tilt_x_deg * 0.75;
+
+                // Color tracks the relic's rarity tier.
                 let rarity = defs
                     .iter()
                     .find(|d| d.id == rid)
@@ -4381,12 +4399,7 @@ impl SceneBehavior for GameplayScene {
                 };
                 let color = crate::render::theme::color::rarity(tier);
 
-                // Activation glow: if this relic is in the cascade glow map,
-                // compute a fast-attack / smooth-decay envelope and stash it
-                // on the placement so the renderer can brighten the box and
-                // emit a real additive halo around it. Attack is the first
-                // ~12% of the lifetime; the rest is a quadratic decay so the
-                // glow flares quickly and lingers in a soft afterglow.
+                // Activation glow: fast-attack / smooth-decay envelope.
                 let (glow, wiggle_deg) = if let Some(start) = self.relic_glow_starts.get(&rid) {
                     let now_for_glow = Instant::now();
                     let age = now_for_glow.saturating_duration_since(*start).as_secs_f32();
@@ -4402,9 +4415,6 @@ impl SceneBehavior for GameplayScene {
                             let decay_t = (t - attack_end) / (1.0 - attack_end);
                             (1.0 - decay_t).max(0.0).powi(2)
                         };
-                        // Decaying sinusoidal wiggle synced to the glow envelope.
-                        // ~6 oscillations over the lifetime, amplitude peaks at
-                        // 12 degrees then decays with the glow.
                         let wiggle = glow * 12.0 * (age * 22.0).sin();
                         (glow, wiggle)
                     }
@@ -4412,15 +4422,16 @@ impl SceneBehavior for GameplayScene {
                     (0.0, 0.0)
                 };
 
-                let px = start_x + i as f32 * cell_w;
-                relic_placements.push(crate::render::draw_cmd::RelicPlacement {
-                    world_pos: [px, row_y, 0.0],
-                    half_extents: [half_x, half_y, half_z],
+                let py = start_y + i as f32 * cell_h;
+                relic_placements.push(RelicShowcasePlacement {
+                    center_pos: [col_x, py, face * 0.15],
+                    extents: [face, face, thick],
+                    rotation_y_deg: wiggle_deg,
+                    rotation_x_deg: 90.0 + tilt,
+                    rotation_z_deg: 0.0,
                     color,
                     relic_id: rid,
                     glow,
-                    rotation_x_deg: 0.0,
-                    rotation_z_deg: wiggle_deg,
                 });
             }
         }
@@ -4795,8 +4806,8 @@ impl SceneBehavior for GameplayScene {
                                     lift,
                                     velocity: [
                                         lateral,
-                                        (6.0 + 4.0 * rf) * envelope * row_strength,
                                         -180.0 * envelope * row_strength,
+                                        (6.0 + 4.0 * rf) * envelope * row_strength,
                                     ],
                                     radius,
                                     density: -0.10 * envelope * row_strength,
@@ -4853,7 +4864,7 @@ impl SceneBehavior for GameplayScene {
                         wind_gusts.push(crate::render::draw_cmd::WindGust {
                             center_px: (cx, cy),
                             lift,
-                            velocity: [1400.0 * envelope, 0.0, -120.0 * envelope],
+                            velocity: [1400.0 * envelope, -120.0 * envelope, 0.0],
                             radius,
                             density: -0.04 * envelope,
                         });
@@ -4873,21 +4884,80 @@ impl SceneBehavior for GameplayScene {
         let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
-        if fov_pop_offset > 0.0 {
-            let mut camera =
-                crate::render::draw_cmd::CameraParams::default_table_camera(layout.window_h);
+        {
+            // Build camera from positions (multipliers on the cs-scaled defaults).
+            let h = layout.window_h;
+            let cs = h / 2104.0_f32;
+            let gp = &self.positions;
+            let mut camera = crate::render::draw_cmd::CameraParams {
+                eye: [0.0, -2104.0 * cs * gp.camera_eye_y_mul, 1157.2 * cs * gp.camera_eye_z_mul],
+                target: [0.0, -39.6 * cs * gp.camera_target_y_mul, 105.2 * cs * gp.camera_target_z_mul],
+                up: [0.0, 0.0, 1.0],
+                fovy_deg: gp.camera_fovy_deg,
+            };
             camera.fovy_deg = (camera.fovy_deg - fov_pop_offset).max(35.0);
             frame.camera_override = Some(camera);
         }
         frame.background(super::BackgroundId::Black);
         frame.table();
-        frame.hand_tile_backdrop();
+
+        // Build hand tile placements for the showcase pipeline.
+        // Each slot becomes one ShowcaseTilePlacement; the renderer draws,
+        // picks, and projects them with no separate hand-tile GPU path.
+        {
+            use crate::ui::layout::HAND_TILE_MESH_Y_FRAC;
+            // Rx(+π/2): rotates face normal from +Z → -Y (toward camera at large -Y).
+            // Rz(π): flips the tile's long axis so the top faces up (without Rz the top faces down).
+            // The -22° lean tilts the top slightly toward the player.
+            const HAND_TILE_RX: f32 = std::f32::consts::FRAC_PI_2 - 22.0_f32 * std::f32::consts::PI / 180.0;
+            const HAND_TILE_RZ: f32 = std::f32::consts::PI;
+            let hand = &run.hand;
+            let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
+                Vec::with_capacity(hand.len());
+            for (i, &tile) in hand.iter().enumerate() {
+                let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
+                    continue;
+                };
+                let tile = Self::display_tile(tile, run);
+                let is_selected = run.selected.get(i).copied().unwrap_or(false);
+                let is_focused = focus == i;
+                let is_hinted = hint_indices.contains(&i);
+                // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
+                let slide_y_frac = self.hand_slide_y.get(i).copied().unwrap_or(1.0);
+                let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
+                let slide_x_px = self.hand_slide_x.get(i).copied().unwrap_or(0.0);
+                let cx = sx + sw * 0.5 + slide_x_px + self.positions.hand_strip.nx * layout.window_w;
+                let cy = sy + sh * HAND_TILE_MESH_Y_FRAC + pop_offset + self.positions.hand_strip.ny * layout.window_h;
+                // Tile standing upright: center is at half the long dimension above the table.
+                // Chinese tile: 30mm long, half = 15mm. layout.mm() converts mm → world units.
+                let lift = layout.mm(15.0) + layout.mm(self.positions.hand_strip.lift_mm);
+                hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
+                    tile,
+                    center_pos: [cx, cy, lift],
+                    rotation: [
+                        HAND_TILE_RX + self.positions.hand_strip.rx_deg.to_radians(),
+                        self.positions.hand_strip.ry_deg.to_radians(),
+                        HAND_TILE_RZ + self.positions.hand_strip.rz_deg.to_radians(),
+                    ],
+                    scale: slide_y_frac.max(0.05),
+                    size_px: sw,
+                    brightness: 1.0,
+                    selected: is_selected,
+                    hovered: is_focused,
+                    outline: is_selected || is_focused,
+                    glow: is_selected || is_hinted,
+                    pick_id: Some(i),
+                });
+            }
+            if !hand_placements.is_empty() {
+                frame.showcase_tile_batch(hand_placements);
+            }
+        }
         if !candle_placements.is_empty() {
             frame.candles(candle_placements.clone());
         }
         if !relic_placements.is_empty() {
-            frame.dish();
-            frame.relic_batch(relic_placements);
+            frame.relic_showcase_batch(relic_placements);
         }
         frame.flames(flame_instances);
 
@@ -4911,28 +4981,37 @@ impl SceneBehavior for GameplayScene {
         // camera (which also scales with `h` — see `eye_height = h * 0.55`
         // in the renderer). A fixed world-unit lift drifts downward as the
         // window grows because the table grows around a constant lift.
-        let plaque_lift = layout.window_h * 0.44;
+        let plaque_lift = layout.mm(self.positions.plaque.lift_mm);
         // Push the plaque deeper into the scene (more negative world_z) so
         // it reads as hanging at the back of the room rather than right
         // above the player. pixel_y → world_z is a direct mapping in the
         // renderer's `pixel_to_world`, so subtracting from pixel_y here
         // moves the plaque back along the table's depth axis.
-        let plaque_back_offset = layout.window_h * 0.18;
+        let plaque_back_offset = layout.window_h * self.positions.plaque.ny;
         // Debug visibility: gated at the call site (rather than post-filtered)
         // because the status placard below also uses `DrawCmd::Plaque(_)` and
         // a cmd-level `retain` couldn't tell them apart.
         if !ctx.debug_visibility.hide_blind_plaque {
-            frame.plaque(crate::render::draw_cmd::PlaquePlacement {
-                center_pos: [
+            frame.object3d(Object3d {
+                pos: [
                     sp.x + sp.w * 0.5,
                     sp.y + sp.h * 0.5 - plaque_back_offset,
                     plaque_lift,
                 ],
                 extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
-                rotation_y_deg: 0.0,
-                top_text: plaque_top_text,
-                bot_text: plaque_bot_text,
-            });
+                rotation: glam::Mat4::from_rotation_x((-65.0_f32).to_radians()) * cam_rot,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Plaque {
+                    top: plaque_top_text,
+                    bot: plaque_bot_text,
+                    pick_id: None,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            });
         }
         // Ofuda only appears on boss blinds (where there's a rule to show).
         // Anchor it from the plaque's *actual* left edge instead of the raw
@@ -4967,16 +5046,29 @@ impl SceneBehavior for GameplayScene {
             // raising it visually moves it up the back wall on screen.
             let ofuda_cy = sp.y - sp.h * 0.68;
             let ofuda_lift = layout.window_h * 0.45;
-            frame.ofuda(crate::render::draw_cmd::OfudaPlacement {
-                center_pos: [ofuda_cx, ofuda_cy, ofuda_lift],
-                // Real washi paper is ~0.1mm but the ofuda needs visible
-                // depth under candlelight; ~3mm reads as a stiff paper
-                // talisman without looking like a wooden tablet.
+            let ofuda_p = &self.positions.ofuda;
+            frame.object3d(Object3d {
+                pos: [
+                    ofuda_cx + ofuda_p.nx * layout.window_w,
+                    ofuda_cy + ofuda_p.ny * layout.window_h,
+                    ofuda_lift + layout.mm(ofuda_p.lift_mm),
+                ],
                 extents: [ofuda_w, ofuda_h, layout.mm(3.0)],
-                rotation_y_deg: 0.0,
-                title: ofuda_title_text,
-                rule: ofuda_rule_text,
-            });
+                // Placement rotation applied centrally via
+                // `committed_arrange_rotations`.
+                rotation: cam_rot,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Ofuda {
+                    title: ofuda_title_text,
+                    rule: ofuda_rule_text,
+                    pick_id: None,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            });
         }
         // Plays/discards pip indicators are a *physical* peg block
         // floating in front of the hanging score plaque. Two rows of
@@ -5005,9 +5097,13 @@ impl SceneBehavior for GameplayScene {
             let peg_block_d = layout.mm(35.0);
             // Anchor pegs at the right end of the plaque, inset so
             // they sit on the plaque face rather than over the edge.
-            let peg_block_x = sp.x + sp.w * 0.85;
-            let peg_block_y = sp.y + sp.h * 0.5 - plaque_back_offset;
-            let peg_block_lift = plaque_lift;
+            let peg = &self.positions.peg_block;
+            let peg_block_x = sp.x + sp.w * peg.nx;
+            let peg_block_y = sp.y + sp.h * 0.5 - plaque_back_offset + peg.ny * layout.window_h;
+            let peg_block_lift = plaque_lift + layout.mm(peg.lift_mm);
+            // PegBlockPlacement has no rotation field, so rotation deltas on
+            // this Placement are ignored — translation is the meaningful axis
+            // for this object.
             frame.peg_block(crate::render::draw_cmd::PegBlockPlacement {
                 world_pos: [peg_block_x, peg_block_y, peg_block_lift],
                 extents: [peg_block_w, peg_block_h, peg_block_d],
@@ -5025,17 +5121,23 @@ impl SceneBehavior for GameplayScene {
         if !cascade_token_placements.is_empty() {
             frame.cascade_token_batch(cascade_token_placements);
         }
-        // Physical scoring bones tumbling onto the play space during a
-        // cascade. Spawned by the reveal-edge handler in `update()` and
-        // cleared the moment the cascade ends, so they only appear while
-        // scoring is mid-flight.
-        if self.falling_bones.is_active() {
-            frame.falling_bone_batch(self.falling_bones.placements());
+        // Score reel — odometer digits floating in front of the plaque.
+        // Always visible; anchor matches the plaque center but lifted a bit
+        // further forward so it reads in front of the wood.
+        {
+            let reel_lift = plaque_lift * 1.08;
+            let reel_px = sp.x + sp.w * 0.5;
+            let reel_py = sp.y + sp.h * 0.5 - plaque_back_offset;
+            // Extract the yaw component from cam_rot for the reel's rotation_y.
+            // cam_rot is Rx(pitch); its (0,2) entry encodes the x-component of
+            // the rotated Z column, which we use as a proxy yaw. For the plaque
+            // the rotation is purely Rx so yaw is 0 — pass 0.0 directly.
+            let reel_placements = self.score_reel.placements(now, reel_px, reel_py, reel_lift, 0.0);
+            if !reel_placements.is_empty() {
+                frame.extruded_glyph_batch(reel_placements);
+            }
         }
         // Floating extruded-glyph score popups (per-step "+50" / "×3").
-        // Pushed after the falling bones so they render on top of the
-        // tumbling pile and the player's eye tracks the number, not the
-        // backdrop.
         if self.score_popups.is_active() {
             frame.extruded_glyph_batch(self.score_popups.placements(now));
         }
@@ -5059,15 +5161,15 @@ impl SceneBehavior for GameplayScene {
             }
         }
         frame.quads(hud_quads);
-        // Committed structure melds + tier tokens: inserted before `HandTileBackdrop`
-        // at end of `draw_frame` so they sit on the table behind the rack (depth order).
+        // Committed structure melds + tier tokens: inserted before the hand
+        // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
         // Phase 3: bone yaku tablets (decal names on mesh).
         if !yaku_tablet_placements.is_empty() {
-            frame.yaku_tablet_batch(yaku_tablet_placements);
+            frame.object3d_batch(yaku_tablet_placements);
         }
         // Phase 4: wood sort/journal/trigger + lacquered bowl + bronze mirror.
         if !wood_tablet_placements.is_empty() {
-            frame.wood_tablet_batch(wood_tablet_placements);
+            frame.object3d_batch(wood_tablet_placements);
         }
         if let Some(bowl) = discard_bowl_placement {
             frame.bowl(bowl);
@@ -5081,8 +5183,13 @@ impl SceneBehavior for GameplayScene {
         if let Some((sx, sy, sw, sh)) = talisman_dish_strip {
             let dish_pad_x = sw * 0.10;
             let dish_pad_y = sh * 0.40;
+            let td = &self.positions.talisman_dish;
             frame.dish_explicit(crate::render::draw_cmd::DishExplicit {
-                center_pos: [sx + sw * 0.5, sy + sh * 0.5, 0.0],
+                center_pos: [
+                    sx + sw * 0.5 + td.nx * layout.window_w,
+                    sy + sh * 0.5 + td.ny * layout.window_h,
+                    layout.mm(td.lift_mm),
+                ],
                 // Brass tray rim ~10mm tall — small decorative dish.
                 extents: [
                     sw + dish_pad_x * 2.0,
@@ -5090,6 +5197,11 @@ impl SceneBehavior for GameplayScene {
                     sh + dish_pad_y * 2.0,
                 ],
                 pick_id: Some(PICK_CONSUMABLE_DISH),
+                rotation: glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                // Gameplay doesn't have a TalismanDish Placement today; leave
+                // None so picks fall through (not arrangeable).
+                arrange_name: None,
+                round: false,
             });
             if !ribbon_dish_placements.is_empty() {
                 frame.zodiac_batch(ribbon_dish_placements);
@@ -5128,27 +5240,14 @@ impl SceneBehavior for GameplayScene {
             // a wide tray, while still leaving the settling pass enough
             // room to lay the bottom layer down before stacking.
             let scatter_half = coin_radius * 3.0;
-            // Pile center tracks the back-right candle: recompute that
-            // candle's layout locally (mirroring the candle pass above) so
-            // the dish stays glued to it as the score panel resizes, then
-            // shift one candle-radius + dish-half outward so the brass rim
-            // sits just to the right of the candle silhouette. The clamp
-            // keeps the tray inside the window even at narrow widths.
-            let coin_sp = layout.score_panel;
-            let coin_candle_w = layout.mm(78.0) * 0.72;
-            let coin_edge_pad = layout.mm(12.0);
-            let coin_back_z_push = coin_candle_w;
-            let right_candle_x = (coin_sp.x + coin_sp.w + coin_candle_w + coin_edge_pad)
-                .min(layout.window_w - coin_candle_w * 0.5 - 4.0);
-            let right_candle_y = coin_sp.y + coin_sp.h * 0.5 - coin_back_z_push;
-            let dish_half_w = scatter_half + coin_radius * 2.0;
-            // Sit past the candle's right edge from the camera's POV. We
-            // intentionally do *not* clamp to the window — the table
-            // extends beyond the visible frame in 3D, and clamping would
-            // pull the dish back on top of the candle whenever the right
-            // candle is already pinned to the window edge.
-            let pile_cx = right_candle_x + coin_candle_w * 0.5 + dish_half_w + coin_edge_pad;
-            let pile_cy = right_candle_y;
+            // Mockup: GOLD right:14% top:3% width:12% height:12% — place the
+            // pile centered inside the score band on the right side.
+            // right:14% means center-x ≈ (1 - 0.14 - 0.06) = 0.80 of window_w.
+            let coin_back_z_push = scatter_half * 0.5;
+            let pile_cx = self.positions.coin_pile.nx * layout.window_w;
+            let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
+                - coin_back_z_push
+                - layout.window_h * self.positions.coin_pile.ny;
             let dish_rim = (coin_thickness * 2.5).max(10.0);
             let dish_w = scatter_half * 2.0 + coin_radius * 4.0;
             let dish_d = scatter_half * 2.0 + coin_radius * 4.0;
@@ -5156,6 +5255,10 @@ impl SceneBehavior for GameplayScene {
                 center_pos: [pile_cx, pile_cy, 0.0],
                 extents: [dish_w, dish_rim, dish_d],
                 pick_id: None,
+                rotation: glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
+                    * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                arrange_name: Some("gameplay.score_panel.coin_pile"),
+                round: false,
             });
             // Settled pile on top of the dish. For each coin we generate
             // several candidate (lx, lz) positions and pick the one with
@@ -5235,18 +5338,9 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Dora indicator stand — hidden until the tile pipeline supports
-        // placing a face-up indicator tile on the plinth.
-        // let dora_cx = dora_rect[0] + dora_rect[2] * 0.5;
-        // let dora_cy = dora_rect[1] + dora_rect[3] * 0.5;
-        // frame.dora_stand(crate::render::draw_cmd::DoraStandPlacement {
-        //     world_pos: [dora_cx, dora_cy, 0.0],
-        //     extents: [dora_rect[2], layout.mm(40.0), layout.mm(20.0)],
-        // });
-
         // Volumetric smoke pass. Pushed *after* every persistent 3D scene
         // object (plaques, ofuda, peg block, yaku/wood tablets, bowl,
-        // talisman dish, coins, wall stack, dora stand) so all of them
+        // talisman dish, coins, wall stack) so all of them
         // land in pass A and the smoke draws over them — mirroring the
         // shop scene's order. Pushing this earlier (next to the candles)
         // dropped most of the table HUD into pass B, where it painted
@@ -5256,11 +5350,6 @@ impl SceneBehavior for GameplayScene {
         frame.fluid_smoke();
 
         frame.texts(hud_text);
-
-        // Hand tile face labels — read on top of the persistent HUD
-        // (score cartouche, button bar, zodiac strip) but under any
-        // hover overlay so tooltips can still cover the tiles cleanly.
-        frame.hand_tile_faces();
 
         // Append the deferred focus rect entries (hand tiles, relics,
         // pegs, gold) before the centralized focus ring so the lookup
@@ -5312,10 +5401,9 @@ impl SceneBehavior for GameplayScene {
 
         // Centralized focus ring: a single brass frame around whatever
         // `self.focus` is currently pointing at, pushed into the hover
-        // layer so it sits above hand tile faces. The hand strip itself
-        // gets a richer focus highlight from the renderer (driven by
-        // `frame.focus`), so we suppress the 2D ring for HandTile to
-        // avoid double-ringing.
+        // layer so it sits above all HUD elements. Hand tiles get their
+        // focus indicator via `ShowcaseTilePlacement.outline`, so we
+        // suppress the 2D ring for HandTile to avoid double-ringing.
         if let Some(target) = self.focus {
             if !matches!(target, FocusTarget::HandTile(_)) {
                 let rect_lookup = focus_rect_graph
@@ -5344,19 +5432,6 @@ impl SceneBehavior for GameplayScene {
         frame.quads(pause_quads);
         frame.texts(pause_text);
 
-        // Non-cmd state — consumed by the renderer's 3D pass and the
-        // main loop's input plumbing.
-        frame.hand_tiles = run
-            .hand
-            .iter()
-            .copied()
-            .map(|tile| Self::display_tile(tile, run))
-            .collect();
-        frame.hand_slots = hand_slots;
-        frame.focus = focus;
-        frame.selected_tiles = run.selected.clone();
-        frame.hint_indices = hint_indices;
-        frame.departing_indices = self.pending_departures.clone();
         frame.candle_light_count = candle_placements.len() as u32;
         // Real candle flame: ~30 mm tall. The renderer passes this through
         // to the volumetric lightbake shader as the analytic flame envelope
@@ -5422,6 +5497,8 @@ impl SceneBehavior for GameplayScene {
 }
 
 /// Structure melds/tokens must draw before the hand mesh or the rack depth-tests over them.
+/// Finds the first `ShowcaseTileBatch` (the hand tile batch) and inserts structure
+/// tiles immediately before it so they render behind the rack.
 fn insert_structure_before_hand(
     mut frame: UiFrame,
     structure_showcase: Vec<ShowcaseTilePlacement>,
@@ -5430,61 +5507,25 @@ fn insert_structure_before_hand(
     let pos = frame
         .cmds
         .iter()
-        .position(|c| matches!(c, DrawCmd::HandTileBackdrop));
-    let Some(pos) = pos else {
-        if !structure_showcase.is_empty() {
-            frame
-                .cmds
-                .push(DrawCmd::ShowcaseTileBatch(structure_showcase));
-        }
-        if !structure_pile_tokens.is_empty() {
-            frame
-                .cmds
-                .push(DrawCmd::CascadeTokenBatch(structure_pile_tokens));
-        }
-        return frame;
-    };
+        .position(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)));
+    let insert_at = pos.unwrap_or(frame.cmds.len());
     if !structure_pile_tokens.is_empty() {
         frame
             .cmds
-            .insert(pos, DrawCmd::CascadeTokenBatch(structure_pile_tokens));
+            .insert(insert_at, DrawCmd::CascadeTokenBatch(structure_pile_tokens));
     }
     if !structure_showcase.is_empty() {
         frame
             .cmds
-            .insert(pos, DrawCmd::ShowcaseTileBatch(structure_showcase));
+            .insert(insert_at, DrawCmd::ShowcaseTileBatch(structure_showcase));
     }
     frame
 }
 
-/// Debug-only invariant: a frame should contain at most one
-/// `HandTileBackdrop` and at most one `HandTileFaces` marker. Two of
-/// either silently break tile face z-ordering, and zero of either skips
-/// the corresponding 3D pass — both bugs are easy to introduce when
-/// editing a long `draw_frame` impl. Costs nothing in release.
+/// Debug-only invariant: kept as a no-op placeholder; hand tile markers
+/// are no longer used (tiles are rendered via `ShowcaseTileBatch`).
 #[inline]
-fn debug_assert_marker_uniqueness(frame: &UiFrame) {
-    if cfg!(debug_assertions) {
-        let backdrops = frame
-            .cmds
-            .iter()
-            .filter(|c| matches!(c, DrawCmd::HandTileBackdrop))
-            .count();
-        let faces = frame
-            .cmds
-            .iter()
-            .filter(|c| matches!(c, DrawCmd::HandTileFaces))
-            .count();
-        debug_assert!(
-            backdrops <= 1,
-            "UiFrame contains {backdrops} HandTileBackdrop markers (expected ≤ 1)"
-        );
-        debug_assert!(
-            faces <= 1,
-            "UiFrame contains {faces} HandTileFaces markers (expected ≤ 1)"
-        );
-    }
-}
+fn debug_assert_marker_uniqueness(_frame: &UiFrame) {}
 
 /// True if `(cx, cy)` lies inside the `[x, y, w, h]` rect.
 #[inline]

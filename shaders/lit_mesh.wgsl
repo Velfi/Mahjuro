@@ -9,6 +9,7 @@
 //   3.0 = lacquered wood — procedural ring grain + Blinn-Phong specular
 //   5.0 = metal     — tinted-Fresnel conductor (gold coins)
 //   7.0 = talisman  — dielectric with heightmap normal perturbation (jade tablets)
+//   9.0 = glass     — faux translucent crystal / glazed glass
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -24,6 +25,8 @@ struct MeshUniform {
 @group(0) @binding(0) var<uniform> mesh: MeshUniform;
 @group(0) @binding(1) var albedo_tex: texture_2d<f32>;
 @group(0) @binding(2) var albedo_samp: sampler;
+/// Linear grayscale relief for relic enamel (separate from color albedo).
+@group(0) @binding(3) var relief_tex: texture_2d<f32>;
 
 struct PointLight {
     pos: vec4<f32>,   // xyz = world position, w = radius
@@ -105,7 +108,7 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
     let jitter_r = 1.5;
     let rot = ign(frag_xy) * 6.2831853;
     let off = vec2<f32>(cos(rot), sin(rot)) * jitter_r;
-    let lp = light_pos + vec3<f32>(off.x, 0.0, off.y);
+    let lp = light_pos + vec3<f32>(off.x, off.y, 0.0);
     let dir = frag_pos - lp;
     let safe = dir + vec3<f32>(1e-6, 1e-6, 1e-6);
     let inv = vec3<f32>(1.0) / safe;
@@ -217,12 +220,8 @@ fn vs_main(
     var world_pos_out = (mesh.model * vec4<f32>(pos, 1.0)).xyz;
 
     // Lacquered wood (kind 3 — the table): evaluate the procedural wood
-    // field in WORLD XZ coordinates rather than local mesh coordinates.
-    // This decouples the grain density from the model's local-to-world
-    // scale, so the table can be enlarged to "infinite plane" extents
-    // without the rings stretching with it. The displacement is applied
-    // directly in world Y (the table normal), and the normal is rebuilt
-    // from a finite-difference of the world-space height field.
+    // field in WORLD XY coordinates (Z-up) rather than local mesh coordinates.
+    // Displacement is along world +Z (table normal); tangents span XY.
     //
     // Kind 3 only — kind 4 (LacqueredWoodFlat) shares the wood albedo
     // branch in the FS but skips this displacement because the table-
@@ -233,20 +232,18 @@ fn vs_main(
     if (mesh.material_params.x > 2.5 && mesh.material_params.x < 3.5) {
         let amp = 1.6;
         let eps_w = 1.0; // 1 world unit step for the gradient
-        let wxz = world_pos_out.xz;
-        let h_c = wood_height_world(wxz);
-        let h_x = wood_height_world(wxz + vec2<f32>(eps_w, 0.0));
-        let h_z = wood_height_world(wxz + vec2<f32>(0.0, eps_w));
+        let wxy = world_pos_out.xy;
+        let h_c = wood_height_world(wxy);
+        let h_x = wood_height_world(wxy + vec2<f32>(eps_w, 0.0));
+        let h_y = wood_height_world(wxy + vec2<f32>(0.0, eps_w));
 
-        world_pos_out.y = world_pos_out.y + h_c * amp;
+        world_pos_out.z = world_pos_out.z + h_c * amp;
 
         let dh_x = (h_x - h_c) * amp;
-        let dh_z = (h_z - h_c) * amp;
-        // World-space tangent vectors along +X and +Z. Cross(t_z, t_x)
-        // produces a normal with a positive Y component (table-up).
-        let t_x = vec3<f32>(eps_w, dh_x, 0.0);
-        let t_z = vec3<f32>(0.0,    dh_z, eps_w);
-        world_normal = normalize(cross(t_z, t_x));
+        let dh_y = (h_y - h_c) * amp;
+        let t_x = vec3<f32>(eps_w, 0.0, dh_x);
+        let t_y = vec3<f32>(0.0, eps_w, dh_y);
+        world_normal = normalize(cross(t_x, t_y));
     }
 
     var o: VsOut;
@@ -319,7 +316,7 @@ struct WoodBasis {
     fiber: f32,
 };
 
-// World-space scale factors that map (world_x, world_z) into the wood
+// World-space scale factors that map (world_x, world_y) into the wood
 // field's pre-multiplied coordinate space. Tuned so that rings sweep
 // across the table at the same density as the original 3.5×screen
 // table on a 1280×720 layout, but now driven by world units instead
@@ -388,16 +385,16 @@ fn wood_basis(local_xy: vec2<f32>) -> WoodBasis {
 // World-space wrapper used by the horizontal lacquered table. Tiles the
 // wood field at a fixed world-space frequency regardless of how big the
 // table model has been scaled.
-fn wood_basis_world(world_xz: vec2<f32>) -> WoodBasis {
+fn wood_basis_world(world_xy: vec2<f32>) -> WoodBasis {
     return wood_basis_p(vec2<f32>(
-        world_xz.x * TABLE_WOOD_SCALE_X,
-        world_xz.y * TABLE_WOOD_SCALE_Z,
+        world_xy.x * TABLE_WOOD_SCALE_X,
+        world_xy.y * TABLE_WOOD_SCALE_Z,
     ));
 }
 
 // Signed surface height from the wood basis. Positive on early-wood
 // ridges, negative inside late-wood lines and pores. Returned in
-// world units so the vertex shader can apply it directly to world Y.
+// world units so the vertex shader can apply it directly to world Z.
 fn wood_height(local_xy: vec2<f32>) -> f32 {
     let b = wood_basis(local_xy);
     // Early-wood bulges up; late-wood and pores recess. The mean is
@@ -405,8 +402,8 @@ fn wood_height(local_xy: vec2<f32>) -> f32 {
     return b.early_wood * 0.55 - b.late_wood * 0.85 - b.pore * 1.6;
 }
 
-fn wood_height_world(world_xz: vec2<f32>) -> f32 {
-    let b = wood_basis_world(world_xz);
+fn wood_height_world(world_xy: vec2<f32>) -> f32 {
+    let b = wood_basis_world(world_xy);
     return b.early_wood * 0.55 - b.late_wood * 0.85 - b.pore * 1.6;
 }
 
@@ -456,8 +453,8 @@ fn wood_sample(local_pos: vec3<f32>) -> WoodSample {
     return wood_sample_basis(wood_basis(local_pos.xy));
 }
 
-fn wood_sample_world(world_xz: vec2<f32>) -> WoodSample {
-    return wood_sample_basis(wood_basis_world(world_xz));
+fn wood_sample_world(world_xy: vec2<f32>) -> WoodSample {
+    return wood_sample_basis(wood_basis_world(world_xy));
 }
 
 @fragment
@@ -474,13 +471,15 @@ fn fs_main(
     // Keep these in sync with MaterialKind in lit_mesh.rs.
     //   0 = Plain, 1 = Wax, 2 = (unused), 3 = LacqueredWood,
     //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water, 7 = Talisman,
-    //   8 = Foil
+    //   8 = Foil, 9 = Glass, 10 = Enamel
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
     let is_water_mat = (kind > 5.5 && kind < 6.5);
     let is_talisman  = (kind > 6.5 && kind < 7.5);
     let is_foil      = (kind > 7.5 && kind < 8.5);
+    let is_glass     = (kind > 8.5 && kind < 9.5);
+    let is_enamel    = (kind > 9.5 && kind < 10.5);
 
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-
@@ -492,7 +491,7 @@ fn fs_main(
     // a transparent overlay (engraved label) composited *over* the procedural
     // base material rather than multiplied with it. For talismans (kind>6.5),
     // .w carries the sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome).
-    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil;
+    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -507,24 +506,41 @@ fn fs_main(
         albedo = mesh.base_color.rgb;
     }
     if (is_foil) {
-        // Foil: the bound texture IS the full-colour pack art; multiply it
-        // with the base colour (typically white) so the art shows through.
-        // The metallic foil sheen is layered on top in the per-light loop.
-        albedo = mesh.base_color.rgb * tex_rgb;
+        // Foil: base_color.rgb is the metallic wrapper tint; the texture is
+        // a decal whose alpha masks where the art sits on the front of the
+        // pack. Front face is local -Y (see build_pack_mesh). Back + edges
+        // stay pure foil so the pack reads as a wrapped card from every
+        // angle. Metallic foil sheen is layered on top in the per-light
+        // loop regardless — decal art still catches the iridescence.
+        let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
+        let decal_mask = tex_sample.a * front_face;
+        albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
+    }
+    if (is_glass) {
+        // The bound texture remains visible, but we brighten and cool it so
+        // the small prop reads more like glazed glass than painted plastic.
+        albedo = mix(mesh.base_color.rgb * 0.85, tex_rgb, 0.55);
+    }
+    if (is_enamel) {
+        // Relic mesh caps have local ±Y normals; the world normal's Y
+        // component is the correct discriminator for the front face (even
+        // under the small ui_tilt that collection/modal showcases apply).
+        let cap_mask = smoothstep(0.55, 0.82, abs(in.world_n.y));
+        albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
     }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
     if (is_wood) {
         // Lacquered wood: procedural grain overrides the (white) albedo tex.
-        // Kind 3 (the horizontal table) samples in world XZ so the grain
+        // Kind 3 (the horizontal table) samples in world XY so the grain
         // tiles at a fixed world-space frequency regardless of the model's
         // scale — this is what lets the table extend to the horizon as an
         // "infinite plane" without stretching the rings. Kind 4 (the
         // upright score plaque) keeps using local surface coords because
-        // its slab face isn't aligned with world XZ.
+        // its slab face isn't aligned with world XY.
         var w: WoodSample;
         if (kind < 3.5) {
-            w = wood_sample_world(in.world_pos.xz);
+            w = wood_sample_world(in.world_pos.xy);
         } else {
             w = wood_sample(in.local_pos);
         }
@@ -723,6 +739,8 @@ fn fs_main(
     // and bottom of the coin) and rotate the normal toward the gradient.
     // Only flat-ish faces are perturbed — the rim's UVs wrap once around
     // the cylinder and the gradient there would be meaningless.
+    var enamel_height = 0.0;
+    var enamel_ridge = 0.0;
     if (is_metal) {
         let face_flat = abs(n.y);
         if (face_flat > 0.6) {
@@ -753,6 +771,32 @@ fn fs_main(
             n = normalize(mix(n, n_face, blend));
         }
     }
+    if (is_enamel) {
+        let face_flat = abs(n.y);
+        // Relief is bound separately (linear grayscale); same remap as the old
+        // baked-alpha path so existing height PNGs still read correctly.
+        let hr = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0).r;
+        let h_c = clamp((hr - 0.62) / 0.33, 0.0, 1.0);
+        enamel_height = h_c;
+        enamel_ridge = smoothstep(0.70, 0.92, h_c);
+        if (face_flat > 0.6) {
+            let dim = vec2<f32>(textureDimensions(relief_tex, 0));
+            let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+            let h_l = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+            let h_r = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+            let h_d = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+            let h_u = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+            let bump = 3.6;
+            let dhdu = (h_r - h_l) * bump;
+            let dhdv = (h_u - h_d) * bump;
+            let sgn = sign(n.y);
+            let perturbed = normalize(vec3<f32>(-dhdu, sgn, -dhdv));
+            var n_face = vec3<f32>(perturbed.x, perturbed.y * sgn, perturbed.z);
+            n_face = normalize(n_face);
+            let blend = smoothstep(0.6, 0.95, face_flat);
+            n = normalize(mix(n, n_face, blend));
+        }
+    }
 
     // ── Talisman heightmap perturbation ──────────────────────────────────
     // Same finite-difference approach as metal, but uses screen-space
@@ -779,7 +823,7 @@ fn fs_main(
             let dp_dy = dpdy(in.world_pos);
             let tangent = normalize(dp_dx);
             let bitangent = normalize(cross(n, tangent));
-            let perturbed = normalize(n - tangent * dhdu - bitangent * dhdv);
+            let perturbed = normalize(n + tangent * dhdu + bitangent * dhdv);
             n = perturbed;
         }
     }
@@ -979,6 +1023,18 @@ fn fs_main(
                 let f0 = mesh.base_color.rgb;
                 let f_metal = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal;
+            } else if (is_enamel) {
+                let vdh = max(dot(view_dir, h), 0.0);
+                let ridge_f0 = mesh.base_color.rgb;
+                let f_pin = ridge_f0 + (vec3<f32>(1.0) - ridge_f0) * pow(1.0 - vdh, 5.0);
+                let ridge_lobe = pow(nh, max(spec_power * 1.8, 1.0)) * smoothstep(0.68, 0.92, enamel_height);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * 0.55;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * ridge_lobe * 1.15 * f_pin;
+            } else if (is_glass) {
+                let vdh = max(dot(view_dir, h), 0.0);
+                let fresnel = 0.10 + 0.90 * pow(1.0 - vdh, 5.0);
+                let glass_tint = mix(vec3<f32>(0.92, 0.97, 1.0), mesh.base_color.rgb, 0.35);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glass_tint * 1.35;
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
@@ -1121,6 +1177,12 @@ fn fs_main(
         // specular + sheen carry the foil's shine.
         diffuse_scale = 0.45;
     }
+    if (is_glass) {
+        diffuse_scale = 0.18;
+    }
+    if (is_enamel) {
+        diffuse_scale = 0.82;
+    }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
     // diffuse. Lerp the diffuse scale down so gold reads as metallic.
@@ -1178,6 +1240,13 @@ fn fs_main(
             albedo = mix(albedo, holo, rim);
         }
     }
+    if (is_enamel) {
+        let rim_gold = mix(vec3<f32>(0.92, 0.76, 0.28), mesh.base_color.rgb, 0.35);
+        albedo = mix(albedo, rim_gold, enamel_ridge * 0.78);
+        let edge = 1.0 - ndv_view;
+        let glaze = pow(edge, 2.4) * 0.12;
+        albedo = mix(albedo, albedo * 1.10 + vec3<f32>(0.04, 0.04, 0.05), glaze);
+    }
 
     // Foil Fresnel edge tint: subtle rainbow color-shift at grazing
     // angles so the wrapper catches a hint of iridescence in ambient.
@@ -1191,6 +1260,12 @@ fn fs_main(
             0.5 + 0.5 * cos(theta + 4.189)
         );
         albedo = mix(albedo, holo, rim);
+    }
+    if (is_glass) {
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 2.0) * 0.55;
+        let cool_edge = vec3<f32>(0.82, 0.93, 1.0);
+        albedo = mix(albedo, cool_edge, rim);
     }
 
     // No directional shadow gating now that there's no directional light;
@@ -1219,7 +1294,7 @@ fn fs_main(
         let r = reflect(-v_ssr, n);
         // Only march rays that point upward away from the table.
         // Reject grazing/down rays — they'd just hit the floor itself.
-        if (r.y > 0.02) {
+        if (r.z > 0.02) {
             let max_dist = ssr_globals.params.y;
             let stride = ssr_globals.params.z;
             let max_steps = i32(ssr_globals.params.w);
@@ -1243,9 +1318,9 @@ fn fs_main(
                 // The march and the depth texture both encode "how
                 // far above the table". A hit happens when the ray
                 // first dips at-or-below the recorded scene point's
-                // world Y at the same screen pixel.
-                if (p.y <= scene_world.y + stride * 0.6
-                    && scene_world.y > in.world_pos.y + 0.1) {
+                // world Z at the same screen pixel.
+                if (p.z <= scene_world.z + stride * 0.6
+                    && scene_world.z > in.world_pos.z + 0.1) {
                     // Binary refinement between the previous and
                     // current step for a sharper contact point.
                     var lo = t_prev;
@@ -1257,7 +1332,7 @@ fn fs_main(
                         if (pmp.w < 0.0) { break; }
                         let uvm = pmp.xy;
                         let sw = ssr_world_at(uvm);
-                        if (pm.y <= sw.y && sw.y > in.world_pos.y + 0.1) {
+                        if (pm.z <= sw.z && sw.z > in.world_pos.z + 0.1) {
                             hi = mid;
                             hit_uv = uvm;
                         } else {

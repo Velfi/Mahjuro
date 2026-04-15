@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mahjuro Shop World UI Mockup</title>
+  <style>
+    :root {
+      --line:#d7b46d; --text:#f3e4c5;
+      --counter:#5a3a22; --relic:#6b4c7a; --packs:#7a5a3a; --talis:#4f6b6a; --ribbons:#7a3a4a;
+      --owned:#3a3f4a; --gold:#8a6a1f; --ui:#3a2f24;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#120f0d;font-family:sans-serif;color:var(--text)}
+    .screen{width:95vw;max-width:1600px;aspect-ratio:16/9;position:relative;border:2px solid var(--line);border-radius:20px}
+    .box{position:absolute;border:2px solid var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;font-weight:700}
+    .small{font-size:14px}.medium{font-size:16px}.large{font-size:18px}
+  </style>
+</head>
+<body>
+<div class="screen">
+
+  <!-- Top -->
+  <div class="box small" style="left:4%;top:4%;width:14%;height:10%;background:var(--ui);">PATH SIGN</div>
+  <div class="box medium" style="left:40%;top:4%;width:20%;height:12%;background:var(--ui);">LAMP + BUGS</div>
+  <div class="box small" style="right:4%;top:4%;width:14%;height:10%;background:var(--ui);">LEAVE SHOP</div>
+
+  <!-- Counter (no overlap, internal grid spacing) -->
+  <div class="box large" style="left:10%;top:18%;width:80%;height:34%;background:var(--counter);">
+    <div style="position:absolute; right:8px; bottom:6px; font-size:12px; opacity:0.8;">SHOP COUNTER</div>
+  </div>
+
+  <!-- Back row categories (spaced evenly) -->
+  <div class="box medium" style="left:14%;top:22%;width:16%;height:20%;background:var(--relic);">RELICS</div>
+  <div class="box medium" style="left:32%;top:22%;width:16%;height:20%;background:var(--packs);">TILE PACKS</div>
+  <div class="box medium" style="left:50%;top:22%;width:16%;height:20%;background:var(--talis);">TALISMANS</div>
+  <div class="box medium" style="left:68%;top:22%;width:16%;height:20%;background:var(--ribbons);">RIBBONS</div>
+
+  <!-- Front focus area (pulled forward, not overlapping) -->
+  <div class="box small" style="left:42%;top:36%;width:16%;height:12%;background:#222;">SELECTED ITEM</div>
+
+  <!-- Player Inventory (aligned row, no overlap) -->
+  <div class="box medium" style="left:12%;bottom:8%;width:16%;height:16%;background:var(--owned);">OWNED RELICS</div>
+  <div class="box medium" style="left:30%;bottom:8%;width:16%;height:16%;background:var(--owned);">OWNED TALISMANS</div>
+  <div class="box medium" style="left:48%;bottom:8%;width:16%;height:16%;background:var(--owned);">OWNED RIBBONS</div>
+
+  <!-- Gold -->
+  <div class="box medium" style="right:4%;bottom:8%;width:16%;height:16%;background:var(--gold);">GOLD</div>
+
+</div>
+</body>
+</html>

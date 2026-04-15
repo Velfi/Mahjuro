@@ -7,6 +7,7 @@ use glam::Mat4;
 
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, TileEnhancement};
+use crate::render::world_space::pixel_to_world;
 use crate::scenes::BackgroundId;
 
 #[repr(C)]
@@ -131,10 +132,7 @@ pub(crate) struct PointLightsBuf {
 }
 
 impl PointLightsBuf {
-    /// Build the std140 light buffer, mapping each light's pixel-space
-    /// `(x, y)` onto the table-plane world (`world_x = x - w/2`,
-    /// `world_z = y - h/2`). The third position component is treated as the
-    /// height above the table plane (`world_y`).
+    /// Build the std140 light buffer via [`pixel_to_world`] (Z-up world).
     pub fn from_lights(
         src: &[PointLight],
         candle_count: u32,
@@ -150,11 +148,9 @@ impl PointLightsBuf {
         }; MAX_POINT_LIGHTS];
         let n = src.len().min(MAX_POINT_LIGHTS);
         for (i, l) in src.iter().take(n).enumerate() {
-            let wx = l.pos[0] - screen_w * 0.5;
-            let wz = l.pos[1] - screen_h * 0.5;
-            let wy = l.pos[2];
+            let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
             lights[i] = PointLightGpu {
-                pos: [wx, wy, wz, l.radius],
+                pos: [p.x, p.y, p.z, l.radius],
                 color: [l.color[0], l.color[1], l.color[2], l.intensity],
             };
         }
@@ -271,10 +267,7 @@ pub(crate) struct HandTileGpu {
     pub shadow_uniform_buffer: wgpu::Buffer,
     pub shadow_bind_group: wgpu::BindGroup,
     /// Cached to skip re-rasterisation when the tile hasn't changed.
-    /// Includes the talisman enhancement so stamping a tile triggers a fresh
-    /// decal upload (the enhancement is baked into the texture as a coloured
-    /// border + corner gem in `rasterize_tile_face_decal`).
-    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool, bool),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
     /// Main label (number or name) for the tile face.
     pub symbol: String,
     /// Emoji suit indicator rendered below the main label.
@@ -294,7 +287,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub shadow_uniform_buffer: wgpu::Buffer,
     pub shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
-    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool, bool),
+    pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
     #[allow(dead_code)]
     pub decal_texture: wgpu::Texture,
 }
@@ -444,8 +437,6 @@ pub const MAX_PEG_BLOCK_SLOTS: usize = 2;
 pub const MAX_PEG_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
-/// Maximum number of dora stands per frame.
-pub const MAX_DORA_STAND_SLOTS: usize = 2;
 /// Maximum number of cascade scoring tokens per frame across all batches.
 /// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
 /// strip adds 2 more during an active cascade.
@@ -468,6 +459,11 @@ pub(crate) struct RelicTextureGpu {
     pub bind_group: wgpu::BindGroup,
     /// Texture view for binding into lit-mesh material bind groups (3D boxes).
     pub view: wgpu::TextureView,
+    /// Owned linear height/relief when uploaded separately; `None` when `relief_view` aliases shared defaults.
+    #[allow(dead_code)]
+    pub relief_texture: Option<wgpu::Texture>,
+    /// Linear grayscale relief (`source/*_height.png`); bound at lit-mesh `relief_tex`.
+    pub relief_view: wgpu::TextureView,
 }
 
 /// Decoded relic image data sent from the background loader thread.
@@ -477,6 +473,13 @@ pub(crate) struct DecodedRelicImage {
     pub rgba: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    pub mesh_rgba: Option<Vec<u8>>,
+    pub mesh_width: u32,
+    pub mesh_height: u32,
+    /// Linear RGBA relief (same UV space as albedo); 1×1 mid-gray when height asset is missing.
+    pub relief_rgba: Vec<u8>,
+    pub relief_width: u32,
+    pub relief_height: u32,
 }
 
 /// Pre-loaded background texture + bind group for the image pipeline.

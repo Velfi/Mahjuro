@@ -1,22 +1,24 @@
 //! Collection scene — paginated grids of relics, yaku, rules, talismans, and
 //! zodiacs. Locked items show a placeholder card with a clue hint. Unlocked
-//! talismans and zodiacs render their 3D model tilted and slowly rotating
-//! (Resident-Evil-style item viewer).
+//! talismans and zodiacs render their 3D model with a slow turntable spin.
+//! Talisman tablets are pitched for a face-on view under the top-down camera.
 
 use std::time::Instant;
 
 use crate::audio::SfxId;
 use crate::core::boss::{ALL_BOSSES, FINAL_BOSSES};
-use crate::core::relic::{Rarity, RelicId, all_relic_defs};
+use crate::core::relic::{Rarity, RelicId, all_relic_defs, relic_visual};
 use crate::core::rules::RuleModifier;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
-use crate::render::draw_cmd::{CameraParams, TalismanPlacement, UiFrame, ZodiacRibbonPlacement};
+use crate::render::draw_cmd::{
+    CameraParams, RelicShowcasePlacement, TalismanPlacement, UiFrame, ZodiacRibbonPlacement,
+};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::TextAlign;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -107,7 +109,7 @@ impl CollectionScene {
 
     /// Whether the active tab renders 3D models that need continuous redraws.
     pub fn has_3d_tab(&self) -> bool {
-        matches!(self.tab, Tab::Talismans | Tab::Zodiacs)
+        matches!(self.tab, Tab::Relics | Tab::Talismans | Tab::Zodiacs)
     }
 
     fn page_count(&self, entries: usize, per_page: usize) -> usize {
@@ -262,7 +264,6 @@ impl SceneBehavior for CollectionScene {
             color: color::OBSIDIAN,
         }];
         let mut text_labels = Vec::new();
-        let mut relic_icons = Vec::new();
 
         // ── Title ───────────────────────────────────────────────────
         let title_font = (24.0 * scale).max(14.0);
@@ -363,15 +364,18 @@ impl SceneBehavior for CollectionScene {
         let grid_y = grid_top + (grid_h - actual_grid_h).max(0.0) * 0.5;
 
         // ── 3D model placements (Talismans / Zodiacs tabs) ──────────
-        // Slow turntable rotation: ~30°/s yaw, tilted forward ~20° on X.
+        // Slow turntable: ~30°/s about world Y. Talismans use rotation_x = -90°
+        // so the tablet face (+Z in mesh space) points at the collection
+        // camera (normal +Y); ribbons keep a slight forward tilt for drape.
         let elapsed = Instant::now()
             .saturating_duration_since(self.created_at)
             .as_secs_f32();
-        let turntable_y_deg = (elapsed * 30.0) % 360.0;
-        let tilt_x_deg: f32 = -20.0;
+        let turntable_deg = (elapsed * 30.0) % 360.0;
+        let ribbon_tilt_x_deg: f32 = -20.0;
 
         let mut talisman_placements: Vec<TalismanPlacement> = Vec::new();
         let mut ribbon_placements: Vec<ZodiacRibbonPlacement> = Vec::new();
+        let mut relic_placements: Vec<RelicShowcasePlacement> = Vec::new();
 
         for (i, card) in cards.iter().skip(page_start).take(per_page).enumerate() {
             let col = i % cols;
@@ -379,7 +383,7 @@ impl SceneBehavior for CollectionScene {
             let cx = grid_x + col as f32 * (card_w + card_gap);
             let cy = grid_y + row as f32 * (card_h + card_gap);
 
-            let has_3d = card.unlocked && matches!(self.tab, Tab::Talismans | Tab::Zodiacs);
+            let has_3d = card.unlocked && matches!(self.tab, Tab::Relics | Tab::Talismans | Tab::Zodiacs);
 
             if has_3d {
                 draw_model_card(
@@ -394,7 +398,7 @@ impl SceneBehavior for CollectionScene {
                     &mut text_labels,
                 );
                 // Push 3D placement centered in upper card region.
-                // pixel_to_world maps (px, py) → world (px-w/2, world_y, py-h/2).
+                // pixel_to_world maps (px, py, lift) → (px-w/2, py-h/2, lift) in Z-up world.
                 // The top-down camera with 20° FOV sees roughly ±0.53*h in
                 // each axis, so extents of ~0.10*h fill a card nicely.
                 let model_center_x = cx + card_w * 0.5;
@@ -408,11 +412,33 @@ impl SceneBehavior for CollectionScene {
                             talisman_placements.push(TalismanPlacement {
                                 center_pos: [model_center_x, model_center_y, lift],
                                 extents: [base * 1.2, base * 1.7, base * 0.25],
-                                rotation_y_deg: 0.0,
-                                rotation_x_deg: tilt_x_deg,
-                                rotation_z_deg: turntable_y_deg,
+                                rotation_y_deg: turntable_deg,
+                                rotation_x_deg: -90.0,
+                                rotation_z_deg: 0.0,
                                 color: talisman_tint(tk),
                                 kind: tk,
+                            });
+                        }
+                    }
+                    Tab::Relics => {
+                        if let Some(relic_id) = card.relic_id {
+                            let visual = relic_visual(relic_id);
+                            // Relic mesh: face disc in local XZ, thickness along local Y.
+                            // Rx(90°) rotates local +Y → world +Z so the face points at the
+                            // overhead camera. extents[1] = face (Y visible area),
+                            // extents[2] = thick (Z = depth from camera).
+                            let face = base * 1.18;
+                            let thick = base * 0.12 * visual.thickness_scale;
+                            let tilt = visual.ui_tilt_x_deg * 0.75;
+                            relic_placements.push(RelicShowcasePlacement {
+                                center_pos: [model_center_x, model_center_y, lift + base * 0.15],
+                                extents: [face, face, thick],
+                                rotation_y_deg: (elapsed * visual.ui_spin_rate_deg * 0.65) % 360.0,
+                                rotation_x_deg: 90.0 + tilt,
+                                rotation_z_deg: 0.0,
+                                color: card.rarity_color,
+                                relic_id,
+                                glow: 0.0,
                             });
                         }
                     }
@@ -423,8 +449,8 @@ impl SceneBehavior for CollectionScene {
                                 length: base * 2.0,
                                 width: base * 0.9,
                                 rotation_y_deg: 0.0,
-                                rotation_x_deg: tilt_x_deg,
-                                rotation_z_deg: turntable_y_deg,
+                                rotation_x_deg: ribbon_tilt_x_deg,
+                                rotation_z_deg: turntable_deg,
                                 color: [1.0, 1.0, 1.0, 1.0],
                                 kind: Some(zk),
                             });
@@ -444,7 +470,6 @@ impl SceneBehavior for CollectionScene {
                     h,
                     &mut instances,
                     &mut text_labels,
-                    &mut relic_icons,
                     ui_scale,
                 );
             } else {
@@ -549,16 +574,18 @@ impl SceneBehavior for CollectionScene {
         });
 
         // ── Assemble frame ──────────────────────────────────────────
-        let has_3d_models = !talisman_placements.is_empty() || !ribbon_placements.is_empty();
+        let has_3d_models = !relic_placements.is_empty()
+            || !talisman_placements.is_empty()
+            || !ribbon_placements.is_empty();
         if has_3d_models {
             // Near-orthographic top-down camera so pixel_to_world positions
             // map cleanly onto screen space without heavy perspective warp.
             // Narrow FOV + high eye keeps the 3D models sitting right where
             // the 2D cards are.
             frame.camera_override = Some(CameraParams {
-                eye: [0.0, h * 3.0, h * 0.01],
-                target: [0.0, 0.0, h * 0.01],
-                up: [0.0, 0.0, -1.0],
+                eye: [0.0, 0.0, h * 3.0],
+                target: [0.0, 0.0, 0.0],
+                up: [0.0, 1.0, 0.0],
                 fovy_deg: 20.0,
             });
             // Point lights illuminate the 3D models like museum spotlights.
@@ -580,6 +607,9 @@ impl SceneBehavior for CollectionScene {
         }
         // Card-background quads first, then 3D models on top.
         frame.quads(instances);
+        if !relic_placements.is_empty() {
+            frame.relic_showcase_batch(relic_placements);
+        }
         if !talisman_placements.is_empty() {
             frame.talisman_batch(talisman_placements);
         }
@@ -587,7 +617,6 @@ impl SceneBehavior for CollectionScene {
             frame.zodiac_batch(ribbon_placements);
         }
         frame.texts(text_labels);
-        frame.relic_icons(relic_icons);
 
         // Single hit-target list shared with update().
         let items = self.flat_items(w, h, ui_scale);
@@ -623,7 +652,6 @@ fn draw_unlocked_card(
     win_h: f32,
     instances: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,
-    icons: &mut Vec<RelicIcon>,
     ui_scale: f32,
 ) {
     // Card background.
@@ -648,69 +676,30 @@ fn draw_unlocked_card(
     let name_rect_h = text_rect_h(name_font);
     let sub_rect_h = text_rect_h(sub_font);
 
-    if let Some(relic_id) = card.relic_id {
-        // Relic icon centered in upper portion.
-        let icon_size = (w * 0.45).min(h * 0.35).max(24.0);
-        let icon_x = x + (w - icon_size) * 0.5;
-        let icon_y = y + accent_h + pad;
-        icons.push(RelicIcon {
-            rect: [icon_x, icon_y, icon_size, icon_size],
-            relic_id,
-        });
+    let name_y = y + accent_h + h * 0.15;
+    let (nx, nw) = readable_text_rect(x, w, pad, &card.name, name_font, win_w);
+    labels.push(TextLabel {
+        rect: [nx, name_y, nw, name_rect_h],
+        text: card.name.clone(),
+        color: [0.95, 0.9, 0.65, 1.0],
+        ..Default::default()
+    });
 
-        // Name below icon — use screen-wide rect for readability.
-        let name_y = icon_y + icon_size + pad * 0.5;
-        let (nx, nw) = readable_text_rect(x, w, pad, &card.name, name_font, win_w);
-        labels.push(TextLabel {
-            rect: [nx, name_y, nw, name_rect_h],
-            text: card.name.clone(),
-            color: [0.95, 0.9, 0.65, 1.0],
-            ..Default::default()
-        });
-
-        // Subtitle (description) — wrapped into the remaining card space.
-        let sub_y = name_y + name_rect_h + pad * 0.3;
-        let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
-        widget::push_text_block(
-            labels,
-            [x + pad, sub_y, w - pad * 2.0, sub_h],
-            &card.subtitle,
-            TextStyle {
-                tier: typography::CAPTION,
-                color: [0.6, 0.6, 0.7, 0.9],
-                padding: 0.0,
-                align: TextAlign::Left,
-            },
-            win_h,
-            ui_scale,
-        );
-    } else {
-        // Non-relic card (yaku / rule): no icon, text layout only.
-        let name_y = y + accent_h + h * 0.15;
-        let (nx, nw) = readable_text_rect(x, w, pad, &card.name, name_font, win_w);
-        labels.push(TextLabel {
-            rect: [nx, name_y, nw, name_rect_h],
-            text: card.name.clone(),
-            color: [0.95, 0.9, 0.65, 1.0],
-            ..Default::default()
-        });
-
-        let sub_y = name_y + name_rect_h + pad;
-        let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
-        widget::push_text_block(
-            labels,
-            [x + pad, sub_y, w - pad * 2.0, sub_h],
-            &card.subtitle,
-            TextStyle {
-                tier: typography::CAPTION,
-                color: [0.65, 0.65, 0.75, 0.9],
-                padding: 0.0,
-                align: TextAlign::Left,
-            },
-            win_h,
-            ui_scale,
-        );
-    }
+    let sub_y = name_y + name_rect_h + pad;
+    let sub_h = (y + h - pad - sub_y).max(sub_rect_h);
+    widget::push_text_block(
+        labels,
+        [x + pad, sub_y, w - pad * 2.0, sub_h],
+        &card.subtitle,
+        TextStyle {
+            tier: typography::CAPTION,
+            color: [0.65, 0.65, 0.75, 0.9],
+            padding: 0.0,
+            align: TextAlign::Left,
+        },
+        win_h,
+        ui_scale,
+    );
 }
 
 fn draw_locked_card(
@@ -1133,6 +1122,12 @@ fn talisman_accent(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Gilded => [0.95, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.80, 0.40, 0.90, 1.0],
         TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
+        TalismanKind::Bamboo => [0.32, 0.60, 0.14, 1.0], // yellow-green accent
+        TalismanKind::Dots => [0.25, 0.45, 0.82, 1.0],
+        TalismanKind::Characters => [0.82, 0.28, 0.22, 1.0],
+        TalismanKind::Honors => [0.72, 0.58, 0.22, 1.0],
+        TalismanKind::Wildflower => [0.88, 0.42, 0.58, 1.0],
+        TalismanKind::Conformity => [0.55, 0.52, 0.60, 1.0],
     }
 }
 
@@ -1144,6 +1139,12 @@ fn talisman_tint(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
         TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
+        TalismanKind::Bamboo => [0.38, 0.70, 0.18, 1.0], // yellow-green (bamboo stalk)
+        TalismanKind::Dots => [0.30, 0.48, 0.88, 1.0],
+        TalismanKind::Characters => [0.88, 0.32, 0.26, 1.0],
+        TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
+        TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
+        TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
     }
 }
 

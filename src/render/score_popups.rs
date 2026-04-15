@@ -24,7 +24,7 @@ const YAW_JITTER: f32 = 0.07;
 /// flight. The settle phase drifts this slightly upward; the drift phase
 /// keeps it constant.
 const LIFT_BASE: f32 = 450.0;
-const LIFT_DRIFT: f32 = 18.0;
+const LIFT_DRIFT: f32 = 120.0;
 
 #[derive(Clone, Debug)]
 struct ScorePopup {

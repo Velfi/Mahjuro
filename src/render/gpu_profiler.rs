@@ -32,6 +32,7 @@ const PASS_LABELS: [&str; NUM_PASSES] = [
 ];
 
 /// Per-pass timestamp slot indices into the shared query set.
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub enum PassSlot {
     Shadow = 0,

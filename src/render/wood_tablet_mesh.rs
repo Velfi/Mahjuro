@@ -7,10 +7,15 @@
 //! separate mesh so each can be sized + lit independently in the slot pool.
 //! Local space spans `-0.5..+0.5` on each axis.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
 use crate::render::tile_glb::Vertex3dTex;
 
-/// Build the wood tablet mesh: a single rectangular block, lacquered wood.
+/// Width of the chamfered bevel strips on the four edges of the tablet's
+/// top face. In local units, where the tablet spans −0.5..+0.5 on each axis.
+const BEVEL: f32 = 0.05;
+
+/// Build the wood tablet mesh: a rectangular block with chamfered top edges,
+/// lacquered wood.
 pub fn build_wood_tablet_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -24,13 +29,63 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
     for i in (0..24).filter(|i| !(8..12).contains(i)) {
         vertices[i].uv = [0.0, 0.0];
     }
-    // Rotate the +Y face UVs 90° CCW around UP so the engraved label
-    // texture (landscape) reads along the long screen-X axis instead
-    // of the short local-Z axis.
+    // +Y face UVs: camera right=+X, camera up=-Z (after Rx(~140°) tilt,
+    // local +Z swings downward in world space, so local -Z = screen-top).
+    // push_box +Y corner order: (x0,y1,z0), (x0,y1,z1), (x1,y1,z1), (x1,y1,z0)
+    //   v8  (-0.5, top, -0.5) screen-left,  screen-top    → [0, 0]
+    //   v9  (-0.5, top, +0.5) screen-left,  screen-bottom → [0, 1]
+    //   v10 (+0.5, top, +0.5) screen-right, screen-bottom → [1, 1]
+    //   v11 (+0.5, top, -0.5) screen-right, screen-top    → [1, 0]
     vertices[8].uv = [0.0, 0.0];
     vertices[9].uv = [0.0, 1.0];
     vertices[10].uv = [1.0, 1.0];
     vertices[11].uv = [1.0, 0.0];
+
+    // Chamfered bevel strips around the top-face perimeter. Each strip has a
+    // 45° normal blending +Y with the respective side direction, so glancing
+    // light picks out a physical carved edge instead of a sharp corner. UVs
+    // default to (0,0) so the decal on the +Y face doesn't bleed onto them.
+    let s = std::f32::consts::FRAC_1_SQRT_2;
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // +X edge bevel: connects top face's +X edge to +X side face.
+        [0.5 - BEVEL,  0.5, -0.5],
+        [0.5 - BEVEL,  0.5,  0.5],
+        [0.5,          0.5 - BEVEL,  0.5],
+        [0.5,          0.5 - BEVEL, -0.5],
+        [s, s, 0.0],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // −X edge bevel.
+        [-0.5,          0.5 - BEVEL, -0.5],
+        [-0.5,          0.5 - BEVEL,  0.5],
+        [-0.5 + BEVEL,  0.5,          0.5],
+        [-0.5 + BEVEL,  0.5,         -0.5],
+        [-s, s, 0.0],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // +Z edge bevel.
+        [-0.5,         0.5 - BEVEL, 0.5],
+        [ 0.5,         0.5 - BEVEL, 0.5],
+        [ 0.5,         0.5,         0.5 - BEVEL],
+        [-0.5,         0.5,         0.5 - BEVEL],
+        [0.0, s, s],
+    );
+    push_quad(
+        &mut vertices,
+        &mut indices,
+        // −Z edge bevel.
+        [-0.5,         0.5,         -0.5 + BEVEL],
+        [ 0.5,         0.5,         -0.5 + BEVEL],
+        [ 0.5,         0.5 - BEVEL, -0.5],
+        [-0.5,         0.5 - BEVEL, -0.5],
+        [0.0, s, -s],
+    );
 
     MeshCpu {
         vertices,

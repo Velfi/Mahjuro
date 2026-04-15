@@ -31,37 +31,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var vd = textureLoad(src_vd, coord, 0);
     var temp = max(textureLoad(src_temp, coord, 0).x, 0.0);
 
-    let extent_y = max(fluid.grid_max.y - fluid.grid_min.y, 1e-3);
-    let height_frac = clamp((world_pos.y - fluid.grid_min.y) / extent_y, 0.0, 1.0);
+    let extent_z = max(fluid.grid_max.z - fluid.grid_min.z, 1e-3);
+    let height_frac = clamp((world_pos.z - fluid.grid_min.z) / extent_z, 0.0, 1.0);
     let cooling = 1.0 - smoothstep(0.10, 0.92, height_frac);
     let smoke = clamp(vd.w, 0.0, 1.0);
     let hot_lift = temp * fluid.params.w * fluid.params.x * cooling;
     let density_drag = smoke * fluid.force_params.w * fluid.params.x * 1.4;
-    vd.y = vd.y + hot_lift - density_drag;
+    vd.z = vd.z + hot_lift - density_drag;
 
     // Let hot plumes spread laterally as they climb so the column opens up
     // rather than remaining a rigid vertical jet.
     let spread_band = smoothstep(0.35, 0.90, height_frac);
     vd.x = vd.x * mix(1.0, 0.988, spread_band);
-    vd.z = vd.z * mix(1.0, 0.988, spread_band);
+    vd.y = vd.y * mix(1.0, 0.988, spread_band);
 
     // Near the table, favor shearing/sliding over noisy recirculation.
     let floor_band = 1.0 - smoothstep(0.02, 0.16, height_frac);
     let floor_damp = mix(1.0, 1.0 - fluid.force_params.z, floor_band);
     vd.x = vd.x * floor_damp;
-    vd.z = vd.z * floor_damp;
-    vd.y = vd.y * mix(1.0, 0.80, floor_band);
+    vd.y = vd.y * floor_damp;
+    vd.z = vd.z * mix(1.0, 0.80, floor_band);
 
     // Feather the plume as it approaches the top of the volume.
     let ceiling_band = smoothstep(0.72, 0.98, height_frac);
     vd.x = vd.x * mix(1.0, 1.035, ceiling_band);
-    vd.z = vd.z * mix(1.0, 1.035, ceiling_band);
-    vd.y = vd.y * mix(1.0, 0.975, ceiling_band);
+    vd.y = vd.y * mix(1.0, 1.035, ceiling_band);
+    vd.z = vd.z * mix(1.0, 0.975, ceiling_band);
 
     temp = temp * mix(0.995, 0.90, height_frac);
 
-    if (coord.y == 0) {
-        vd.y = max(vd.y, 0.0);
+    if (coord.z == 0) {
+        vd.z = max(vd.z, 0.0);
         vd.w = max(vd.w, 0.0);
     }
 

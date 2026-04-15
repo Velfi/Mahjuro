@@ -32,9 +32,10 @@ const SMOKE_OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16F
 // Grid configuration
 // ──────────────────────────────────────────────────────────────────────
 
-const MAX_GRID_X: u32 = 128;
-const MAX_GRID_Y: u32 = 80;
-const MAX_GRID_Z: u32 = 128;
+/// Horizontal extent along world X and Y (table plane).
+const MAX_GRID_XY: u32 = 128;
+/// Vertical resolution along world +Z.
+const MAX_GRID_Z_UP: u32 = 80;
 const WG: u32 = 4;
 const BIMOCQ_REINIT_FRAMES: u32 = 32;
 
@@ -59,9 +60,10 @@ impl From<GridDims> for Vec3 {
 
 fn grid_dims_for_quality(quality: SmokeSimQuality) -> GridDims {
     match quality {
-        SmokeSimQuality::Standard => GridDims::new(96, 48, 96),
-        SmokeSimQuality::High => GridDims::new(112, 64, 112),
-        SmokeSimQuality::Ultra => GridDims::new(MAX_GRID_X, MAX_GRID_Y, MAX_GRID_Z),
+        // Texture (x, y, z) ↔ world (X, Y, Z); vertical smoke is along Z.
+        SmokeSimQuality::Standard => GridDims::new(96, 96, 48),
+        SmokeSimQuality::High => GridDims::new(112, 112, 64),
+        SmokeSimQuality::Ultra => GridDims::new(MAX_GRID_XY, MAX_GRID_XY, MAX_GRID_Z_UP),
     }
 }
 
@@ -364,6 +366,7 @@ pub struct FluidSim {
     /// instantly. Cleared automatically after one step.
     pending_clear: bool,
     frames_since_reinit: u32,
+    sim_time: f32,
 }
 
 impl FluidSim {
@@ -378,9 +381,9 @@ impl FluidSim {
         let _ = surface_format; // surface format is now consumed by the composite pipeline below.
         // ── 3D textures ────────────────────────────────────────────────
         let extent3d = wgpu::Extent3d {
-            width: MAX_GRID_X,
-            height: MAX_GRID_Y,
-            depth_or_array_layers: MAX_GRID_Z,
+            width: MAX_GRID_XY,
+            height: MAX_GRID_XY,
+            depth_or_array_layers: MAX_GRID_Z_UP,
         };
         let make_3d = |label: &str, format: wgpu::TextureFormat| -> wgpu::Texture {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -492,8 +495,8 @@ impl FluidSim {
                     grid_dims_for_quality(SmokeSimQuality::High).z as f32,
                     0.0,
                 ],
-                grid_min: [-100.0, 0.0, -100.0, 0.0],
-                grid_max: [100.0, 60.0, 100.0, 0.0],
+                grid_min: [-100.0, -100.0, 0.0, 0.0],
+                grid_max: [100.0, 100.0, 60.0, 0.0],
                 inv_extent: [1.0 / 200.0, 1.0 / 60.0, 1.0 / 200.0, 0.0],
                 params: [1.0 / 60.0, 0.998, 0.99, 14.0],
                 force_params: [0.985, 1.0, 0.16, 0.18],
@@ -518,8 +521,8 @@ impl FluidSim {
                 inv_view_proj: Mat4::IDENTITY.to_cols_array(),
                 view_proj: Mat4::IDENTITY.to_cols_array(),
                 cam_pos: [0.0; 4],
-                grid_min: [-100.0, 0.0, -100.0, 0.0],
-                grid_max: [100.0, 60.0, 100.0, 0.0],
+                grid_min: [-100.0, -100.0, 0.0, 0.0],
+                grid_max: [100.0, 100.0, 60.0, 0.0],
                 grid_size: [
                     grid_dims_for_quality(SmokeSimQuality::High).x as f32,
                     grid_dims_for_quality(SmokeSimQuality::High).y as f32,
@@ -1451,13 +1454,14 @@ impl FluidSim {
             offscreen_h: 0,
             current_detail: None,
             impulses: Vec::new(),
-            grid_min: Vec3::new(-100.0, 0.0, -100.0),
-            grid_max: Vec3::new(100.0, 60.0, 100.0),
+            grid_min: Vec3::new(-100.0, -100.0, 0.0),
+            grid_max: Vec3::new(100.0, 100.0, 60.0),
             grid_size: grid_dims_for_quality(SmokeSimQuality::High),
             screen_w,
             screen_h,
             pending_clear: false,
             frames_since_reinit: BIMOCQ_REINIT_FRAMES,
+            sim_time: 0.0,
         }
     }
 
@@ -1717,31 +1721,31 @@ impl FluidSim {
             match (intensity, sim_quality) {
                 (SmokeIntensity::Off, _) => (0.0_f64, 0.0_f64, 0.0_f64, 0.0, 0.0, 2u32),
                 (SmokeIntensity::Subtle, SmokeSimQuality::Standard) => {
-                    (0.9945, 0.9890, 0.978, 6.4, 0.70, 12)
+                    (0.9945, 0.9955, 0.978, 6.4, 0.70, 40)
                 }
                 (SmokeIntensity::Subtle, SmokeSimQuality::High) => {
-                    (0.9955, 0.9905, 0.981, 7.1, 0.88, 16)
+                    (0.9955, 0.9962, 0.981, 7.1, 0.88, 48)
                 }
                 (SmokeIntensity::Subtle, SmokeSimQuality::Ultra) => {
-                    (0.9964, 0.9915, 0.984, 7.8, 1.02, 20)
+                    (0.9964, 0.9968, 0.984, 7.8, 1.02, 56)
                 }
                 (SmokeIntensity::Strong, SmokeSimQuality::Standard) => {
-                    (0.9960, 0.9910, 0.983, 9.8, 1.00, 18)
+                    (0.9960, 0.9965, 0.983, 9.8, 1.00, 48)
                 }
                 (SmokeIntensity::Strong, SmokeSimQuality::High) => {
-                    (0.9970, 0.9922, 0.986, 10.7, 1.18, 22)
+                    (0.9970, 0.9970, 0.986, 10.7, 1.18, 56)
                 }
                 (SmokeIntensity::Strong, SmokeSimQuality::Ultra) => {
-                    (0.9978, 0.9930, 0.988, 11.6, 1.32, 26)
+                    (0.9978, 0.9975, 0.988, 11.6, 1.32, 64)
                 }
                 (SmokeIntensity::OverTheTop, SmokeSimQuality::Standard) => {
-                    (0.9975, 0.9926, 0.986, 12.4, 1.24, 22)
+                    (0.9975, 0.9970, 0.986, 12.4, 1.24, 56)
                 }
                 (SmokeIntensity::OverTheTop, SmokeSimQuality::High) => {
-                    (0.9983, 0.9934, 0.989, 13.6, 1.42, 28)
+                    (0.9983, 0.9976, 0.989, 13.6, 1.42, 64)
                 }
                 (SmokeIntensity::OverTheTop, SmokeSimQuality::Ultra) => {
-                    (0.9988, 0.9941, 0.991, 14.8, 1.58, 32)
+                    (0.9988, 0.9980, 0.991, 14.8, 1.58, 72)
                 }
             };
         // Force even iteration count so the final result lands in pressure[0].
@@ -1757,6 +1761,10 @@ impl FluidSim {
             1.0 / extent.z.max(1e-3),
         );
         let dt_clamped = dt.min(0.05);
+        // Advance sim time for time-evolving curl-noise forcing. Wrap to keep
+        // fp precision from drifting over long sessions; any wrap-safe period
+        // longer than the noise frequency works, so use a round constant.
+        self.sim_time = (self.sim_time + dt_clamped) % 3600.0;
         // Make per-step density/velocity dissipation framerate-independent.
         // The intensity table above lists the *per-frame at 60 Hz reference*
         // multiplier; the shader applies whatever value we upload once per
@@ -1778,7 +1786,7 @@ impl FluidSim {
                     self.grid_size.x as f32,
                     self.grid_size.y as f32,
                     self.grid_size.z as f32,
-                    0.0,
+                    self.sim_time,
                 ],
                 grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
                 grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
@@ -2241,9 +2249,9 @@ mod tests {
 
     #[test]
     fn impulse_velocity_clamps_to_under_one_cell_per_step() {
-        let grid_min = Vec3::new(-100.0, 0.0, -100.0);
-        let grid_max = Vec3::new(100.0, 60.0, 100.0);
-        let grid_size = GridDims::new(100, 60, 100);
+        let grid_min = Vec3::new(-100.0, -100.0, 0.0);
+        let grid_max = Vec3::new(100.0, 100.0, 60.0);
+        let grid_size = GridDims::new(100, 100, 60);
         let dt = 0.05;
         let clamped = clamp_impulse_velocity_for_step(
             Vec3::new(9999.0, -9999.0, 9999.0),
@@ -2267,9 +2275,9 @@ mod tests {
         let clamped = clamp_impulse_velocity_for_step(
             velocity,
             1.0 / 60.0,
-            Vec3::new(-100.0, 0.0, -100.0),
-            Vec3::new(100.0, 60.0, 100.0),
-            GridDims::new(96, 48, 96),
+            Vec3::new(-100.0, -100.0, 0.0),
+            Vec3::new(100.0, 100.0, 60.0),
+            GridDims::new(96, 96, 48),
         );
 
         assert_eq!(clamped, velocity);

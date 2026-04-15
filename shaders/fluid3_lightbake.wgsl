@@ -93,7 +93,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let light_strength = cam.params.z;
     let ambient = cam.params.w;
     let lcount = lights.count.x;
-    let height_frac = clamp((pos.y - u.grid_min.y) / max(u.grid_max.y - u.grid_min.y, 1e-3), 0.0, 1.0);
+    let height_frac = clamp((pos.z - u.grid_min.z) / max(u.grid_max.z - u.grid_min.z, 1e-3), 0.0, 1.0);
 
     // ── Lighting (verbatim from the original fragment shader) ──────────
     // Two non-obvious deviations from a naïve `(1 - dist/radius)²`
@@ -110,6 +110,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     //      a fraction of incoming light forward; the dark grey base
     //      keeps even brightly-lit cells reading as smoke rather than
     //      glowing fog.
+    // Single-scattering with a short shadow ray per light. Walk a few taps
+    // from this voxel toward the light, accumulate optical depth in density,
+    // and attenuate the light by exp(-tau). Keeps the old falloff model so
+    // existing light tuning still reads the same in thin regions, but dense
+    // plume backs now correctly darken — the previous bake treated the
+    // medium as transparent to incoming light, so a thick column lit from
+    // one side read as uniformly lit glowing fog.
+    let extent = u.grid_max.xyz - u.grid_min.xyz;
+    let inv_extent = vec3<f32>(1.0 / max(extent.x, 1e-3), 1.0 / max(extent.y, 1e-3), 1.0 / max(extent.z, 1e-3));
+    let sigma_t = 0.065;
+    let shadow_taps = 4;
+
     var lit = vec3<f32>(ambient);
     for (var li: u32 = 0u; li < lcount; li = li + 1u) {
         let l = lights.lights[li];
@@ -119,7 +131,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let min_dist = radius * 0.28;
         let eff_dist = max(dist, min_dist);
         let falloff = clamp(1.0 - eff_dist / radius, 0.0, 1.0);
-        lit = lit + l.color.rgb * l.color.a * falloff * falloff * light_strength;
+
+        // March a short ray toward the light, sampling density. Cap the
+        // shadow distance at the light radius — beyond that the falloff is
+        // zero anyway so extra taps would just be wasted reads.
+        let shadow_len = min(dist, radius);
+        let shadow_dir = to_light / dist;
+        let shadow_step = shadow_len / f32(shadow_taps);
+        var tau = 0.0;
+        for (var s: i32 = 1; s <= shadow_taps; s = s + 1) {
+            let sp = pos + shadow_dir * (f32(s) - 0.5) * shadow_step;
+            let uvw = (sp - u.grid_min.xyz) * inv_extent;
+            if (all(uvw >= vec3<f32>(0.0)) && all(uvw <= vec3<f32>(1.0))) {
+                let sc = vec3<i32>(i32(uvw.x * u.grid_size.x), i32(uvw.y * u.grid_size.y), i32(uvw.z * u.grid_size.z));
+                let sd = max(textureLoad(src_vd, sc, 0).w, 0.0);
+                tau = tau + sd * sigma_t * shadow_step;
+            }
+        }
+        let shadow = exp(-tau);
+        lit = lit + l.color.rgb * l.color.a * falloff * falloff * light_strength * shadow;
     }
     // Reinhard so overlapping candle radii don't push past the smoke's
     // own albedo and clip to white.

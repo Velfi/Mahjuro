@@ -32,19 +32,62 @@ fn load_vd(c: vec3<i32>, dims: vec3<i32>) -> vec4<f32> {
     return textureLoad(src_vd, clamp_coord(c, dims), 0);
 }
 
-fn hash21(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+fn hash31(p: vec3<f32>) -> f32 {
+    return fract(sin(dot(p, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
-fn vnoise2(p: vec2<f32>) -> f32 {
+fn vnoise3(p: vec3<f32>) -> f32 {
     let i = floor(p);
     let f = p - i;
     let u = f * f * (3.0 - 2.0 * f);
-    let a = hash21(i + vec2<f32>(0.0, 0.0));
-    let b = hash21(i + vec2<f32>(1.0, 0.0));
-    let c = hash21(i + vec2<f32>(0.0, 1.0));
-    let d = hash21(i + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    let n000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let n100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let n010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let n110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let n001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let n101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let n011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let n111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    let a = mix(n000, n100, u.x);
+    let b = mix(n010, n110, u.x);
+    let c = mix(n001, n101, u.x);
+    let d = mix(n011, n111, u.x);
+    let e = mix(a, b, u.y);
+    let g = mix(c, d, u.y);
+    return mix(e, g, u.z);
+}
+
+// Divergence-free curl-noise: take finite-difference curl of a vector
+// potential made from three offset 3D value-noise scalar fields. Result is
+// analytically div-free (up to the finite-difference stencil) so it injects
+// rotational motion without adding pressure work for the solver to undo.
+fn curl_noise3(p: vec3<f32>) -> vec3<f32> {
+    let eps = 1.0;
+    let o1 = vec3<f32>(0.0, 0.0, 0.0);
+    let o2 = vec3<f32>(57.3, 113.7, 29.1);
+    let o3 = vec3<f32>(-41.9, 17.5, 83.2);
+
+    let p1yp = vnoise3(p + vec3<f32>(0.0, eps, 0.0) + o1);
+    let p1ym = vnoise3(p - vec3<f32>(0.0, eps, 0.0) + o1);
+    let p1zp = vnoise3(p + vec3<f32>(0.0, 0.0, eps) + o1);
+    let p1zm = vnoise3(p - vec3<f32>(0.0, 0.0, eps) + o1);
+
+    let p2xp = vnoise3(p + vec3<f32>(eps, 0.0, 0.0) + o2);
+    let p2xm = vnoise3(p - vec3<f32>(eps, 0.0, 0.0) + o2);
+    let p2zp = vnoise3(p + vec3<f32>(0.0, 0.0, eps) + o2);
+    let p2zm = vnoise3(p - vec3<f32>(0.0, 0.0, eps) + o2);
+
+    let p3xp = vnoise3(p + vec3<f32>(eps, 0.0, 0.0) + o3);
+    let p3xm = vnoise3(p - vec3<f32>(eps, 0.0, 0.0) + o3);
+    let p3yp = vnoise3(p + vec3<f32>(0.0, eps, 0.0) + o3);
+    let p3ym = vnoise3(p - vec3<f32>(0.0, eps, 0.0) + o3);
+
+    let inv2e = 1.0 / (2.0 * eps);
+    return vec3<f32>(
+        ((p3yp - p3ym) - (p2zp - p2zm)) * inv2e,
+        ((p1zp - p1zm) - (p3xp - p3xm)) * inv2e,
+        ((p2xp - p2xm) - (p1yp - p1ym)) * inv2e,
+    );
 }
 
 fn curl_at(c: vec3<i32>, dims: vec3<i32>) -> vec3<f32> {
@@ -78,8 +121,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         fluid.grid_max.xyz,
         (vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)) + vec3<f32>(0.5)) / fluid.grid_size.xyz,
     );
-    let extent_y = max(fluid.grid_max.y - fluid.grid_min.y, 1e-3);
-    let height_frac = clamp((world_pos.y - fluid.grid_min.y) / extent_y, 0.0, 1.0);
+    let extent_z = max(fluid.grid_max.z - fluid.grid_min.z, 1e-3);
+    let height_frac = clamp((world_pos.z - fluid.grid_min.z) / extent_z, 0.0, 1.0);
 
     let curl_c = curl_at(c, dims);
     let mag_xp = length(curl_at(c + vec3<i32>(1, 0, 0), dims));
@@ -111,38 +154,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         new_vel = new_vel + force * fluid.params.x;
     }
 
-    // Vorticity confinement preserves existing curl, but a very symmetric hot
+    // Vorticity confinement preserves existing curl, but a symmetric hot
     // plume can still remain too laminar on a coarse grid. Seed a small,
-    // divergence-free horizontal curl field here so the plume has something
-    // physical-looking to roll into without hiding the force inside advection.
+    // analytically divergence-free 3D curl-noise field that also advances in
+    // time so the plume has something physical-looking to roll into — the
+    // previous 2D quasi-static stream function forced the same spatial
+    // pattern every frame, which BiMocq faithfully preserved into visible
+    // striping. True 3D curl-noise gives wispy, non-repeating shape.
     let nscale = 0.013;
-    let np = vec2<f32>(world_pos.x, world_pos.z) * nscale
-           + vec2<f32>(world_pos.y * nscale * 0.35, 0.0);
-    let eps = 4.0;
-    let psi_xp = vnoise2(np + vec2<f32>(eps * nscale, 0.0));
-    let psi_xm = vnoise2(np - vec2<f32>(eps * nscale, 0.0));
-    let psi_zp = vnoise2(np + vec2<f32>(0.0, eps * nscale));
-    let psi_zm = vnoise2(np - vec2<f32>(0.0, eps * nscale));
-    let noise_curl = vec3<f32>(
-        (psi_zp - psi_zm) / (2.0 * eps),
-        0.0,
-        -(psi_xp - psi_xm) / (2.0 * eps),
-    );
+    let t = fluid.grid_size.w;
+    let np = vec3<f32>(world_pos.x, world_pos.y, world_pos.z) * nscale
+           + vec3<f32>(t * 0.23, t * -0.17, t * 0.11);
+    let noise_curl = curl_noise3(np);
     let hot_noise_strength = fluid.force_params.y * 145.0 * thermal * height_gate;
     let loft_noise_strength = fluid.force_params.y * 48.0 * smoke * loft_gate;
     new_vel = new_vel + noise_curl * (hot_noise_strength + loft_noise_strength) * fluid.params.x;
 
     // Very weak high-altitude drift so the tops of the plumes separate and
     // stop looking phase-locked.
-    let drift_angle = world_pos.y * 0.018 + world_pos.x * 0.006 + world_pos.z * 0.004;
-    let drift = vec3<f32>(sin(drift_angle), 0.0, cos(drift_angle)) * loft_gate * smoke * 6.0;
+    let drift_angle = world_pos.z * 0.018 + world_pos.x * 0.006 + world_pos.y * 0.004;
+    let drift = vec3<f32>(sin(drift_angle), cos(drift_angle), 0.0) * loft_gate * smoke * 6.0;
     new_vel = new_vel + drift * fluid.params.x;
 
     vd = vec4<f32>(new_vel, vd.w);
 
     // Preserve the solid table floor behavior after confinement too.
-    if (c.y == 0) {
-        vd.y = max(vd.y, 0.0);
+    if (c.z == 0) {
+        vd.z = max(vd.z, 0.0);
     }
 
     textureStore(dst_vd, c, vd);

@@ -19,25 +19,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
 
-/// Visual variant for a panel — picks the background color.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelVariant {
-    /// Hero panel for the score / important callouts: TWILIGHT with GOLD border.
-    Hero,
-}
-
-/// Push a panel (background + 1px-style inset border, faked with four quads).
-///
-/// The border is drawn as four thin quads on the inside edge of `rect` so it
-/// reads as a recessed gold inlay rather than a hard outline.
-pub fn push_panel(out: &mut Vec<GpuInstance>, rect: [f32; 4], variant: PanelVariant) {
-    let (bg, border) = match variant {
-        PanelVariant::Hero => (color::TWILIGHT, color::GOLD),
-    };
-    push_panel_colored(out, rect, bg, border);
-}
-
-/// Same as [`push_panel`] but with explicit colors. Used by score panel and
+/// Same as calling [`push_panel_colored`] but with explicit colors. Used by score panel and
 /// shop cards which need fine-grained control over the gold flash overlays.
 pub fn push_panel_colored(
     out: &mut Vec<GpuInstance>,
@@ -47,7 +29,12 @@ pub fn push_panel_colored(
 ) {
     // Background fill.
     out.push(GpuInstance { rect, color: bg });
-    push_inset_border(out, rect, border, border_thickness(rect));
+    let bt = border_thickness(rect);
+    push_inset_border(out, rect, border, bt);
+    // Bevel: one pixel of highlight on the inner top/left edges, shadow on
+    // inner bottom/right edges. Sits just inside the inset border so it reads
+    // as a raised-panel chamfer rather than a second border.
+    push_bevel(out, rect, bt);
 }
 
 /// Standard border thickness for a rect — small enough to look like an
@@ -85,6 +72,33 @@ pub fn push_inset_border(
         rect: [x + w - t, y + t, t, h - 2.0 * t],
         color,
     });
+}
+
+/// Draw a one-pixel raised-panel bevel just inside the inset border.
+///
+/// The top and left inner edges get a subtle highlight (lighter indigo) and
+/// the bottom and right inner edges get a shadow (near-black), making the
+/// panel read as physically raised out of the background.
+///
+/// `border_t` is the thickness of the already-drawn inset border so the bevel
+/// starts at the correct inset position.
+fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
+    use color::*;
+    let [x, y, w, h] = rect;
+    let o = border_t;       // offset: bevel sits just inside the border
+    let bw = 1.0_f32;       // bevel strip width (1 px looks crisp at all scales)
+    let hi = alpha(TWILIGHT, 0.55);   // top-left highlight — lighter indigo
+    let sh = alpha(OBSIDIAN, 0.70);   // bottom-right shadow — near-black
+
+    // Highlight: top inner edge
+    out.push(GpuInstance { rect: [x + o, y + o, w - 2.0 * o, bw], color: hi });
+    // Highlight: left inner edge (skip the top-left corner already covered)
+    out.push(GpuInstance { rect: [x + o, y + o + bw, bw, h - 2.0 * o - bw], color: hi });
+
+    // Shadow: bottom inner edge
+    out.push(GpuInstance { rect: [x + o, y + h - o - bw, w - 2.0 * o, bw], color: sh });
+    // Shadow: right inner edge (skip the bottom-right corner)
+    out.push(GpuInstance { rect: [x + w - o - bw, y + o, bw, h - 2.0 * o - bw], color: sh });
 }
 
 /// Push a button: background + border + centered text + hit-test rect.

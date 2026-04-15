@@ -24,6 +24,10 @@ fn seeded_shuffle<T>(slice: &mut [T], seed: u32) {
     }
 }
 
+/// Canonical aspect ratio (width / height) of booster pack cover art.
+/// All pack textures are authored at 256×384 (2:3 portrait).
+pub const PACK_ASPECT_W_OVER_H: f32 = 2.0 / 3.0;
+
 /// ID offset for pack-generated tiles. Standard wall uses 0–139.
 pub const PACK_TILE_ID_BASE: u32 = 1000;
 /// Each pack instance gets a block of 16 IDs (more than any single pack needs).
@@ -76,6 +80,27 @@ impl TilePackKind {
             Self::BambooGrove => "+8 bamboo tiles to the wall",
             Self::CoinCache => "+8 dots tiles to the wall",
             Self::ScrollLibrary => "+8 character tiles to the wall",
+        }
+    }
+
+    /// Foil wrapper tint for this pack kind. The pack body is rendered as
+    /// shiny metallic foil in this colour; the pack art is composited on top
+    /// as a decal via its alpha channel. Chosen to evoke each pack's theme
+    /// while staying muted enough that the decal art reads clearly.
+    pub fn foil_tint(self) -> [f32; 4] {
+        match self {
+            // Honors: imperial gold foil.
+            Self::Honors => [0.92, 0.78, 0.38, 1.0],
+            // Terminals: weathered copper/bronze.
+            Self::Terminals => [0.78, 0.52, 0.32, 1.0],
+            // Flowers: soft rose-pink foil.
+            Self::Flowers => [0.92, 0.62, 0.70, 1.0],
+            // Bamboo Grove: jade green.
+            Self::BambooGrove => [0.48, 0.78, 0.52, 1.0],
+            // Coin Cache: polished silver with a cool cast.
+            Self::CoinCache => [0.78, 0.82, 0.88, 1.0],
+            // Scroll Library: lacquer indigo.
+            Self::ScrollLibrary => [0.42, 0.48, 0.78, 1.0],
         }
     }
 

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::core::boss::{self, BossKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
-use crate::core::hand::{DetectedSet, SetKind, detect_all_sets, validate_selection_with_rules};
+use crate::core::hand::{
+    DetectedSet, SetKind, detect_all_sets, enumerate_decompositions, validate_selection_with_rules,
+};
 use crate::core::structure::{
     StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
     is_winning_structure_shape,
@@ -66,9 +68,6 @@ pub enum ConsumableUseResult {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
-    /// The player activated a Kiln — the gameplay scene should enter tile
-    /// selection mode so the player can pick up to 3 tiles to destroy.
-    KilnMode,
 }
 
 pub const HAND_SIZE: usize = 14;
@@ -238,22 +237,23 @@ fn enumerate_regular_subsets(
     }
 
     if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        let flower = flowers[0];
         if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                &flowers[1..],
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << flower.hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 3,
-                out,
-            );
+            for (flower_idx, flower) in flowers.iter().copied().enumerate() {
+                enumerate_regular_subsets(
+                    &remaining[2..],
+                    &remove_flower(flowers, flower_idx),
+                    current_mask
+                        | (1 << first.hand_index)
+                        | (1 << remaining[1].hand_index)
+                        | (1 << flower.hand_index),
+                    allow_wrap,
+                    no_sequences,
+                    require_honor,
+                    must_play_five,
+                    current_tile_count + 3,
+                    out,
+                );
+            }
         }
     }
 
@@ -265,26 +265,34 @@ fn enumerate_regular_subsets(
                 next_mask |= 1 << remaining[idx].hand_index;
                 remove.push(idx);
             }
-            if seq.uses_flower {
-                let flower = flowers[0];
-                next_mask |= 1 << flower.hand_index;
-            }
             let rest = remove_indices(remaining, &remove);
-            enumerate_regular_subsets(
-                &rest,
-                if seq.uses_flower {
-                    &flowers[1..]
-                } else {
-                    flowers
-                },
-                next_mask,
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 3,
-                out,
-            );
+            if seq.uses_flower {
+                for (flower_idx, flower) in flowers.iter().copied().enumerate() {
+                    enumerate_regular_subsets(
+                        &rest,
+                        &remove_flower(flowers, flower_idx),
+                        next_mask | (1 << flower.hand_index),
+                        allow_wrap,
+                        no_sequences,
+                        require_honor,
+                        must_play_five,
+                        current_tile_count + 3,
+                        out,
+                    );
+                }
+            } else {
+                enumerate_regular_subsets(
+                    &rest,
+                    flowers,
+                    next_mask,
+                    allow_wrap,
+                    no_sequences,
+                    require_honor,
+                    must_play_five,
+                    current_tile_count + 3,
+                    out,
+                );
+            }
         }
     }
 }
@@ -314,25 +322,43 @@ fn emit_leaf_masks(
 
 fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
     let mut masks = vec![0];
-    if flowers.len() >= 2 {
-        masks.push((1 << flowers[0].hand_index) | (1 << flowers[1].hand_index));
+
+    for select_count in 2..=flowers.len().min(4) {
+        collect_flower_masks(flowers, select_count, 0, 0, &mut masks);
     }
-    if flowers.len() >= 3 {
-        masks.push(
-            (1 << flowers[0].hand_index)
-                | (1 << flowers[1].hand_index)
-                | (1 << flowers[2].hand_index),
-        );
-    }
-    if flowers.len() >= 4 {
-        masks.push(
-            (1 << flowers[0].hand_index)
-                | (1 << flowers[1].hand_index)
-                | (1 << flowers[2].hand_index)
-                | (1 << flowers[3].hand_index),
-        );
-    }
+
     masks
+}
+
+fn collect_flower_masks(
+    flowers: &[IndexedTile],
+    select_count: usize,
+    start: usize,
+    current_mask: u32,
+    out: &mut Vec<u32>,
+) {
+    if select_count == 0 {
+        out.push(current_mask);
+        return;
+    }
+
+    for idx in start..=flowers.len() - select_count {
+        collect_flower_masks(
+            flowers,
+            select_count - 1,
+            idx + 1,
+            current_mask | (1 << flowers[idx].hand_index),
+            out,
+        );
+    }
+}
+
+fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
+    flowers
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, flower)| (idx != remove_idx).then_some(*flower))
+        .collect()
 }
 
 fn same_face(a: Tile, b: Tile) -> bool {
@@ -1190,8 +1216,18 @@ impl RunState {
     /// their yaku for the run; Talismans stamp their enhancement onto every
     /// tile currently in the player's hand. Returns a [`ConsumableUseResult`]
     /// describing what happened so the UI can log/animate appropriately.
-    pub fn use_consumable(&mut self, index: usize) -> Option<ConsumableUseResult> {
+    pub fn use_consumable(
+        &mut self,
+        index: usize,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) -> Option<ConsumableUseResult> {
         use crate::core::consumable::Consumable;
+        let pending = self.consumables.items.get(index).copied()?;
+        if let Consumable::Talisman(t) = pending {
+            if t.acts_on_selection() && !self.selected.iter().any(|&s| s) {
+                return None;
+            }
+        }
         let item = self.consumables.take(index)?;
         match item {
             Consumable::Zodiac(z) => {
@@ -1200,18 +1236,125 @@ impl RunState {
                 Some(ConsumableUseResult::Zodiac { yaku, new_level })
             }
             Consumable::Talisman(t) => {
-                if t == crate::core::talisman::TalismanKind::Kiln {
-                    return Some(ConsumableUseResult::KilnMode);
+                if t.acts_on_selection() {
+                    self.apply_talisman_to_selection(t, bus);
+                } else {
+                    let enh = t.enhancement().expect("buff talisman has enhancement");
+                    // Record the enhancement against each current hand tile's id
+                    // so it persists when those tiles get redrawn next round.
+                    for tile in &self.hand {
+                        self.tile_enhancements.insert(tile.id, enh);
+                    }
+                    crate::core::talisman::apply_to_hand(&mut self.hand, t);
                 }
-                let enh = t.enhancement().expect("non-Kiln talisman has enhancement");
-                // Record the enhancement against each current hand tile's id
-                // so it persists when those tiles get redrawn next round.
-                for tile in &self.hand {
-                    self.tile_enhancements.insert(tile.id, enh);
-                }
-                crate::core::talisman::apply_to_hand(&mut self.hand, t);
                 Some(ConsumableUseResult::Talisman { kind: t })
             }
+        }
+    }
+
+    /// Apply a selection-targeting talisman to currently selected hand tiles.
+    /// Clears selection and re-sorts the hand. Caller must ensure at least one
+    /// tile is selected.
+    fn apply_talisman_to_selection(
+        &mut self,
+        kind: crate::core::talisman::TalismanKind,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) {
+        use crate::core::talisman::TalismanKind;
+        use crate::core::tile::Suit;
+        use rand::RngExt;
+
+        match kind {
+            TalismanKind::Kiln => {
+                let _ = self.destroy_selected_tiles(bus);
+            }
+            TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
+                let target = match kind {
+                    TalismanKind::Bamboo => Suit::Bamboos,
+                    TalismanKind::Dots => Suit::Circles,
+                    TalismanKind::Characters => Suit::Characters,
+                    _ => unreachable!(),
+                };
+                for i in 0..self.hand.len() {
+                    if !self.selected.get(i).copied().unwrap_or(false) {
+                        continue;
+                    }
+                    let tile = &mut self.hand[i];
+                    if tile.is_number_tile() {
+                        tile.suit = target;
+                    }
+                }
+                self.clear_hand_selection_flags();
+                self.hand.sort();
+                self.restamp_hand_enhancements();
+            }
+            TalismanKind::Honors => {
+                let mut rng = rand::rng();
+                for i in 0..self.hand.len() {
+                    if !self.selected.get(i).copied().unwrap_or(false) {
+                        continue;
+                    }
+                    let tile = &mut self.hand[i];
+                    if !tile.is_number_tile() {
+                        continue;
+                    }
+                    let honor_suits = [Suit::Wind, Suit::Dragon];
+                    let suit = honor_suits[rng.random_range(0..honor_suits.len())];
+                    let rank: u8 = if suit == Suit::Wind {
+                        rng.random_range(1..=4)
+                    } else {
+                        rng.random_range(1..=3)
+                    };
+                    tile.suit = suit;
+                    tile.rank = rank;
+                }
+                self.clear_hand_selection_flags();
+                self.hand.sort();
+                self.restamp_hand_enhancements();
+            }
+            TalismanKind::Wildflower => {
+                let mut rng = rand::rng();
+                for i in 0..self.hand.len() {
+                    if !self.selected.get(i).copied().unwrap_or(false) {
+                        continue;
+                    }
+                    let tile = &mut self.hand[i];
+                    tile.suit = Suit::Flower;
+                    tile.rank = rng.random_range(1..=4);
+                }
+                self.clear_hand_selection_flags();
+                self.hand.sort();
+                self.restamp_hand_enhancements();
+            }
+            TalismanKind::Conformity => {
+                let selected_indices: Vec<usize> = (0..self.hand.len())
+                    .filter(|&i| self.selected.get(i).copied().unwrap_or(false))
+                    .collect();
+                if selected_indices.is_empty() {
+                    return;
+                }
+                let leftmost = selected_indices.iter().copied().min().unwrap();
+                let template = self.hand[leftmost];
+                for i in selected_indices {
+                    self.hand[i].suit = template.suit;
+                    self.hand[i].rank = template.rank;
+                }
+                self.clear_hand_selection_flags();
+                self.hand.sort();
+                self.restamp_hand_enhancements();
+            }
+            TalismanKind::Jade
+            | TalismanKind::Pearl
+            | TalismanKind::Gilded
+            | TalismanKind::Polychrome => {
+                unreachable!("selection-only path");
+            }
+        }
+    }
+
+    fn clear_hand_selection_flags(&mut self) {
+        for s in &mut self.selected {
+            *s = false;
         }
     }
 
@@ -1313,7 +1456,10 @@ impl RunState {
         self.reset_round_resources();
         self.tile_debuffs.clear();
         self.relics.clear_debuffs();
-        let mut target = (self.base_target as f32 * blind.target_multiplier()) as u32;
+        // Target scales linearly with the blind's precedence: the Nth blind
+        // (skipped or played) targets `base_target * N`. Base is 200 by default,
+        // so blind 5 = 1000, blind 16 = 3200.
+        let mut target = self.base_target.saturating_mul(self.run_number);
         // Tutorial adaptive difficulty: lower the target after repeated failures.
         if let Some(ref tut) = self.tutorial {
             if tut.is_active() {
@@ -1378,6 +1524,11 @@ impl RunState {
         self.structure_sets.clear();
         self.structure_tiles.clear();
         self.restamp_hand_enhancements();
+        // SetMagnet: pull 4th copies of any triplets in the opening hand.
+        // No bus available at deal time; create a throwaway sink.
+        let mut _sink = EventBus::default();
+        self.set_magnet_draw_fourths(&mut _sink);
+        self.hand.sort();
     }
 
     /// Commit selected melds into structure (costs one play). Alias for the
@@ -1408,6 +1559,7 @@ impl RunState {
                 return 0;
             }
         };
+        let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
 
         {
             let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
@@ -1424,7 +1576,13 @@ impl RunState {
 
         if self.mode.structure_bank {
             let current_tile_count = self.structure_tiles.len();
-            if current_tile_count + scoring_tiles.len() > HAND_SIZE {
+            let kongs_after = self
+                .structure_sets
+                .iter()
+                .chain(sets.iter())
+                .filter(|s| s.kind == SetKind::Kong)
+                .count();
+            if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 bus.push(GameEvent::InvalidAction);
                 return 0;
             }
@@ -1505,10 +1663,8 @@ impl RunState {
         }
 
         self.hand.sort();
-        if !self.mode.structure_bank {
-            self.set_magnet_after_score(&sets, &scoring_tiles, bus);
-            self.hand.sort();
-        }
+        self.set_magnet_draw_fourths(bus);
+        self.hand.sort();
         self.selected = vec![false; self.hand.len()];
         self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
@@ -1682,29 +1838,25 @@ impl RunState {
         debuffs
     }
 
-    fn set_magnet_after_score(
-        &mut self,
-        sets: &[DetectedSet],
-        scoring_tiles: &[Tile],
-        bus: &mut EventBus,
-    ) {
+    /// Set Magnet: after any draw phase, for each face with exactly 3 copies
+    /// in hand, pull the 4th matching tile from the wall.
+    fn set_magnet_draw_fourths(&mut self, bus: &mut EventBus) {
         if !self.relics.has(RelicId::SetMagnet) {
             return;
         }
-        let scored_triplet = sets
-            .iter()
-            .find(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong));
-        let triplet_tile = scored_triplet.and_then(|s| {
-            s.tile_ids
-                .first()
-                .and_then(|id| scoring_tiles.iter().find(|t| t.id == *id))
-                .copied()
-        });
-        if let Some(ref tt) = triplet_tile {
-            if let Some(matching) = self.wall.draw_matching(tt.suit, tt.rank) {
-                self.hand.push(matching);
-                bus.push(GameEvent::TileDrawn(matching));
-                self.relic_activations.push(RelicId::SetMagnet);
+        // Count copies of each (suit, rank) face currently in hand.
+        let mut counts: std::collections::HashMap<(crate::core::tile::Suit, u8), u32> =
+            std::collections::HashMap::new();
+        for t in &self.hand {
+            *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
+        }
+        for ((suit, rank), count) in counts {
+            if count == 3 {
+                if let Some(matching) = self.wall.draw_matching(suit, rank) {
+                    self.hand.push(matching);
+                    bus.push(GameEvent::TileDrawn(matching));
+                    self.relic_activations.push(RelicId::SetMagnet);
+                }
             }
         }
     }
@@ -1748,7 +1900,6 @@ impl RunState {
         self.structure_sets.clear();
         self.structure_tiles.clear();
 
-        self.set_magnet_after_score(&sets, &scoring_tiles, bus);
         self.hand.sort();
 
         earned
@@ -1970,6 +2121,82 @@ impl RunState {
         self.try_validate_with_wildcards(&selected_tiles).is_some()
     }
 
+    /// When the submission could be a full winning hand (14+ tiles), enumerate
+    /// every valid meld decomposition and pick the highest-scoring one. For
+    /// shorter plays (partial structure commits, small selections), keep the
+    /// backtracker's first-found decomposition — ambiguity is rare and the
+    /// enumeration overhead isn't worth it.
+    ///
+    /// Ties fall back to the first decomposition found.
+    fn pick_best_decomposition(
+        &self,
+        default_sets: Vec<DetectedSet>,
+        scoring_tiles: &[Tile],
+        original_tiles: &[Tile],
+    ) -> Vec<DetectedSet> {
+        // Only search alternatives when the submission is plausibly a full hand.
+        // A full hand has 14 + kong_count tiles (kongs use 4 tiles each).
+        let kongs = default_sets
+            .iter()
+            .filter(|s| s.kind == SetKind::Kong)
+            .count();
+        if scoring_tiles.len() < HAND_SIZE || scoring_tiles.len() != HAND_SIZE + kongs {
+            return default_sets;
+        }
+        let rules = self.validation_rules_for_current_mode();
+        let alternatives = enumerate_decompositions(scoring_tiles, &rules);
+        if alternatives.len() <= 1 {
+            return default_sets;
+        }
+        let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
+        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let ctx = ScoreContext {
+            relics: &self.relics,
+            tile_debuffs: &scoring_tile_debuffs,
+            scored_last_turn: self.scored_last_turn,
+            dora_faces: self.wall.dora_faces(),
+            available_yaku: self.available_yaku.clone(),
+            round_wind: rw,
+            first_full_hand_of_round: !self.full_hand_played_this_round,
+            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
+            riichi_active: false,
+            yaku_levels: Some(self.yaku_levels.clone()),
+            played_yaku_this_round: self.played_yaku_this_round.clone(),
+            gold: self.gold,
+            total_score: self.total_score_earned,
+            is_final_play: self.plays_remaining == 0,
+            tile_polisher_bonus: self.tile_polisher_bonus,
+            relic_counters: self.relic_counters.clone(),
+            unscored_hand_tiles: self.hand.len(),
+            river_runner_bonus: self.river_runner_bonus,
+            structure: None,
+        };
+        let mut best = default_sets;
+        let mut best_total = score_sets_with_original(
+            scoring_tiles,
+            &best,
+            &ctx,
+            &self.round_rules,
+            original_tiles,
+        )
+        .total;
+        for candidate in alternatives {
+            let total = score_sets_with_original(
+                scoring_tiles,
+                &candidate,
+                &ctx,
+                &self.round_rules,
+                original_tiles,
+            )
+            .total;
+            if total > best_total {
+                best_total = total;
+                best = candidate;
+            }
+        }
+        best
+    }
+
     fn validation_rules_for_current_mode(&self) -> Vec<RuleModifier> {
         if self.mode.structure_bank {
             self.round_rules
@@ -1995,14 +2222,20 @@ impl RunState {
         for mask in enumerate_candidate_play_masks(&self.hand, &rules) {
             let indices: Vec<usize> = (0..hand_len).filter(|i| mask & (1 << i) != 0).collect();
             let tiles: Vec<Tile> = indices.iter().map(|&i| self.hand[i]).collect();
-            let Some((_, scoring_tiles)) = self.try_validate_with_wildcards(&tiles) else {
+            let Some((new_sets, scoring_tiles)) = self.try_validate_with_wildcards(&tiles) else {
                 continue;
             };
 
-            if self.uses_structure_bank()
-                && self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE
-            {
-                continue;
+            if self.uses_structure_bank() {
+                let kongs_after = self
+                    .structure_sets
+                    .iter()
+                    .chain(new_sets.iter())
+                    .filter(|s| s.kind == SetKind::Kong)
+                    .count();
+                if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
+                    continue;
+                }
             }
             return true;
         }
@@ -2172,6 +2405,7 @@ impl RunState {
         if restocked {
             self.times_restocked = self.times_restocked.saturating_add(1);
         }
+        self.set_magnet_draw_fourths(bus);
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
         // Re-seed guaranteed melds so the tutorial lesson stays solvable
@@ -2182,17 +2416,9 @@ impl RunState {
         self.emit_round_resolution_events(bus);
     }
 
-    /// Swap two tiles in the hand by index. Clears selection afterward.
-    pub fn swap_tiles(&mut self, from: usize, to: usize) {
-        if from < self.hand.len() && to < self.hand.len() && from != to {
-            self.hand.swap(from, to);
-            self.selected = vec![false; self.hand.len()];
-        }
-    }
-
     /// Sort hand by suit then rank (Characters → Bamboos → Circles → Wind → Dragon).
     pub fn sort_hand_by_suit(&mut self) {
-        self.hand.sort();
+        self.hand.sort_by(crate::core::tile::cmp_sort_order);
         self.selected = vec![false; self.hand.len()];
     }
 
@@ -2283,14 +2509,14 @@ impl RunState {
             }
         }
 
-        // Defeating the Boss completes an ante and scales the base for the next one.
+        // Defeating the Boss completes an ante. Target scaling is now driven
+        // by `run_number` in `apply_blind`, so `base_target` stays constant.
         let was_boss = self.blind == BlindKind::Boss;
         if was_boss {
             self.ante += 1;
-            self.base_target = (self.base_target as f32 * self.mode.target_scaling) as u32;
         }
         self.run_number += 1;
-        self.target_score = self.base_target; // will be overridden by apply_blind
+        // `target_score` is recomputed by `apply_blind` when the next blind is picked.
         self.round_rules.clear();
         self.reset_round_resources();
         self.last_breakdown = None;
@@ -2346,9 +2572,7 @@ impl RunState {
     pub fn skip_to_next_blind(&mut self) {
         self.upcoming_blind = self.upcoming_blind.next();
         self.run_number += 1;
-        // Skipping stays inside the same ante (Boss can't be skipped), so the
-        // ante's base target is unchanged — only the blind multiplier shifts.
-        self.target_score = self.base_target;
+        // `target_score` is recomputed by `apply_blind` when the next blind is picked.
         self.round_rules.clear();
         self.reset_round_resources();
         self.last_breakdown = None;
@@ -2431,9 +2655,7 @@ impl RunState {
                 let defs = all_relic_defs();
                 let mut pool: Vec<_> = defs
                     .iter()
-                    .filter(|d| {
-                        self.available_relics.contains(&d.id) && !self.relics.owns(d.id)
-                    })
+                    .filter(|d| self.available_relics.contains(&d.id) && !self.relics.owns(d.id))
                     .collect();
                 if pool.is_empty() || self.relics.is_full() {
                     self.gold = self.gold.saturating_add(6);
@@ -3637,7 +3859,9 @@ mod progression_snapshot_tests {
         assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
 
         progress.runs_completed = 10;
-        let result = progress.check_level_up().expect("level 5 should unlock relics");
+        let result = progress
+            .check_level_up()
+            .expect("level 5 should unlock relics");
         assert!(result.relics.contains(&RelicId::JokerTile));
         assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
 

@@ -1,7 +1,7 @@
 //! Sane UI layering: a single ordered command list per frame.
 //!
 //! `UiFrame` carries one `Vec<DrawCmd>` plus the per-frame data the renderer
-//! needs that isn't a draw call (hand tile mesh state, hit-test buttons, etc).
+//! needs that isn't a draw call (hit-test buttons, point lights, etc).
 //! The ordering rule for `cmds` is simple:
 //!
 //! 1. **Elements pushed earlier render under elements pushed later.**
@@ -13,11 +13,10 @@
 //!
 //! ## Markers
 //!
-//! A few `DrawCmd` variants are markers (`HandTileBackdrop`, `HandTileFaces`,
-//! `FluidSmoke`) that the renderer expands into pipeline-specific draws using
-//! its own internal animation state. They obey the same ordering rule: a
-//! marker draws *between* whatever was pushed before and after it. Scenes
-//! place them in declarative order alongside ordinary cmds.
+//! `FluidSmoke` is a marker that the renderer expands into pipeline-specific
+//! draws. It obeys the same ordering rule: a marker draws *between* whatever
+//! was pushed before and after it. Scenes place it in declarative order
+//! alongside ordinary cmds.
 
 use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
@@ -25,6 +24,7 @@ use crate::core::tile_pack::TilePackKind;
 use crate::render::candle_mesh::CandlePlacement;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
+use glam;
 
 /// Per-frame camera override supplied by a scene that wants to draw the 3D
 /// world from a perspective other than the renderer's default "person at the
@@ -36,45 +36,89 @@ pub struct CameraParams {
     pub eye: [f32; 3],
     /// Camera look target in world space.
     pub target: [f32; 3],
-    /// Up vector (typically `[0, 1, 0]`).
+    /// Up vector (typically `[0, 0, 1]` for Z-up world space).
     pub up: [f32; 3],
     /// Vertical field of view in degrees.
     pub fovy_deg: f32,
 }
 
 impl CameraParams {
+    /// Returns the visible world-X range `(min_x, max_x)` at a given world
+    /// position `(world_y, world_z)` by unprojecting the left and right NDC
+    /// edges through the same view-projection matrix the renderer uses.
+    ///
+    /// Useful for layout code that needs to keep 3D objects within the camera
+    /// frustum.  Pass the shelf's world Y and Z so the frustum width is
+    /// evaluated at the correct depth.
+    ///
+    /// Uses the same near/far planes as the renderer (`near = 1.0`,
+    /// `far = h * 12.0`) and the same right-handed convention.
+    pub fn frustum_x_range_at(&self, w: f32, h: f32, world_y: f32, world_z: f32) -> (f32, f32) {
+        use glam::{Mat4, Vec3, Vec4};
+
+        let aspect = w / h;
+        let fov_y = self.fovy_deg.to_radians();
+        let eye = Vec3::from_array(self.eye);
+        let target = Vec3::from_array(self.target);
+        let up = Vec3::from_array(self.up);
+
+        let view = Mat4::look_at_rh(eye, target, up);
+        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let view_proj = proj * view;
+        let inv_vp = view_proj.inverse();
+
+        // Project the shelf centre (0, world_y, world_z) → NDC to obtain the
+        // correct clip depth for this horizontal plane.
+        let centre_clip = view_proj * Vec4::new(0.0, world_y, world_z, 1.0);
+        let ndc_z = centre_clip.z / centre_clip.w.max(1e-6);
+
+        // Unproject the left (ndc_x = -1) and right (ndc_x = +1) edges at
+        // that depth.  ndc_y = 0 (vertical midline) is fine — we only need X.
+        let unproj = |ndc_x: f32| {
+            let h4 = inv_vp * Vec4::new(ndc_x, 0.0, ndc_z, 1.0);
+            h4.x / h4.w.max(1e-6)
+        };
+
+        (unproj(-1.0), unproj(1.0))
+    }
+
     /// Default "person at the table" camera when [`UiFrame::camera_override`] is
     /// `None` — must match `WgpuRenderer`'s resolve path.
     pub fn default_table_camera(window_h: f32) -> Self {
         let h = window_h.max(1.0);
         // ref_h: 2104
         let cs = h / 2104_f32;
+        // Z-up world, standard right-hand conventions: +X right, +Y into table (far side),
+        // −Y toward player. Camera sits behind the player at large −Y, elevated in +Z, looking
+        // toward +Y. With look_at_rh: forward = +Y, right = forward × up = +Y × +Z = +X ✓.
+        // Values derived from the legacy Y-up camera: (x, Y_zup, Z_zup) = (x, −old_z, old_y).
         Self {
-            eye: [0.0 * cs, 1157.2 * cs, 2104.0 * cs],
-            target: [0.0 * cs, 105.2 * cs, 39.6 * cs],
-            up: [0.0, 1.0, 0.0],
+            eye: [0.0 * cs, -2104.0 * cs, 1157.2 * cs],
+            target: [0.0 * cs, -39.6 * cs, 105.2 * cs],
+            up: [0.0, 0.0, 1.0],
             fovy_deg: 55.0,
         }
     }
 }
 
-/// Packs `(pixel_x, pixel_y, lift_y)` where `lift_y` is height above the table (world **+Y**).
-/// Consumed by [`crate::render::table_space::pixel_to_table_world`].
-pub type TableSurfaceAnchor = [f32; 3];
+/// Packs `(pixel_x, pixel_y, lift)` for a point in **world space** (`lift` is **+Z** above the felt).
+/// Consumed by [`crate::render::world_space::pixel_to_world`].
+pub type WorldSurfaceAnchor = [f32; 3];
 
 /// One soft wind impulse to inject into the volumetric smoke sim this frame.
 ///
 /// Coordinates use the same `(pixel_x, pixel_y)` convention as the rest of the
-/// scene draw output: the renderer projects them onto the table plane (with
-/// the optional `lift_px` height) using [`crate::render::table_space::pixel_to_table_world`] before
-/// queueing the impulse on the fluid sim. Velocity is in world units (the same
-/// space the existing candle plumes and cursor wind use), so a small upward +Z
-/// push reads as a gentle breath flowing toward the back of the table.
+/// scene draw output: the renderer projects them onto the felt plane (`z ≈ 0`, with
+/// the optional `lift_px` height) using [`crate::render::world_space::pixel_to_world`] before
+/// queueing the impulse on the fluid sim. Velocity is in **world** units (same
+/// frame as [`crate::render::world_space`]): **+Z** is up from the felt; along the
+/// felt, larger layout **py** (nearer the player / bottom of screen) maps to more
+/// **negative world y** (see [`crate::render::world_space::pixel_to_world`]).
 #[derive(Clone, Copy, Debug)]
 pub struct WindGust {
     /// `(pixel_x, pixel_y)` center of the gust in layout-pixel space.
     pub center_px: (f32, f32),
-    /// Height above the table plane in world units.
+    /// Height in world **+Z** above the felt.
     pub lift: f32,
     /// Velocity in world units per second (x, y, z).
     pub velocity: [f32; 3],
@@ -88,12 +132,12 @@ pub struct WindGust {
 /// One physical relic placeholder sitting in the dish on the table.
 ///
 /// Coordinates use the same convention as `CandlePlacement`: `world_pos` is
-/// `(pixel_x, pixel_y, world_y_lift)` — the renderer maps the pixel x/y onto
-/// the table plane and uses world_y as the height above the wood.
+/// `(pixel_x, pixel_y, lift)` — the renderer maps the pixel x/y onto
+/// the table plane and uses `lift` as the height above the wood (**+Z**).
 #[derive(Clone, Copy, Debug)]
 pub struct RelicPlacement {
-    /// `(pixel_x, pixel_y, world_y_lift)` for the box's *base center*.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the box's *base center*.
+    pub world_pos: WorldSurfaceAnchor,
     /// Half-extents of the relic box in world units (x = width/2, y = height/2,
     /// z = depth/2). Each placeholder gets a slightly different size so the
     /// row reads as a collection of distinct objects.
@@ -119,12 +163,34 @@ pub struct RelicPlacement {
     pub rotation_z_deg: f32,
 }
 
-/// A tile-pack box on the shop shelf. Rendered using the same unit-box mesh
-/// and lit-mesh pipeline as relics, with the pack's art texture wrapped on
-/// every face. `rotation_x_deg` leans the box against the shelf back.
+/// A centered 3D relic viewer placement used by collection cards, tutorial
+/// panels, and unlock modals. Orientation is **`Rx * Ry * Rz`**
+/// ([`crate::render::table_transform::rot_rx_ry_rz_deg`]).
+#[derive(Clone, Copy, Debug)]
+pub struct RelicShowcasePlacement {
+    /// `(pixel_x, pixel_y, lift)` for the object's center.
+    pub center_pos: [f32; 3],
+    /// Width × height × depth in world units.
+    pub extents: [f32; 3],
+    /// Yaw rotation about world Y in degrees.
+    pub rotation_y_deg: f32,
+    /// Pitch rotation about world X in degrees.
+    pub rotation_x_deg: f32,
+    /// Roll rotation about world Z in degrees.
+    pub rotation_z_deg: f32,
+    /// Base tint (linear RGBA).
+    pub color: [f32; 4],
+    pub relic_id: RelicId,
+    /// Optional reveal/activation glow in [0, 1].
+    pub glow: f32,
+}
+
+/// A tile-pack box on the shop shelf. Rendered as an axis-aligned box (not
+/// the relic cylinder mesh) with foil pack art. `rotation_x_deg` leans the box
+/// against the shelf back.
 #[derive(Clone, Copy, Debug)]
 pub struct PackPlacement {
-    pub world_pos: TableSurfaceAnchor,
+    pub world_pos: WorldSurfaceAnchor,
     pub half_extents: [f32; 3],
     pub color: [f32; 4],
     pub kind: TilePackKind,
@@ -142,9 +208,12 @@ pub struct PackPlacement {
 /// curio cabinet) and the player's owned-consumable fan in front of the
 /// counter. `rotation_y_deg` lets the same mesh be reused for the radial fan
 /// (set per-ribbon to spread them) and for plain vertical drops (set 0).
+///
+/// Same **`Rz * Ry * Rx`** composition as [`TalismanPlacement`]
+/// ([`crate::render::table_transform::rot_rz_ry_rx_deg`]).
 #[derive(Clone, Copy, Debug)]
 pub struct ZodiacRibbonPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the ribbon's *top anchor*.
+    /// `(pixel_x, pixel_y, lift)` for the ribbon's *top anchor*.
     pub anchor_pos: [f32; 3],
     /// Length the ribbon hangs in world units.
     pub length: f32,
@@ -156,8 +225,9 @@ pub struct ZodiacRibbonPlacement {
     /// Pitch rotation about world X around the anchor, in degrees. Used by
     /// the inventory fan to drape ribbons forward toward the camera.
     pub rotation_x_deg: f32,
-    /// Roll rotation about world Z around the anchor, in degrees. Used by
-    /// the collection viewer's top-down camera for a turntable spin.
+    /// World **Z** rotation in degrees — outer factor in **`Rz * Ry * Rx`**
+    /// ([`crate::render::table_transform::rot_rz_ry_rx_deg`]). Shop wall ribbons
+    /// usually leave this at 0; collection applies the slow spin here.
     pub rotation_z_deg: f32,
     /// Linear-space RGBA tint. When `kind` is `Some`, this is multiplied
     /// against the silk texture (use white to show the texture unmodified;
@@ -171,20 +241,24 @@ pub struct ZodiacRibbonPlacement {
 /// One hanging talisman tablet (jade-amulet pendant). Used by the shop scene
 /// for the for-sale talismans pinned in the curio cabinet — distinct from the
 /// silken zodiac ribbons hanging next to them.
+///
+/// Rotations compose as **`Rz * Ry * Rx`** — see
+/// [`crate::render::table_transform::rot_rz_ry_rx_deg`]. For a top-down
+/// collection camera, **yaw (`rotation_y_deg`)** spins the tablet in the table
+/// plane; **pitch (`rotation_x_deg`)** tips the face toward/away from the camera
+/// (e.g. `-90` for face-on from above).
 #[derive(Clone, Copy, Debug)]
 pub struct TalismanPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the tablet's *center*.
+    /// `(pixel_x, pixel_y, lift)` for the tablet's *center*.
     pub center_pos: [f32; 3],
     /// Width × height × thickness in world units.
     pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees (0 = facing the camera).
+    /// Yaw rotation about world Y in degrees (turntable in the table plane).
     pub rotation_y_deg: f32,
-    /// Pitch rotation about world X in degrees. 0 = upright. -90 lays
-    /// the tablet face-up on the table (long axis flat, face normal
-    /// rotated from +Z to +Y).
+    /// Pitch rotation about world X in degrees. 0 = mesh-default standing pose.
+    /// `-90` lays the tablet face-up on the table (face normal toward +Y).
     pub rotation_x_deg: f32,
-    /// Roll rotation about world Z in degrees. Used by the collection
-    /// viewer's top-down camera for a turntable spin.
+    /// Roll rotation about world Z in degrees (in-plane wobble after pitch/yaw).
     pub rotation_z_deg: f32,
     /// Linear-space RGBA tint.
     pub color: [f32; 4],
@@ -199,8 +273,8 @@ pub struct TalismanPlacement {
 /// variety in a stacked pile.
 #[derive(Clone, Copy, Debug)]
 pub struct CoinPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the coin's center.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the coin's center.
+    pub world_pos: WorldSurfaceAnchor,
     /// Yaw rotation about world Y in radians (small per-coin jitter).
     pub rotation_y: f32,
     /// World-units radius (typically a few pixels).
@@ -217,8 +291,8 @@ pub struct CoinPlacement {
 /// Metal material, giving them the same specular gold finish as coins.
 #[derive(Clone, Copy, Debug)]
 pub struct GoldBarPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the bar's base center.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the bar's base center.
+    pub world_pos: WorldSurfaceAnchor,
     /// Yaw rotation about world Y in radians.
     pub rotation_y: f32,
     /// Half-extents of the bar in world units (width/2, height/2, depth/2).
@@ -231,8 +305,8 @@ pub struct GoldBarPlacement {
 /// Used by the shop scene for the Yaku Journal bookend on the inventory shelf.
 #[derive(Clone, Copy, Debug)]
 pub struct BookPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the book's base center.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the book's base center.
+    pub world_pos: WorldSurfaceAnchor,
     /// Yaw rotation about world Y in radians.
     pub rotation_y: f32,
     /// Half-extents in world units (width/2, height/2, depth/2).
@@ -249,7 +323,7 @@ pub struct BookPlacement {
 /// living up in the curio cabinet.
 #[derive(Clone, Copy, Debug)]
 pub struct DishExplicit {
-    /// `(pixel_x, pixel_y, world_y)` for the dish base center.
+    /// `(pixel_x, pixel_y, lift)` for the dish base center.
     pub center_pos: [f32; 3],
     /// Full extents in world units (width × height × depth). The dish mesh
     /// itself is a wide low box; height ≈ rim height.
@@ -258,6 +332,31 @@ pub struct DishExplicit {
     /// dish (e.g. so the scene can route a click on the coin dish to "show
     /// gold count" rather than to a relic).
     pub pick_id: Option<u32>,
+    /// Rotation applied to the dish mesh in world space. Use
+    /// `glam::Mat4::IDENTITY` (or omit via `..Default::default()`) for the
+    /// default Y-up orientation. The pick-blind floor plane uses
+    /// `mesh_y_thickness_along_local_y_to_z_up()` to lay flat.
+    pub rotation: glam::Mat4,
+    /// Name exposed to arrange mode (`pick_debug_object` + `apply_arrange_override`).
+    /// `None` means the dish is not selectable in arrange mode.
+    pub arrange_name: Option<&'static str>,
+    /// If true, render with the round dish mesh (circular rim + recessed
+    /// floor). Default false uses the legacy square dish mesh so existing
+    /// callers (relic dish, ribbon/talisman trays) keep their look.
+    pub round: bool,
+}
+
+impl Default for DishExplicit {
+    fn default() -> Self {
+        Self {
+            center_pos: [0.0; 3],
+            extents: [1.0, 1.0, 1.0],
+            pick_id: None,
+            rotation: glam::Mat4::IDENTITY,
+            arrange_name: None,
+            round: false,
+        }
+    }
 }
 
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
@@ -280,7 +379,7 @@ pub struct DishExplicit {
 /// lit-mesh shader.
 #[derive(Clone, Debug)]
 pub struct PlaquePlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the plaque's *center*.
+    /// `(pixel_x, pixel_y, lift)` for the plaque's *center*.
     pub center_pos: [f32; 3],
     /// Width × height × thickness in world units.
     pub extents: [f32; 3],
@@ -296,7 +395,7 @@ pub struct PlaquePlacement {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct OfudaPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the ofuda's *center*.
+    /// `(pixel_x, pixel_y, lift)` for the ofuda's *center*.
     pub center_pos: [f32; 3],
     /// Width × height × thickness in world units.
     pub extents: [f32; 3],
@@ -312,8 +411,8 @@ pub struct OfudaPlacement {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct YakuTabletPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the tablet's *base center*.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the tablet's *base center*.
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Roll about table/world Z in degrees.
@@ -333,8 +432,8 @@ pub struct YakuTabletPlacement {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct WoodTabletPlacement {
-    /// Tablet *base center* as [`TableSurfaceAnchor`] (`lift_y` = height above felt).
-    pub world_pos: TableSurfaceAnchor,
+    /// Tablet *base center* as [`WorldSurfaceAnchor`] (third component = **+Z** lift).
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Engraved label (Sort by Suit, Sort by Rank, Play, …).
@@ -353,12 +452,15 @@ pub struct WoodTabletPlacement {
 /// The discard bowl. Click target = drop selected tile in.
 #[derive(Clone, Copy, Debug)]
 pub struct BowlPlacement {
-    /// Bowl *base center* as [`TableSurfaceAnchor`].
-    pub world_pos: TableSurfaceAnchor,
+    /// Bowl *base center* as [`WorldSurfaceAnchor`].
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Hover lift envelope in [0, 1].
     pub hover: f32,
+    /// Base pitch rotation about world X in degrees, applied before the
+    /// hover tilt animation. 0 = mesh default orientation.
+    pub rotation_x_deg: f32,
 }
 
 /// The bronze mirror. Click target = play the selected hand. Visual
@@ -366,8 +468,8 @@ pub struct BowlPlacement {
 /// footprint and hover-lift convention.
 #[derive(Clone, Copy, Debug)]
 pub struct MirrorPlacement {
-    /// Mirror *base center* as [`TableSurfaceAnchor`].
-    pub world_pos: TableSurfaceAnchor,
+    /// Mirror *base center* as [`WorldSurfaceAnchor`].
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Hover lift envelope in [0, 1].
@@ -385,8 +487,8 @@ pub struct MirrorPlacement {
 /// instances by the renderer based on the live counts.
 #[derive(Clone, Copy, Debug)]
 pub struct PegBlockPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the block's *base center*.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the block's *base center*.
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × height × depth in world units.
     pub extents: [f32; 3],
     /// Number of plays remaining (left peg row, capped at `plays_max`).
@@ -402,24 +504,14 @@ pub struct PegBlockPlacement {
 /// Stack of facedown wall tiles at the back of the table.
 #[derive(Clone, Copy, Debug)]
 pub struct WallStackPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the bottom-back-left of the stack.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the bottom-back-left of the stack.
+    pub world_pos: WorldSurfaceAnchor,
     /// Tile slot dimensions in world units (per-tile width/height/depth).
     pub tile_extents: [f32; 3],
     /// Number of facedown tiles still in the wall.
     pub remaining: u32,
     /// Number of tiles per row in the stack (the pile fans wide).
     pub row_len: u32,
-}
-
-/// The dora indicator stand: a brass plinth + a single face-up tile resting
-/// against the back board.
-#[derive(Clone, Copy, Debug)]
-pub struct DoraStandPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the stand's *base center*.
-    pub world_pos: TableSurfaceAnchor,
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
 }
 
 /// Which cascade-readout axis a token represents — drives its tint and
@@ -438,8 +530,8 @@ pub enum CascadeTokenKind {
 /// scoring step.
 #[derive(Clone, Copy, Debug)]
 pub struct CascadeTokenPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the token's *center*.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the token's *center*.
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × thickness × depth in world units.
     pub extents: [f32; 3],
     /// Which scoring axis this token shows.
@@ -457,17 +549,16 @@ pub struct CascadeTokenPlacement {
 /// them when the cascade ends.
 #[derive(Clone, Debug)]
 pub struct ExtrudedGlyphPlacement {
-    /// `(pixel_x, pixel_y, world_y_lift)` for the popup's *center*. Pixel
-    /// x/y resolve to world xz via `pixel_to_world`; `world_y_lift` is the
+    /// `(pixel_x, pixel_y, lift)` for the popup's *center*. Pixel
+    /// x/y resolve via [`crate::render::world_space::pixel_to_world`]; `lift` is the
     /// height above the table plane the popup currently floats at.
-    pub world_pos: TableSurfaceAnchor,
+    pub world_pos: WorldSurfaceAnchor,
     /// Uniform world-units scale applied to the glyph mesh. The mesh itself
     /// is normalised to a height of 1.0 unit, so this directly sets the
     /// rendered character height in world space.
     pub scale: f32,
-    /// Pitch rotation (radians) about world X. The popup defaults to lying
-    /// flat on the table (face-up), so a small positive tilt rocks the top
-    /// edge toward the camera for legibility.
+    /// Pitch rotation (radians) about world X (combined with `-π/2` camera-face in
+    /// the renderer — see [`crate::render::table_transform::score_popup_glyph_rot_rad`]).
     pub rotation_x: f32,
     /// Yaw rotation (radians) about world Y — small per-popup random
     /// jitter so a chain of popups doesn't read as a stamped row.
@@ -484,25 +575,20 @@ pub struct ExtrudedGlyphPlacement {
     pub emissive: f32,
 }
 
-/// One physical scoring bone tumbling onto the play space during a cascade.
-/// Reuses the `bone_tablet_mesh` geometry; per-instance tint matches the
-/// cascade token kind so chips bones read cool indigo and mult bones read
-/// warm crimson, tying the falling pile back to the HUD readout it spawned
-/// from. The simulation lives in `crate::render::falling_bones` and is
-/// driven by the gameplay scene's cascade reveal events.
-#[derive(Clone, Copy, Debug)]
-/// One tile in a showcase display (pack-opening celebration, etc.).
+/// One tile in a showcase display (pack-opening celebration, hand strip, etc.).
 /// The scene provides full per-tile 3D transforms each frame — the renderer
 /// just draws what it's told, with no animation state of its own.
+#[derive(Clone, Copy, Debug)]
 pub struct ShowcaseTilePlacement {
     /// The tile to display (identity determines the rasterized decal).
     pub tile: Tile,
-    /// `(pixel_x, pixel_y, world_y_lift)` — same coordinate space as every
-    /// other 3D placement. `pixel_to_world` maps px/py to world xz;
-    /// `world_y_lift` is height above the table plane.
+    /// `(pixel_x, pixel_y, lift)` — same coordinate space as every
+    /// other 3D placement. [`crate::render::world_space::pixel_to_world`] maps px/py to world XY;
+    /// `lift` is height above the table plane (**+Z**).
     pub center_pos: [f32; 3],
-    /// Euler rotation `(rx, ry, rz)` in radians, applied after the standard
-    /// tile basis orientation. `[0, 0, 0]` = default tilted-toward-camera.
+    /// Euler rotation `(rx, ry, rz)` in radians — same composition as
+    /// [`crate::render::table_transform::rot_euler_xyz_rad`], after the
+    /// standard tile basis. `[0, 0, 0]` = default tilted-toward-camera.
     pub rotation: [f32; 3],
     /// Uniform scale factor (`1.0` = standard hand-tile size at the given
     /// pixel footprint). Used for grow-in / shrink animations.
@@ -514,19 +600,38 @@ pub struct ShowcaseTilePlacement {
     /// tiles in solitaire). Passed to the tile shader via `base_color_factor.x`.
     pub brightness: f32,
     /// Whether this tile is currently selected (e.g. first pick in solitaire).
-    /// Passed to the tile shader via `base_color_factor.y`.
+    /// Drives a warm gold fresnel rim via `base_color_factor.y = 1.0`.
     pub selected: bool,
+    /// Whether this tile is hovered (focused). Drives a cool fresnel rim via
+    /// `base_color_factor.y = 0.5`. Takes lower priority than `selected`.
+    pub hovered: bool,
+    /// Draw a gold outline shell around this tile (hand-strip selection indicator).
+    /// The renderer writes an inflated model matrix into the outline uniform buffer.
+    pub outline: bool,
+    /// Emit an additive radial glow halo behind this tile (warm champagne gold).
+    pub glow: bool,
+    /// Logical slot index for ray-cast tile picking and `proj.hand_rects` tracking.
+    /// `None` = not pickable (pack-open showcase tiles, etc.).
+    pub pick_id: Option<usize>,
 }
 
+/// One physical scoring bone tumbling onto the play space during a cascade.
+/// Reuses the `bone_tablet_mesh` geometry; per-instance tint matches the
+/// cascade token kind so chips bones read cool indigo and mult bones read
+/// warm crimson, tying the falling pile back to the HUD readout it spawned
+/// from. The simulation lives in `crate::render::falling_bones` and is
+/// driven by the gameplay scene's cascade reveal events.
+#[derive(Clone, Copy, Debug)]
 pub struct FallingBonePlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the bone's *center*. Pixel x/y
-    /// resolve to world xz via `pixel_to_world`; `world_y` is the live
+    /// `(pixel_x, pixel_y, world_z)` for the bone's *center*. Pixel x/y
+    /// resolve via [`crate::render::world_space::pixel_to_world`]; `world_z` is the live
     /// height above the table plane that the simulation drives under
     /// gravity.
-    pub world_pos: TableSurfaceAnchor,
+    pub world_pos: WorldSurfaceAnchor,
     /// Width × thickness × depth in world units.
     pub extents: [f32; 3],
-    /// Tumble euler angles (rot_x, rot_y, rot_z) in radians.
+    /// Tumble euler angles `(rot_x, rot_y, rot_z)` in radians — composition
+    /// **`Ry * Rx * Rz`**, see [`crate::render::table_transform::rot_ry_rx_rz_rad`].
     pub rotation: [f32; 3],
     /// Which scoring axis this bone represents (drives the tint).
     pub kind: CascadeTokenKind,
@@ -541,8 +646,8 @@ pub struct FallingBonePlacement {
 /// `extents` and translated to `world_pos`.
 #[derive(Clone, Copy, Debug)]
 pub struct ShrinePlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the shrine's *base center*.
-    pub world_pos: TableSurfaceAnchor,
+    /// `(pixel_x, pixel_y, lift)` for the shrine's *base center*.
+    pub world_pos: WorldSurfaceAnchor,
     /// Full extents in world units (width × height × depth). Per-instance
     /// scaling is how the Small / Big / Boss shrines get visibly distinct
     /// sizes.
@@ -558,10 +663,195 @@ pub struct ShrinePlacement {
 /// One curio-cabinet placement (single instance — the back wall of the shop).
 #[derive(Clone, Copy, Debug)]
 pub struct CurioCabinetPlacement {
-    /// `(pixel_x, pixel_y, world_y)` for the cabinet's *center*.
+    /// `(pixel_x, pixel_y, lift)` for the cabinet's *center*.
     pub center_pos: [f32; 3],
     /// Full extents in world units (width × height × depth).
     pub extents: [f32; 3],
+}
+
+// ── General-purpose 3D placement ─────────────────────────────────────────
+
+/// Rotation matrix for an [`Object3d`].  Scenes compose this directly using
+/// [`glam::Mat4`] rotation constructors — no implicit axis order is assumed.
+///
+/// ```no_run
+/// // Flat panel facing the camera (pitch only):
+/// use glam::Mat4;
+/// let pitch = camera_facing_rotation(cam.eye, cam.target);
+/// // Extra yaw: multiply on the left (applied after pitch).
+/// let rot = Mat4::from_rotation_z(yaw_rad) * pitch;
+/// ```
+pub type Rotation3d = glam::Mat4;
+
+/// Returns a rotation [`Mat4`] that pitches a +Z-normal flat mesh to face
+/// the given camera.  Equivalent to the formula wood tablets have always used.
+///
+/// Compose additional rotations by multiplying on the left:
+/// `extra_rot * camera_facing_rotation(eye, target)`.
+pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam::Mat4 {
+    let look = glam::Vec3::from(look_target) - glam::Vec3::from(cam_eye);
+    let pitch_deg = look.z.atan2(look.y.abs()).to_degrees() + 180.0;
+    glam::Mat4::from_rotation_x(pitch_deg.to_radians())
+}
+
+/// Mesh-specific data carried alongside the common [`Object3d`] fields.
+/// Each variant names only the fields that differ from the common set.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum Object3dKind {
+    // ── Upright panels ──────────────────────────────────────────────
+    /// Lacquered wood slab + chain nubs with a two-line engraved decal.
+    Plaque {
+        top: String,
+        bot: String,
+        pick_id: Option<u32>,
+    },
+    /// Paper slab + eyelet with a title + body-rule decal.
+    Ofuda {
+        title: String,
+        rule: String,
+        pick_id: Option<u32>,
+    },
+    /// Carved bone tablet with a single engraved name and progress glow.
+    YakuTablet {
+        label: String,
+        active: bool,
+        hover: f32,
+        progress: f32,
+    },
+    /// Lacquered wood action tablet with press/hover animation envelopes.
+    WoodTablet {
+        label: String,
+        hover: f32,
+        pressed: f32,
+        disabled: bool,
+    },
+
+    // ── Props ────────────────────────────────────────────────────────
+    /// Procedural shrine altar (Small / Big / Boss scale via `extents`).
+    Shrine { glow: f32 },
+    /// Colored relic placeholder box sitting in the dish.
+    Relic { relic_id: RelicId, glow: f32 },
+    /// 3D relic viewer (collection card, modal, tutorial).
+    RelicShowcase { relic_id: RelicId, glow: f32 },
+    /// Tile-pack box on the shop shelf.
+    Pack {
+        kind: TilePackKind,
+        pick_id: Option<u32>,
+    },
+    /// Silken zodiac ribbon hanging from an anchor.
+    ZodiacRibbon {
+        kind: Option<crate::core::zodiac::ZodiacKind>,
+    },
+    /// Jade talisman tablet.
+    Talisman {
+        kind: crate::core::talisman::TalismanKind,
+    },
+    /// Stamped coin (extents encode `[radius*2, thickness, radius*2]`).
+    Coin,
+    /// Gold bar rendered as a Metal-material box.
+    GoldBar,
+    /// Standing book (Yaku Journal).
+    Book { pick_id: Option<u32> },
+    /// Discard bowl. Hover animation is driven by [`Object3d::hover_target`].
+    Bowl,
+    /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
+    ///
+    /// `rotation_x_deg` is the base pitch before hover tilt is added.
+    /// `rotation_z_deg` is the Z-roll (idle wobble) applied simultaneously.
+    /// The `Object3d::rotation` field is ignored for Mirror; use these two
+    /// instead so hover can correctly modify only the X component.
+    Mirror {
+        rotation_x_deg: f32,
+        rotation_z_deg: f32,
+    },
+    /// Engraved bone cascade token with a pulse-pop envelope.
+    CascadeToken { kind: CascadeTokenKind, pulse: f32 },
+    /// Free-standing dish (explicit size/position, not auto-sized from relics).
+    Dish { pick_id: Option<u32> },
+    /// Curio cabinet back-wall shadow box.
+    CurioCabinet,
+    /// Counter-end action prop (Leave / Restock) rendered as a labelled rectangle.
+    ShopActionProp {
+        label: String,
+        pick_id: Option<u32>,
+        disabled: bool,
+    },
+    /// Sell-return tray on the counter far-left end.
+    SellTray { pick_id: Option<u32> },
+    /// Overhead shop lamp — brass pole + conical shade (body mesh) plus a
+    /// glass bulb.  The scene should also push a warm `PointLight` at the
+    /// bulb position via `UiFrame::point_lights` (or `own_light`).
+    ///
+    /// `glow` drives the bulb brightness envelope \[0, 1\]; 1.0 = full lamp-on
+    /// emission boost on the glass material.
+    ShopLamp { glow: f32 },
+    /// One hovering insect near the lamp.  The scene emits one `Bug` per bug
+    /// per frame, with `slot` ∈ `0..MAX_BUG_SLOTS` identifying the instance
+    /// buffer entry.  `rotation` orients the body so +X faces the orbit tangent.
+    /// Body and wings share the same `pos` / `extents` / `rotation`.
+    Bug { slot: usize },
+    /// Ghost trail copy of a bug, rendered through the alpha-blended pipeline.
+    /// `slot` ∈ `0..MAX_BUG_GHOST_SLOTS` indexes a separate instance pool;
+    /// `alpha` ∈ [0, 1] scales the body/wing material's RGBA output.
+    BugGhost { slot: usize, alpha: f32 },
+}
+
+/// A single lit mesh placed in the world.
+///
+/// Replaces all individual `XxxPlacement` structs for objects rendered through
+/// the `lit_mesh_pipeline`.  Scenes set `pos`, `extents`, and `rotation`
+/// directly — use [`camera_facing_rotation`] when the face should track the
+/// active camera.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct Object3d {
+    /// Center position as `(pixel_x, pixel_y, lift)`.
+    /// Mapped to world space by [`crate::render::world_space::pixel_to_world`].
+    pub pos: [f32; 3],
+    /// Full extents `(width, height, depth)` in world units.
+    pub extents: [f32; 3],
+    /// Rotation matrix. Build with [`glam::Mat4`] rotation constructors and
+    /// compose with `*`. Use [`camera_facing_rotation`] for camera-facing panels.
+    /// [`glam::Mat4::IDENTITY`] = no rotation.
+    pub rotation: Rotation3d,
+    /// Base tint (linear RGBA). `[1.0, 1.0, 1.0, 1.0]` = mesh default color.
+    pub color: [f32; 4],
+    /// Which mesh + material to render, plus mesh-specific payload.
+    pub kind: Object3dKind,
+    /// When `true`, this object participates in focus-ring and hover
+    /// hit-testing (rendered rect is exposed via `proj.object3d_rects`).
+    pub focusable: bool,
+    /// When `true`, the scene's ambient lighting and shadow map apply.
+    /// Set `false` for self-illuminated / unshaded objects.
+    pub scene_shaded: bool,
+    /// Optional point light emitted from this object's center this frame.
+    pub own_light: Option<PointLight>,
+    /// Target hover intensity in \[0, 1\] for this frame.
+    ///
+    /// When non-zero or when `anim_id` is set, the renderer maintains a
+    /// per-object smoothed envelope (exponential ease, rate ≈ 14) and uses the
+    /// eased value to animate lift, tilt, and scale. The exact effect is
+    /// kind-specific (Bowl tilts and lifts; Mirror tilts further; tablets lift
+    /// and scale-up; etc.). `0.0` = not hovered; `1.0` = fully hovered.
+    pub hover_target: f32,
+    /// Stable logical ID for objects that need persistent animation state
+    /// across frames (smoothed hover envelopes, etc.).
+    ///
+    /// The renderer stores per-ID smoothed state in a table keyed on this
+    /// value.  Scenes should assign a small non-zero constant per logical
+    /// object (e.g. `1` = discard bowl, `2` = bronze mirror, `3..N` = yaku
+    /// tablets).  `0` means "no persistent state" — `hover_target` is used
+    /// directly without easing.
+    pub anim_id: u64,
+    /// Canonical arrange-mode path for this object (e.g.
+    /// `"shop.counter"`, `"gameplay.hand.strip"`). When set, the renderer
+    /// uses this name both for `apply_arrange_override` lookups and for
+    /// `last_debug_pickables` so click-to-select lands on the correct
+    /// scene placement without per-kind hard-coded name tables.
+    ///
+    /// `None` = object is not arrangeable via the debug picker.
+    pub arrange_name: Option<&'static str>,
 }
 
 /// One drawable element in a `UiFrame`.
@@ -570,6 +860,7 @@ pub struct CurioCabinetPlacement {
 /// the appropriate pipeline. Contiguous runs of the same variant (e.g.
 /// several `Quad`s in a row) are batched into a single instanced draw, which
 /// is invisible to scenes and preserves ordering exactly.
+#[allow(dead_code)]
 pub enum DrawCmd {
     /// Full-screen background image.
     Background(BackgroundId),
@@ -611,6 +902,7 @@ pub enum DrawCmd {
     DishExplicit(DishExplicit),
     /// Single curio-cabinet (back-wall shadow box) placement. The shop scene
     /// uses one per frame; gameplay leaves this empty.
+    #[allow(dead_code)]
     CurioCabinet(CurioCabinetPlacement),
     /// Batch of shrine meshes drawn via the lit-mesh pipeline, instanced
     /// from the renderer's pre-allocated shrine slot pool. The pick-blind
@@ -636,20 +928,14 @@ pub enum DrawCmd {
     GoldBarBatch(Vec<GoldBarPlacement>),
     /// A standing book mesh (Yaku Journal). Single placement per frame.
     Book(BookPlacement),
-    /// Light beams + hand tile body quads (drawn via `light_beam_pipeline` +
-    /// `tile_quad_pipeline`). Renderer pulls hand state from `UiFrame`.
-    HandTileBackdrop,
     /// Fluid smoke overlay. Renderer owns the simulation state.
     FluidSmoke,
-    /// Hand tile face text + emoji indicators (text_pipeline). Splitting from
-    /// the backdrop lets scenes draw 2D UI panels between hand tile bodies and
-    /// their face labels — preserving the existing visual semantics where
-    /// tile faces appear on top of overlay panels.
-    HandTileFaces,
-    /// Batch of showcase tiles with explicit 3D transforms. Used by the
-    /// pack-opening celebration to display tiles at arbitrary positions
-    /// (not constrained to the table plane like hand tiles).
+    /// Batch of showcase tiles with explicit 3D transforms — used for hand
+    /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
+    /// Batch of 3D relic viewer placements for collection cards, tutorial
+    /// panels, and reward reveals.
+    RelicShowcaseBatch(Vec<RelicShowcasePlacement>),
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
     /// Procedural candle flame (additive blend, animated by globals.time).
@@ -658,6 +944,7 @@ pub enum DrawCmd {
     /// Rasterized text label.
     Text(TextLabel),
     /// Pre-loaded relic icon texture.
+    #[allow(dead_code)]
     RelicIcon(RelicIcon),
     // ── Skeuomorphic gameplay HUD ──
     /// Hanging blind/score plaque (gameplay HUD). Single placement per cmd.
@@ -678,15 +965,12 @@ pub enum DrawCmd {
     /// The wall stack (facedown tiles at the back of the table).
     #[allow(dead_code)]
     WallStack(WallStackPlacement),
-    /// The dora indicator stand.
-    #[allow(dead_code)]
-    DoraStand(DoraStandPlacement),
     /// Engraved bone scoring tokens that pop in during a cascade. Reuses
     /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
     CascadeTokenBatch(Vec<CascadeTokenPlacement>),
     /// Physical scoring bones tumbling onto the play space during a cascade.
     /// Same bone-tablet mesh as the cascade tokens, with full 3D model
-    /// matrices (gravity-driven world_y + euler tumble) instead of static
+    /// matrices (gravity-driven world_z + euler tumble) instead of static
     /// HUD positioning.
     FallingBoneBatch(Vec<FallingBonePlacement>),
     /// Floating 3D extruded-glyph score popups. Each placement carries its
@@ -698,6 +982,12 @@ pub enum DrawCmd {
     /// (e.g. the coin pile, the wall stack) by giving its approximate
     /// 2D screen footprint and the glossary term to look up.
     GlossaryAnchor { rect: [f32; 4], term: &'static str },
+
+    // ── General-purpose 3D objects ──────────────────────────────────
+    /// Single general-purpose lit-mesh object. See [`Object3d`].
+    Object3d(Object3d),
+    /// Batch of general-purpose lit-mesh objects. See [`Object3d`].
+    Object3dBatch(Vec<Object3d>),
 }
 
 /// Everything a frame's draw needs: an ordered command list plus per-frame
@@ -706,20 +996,6 @@ pub struct UiFrame {
     /// Drawn back-to-front in order. Push earlier = renders under.
     pub cmds: Vec<DrawCmd>,
 
-    // ── Hand tile state (consumed by HandTileBackdrop / HandTileFaces) ──
-    /// Logical hand tiles for `update_hand_tiles`.
-    pub hand_tiles: Vec<Tile>,
-    /// Screen-space slot rects parallel with `hand_tiles`.
-    pub hand_slots: Vec<(f32, f32, f32, f32)>,
-    /// Focused hand tile index.
-    pub focus: usize,
-    /// Selection bitmask parallel with `hand_tiles`.
-    pub selected_tiles: Vec<bool>,
-    /// Tile indices that should glow with a directional hint this frame.
-    pub hint_indices: Vec<usize>,
-    /// Tile indices that started departing this frame; consumed by
-    /// `WgpuRenderer::depart_tiles` before `update_hand_tiles` removes them.
-    pub departing_indices: Vec<usize>,
     /// Active point lights this frame. Uploaded to the tile pipeline so the
     /// 3D hand-tile shader can apply candle / spot illumination.
     pub point_lights: Vec<PointLight>,
@@ -769,12 +1045,6 @@ impl UiFrame {
     pub fn new() -> Self {
         Self {
             cmds: Vec::new(),
-            hand_tiles: Vec::new(),
-            hand_slots: Vec::new(),
-            focus: 0,
-            selected_tiles: Vec::new(),
-            hint_indices: Vec::new(),
-            departing_indices: Vec::new(),
             point_lights: Vec::new(),
             candle_light_count: 0,
             flame_height_world: 0.0,
@@ -811,12 +1081,6 @@ impl UiFrame {
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
     }
-    pub fn hand_tile_backdrop(&mut self) {
-        self.cmds.push(DrawCmd::HandTileBackdrop);
-    }
-    pub fn hand_tile_faces(&mut self) {
-        self.cmds.push(DrawCmd::HandTileFaces);
-    }
     pub fn fluid_smoke(&mut self) {
         self.cmds.push(DrawCmd::FluidSmoke);
     }
@@ -826,23 +1090,14 @@ impl UiFrame {
     pub fn candles(&mut self, placements: Vec<CandlePlacement>) {
         self.cmds.push(DrawCmd::CandleBatch(placements));
     }
-    pub fn dish(&mut self) {
-        self.cmds.push(DrawCmd::Dish);
-    }
-    pub fn relic_batch(&mut self, placements: Vec<RelicPlacement>) {
-        self.cmds.push(DrawCmd::RelicBatch(placements));
-    }
     pub fn pack_batch(&mut self, placements: Vec<PackPlacement>) {
         self.cmds.push(DrawCmd::PackBatch(placements));
     }
+    pub fn relic_showcase_batch(&mut self, placements: Vec<RelicShowcasePlacement>) {
+        self.cmds.push(DrawCmd::RelicShowcaseBatch(placements));
+    }
     pub fn dish_explicit(&mut self, dish: DishExplicit) {
         self.cmds.push(DrawCmd::DishExplicit(dish));
-    }
-    pub fn curio_cabinet(&mut self, cabinet: CurioCabinetPlacement) {
-        self.cmds.push(DrawCmd::CurioCabinet(cabinet));
-    }
-    pub fn shrine_batch(&mut self, placements: Vec<ShrinePlacement>) {
-        self.cmds.push(DrawCmd::ShrineBatch(placements));
     }
     pub fn zodiac_batch(&mut self, placements: Vec<ZodiacRibbonPlacement>) {
         self.cmds.push(DrawCmd::ZodiacBatch(placements));
@@ -853,20 +1108,9 @@ impl UiFrame {
     pub fn coin_batch(&mut self, placements: Vec<CoinPlacement>) {
         self.cmds.push(DrawCmd::CoinBatch(placements));
     }
+    #[allow(dead_code)]
     pub fn gold_bar_batch(&mut self, placements: Vec<GoldBarPlacement>) {
         self.cmds.push(DrawCmd::GoldBarBatch(placements));
-    }
-    pub fn book(&mut self, placement: BookPlacement) {
-        self.cmds.push(DrawCmd::Book(placement));
-    }
-    pub fn plaque(&mut self, p: PlaquePlacement) {
-        self.cmds.push(DrawCmd::Plaque(p));
-    }
-    pub fn ofuda(&mut self, p: OfudaPlacement) {
-        self.cmds.push(DrawCmd::Ofuda(p));
-    }
-    pub fn yaku_tablet_batch(&mut self, placements: Vec<YakuTabletPlacement>) {
-        self.cmds.push(DrawCmd::YakuTabletBatch(placements));
     }
     pub fn wood_tablet_batch(&mut self, placements: Vec<WoodTabletPlacement>) {
         self.cmds.push(DrawCmd::WoodTabletBatch(placements));
@@ -885,15 +1129,8 @@ impl UiFrame {
     pub fn wall_stack(&mut self, p: WallStackPlacement) {
         self.cmds.push(DrawCmd::WallStack(p));
     }
-    #[allow(dead_code)]
-    pub fn dora_stand(&mut self, p: DoraStandPlacement) {
-        self.cmds.push(DrawCmd::DoraStand(p));
-    }
     pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
         self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
-    }
-    pub fn falling_bone_batch(&mut self, placements: Vec<FallingBonePlacement>) {
-        self.cmds.push(DrawCmd::FallingBoneBatch(placements));
     }
     pub fn extruded_glyph_batch(&mut self, placements: Vec<ExtrudedGlyphPlacement>) {
         self.cmds.push(DrawCmd::ExtrudedGlyphBatch(placements));
@@ -913,12 +1150,22 @@ impl UiFrame {
     pub fn texts<I: IntoIterator<Item = TextLabel>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Text));
     }
+    #[allow(dead_code)]
     pub fn relic_icons<I: IntoIterator<Item = RelicIcon>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::RelicIcon));
     }
 
     pub fn glossary_anchor(&mut self, rect: [f32; 4], term: &'static str) {
         self.cmds.push(DrawCmd::GlossaryAnchor { rect, term });
+    }
+    pub fn object3d(&mut self, obj: Object3d) {
+        self.cmds.push(DrawCmd::Object3d(obj));
+    }
+    pub fn object3d_batch(&mut self, objs: Vec<Object3d>) {
+        self.cmds.push(DrawCmd::Object3dBatch(objs));
+    }
+    pub fn showcase_tile_batch(&mut self, placements: Vec<ShowcaseTilePlacement>) {
+        self.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
     }
 
     /// Apply a global alpha multiplier to every queued cmd's color.
@@ -942,14 +1189,13 @@ impl UiFrame {
                 | DrawCmd::MoonlitWater
                 | DrawCmd::SunlitWater
                 | DrawCmd::ShootingStarCascade
-                | DrawCmd::HandTileBackdrop
-                | DrawCmd::HandTileFaces
                 | DrawCmd::FluidSmoke
                 | DrawCmd::Table
                 | DrawCmd::CandleBatch(_)
                 | DrawCmd::Dish
                 | DrawCmd::RelicBatch(_)
                 | DrawCmd::PackBatch(_)
+                | DrawCmd::RelicShowcaseBatch(_)
                 | DrawCmd::DishExplicit(_)
                 | DrawCmd::CurioCabinet(_)
                 | DrawCmd::ShrineBatch(_)
@@ -965,14 +1211,15 @@ impl UiFrame {
                 | DrawCmd::Mirror(_)
                 | DrawCmd::PegBlock(_)
                 | DrawCmd::WallStack(_)
-                | DrawCmd::DoraStand(_)
                 | DrawCmd::CascadeTokenBatch(_)
                 | DrawCmd::FallingBoneBatch(_)
                 | DrawCmd::ExtrudedGlyphBatch(_)
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::GlossaryAnchor { .. }
                 | DrawCmd::GoldBarBatch(_)
-                | DrawCmd::Book(_) => {}
+                | DrawCmd::Book(_)
+                | DrawCmd::Object3d(_)
+                | DrawCmd::Object3dBatch(_) => {}
             }
         }
     }

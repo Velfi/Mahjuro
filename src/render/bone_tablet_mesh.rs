@@ -30,12 +30,13 @@ pub fn build_bone_tablet_mesh() -> MeshCpu {
     for i in (0..24).filter(|i| !(8..12).contains(i)) {
         vertices[i].uv = [0.0, 0.0];
     }
-    // Rotate the +Y face UVs 90° CCW so the engraved label reads along
-    // the long screen-X axis. Corner order for +Y:
-    //   v8 = (x0, y1, z0)  back-left   → top-left of texture
-    //   v9 = (x0, y1, z1)  front-left  → bottom-left
-    //   v10 = (x1, y1, z1) front-right → bottom-right
-    //   v11 = (x1, y1, z0) back-right  → top-right
+    // +Y face UVs: camera right=+X, camera up=-Z (tablet tilted Rx(-25°) so
+    // local -Z is "further from player" = higher on screen).
+    // push_box +Y corner order: (x0,y1,z0), (x0,y1,z1), (x1,y1,z1), (x1,y1,z0)
+    //   v8  (-0.5, top, -0.5) screen-left,  screen-top    → [0, 0]
+    //   v9  (-0.5, top, +0.5) screen-left,  screen-bottom → [0, 1]
+    //   v10 (+0.5, top, +0.5) screen-right, screen-bottom → [1, 1]
+    //   v11 (+0.5, top, -0.5) screen-right, screen-top    → [1, 0]
     vertices[8].uv = [0.0, 0.0];
     vertices[9].uv = [0.0, 1.0];
     vertices[10].uv = [1.0, 1.0];

@@ -8,7 +8,9 @@ use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
-use crate::render::draw_cmd::{CameraParams, PlaquePlacement, UiFrame, WoodTabletPlacement};
+use crate::render::draw_cmd::{
+    CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
+};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GameplayPick, GpuInstance, PointLight, TextLabel};
 use crate::ui::focus_nav::{self, FocusDir};
@@ -267,13 +269,13 @@ impl SceneBehavior for StartScreenScene {
 
         // Scale the user's reference camera proportionally with window
         // height so the perspective framing stays identical at every
-        // resolution.  The reference was tuned at h ≈ 800.
-        let cs = h / 800.0;
+        // resolution.  The reference was tuned at h ≈ 2104.
+        let cs = h / 2104.0;
         let camera = CameraParams {
-            eye: [0.0, 290.0 * cs, 220.0 * cs],
-            target: [0.0, 0.0, -130.0 * cs],
-            up: [0.0, 1.0, 0.0],
-            fovy_deg: 45.0,
+            eye: [0.0, -928.6 * cs, 1202.7 * cs],
+            target: [0.0, 481.9 * cs, 0.0],
+            up: [0.0, 0.0, 1.0],
+            fovy_deg: 30.0,
         };
 
         // ── Wood tablet layout: centered vertical column ────────────────
@@ -288,23 +290,29 @@ impl SceneBehavior for StartScreenScene {
         let center_y = h * 0.38;
         let start_y = center_y - total_h * 0.5;
         let cx = w * 0.5;
+        let tablet_z = h * 0.06;
 
-        let mut tablets: Vec<WoodTabletPlacement> = Vec::new();
+        let cam_rot = camera_facing_rotation(camera.eye, camera.target);
+        let mut tablets: Vec<Object3d> = Vec::new();
         for (i, &item) in items.iter().enumerate() {
             let ty = start_y + i as f32 * (tablet_h + gap);
-            tablets.push(WoodTabletPlacement {
-                world_pos: [cx, ty, 0.0],
+            tablets.push(Object3d {
+                pos: [cx, ty, tablet_z],
                 extents: [tablet_w, tablet_depth, tablet_h],
-                label: label_for(item, in_progress).to_string(),
-                pressed: 0.0,
-                hover: if i < self.hover_anims.len() {
-                    self.hover_anims[i]
-                } else {
-                    0.0
+                rotation: cam_rot,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::WoodTablet {
+                    label: label_for(item, in_progress).to_string(),
+                    hover: if i < self.hover_anims.len() { self.hover_anims[i] } else { 0.0 },
+                    pressed: 0.0,
+                    disabled: false,
                 },
-                rotation_z_deg: 0.0,
-                disabled: false,
-            });
+                focusable: true,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,            });
         }
 
         // ── Candles: two flanking the menu column ───────────────────────
@@ -374,13 +382,22 @@ impl SceneBehavior for StartScreenScene {
             format!("Profile {}  —  New", active + 1)
         };
 
-        let plaque = PlaquePlacement {
-            center_pos: [cx, plaque_y, plaque_h * 0.5],
+        let plaque = Object3d {
+            pos: [cx, plaque_y + -69.0, plaque_h * 0.5],
             extents: [plaque_w, plaque_h, plaque_depth],
-            rotation_y_deg: 0.0,
-            top_text: "M A H J U R O".into(),
-            bot_text: prof_text,
-        };
+            rotation: glam::Mat4::from_rotation_x((-60.0_f32).to_radians()) * cam_rot,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Plaque {
+                top: "M A H J U R O".into(),
+                bot: prof_text,
+                pick_id: None,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,        };
 
         // ── Update focus rect graph for next frame's update() ───────────
         let mut focus_rects = Vec::new();
@@ -423,8 +440,8 @@ impl SceneBehavior for StartScreenScene {
         frame.background(BackgroundId::Black);
         frame.table();
         frame.candles(candle_placements);
-        frame.plaque(plaque);
-        frame.wood_tablet_batch(tablets);
+        frame.object3d(plaque);
+        frame.object3d_batch(tablets);
         frame.starfield();
         frame.flames(flame_instances);
         frame.fluid_smoke();
@@ -437,7 +454,14 @@ impl SceneBehavior for StartScreenScene {
         frame.cursor_pos = Some(self.cursor_pos);
         frame.camera_override = Some(camera);
         frame.buttons = buttons;
-        frame.window_title = "Mahjuro".into();
+        frame.window_title = format!(
+            "Mahjuro — {}",
+            if cfg!(debug_assertions) {
+                "vNEXT"
+            } else {
+                env!("CARGO_PKG_VERSION")
+            }
+        );
 
         frame
     }

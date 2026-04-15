@@ -83,7 +83,7 @@ fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
     parts.join("  ")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SetKind {
     Pair,
     Triplet,
@@ -260,8 +260,8 @@ pub fn validate_selection_with_rules(
     let no_sequences = rules.contains(&RuleModifier::NoSequences);
 
     // Try each way of splitting flowers into their own melds vs wildcards.
-    // Flowers can form pairs (any 2), triplets (any 3), or two pairs (any 4)
-    // with each other regardless of rank.
+    // Flowers can form pairs (any 2) or triplets (any 3) with each other
+    // regardless of rank, in any combination.
     for (flower_melds, mut wildcards) in flower_meld_partitions(&flower_ids) {
         if regular.is_empty() {
             // Flower-only hand: valid only when all flowers are consumed as melds.
@@ -307,6 +307,356 @@ pub fn validate_selection_with_rules(
     None
 }
 
+/// Enumerate **every** valid meld decomposition of `tiles`. Unlike
+/// [`validate_selection_with_rules`], which returns the first split found,
+/// this returns all of them so the caller can pick the highest-scoring one.
+///
+/// Includes chiitoitsu as an alternative when 14 tiles split into 7 distinct
+/// pairs. De-duplicates decompositions that differ only by tile-id ordering
+/// (same multiset of melds by face + kind).
+pub fn enumerate_decompositions(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+) -> Vec<Vec<DetectedSet>> {
+    if tiles.is_empty() {
+        return Vec::new();
+    }
+    if rules.contains(&RuleModifier::MustPlayFive) && tiles.len() != 5 {
+        return Vec::new();
+    }
+    let mut regular: Vec<Tile> = tiles.iter().filter(|t| !t.is_flower()).copied().collect();
+    let flower_ids: Vec<u32> = tiles
+        .iter()
+        .filter(|t| t.is_flower())
+        .map(|t| t.id)
+        .collect();
+    regular.sort();
+
+    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
+    let no_sequences = rules.contains(&RuleModifier::NoSequences);
+    let require_honor = rules.contains(&RuleModifier::RequireHonor);
+
+    let mut all: Vec<Vec<DetectedSet>> = Vec::new();
+    let mut seen: std::collections::HashSet<Vec<(SetKind, Vec<(Suit, u8)>)>> =
+        std::collections::HashSet::new();
+
+    let tile_lookup = |id: u32| tiles.iter().find(|t| t.id == id).copied();
+    let canonicalize = |sets: &[DetectedSet]| -> Vec<(SetKind, Vec<(Suit, u8)>)> {
+        let mut keyed: Vec<(SetKind, Vec<(Suit, u8)>)> = sets
+            .iter()
+            .map(|s| {
+                let mut faces: Vec<(Suit, u8)> = s
+                    .tile_ids
+                    .iter()
+                    .filter_map(|&id| tile_lookup(id).map(|t| (t.suit, t.rank)))
+                    .collect();
+                faces.sort();
+                (s.kind, faces)
+            })
+            .collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        keyed
+    };
+
+    for (flower_melds, mut wildcards) in flower_meld_partitions(&flower_ids) {
+        if regular.is_empty() {
+            if wildcards.is_empty() && !flower_melds.is_empty() {
+                let key = canonicalize(&flower_melds);
+                if seen.insert(key) {
+                    all.push(flower_melds);
+                }
+            }
+            continue;
+        }
+        let mut prefix = flower_melds;
+        let prefix_len = prefix.len();
+        collect_decompositions(
+            &regular,
+            &mut wildcards,
+            &mut prefix,
+            allow_wrap,
+            &mut |sets: &[DetectedSet]| {
+                if no_sequences && sets.iter().any(|s| s.kind == SetKind::Sequence) {
+                    return;
+                }
+                if require_honor
+                    && !sets.iter().any(|set| {
+                        set.tile_ids.iter().any(|id| {
+                            tiles.iter().find(|t| t.id == *id).is_some_and(|t| {
+                                matches!(t.suit, Suit::Wind | Suit::Dragon)
+                            })
+                        })
+                    })
+                {
+                    return;
+                }
+                let key = canonicalize(sets);
+                if seen.insert(key) {
+                    all.push(sets.to_vec());
+                }
+            },
+        );
+        prefix.truncate(prefix_len);
+    }
+
+    // Chiitoitsu as an alternative decomposition (not just a fallback).
+    if flower_ids.is_empty() {
+        if let Some(pairs) = try_chiitoitsu(&regular) {
+            let key = canonicalize(&pairs);
+            if seen.insert(key) {
+                all.push(pairs);
+            }
+        }
+    }
+
+    all
+}
+
+/// Collector variant of [`backtrack_decompose_flowers`]: instead of returning
+/// on the first success, invokes `on_found` for every complete decomposition.
+fn collect_decompositions(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    on_found: &mut dyn FnMut(&[DetectedSet]),
+) {
+    if remaining.is_empty() {
+        if flower_pool.is_empty() {
+            on_found(found);
+        }
+        return;
+    }
+    let first = remaining[0];
+
+    // Kong (4 of a kind).
+    if remaining.len() >= 4
+        && remaining[1].suit == first.suit
+        && remaining[1].rank == first.rank
+        && remaining[2].suit == first.suit
+        && remaining[2].rank == first.rank
+        && remaining[3].suit == first.suit
+        && remaining[3].rank == first.rank
+    {
+        found.push(DetectedSet {
+            kind: SetKind::Kong,
+            tile_ids: vec![
+                remaining[0].id,
+                remaining[1].id,
+                remaining[2].id,
+                remaining[3].id,
+            ],
+        });
+        let rest: Vec<Tile> = remaining[4..].to_vec();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+    }
+
+    // Triplet.
+    if remaining.len() >= 3
+        && remaining[1].suit == first.suit
+        && remaining[1].rank == first.rank
+        && remaining[2].suit == first.suit
+        && remaining[2].rank == first.rank
+    {
+        found.push(DetectedSet {
+            kind: SetKind::Triplet,
+            tile_ids: vec![remaining[0].id, remaining[1].id, remaining[2].id],
+        });
+        let rest: Vec<Tile> = remaining[3..].to_vec();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+    }
+
+    // Sequence.
+    if first.is_number_tile() && remaining.len() >= 3 {
+        collect_sequence(remaining, flower_pool, found, allow_wrap, &first, on_found);
+    }
+
+    // Pair.
+    if remaining.len() >= 2
+        && remaining[1].suit == first.suit
+        && remaining[1].rank == first.rank
+    {
+        found.push(DetectedSet {
+            kind: SetKind::Pair,
+            tile_ids: vec![remaining[0].id, remaining[1].id],
+        });
+        let rest: Vec<Tile> = remaining[2..].to_vec();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+    }
+
+    // Flower-assisted melds.
+    if !flower_pool.is_empty() {
+        if remaining.len() >= 2
+            && remaining[1].suit == first.suit
+            && remaining[1].rank == first.rank
+        {
+            let fid = flower_pool.pop().expect("flower pool exhausted");
+            found.push(DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![remaining[0].id, remaining[1].id, fid],
+            });
+            let rest: Vec<Tile> = remaining[2..].to_vec();
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            found.pop();
+            flower_pool.push(fid);
+        }
+        if first.is_number_tile() && remaining.len() >= 2 {
+            collect_sequence_with_flower(
+                remaining,
+                flower_pool,
+                found,
+                allow_wrap,
+                &first,
+                on_found,
+            );
+        }
+    }
+}
+
+fn collect_sequence(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+    on_found: &mut dyn FnMut(&[DetectedSet]),
+) {
+    let mid = remaining[1..]
+        .iter()
+        .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
+    if let Some(mid_offset) = mid {
+        let mid_idx = mid_offset + 1;
+        let search_start = mid_idx + 1;
+        if let Some(hi_offset) = remaining[search_start..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 2)
+        {
+            let hi_idx = hi_offset + search_start;
+            found.push(DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, remaining[mid_idx].id, remaining[hi_idx].id],
+            });
+            let rest: Vec<Tile> = remaining
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
+                .collect();
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            found.pop();
+        }
+    }
+    if allow_wrap {
+        collect_wrap_sequence(remaining, flower_pool, found, allow_wrap, first, on_found);
+    }
+}
+
+fn collect_wrap_sequence(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+    on_found: &mut dyn FnMut(&[DetectedSet]),
+) {
+    let wrap_patterns: &[[u8; 3]] = match first.rank {
+        1 => &[[9, 1, 2], [8, 9, 1]],
+        2 => &[[9, 1, 2]],
+        8 => &[[8, 9, 1]],
+        9 => &[[8, 9, 1], [9, 1, 2]],
+        _ => &[],
+    };
+    for pattern in wrap_patterns {
+        let other_ranks: Vec<u8> = pattern
+            .iter()
+            .copied()
+            .filter(|&r| r != first.rank)
+            .collect();
+        if other_ranks.len() != 2 {
+            continue;
+        }
+        if let Some(mid_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == other_ranks[0])
+        {
+            let mid_idx = mid_offset + 1;
+            if let Some(hi_idx) = remaining.iter().enumerate().position(|(i, t)| {
+                i != 0 && i != mid_idx && t.suit == first.suit && t.rank == other_ranks[1]
+            }) {
+                found.push(DetectedSet {
+                    kind: SetKind::Sequence,
+                    tile_ids: vec![
+                        remaining[0].id,
+                        remaining[mid_idx].id,
+                        remaining[hi_idx].id,
+                    ],
+                });
+                let rest: Vec<Tile> = remaining
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, t)| (i != 0 && i != mid_idx && i != hi_idx).then_some(*t))
+                    .collect();
+                collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+                found.pop();
+            }
+        }
+    }
+}
+
+fn collect_sequence_with_flower(
+    remaining: &[Tile],
+    flower_pool: &mut Vec<u32>,
+    found: &mut Vec<DetectedSet>,
+    allow_wrap: bool,
+    first: &Tile,
+    on_found: &mut dyn FnMut(&[DetectedSet]),
+) {
+    if first.rank <= 7 {
+        if let Some(mid_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 1)
+        {
+            let mid_idx = mid_offset + 1;
+            let fid = flower_pool.pop().expect("flower pool exhausted");
+            found.push(DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, remaining[mid_idx].id, fid],
+            });
+            let rest: Vec<Tile> = remaining
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| (i != 0 && i != mid_idx).then_some(*t))
+                .collect();
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            found.pop();
+            flower_pool.push(fid);
+        }
+    }
+    if first.rank <= 7 {
+        if let Some(hi_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 2)
+        {
+            let hi_idx = hi_offset + 1;
+            let fid = flower_pool.pop().expect("flower pool exhausted");
+            found.push(DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![remaining[0].id, fid, remaining[hi_idx].id],
+            });
+            let rest: Vec<Tile> = remaining
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| (i != 0 && i != hi_idx).then_some(*t))
+                .collect();
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            found.pop();
+            flower_pool.push(fid);
+        }
+    }
+}
+
 /// Detect a Chiitoitsu (seven pairs) hand: exactly 14 tiles, decomposing into
 /// 7 distinct face pairs (no triplets or kongs of the same face). Returns
 /// `Some(pairs)` on success.
@@ -338,45 +688,40 @@ fn try_chiitoitsu(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
 /// Generate all ways to partition flower tile ids into "flower melds" (pairs,
 /// triplets) vs leftover wildcards. Flowers can form melds with each other
 /// regardless of rank — any 2 flowers make a pair, any 3 make a triplet.
+/// Handles arbitrarily many flowers (e.g. from Wildflower talisman).
 fn flower_meld_partitions(flower_ids: &[u32]) -> Vec<(Vec<DetectedSet>, Vec<u32>)> {
-    let n = flower_ids.len();
-    let mut partitions = Vec::new();
+    let mut results = Vec::new();
+    flower_meld_partitions_recurse(flower_ids, vec![], &mut results);
+    results
+}
 
-    // All flowers as wildcards (existing behaviour).
-    partitions.push((vec![], flower_ids.to_vec()));
+fn flower_meld_partitions_recurse(
+    remaining: &[u32],
+    melds_so_far: Vec<DetectedSet>,
+    results: &mut Vec<(Vec<DetectedSet>, Vec<u32>)>,
+) {
+    // Base: leave all remaining as wildcards.
+    results.push((melds_so_far.clone(), remaining.to_vec()));
 
-    // One pair of flowers.
-    if n >= 2 {
-        let pair = DetectedSet {
+    // Try consuming a pair.
+    if remaining.len() >= 2 {
+        let mut melds = melds_so_far.clone();
+        melds.push(DetectedSet {
             kind: SetKind::Pair,
-            tile_ids: vec![flower_ids[0], flower_ids[1]],
-        };
-        partitions.push((vec![pair], flower_ids[2..].to_vec()));
+            tile_ids: vec![remaining[0], remaining[1]],
+        });
+        flower_meld_partitions_recurse(&remaining[2..], melds, results);
     }
 
-    // One triplet of flowers.
-    if n >= 3 {
-        let triplet = DetectedSet {
+    // Try consuming a triplet.
+    if remaining.len() >= 3 {
+        let mut melds = melds_so_far.clone();
+        melds.push(DetectedSet {
             kind: SetKind::Triplet,
-            tile_ids: vec![flower_ids[0], flower_ids[1], flower_ids[2]],
-        };
-        partitions.push((vec![triplet], flower_ids[3..].to_vec()));
+            tile_ids: vec![remaining[0], remaining[1], remaining[2]],
+        });
+        flower_meld_partitions_recurse(&remaining[3..], melds, results);
     }
-
-    // Two pairs of flowers.
-    if n >= 4 {
-        let pair1 = DetectedSet {
-            kind: SetKind::Pair,
-            tile_ids: vec![flower_ids[0], flower_ids[1]],
-        };
-        let pair2 = DetectedSet {
-            kind: SetKind::Pair,
-            tile_ids: vec![flower_ids[2], flower_ids[3]],
-        };
-        partitions.push((vec![pair1, pair2], flower_ids[4..].to_vec()));
-    }
-
-    partitions
 }
 
 /// Recursive helper: try to decompose `remaining` (sorted, no flowers) into melds,
