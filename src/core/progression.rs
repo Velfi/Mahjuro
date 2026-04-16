@@ -216,6 +216,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TenpaiTalisman,
                 RelicId::LuckySeven,
                 RelicId::Minimalist,
+                RelicId::Disgust,
             ],
             rules: vec![RuleModifier::HonorTripleScore],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],

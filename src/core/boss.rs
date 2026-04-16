@@ -294,7 +294,7 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
         relic_debuffs: vec![],
         on_apply: Some(tax_collector_apply),
         on_play: Some(tribute_play),
-        description_override: Some(format!("Pay {cost} gold each play (locked at reveal)")),
+        description_override: Some(format!("Pay {cost} gold each play")),
     }
 }
 

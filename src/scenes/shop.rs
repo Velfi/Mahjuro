@@ -25,6 +25,7 @@ use crate::render::draw_cmd::{
     CameraParams, DishExplicit, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
     camera_facing_rotation,
 };
+use crate::render::decal::{load_ui_font, measure_plaque_wrap};
 use crate::render::lamp_mesh::{BULB_Z as LAMP_BULB_LOCAL_Z, SHADE_RIM_R, shade_exclusion_radius};
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
@@ -50,7 +51,8 @@ enum ShopAction {
     /// Use the consumable at this index in `run.consumables.items`.
     /// Currently only zodiacs can be used from the shop (levels up a yaku).
     UseConsumable(usize),
-    BuyPack,
+    /// Buy the tile pack at the given index in `pack_items`.
+    BuyPack(usize),
     #[allow(dead_code)]
     Reroll,
     /// Swap an owned relic one slot to the left.
@@ -173,9 +175,12 @@ fn shop_action_for_hit(
                 None
             }
         }
-        ShopHit::Dish(id) if id == PICK_TILE_PACK => Some(ShopAction::BuyPack),
-        ShopHit::Dish(_) => None,
-        ShopHit::TilePack(_) => Some(ShopAction::BuyPack),
+        ShopHit::Dish(id) => {
+            tile_pack_index_from_pick(id).map(ShopAction::BuyPack)
+        }
+        ShopHit::TilePack(id) => {
+            tile_pack_index_from_pick(id).map(ShopAction::BuyPack)
+        }
     }
 }
 
@@ -283,7 +288,7 @@ fn apply_shop_action(
     items: &mut Vec<ShopItem>,
     zodiac_items: &mut Vec<ConsumableShopItem>,
     talisman_items: &mut Vec<ConsumableShopItem>,
-    pack_item: &mut Option<TilePackShopItem>,
+    pack_items: &mut [TilePackShopItem],
     run: &mut crate::game::run::RunState,
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopActionResult {
@@ -296,6 +301,9 @@ fn apply_shop_action(
                     let relic = item.relic;
                     run.gold -= price as i32;
                     run.relics.active.push(relic);
+                    bus.push(crate::game::event_bus::GameEvent::UiSound(
+                        crate::audio::SfxId::Purchase,
+                    ));
                     // Initialize counters for stateful relics.
                     match relic {
                         RelicId::MeltingIce => {
@@ -383,6 +391,9 @@ fn apply_shop_action(
                 }
                 run.relics.active.remove(idx);
                 run.gold = run.gold.saturating_add(refund as i32);
+                bus.push(crate::game::event_bus::GameEvent::UiSound(
+                    crate::audio::SfxId::Sell,
+                ));
                 // Bonfire: track relic sales for mult bonus.
                 *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
                 if run.relics.has(RelicId::Bonfire) {
@@ -407,6 +418,9 @@ fn apply_shop_action(
                 if !item.sold && run.gold >= price as i32 {
                     if let Consumable::Zodiac(z) = item.consumable {
                         run.gold -= price as i32;
+                        bus.push(crate::game::event_bus::GameEvent::UiSound(
+                            crate::audio::SfxId::Purchase,
+                        ));
                         let yaku = z.yaku();
                         let new_level = run.yaku_levels.level_up(yaku);
                         zodiac_items.remove(idx);
@@ -427,6 +441,9 @@ fn apply_shop_action(
                     let consumable = item.consumable;
                     run.gold -= price as i32;
                     run.consumables.items.push(consumable);
+                    bus.push(crate::game::event_bus::GameEvent::UiSound(
+                        crate::audio::SfxId::Purchase,
+                    ));
                     talisman_items.remove(idx);
                 }
             }
@@ -437,6 +454,9 @@ fn apply_shop_action(
                 let refund = consumable_sell_price(c);
                 run.consumables.items.remove(idx);
                 run.gold = run.gold.saturating_add(refund as i32);
+                bus.push(crate::game::event_bus::GameEvent::UiSound(
+                    crate::audio::SfxId::Sell,
+                ));
             }
         }
         ShopAction::UseConsumable(idx) => {
@@ -454,8 +474,8 @@ fn apply_shop_action(
                 }
             }
         }
-        ShopAction::BuyPack => {
-            if let Some(ref mut pack) = *pack_item {
+        ShopAction::BuyPack(pack_idx) => {
+            if let Some(pack) = pack_items.get_mut(pack_idx) {
                 if !pack.sold {
                     let price = pack.kind.shop_price();
                     if run.gold >= price as i32 {
@@ -517,7 +537,7 @@ fn live_shop_hit(
     items: &[ShopItem],
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
-    pack_item: &Option<TilePackShopItem>,
+    pack_items: &[TilePackShopItem],
     run: &crate::game::run::RunState,
 ) -> Option<ShopHit> {
     let valid = match hit {
@@ -531,12 +551,17 @@ fn live_shop_hit(
                 + owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)))
         }
         ShopHit::Dish(id) => {
-            matches!(
-                id,
-                PICK_RELIC_DISH | PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_TILE_PACK
-            ) && (id != PICK_TILE_PACK || pack_item.is_some())
+            if matches!(id, PICK_COIN_DISH | PICK_JOURNAL_BOOK) {
+                true
+            } else if let Some(idx) = tile_pack_index_from_pick(id) {
+                pack_items.get(idx).is_some_and(|p| !p.sold)
+            } else {
+                false
+            }
         }
-        ShopHit::TilePack(id) => id == PICK_TILE_PACK && pack_item.is_some(),
+        ShopHit::TilePack(id) => tile_pack_index_from_pick(id)
+            .and_then(|idx| pack_items.get(idx))
+            .is_some_and(|p| !p.sold),
     };
     valid.then_some(hit)
 }
@@ -758,48 +783,6 @@ impl PackCelebration {
     }
 }
 
-/// Zodiac ribbon close-up celebration: shows the purchased ribbon front
-/// and center with a sinusoidal snake/sway animation before dismissing
-/// into the yaku level-up popup.
-struct ZodiacCelebration {
-    kind: ZodiacKind,
-    yaku_name: &'static str,
-    new_level: u32,
-    started_at: Instant,
-    dismissed: bool,
-}
-
-impl ZodiacCelebration {
-    /// Minimum on-screen time before the player can dismiss the celebration.
-    /// Filters out the purchase click that triggered the overlay so it
-    /// doesn't close on frame 1.
-    const DISMISS_GRACE: f32 = 0.35;
-
-    fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
-        Self {
-            kind,
-            yaku_name,
-            new_level,
-            started_at: Instant::now(),
-            dismissed: false,
-        }
-    }
-
-    fn elapsed(&self) -> f32 {
-        Instant::now()
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32()
-    }
-
-    fn can_dismiss(&self) -> bool {
-        self.elapsed() >= Self::DISMISS_GRACE
-    }
-
-    fn is_done(&self) -> bool {
-        self.dismissed
-    }
-}
-
 /// An owned item the player is currently dragging (keyboard/controller hold-A
 /// or mouse press-and-drag) toward the sell tray. Stores enough information to
 /// reconstruct the sell action once the item is dropped.
@@ -829,7 +812,8 @@ pub struct ShopScene {
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
     talisman_items: Vec<ConsumableShopItem>,
-    pack_item: Option<TilePackShopItem>,
+    /// Tile packs for sale this shop visit (always up to `N_TILE_PACKS`).
+    pack_items: Vec<TilePackShopItem>,
     /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
     /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
     reroll_cost: u32,
@@ -846,8 +830,6 @@ pub struct ShopScene {
     last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
     /// Active tile-pack opening celebration, if any.
     pack_celebration: Option<PackCelebration>,
-    /// Active zodiac ribbon close-up celebration, if any.
-    zodiac_celebration: Option<ZodiacCelebration>,
     /// Floating 3D text popups for zodiac level-up feedback.
     score_popups: ScorePopupSystem,
     /// Particle burst effects for zodiac level-up feedback.
@@ -931,8 +913,13 @@ const PICK_COIN_DISH: u32 = 2;
 /// dish-shaped until proper book art lands, but the click target is
 /// what matters here.
 const PICK_JOURNAL_BOOK: u32 = 3;
-/// Pick id for the for-sale tile pack on the shop shelf.
-const PICK_TILE_PACK: u32 = 4;
+/// Base pick id for the for-sale tile packs on the shop shelf.
+/// Two packs are offered, using ids `PICK_TILE_PACK_BASE` and
+/// `PICK_TILE_PACK_BASE + 1`. Id `6` is reserved for `PICK_LEAVE_PROP`,
+/// so only 2 ids are reserved here.
+const PICK_TILE_PACK_BASE: u32 = 4;
+/// Number of tile packs offered per shop visit.
+const N_TILE_PACKS: usize = 2;
 /// Pick id for the Leave action prop (counter right end).
 const PICK_LEAVE_PROP: u32 = 6;
 /// Pick id for the Reroll action prop (counter left end).
@@ -942,6 +929,20 @@ const PICK_SELL_TRAY: u32 = 8;
 
 /// Max for-sale relic slots on the kiosk (must match stock generation).
 const KIOSK_RELIC_SLOTS: usize = 3;
+
+/// True if `id` is one of the tile-pack pick ids.
+fn is_tile_pack_pick(id: u32) -> bool {
+    id >= PICK_TILE_PACK_BASE && id < PICK_TILE_PACK_BASE + N_TILE_PACKS as u32
+}
+
+/// Convert a tile-pack pick id to the index in `pack_items`.
+fn tile_pack_index_from_pick(id: u32) -> Option<usize> {
+    if is_tile_pack_pick(id) {
+        Some((id - PICK_TILE_PACK_BASE) as usize)
+    } else {
+        None
+    }
+}
 
 /// Pitch relic cuboids toward the camera (`rot_rx_rz_deg`).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
@@ -963,7 +964,7 @@ fn generate_shop_stock(
     Vec<ShopItem>,
     Vec<ConsumableShopItem>,
     Vec<ConsumableShopItem>,
-    Option<TilePackShopItem>,
+    Vec<TilePackShopItem>,
 ) {
     let mut rng = rand::rng();
 
@@ -1052,23 +1053,25 @@ fn generate_shop_stock(
         })
         .collect();
 
-    // Always offer a tile pack.
-    let pack_item = {
+    // Always offer two unique tile packs.
+    let pack_items: Vec<TilePackShopItem> = {
         let mut pack_pool: Vec<TilePackKind> = TilePackKind::all().to_vec();
         pack_pool.shuffle(&mut rng);
         pack_pool
-            .first()
-            .map(|&kind| TilePackShopItem { kind, sold: false })
+            .into_iter()
+            .take(N_TILE_PACKS)
+            .map(|kind| TilePackShopItem { kind, sold: false })
+            .collect()
     };
 
-    (items, zodiac_items, talisman_items, pack_item)
+    (items, zodiac_items, talisman_items, pack_items)
 }
 
 fn tutorial_shop_stock() -> (
     Vec<ShopItem>,
     Vec<ConsumableShopItem>,
     Vec<ConsumableShopItem>,
-    Option<TilePackShopItem>,
+    Vec<TilePackShopItem>,
 ) {
     let defs = all_relic_defs();
     let pair_power = defs
@@ -1092,10 +1095,27 @@ fn tutorial_shop_stock() -> (
             consumable: Consumable::Talisman(TalismanKind::Jade),
             sold: false,
         }],
-        Some(TilePackShopItem {
-            kind: TilePackKind::ScrollLibrary,
-            sold: false,
-        }),
+        // Tutorial mode: two deterministic packs so the player can see
+        // the side-by-side layout and still always encounter the canonical
+        // tutorial pack (ScrollLibrary) in the first slot.
+        vec![
+            TilePackShopItem {
+                kind: TilePackKind::ScrollLibrary,
+                sold: false,
+            },
+            TilePackShopItem {
+                kind: {
+                    // Pick a second pack kind distinct from ScrollLibrary.
+                    // Uses the first `all()` entry that differs.
+                    let all = TilePackKind::all();
+                    all.iter()
+                        .copied()
+                        .find(|&k| k != TilePackKind::ScrollLibrary)
+                        .unwrap_or(TilePackKind::ScrollLibrary)
+                },
+                sold: false,
+            },
+        ],
     )
 }
 
@@ -1119,7 +1139,7 @@ impl ShopScene {
         } else {
             extra_relics
         };
-        let (mut items, zodiac_items, talisman_items, pack_item) = if mode == ShopMode::Tutorial {
+        let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
             tutorial_shop_stock()
         } else {
             generate_shop_stock(&run.relics, &run.available_relics, extra_relics)
@@ -1153,14 +1173,13 @@ impl ShopScene {
             items,
             zodiac_items,
             talisman_items,
-            pack_item,
+            pack_items,
             reroll_cost,
             pause_menu: PauseMenu::new(),
             journal: super::journal::JournalOverlay::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             pack_celebration: None,
-            zodiac_celebration: None,
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),
@@ -1204,6 +1223,7 @@ impl ShopScene {
         result: ShopActionResult,
         _cursor_pos: (f32, f32),
         bus: &mut crate::game::event_bus::EventBus,
+        overlay_request: &mut Option<super::OverlayRequest>,
     ) {
         match result {
             ShopActionResult::None => {}
@@ -1215,35 +1235,13 @@ impl ShopScene {
                 yaku_name,
                 new_level,
             } => {
-                self.zodiac_celebration =
-                    Some(ZodiacCelebration::new(zodiac_kind, yaku_name, new_level));
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
+                *overlay_request = Some(super::OverlayRequest::Push(
+                    Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
+                        zodiac_kind, yaku_name, new_level,
+                    )),
+                ));
             }
-        }
-    }
-
-    /// Spawn the yaku level-up popup + particle burst at the center of the
-    /// screen. Called when a zodiac celebration finishes (either by timeout
-    /// or player dismiss).
-    fn finish_zodiac_celebration(
-        &mut self,
-        w: f32,
-        h: f32,
-        bus: &mut crate::game::event_bus::EventBus,
-    ) {
-        if let Some(celeb) = self.zodiac_celebration.take() {
-            bus.push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
-            let label = format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level);
-            let center = (w * 0.5, h * 0.45);
-            self.score_popups.spawn(
-                label,
-                center,
-                center,
-                crate::core::scoring::StepKind::Gold,
-                celeb.new_level as f32,
-            );
-            self.particles
-                .emit(center.0, center.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
         }
     }
 
@@ -1254,23 +1252,23 @@ impl ShopScene {
         }
         run.gold -= self.reroll_cost as i32;
         self.reroll_cost += REROLL_COST_INCREMENT;
-        let (items, zodiac_items, talisman_items, pack_item) =
+        let (items, zodiac_items, talisman_items, pack_items) =
             generate_shop_stock(&run.relics, &run.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
-        self.pack_item = pack_item;
+        self.pack_items = pack_items;
         self.focus = None;
     }
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
-        let (items, zodiac_items, talisman_items, pack_item) =
+        let (items, zodiac_items, talisman_items, pack_items) =
             generate_shop_stock(&run.relics, &run.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
-        self.pack_item = pack_item;
+        self.pack_items = pack_items;
         self.focus = None;
     }
 
@@ -1311,7 +1309,7 @@ struct ShopLayout {
     talisman_anchors_px: [(f32, f32, f32); 4],
     talisman_anchor_count: usize,
     talisman_wall_width: f32,
-    pack_center_px: (f32, f32, f32),
+    pack_centers_px: [(f32, f32, f32); N_TILE_PACKS],
     pack_extents: [f32; 3],
     relic_dish_center_px: (f32, f32, f32),
     relic_dish_extents: [f32; 3],
@@ -1319,6 +1317,11 @@ struct ShopLayout {
     ribbon_tray_extents: [f32; 3],
     talisman_tray_center_px: (f32, f32, f32),
     talisman_tray_extents: [f32; 3],
+    /// Per-pendant nudge for the player's owned talismans on the
+    /// `talisman_tray`. `(px, py, lift_world)` resolved from the
+    /// `owned_talismans` placement at build time. Rotation from the
+    /// placement is applied by the renderer via `apply_arrange_override`.
+    owned_talisman_offset: (f32, f32, f32),
     coin_dish_center_px: (f32, f32, f32),
     coin_dish_extents: [f32; 3],
     owned_relic_count: usize,
@@ -1440,11 +1443,21 @@ impl ShopLayout {
         // Tile pack: column 1, slightly taller lift. Width is derived from
         // the texture's canonical aspect so the cover art is never stretched;
         // thickness is a small fraction of the height for a card-pack feel.
-        let pack_center_px = (col_px_x[1], pack_pixel_y, pack_wz + layout.mm(10.0));
+        // Two tile packs: flank the `col_px_x[1]` center, spaced by
+        // `pack_width + gap`. Pack extents are shared between both.
         let pack_height = h * 0.090;
         let pack_width = pack_height * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
         let pack_thickness = pack_height * 0.10;
         let pack_extents = [pack_width, pack_thickness, pack_height];
+        let pack_gap = pack_width * 0.35;
+        let pack_spacing = pack_width + pack_gap;
+        let pack_z = pack_wz + layout.mm(10.0);
+        let mut pack_centers_px = [(0.0, 0.0, 0.0); N_TILE_PACKS];
+        for i in 0..N_TILE_PACKS {
+            let off =
+                (i as f32 - (N_TILE_PACKS as f32 - 1.0) * 0.5) * pack_spacing;
+            pack_centers_px[i] = (col_px_x[1] + off, pack_pixel_y, pack_z);
+        }
 
         // ── Bottom owned row ─────────────────────────────────────────────
         // shelf_ny was previously a single shared field; after migration each
@@ -1485,6 +1498,13 @@ impl ShopLayout {
         let consumable_width = layout.mm(9.0);
         let consumable_length = consumable_width * 1.5;
 
+        // Owned-talisman nudge: convert the placement's window-fraction /
+        // lift-mm values into the same (px, py, world) coordinates the draw
+        // site uses so arrange-mode translation edits actually move the
+        // rendered pendants.
+        let ot = &positions.owned_talismans;
+        let owned_talisman_offset = (ot.nx * w, ot.ny * h, layout.mm(ot.lift_mm));
+
         // Lamp: top-center, elevated above counter.
         let lamp_center_px = (
             positions.lamp.nx * w,
@@ -1506,7 +1526,7 @@ impl ShopLayout {
             talisman_anchors_px,
             talisman_anchor_count: n_talisman_anchors,
             talisman_wall_width,
-            pack_center_px,
+            pack_centers_px,
             pack_extents,
             relic_dish_center_px,
             relic_dish_extents,
@@ -1514,6 +1534,7 @@ impl ShopLayout {
             ribbon_tray_extents,
             talisman_tray_center_px,
             talisman_tray_extents,
+            owned_talisman_offset,
             coin_dish_center_px,
             coin_dish_extents,
             owned_relic_count: n_owned_relics,
@@ -1556,7 +1577,8 @@ impl ShopLayout {
         let py = self.talisman_tray_center_px.1;
         // lift_z: above tray rim
         let lift = self.talisman_tray_extents[1] + self.consumable_width * 0.5 + 6.0;
-        (px, py, lift)
+        let (ox, oy, olift) = self.owned_talisman_offset;
+        (px + ox, py + oy, lift + olift)
     }
 }
 
@@ -1611,12 +1633,12 @@ fn consumable_color(c: Consumable) -> [f32; 4] {
         Consumable::Talisman(t) => match t {
             TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0], // jade green
             TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0], // pearl white
-            TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0], // gold
+            TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0], // shining gold
             TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0], // iridescent violet
             TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0], // kiln orange-red
-            TalismanKind::Bamboo => [0.38, 0.70, 0.18, 1.0], // yellow-green (bamboo stalk)
-            TalismanKind::Dots => [0.30, 0.48, 0.88, 1.0],
-            TalismanKind::Characters => [0.88, 0.32, 0.26, 1.0],
+            TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
+            TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],   // sapphire
+            TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
             TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
             TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
             TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
@@ -1779,7 +1801,6 @@ impl SceneBehavior for ShopScene {
         self.pause_menu.paused
             || self.journal.open
             || self.pack_celebration.is_some()
-            || self.zodiac_celebration.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -1794,6 +1815,24 @@ impl SceneBehavior for ShopScene {
         }
         self.score_popups.update(now);
 
+        // Drain finished zodiac celebration → spawn popup + particles.
+        if let Some((yaku_name, new_level)) = ctx.run.finished_zodiac_celebration.take() {
+            let w = ctx.layout.window_w;
+            let h = ctx.layout.window_h;
+            let label = format!("{yaku_name} Lvl.{new_level}");
+            let center = (w * 0.5, h * 0.45);
+            self.score_popups.spawn(
+                label,
+                center,
+                center,
+                None,
+                crate::core::scoring::StepKind::Gold,
+                new_level as f32,
+            );
+            self.particles
+                .emit(center.0, center.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+        }
+
         // Drain relic activations and evict expired glows.
         for rid in ctx.run.relic_activations.drain(..) {
             self.relic_glow_starts.insert(rid, now);
@@ -1803,20 +1842,23 @@ impl SceneBehavior for ShopScene {
         self.relic_glow_starts
             .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
 
-        // Help action opens the Meld Guide scene.
+        // Help action opens the Meld Guide as an overlay.
+        let mut open_guide = false;
         for &cid in ctx.button_clicks {
             if cid == SHOP_HELP_BADGE_ID {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
-                    true,
-                )));
+                open_guide = true;
             }
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
-                    true,
-                )));
+                open_guide = true;
             }
+        }
+        if open_guide {
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
+            ));
+            return None;
         }
 
         // Yaku Journal overlay — opened by clicking the Journal book on
@@ -1867,33 +1909,14 @@ impl SceneBehavior for ShopScene {
             return None;
         }
 
-        // Zodiac ribbon close-up celebration — swallow input until
-        // the player dismisses it.
-        if let Some(ref mut celeb) = self.zodiac_celebration {
-            let has_input = ctx.actions.iter().any(|a| {
-                matches!(
-                    a,
-                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
-                )
-            }) || !ctx.button_clicks.is_empty();
-            if has_input && celeb.can_dismiss() {
-                celeb.dismissed = true;
-            }
-            if celeb.is_done() {
-                let w = ctx.layout.window_w;
-                let h = ctx.layout.window_h;
-                self.finish_zodiac_celebration(w, h, ctx.bus);
-            }
-            return None;
-        }
-
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
-                return Some(Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(
-                    true,
-                )));
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                    Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
+                ));
+                return None;
             }
             return t;
         }
@@ -1977,11 +2000,11 @@ impl SceneBehavior for ShopScene {
                                     &mut self.items,
                                     &mut self.zodiac_items,
                                     &mut self.talisman_items,
-                                    &mut self.pack_item,
+                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                                 self.focus = None;
                             }
                             continue;
@@ -1995,11 +2018,11 @@ impl SceneBehavior for ShopScene {
                                     &mut self.items,
                                     &mut self.zodiac_items,
                                     &mut self.talisman_items,
-                                    &mut self.pack_item,
+                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                                 self.focus = None;
                             }
                             continue;
@@ -2013,11 +2036,11 @@ impl SceneBehavior for ShopScene {
                                     &mut self.items,
                                     &mut self.zodiac_items,
                                     &mut self.talisman_items,
-                                    &mut self.pack_item,
+                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                                 self.focus = None;
                             }
                             continue;
@@ -2039,7 +2062,7 @@ impl SceneBehavior for ShopScene {
                             &mut self.items,
                             &mut self.zodiac_items,
                             &mut self.talisman_items,
-                            &mut self.pack_item,
+                            &mut self.pack_items,
                             ctx.run,
                             ctx.bus,
                         );
@@ -2103,11 +2126,11 @@ impl SceneBehavior for ShopScene {
                                 &mut self.items,
                                 &mut self.zodiac_items,
                                 &mut self.talisman_items,
-                                &mut self.pack_item,
+                                &mut self.pack_items,
                                 ctx.run,
                                 ctx.bus,
                             );
-                            self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                            self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             // Journal book: same toggle as the click path.
                             self.journal.toggle();
@@ -2127,11 +2150,11 @@ impl SceneBehavior for ShopScene {
                             &mut self.items,
                             &mut self.zodiac_items,
                             &mut self.talisman_items,
-                            &mut self.pack_item,
+                            &mut self.pack_items,
                             ctx.run,
                             ctx.bus,
                         );
-                        self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                        self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                         self.focus = None;
                     }
                 }
@@ -2162,11 +2185,11 @@ impl SceneBehavior for ShopScene {
                     &mut self.items,
                     &mut self.zodiac_items,
                     &mut self.talisman_items,
-                    &mut self.pack_item,
+                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                 self.focus = None;
                 return None;
             }
@@ -2177,11 +2200,11 @@ impl SceneBehavior for ShopScene {
                     &mut self.items,
                     &mut self.zodiac_items,
                     &mut self.talisman_items,
-                    &mut self.pack_item,
+                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                 self.focus = None;
                 return None;
             }
@@ -2209,11 +2232,11 @@ impl SceneBehavior for ShopScene {
                     &mut self.items,
                     &mut self.zodiac_items,
                     &mut self.talisman_items,
-                    &mut self.pack_item,
+                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                 self.focus = None;
             }
             return None;
@@ -2262,11 +2285,11 @@ impl SceneBehavior for ShopScene {
                         &mut self.items,
                         &mut self.zodiac_items,
                         &mut self.talisman_items,
-                        &mut self.pack_item,
+                        &mut self.pack_items,
                         ctx.run,
                         ctx.bus,
                     );
-                    self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                    self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                 }
                 return None;
             }
@@ -2294,11 +2317,11 @@ impl SceneBehavior for ShopScene {
                     &mut self.items,
                     &mut self.zodiac_items,
                     &mut self.talisman_items,
-                    &mut self.pack_item,
+                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus);
+                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
             }
             return None;
         }
@@ -2427,23 +2450,24 @@ impl SceneBehavior for ShopScene {
             arrange_name: None,
         });
 
-        // Tile pack — column 2, on the counter.
-        if let Some(ref pack) = self.pack_item {
-            if !pack.sold {
-                let ext = layout.pack_extents;
-                frame.object3d_batch(vec![Object3d {
+        // Tile packs — two flanking positions in column 2, on the counter.
+        {
+            let ext = layout.pack_extents;
+            let mut pack_objs: Vec<Object3d> = Vec::new();
+            for (i, pack) in self.pack_items.iter().enumerate() {
+                if i >= N_TILE_PACKS || pack.sold {
+                    continue;
+                }
+                let (cx, cy, cz) = layout.pack_centers_px[i];
+                pack_objs.push(Object3d {
                     // Center-lift so the pack sits on the counter (ext[2] is height).
-                    pos: [
-                        layout.pack_center_px.0,
-                        layout.pack_center_px.1,
-                        layout.pack_center_px.2 + ext[2] * 0.5,
-                    ],
+                    pos: [cx, cy, cz + ext[2] * 0.5],
                     extents: ext,
                     rotation: glam::Mat4::IDENTITY,
                     color: pack.kind.foil_tint(),
                     kind: Object3dKind::Pack {
                         kind: pack.kind,
-                        pick_id: Some(PICK_TILE_PACK),
+                        pick_id: Some(PICK_TILE_PACK_BASE + i as u32),
                     },
                     focusable: true,
                     scene_shaded: true,
@@ -2451,7 +2475,10 @@ impl SceneBehavior for ShopScene {
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
-                }]);
+                });
+            }
+            if !pack_objs.is_empty() {
+                frame.object3d_batch(pack_objs);
             }
         }
 
@@ -2648,7 +2675,7 @@ impl SceneBehavior for ShopScene {
                         own_light: None,
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: None,
+                        arrange_name: Some("shop.shelf.owned_talismans"),
                     });
                 }
             }
@@ -2943,7 +2970,7 @@ impl SceneBehavior for ShopScene {
                     &self.items,
                     &self.zodiac_items,
                     &self.talisman_items,
-                    &self.pack_item,
+                    &self.pack_items,
                     ctx.run,
                 )
             });
@@ -2967,7 +2994,7 @@ impl SceneBehavior for ShopScene {
                         if ctx.run.relics.is_full() {
                             "Relics full".to_string()
                         } else {
-                            format!("Need {}g", item.price as i32 - ctx.run.gold)
+                            format!("${} (have {}g)", item.price, ctx.run.gold.max(0))
                         }
                     } else {
                         item.buy_label()
@@ -3013,7 +3040,7 @@ impl SceneBehavior for ShopScene {
                     let cta = if item.sold {
                         "SOLD".to_string()
                     } else if !can_afford {
-                        format!("Need {}g", price as i32 - ctx.run.gold)
+                        format!("${} (have {}g)", price, ctx.run.gold.max(0))
                     } else if price == 0 {
                         "FREE".to_string()
                     } else {
@@ -3068,7 +3095,7 @@ impl SceneBehavior for ShopScene {
                         if ctx.run.consumables.is_full() {
                             "Inventory full".to_string()
                         } else {
-                            format!("Need {}g", price as i32 - ctx.run.gold)
+                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
                         }
                     } else if price == 0 {
                         "FREE".to_string()
@@ -3141,7 +3168,7 @@ impl SceneBehavior for ShopScene {
                     if reroll_affordable {
                         format!("{}g", self.reroll_cost)
                     } else {
-                        format!("Need {}g", self.reroll_cost as i32 - ctx.run.gold)
+                        format!("${} (have {}g)", self.reroll_cost, ctx.run.gold.max(0))
                     },
                     if reroll_affordable {
                         color::GOLD
@@ -3155,8 +3182,9 @@ impl SceneBehavior for ShopScene {
                     String::new(),
                     color::CHAMPAGNE,
                 ),
-                ShopHit::Dish(id) if id == PICK_TILE_PACK => {
-                    if let Some(ref pack) = self.pack_item {
+                ShopHit::Dish(id) if is_tile_pack_pick(id) => {
+                    let idx = tile_pack_index_from_pick(id).unwrap_or(0);
+                    if let Some(pack) = self.pack_items.get(idx) {
                         let price = pack.kind.shop_price();
                         let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
@@ -3166,7 +3194,7 @@ impl SceneBehavior for ShopScene {
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
-                            format!("Need {}g", price as i32 - ctx.run.gold)
+                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
                         };
                         (
                             pack.kind.name().to_string(),
@@ -3184,8 +3212,9 @@ impl SceneBehavior for ShopScene {
                     String::new(),
                     color::SLATE,
                 ),
-                ShopHit::TilePack(_) => {
-                    if let Some(ref pack) = self.pack_item {
+                ShopHit::TilePack(id) => {
+                    let idx = tile_pack_index_from_pick(id).unwrap_or(0);
+                    if let Some(pack) = self.pack_items.get(idx) {
                         let price = pack.kind.shop_price();
                         let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
@@ -3195,7 +3224,7 @@ impl SceneBehavior for ShopScene {
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
-                            format!("{}g (not enough gold)", price)
+                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
                         };
                         let col = if pack.sold {
                             color::SLATE
@@ -3317,13 +3346,15 @@ impl SceneBehavior for ShopScene {
                         intensity: 2.50,
                     });
                 }
-                ShopHit::TilePack(_) => {
+                ShopHit::TilePack(id) => {
+                    let idx = tile_pack_index_from_pick(id).unwrap_or(0);
+                    let center = layout
+                        .pack_centers_px
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(layout.pack_centers_px[0]);
                     point_lights.push(PointLight {
-                        pos: [
-                            layout.pack_center_px.0,
-                            layout.pack_center_px.1 - 30.0,
-                            layout.pack_center_px.2 + 60.0,
-                        ],
+                        pos: [center.0, center.1 - 30.0, center.2 + 60.0],
                         radius: 180.0,
                         color: [1.00, 0.92, 0.70],
                         intensity: 3.20,
@@ -3385,12 +3416,15 @@ impl SceneBehavior for ShopScene {
                         layout.owned_talisman_pos(oi)
                     }
                 }
-                ShopHit::TilePack(_) => {
-                    let cx = layout.pack_center_px.0;
-                    let cy = layout.pack_center_px.1;
-                    let cz = layout.pack_center_px.2;
+                ShopHit::TilePack(id) => {
+                    let idx = tile_pack_index_from_pick(id).unwrap_or(0);
+                    let center = layout
+                        .pack_centers_px
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(layout.pack_centers_px[0]);
                     let hh = layout.pack_extents[2] * 0.5;
-                    (cx, cy - hh, cz + hh)
+                    (center.0, center.1 - hh, center.2 + hh)
                 }
                 ShopHit::Dish(id) => {
                     if id == PICK_RELIC_DISH {
@@ -3470,8 +3504,7 @@ impl SceneBehavior for ShopScene {
             rotation: cam_rot,
             color: [0.88, 0.78, 0.42, 1.0],
             kind: Object3dKind::Plaque {
-                top: "Gold".to_string(),
-                bot: format!("{}g", ctx.run.gold.max(0)),
+                text: format!("Gold\n{}g", ctx.run.gold.max(0)),
                 pick_id: None,
             },
             focusable: false,
@@ -3483,52 +3516,162 @@ impl SceneBehavior for ShopScene {
         });
 
         // Info plaque: title+CTA above the hovered item.
-        if let Some((ref title, _, ref cta, cta_color)) = hover_info {
+        //
+        // Player-owned items live on the bottom-shelf trays (y≈0.84h), so the
+        // for-sale layout — title above, description below — pushes the
+        // description off the bottom of the screen. For owned items we draw a
+        // single combined plaque (title / sell price / description) anchored
+        // at its own arrange-mode placement so it can be positioned
+        // independently from the for-sale hover plaques.
+        let hover_is_owned = match hover {
+            Some(ShopHit::Relic(i)) => i >= n_for_sale_relics_hud,
+            Some(ShopHit::Ribbon(i)) => i >= self.zodiac_items.len(),
+            Some(ShopHit::Talisman(i)) => i >= self.talisman_items.len(),
+            _ => false,
+        };
+        if let Some((ref title, ref desc, ref cta, cta_color)) = hover_info {
             if !title.is_empty() {
                 if let Some((tpx, tpy, twz)) = hover_item_pos {
                     let plaque_rot =
                         glam::Mat4::from_rotation_x((-80.0_f32).to_radians()) * cam_rot;
-                    let plaque_w = w * 0.22;
-                    let plaque_h = h * 0.12;
                     let plaque_z = layout.mm(4.0);
 
-                    // Title plaque: anchored to the top face of the item's
-                    // AABB, floated up in screen-space and pulled forward
-                    // toward the camera. Arrange-mode placement contributes
-                    // additive deltas.
-                    let title_p = &self.positions.hover_title_plaque;
-                    let title_px = tpx + title_p.nx * w;
-                    let title_py = tpy - h * 0.28 + title_p.ny * h;
-                    let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
-                    frame.object3d(Object3d {
-                        pos: [title_px, title_py, title_wz],
-                        extents: [plaque_w, plaque_h, plaque_z],
-                        // Placement rotation is applied centrally via
-                        // `committed_arrange_rotations`; only the baseline
-                        // camera-facing orientation is baked here.
-                        rotation: plaque_rot,
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::Plaque {
-                            top: title.clone(),
-                            bot: cta.clone(),
-                            pick_id: None,
-                        },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: Some(PointLight {
-                            pos: [title_px, title_py, title_wz + layout.mm(25.0)],
-                            radius: h * 0.30,
-                            color: [
-                                cta_color[0].clamp(0.0, 1.0),
-                                cta_color[1].clamp(0.0, 1.0),
-                                cta_color[2].clamp(0.0, 1.0),
-                            ],
-                            intensity: 1.2,
-                        }),
-                        hover_target: 0.0,
-                        anim_id: 0xAC00,
-                        arrange_name: Some("shop.hover.title_plaque"),
-                    });
+                    if hover_is_owned {
+                        // Combined owned-item plaque: title / sell price /
+                        // description, stacked on one sign. Width sized like
+                        // the description plaque so long relic descriptions
+                        // don't shrink against the font clamp; height sized
+                        // to wrapped content.
+                        let owned_p = &self.positions.hover_owned_plaque;
+                        let plaque_w = w * 0.38;
+                        let text = if desc.is_empty() {
+                            format!("{}\n{}", title, cta)
+                        } else {
+                            format!("{}\n{}\n{}", title, cta, desc)
+                        };
+                        let font_px = (h * 0.022).max(14.0);
+                        let pad_frac = 0.1;
+                        let inner_w = plaque_w * (1.0 - 2.0 * pad_frac);
+                        let (line_count, line_h) = measure_plaque_wrap(
+                            load_ui_font().as_ref(),
+                            &text,
+                            inner_w,
+                            font_px,
+                        );
+                        let content_h = line_count as f32 * line_h;
+                        let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
+
+                        let px = tpx + owned_p.nx * w;
+                        let py = tpy + owned_p.ny * h;
+                        let wz = (twz + h * 0.05 + layout.mm(owned_p.lift_mm)).max(0.0);
+                        frame.object3d(Object3d {
+                            pos: [px, py, wz],
+                            extents: [plaque_w, plaque_h, plaque_z],
+                            rotation: plaque_rot,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            kind: Object3dKind::Plaque {
+                                text,
+                                pick_id: None,
+                            },
+                            focusable: false,
+                            scene_shaded: true,
+                            own_light: Some(PointLight {
+                                pos: [px, py, wz + layout.mm(25.0)],
+                                radius: h * 0.30,
+                                color: [
+                                    cta_color[0].clamp(0.0, 1.0),
+                                    cta_color[1].clamp(0.0, 1.0),
+                                    cta_color[2].clamp(0.0, 1.0),
+                                ],
+                                intensity: 1.2,
+                            }),
+                            hover_target: 0.0,
+                            anim_id: 0xAC0E,
+                            arrange_name: Some("shop.hover.owned_plaque"),
+                        });
+                    } else {
+                        let plaque_w = w * 0.22;
+                        let plaque_h = h * 0.12;
+
+                        // Title plaque: anchored to the top face of the
+                        // item's AABB, floated up in screen-space and pulled
+                        // forward toward the camera. Arrange-mode placement
+                        // contributes additive deltas.
+                        let title_p = &self.positions.hover_title_plaque;
+                        let title_px = tpx + title_p.nx * w;
+                        let title_py = tpy - h * 0.28 + title_p.ny * h;
+                        let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
+                        frame.object3d(Object3d {
+                            pos: [title_px, title_py, title_wz],
+                            extents: [plaque_w, plaque_h, plaque_z],
+                            rotation: plaque_rot,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            kind: Object3dKind::Plaque {
+                                text: format!("{}\n{}", title, cta),
+                                pick_id: None,
+                            },
+                            focusable: false,
+                            scene_shaded: true,
+                            own_light: Some(PointLight {
+                                pos: [title_px, title_py, title_wz + layout.mm(25.0)],
+                                radius: h * 0.30,
+                                color: [
+                                    cta_color[0].clamp(0.0, 1.0),
+                                    cta_color[1].clamp(0.0, 1.0),
+                                    cta_color[2].clamp(0.0, 1.0),
+                                ],
+                                intensity: 1.2,
+                            }),
+                            hover_target: 0.0,
+                            anim_id: 0xAC00,
+                            arrange_name: Some("shop.hover.title_plaque"),
+                        });
+
+                        // Description plaque: anchored below the item so the
+                        // player can read what the focused relic/ribbon/
+                        // talisman actually does.
+                        if !desc.is_empty() {
+                            let desc_p = &self.positions.hover_desc_plaque;
+                            let desc_px = tpx + desc_p.nx * w;
+                            // Wider + shorter than the title plaque.
+                            let desc_w = w * 0.38;
+                            let font_px = (h * 0.022).max(14.0);
+                            let pad_frac = 0.1;
+                            let inner_w = desc_w * (1.0 - 2.0 * pad_frac);
+                            let (line_count, line_h) = measure_plaque_wrap(
+                                load_ui_font().as_ref(),
+                                desc,
+                                inner_w,
+                                font_px,
+                            );
+                            let content_h = line_count as f32 * line_h;
+                            let desc_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.08);
+                            let desc_py = tpy + h * 0.10 + desc_p.ny * h;
+                            let desc_wz =
+                                (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
+                            frame.object3d(Object3d {
+                                pos: [desc_px, desc_py, desc_wz],
+                                extents: [desc_w, desc_h, plaque_z],
+                                rotation: plaque_rot,
+                                color: [1.0, 1.0, 1.0, 1.0],
+                                kind: Object3dKind::Plaque {
+                                    text: desc.clone(),
+                                    pick_id: None,
+                                },
+                                focusable: false,
+                                scene_shaded: true,
+                                own_light: Some(PointLight {
+                                    pos: [desc_px, desc_py, desc_wz + layout.mm(25.0)],
+                                    radius: h * 0.30,
+                                    color: [0.95, 0.90, 0.75],
+                                    intensity: 1.0,
+                                }),
+                                hover_target: 0.0,
+                                anim_id: 0xAC0D,
+                                arrange_name: Some("shop.hover.desc_plaque"),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -3660,7 +3803,8 @@ impl SceneBehavior for ShopScene {
                     .yaku_levels
                     .level_of(crate::core::yaku::YakuKind::FullHand)
                     > 1
-                || self.pack_item.as_ref().is_some_and(|p| p.sold);
+                || (!self.pack_items.is_empty()
+                    && self.pack_items.iter().any(|p| p.sold));
             let (flavor, hint) = if has_bought {
                 (
                     "Your loadout is ready.",
@@ -3694,7 +3838,7 @@ impl SceneBehavior for ShopScene {
                         "Owned talismans can be sold back.",
                         "Hover an owned talisman in the bottom talisman tray to inspect it or sell it for gold if you need room.",
                     ),
-                    ShopHit::Dish(id) if id == PICK_TILE_PACK => (
+                    ShopHit::Dish(id) if is_tile_pack_pick(id) => (
                         "Tile packs change the wall.",
                         "Packs add new tiles to future draws. They are optional, but can reshape the kinds of melds your run wants to make.",
                     ),
@@ -3832,7 +3976,7 @@ impl SceneBehavior for ShopScene {
         for (pid, r) in ctx.proj.aux_dish_rects.iter() {
             if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
                 if let Some(id) = pid {
-                    if *id == PICK_TILE_PACK {
+                    if is_tile_pack_pick(*id) {
                         focus_rect_graph.push((ShopFocus::Pack(*id), *r));
                     } else if *id == PICK_LEAVE_PROP {
                         focus_rect_graph.push((ShopFocus::NextRound, *r));
@@ -3840,7 +3984,7 @@ impl SceneBehavior for ShopScene {
                         focus_rect_graph.push((ShopFocus::Reroll, *r));
                     } else if *id == PICK_SELL_TRAY {
                         focus_rect_graph.push((ShopFocus::SellTray, *r));
-                    } else {
+                    } else if *id != PICK_RELIC_DISH {
                         focus_rect_graph.push((ShopFocus::Dish(*id), *r));
                     }
                 }
@@ -3856,7 +4000,7 @@ impl SceneBehavior for ShopScene {
                     .iter()
                     .find_map(|(t, r)| (*t == target).then_some(*r));
                 if let Some(rect) = rect_lookup {
-                    push_focus_ring(rect, scale, &mut quads);
+                    push_focus_ring(rect, scale, w, h, &mut quads);
                 }
             }
         }
@@ -3914,82 +4058,6 @@ impl SceneBehavior for ShopScene {
         // Push 2D layers onto the frame after all 3D content.
         frame.quads(quads);
         frame.texts(texts);
-
-        // ── Zodiac ribbon close-up celebration overlay ──────────────
-        if let Some(ref celeb) = self.zodiac_celebration {
-            // Semi-transparent dimmer.
-            frame.quad(GpuInstance {
-                rect: [0.0, 0.0, w, h],
-                color: [0.0, 0.0, 0.0, 0.72],
-            });
-            // Constellation starfield vignette behind the ribbon.
-            frame.starfield();
-
-            let t = celeb.elapsed();
-            // Ribbon dimensions — large and centered.
-            let ribbon_w = h * 0.12;
-            let ribbon_l = h * 0.55;
-            let cx = w * 0.5;
-            let cy = h * self.positions.celeb_zodiac.ny;
-            let lift = layout.mm(self.positions.celeb_zodiac.lift_mm);
-
-            // ── Snake / sway animation ──────────────────────────────
-            // Primary sway: slow sinusoidal yaw oscillation.
-            let sway_yaw = (t * 1.8).sin() * 12.0; // degrees
-            // Secondary roll: faster, smaller, phase-offset from yaw
-            // so the ribbon traces an organic figure-eight path.
-            let sway_roll = (t * 2.5 + 0.7).sin() * 6.0; // degrees
-            // Gentle forward tilt so the face catches the light.
-            let tilt = 8.0 + (t * 1.2).sin() * 3.0; // degrees
-
-            // Fade-in: quick opacity ramp over the first 0.3s.
-            let alpha = (t / 0.3).clamp(0.0, 1.0);
-
-            frame.object3d_batch(vec![Object3d {
-                pos: [cx, cy, lift],
-                extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
-                rotation: rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll),
-                color: [1.0, 1.0, 1.0, alpha],
-                kind: Object3dKind::ZodiacRibbon {
-                    kind: Some(celeb.kind),
-                },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: None,
-            }]);
-
-            // Title: yaku name above the ribbon.
-            let title_font = (h * 0.04).max(24.0);
-            let title_y = h * 0.10;
-            frame.text(TextLabel {
-                text: format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level),
-                rect: [0.0, title_y, w, title_font * 1.5],
-                font_px: Some(title_font),
-                color: [0.95, 0.78, 0.25, alpha],
-                align: TextAlign::Center,
-                ..Default::default()
-            });
-
-            // Dismiss prompt — pulsing at the bottom.
-            let prompt_font = (h * 0.028).max(18.0);
-            let prompt_y = h * 0.88;
-            let pulse_alpha = alpha * (0.5 + 0.5 * (t * 3.0).sin());
-            frame.text(TextLabel {
-                text: "Click or press confirm to continue".to_string(),
-                rect: [0.0, prompt_y, w, prompt_font * 1.5],
-                font_px: Some(prompt_font),
-                color: [1.0, 1.0, 1.0, pulse_alpha],
-                align: TextAlign::Center,
-                ..Default::default()
-            });
-
-            // Block all shop buttons so clicks go to the celebration.
-            buttons.clear();
-            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), SHOP_3D_HIT_ID));
-        }
 
         // ── Tile-pack opening celebration overlay ─────────────────────
         if let Some(ref celeb) = self.pack_celebration {

@@ -83,7 +83,10 @@ impl SceneBehavior for TutorialSummaryScene {
         match action {
             Some(SummaryAction::MeldGuide) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                Some(Scene::MeldGuide(MeldGuideScene::new(true)))
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                    Scene::MeldGuide(MeldGuideScene::new(true)),
+                ));
+                None
             }
             Some(SummaryAction::Continue) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));

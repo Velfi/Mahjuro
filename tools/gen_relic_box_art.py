@@ -614,6 +614,14 @@ RELIC_PROMPTS: dict[str, str] = {
         "reflection. Candle smoke, carved symbols on the altar. The blade "
         "has a faint golden edge. Navy, ochre, rust. Sacrificial precision."
     ),
+    "disgust": (
+        "A weathered cast-iron weather vane on a slate roof, the East and "
+        "West cardinal arms bent inward until they nearly touch — fused at "
+        "the tips by years of corrosion into a single grimacing mouth. The "
+        "North and South arms hang slack and unused. A sour wind visibly "
+        "curls from the joined mouth in pale green wisps. Overcast sky, "
+        "muted teal and tarnished bronze. Quietly grotesque."
+    ),
 
     # ═══════════════════════════════════════════════════════════════════
     # DISABLED/STUB — generate art anyway for when they ship
@@ -733,6 +741,7 @@ RELIC_RARITY: dict[str, str] = {
     "smoke_bomb": "rare",
     "phantom_relic": "rare",
     "ritual_blade": "rare",
+    "disgust": "rare",
 }
 
 # Subtle border tint color per rarity (RGBA).

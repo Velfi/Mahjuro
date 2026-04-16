@@ -1,8 +1,19 @@
 //! Native OS menubar "Debug" menu using muda.
 //!
 //! Provides debug shortcuts for setting player level, gold, relics, and card inventory.
+//!
+//! ## Cross-platform installation
+//!
+//! - **macOS**: installed as the global NSApp menu via `init_for_nsapp()`.
+//! - **Windows**: installed onto the main window's HWND via `init_for_hwnd()`.
+//!   The HWND is extracted from the winit window's `RawWindowHandle::Win32`.
+//! - **Linux**: muda requires GTK on Linux, which the rest of the app does not
+//!   pull in. The menu is built (so `poll()` continues to work for any
+//!   programmatically-injected events) but is *not* attached to the window —
+//!   Linux users reach the same actions via in-app keyboard shortcuts instead.
 
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+use winit::window::Window;
 
 use crate::core::boss::{ALL_BOSSES, BossKind, FINAL_BOSSES};
 use crate::core::relic::{RelicId, all_relic_defs};
@@ -49,6 +60,10 @@ pub enum DebugAction {
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
+    /// Spawn a burst of demo score popups streaming toward the reel —
+    /// visually exercises the chips/mult/gold polychrome streaming effect
+    /// without needing to play a hand. Only meaningful in the gameplay scene.
+    DemoCascade,
     /// Spawn a blank test modal overlay to verify overlay blocking behavior.
     TestOverlay,
     /// Jump directly to the victory scene for presentation/debugging.
@@ -64,6 +79,9 @@ pub enum DebugAction {
     SaveShopLayout,
     /// Save the current gameplay scene [`GameplayPositions`] to JSON.
     SaveGameplayRelicLayout,
+    /// Push the material viewer pushdown scene onto the overlay stack.
+    /// Shows one preview orb per `MaterialKind` for visual inspection.
+    OpenMaterialViewer,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -74,8 +92,9 @@ pub struct DebugMenuBar {
 }
 
 impl DebugMenuBar {
-    /// Build and install the debug menu bar. Must be called on the main thread.
-    pub fn new() -> Self {
+    /// Build and install the debug menu bar. Must be called on the main thread,
+    /// after the window is created (Windows needs the HWND).
+    pub fn new(window: &Window) -> Self {
         let menu = Menu::new();
 
         // --- App submenu (macOS convention: first submenu is the app menu) ---
@@ -182,6 +201,14 @@ impl DebugMenuBar {
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
         let _ = debug_menu.append(&test_overlay_item);
 
+        // Material viewer: grid of preview orbs, one per MaterialKind.
+        let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
+        mappings.push((
+            material_viewer_item.id().clone(),
+            DebugAction::OpenMaterialViewer,
+        ));
+        let _ = debug_menu.append(&material_viewer_item);
+
         // ── Gameplay Cheats ───────────────────────────────────────────────────
         let _ = debug_menu.append(&PredefinedMenuItem::separator());
 
@@ -194,6 +221,11 @@ impl DebugMenuBar {
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
         let _ = debug_menu.append(&open_pack_item);
+
+        // Fire a demo popup cascade in the gameplay scene.
+        let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
+        mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));
+        let _ = debug_menu.append(&demo_cascade_item);
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);
@@ -267,9 +299,7 @@ impl DebugMenuBar {
 
         let _ = menu.append(&debug_menu);
 
-        // Install as macOS global app menu.
-        #[cfg(target_os = "macos")]
-        menu.init_for_nsapp();
+        install_menu(&menu, window);
 
         Self { menu, mappings }
     }
@@ -287,4 +317,38 @@ impl DebugMenuBar {
         }
         actions
     }
+}
+
+/// Per-OS dispatch for attaching the menu to the active app/window.
+#[cfg(target_os = "macos")]
+fn install_menu(menu: &Menu, _window: &Window) {
+    menu.init_for_nsapp();
+}
+
+#[cfg(target_os = "windows")]
+fn install_menu(menu: &Menu, window: &Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = match window.window_handle() {
+        Ok(h) => h,
+        Err(_) => {
+            log::warn!("[Debug] window handle unavailable; debug menu not installed");
+            return;
+        }
+    };
+    if let RawWindowHandle::Win32(h) = handle.as_raw() {
+        let hwnd = h.hwnd.get();
+        if let Err(e) = unsafe { menu.init_for_hwnd(hwnd) } {
+            log::warn!("[Debug] init_for_hwnd failed: {e}");
+        }
+    } else {
+        log::warn!("[Debug] non-Win32 window handle on Windows; menu not installed");
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn install_menu(_menu: &Menu, _window: &Window) {
+    // Linux/other: muda requires GTK on Linux. The menu object exists so
+    // `poll()` stays valid, but it isn't attached to a window. Use the
+    // in-app keyboard shortcuts instead (e.g. Ctrl+Shift+M for the
+    // material viewer).
 }

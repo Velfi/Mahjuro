@@ -14,18 +14,18 @@
 //! (panel headers, per-shrine labels, skip button) sits on top.
 
 use std::cell::Cell;
-use std::time::Instant;
 
 use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
-use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, DishExplicit, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
-use crate::render::table_transform::{mesh_y_thickness_along_local_y_to_z_up, rot_rz_ry_rx_deg, rot_z_rad};
+use crate::render::table_transform::{
+    mesh_y_thickness_along_local_y_to_z_up, rot_z_rad,
+};
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -33,48 +33,6 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use super::gameplay::GameplayScene;
 use super::pause_menu::PauseMenu;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-
-/// Zodiac ribbon close-up celebration for the pick-blind scene.
-/// Mirrors `ShopScene`'s `ZodiacCelebration` — shows the activated
-/// ribbon front and center with a sinusoidal sway animation.
-struct ZodiacCelebration {
-    kind: ZodiacKind,
-    yaku_name: &'static str,
-    new_level: u32,
-    started_at: Instant,
-    dismissed: bool,
-}
-
-impl ZodiacCelebration {
-    /// Minimum on-screen time before the player can dismiss the celebration.
-    /// Filters out stale input (e.g. the Confirm that triggered the scene
-    /// transition into pick-blind) so the overlay doesn't close on frame 1.
-    const DISMISS_GRACE: f32 = 0.35;
-
-    fn new(kind: ZodiacKind, yaku_name: &'static str, new_level: u32) -> Self {
-        Self {
-            kind,
-            yaku_name,
-            new_level,
-            started_at: Instant::now(),
-            dismissed: false,
-        }
-    }
-
-    fn elapsed(&self) -> f32 {
-        Instant::now()
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32()
-    }
-
-    fn can_dismiss(&self) -> bool {
-        self.elapsed() >= Self::DISMISS_GRACE
-    }
-
-    fn is_done(&self) -> bool {
-        self.dismissed
-    }
-}
 
 /// `pick_id` for the play altar `DishExplicit`. Used to look up its
 /// projected screen rect in `ctx.aux_dish_rects` for label placement.
@@ -105,8 +63,6 @@ pub struct PickBlindScene {
     last_play_rect: Cell<Option<[f32; 4]>>,
     /// Cached projected screen rect of the skip altar.
     last_skip_rect: Cell<Option<[f32; 4]>>,
-    /// Active zodiac ribbon close-up celebration, if any.
-    zodiac_celebration: Option<ZodiacCelebration>,
 }
 
 impl PickBlindScene {
@@ -118,7 +74,6 @@ impl PickBlindScene {
             pause_menu: PauseMenu::new(),
             last_play_rect: Cell::new(None),
             last_skip_rect: Cell::new(None),
-            zodiac_celebration: None,
         }
     }
 
@@ -182,11 +137,19 @@ impl PickBlindScene {
 /// Shared placement for the floating plaque above the upcoming shrine.
 /// Keeping the light and the physical plaque on the same anchor avoids
 /// "fixing" the mesh position while leaving its highlight behind.
+///
+/// `plaque_h` is the (clamped) vertical extent of the plaque. On small
+/// screens the plaque hits its minimum-size clamp while the shrine keeps
+/// scaling down with the window, so a pure `shrine_ext[1] * factor` lift
+/// puts the plaque's bottom edge inside the shrine roof. We enforce a
+/// minimum clearance between the plaque bottom and the shrine top so the
+/// plaque stays clearly floating above regardless of window size.
 fn upcoming_plaque_anchor(
     upcoming: BlindKind,
     shrine_px: f32,
     shrine_py: f32,
     shrine_ext: [f32; 3],
+    plaque_h: f32,
 ) -> (f32, f32, f32) {
     let (py_factor, world_y_factor) = if upcoming == BlindKind::Small {
         (-0.06, 1.62)
@@ -194,7 +157,13 @@ fn upcoming_plaque_anchor(
         (0.10, 1.45)
     };
     let plaque_py = shrine_py + shrine_ext[2] * py_factor;
-    let plaque_world_y = shrine_ext[1] * world_y_factor;
+    let natural_world_y = shrine_ext[1] * world_y_factor;
+    // Ensure the plaque bottom sits at least `min_clearance` above the
+    // shrine top. On large screens `natural_world_y` already exceeds this
+    // floor and the branch is a no-op.
+    let min_clearance = plaque_h * 0.25;
+    let min_world_y = shrine_ext[1] + plaque_h * 0.5 + min_clearance;
+    let plaque_world_y = natural_world_y.max(min_world_y);
     (shrine_px, plaque_py, plaque_world_y)
 }
 
@@ -250,11 +219,7 @@ fn estimated_wrapped_lines(text: &str, max_chars: usize) -> usize {
         }
     }
 
-    if lines == 0 {
-        1
-    } else {
-        lines
-    }
+    if lines == 0 { 1 } else { lines }
 }
 
 /// Pick-blind shrine ofuda sizing. Boss names and rule overrides vary a lot
@@ -454,40 +419,22 @@ impl SceneBehavior for PickBlindScene {
     }
 
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused || self.zodiac_celebration.is_some()
+        self.pause_menu.paused
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         // Pick up a pending zodiac celebration from a ZodiacBlessing tag.
-        if self.zodiac_celebration.is_none() {
-            if let Some((kind, yaku, new_level)) = ctx.run.pending_zodiac_celebration.take() {
-                self.zodiac_celebration =
-                    Some(ZodiacCelebration::new(kind, yaku.name(), new_level));
-                ctx.bus
-                    .push(crate::game::event_bus::GameEvent::ZodiacReveal);
-            }
-        }
-
-        // Zodiac ribbon close-up — swallow input until the player dismisses it.
-        if let Some(ref mut celeb) = self.zodiac_celebration {
-            let has_input = ctx.actions.iter().any(|a| {
-                matches!(
-                    a,
-                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
-                )
-            }) || !ctx.button_clicks.is_empty();
-            if has_input && celeb.can_dismiss() {
-                celeb.dismissed = true;
-            }
-            if celeb.is_done() {
-                let celeb = self.zodiac_celebration.take().unwrap();
-                ctx.bus
-                    .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
-                // Celebration finished — drop through to normal update.
-                let _ = celeb;
-            } else {
-                return None;
-            }
+        if let Some((kind, yaku, new_level)) = ctx.run.pending_zodiac_celebration.take() {
+            ctx.bus
+                .push(crate::game::event_bus::GameEvent::ZodiacReveal);
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
+                    kind,
+                    yaku.name(),
+                    new_level,
+                )),
+            ));
+            return None;
         }
 
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
@@ -541,6 +488,7 @@ impl SceneBehavior for PickBlindScene {
             }
             Some(BlindAction::PlayBlind) | Some(BlindAction::SkipBlind) => {
                 ctx.run.apply_blind(upcoming);
+                ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
                 Some(Scene::Gameplay(GameplayScene::new()))
             }
             None => None,
@@ -628,7 +576,8 @@ impl SceneBehavior for PickBlindScene {
                 own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,            });
+                arrange_name: None,
+            });
         }
         frame.object3d_batch(shrine_objects);
 
@@ -677,7 +626,8 @@ impl SceneBehavior for PickBlindScene {
             own_light: None,
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: None,        }]);
+            arrange_name: None,
+        }]);
 
         if can_skip {
             let (skip_px, skip_py) = layout.skip_dish_anchor_px;
@@ -708,7 +658,8 @@ impl SceneBehavior for PickBlindScene {
                 own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,            }]);
+                arrange_name: None,
+            }]);
         }
 
         // ── Lighting: temple hall at night ────────────────────────────
@@ -766,7 +717,7 @@ impl SceneBehavior for PickBlindScene {
         let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
         let plaque_h = (h * 0.26).clamp(190.0, 300.0);
         let (raw_plaque_px, plaque_py, plaque_world_y) =
-            upcoming_plaque_anchor(upcoming, up_px, up_py, up_ext);
+            upcoming_plaque_anchor(upcoming, up_px, up_py, up_ext, plaque_h);
         let plaque_px = raw_plaque_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
         point_lights.push(PointLight {
             pos: spot,
@@ -801,7 +752,7 @@ impl SceneBehavior for PickBlindScene {
             pos: [
                 plaque_px,
                 plaque_py - plaque_h * 0.06,
-                plaque_world_y + plaque_h * 0.22,
+                plaque_world_y + plaque_h * 0.45,
             ],
             radius: plaque_w * 0.46,
             color: [1.00, 0.93, 0.80],
@@ -819,10 +770,13 @@ impl SceneBehavior for PickBlindScene {
                     .unwrap_or(def.description);
                 let (ofuda_w, ofuda_h) =
                     auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
-                let ofuda_px =
-                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 4.0).max(ofuda_w * 0.5 + 8.0);
+                // Mirror the light anchor to the ofuda's drawn position below
+                // (the wider gap keeps the plaque's rotated side from clipping
+                // the paper decal).
+                let ofuda_px = (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0)
+                    .max(ofuda_w * 0.5 + 8.0);
                 let ofuda_py = plaque_py + up_ext[2] * 0.15;
-                let ofuda_world_y = plaque_world_y * 0.86;
+                let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
                 point_lights.push(PointLight {
                     pos: [
                         ofuda_px - ofuda_w * 0.06,
@@ -989,7 +943,7 @@ impl SceneBehavior for PickBlindScene {
             let plaque_w = (w * 0.70).clamp(560.0, 1000.0);
             let plaque_h = (h * 0.26).clamp(190.0, 300.0);
             let (raw_plaque_px, plaque_py, plaque_world_y) =
-                upcoming_plaque_anchor(upcoming, shrine_px, shrine_py, shrine_ext);
+                upcoming_plaque_anchor(upcoming, shrine_px, shrine_py, shrine_ext, plaque_h);
             let plaque_px = raw_plaque_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
 
             let blind_name = if upcoming == BlindKind::Boss {
@@ -1011,17 +965,13 @@ impl SceneBehavior for PickBlindScene {
                 rotation: cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Plaque {
-                    top: format!(
-                        "ANTE {}/{} · {}",
+                    text: format!(
+                        "ANTE {}/{} · {}\nTarget {}   ·   Reward ${}",
                         ctx.run.ante,
                         crate::game::run::FINAL_ANTE,
-                        blind_name
-                    ),
-                    bot: format!(
-                        "Target {}   ·   Reward ${}   ·   Gold {}",
+                        blind_name,
                         target_value,
                         upcoming.clear_reward(),
-                        ctx.run.gold,
                     ),
                     pick_id: None,
                 },
@@ -1030,7 +980,8 @@ impl SceneBehavior for PickBlindScene {
                 own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,            });
+                arrange_name: None,
+            });
 
             // Boss blinds get an ofuda beside the plaque showing the rule
             // description + tier — the plaque's two lines are already full.
@@ -1047,11 +998,18 @@ impl SceneBehavior for PickBlindScene {
                     let (ofuda_w, ofuda_h) =
                         auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
                     // Position to the left of the plaque, but keep it tucked
-                    // close enough to share the plaque accent light.
-                    let ofuda_px =
-                        (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 4.0).max(ofuda_w * 0.5 + 8.0);
+                    // close enough to share the plaque accent light. The gap
+                    // has to clear the plaque's rotated thickness (extents z =
+                    // 10, tilted ~60°) — a tight 4px gap let the plaque's left
+                    // side face z-fight with the ofuda's front face and punch
+                    // holes through the boss-rule decal.
+                    let ofuda_px = (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0)
+                        .max(ofuda_w * 0.5 + 8.0);
                     let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 18.0;
-                    let ofuda_world_y = plaque_world_y * 0.86;
+                    // Float the ofuda slightly higher than the plaque's nominal
+                    // lift so its front face clearly sits in front of anything
+                    // behind it (shrine plinths) and doesn't co-planar-fight.
+                    let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
                     frame.object3d(Object3d {
                         pos: [ofuda_px, ofuda_py, ofuda_world_y],
                         extents: [ofuda_w, ofuda_h, 3.0],
@@ -1067,7 +1025,8 @@ impl SceneBehavior for PickBlindScene {
                         own_light: None,
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: None,                    });
+                        arrange_name: None,
+                    });
                 }
             }
         }
@@ -1233,10 +1192,10 @@ impl SceneBehavior for PickBlindScene {
         // can immediately read which action they're about to confirm.
         let big_ring_scale = scale * 3.0;
         if play_focused_label {
-            push_focus_ring(play_anchor_rect, big_ring_scale, &mut quads);
+            push_focus_ring(play_anchor_rect, big_ring_scale, w, h, &mut quads);
         }
         if skip_focused_label && can_skip {
-            push_focus_ring(skip_anchor_rect, big_ring_scale, &mut quads);
+            push_focus_ring(skip_anchor_rect, big_ring_scale, w, h, &mut quads);
         }
 
         // Register focus-tree click targets for PlayBlind + SkipBlind.
@@ -1266,77 +1225,15 @@ impl SceneBehavior for PickBlindScene {
         // was only emitted inside the `transition_at` block below, which
         // meant the renderer's pass split saw `split_idx = None` on every
         // idle pick-blind frame and skipped the volume pass entirely —
-        // the fluid sim was still simmering full of density from
-        // gameplay candle plumes, but it was never drawn. The transition
-        // burst still works because it pumps wind impulses into the same
+        // the fluid sim was still simmering full of density carried over
+        // from gameplay, but it was never drawn. The transition burst
+        // still works because it pumps wind impulses into the same
         // marker; it just no longer has to push the marker itself.
         frame.fluid_smoke();
 
         // Push 2D layers + metadata onto the frame.
         frame.quads(quads);
         frame.texts(texts);
-
-        // ── Zodiac ribbon close-up celebration overlay ──────────────
-        if let Some(ref celeb) = self.zodiac_celebration {
-            // Semi-transparent dimmer.
-            frame.quad(GpuInstance {
-                rect: [0.0, 0.0, w, h],
-                color: [0.0, 0.0, 0.0, 0.72],
-            });
-            frame.starfield();
-
-            let t = celeb.elapsed();
-            let ribbon_w = h * 0.12;
-            let ribbon_l = h * 0.55;
-            let cx = w * 0.5;
-            let cy = h * 0.28;
-            let lift = h * 0.50;
-
-            let sway_yaw = (t * 1.8).sin() * 12.0;
-            let sway_roll = (t * 2.5 + 0.7).sin() * 6.0;
-            let tilt = 8.0 + (t * 1.2).sin() * 3.0;
-            let alpha = (t / 0.3).clamp(0.0, 1.0);
-
-            frame.object3d_batch(vec![Object3d {
-                pos: [cx, cy, lift],
-                extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
-                rotation: rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll),
-                color: [1.0, 1.0, 1.0, alpha],
-                kind: Object3dKind::ZodiacRibbon { kind: Some(celeb.kind) },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: None,            }]);
-
-            let title_font = (h * 0.04).max(24.0);
-            let title_y = h * 0.10;
-            frame.text(TextLabel {
-                text: format!("{} Lvl.{}", celeb.yaku_name, celeb.new_level),
-                rect: [0.0, title_y, w, title_font * 1.5],
-                font_px: Some(title_font),
-                color: [0.95, 0.78, 0.25, alpha],
-                align: TextAlign::Center,
-                ..Default::default()
-            });
-
-            let prompt_font = (h * 0.028).max(18.0);
-            let prompt_y = h * 0.88;
-            let pulse_alpha = alpha * (0.5 + 0.5 * (t * 3.0).sin());
-            frame.text(TextLabel {
-                text: "Click or press confirm to continue".to_string(),
-                rect: [0.0, prompt_y, w, prompt_font * 1.5],
-                font_px: Some(prompt_font),
-                color: [1.0, 1.0, 1.0, pulse_alpha],
-                align: TextAlign::Center,
-                ..Default::default()
-            });
-
-            // Block all scene buttons — clicks go to the celebration.
-            buttons.clear();
-            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
-        }
 
         frame.buttons = buttons;
         frame.window_title = "Mahjuro".to_string();

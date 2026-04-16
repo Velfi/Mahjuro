@@ -1314,7 +1314,7 @@ impl SceneBehavior for TutorialCampaignScene {
             }
             _ => None,
         } {
-            focus_nav::push_focus_ring(rect, scale, &mut fg_quads);
+            focus_nav::push_focus_ring(rect, scale, w, h, &mut fg_quads);
         }
 
         frame.quads(bg_quads);

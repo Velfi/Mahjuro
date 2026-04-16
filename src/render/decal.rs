@@ -543,8 +543,7 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 /// line so the engraving still reads after the texture is bilinear-stretched
 /// across the on-screen plaque face.
 pub fn rasterize_plaque_decal(
-    top: &str,
-    bot: &str,
+    text: &str,
     ui_font: Option<&fontdue::Font>,
     w: u32,
     h: u32,
@@ -553,86 +552,156 @@ pub fn rasterize_plaque_decal(
     let Some(font) = ui_font else {
         return rgba;
     };
+    if text.trim().is_empty() {
+        return rgba;
+    }
+
     // Horizontal padding so glyphs don't run into the engraved-edge silhouette
-    // of the plaque face. Vertical padding is kept tight so the two lines fill
-    // most of the texture height — the plaque face is now upright (no
-    // foreshortening tilt) so the text needs every vertical pixel it can get
-    // to avoid looking squished after bilinear stretch onto the wood face.
+    // of the plaque face. Vertical padding is kept tight so the text fills
+    // most of the texture height — the face is upright (no foreshortening
+    // tilt) so every vertical pixel helps it read after the bilinear stretch
+    // onto the wood.
     let pad_x = (w as f32 * 0.05) as u32;
     let pad_y = (h as f32 * 0.05) as u32;
     let inner_w = w.saturating_sub(pad_x * 2).max(1);
     let inner_h = h.saturating_sub(pad_y * 2).max(1);
 
-    // Pick font sizes against a *nominal* half-band, then build tight bands
-    // sized just large enough for the chosen glyphs. This collapses the
-    // empty whitespace that the previous equal-half layout left between the
-    // two lines, so the engraving reads as a compact stacked label.
-    let nominal_band = inner_h / 2;
-    let pin_for = |text: &str, band_h: u32| -> f32 {
-        let by_height = band_h as f32 * 0.85;
-        let chars = text.chars().count().max(1) as f32;
-        // Allow up to ~1.7x glyph density horizontally before clamping —
-        // looser than the default 1.5 because the plaque text is short.
-        let by_width = inner_w as f32 * 1.7 / chars;
-        by_height.min(by_width).max(12.0)
-    };
-    let top_px = pin_for(top, nominal_band);
-    let bot_px = pin_for(bot, nominal_band);
+    // Dynamically-sized text container: try a sequence of candidate font
+    // sizes (largest first), word-wrapping at each size to determine how many
+    // lines the text actually occupies. Pick the biggest size where both:
+    //   line_count * line_height ≤ inner_h, and
+    //   no single line's advance exceeds inner_w.
+    // Forced newlines in the input (`\n`) are honored as hard breaks.
+    let (chosen_px, chosen_lines) =
+        fit_plaque_text(font, text, inner_w as f32, inner_h as f32);
 
-    // Tight band heights: ~1.15× font_px gives just enough room for ascender
-    // + descender without leaving a gap that puffs the line spacing.
-    let top_h = ((top_px * 1.15) as u32).min(inner_h).max(1);
-    let bot_h = ((bot_px * 1.15) as u32)
-        .min(inner_h - top_h.min(inner_h - 1))
-        .max(1);
-
-    let top_band =
-        rasterize_label_styled(font, top, inner_w, top_h, Some(top_px), LabelAlign::Center);
-    let bot_band =
-        rasterize_label_styled(font, bot, inner_w, bot_h, Some(bot_px), LabelAlign::Center);
+    // Rasterize the wrapped block at the chosen size. `rasterize_block`
+    // handles multi-line layout (stable line-height, per-line alignment).
+    let line_refs: Vec<&str> = chosen_lines.iter().map(|s| s.as_str()).collect();
+    let block = rasterize_block(
+        font,
+        None,
+        &line_refs,
+        inner_w,
+        inner_h,
+        Some(chosen_px),
+        LabelAlign::Center,
+    );
 
     // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
-    // by a bright pale-gold highlight offset up-left. Three passes per band
-    // give the engraving a metallic, leafed-gold read at any size.
+    // by a bright pale-gold highlight offset up-left. Three passes give the
+    // engraving a metallic, leafed-gold read at any size.
     let gold_base = [0.92_f32, 0.74, 0.28, 1.0]; // rich antique gold
     let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0]; // pale champagne sheen
     let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92]; // burnt umber recess
 
-    let gild = |band: &[u8], band_h: u32, y_off: u32, rgba: &mut Vec<u8>| {
-        // Drop shadow first (offset down-right so the recess reads from above).
-        blit_tinted(
-            band,
-            inner_w,
-            band_h,
-            rgba,
-            w,
-            pad_x + 3,
-            y_off + 3,
-            gold_shadow,
-        );
-        // Gold body.
-        blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, gold_base);
-        // Bright highlight offset up-left so the leaf catches the light.
-        blit_tinted(
-            band,
-            inner_w,
-            band_h,
-            rgba,
-            w,
-            pad_x.saturating_sub(1),
-            y_off.saturating_sub(1),
-            gold_highlight,
-        );
-    };
-
-    // Centre the tight two-band stack vertically inside `inner_h` so the
-    // engraving sits in the middle of the plaque face rather than hugging
-    // the top edge.
-    let stack_h = top_h + bot_h;
-    let stack_top = pad_y + inner_h.saturating_sub(stack_h) / 2;
-    gild(&top_band, top_h, stack_top, &mut rgba);
-    gild(&bot_band, bot_h, stack_top + top_h, &mut rgba);
+    blit_tinted(
+        &block,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        w,
+        pad_x + 3,
+        pad_y + 3,
+        gold_shadow,
+    );
+    blit_tinted(
+        &block, inner_w, inner_h, &mut rgba, w, pad_x, pad_y, gold_base,
+    );
+    blit_tinted(
+        &block,
+        inner_w,
+        inner_h,
+        &mut rgba,
+        w,
+        pad_x.saturating_sub(1),
+        pad_y.saturating_sub(1),
+        gold_highlight,
+    );
     rgba
+}
+
+/// Fit `text` into a `(w, h)` area by searching for the largest font size
+/// whose word-wrapped layout fits vertically and horizontally. Returns the
+/// chosen `font_px` and the wrapped lines at that size. Honors explicit
+/// `\n` as hard line breaks.
+fn fit_plaque_text(
+    font: &fontdue::Font,
+    text: &str,
+    w: f32,
+    h: f32,
+) -> (f32, Vec<String>) {
+    // Candidate sizes sweep downward from a height-based ceiling. We let
+    // word-wrap take up vertical space so short strings grow as large as the
+    // box height allows, rather than being pinned by their single-line width.
+    let max_by_h = h * 0.85;
+    let mut candidate = max_by_h.max(12.0);
+
+    let min_px = 10.0_f32;
+    loop {
+        let lines = wrap_lines(font, text, candidate, w);
+        let line_metrics = font.horizontal_line_metrics(candidate);
+        let line_h = line_metrics
+            .map(|lm| lm.new_line_size)
+            .unwrap_or(candidate * 1.2);
+        let total_h = line_h * lines.len() as f32;
+        // Widest line's advance at this size.
+        let widest = lines
+            .iter()
+            .map(|s| advance_width(font, s, candidate))
+            .fold(0.0_f32, f32::max);
+        if total_h <= h && widest <= w {
+            return (candidate, lines);
+        }
+        if candidate <= min_px {
+            // Floor: accept the smallest legal size even if it overflows a
+            // little rather than producing unreadable glyphs.
+            return (min_px, lines);
+        }
+        // Shrink by 7% per iteration — fast enough to converge, fine enough
+        // to land on a visually distinct size per step.
+        candidate = (candidate * 0.93).max(min_px);
+    }
+}
+
+/// Word-wrap `text` to the given pixel width at `font_px`. Treats explicit
+/// `\n` as hard line breaks and otherwise greedy-wraps on whitespace. If a
+/// single word is wider than `max_w`, it's placed on its own line (we don't
+/// break inside words — the size-fit loop will shrink further instead).
+fn wrap_lines(font: &fontdue::Font, text: &str, font_px: f32, max_w: f32) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for hard in text.split('\n') {
+        let mut line = String::new();
+        for word in hard.split_whitespace() {
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", line, word)
+            };
+            if advance_width(font, &candidate, font_px) <= max_w || line.is_empty() {
+                line = candidate;
+            } else {
+                out.push(std::mem::take(&mut line));
+                line = word.to_string();
+            }
+        }
+        if !line.is_empty() {
+            out.push(line);
+        } else if hard.is_empty() {
+            // Preserve blank lines from explicit `\n\n` runs.
+            out.push(String::new());
+        }
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+fn advance_width(font: &fontdue::Font, text: &str, font_px: f32) -> f32 {
+    text.chars()
+        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .sum()
 }
 
 /// Reference height (in texels) for the plaque decal texture. The actual
@@ -640,6 +709,28 @@ pub fn rasterize_plaque_decal(
 /// ratio so glyphs don't get stretched by the bilinear sampler when the face
 /// isn't ~landscape — see the call site in `wgpu_renderer.rs`.
 pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
+
+/// Measure how tall a plaque needs to be to fit `text` at `font_px`, wrapping
+/// at `inner_w` pixels. Returns `(line_count, line_height_px)` — multiply and
+/// add the scene's chosen vertical padding to get the full plaque pixel height.
+/// Lets shop/gameplay scenes size the description plaque from the wrapped
+/// line count instead of shrinking the font to fit a fixed box.
+pub fn measure_plaque_wrap(
+    ui_font: Option<&fontdue::Font>,
+    text: &str,
+    inner_w: f32,
+    font_px: f32,
+) -> (usize, f32) {
+    let Some(font) = ui_font else {
+        return (1, font_px * 1.2);
+    };
+    let line_h = font
+        .horizontal_line_metrics(font_px)
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(font_px * 1.2);
+    let lines = wrap_lines(font, text, font_px, inner_w);
+    (lines.len().max(1), line_h)
+}
 
 /// Reference long-edge size (in texels) for the ofuda decal texture. The
 /// other dimension is computed at draw time from the paper face's world-space

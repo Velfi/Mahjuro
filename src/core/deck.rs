@@ -125,7 +125,7 @@ impl Wall {
 
     /// Build a wall with tile-pack extras injected, then filter removed IDs.
     /// Pack tiles get pre-stamped enhancements from `enhancements` (e.g.
-    /// Polychrome pack tiles carry their ×1.2 mult enhancement).
+    /// Polychrome pack tiles carry their ×1.15 mult enhancement).
     /// When `overflow` is true, 2 extra copies per tile face are added with
     /// IDs starting at [`OVERFLOW_TILE_ID_BASE`] so they can be stripped
     /// mid-round if the relic is lost.
@@ -196,6 +196,25 @@ impl Wall {
     /// The dora indicator tiles themselves (for UI display).
     pub fn dora_indicator_tiles(&self) -> &[Tile] {
         &self.dora_indicators
+    }
+
+    /// Reveal an additional dora indicator (used by the Dora Crown relic).
+    /// Picks the next unused wall tile from the back so it does not collide
+    /// with the existing indicator and never gets drawn into a hand.
+    pub fn reveal_extra_dora_indicator(&mut self) {
+        let mut idx = self.tiles.len();
+        while idx > 0 {
+            idx -= 1;
+            let candidate = self.tiles[idx];
+            if matches!(candidate.suit, Suit::Flower | Suit::Season) {
+                continue;
+            }
+            if self.dora_indicators.iter().any(|t| t.id == candidate.id) {
+                continue;
+            }
+            self.dora_indicators.push(candidate);
+            return;
+        }
     }
 
     /// How many tiles remain in the wall.

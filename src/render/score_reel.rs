@@ -21,7 +21,7 @@
 
 use std::time::Instant;
 
-use crate::render::draw_cmd::ExtrudedGlyphPlacement;
+use crate::render::draw_cmd::{ExtrudedGlyphPlacement, GlyphMaterial};
 
 // ── Tuning constants ──────────────────────────────────────────────────────
 
@@ -29,15 +29,15 @@ use crate::render::draw_cmd::ExtrudedGlyphPlacement;
 const BASE_COLUMNS: usize = 7;
 
 /// World-unit width of one digit column (controls spacing between digits).
-const COLUMN_WIDTH: f32 = 90.0;
+const COLUMN_WIDTH: f32 = 95.0;
 
 /// World-unit height of one digit slot (the vertical travel distance for one
 /// reel step). Should match the visual cap-height of the glyph at `DIGIT_SCALE`.
-const SLOT_HEIGHT: f32 = 110.0;
+const SLOT_HEIGHT: f32 = 165.0;
 
 /// Uniform scale applied to every digit glyph. The glyph meshes are
 /// normalised to ~1.0 height in font space; this scales them to world units.
-const DIGIT_SCALE: f32 = 95.0;
+const DIGIT_SCALE: f32 = 142.0;
 
 /// Duration of one digit spin in seconds.
 const SPIN_DURATION: f32 = 0.22;
@@ -59,13 +59,11 @@ const EMISSIVE_SPIN: f32 = 0.9;
 const EMISSIVE_IDLE: f32 = 0.25;
 
 /// Pitch (radians) passed as `rotation_x` through to the extruded-glyph
-/// pipeline. The renderer bakes in a `-π/2` base rotation (so score popups
-/// lie flat on the table), so setting `PITCH = π/2` cancels that and leaves
-/// the digits standing upright facing the camera — which is what the reel
-/// wants since it floats in front of the vertical-ish score plaque. A small
-/// forward lean (reduce by ~0.08 rad) keeps them catching the key light
-/// instead of looking like a billboard.
-const PITCH: f32 = std::f32::consts::FRAC_PI_2 - 0.08;
+/// pipeline. The renderer applies `-π/2 + rotation_x` to the mesh, which
+/// already makes the glyphs stand upright facing the camera (that's how
+/// score popups read). Pass 0 — or a small value for a forward lean — to
+/// keep the reel digits on the same upright plane.
+const PITCH: f32 = 0.0;
 
 // ── Internal state ────────────────────────────────────────────────────────
 
@@ -201,18 +199,35 @@ impl ScoreReel {
         anchor_py: f32,
         lift: f32,
         rot_y: f32,
+        target: Option<u64>,
+        scale: f32,
     ) -> Vec<ExtrudedGlyphPlacement> {
+        let col_w = COLUMN_WIDTH * scale;
+        let slot_h = SLOT_HEIGHT * scale;
+        let digit_scale = DIGIT_SCALE * scale;
         let n = self.columns.len();
-        // Total reel width in world units; center it on the anchor.
-        let total_w = n as f32 * COLUMN_WIDTH;
+        // Static "score:" prefix rendered as dimmer glyphs to the left of
+        // the digit columns so the reel reads as "score: N / target".
+        let prefix: Vec<char> = "score:".chars().collect();
+        // Target tail ("/ N") rendered as dimmer glyphs immediately to the
+        // right of the digit columns so the reel reads as "score / target".
+        // Each tail char occupies roughly one column-width so the spacing
+        // matches the reel.
+        let tail: Vec<char> = target
+            .map(|t| format!("/{t}").chars().collect())
+            .unwrap_or_default();
+        let total_cols = prefix.len() + n + tail.len();
+        // Total reel+tail width in world units; center it on the anchor.
+        let total_w = total_cols as f32 * col_w;
         // Columns are ordered ones-first internally; display most-significant on left.
-        let mut out = Vec::with_capacity(n * 3);
+        let mut out = Vec::with_capacity(prefix.len() + n * 3 + tail.len());
 
         for col in 0..n {
-            // Display index: most-significant digit on the left.
-            let display_idx = n - 1 - col;
+            // Display index: prefix slots come first, then most-significant
+            // digit, then the rest of the digits, then the tail.
+            let display_idx = prefix.len() + (n - 1 - col);
             let col_center_x =
-                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * COLUMN_WIDTH);
+                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
 
             let c = &self.columns[col];
             let t = c.progress(now);
@@ -221,7 +236,7 @@ impl ScoreReel {
             // Spring easing: overshoot then settle.
             let y_offset = if t < 1.0 {
                 let eased = spring_ease(t);
-                eased * SLOT_HEIGHT
+                eased * slot_h
             } else {
                 0.0
             };
@@ -254,7 +269,7 @@ impl ScoreReel {
                 // prev moves up (+Z) and out: starts at 0, exits at +SLOT_HEIGHT
                 let prev_z = y_offset;
                 // current rolls in from below (-Z): starts at -SLOT_HEIGHT, lands at 0
-                let cur_z = y_offset - SLOT_HEIGHT;
+                let cur_z = y_offset - slot_h;
 
                 out.push(make_placement(
                     &prev_label,
@@ -265,6 +280,7 @@ impl ScoreReel {
                     rot_y,
                     color,
                     emissive,
+                    digit_scale,
                 ));
                 out.push(make_placement(
                     &cur_label,
@@ -275,6 +291,7 @@ impl ScoreReel {
                     rot_y,
                     color,
                     emissive,
+                    digit_scale,
                 ));
             } else {
                 // Idle: just the current digit, centred.
@@ -288,8 +305,48 @@ impl ScoreReel {
                     rot_y,
                     color,
                     emissive,
+                    digit_scale,
                 ));
             }
+        }
+
+        // Prefix: "score:" rendered before the digit columns, dimmed so the
+        // digits themselves remain the primary read.
+        let dim_color = [DIGIT_COLOR[0], DIGIT_COLOR[1], DIGIT_COLOR[2], 0.55];
+        for (i, ch) in prefix.iter().enumerate() {
+            let col_center_x =
+                anchor_px + (-total_w * 0.5 + (i as f32 + 0.5) * col_w);
+            out.push(make_placement(
+                &ch.to_string(),
+                col_center_x,
+                anchor_py,
+                lift,
+                0.0,
+                rot_y,
+                dim_color,
+                EMISSIVE_IDLE,
+                digit_scale,
+            ));
+        }
+
+        // Tail: "/ N" target glyphs to the right of the digit columns,
+        // dimmed so the reel reads as the primary number and the target
+        // reads as a secondary reference.
+        for (i, ch) in tail.iter().enumerate() {
+            let display_idx = prefix.len() + n + i;
+            let col_center_x =
+                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
+            out.push(make_placement(
+                &ch.to_string(),
+                col_center_x,
+                anchor_py,
+                lift,
+                0.0,
+                rot_y,
+                dim_color,
+                EMISSIVE_IDLE,
+                digit_scale,
+            ));
         }
 
         out
@@ -354,14 +411,16 @@ fn make_placement(
     rot_y: f32,
     color: [f32; 4],
     emissive: f32,
+    digit_scale: f32,
 ) -> ExtrudedGlyphPlacement {
     ExtrudedGlyphPlacement {
         world_pos: [col_px, anchor_py, lift + z_offset],
-        scale: DIGIT_SCALE,
+        scale: digit_scale,
         rotation_x: PITCH,
         rotation_y: rot_y,
         label: label.to_string(),
         color,
         emissive,
+        material: GlyphMaterial::Plain,
     }
 }

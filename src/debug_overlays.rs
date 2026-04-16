@@ -633,7 +633,7 @@ impl SfxTestOverlay {
     pub fn update(
         &mut self,
         actions: &[UiAction],
-        audio: &audio::AudioManager,
+        audio: &mut audio::AudioManager,
         mouse: Option<(f32, f32, bool)>,
     ) -> bool {
         let count = audio::all_sfx_ids().len();

@@ -13,16 +13,16 @@ pub enum SfxId {
     UiConfirm,
     UiCancel,
     TileClick,
+    TileSelect,
+    TileDeselect,
     TilePlace,
     TileDiscard,
     ScoreReveal,
     ScoreStep,
-    /// Three perceptibly different tick pitches cycled per cascade step so
-    /// the audio rises through the reveal sequence even though `rodio`
-    /// doesn't support runtime pitch shifting.
-    ScoreTickA,
-    ScoreTickB,
-    ScoreTickC,
+    /// Base sample for the cascade tick. Cycled through eight semitone-spaced
+    /// pitches per step via [`AudioManager::play_score_tick`] so the reveal
+    /// sequence audibly climbs a scale.
+    ScoreTick,
     /// Brassy hit jingle layered on top of `ScoreFinal` to add weight to
     /// the closing crescendo.
     ScoreCrescendo,
@@ -48,6 +48,34 @@ pub enum SfxId {
     CandleFlareImpact,
     /// Melds locked into the structure bank (distinct from [`Self::TilePlace`]).
     StructureCommit,
+    /// Focus moved to a hand tile.
+    FocusHandTile,
+    /// Focus moved to an action-bar button (Play, Discard, Sort, etc.).
+    FocusButton,
+    /// Focus moved to a consumable slot.
+    FocusConsumable,
+    /// Focus moved to a relic on the shelf.
+    FocusRelic,
+    /// Focus moved to a UI peg (hand-size, discards, etc.).
+    FocusPeg,
+    /// Focus moved to the gold readout.
+    FocusGold,
+    /// Focus moved to a yaku-progress tablet.
+    FocusYakuTablet,
+    /// Focus moved to the dora indicator stand.
+    FocusDora,
+    /// A gameplay round begins.
+    RoundStart,
+    /// The shooting-star cascade transition fires (dramatic scene change).
+    StarShimmer,
+    /// Relic / zodiac / talisman purchased in the shop.
+    Purchase,
+    /// Relic / consumable sold back for gold.
+    Sell,
+    /// Pause menu opened.
+    Pause,
+    /// Pause menu dismissed (game resumed).
+    Unpause,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -57,13 +85,13 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::UiConfirm,
         SfxId::UiCancel,
         SfxId::TileClick,
+        SfxId::TileSelect,
+        SfxId::TileDeselect,
         SfxId::TilePlace,
         SfxId::TileDiscard,
         SfxId::ScoreReveal,
         SfxId::ScoreStep,
-        SfxId::ScoreTickA,
-        SfxId::ScoreTickB,
-        SfxId::ScoreTickC,
+        SfxId::ScoreTick,
         SfxId::ScoreCrescendo,
         SfxId::ScoreFinal,
         SfxId::RelicPickup,
@@ -79,6 +107,20 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::CandleFlareWhoosh,
         SfxId::CandleFlareImpact,
         SfxId::StructureCommit,
+        SfxId::FocusHandTile,
+        SfxId::FocusButton,
+        SfxId::FocusConsumable,
+        SfxId::FocusRelic,
+        SfxId::FocusPeg,
+        SfxId::FocusGold,
+        SfxId::FocusYakuTablet,
+        SfxId::FocusDora,
+        SfxId::RoundStart,
+        SfxId::StarShimmer,
+        SfxId::Purchase,
+        SfxId::Sell,
+        SfxId::Pause,
+        SfxId::Unpause,
     ]
 }
 
@@ -88,13 +130,13 @@ impl SfxId {
             SfxId::UiConfirm => "kenney_interface-sounds/Audio/confirmation_001.ogg",
             SfxId::UiCancel => "kenney_interface-sounds/Audio/back_001.ogg",
             SfxId::TileClick => "kenney_interface-sounds/Audio/drop_003.ogg",
+            SfxId::TileSelect => "kenney_interface-sounds/Audio/tick_002.ogg",
+            SfxId::TileDeselect => "kenney_interface-sounds/Audio/tick_004.ogg",
             SfxId::TilePlace => "Snap.ogg",
-            SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.mp3",
+            SfxId::TileDiscard => "freesound_community-tile-shuffle-99834.ogg",
             SfxId::ScoreReveal => "intake.ogg",
             SfxId::ScoreStep => "vwomp2.ogg",
-            SfxId::ScoreTickA => "plink3.ogg",
-            SfxId::ScoreTickB => "plink4.ogg",
-            SfxId::ScoreTickC => "plink7.ogg",
+            SfxId::ScoreTick => "plink3.ogg",
             SfxId::ScoreCrescendo => "scorecrescendo.ogg",
             SfxId::ScoreFinal => "MixingBell.ogg",
             SfxId::RelicPickup => "relic_pickup.ogg",
@@ -110,14 +152,52 @@ impl SfxId {
             SfxId::CandleFlareWhoosh => "candle_flareup.ogg",
             SfxId::CandleFlareImpact => "candle_impact.ogg",
             SfxId::StructureCommit => "kenney_interface-sounds/Audio/confirmation_002.ogg",
+            SfxId::FocusHandTile => "kenney_interface-sounds/Audio/select_001.ogg",
+            SfxId::FocusButton => "kenney_interface-sounds/Audio/select_004.ogg",
+            SfxId::FocusConsumable => "kenney_interface-sounds/Audio/pluck_002.ogg",
+            SfxId::FocusRelic => "kenney_interface-sounds/Audio/glass_003.ogg",
+            SfxId::FocusPeg => "kenney_interface-sounds/Audio/switch_002.ogg",
+            SfxId::FocusGold => "kenney_interface-sounds/Audio/bong_001.ogg",
+            SfxId::FocusYakuTablet => "kenney_interface-sounds/Audio/scroll_003.ogg",
+            SfxId::FocusDora => "kenney_interface-sounds/Audio/glass_001.ogg",
+            SfxId::RoundStart => "kenney_interface-sounds/Audio/confirmation_004.ogg",
+            SfxId::StarShimmer => "kenney_interface-sounds/Audio/glass_005.ogg",
+            SfxId::Purchase => "coindrop.ogg",
+            SfxId::Sell => "kenney_interface-sounds/Audio/confirmation_002.ogg",
+            SfxId::Pause => "kenney_interface-sounds/Audio/minimize_003.ogg",
+            SfxId::Unpause => "kenney_interface-sounds/Audio/maximize_003.ogg",
         }
     }
 }
+
+/// Maximum number of SFX sinks allowed to ring simultaneously. Rodio mixes
+/// detached sinks by summing samples with no limiter, so uncapped pileups
+/// (e.g. a candle-flare whoosh + impact overlapping a burst of cascade
+/// ticks, each of which itself layers two sounds) clip and smear into mud.
+/// When the cap is hit, the oldest live sink is dropped to make room.
+const MAX_CONCURRENT_SFX: usize = 8;
+
+/// Playback speeds used by [`AudioManager::play_score_tick`], cycling per
+/// cascade step. Each ratio is a semitone above the previous (2^(n/12)) so
+/// the reveal climbs a chromatic scale across eight steps before wrapping.
+const SCORE_TICK_PITCHES: [f32; 8] = [
+    1.000_000, // root
+    1.059_463, // +1 semitone
+    1.122_462, // +2
+    1.189_207, // +3
+    1.259_921, // +4
+    1.334_840, // +5
+    1.414_214, // +6
+    1.498_307, // +7
+];
 
 pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
     sfx_data: HashMap<SfxId, Vec<u8>>,
+    /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
+    /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
+    active_sinks: Vec<Sink>,
     master_volume: f32,
     sfx_volume: f32,
     music_volume: f32,
@@ -152,6 +232,7 @@ impl AudioManager {
             _stream: stream,
             handle,
             sfx_data,
+            active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
             master_volume: 0.7,
             sfx_volume: 0.7,
             music_volume: 0.7,
@@ -159,8 +240,20 @@ impl AudioManager {
         }
     }
 
+    /// Play the cascade tick at one of [`SCORE_TICK_PITCHES`] stepped speeds,
+    /// indexed by `step`. Each speed shifts the base sample by one semitone,
+    /// so the cascade climbs a major-scale-ish run as scoring unfolds.
+    pub fn play_score_tick(&mut self, step: usize) {
+        let speed = SCORE_TICK_PITCHES[step % SCORE_TICK_PITCHES.len()];
+        self.play_sfx_with_speed(SfxId::ScoreTick, speed);
+    }
+
     /// Play a sound effect. No-op if audio is unavailable or the SFX file wasn't loaded.
-    pub fn play_sfx(&self, id: SfxId) {
+    pub fn play_sfx(&mut self, id: SfxId) {
+        self.play_sfx_with_speed(id, 1.0);
+    }
+
+    fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {
         if !self.enabled {
             log::debug!("play_sfx({id:?}): disabled");
             return;
@@ -182,11 +275,25 @@ impl AudioManager {
             log::warn!("play_sfx({id:?}): sink creation failed");
             return;
         };
+
+        self.active_sinks.retain(|s| !s.empty());
+        if self.active_sinks.len() >= MAX_CONCURRENT_SFX {
+            let dropped = self.active_sinks.remove(0);
+            log::debug!(
+                "play_sfx({id:?}): concurrent cap hit, dropping oldest sink (live={})",
+                self.active_sinks.len() + 1,
+            );
+            drop(dropped);
+        }
+
         let effective_vol = self.master_volume * self.sfx_volume;
-        log::debug!("play_sfx({id:?}): vol={effective_vol:.2}");
-        let amplified = source.amplify(effective_vol);
+        log::debug!(
+            "play_sfx({id:?}): vol={effective_vol:.2} live={}",
+            self.active_sinks.len() + 1,
+        );
+        let amplified = source.speed(speed).amplify(effective_vol);
         sink.append(amplified);
-        sink.detach();
+        self.active_sinks.push(sink);
     }
 
     /// Set the master volume (0.0 to 1.0).

@@ -1007,6 +1007,7 @@ fn relic_clue(id: RelicId) -> String {
         RelicId::SmokeBomb => "A coward's escape — or a strategist's.".into(),
         RelicId::PhantomRelic => "Not quite real, not quite gone.".into(),
         RelicId::RitualBlade => "Power demands sacrifice.".into(),
+        RelicId::Disgust => "East and West, an unlikely meld.".into(),
     }
 }
 
@@ -1122,9 +1123,9 @@ fn talisman_accent(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Gilded => [0.95, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.80, 0.40, 0.90, 1.0],
         TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
-        TalismanKind::Bamboo => [0.32, 0.60, 0.14, 1.0], // yellow-green accent
-        TalismanKind::Dots => [0.25, 0.45, 0.82, 1.0],
-        TalismanKind::Characters => [0.82, 0.28, 0.22, 1.0],
+        TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
+        TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],   // sapphire
+        TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
         TalismanKind::Honors => [0.72, 0.58, 0.22, 1.0],
         TalismanKind::Wildflower => [0.88, 0.42, 0.58, 1.0],
         TalismanKind::Conformity => [0.55, 0.52, 0.60, 1.0],
@@ -1139,9 +1140,9 @@ fn talisman_tint(tk: TalismanKind) -> [f32; 4] {
         TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
         TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
         TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
-        TalismanKind::Bamboo => [0.38, 0.70, 0.18, 1.0], // yellow-green (bamboo stalk)
-        TalismanKind::Dots => [0.30, 0.48, 0.88, 1.0],
-        TalismanKind::Characters => [0.88, 0.32, 0.26, 1.0],
+        TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
+        TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],   // sapphire
+        TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
         TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
         TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
         TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],

@@ -263,11 +263,6 @@ impl ScoringCascade {
         matches!(self.phase, Phase::ShowTotal | Phase::Done)
     }
 
-    /// Skip to done (e.g. if player presses a key to skip).
-    pub fn skip(&mut self) {
-        self.phase = Phase::Done;
-    }
-
     /// Build the current frame for rendering.
     pub fn frame(&self, now: Instant) -> CascadeFrame {
         let elapsed = now.saturating_duration_since(self.phase_started);

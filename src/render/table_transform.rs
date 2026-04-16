@@ -127,12 +127,6 @@ pub fn mesh_y_thickness_along_local_y_to_z_up() -> Mat4 {
     Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
 }
 
-/// Pegs in a row: cylinder axis along **world +X** after [`mesh_y_thickness_along_local_y_to_z_up`].
-#[inline]
-pub fn peg_mesh_lay_on_table() -> Mat4 {
-    mesh_y_thickness_along_local_y_to_z_up() * Mat4::from_rotation_y(-std::f32::consts::FRAC_PI_2)
-}
-
 /// `Ry * Rx * Rz` in radians — falling bone tumbling (`rotation[0]` = X, `[1]` = Y, `[2]` = Z).
 #[inline]
 pub fn rot_ry_rx_rz_rad(rot_x: f32, rot_y: f32, rot_z: f32) -> Mat4 {

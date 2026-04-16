@@ -31,6 +31,30 @@ pub fn rect_center(r: [f32; 4]) -> (f32, f32) {
     (r[0] + r[2] * 0.5, r[1] + r[3] * 0.5)
 }
 
+/// Intersect `rect` with `[0, 0, window_w, window_h]`. Returns `None`
+/// when the rect is entirely outside the viewport.
+///
+/// Use for UI elements whose natural AABB (e.g. a projected 3D-mesh rect,
+/// a tooltip, a centered text label) can extend off-screen. Text inside
+/// the returned rect stays centered within the *visible* portion of the
+/// element rather than disappearing off the edge of the window.
+#[inline]
+pub fn clamp_rect_to_viewport(
+    rect: [f32; 4],
+    window_w: f32,
+    window_h: f32,
+) -> Option<[f32; 4]> {
+    let x0 = rect[0].max(0.0);
+    let y0 = rect[1].max(0.0);
+    let x1 = (rect[0] + rect[2]).min(window_w);
+    let y1 = (rect[1] + rect[3]).min(window_h);
+    if x1 > x0 && y1 > y0 {
+        Some([x0, y0, x1 - x0, y1 - y0])
+    } else {
+        None
+    }
+}
+
 /// Pick the spatially-nearest focus target in `dir` from `current`.
 /// Filters candidates whose center is in the requested half-plane and
 /// not too far off-axis ("L-shaped" jumps), then ranks by
@@ -108,28 +132,53 @@ pub fn focus_target_at_cursor<T: Copy>(
 /// Push a brass focus ring (four border quads) around `rect` into
 /// `quads`. Centralizes the highlight pattern that used to live per-zone
 /// in scene-specific button-bar / inventory code.
-pub fn push_focus_ring(rect: [f32; 4], scale: f32, quads: &mut Vec<GpuInstance>) {
+///
+/// The padded outer rect is clamped to `[0, 0, window_w, window_h]` as
+/// a whole before the four border quads are emitted, so an anchor that
+/// extends past a screen edge produces a complete rectangular frame
+/// flush against the viewport edge rather than a partial ring that
+/// trails off-screen.
+pub fn push_focus_ring(
+    rect: [f32; 4],
+    scale: f32,
+    window_w: f32,
+    window_h: f32,
+    quads: &mut Vec<GpuInstance>,
+) {
     let bt = (3.0 * scale).max(2.0);
     let pad = (4.0 * scale).max(3.0);
-    let rx = rect[0] - pad;
-    let ry = rect[1] - pad;
-    let rw = rect[2] + pad * 2.0;
-    let rh = rect[3] + pad * 2.0;
+    let outer = [
+        rect[0] - pad,
+        rect[1] - pad,
+        rect[2] + pad * 2.0,
+        rect[3] + pad * 2.0,
+    ];
+    let Some(clamped) = clamp_rect_to_viewport(outer, window_w, window_h) else {
+        return;
+    };
+    let [rx, ry, rw, rh] = clamped;
+    // Degenerate rects thinner than the border thickness can't host a
+    // four-sided frame without overlapping — fall back to a single fill
+    // so the focus indicator still reads as present.
+    if rw <= bt * 2.0 || rh <= bt * 2.0 {
+        quads.push(GpuInstance {
+            rect: clamped,
+            color: [0.95, 0.78, 0.32, 1.0],
+        });
+        return;
+    }
+
     let ring = [0.95, 0.78, 0.32, 1.0];
-    quads.push(GpuInstance {
-        rect: [rx, ry, rw, bt],
-        color: ring,
-    });
-    quads.push(GpuInstance {
-        rect: [rx, ry + rh - bt, rw, bt],
-        color: ring,
-    });
-    quads.push(GpuInstance {
-        rect: [rx, ry, bt, rh],
-        color: ring,
-    });
-    quads.push(GpuInstance {
-        rect: [rx + rw - bt, ry, bt, rh],
-        color: ring,
-    });
+    let borders = [
+        [rx, ry, rw, bt],           // top
+        [rx, ry + rh - bt, rw, bt], // bottom
+        [rx, ry, bt, rh],           // left
+        [rx + rw - bt, ry, bt, rh], // right
+    ];
+    for border in borders {
+        quads.push(GpuInstance {
+            rect: border,
+            color: ring,
+        });
+    }
 }

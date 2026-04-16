@@ -22,6 +22,7 @@ use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::candle_mesh::CandlePlacement;
+use crate::render::lit_mesh::MaterialParams;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
@@ -375,8 +376,7 @@ impl Default for DishExplicit {
 ///
 /// The wood + chain mesh is uploaded once at renderer init; per-instance
 /// position + extents drive a model matrix and the renderer rasterizes the
-/// `top_text` / `bot_text` payload into a decal texture sampled by the
-/// lit-mesh shader.
+/// `text` payload into a decal texture sampled by the lit-mesh shader.
 #[derive(Clone, Debug)]
 pub struct PlaquePlacement {
     /// `(pixel_x, pixel_y, lift)` for the plaque's *center*.
@@ -385,10 +385,10 @@ pub struct PlaquePlacement {
     pub extents: [f32; 3],
     /// Yaw rotation about world Y in degrees (0 = facing the camera).
     pub rotation_y_deg: f32,
-    /// Display string for the large top line (blind name + ante + score/target).
-    pub top_text: String,
-    /// Display string for the smaller bottom line (gold · wind · shanten · ...).
-    pub bot_text: String,
+    /// Plaque text. May contain `\n` for hard line breaks; otherwise it's
+    /// word-wrapped to fit the plaque face. The renderer picks the largest
+    /// font size where the wrapped layout fits the face.
+    pub text: String,
 }
 
 /// Hanging boss-rule ofuda paper.
@@ -482,23 +482,49 @@ pub struct MirrorPlacement {
     pub rotation_z_deg: f32,
 }
 
-/// The plays/discards remaining peg block. The block itself is a single
-/// wooden mesh; pegs (small cylinders) are emitted as separate coin-mesh
-/// instances by the renderer based on the live counts.
+/// Which counter fan this `TallyFanPlacement` represents. Drives per-fan
+/// focus rect slot and tooltip wiring on the gameplay scene side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TallyFanKind {
+    /// Plays-remaining fan, anchored in front of the mirror.
+    Draws,
+    /// Discards-remaining fan, anchored in front of the river.
+    Discards,
+}
+
+/// An upright fan of bone tally sticks — one fan per counter (draws in front of
+/// the mirror, discards in front of the river). The fan's pivot is the narrow
+/// base of each stick; sticks radiate upward/outward through a total spread
+/// angle, evenly spaced across `max_count` slots. Sticks keep their *original*
+/// angular slots as the count drops (the fan thins from the outermost stick
+/// first) so consumption reads as a spent stick rather than a re-deal.
 #[derive(Clone, Copy, Debug)]
-pub struct PegBlockPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the block's *base center*.
+pub struct TallyFanPlacement {
+    /// Fan pivot — `(pixel_x, pixel_y, lift)` at the base of each stick.
     pub world_pos: WorldSurfaceAnchor,
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
-    /// Number of plays remaining (left peg row, capped at `plays_max`).
-    pub plays_left: u32,
-    /// Maximum number of play pegs (the row length).
-    pub plays_max: u32,
-    /// Number of discards remaining (right peg row, capped at `discards_max`).
-    pub discards_left: u32,
-    /// Maximum number of discard pegs (the row length).
-    pub discards_max: u32,
+    /// Stick height (world units, from narrow base to wide tip).
+    pub stick_len: f32,
+    /// Wide-end width (world units, at the tip). Narrow-end width is
+    /// baked into the mesh at half the wide end (2:1 taper).
+    pub stick_wide: f32,
+    /// Thickness along the fan's forward axis (world units).
+    pub stick_thickness: f32,
+    /// Sticks currently visible (the live count).
+    pub count: u32,
+    /// Slot count the fan is sized for (determines stick spacing and outer
+    /// angular slots).
+    pub max_count: u32,
+    /// Total arc the fan spreads across at `max_count` (degrees, symmetric
+    /// about vertical). Typical value ~60°.
+    pub spread_deg: f32,
+    /// RGBA tint for the upper cap of each stick. The tip cap's length is
+    /// baked into the tally-stick mesh (`TIP_FRAC`).
+    pub tip_color: [f32; 4],
+    /// Yaw rotation of the fan plane about world up (degrees). Lets scenes
+    /// angle the fan to face the camera.
+    pub rotation_y_deg: f32,
+    /// Which counter this fan represents.
+    pub kind: TallyFanKind,
 }
 
 /// Stack of facedown wall tiles at the back of the table.
@@ -573,6 +599,21 @@ pub struct ExtrudedGlyphPlacement {
     /// color so popups read against busy backgrounds without depending on
     /// candle illumination.
     pub emissive: f32,
+    /// Which lit-mesh material to render the glyph with. `Plain` is the
+    /// default flat/specular look used by debuff Xs and other simple popups.
+    /// `Metal` gives Fresnel-tinted specular highlights for the score reel.
+    /// `Polychrome` adds a thin-film rainbow sheen over the base color,
+    /// used by the streaming chip/mult/gold popups.
+    pub material: GlyphMaterial,
+}
+
+/// Material selector for [`ExtrudedGlyphPlacement`]. Maps to the lit-mesh
+/// shader's `MaterialKind` branch at render time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphMaterial {
+    Plain,
+    Metal,
+    Polychrome,
 }
 
 /// One tile in a showcase display (pack-opening celebration, hand strip, etc.).
@@ -700,10 +741,12 @@ pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam:
 #[allow(dead_code)]
 pub enum Object3dKind {
     // ── Upright panels ──────────────────────────────────────────────
-    /// Lacquered wood slab + chain nubs with a two-line engraved decal.
+    /// Lacquered wood slab + chain nubs with a dynamically-scaled engraved
+    /// decal. The renderer word-wraps `text` and picks the largest font size
+    /// that fits the face; callers format with explicit `\n` if they want a
+    /// forced line break between fields.
     Plaque {
-        top: String,
-        bot: String,
+        text: String,
         pick_id: Option<u32>,
     },
     /// Paper slab + eyelet with a title + body-rule decal.
@@ -795,6 +838,13 @@ pub enum Object3dKind {
     /// `slot` ∈ `0..MAX_BUG_GHOST_SLOTS` indexes a separate instance pool;
     /// `alpha` ∈ [0, 1] scales the body/wing material's RGBA output.
     BugGhost { slot: usize, alpha: f32 },
+    /// Material preview orb — a shared unit sphere drawn with a caller-supplied
+    /// `MaterialParams`. Used only by the material viewer debug scene. The
+    /// instance pool binds the 1×1 default albedo and relief textures so
+    /// materials that sample heightmaps render as their base material with no
+    /// displacement (i.e. every orb previews the shading model itself, not a
+    /// per-asset heightmap).
+    MaterialOrb { material: MaterialParams },
 }
 
 /// A single lit mesh placed in the world.
@@ -959,9 +1009,10 @@ pub enum DrawCmd {
     Bowl(BowlPlacement),
     /// The bronze "play hand" mirror.
     Mirror(MirrorPlacement),
-    /// The plays/discards remaining peg block.
-    #[allow(dead_code)]
-    PegBlock(PegBlockPlacement),
+    /// A counter fan — upright bone tally sticks, one fan per counter.
+    /// Gameplay pushes two per frame: draws (jade tips, at the mirror) and
+    /// discards (amber tips, at the river).
+    TallyFan(TallyFanPlacement),
     /// The wall stack (facedown tiles at the back of the table).
     #[allow(dead_code)]
     WallStack(WallStackPlacement),
@@ -1121,9 +1172,8 @@ impl UiFrame {
     pub fn mirror(&mut self, p: MirrorPlacement) {
         self.cmds.push(DrawCmd::Mirror(p));
     }
-    #[allow(dead_code)]
-    pub fn peg_block(&mut self, p: PegBlockPlacement) {
-        self.cmds.push(DrawCmd::PegBlock(p));
+    pub fn tally_fan(&mut self, p: TallyFanPlacement) {
+        self.cmds.push(DrawCmd::TallyFan(p));
     }
     #[allow(dead_code)]
     pub fn wall_stack(&mut self, p: WallStackPlacement) {
@@ -1209,7 +1259,7 @@ impl UiFrame {
                 | DrawCmd::WoodTabletBatch(_)
                 | DrawCmd::Bowl(_)
                 | DrawCmd::Mirror(_)
-                | DrawCmd::PegBlock(_)
+                | DrawCmd::TallyFan(_)
                 | DrawCmd::WallStack(_)
                 | DrawCmd::CascadeTokenBatch(_)
                 | DrawCmd::FallingBoneBatch(_)

@@ -33,6 +33,7 @@ use render::draw_cmd::{CameraParams, UiFrame};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
+use scenes::material_viewer::MaterialViewerScene;
 use scenes::shop::{ShopScene, SHOP_DRAG_DROP_ID};
 use scenes::splash::SplashScene;
 use scenes::tutorial_recap::TutorialRecapScene;
@@ -658,9 +659,11 @@ struct App {
     transition_timer: f32,
     transition_kind: TransitionKind,
     pending_scene: Option<Scene>,
-    /// Scene suspended while the Meld Guide is open. Restored when the guide
-    /// signals `wants_back`.
-    suspended_scene: Option<Scene>,
+    /// Pushdown stack for overlay scenes (e.g. zodiac/pack celebrations,
+    /// meld guide from in-game).
+    /// When non-empty, the top of the stack is the active scene: only it
+    /// ticks and draws. `self.scene` is the root; overlays stack above.
+    overlay_stack: Vec<Scene>,
     quit_requested: bool,
     close_saved: bool,
     modals: ModalQueue,
@@ -721,6 +724,8 @@ impl App {
         self.modals.is_active()
             || self.debug.any_overlay_active()
             || self.scene.has_blocking_overlay()
+            || self.overlay_stack.iter().any(|s| s.has_blocking_overlay())
+            || !self.overlay_stack.is_empty()
     }
 
     /// Gameplay-only hover hit-test for the on-table relic row. Uses the
@@ -801,7 +806,7 @@ impl App {
             transition_timer: 0.0,
             transition_kind: TransitionKind::Quick,
             pending_scene: None,
-            suspended_scene: None,
+            overlay_stack: Vec::new(),
             quit_requested: false,
             close_saved: false,
             modals: ModalQueue::default(),
@@ -1226,7 +1231,11 @@ impl App {
         // for legacy scenes the default impl forwards through `draw()` +
         // `into_frame()`. Either way we get back a single ordered
         // `UiFrame.cmds` list whose push order is z-order.
-        let mut frame: UiFrame = self.scene.draw_frame(ctx);
+        let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
+            top.draw_frame(ctx)
+        } else {
+            self.scene.draw_frame(ctx)
+        };
 
         let h = size.height as f32;
         self.debug.last_effective_camera = frame
@@ -1765,6 +1774,39 @@ impl App {
                     log::warn!("[Debug] Open Pack ignored — not in shop scene");
                 }
             }
+            DebugAction::DemoCascade => {
+                if let Scene::Gameplay(gp) = &mut self.scene {
+                    if let Some(win) = self.window.as_ref() {
+                        let size = win.inner_size();
+                        let layout = self
+                            .layout_engine
+                            .solve(size.width as f32, size.height as f32);
+                        gp.debug_demo_cascade(&layout, &self.run);
+                    }
+                } else {
+                    let name = match &self.scene {
+                        Scene::Splash(_) => "Splash",
+                        Scene::StartScreen(_) => "StartScreen",
+                        Scene::TileSelect(_) => "TileSelect",
+                        Scene::ProfileSelect(_) => "ProfileSelect",
+                        Scene::Shop(_) => "Shop",
+                        Scene::PickBlind(_) => "PickBlind",
+                        Scene::Gameplay(_) => "Gameplay",
+                        Scene::GameOver(_) => "GameOver",
+                        Scene::MeldGuide(_) => "MeldGuide",
+                        Scene::MaterialViewer(_) => "MaterialViewer",
+                        Scene::Options(_) => "Options",
+                        Scene::Collection(_) => "Collection",
+                        Scene::Solitaire(_) => "Solitaire",
+                        Scene::TutorialRecap(_) => "TutorialRecap",
+                        Scene::TutorialCampaign(_) => "TutorialCampaign",
+                        Scene::TutorialSummary(_) => "TutorialSummary",
+                        Scene::TileLiteracy(_) => "TileLiteracy",
+                        Scene::ZodiacCelebration(_) => "ZodiacCelebration",
+                    };
+                    log::warn!("[Debug] Demo Cascade ignored — current scene is {name}");
+                }
+            }
             DebugAction::SetBoss(kind) => {
                 // Replace the current ante's boss and rebuild the resolved
                 // effect. resolve_upcoming_boss handles both static (wraps
@@ -1783,6 +1825,11 @@ impl App {
                 );
                 self.modals.push(modal);
                 log::info!("[Debug] Spawned test overlay modal");
+            }
+            DebugAction::OpenMaterialViewer => {
+                self.overlay_stack
+                    .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
+                log::info!("[Debug] Opened material viewer");
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
@@ -1860,7 +1907,7 @@ impl ApplicationHandler for App {
 
         let t0 = Instant::now();
         self.input = Some(InputState::new().expect("input"));
-        self.debug.menu = Some(DebugMenuBar::new());
+        self.debug.menu = Some(DebugMenuBar::new(&window));
         log::info!("input + debug menu init in {:?}", t0.elapsed());
 
         log::info!("App::resumed() total: {:?}", t_resumed.elapsed());
@@ -1923,19 +1970,12 @@ impl ApplicationHandler for App {
                             self.audio.play_sfx(audio::SfxId::ScoreReveal);
                         }
                         GameEvent::ScoreStepRevealed { index } => {
-                            // Cycle three pre-recorded tick pitches per
-                            // step so the cascade audibly climbs through
-                            // its reveal sequence (rodio doesn't support
-                            // runtime pitch shifting). Layer the existing
-                            // ScoreStep "rollover" sound on top to keep the
-                            // soft confirmation that's already wired into
-                            // the game.
-                            let tick = match index % 3 {
-                                0 => audio::SfxId::ScoreTickA,
-                                1 => audio::SfxId::ScoreTickB,
-                                _ => audio::SfxId::ScoreTickC,
-                            };
-                            self.audio.play_sfx(tick);
+                            // Climb eight semitones across the reveal so the
+                            // cascade audibly rises, then wrap. Layer the
+                            // existing ScoreStep "rollover" sound on top to
+                            // keep the soft confirmation that's already
+                            // wired into the game.
+                            self.audio.play_score_tick(index);
                             self.audio.play_sfx(audio::SfxId::ScoreStep);
                         }
                         GameEvent::ScoreCascadeFinal => {
@@ -2177,7 +2217,7 @@ impl ApplicationHandler for App {
                         let (mx, my) = i.last_cursor;
                         (mx, my, self.mouse_clicked)
                     });
-                    let close = overlay.update(&actions, &self.audio, mouse);
+                    let close = overlay.update(&actions, &mut self.audio, mouse);
                     self.mouse_clicked = false;
                     if !close {
                         self.debug.sfx_test_overlay = Some(overlay);
@@ -2290,6 +2330,7 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
                 let scroll_lines = std::mem::take(&mut self.scroll_delta);
+                let mut overlay_request: Option<scenes::OverlayRequest> = None;
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -2321,26 +2362,25 @@ impl ApplicationHandler for App {
                     multiple_materials: self.progress.plastic_unlocked(),
                     resume_scene: self.resume_scene,
                     transitioning: self.pending_scene.is_some(),
+                    overlay_request: &mut overlay_request,
                 };
-                if let Some(mut next_scene) = self.scene.update(ctx) {
-                    // When transitioning *to* the Meld Guide from a game scene,
-                    // suspend the current scene so we can restore it later.
-                    if matches!(next_scene, Scene::MeldGuide(_))
-                        && !matches!(self.scene, Scene::StartScreen(_))
-                    {
-                        let old = std::mem::replace(
-                            &mut self.scene,
-                            Scene::Splash(scenes::SplashScene::new()), // placeholder
-                        );
-                        self.suspended_scene = Some(old);
+                let update_result = if let Some(top) = self.overlay_stack.last_mut() {
+                    top.update(ctx)
+                } else {
+                    self.scene.update(ctx)
+                };
+                // Apply overlay push/pop before a SceneTransition (Replace).
+                // Push/Pop operate on the overlay stack; they never fade.
+                match overlay_request {
+                    Some(scenes::OverlayRequest::Push(s)) => {
+                        self.overlay_stack.push(s);
                     }
-                    // When leaving the Meld Guide, restore the suspended scene
-                    // instead of going where the guide wanted (start screen).
-                    if matches!(self.scene, Scene::MeldGuide(_)) {
-                        if let Some(restored) = self.suspended_scene.take() {
-                            next_scene = restored;
-                        }
+                    Some(scenes::OverlayRequest::Pop) => {
+                        let _ = self.overlay_stack.pop();
                     }
+                    None => {}
+                }
+                if let Some(next_scene) = update_result {
                     // Choose transition style: dramatic cascade for
                     // new-game flows, quick fade for everything else.
                     let use_cascade = matches!(
@@ -2360,6 +2400,7 @@ impl ApplicationHandler for App {
                     if use_cascade {
                         self.transition_kind = TransitionKind::ShootingStarCascade;
                         self.transition_speed = 0.012;
+                        self.audio.play_sfx(audio::SfxId::StarShimmer);
                     } else if slow_fade {
                         self.transition_kind = TransitionKind::Quick;
                         self.transition_speed = 0.025;
@@ -2495,7 +2536,11 @@ impl ApplicationHandler for App {
                                     | (Scene::TutorialCampaign(_), Scene::Shop(_))
                                     | (Scene::Shop(_), Scene::PickBlind(_))
                             );
-                            self.scene = next;
+                            if let Some(top) = self.overlay_stack.last_mut() {
+                                *top = next;
+                            } else {
+                                self.scene = next;
+                            }
                             if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                                 self.resume_scene = scene;
                             }
@@ -3100,6 +3145,32 @@ impl ApplicationHandler for App {
                             return;
                         }
                         // Fall through for unhandled keys (e.g. fullscreen).
+                    }
+
+                    // Cross-platform debug shortcut: Ctrl+Shift+M opens the
+                    // material viewer pushdown scene. Mirrors the Debug menu
+                    // entry so Linux (where muda has no non-GTK menu) and any
+                    // other OS the menu doesn't reach still has access.
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        if code == KeyCode::KeyM
+                            && self.modifiers.shift_key()
+                            && (self.modifiers.control_key() || self.modifiers.super_key())
+                        {
+                            if !self
+                                .overlay_stack
+                                .iter()
+                                .any(|s| matches!(s, Scene::MaterialViewer(_)))
+                            {
+                                self.overlay_stack.push(Scene::MaterialViewer(
+                                    MaterialViewerScene::new(true),
+                                ));
+                                log::info!("[Debug] Opened material viewer (keyboard shortcut)");
+                                if let Some(w) = self.window.as_ref() {
+                                    w.request_redraw();
+                                }
+                            }
+                            return;
+                        }
                     }
 
                     let mut v = Vec::new();

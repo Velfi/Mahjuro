@@ -536,10 +536,10 @@ fn score_sets_inner(
                             jade_chips += 20;
                         }
                     }
-                    TileEnhancement::Pearl => pearl_chips += 30,
+                    TileEnhancement::Pearl => pearl_chips += 25,
                     TileEnhancement::Gilded => {
                         if !matches!(s.kind, SetKind::Pair) {
-                            gilded_mult += 0.5;
+                            gilded_mult += 0.4;
                         }
                     }
                     TileEnhancement::Polychrome => meld_has_polychrome = true,
@@ -559,12 +559,12 @@ fn score_sets_inner(
             push_mult!("Gilded Talisman", gilded_mult);
         }
         // Polychrome is multiplicative, but we already build mult additively
-        // (`mult = 1 + sum(deltas)`). Convert each polychrome meld's ×1.2 into
-        // an equivalent additive `+0.2 × current_mult` step so the cascade stays
+        // (`mult = 1 + sum(deltas)`). Convert each polychrome meld's ×1.15 into
+        // an equivalent additive `+0.15 × current_mult` step so the cascade stays
         // single-axis. This understates true multiplicativity slightly but
         // keeps the math reproducible and matches the existing pipeline.
         for _ in 0..polychrome_melds {
-            let delta = mult * 0.2;
+            let delta = mult * 0.15;
             push_mult!("Polychrome Talisman", delta);
         }
     }
@@ -1320,7 +1320,7 @@ pub fn score_sets_total(
 ///   Fury) are included optimistically — i.e. we assume the player will
 ///   actually score this tile inside a triplet/sequence/kong, since that's
 ///   what the tooltip is meant to *promise*.
-/// * Polychrome's per-meld ×1.2 mult is approximated as a flat `+0.2 mult`
+/// * Polychrome's per-meld ×1.15 mult is approximated as a flat `+0.15 mult`
 ///   line on the tile, matching the additive expansion the cascade uses in
 ///   `score_sets`.
 /// * Cross-set / structural relics (DragonEcho, ChainReaction, MultiplierMaster…)
@@ -1379,24 +1379,22 @@ pub fn tile_effective_value(
     if let Some(enh) = tile.enhancement {
         match enh {
             TileEnhancement::Pearl => {
-                out.bonus_chips += 30;
-                out.sources.push(("Pearl Talisman", "+30 chips".into()));
+                out.bonus_chips += 25;
+                out.sources.push(("Pearl Talisman", "+25 chips".into()));
             }
             TileEnhancement::Jade => {
                 out.bonus_chips += 20;
                 out.sources.push(("Jade Talisman", "+20 chips".into()));
             }
             TileEnhancement::Gilded => {
-                out.mult_bonus += 0.5;
-                out.sources.push(("Gilded Talisman", "+0.5 mult".into()));
+                out.mult_bonus += 0.4;
+                out.sources.push(("Gilded Talisman", "+0.4 mult".into()));
             }
             TileEnhancement::Polychrome => {
-                // Per-meld ×1.2; the cascade expands this as +0.2 × current_mult.
-                // Show the +0.2 figure so the tooltip reflects what the
-                // cascade actually adds.
-                out.mult_bonus += 0.2;
+                // Per-meld ×1.15; the cascade expands this as +0.15 × current_mult.
+                out.mult_bonus += 0.15;
                 out.sources
-                    .push(("Polychrome Talisman", "+0.2 mult / meld".into()));
+                    .push(("Polychrome Talisman", "+0.15 mult / meld".into()));
             }
         }
     }

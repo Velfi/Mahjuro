@@ -36,14 +36,6 @@ pub enum MaterialKind {
     /// otherwise the fragment is treated as dark stone. Reads `extras.y`
     /// from the point-light buffer for an animated time uniform.
     Water = 6,
-    /// Jade-tablet talisman: dielectric material (like Plain) with a
-    /// heightmap-driven normal perturbation on the flat faces. The bound
-    /// texture is treated as a grayscale heightfield — the shader samples
-    /// finite differences and perturbs the surface normal so carved motifs
-    /// catch the candle highlights. Uses screen-space derivative tangent
-    /// basis so it works regardless of the tablet's world-space orientation
-    /// (upright on the wall or laid flat in the tray).
-    Talisman = 7,
     /// Metallic foil wrapping — semi-conductor with thin-film iridescence.
     /// The bound texture is sampled as full-colour albedo (pack box art),
     /// overlaid with a view-dependent rainbow sheen that shifts as the
@@ -57,6 +49,33 @@ pub enum MaterialKind {
     /// Hard-enamel lapel pin look: color from `albedo_tex`; height/ridge from
     /// `relief_tex` (binding 3, linear grayscale).
     Enamel = 10,
+    /// Carved jade tablet — waxy vitreous green dielectric with broad
+    /// view-dependent sheen, soft SSS, and back-transmission glow on
+    /// silhouette edges. The bound texture is a grayscale heightfield;
+    /// the shader perturbs the normal on the flat faces so carved motifs
+    /// catch the candle highlights.
+    Jade = 11,
+    /// Moonstone — transparent feldspar with blue adularescence.
+    /// Layered specular (tight white pinpoint + wide soft-blue schiller
+    /// halo) over a clear body with cool SSS and a moon-blue Fresnel
+    /// rim. `base_color` tints the body. Uses the talisman heightmap.
+    Moonstone = 12,
+    /// Pearl / nacre — pearlescent surface with view-dependent hue shift
+    /// (pink/blue iridescence) and broad sheen. `base_color` tints the
+    /// nacre (white pearl, gold honors). Uses the talisman heightmap.
+    Pearl = 13,
+    /// Pitted gold nugget — metallic gold conductor with procedural
+    /// noise-driven normal perturbation that reads as raw cast-metal
+    /// pitting. Tinted Schlick Fresnel highlights.
+    GoldNugget = 14,
+    /// Holographic polychrome — thin-film iridescence with a rainbow
+    /// hue that shifts with viewing angle. Uses the talisman heightmap.
+    Polychrome = 15,
+    /// Glazed porcelain — cool-white dielectric with a crisp narrow
+    /// specular highlight, subtle Fresnel rim, and a soft warm SSS wrap
+    /// so the ceramic reads as glazed rather than matte plastic.
+    /// Composites engraved decals (same `has_decal` path as Plain).
+    Porcelain = 16,
 }
 
 /// Compact per-mesh material parameters.
@@ -414,9 +433,9 @@ impl LitMeshInstance {
     }
 
     /// Lowest-level uniform write: caller supplies the raw `f32` that lands
-    /// in `material_params.w`. Talisman rendering uses this to pass the
-    /// sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome) so the
-    /// shader can select per-kind sheen effects.
+    /// in `material_params.w`. Talisman rendering passes the per-kind
+    /// heightmap-texture index here so the shader's heightmap-driven
+    /// normal perturbation samples the right relief carving.
     pub fn write_uniform_raw_w(
         &self,
         queue: &wgpu::Queue,

@@ -655,6 +655,28 @@ fn collect_sequence_with_flower(
             flower_pool.push(fid);
         }
     }
+    // Flower as low: F, first, first+1 (needs first.rank >= 2 so flower subs for a real rank).
+    if first.rank >= 2 {
+        if let Some(next_offset) = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 1)
+        {
+            let next_idx = next_offset + 1;
+            let fid = flower_pool.pop().expect("flower pool exhausted");
+            found.push(DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![fid, remaining[0].id, remaining[next_idx].id],
+            });
+            let rest: Vec<Tile> = remaining
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| (i != 0 && i != next_idx).then_some(*t))
+                .collect();
+            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+            found.pop();
+            flower_pool.push(fid);
+        }
+    }
 }
 
 /// Detect a Chiitoitsu (seven pairs) hand: exactly 14 tiles, decomposing into
@@ -1012,11 +1034,36 @@ fn try_sequence_with_flower(
         }
     }
 
-    // Case 3: flower fills first position — first tile is rank+1 or rank+2
-    // of a potential sequence. We handle this implicitly: when the backtracker
-    // reaches a tile that could be the middle or end of a sequence, the
-    // "first + flower" cases above will have already tried it from the lower
-    // tile's perspective. No extra logic needed here.
+    // Case 3: flower fills the low slot — F, first, first+1.
+    // Needed when the real tiles start at rank >= 2 (e.g. 8+9+F = 7-8-9),
+    // since the lower-rank anchor that would drive cases 1/2 doesn't exist.
+    if first.rank >= 2 {
+        let next = remaining[1..]
+            .iter()
+            .position(|t| t.suit == first.suit && t.rank == first.rank + 1);
+        if let Some(next_offset) = next {
+            let next_idx = next_offset + 1;
+            let fid = flower_pool
+                .pop()
+                .expect("flower pool exhausted mid-backtrack");
+            let set = DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![fid, remaining[0].id, remaining[next_idx].id],
+            };
+            found.push(set);
+            let mut rest: Vec<Tile> = Vec::with_capacity(remaining.len() - 2);
+            for (i, t) in remaining.iter().enumerate() {
+                if i != 0 && i != next_idx {
+                    rest.push(*t);
+                }
+            }
+            if backtrack_decompose_flowers(&rest, flower_pool, found, allow_wrap) {
+                return true;
+            }
+            found.pop();
+            flower_pool.push(fid);
+        }
+    }
 
     false
 }
@@ -1275,6 +1322,19 @@ mod tests {
             t(Suit::Characters, 1, 0),
             t(Suit::Characters, 3, 1),
             t(Suit::Flower, 3, 100),
+        ];
+        let sets = validate_selection(&tiles).unwrap();
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Sequence);
+    }
+
+    #[test]
+    fn flower_completes_sequence_low() {
+        // 8m, 9m + flower = 7-8-9m sequence (flower fills rank 7)
+        let tiles = vec![
+            t(Suit::Characters, 8, 0),
+            t(Suit::Characters, 9, 1),
+            t(Suit::Flower, 1, 100),
         ];
         let sets = validate_selection(&tiles).unwrap();
         assert_eq!(sets.len(), 1);

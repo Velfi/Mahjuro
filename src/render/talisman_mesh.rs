@@ -126,7 +126,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::Plain,
+            kind: MaterialKind::Jade,
             // Default jade-green; per-instance color overrides this.
             base_color: [0.45, 0.78, 0.55, 1.0],
             specular_strength: 0.55,
@@ -138,3 +138,30 @@ pub fn build_talisman_mesh() -> MeshCpu {
 /// Local AABB half-extents for `pick_shop_object`'s slab test. Matches the
 /// vertex layout above.
 pub const TALISMAN_LOCAL_HALF: [f32; 3] = [HALF_W, HALF_H, HALF_T];
+
+/// Per-talisman material parameters. Each variant gets its own `MaterialKind`
+/// so the shader can pick the right sheen/Fresnel/SSS treatment. The caller
+/// supplies the per-instance tint via `base_color`.
+pub fn talisman_material(
+    kind: crate::core::talisman::TalismanKind,
+    base_color: [f32; 4],
+) -> MaterialParams {
+    use crate::core::talisman::TalismanKind as T;
+    let (mat_kind, spec_strength, spec_power) = match kind {
+        T::Jade => (MaterialKind::Jade, 0.55, 48.0),
+        T::Pearl => (MaterialKind::Pearl, 0.60, 64.0),
+        T::Gilded => (MaterialKind::GoldNugget, 0.95, 160.0),
+        T::Polychrome => (MaterialKind::Polychrome, 0.70, 32.0),
+        T::Kiln => (MaterialKind::Polychrome, 0.70, 32.0),
+        T::Bamboo | T::Dots | T::Characters | T::Conformity => {
+            (MaterialKind::Moonstone, 0.80, 80.0)
+        }
+        T::Honors | T::Wildflower => (MaterialKind::Pearl, 0.60, 64.0),
+    };
+    MaterialParams {
+        kind: mat_kind,
+        base_color,
+        specular_strength: spec_strength,
+        specular_power: spec_power,
+    }
+}

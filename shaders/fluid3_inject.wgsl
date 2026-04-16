@@ -68,15 +68,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             // sweep in gameplay.rs) running for many frames at the same cells
             // would drive density arbitrarily negative. The lightbake clamps
             // negative density to 0 for the raymarcher, so the well stays
-            // *invisible*, but subsequent positive injections (cursor puffs,
-            // candle plumes) get absorbed into it and don't render until
-            // natural dissipation drains the well — which takes ~10 seconds
-            // and presents as "the cursor stopped emitting smoke." Clamping
-            // here keeps negative impulses doing their job (subtracting from
-            // existing positive density) without letting them dig wells.
+            // *invisible*, but subsequent positive injections (cursor puffs)
+            // get absorbed into it and don't render until natural dissipation
+            // drains the well — which takes ~10 seconds and presents as
+            // "the cursor stopped emitting smoke." Clamping here keeps
+            // negative impulses doing their job (subtracting from existing
+            // positive density) without letting them dig wells.
             vd.w = max(vd.w + pt.vel_density.w * gauss, 0.0);
-            // Temperature is explicitly authored per source so we can
-            // separate hot-but-thin plumes from dense-but-cool soot.
+            // Temperature is explicitly authored per source.
             let temp_src = max(pt.temperature_phase.x, 0.0) + up * 0.003;
             temp = max(temp + temp_src * gauss, 0.0);
         }
