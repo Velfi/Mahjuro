@@ -790,6 +790,7 @@ impl TutorialCampaignScene {
                         hovered: false,
                         outline: false,
                         glow: false,
+                        glow_color: None,
                         pick_id: None,
                     });
                     next_id += 1;

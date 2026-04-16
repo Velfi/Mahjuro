@@ -323,6 +323,10 @@ pub struct GameplayScene {
     score_popups: ScorePopupSystem,
     /// Odometer-style floating digit reel showing the current score.
     score_reel: ScoreReel,
+    /// Last target score the reel was sized for. When this differs from
+    /// `run.target_score` (scene init or a new round) the reel is reset so
+    /// it starts with exactly as many zero columns as the target has digits.
+    score_reel_target: u64,
     /// When set, the gameplay scene draws a fullscreen gold-tinted quad
     /// fading out from this timestamp. Triggered on the cascade's
     /// `ShowTotal` edge so the screen flashes gold as the final beat lands.
@@ -371,6 +375,11 @@ pub struct GameplayScene {
     /// Whether the current cascade has already emitted its `ScoreCascadeFinal`
     /// event. Reset when a new cascade starts.
     cascade_final_emitted: bool,
+    /// Future timestamps at which a queued `DoraScored` chime should fire.
+    /// Populated with one entry per dora tile when the cascade reveals a
+    /// "Dora ×N" step, so multiple dora audibly play in sequence rather
+    /// than a single stacked hit. Drained each frame as entries come due.
+    pending_dora_chimes: Vec<Instant>,
     /// Yaku Journal overlay — Balatro-style run-stats page listing every
     /// yaku with its level, leveled bonuses, and run play count. Opened
     /// by clicking the Journal book on the table.
@@ -661,6 +670,7 @@ impl GameplayScene {
             prev_gold: 0,
             score_popups: ScorePopupSystem::new(),
             score_reel: ScoreReel::new(),
+            score_reel_target: 0,
             gold_flash_at: None,
             last_frame: Instant::now(),
             pause_menu: PauseMenu::new(),
@@ -682,6 +692,7 @@ impl GameplayScene {
             relic_glow_starts: std::collections::HashMap::new(),
             last_revealed_step: None,
             cascade_final_emitted: false,
+            pending_dora_chimes: Vec::new(),
             journal: super::journal::JournalOverlay::new(),
             prev_hand_len: 0,
             last_deal_at: None,
@@ -780,6 +791,7 @@ impl GameplayScene {
                 if starting_fresh {
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
+                    self.pending_dora_chimes.clear();
                 }
                 let sp = ctx.layout.score_panel;
                 let px = sp.x + sp.w * 0.5;
@@ -1170,6 +1182,15 @@ impl SceneBehavior for GameplayScene {
         self.particles.update(dt);
         self.flying_coins.update(dt);
         self.score_popups.update(now);
+        // When the target changes (scene init or a new round), shrink the
+        // reel back down to exactly `digits(target)` zero columns. Columns
+        // that grew mid-round because the player overshot the target are
+        // dropped here.
+        let cur_target = ctx.run.target_score as u64;
+        if self.score_reel_target != cur_target {
+            self.score_reel.reset_for_target(cur_target);
+            self.score_reel_target = cur_target;
+        }
         // When idle (no cascade), snap the reel to the real score so scene
         // init and round transitions display the correct value immediately.
         if self.cascade_queue.is_empty() {
@@ -1469,6 +1490,19 @@ impl SceneBehavior for GameplayScene {
         // If a cascade is running, advance it and block most input.
         if let Some((cascade, cascade_showcase_opt)) = self.cascade_queue.front_mut() {
             let cascade_showcase = cascade_showcase_opt.clone();
+            // Fire any dora chimes whose scheduled time has arrived. Entries
+            // are pushed in ascending time order, so we drain from the front
+            // while the head is due.
+            while self
+                .pending_dora_chimes
+                .first()
+                .is_some_and(|t| *t <= now)
+            {
+                self.pending_dora_chimes.remove(0);
+                ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
+                    crate::audio::SfxId::DoraScored,
+                ));
+            }
             cascade.update(now);
             let frame = cascade.frame(now);
             self.displayed_score = frame.displayed_score;
@@ -1504,6 +1538,18 @@ impl SceneBehavior for GameplayScene {
                             .get(ordinal - cascade.breakdown.base_steps.len())
                     };
                     if let Some(step) = step {
+                        // Dora step just revealed: schedule one chime per
+                        // matching tile, spaced so multiple dora play as a
+                        // rolling ding-ding rather than a stacked hit.
+                        if step.source.starts_with("Dora") && !step.tile_ids.is_empty() {
+                            const DORA_CHIME_SPACING_MS: u64 = 180;
+                            for (i, _) in step.tile_ids.iter().enumerate() {
+                                let offset = std::time::Duration::from_millis(
+                                    (i as u64) * DORA_CHIME_SPACING_MS,
+                                );
+                                self.pending_dora_chimes.push(now + offset);
+                            }
+                        }
                         if let Some(rid) = crate::core::relic::relic_by_name(&step.source) {
                             self.relic_glow_starts.insert(rid, now);
                         }
@@ -1635,6 +1681,7 @@ impl SceneBehavior for GameplayScene {
                 self.cascade_queue.pop_front();
                 self.last_revealed_step = None;
                 self.cascade_final_emitted = false;
+                self.pending_dora_chimes.clear();
                 self.score_popups.clear();
                 // If more cascades are queued, stay in cascade mode.
                 if !self.cascade_queue.is_empty() {
@@ -1656,6 +1703,7 @@ impl SceneBehavior for GameplayScene {
                     self.cascade_queue.pop_front();
                     self.last_revealed_step = None;
                     self.cascade_final_emitted = false;
+                    self.pending_dora_chimes.clear();
                     self.score_popups.clear();
                     if !self.cascade_queue.is_empty() {
                         return None;
@@ -2535,13 +2583,6 @@ impl SceneBehavior for GameplayScene {
         // Score panel text.
         let tiles_left = run.wall.remaining();
         let dora_section = if ctx.progress.dora_enabled() {
-            let indicator_text: String = run
-                .wall
-                .dora_indicator_tiles()
-                .iter()
-                .map(|t| t.label())
-                .collect::<Vec<_>>()
-                .join(",");
             let face_text: String = run
                 .wall
                 .dora_faces()
@@ -2552,7 +2593,7 @@ impl SceneBehavior for GameplayScene {
                 })
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("   Dora: {} (ind: {})", face_text, indicator_text)
+            format!("   Dora: {}", face_text)
         } else {
             String::new()
         };
@@ -2970,6 +3011,7 @@ impl SceneBehavior for GameplayScene {
                         hovered: false,
                         outline: false,
                         glow: false,
+                        glow_color: None,
                         pick_id: None,
                     });
                     x_cursor += tile_size + intra_gap;
@@ -3633,13 +3675,17 @@ impl SceneBehavior for GameplayScene {
         // when there's no gold to display (no pile is drawn).
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry and the focus tooltip can both use it.
-        let dora_rect: [f32; 4] = {
+        // Prefer the renderer's projected plinth rect (one frame stale,
+        // tracks the actual on-screen quad as the camera or arrange-mode
+        // overrides shift it). Falls back to a screen-position estimate on
+        // the first frame before the projection cache has populated.
+        let dora_rect: [f32; 4] = ctx.proj.dora_plinth_rect.unwrap_or_else(|| {
             let dora_x = self.positions.dora.nx * layout.window_w;
             let dora_y = self.positions.dora.ny * layout.window_h;
-            let dora_w = layout.mm(30.0);
-            let dora_h = layout.mm(40.0);
+            let dora_w = layout.mm(48.0);
+            let dora_h = layout.mm(34.0);
             [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
-        };
+        });
 
         let coin_pile_rect: Option<[f32; 4]> = if run.gold > 0 {
             let coin_radius = layout.mm(11.3);
@@ -4108,11 +4154,15 @@ impl SceneBehavior for GameplayScene {
                     };
 
                     // ── Geometry ──────────────────────────────────────
-                    let line_h = 18.0 * scale;
-                    let pad_x = 8.0 * scale;
-                    let pad_y = 6.0 * scale;
+                    // Floors mirror the glossary tooltip in `ui::tooltip` so
+                    // small windows and low `ui_scale` don't squish text below
+                    // legible size.
+                    let line_h = (18.0 * scale).max(20.0);
+                    let pad_x = (8.0 * scale).max(8.0);
+                    let pad_y = (6.0 * scale).max(8.0);
+                    let char_px = (7.5 * scale).max(6.0);
                     let widest = lines.iter().map(|s| s.chars().count()).max().unwrap_or(0) as f32;
-                    let tw = (widest * 7.5 * scale + pad_x * 2.0).max(120.0 * scale);
+                    let tw = (widest * char_px + pad_x * 2.0).max(200.0);
                     let th = line_h * lines.len() as f32 + pad_y * 2.0;
 
                     // Position: below the anchor's bottom edge (the tile
@@ -4882,6 +4932,18 @@ impl SceneBehavior for GameplayScene {
                 }
             }
             Some(FocusTarget::Dora) => {
+                let per_dora = if run.relics.has(RelicId::DoraCrown) { 35 } else { 25 };
+                let dora_faces = run.wall.dora_faces();
+                let body = if dora_faces.is_empty() {
+                    format!("Each dora in a scored set: +{per_dora} chips.")
+                } else {
+                    let names: Vec<String> = dora_faces
+                        .iter()
+                        .map(|&(suit, rank)| crate::core::tile::Tile::new(suit, rank, 0).full_name())
+                        .collect();
+                    let label = if names.len() == 1 { "Dora" } else { "Doras" };
+                    format!("{label}: {}. Each in a scored set: +{per_dora} chips.", names.join(", "))
+                };
                 push_tooltip(
                     &mut hover_quads,
                     &mut hover_text,
@@ -4890,8 +4952,8 @@ impl SceneBehavior for GameplayScene {
                     layout.window_w,
                     layout.window_h,
                     ctx.ui_scale,
-                    "Dora Indicator",
-                    "The face-up tile on the brass stand marks the round's bonus. Each tile in your hand matching the dora (the next tile after the indicator) adds extra mult when scored.",
+                    "Dora",
+                    &body,
                 );
             }
             _ => {}
@@ -5090,6 +5152,14 @@ impl SceneBehavior for GameplayScene {
             const HAND_TILE_RX: f32 = std::f32::consts::FRAC_PI_2 - 22.0_f32 * std::f32::consts::PI / 180.0;
             const HAND_TILE_RZ: f32 = std::f32::consts::PI;
             let hand = &run.hand;
+            // Dora face set for highlighting matching hand tiles. Empty
+            // before dora unlocks (level 4) so the marker only appears
+            // once the player can read the indicator.
+            let dora_faces: Vec<(crate::core::tile::Suit, u8)> = if ctx.progress.dora_enabled() {
+                run.wall.dora_faces()
+            } else {
+                Vec::new()
+            };
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
             for (i, &tile) in hand.iter().enumerate() {
@@ -5100,6 +5170,7 @@ impl SceneBehavior for GameplayScene {
                 let is_selected = run.selected.get(i).copied().unwrap_or(false);
                 let is_focused = focus == i;
                 let is_hinted = hint_indices.contains(&i);
+                let is_dora = dora_faces.contains(&(tile.suit, tile.rank));
                 // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
                 let slide_y_frac = self.hand_slide_y.get(i).copied().unwrap_or(1.0);
                 let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
@@ -5109,6 +5180,15 @@ impl SceneBehavior for GameplayScene {
                 // Tile standing upright: center is at half the long dimension above the table.
                 // Chinese tile: 30mm long, half = 15mm. layout.mm() converts mm → world units.
                 let lift = layout.mm(15.0) + layout.mm(self.positions.hand_strip.lift_mm);
+                let glow_on = is_selected || is_hinted || is_dora;
+                // Selection / hint take priority over the dora marker so
+                // the player's active intent stays visible. Dora-only
+                // tiles glow red.
+                let glow_color = if is_dora && !(is_selected || is_hinted) {
+                    Some([1.00, 0.25, 0.20, 0.55])
+                } else {
+                    None
+                };
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
@@ -5123,7 +5203,8 @@ impl SceneBehavior for GameplayScene {
                     selected: is_selected,
                     hovered: is_focused,
                     outline: is_selected || is_focused,
-                    glow: is_selected || is_hinted,
+                    glow: glow_on,
+                    glow_color,
                     pick_id: Some(i),
                 });
             }
@@ -5205,9 +5286,11 @@ impl SceneBehavior for GameplayScene {
             let ms_rect = layout.modifier_strip;
             // Keep the gameplay ofuda slimmer than the shrine-screen paper:
             // the main plaque also needs room for score + gold + wind, so a
-            // full-width warning card feels crowding here.
-            let ofuda_w = ms_rect.w * 0.22;
-            let ofuda_h = ms_rect.h * 1.7;
+            // full-width warning card feels crowding here. Width set so the
+            // wrapped rule body reads at table distance — too narrow and the
+            // body shrinks to unreadable per-glyph sizes.
+            let ofuda_w = ms_rect.w * 0.34;
+            let ofuda_h = ms_rect.h * 1.55;
             let scale_c = (layout.window_w / 600.0).max(0.5);
             let plaque_w = sp.w * 0.95;
             let plaque_left = sp.x + (sp.w - plaque_w) * 0.5;
@@ -5346,7 +5429,8 @@ impl SceneBehavior for GameplayScene {
         }
         // Floating extruded-glyph score popups (per-step "+50" / "×3").
         if self.score_popups.is_active() {
-            let placements = self.score_popups.placements(now);
+            let popup_scale = layout.window_w.min(layout.window_h) / 1080.0;
+            let placements = self.score_popups.placements(now, popup_scale);
             frame.extruded_glyph_batch(placements);
         }
         // Gold-flash overlay: a fullscreen quad that fades from peak alpha
@@ -5422,6 +5506,90 @@ impl SceneBehavior for GameplayScene {
         // stand. None of these are clickable; they're pure atmosphere that
         // makes the score line and wall counter physically present.
         //
+        // Dora indicator plinth — ornate brass pedestal at center-stage
+        // (back of the table by default; user-arrangeable). Holds 1–2
+        // dora indicator tile faces. Only drawn once dora is unlocked
+        // (level 4+); the focusable rect powers the focus ring + glossary
+        // tooltip below.
+        if ctx.progress.dora_enabled() {
+            let dora_p = &self.positions.dora;
+            let plinth_w = layout.mm(48.0);
+            let plinth_h = layout.mm(20.0);
+            let plinth_d = layout.mm(34.0);
+            let plinth_cx = dora_p.nx * layout.window_w;
+            let plinth_cy = dora_p.ny * layout.window_h;
+            let plinth_lift = layout.mm(dora_p.lift_mm);
+            frame.object3d(Object3d {
+                pos: [plinth_cx, plinth_cy, plinth_lift],
+                extents: [plinth_w, plinth_h, plinth_d],
+                rotation: glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
+                    * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
+                    * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: crate::render::draw_cmd::Object3dKind::DoraPlinth { glow: 0.0 },
+                focusable: true,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("gameplay.dora_plinth"),
+            });
+
+            // Indicator tile face(s) sitting on the platform. The mesh
+            // platform's top is at local-y = +0.36 (lip rim), so place
+            // tiles slightly above that in world units. With Dora Crown,
+            // a second tile sits beside the first; otherwise just one.
+            let indicators = run.wall.dora_indicator_tiles();
+            if !indicators.is_empty() {
+                use crate::render::draw_cmd::ShowcaseTilePlacement;
+                let tile_size_px = layout.mm(22.0);
+                // Platform-top lift in world units. Mesh local-y goes up
+                // to +0.36 (lip top); the plinth's full Y extent is
+                // `plinth_h`, so the platform sits at +0.36 / 0.5 *
+                // (plinth_h * 0.5) above the plinth center. Plinth
+                // center is at lift + plinth_h*0.5 (because mesh is
+                // centered and we lifted by half-height in the renderer).
+                let platform_top = plinth_lift + plinth_h * (0.5 + 0.36);
+                // Stand the tile half its long dimension above the
+                // platform so it appears upright resting in the lip.
+                let tile_lift = platform_top + layout.mm(15.0);
+                let count = indicators.len().min(2);
+                let spacing = layout.mm(24.0);
+                let mut tile_placements: Vec<ShowcaseTilePlacement> =
+                    Vec::with_capacity(count);
+                for (i, &t) in indicators.iter().take(count).enumerate() {
+                    let offset = if count == 1 {
+                        0.0
+                    } else {
+                        (i as f32 - 0.5) * spacing
+                    };
+                    tile_placements.push(ShowcaseTilePlacement {
+                        tile: t,
+                        center_pos: [plinth_cx + offset, plinth_cy, tile_lift],
+                        // Stand upright with face toward the camera: Rx(+π/2)
+                        // sends the +Z face normal to -Y, and Rz(π) keeps the
+                        // tile's top edge up. The small negative lean tilts
+                        // the face slightly forward for the high camera.
+                        rotation: [
+                            std::f32::consts::FRAC_PI_2 - 15.0_f32.to_radians(),
+                            0.0,
+                            std::f32::consts::PI,
+                        ],
+                        scale: 1.0,
+                        size_px: tile_size_px,
+                        brightness: 1.0,
+                        selected: false,
+                        hovered: false,
+                        outline: false,
+                        glow: false,
+                        glow_color: None,
+                        pick_id: None,
+                    });
+                }
+                frame.showcase_tile_batch(tile_placements);
+            }
+        }
+
         // Coin pile — sits at the back-right of the play area, just past
         // the right-hand score-panel candle, so it shares the rear pool of
         // candlelight with the score plaque. Coin count = min(gold,
@@ -5534,6 +5702,9 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = coin_pile_rect {
                 frame.glossary_anchor(rect, "Gold");
             }
+            // Dora plinth hover is handled by the `FocusTarget::Dora` tooltip
+            // path, which shows live dora-face data. Registering a glossary
+            // anchor here too would stack two tooltips over the plinth.
         }
 
         // Flying coin animations (gold changes).

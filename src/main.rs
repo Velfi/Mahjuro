@@ -1817,6 +1817,11 @@ impl App {
                 self.run.resolve_upcoming_boss();
                 log::info!("[Debug] Set boss to {}", kind.name());
             }
+            DebugAction::SetDora(suit, rank) => {
+                self.run.wall.set_sole_dora(suit, rank);
+                let name = crate::core::tile::Tile::new(suit, rank, 0).full_name();
+                log::info!("[Debug] Set dora to {name}");
+            }
             DebugAction::TestOverlay => {
                 let modal = Modal::new(
                     "Test Overlay",

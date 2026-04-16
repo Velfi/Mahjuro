@@ -353,14 +353,14 @@ fn build_tooltip(
     win_h: f32,
     exclude: &[&str],
 ) -> TooltipEntry {
-    let padding = (10.0 * scale).max(6.0);
-    let tooltip_w = (280.0 * scale).max(160.0);
-    let line_h = (22.0 * scale).max(14.0);
+    let padding = (10.0 * scale).max(8.0);
+    let tooltip_w = (280.0 * scale).max(200.0);
+    let line_h = (22.0 * scale).max(20.0);
     let content_w = tooltip_w - padding * 2.0;
     let margin = 4.0;
     let gap = 6.0;
 
-    let font_px = (line_h * 0.55).max(8.0);
+    let font_px = (line_h * 0.55).max(11.0);
     let lines = wrap_text(font, description, font_px, content_w);
 
     let tooltip_h = padding * 2.0 + line_h + padding * 0.5 + lines.len() as f32 * line_h;

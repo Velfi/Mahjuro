@@ -18,6 +18,7 @@ use winit::window::Window;
 use crate::core::boss::{ALL_BOSSES, BossKind, FINAL_BOSSES};
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
+use crate::core::tile::{Suit, Tile};
 use crate::core::zodiac::ZodiacKind;
 
 /// Identifies which debug action was triggered.
@@ -33,6 +34,9 @@ pub enum DebugAction {
     /// Replace the current ante's `upcoming_boss` and re-resolve its effect
     /// (so reactive variants like Mirror/Tax Collector pick fresh).
     SetBoss(BossKind),
+    /// Replace the current dora indicator with a single tile of the given
+    /// face. Clobbers any extra dora revealed by Dora Crown.
+    SetDora(Suit, u8),
     ToggleShowFps,
     /// Open the in-game debug visibility modal — a checkbox panel for
     /// hiding individual gameplay HUD elements (tiles, candles, the two
@@ -296,6 +300,28 @@ impl DebugMenuBar {
             let _ = boss_sub.append(&item);
         }
         let _ = debug_menu.append(&boss_sub);
+
+        // Set Dora submenu — pick any non-bonus tile face (number suits,
+        // winds, dragons) and the current dora indicator is replaced.
+        // Grouped into sub-submenus per suit to keep the list browsable.
+        let dora_sub = Submenu::new("Set Dora", true);
+        for (suit_label, suit, max_rank) in [
+            ("Characters (m)", Suit::Characters, 9u8),
+            ("Bamboos (s)", Suit::Bamboos, 9u8),
+            ("Circles (p)", Suit::Circles, 9u8),
+            ("Winds", Suit::Wind, 4u8),
+            ("Dragons", Suit::Dragon, 3u8),
+        ] {
+            let suit_sub = Submenu::new(suit_label, true);
+            for rank in 1..=max_rank {
+                let label = Tile::new(suit, rank, 0).full_name();
+                let item = MenuItem::new(label, true, None);
+                mappings.push((item.id().clone(), DebugAction::SetDora(suit, rank)));
+                let _ = suit_sub.append(&item);
+            }
+            let _ = dora_sub.append(&suit_sub);
+        }
+        let _ = debug_menu.append(&dora_sub);
 
         let _ = menu.append(&debug_menu);
 

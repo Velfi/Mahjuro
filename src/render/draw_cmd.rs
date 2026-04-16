@@ -651,6 +651,10 @@ pub struct ShowcaseTilePlacement {
     pub outline: bool,
     /// Emit an additive radial glow halo behind this tile (warm champagne gold).
     pub glow: bool,
+    /// Override color for the glow halo when `glow` is true. `None` falls
+    /// back to the default warm champagne gold. Used to mark dora tiles
+    /// with a red glow.
+    pub glow_color: Option<[f32; 4]>,
     /// Logical slot index for ray-cast tile picking and `proj.hand_rects` tracking.
     /// `None` = not pickable (pack-open showcase tiles, etc.).
     pub pick_id: Option<usize>,
@@ -773,6 +777,11 @@ pub enum Object3dKind {
     // ── Props ────────────────────────────────────────────────────────
     /// Procedural shrine altar (Small / Big / Boss scale via `extents`).
     Shrine { glow: f32 },
+    /// Procedural ornate brass plinth used by the gameplay scene to display
+    /// the dora indicator tile(s). The mesh has no roof; the indicator
+    /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
+    /// resting on the platform on top.
+    DoraPlinth { glow: f32 },
     /// Colored relic placeholder box sitting in the dish.
     Relic { relic_id: RelicId, glow: f32 },
     /// 3D relic viewer (collection card, modal, tutorial).

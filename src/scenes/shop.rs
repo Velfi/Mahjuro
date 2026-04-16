@@ -859,6 +859,12 @@ pub struct ShopScene {
     /// over an owned item; cleared when the button is released. If released
     /// over the sell tray, the item is sold.
     mouse_drag: Option<ShopDragSource>,
+    /// Last observed cursor position in layout-pixel space. Stashed in
+    /// `update()` so `draw_frame` can seed a faint wind gust at the cursor.
+    last_cursor_px: (f32, f32),
+    /// Cursor position from the previous frame, used to derive a velocity
+    /// for the cursor-driven wind gust.
+    prev_cursor_px: (f32, f32),
     /// Per-`ShopHit` world-space overrides for the hover title/description
     /// plaque anchor. When a key is present, the scene uses the stored
     /// `(px, py, wz)` instead of the default layout-derived anchor for that
@@ -1197,6 +1203,8 @@ impl ShopScene {
             held_item_drag: None,
             mouse_drag: None,
             hover_anchor_overrides: std::collections::HashMap::new(),
+            last_cursor_px: (0.0, 0.0),
+            prev_cursor_px: (0.0, 0.0),
         }
     }
 
@@ -1808,6 +1816,8 @@ impl SceneBehavior for ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        self.prev_cursor_px = self.last_cursor_px;
+        self.last_cursor_px = ctx.cursor_pos;
         self.particles.update(dt);
         // Advance bug orbit phases.
         for (i, phase) in self.bug_phases.iter_mut().enumerate() {
@@ -2843,7 +2853,7 @@ impl SceneBehavior for ShopScene {
         // drape, not a uniform wall.
         let t = self.age_secs;
         const N_EMITTERS: usize = 9;
-        let back_pixel_y = h * 0.12;
+        let back_pixel_y = h * 0.02;
         let span = w * 0.88;
         let curtain_lift = h * 0.55;
         for i in 0..N_EMITTERS {
@@ -2862,6 +2872,59 @@ impl SceneBehavior for ShopScene {
                 velocity: [sway * 6.0, -4.0 - roll * 2.0, 14.0 + roll * 3.0],
                 radius: h * 0.18,
                 density: 0.55 + 0.15 * roll,
+            });
+        }
+
+        // ── Corner fans ────────────────────────────────────────────────
+        // Two fans tucked in the back corners of the room wafting smoke
+        // forward toward the camera (world −Y). A slow sinusoid on the
+        // magnitude sells the "blade spin cycle" without a visible fan
+        // mesh, and a small lateral sway keeps the stream from reading
+        // as a perfectly rigid jet.
+        let fan_pixel_y = h * 0.08;
+        let fan_lift = h * 0.28;
+        let fan_radius = h * 0.14;
+        for side in [-1.0_f32, 1.0_f32] {
+            let fan_px = w * 0.5 + side * w * 0.44;
+            // Out-of-phase pulse between the two fans so the room doesn't
+            // breathe in unison.
+            let fan_phase = if side < 0.0 { 0.0 } else { 1.9 };
+            let pulse = 0.75 + 0.25 * (t * 1.6 + fan_phase).sin();
+            let wobble = (t * 2.3 + fan_phase).sin();
+            frame.wind_gusts.push(crate::render::draw_cmd::WindGust {
+                center_px: (fan_px, fan_pixel_y),
+                lift: fan_lift + wobble * h * 0.02,
+                // −Y pushes smoke toward the camera. A touch of inward X
+                // aims each fan toward center so the streams converge on
+                // the counter.
+                velocity: [
+                    -side * 4.0 + wobble * 2.0,
+                    -28.0 * pulse,
+                    2.0 + wobble * 1.5,
+                ],
+                radius: fan_radius,
+                density: 0.35 * pulse,
+            });
+        }
+
+        // ── Cursor breeze ──────────────────────────────────────────────
+        // A faint wind gust that follows the cursor, derived from its
+        // frame-to-frame motion. Small radius/density so it only ruffles
+        // the curtain rather than fogging the scene.
+        let (cx_px, cy_px) = self.last_cursor_px;
+        let (px_px, py_px) = self.prev_cursor_px;
+        if cx_px > 0.0 && cy_px > 0.0 {
+            let dx = cx_px - px_px;
+            let dy = cy_px - py_px;
+            // Pixel +y is world -y, so flip y when pushing smoke.
+            let vx = dx.clamp(-w * 0.05, w * 0.05) * 0.6;
+            let vy = -dy.clamp(-h * 0.05, h * 0.05) * 0.6;
+            frame.wind_gusts.push(crate::render::draw_cmd::WindGust {
+                center_px: (cx_px, cy_px),
+                lift: h * 0.12,
+                velocity: [vx, vy, 2.0],
+                radius: h * 0.08,
+                density: 0.05,
             });
         }
 
@@ -3423,8 +3486,7 @@ impl SceneBehavior for ShopScene {
                         .get(idx)
                         .copied()
                         .unwrap_or(layout.pack_centers_px[0]);
-                    let hh = layout.pack_extents[2] * 0.5;
-                    (center.0, center.1 - hh, center.2 + hh)
+                    (center.0, center.1, center.2 + layout.pack_extents[2])
                 }
                 ShopHit::Dish(id) => {
                     if id == PICK_RELIC_DISH {
@@ -4164,6 +4226,7 @@ impl SceneBehavior for ShopScene {
                             hovered: false,
                             outline: false,
                             glow: false,
+                            glow_color: None,
                             pick_id: None,
                         });
                     }
@@ -4198,7 +4261,8 @@ impl SceneBehavior for ShopScene {
 
         // Zodiac level-up feedback: floating text + particles.
         let now = Instant::now();
-        let glyph_placements = self.score_popups.placements(now);
+        let popup_scale = w.min(h) / 1080.0;
+        let glyph_placements = self.score_popups.placements(now, popup_scale);
         if !glyph_placements.is_empty() {
             frame.extruded_glyph_batch(glyph_placements);
         }

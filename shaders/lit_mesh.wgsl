@@ -555,9 +555,16 @@ fn fs_main(
         // stay pure foil so the pack reads as a wrapped card from every
         // angle. Metallic foil sheen is layered on top in the per-light
         // loop regardless — decal art still catches the iridescence.
-        let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
-        let decal_mask = tex_sample.a * front_face;
-        albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
+        // `material_params.w > 0.5` signals a talisman-shaped foil draw
+        // (different mesh axis, heightmap bound instead of decal) — skip
+        // the decal composite so the tablet reads as pure gold foil.
+        if (mesh.material_params.w > 0.5) {
+            albedo = mesh.base_color.rgb;
+        } else {
+            let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
+            let decal_mask = tex_sample.a * front_face;
+            albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
+        }
     }
     if (is_glass) {
         // The bound texture remains visible, but we brighten and cool it so
@@ -940,7 +947,8 @@ fn fs_main(
     // the tablet's orientation (upright on the wall or laid flat in the
     // tray). Only the flat front/back faces are perturbed — detected via
     // local_pos.z proximity to the half-thickness (±0.09).
-    if (is_talisman) {
+    let is_foil_talisman = is_foil && mesh.material_params.w > 0.5;
+    if (is_talisman || is_foil_talisman) {
         let face_flat = abs(abs(in.local_pos.z) - 0.09);
         if (face_flat < 0.02) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
@@ -1328,9 +1336,11 @@ fn fs_main(
             let vdh = max(dot(view_dir, h), 0.0);
             let ndv = max(dot(n, view_dir), 0.0);
             let broad = max(dot(n, l_dir), 0.0);
-            // Silver conductor Fresnel — real foil wrappers have a neutral
-            // metallic sheen regardless of the printed art underneath.
-            let f0 = vec3<f32>(0.75) + albedo * 0.1;
+            // Tinted conductor Fresnel — F0 is the foil's own colour so a
+            // gold-tinted instance reflects gold, a silver one reflects
+            // silver, etc. Real metallic foil wrappers take their sheen
+            // from the metal itself, not a neutral spec.
+            let f0 = mesh.base_color.rgb;
             let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
             let mirror_lobe = pow(nh, 48.0) * 1.6;
             spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;

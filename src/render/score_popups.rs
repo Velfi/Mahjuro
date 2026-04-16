@@ -100,7 +100,7 @@ impl ScorePopupSystem {
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Metal, PopupMotion::Settle),
         };
         let mag = magnitude.abs().max(1.0);
-        let scale = 205.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.42));
+        let scale = 185.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.42));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
         self.popups.push(ScorePopup {
@@ -154,7 +154,12 @@ impl ScorePopupSystem {
     }
 
     /// Build the per-frame placement list the renderer consumes.
-    pub fn placements(&self, now: Instant) -> Vec<ExtrudedGlyphPlacement> {
+    ///
+    /// `screen_scale` multiplies each popup's world-units scale so they stay
+    /// readable at the current window size. Callers derive this from
+    /// `min(window_w, window_h) / 1080.0` so small windows get proportionally
+    /// smaller popups.
+    pub fn placements(&self, now: Instant, screen_scale: f32) -> Vec<ExtrudedGlyphPlacement> {
         self.popups
             .iter()
             .map(|p| {
@@ -172,7 +177,7 @@ impl ScorePopupSystem {
 
                 ExtrudedGlyphPlacement {
                     world_pos: [px, py, lift_z],
-                    scale: p.base_scale * scale_mul,
+                    scale: p.base_scale * scale_mul * screen_scale,
                     rotation_x: 0.08,
                     rotation_y: p.yaw,
                     label: p.label.clone(),
@@ -222,8 +227,10 @@ fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
     let ctrl_x = (p.source_xy.0 + p.dest_xy.0) * 0.5;
     let ctrl_y = (p.source_xy.1 + p.dest_xy.1) * 0.5;
     let one_m = 1.0 - eased;
-    let px = one_m * one_m * p.source_xy.0 + 2.0 * one_m * eased * ctrl_x + eased * eased * p.dest_xy.0;
-    let py = one_m * one_m * p.source_xy.1 + 2.0 * one_m * eased * ctrl_y + eased * eased * p.dest_xy.1;
+    let px =
+        one_m * one_m * p.source_xy.0 + 2.0 * one_m * eased * ctrl_x + eased * eased * p.dest_xy.0;
+    let py =
+        one_m * one_m * p.source_xy.1 + 2.0 * one_m * eased * ctrl_y + eased * eased * p.dest_xy.1;
     // Ease Z from (LIFT_BASE + LIFT_HOVER) at the start of the stream phase
     // to `dest_lift` at landing, so the popup actually meets the reel's
     // depth. The bezier arc adds an extra peak on top, via the one_m*eased

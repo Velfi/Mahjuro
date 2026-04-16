@@ -155,7 +155,14 @@ impl Default for ShopPositions {
                 ry_deg: 0.0,
                 rz_deg: 1.0,
             },
-            talismans: Placement::at(0.58, 0.333_764_26, 39.431_37),
+            talismans: Placement {
+                nx: 0.58,
+                ny: 0.333_764_26,
+                lift_mm: 39.431_37,
+                rx_deg: -8.0,
+                ry_deg: 0.0,
+                rz_deg: -27.0,
+            },
             ribbons: Placement::at(0.76, 0.43, 23.431_372),
             relic_spread_nx: 0.075,
             ribbon_spread_nx: 0.050,
@@ -669,7 +676,7 @@ pub struct GameplayPositions {
 impl Default for GameplayPositions {
     fn default() -> Self {
         Self {
-            relic_col: Placement::at(0.5, 0.045, 2.144_608),
+            relic_col: Placement::at(-0.198_206_01, -0.145_114_06, 2.144_608),
             relic_col_top_ny: 0.22,
             relic_col_bottom_ny: 0.78,
             relic_cell_height_mm: 42.0,
@@ -692,9 +699,9 @@ impl Default for GameplayPositions {
                 rz_deg: -30.0,
             },
             counter_discards_fan: Placement {
-                nx: 0.016_493_056,
-                ny: -0.102_661_6,
-                lift_mm: -25.318_287,
+                nx: 0.084_490_73,
+                ny: 0.065_589_31,
+                lift_mm: 19.361_042,
                 rx_deg: 0.0,
                 ry_deg: 0.0,
                 rz_deg: 45.0,
@@ -703,7 +710,7 @@ impl Default for GameplayPositions {
             ofuda: Placement {
                 nx: 0.002_893_518_4,
                 ny: 0.0,
-                lift_mm: -22.875_816,
+                lift_mm: -35.981_754,
                 rx_deg: -69.0,
                 ry_deg: 0.0,
                 rz_deg: 0.0,
@@ -711,14 +718,21 @@ impl Default for GameplayPositions {
 
             coin_pile: Placement::at(1.179_050_6, 0.13, 2.144_608),
 
-            dora: Placement::at(0.94, 0.22, 2.144_608),
+            dora: Placement {
+                nx: 0.765_231_4,
+                ny: -0.540_456_24,
+                lift_mm: 2.144_608_5,
+                rx_deg: 0.0,
+                ry_deg: 180.0,
+                rz_deg: 180.0,
+            },
 
-            talisman_dish: Placement::at(0.0, 0.0, 2.144_608),
+            talisman_dish: Placement::at(-0.115_740_74, -0.336_977_2, 2.144_608),
 
             bowl: Placement {
-                nx: -0.002_581_019,
-                ny: 0.027_867_55,
-                lift_mm: 2.144_608,
+                nx: -0.051_770_832,
+                ny: -0.115_193_285,
+                lift_mm: -32.109_547,
                 rx_deg: 0.0,
                 ry_deg: 0.0,
                 rz_deg: -315.0,
@@ -854,7 +868,7 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
         },
         Node::Leaf {
             name: "gameplay.dora",
-            label: "Dora indicator",
+            label: "Dora",
         },
         Node::Leaf {
             name: "gameplay.talisman_dish",

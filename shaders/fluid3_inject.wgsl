@@ -1,35 +1,35 @@
-// 3D fluid injection — gaussian splat of velocity + density per impulse.
+// Density injection — gaussian splats from a list of impulse points.
 //
-// Reads source vel/density via texture_3d, writes destination via storage texture.
+// No temperature, no pressure. Per-puff velocity is stashed in the xyz
+// channels of the density texture; the advect shader reads it back the
+// next frame so tile drags and scripted wind gusts still nudge smoke.
 
 struct FluidUniforms {
-    grid_size:    vec4<f32>, // xyz = grid dims (cells), w = unused
-    grid_min:     vec4<f32>, // xyz = world min,         w = unused
-    grid_max:     vec4<f32>, // xyz = world max,         w = unused
-    inv_extent:   vec4<f32>, // xyz = 1/(max-min),       w = unused
-    params:       vec4<f32>, // x=dt, y=density_dis, z=velocity_dis, w=buoyancy
+    grid_size:    vec4<f32>, // xyz = grid dims, w = sim_time
+    grid_min:     vec4<f32>,
+    grid_max:     vec4<f32>,
+    inv_extent:   vec4<f32>,
+    params:       vec4<f32>,
     force_params: vec4<f32>,
 };
 
 struct InjectionPoint {
-    pos_radius: vec4<f32>,   // xyz=world pos,  w=radius (world units)
-    vel_density: vec4<f32>,  // xyz=world vel,  w=density strength
-    temperature_phase: vec4<f32>, // x=temperature, y=phase
+    pos_radius:  vec4<f32>,       // xyz = world pos, w = radius (world units)
+    vel_density: vec4<f32>,       // xyz = world vel, w = density strength
+    temperature_phase: vec4<f32>, // unused; kept so the Rust side can leave its layout alone
 };
 
 // Must stay in sync with `MAX_INJECTIONS` in `src/render/fluid.rs`.
 const MAX_INJECTIONS: u32 = 64u;
 struct InjectionParams {
     points: array<InjectionPoint, 64>,
-    active_count: vec4<u32>, // x=count
+    active_count: vec4<u32>, // x = count
 };
 
 @group(0) @binding(0) var<uniform> fluid: FluidUniforms;
 @group(0) @binding(1) var<uniform> injection: InjectionParams;
-@group(0) @binding(2) var src_vd: texture_3d<f32>;
-@group(0) @binding(3) var src_temp: texture_3d<f32>;
-@group(0) @binding(4) var dst_vd: texture_storage_3d<rgba16float, write>;
-@group(0) @binding(5) var dst_temp: texture_storage_3d<r32float, write>;
+@group(0) @binding(2) var src_density: texture_3d<f32>;
+@group(0) @binding(3) var dst_density: texture_storage_3d<rgba16float, write>;
 
 fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     let uvw = (c + vec3<f32>(0.5)) / fluid.grid_size.xyz;
@@ -43,8 +43,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let coord = vec3<i32>(i32(gid.x), i32(gid.y), i32(gid.z));
-    var vd = textureLoad(src_vd, coord, 0);
-    var temp = textureLoad(src_temp, coord, 0).x;
+    var out = textureLoad(src_density, coord, 0);
 
     let world = cell_to_world(vec3<f32>(f32(gid.x), f32(gid.y), f32(gid.z)));
 
@@ -58,29 +57,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r2 = radius * radius;
         let gauss = exp(-dist2 / (2.0 * r2));
         if (gauss > 0.0001) {
-            let up = max(pt.vel_density.z, 0.0);
-            vd.x = vd.x + pt.vel_density.x * gauss;
-            vd.y = vd.y + pt.vel_density.y * gauss;
-            vd.z = vd.z + pt.vel_density.z * gauss;
-            // Clamp density at zero. Smoke density is physically non-negative,
-            // but the inject step is otherwise purely additive — so a "remove
-            // smoke" impulse with negative density (e.g. the post-deal wind
-            // sweep in gameplay.rs) running for many frames at the same cells
-            // would drive density arbitrarily negative. The lightbake clamps
-            // negative density to 0 for the raymarcher, so the well stays
-            // *invisible*, but subsequent positive injections (cursor puffs)
-            // get absorbed into it and don't render until natural dissipation
-            // drains the well — which takes ~10 seconds and presents as
-            // "the cursor stopped emitting smoke." Clamping here keeps
-            // negative impulses doing their job (subtracting from existing
-            // positive density) without letting them dig wells.
-            vd.w = max(vd.w + pt.vel_density.w * gauss, 0.0);
-            // Temperature is explicitly authored per source.
-            let temp_src = max(pt.temperature_phase.x, 0.0) + up * 0.003;
-            temp = max(temp + temp_src * gauss, 0.0);
+            // Velocity: accumulate per-puff velocity into xyz so the advect
+            // pass can transport nearby density accordingly. Density: clamp
+            // at zero so scripted "remove smoke" impulses can dig wells
+            // without going negative (which would soak up later positive
+            // injections invisibly and present as "the cursor stopped
+            // emitting smoke").
+            out.x = out.x + pt.vel_density.x * gauss;
+            out.y = out.y + pt.vel_density.y * gauss;
+            out.z = out.z + pt.vel_density.z * gauss;
+            out.w = max(out.w + pt.vel_density.w * gauss, 0.0);
         }
     }
 
-    textureStore(dst_vd, coord, vd);
-    textureStore(dst_temp, coord, vec4<f32>(temp, 0.0, 0.0, 0.0));
+    textureStore(dst_density, coord, out);
 }

@@ -23,6 +23,7 @@ use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
+use crate::audio::SfxId;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
@@ -1914,6 +1915,8 @@ impl RunState {
             Some(meta),
             bus,
         );
+
+        bus.push(GameEvent::UiSound(SfxId::CashIn));
 
         self.structure_sets.clear();
         self.structure_tiles.clear();
