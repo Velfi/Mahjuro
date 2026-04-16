@@ -48,21 +48,16 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     vertices[17].uv = [1.0, 1.0];
     vertices[18].uv = [1.0, 0.0];
     vertices[19].uv = [0.0, 0.0];
-    // Also map the -Z broad face (mirrored U so it reads correctly from that side).
-    // The -Z corner order pushed by `push_box` is:
-    //   v20 = (x1, y0, z0)  screen-right, screen-bottom → [0, 1]  (mirrored U)
-    //   v21 = (x0, y0, z0)  screen-left,  screen-bottom → [1, 1]
-    //   v22 = (x0, y1, z0)  screen-left,  screen-top    → [1, 0]
-    //   v23 = (x1, y1, z0)  screen-right, screen-top    → [0, 0]
-    vertices[20].uv = [0.0, 1.0];
-    vertices[21].uv = [1.0, 1.0];
-    vertices[22].uv = [1.0, 0.0];
-    vertices[23].uv = [0.0, 0.0];
-    // Every other slab face samples the transparent (0,0) corner of the
-    // decal so the title/rule only appears on the broad paper faces. The
-    // shader composites decal as `mix(albedo, tex_rgb, tex.a)`, so alpha=0
-    // leaves the paper albedo untouched on the edges.
+    // Every non-front face (including the -Z back) samples the transparent
+    // (0,0) corner of the decal so the title/rule only appears on the +Z
+    // paper face. The shader composites decal as `mix(albedo, tex_rgb,
+    // tex.a)`, so alpha=0 leaves the paper albedo untouched. Mapping the
+    // back face to the decal (even mirrored) bled through as reversed text
+    // whenever camera pitch let the -Z face win the depth test.
     for i in 0..16 {
+        vertices[i].uv = [0.0, 0.0];
+    }
+    for i in 20..24 {
         vertices[i].uv = [0.0, 0.0];
     }
 

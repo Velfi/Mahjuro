@@ -57,10 +57,15 @@ impl MeldGuideScene {
         }
     }
 
-    /// Transition to return to the start screen. When there is a suspended
-    /// scene, `App` intercepts this and restores it instead.
-    fn go_back() -> SceneTransition {
-        Some(Scene::StartScreen(StartScreenScene::new()))
+    /// Transition to return to the start screen. When entered as an overlay
+    /// (from in-game pause menu or shop), pops the overlay instead.
+    fn go_back(&self, overlay_request: &mut Option<super::OverlayRequest>) -> SceneTransition {
+        if self.has_suspended {
+            *overlay_request = Some(super::OverlayRequest::Pop);
+            None
+        } else {
+            Some(Scene::StartScreen(StartScreenScene::new()))
+        }
     }
 }
 
@@ -81,7 +86,7 @@ impl SceneBehavior for MeldGuideScene {
                     }
                 }
                 CLICK_BACK => {
-                    return Self::go_back();
+                    return self.go_back(ctx.overlay_request);
                 }
                 _ => {}
             }
@@ -90,7 +95,7 @@ impl SceneBehavior for MeldGuideScene {
         for a in ctx.actions {
             match a {
                 UiAction::Cancel | UiAction::Pause => {
-                    return Self::go_back();
+                    return self.go_back(ctx.overlay_request);
                 }
                 UiAction::FocusPrev | UiAction::FocusUp => {
                     if self.page > 0 {

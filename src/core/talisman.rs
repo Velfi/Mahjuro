@@ -94,12 +94,10 @@ impl TalismanKind {
     pub fn description(self) -> &'static str {
         match self {
             TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
-            TalismanKind::Pearl => "Every tile in hand: +30 flat chips when scored.",
-            TalismanKind::Gilded => "Every tile in hand: +0.5 mult when scored in a meld.",
-            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
-            TalismanKind::Kiln => {
-                "Select tiles, then use: destroy them permanently. They never return."
-            }
+            TalismanKind::Pearl => "Every tile in hand: +25 flat chips when scored.",
+            TalismanKind::Gilded => "Every tile in hand: +0.4 mult when scored in a meld.",
+            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.15 mult.",
+            TalismanKind::Kiln => "Select tiles, then use to destroy them permanently.",
             TalismanKind::Bamboo => {
                 "Select tiles, then use: numbered tiles become bamboo; honors unchanged."
             }
@@ -112,9 +110,11 @@ impl TalismanKind {
             TalismanKind::Honors => {
                 "Select tiles, then use: numbered tiles become random honors; honors unchanged."
             }
-            TalismanKind::Wildflower => "Select tiles, then use: every selected tile becomes a flower.",
+            TalismanKind::Wildflower => {
+                "Select tiles, then use: every selected tile becomes a flower."
+            }
             TalismanKind::Conformity => {
-                "Select tiles, then use: every selected tile becomes the leftmost selected tile."
+                "Select tiles, then use: every selected tile becomes a copy of a random tile in your hand."
             }
         }
     }
@@ -146,8 +146,11 @@ impl TalismanKind {
             | TalismanKind::Characters
             | TalismanKind::Honors
             | TalismanKind::Wildflower
-            | TalismanKind::Conformity => 7,
-            _ => 8,
+            | TalismanKind::Conformity => 8,
+            TalismanKind::Jade => 10,
+            TalismanKind::Pearl => 12,
+            TalismanKind::Gilded => 14,
+            TalismanKind::Polychrome => 16,
         }
     }
 }

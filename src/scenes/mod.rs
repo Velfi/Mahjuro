@@ -5,6 +5,7 @@ pub mod collection;
 pub mod game_over;
 pub mod gameplay;
 pub mod journal;
+pub mod material_viewer;
 pub mod meld_guide;
 pub mod options;
 pub mod pause_menu;
@@ -20,10 +21,12 @@ pub mod tutorial_campaign;
 pub mod tutorial_overlay;
 pub mod tutorial_recap;
 pub mod tutorial_summary;
+pub mod zodiac_celebration;
 
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
+pub use material_viewer::MaterialViewerScene;
 pub use meld_guide::MeldGuideScene;
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
@@ -37,6 +40,7 @@ pub use tile_literacy::TileLiteracyScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
+pub use zodiac_celebration::ZodiacCelebrationScene;
 
 use enum_dispatch::enum_dispatch;
 
@@ -158,6 +162,24 @@ pub struct UpdateCtx<'a> {
     /// `true` while a scene transition is pending (fade-out in progress).
     /// Scenes should skip input processing but continue running animations.
     pub transitioning: bool,
+    /// Pushdown overlay request: set by a scene's `update()` to push a new
+    /// overlay scene on top of the stack, or pop the current overlay back
+    /// to the scene beneath. `SceneTransition` continues to mean "replace
+    /// the current top of the stack" — overlays are orthogonal to that.
+    pub overlay_request: &'a mut Option<OverlayRequest>,
+}
+
+/// Pushdown-stack action a scene's `update()` can request. Scenes do this
+/// by writing to [`UpdateCtx::overlay_request`]; the `App` applies the
+/// request after `update()` returns.
+///
+/// - `Push(scene)`: the current scene is suspended (its state preserved);
+///   `scene` becomes the active top of stack. Only the top ticks and draws.
+/// - `Pop`: the current top is discarded; the scene beneath resumes with
+///   its state intact.
+pub enum OverlayRequest {
+    Push(Scene),
+    Pop,
 }
 
 /// Everything a scene's `draw()` may need.
@@ -377,6 +399,7 @@ pub enum Scene {
     Gameplay(GameplayScene),
     GameOver(GameOverScene),
     MeldGuide(MeldGuideScene),
+    MaterialViewer(MaterialViewerScene),
     Options(OptionsScene),
     Collection(CollectionScene),
     Solitaire(SolitaireScene),
@@ -384,4 +407,5 @@ pub enum Scene {
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TileLiteracy(TileLiteracyScene),
+    ZodiacCelebration(ZodiacCelebrationScene),
 }

@@ -204,6 +204,7 @@ impl PauseMenu {
         for a in ctx.actions {
             if matches!(a, UiAction::Pause) {
                 self.open();
+                ctx.bus.push(GameEvent::UiSound(SfxId::Pause));
                 return Some(None);
             }
         }
@@ -257,7 +258,7 @@ impl PauseMenu {
         // Esc/Cancel resume the underlying scene.
         for a in actions {
             if matches!(a, UiAction::Pause | UiAction::Cancel) {
-                bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                bus.push(GameEvent::UiSound(SfxId::Unpause));
                 self.paused = false;
                 return PauseUpdate::Resume;
             }
@@ -281,7 +282,7 @@ impl PauseMenu {
         }
         match action {
             Some(PauseAction::Resume) => {
-                bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                bus.push(GameEvent::UiSound(SfxId::Unpause));
                 self.paused = false;
                 PauseUpdate::Resume
             }

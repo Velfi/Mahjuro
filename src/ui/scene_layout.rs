@@ -91,6 +91,22 @@ pub struct ShopPositions {
     /// Arrange-mode offsets nudge the rendered model on top of the baseline
     /// position computed at draw time.
     pub hover_title_plaque: Placement,
+    /// Description plaque anchored *below* the currently hovered/focused item.
+    /// Mirrors `hover_title_plaque` and carries the item's description text so
+    /// players can read what a relic/ribbon/talisman/pack actually does.
+    pub hover_desc_plaque: Placement,
+    /// Combined title + sell price + description plaque for hovered
+    /// *player-owned* items on the bottom shelf trays. Positioned
+    /// independently from the for-sale hover plaques because owned items
+    /// live near the bottom of the screen where "description below item"
+    /// would fall off-screen.
+    pub hover_owned_plaque: Placement,
+
+    /// Per-pendant offset applied to the player's owned talismans as they
+    /// sit on the `talisman_tray`. Kept separate from the `for_sale.talismans`
+    /// stall so arrange-mode rotations on the shop wall don't leak into the
+    /// owned-inventory pendants.
+    pub owned_talismans: Placement,
 
     // ── Camera (non-spatial; multipliers on window-derived defaults) ───────
     pub camera_eye_y_frac: f32,
@@ -134,10 +150,10 @@ impl Default for ShopPositions {
             packs: Placement {
                 nx: 0.413_888_9,
                 ny: 0.478_250_95,
-                lift_mm: 57.875,
+                lift_mm: 58.172_863,
                 rx_deg: -16.0,
-                ry_deg: -178.0,
-                rz_deg: 32.0,
+                ry_deg: 0.0,
+                rz_deg: 1.0,
             },
             talismans: Placement::at(0.58, 0.333_764_26, 39.431_37),
             ribbons: Placement::at(0.76, 0.43, 23.431_372),
@@ -167,13 +183,16 @@ impl Default for ShopPositions {
                 nx: 0.854_499_16,
                 ny: 0.788_335_8,
                 lift_mm: 140.433_52,
-                rx_deg: 47.0,
-                ry_deg: -1.0,
-                rz_deg: -63.0,
+                rx_deg: 20.0,
+                ry_deg: 2.0,
+                rz_deg: -38.0,
             },
             ofuda: Placement::at(0.050_925_925, -0.034_220_53, -4.086_677_6),
 
-            hover_title_plaque: Placement::at(0.016_203_705, 0.285_171_06, -16.900_726),
+            hover_title_plaque: Placement::at(-0.001_736_110_1, 0.285_171_06, -16.900_726),
+            hover_desc_plaque: Placement::at(-0.001_446_759_2, 0.0, -29.786_219),
+            hover_owned_plaque: Placement::at(0.0, -0.22, 0.0),
+            owned_talismans: Placement::at(0.0, 0.0, 0.0),
 
             camera_eye_y_frac: 0.72,
             camera_eye_z_frac: 0.34,
@@ -244,6 +263,10 @@ pub const SHOP_HIERARCHY: &[Node] = &[Node::Group {
                     name: "shop.shelf.sell_tray",
                     label: "Sell tray",
                 },
+                Node::Leaf {
+                    name: "shop.shelf.owned_talismans",
+                    label: "Owned talismans",
+                },
             ],
         },
         Node::Group {
@@ -279,6 +302,14 @@ pub const SHOP_HIERARCHY: &[Node] = &[Node::Group {
                 Node::Leaf {
                     name: "shop.hover.title_plaque",
                     label: "Title plaque",
+                },
+                Node::Leaf {
+                    name: "shop.hover.desc_plaque",
+                    label: "Description plaque",
+                },
+                Node::Leaf {
+                    name: "shop.hover.owned_plaque",
+                    label: "Owned item plaque",
                 },
             ],
         },
@@ -332,6 +363,9 @@ pub enum ShopField {
     LeaveProp,
     Ofuda,
     HoverTitlePlaque,
+    HoverDescPlaque,
+    HoverOwnedPlaque,
+    OwnedTalismans,
     CelebPackCloseup,
     CelebPackReveal,
     CelebZodiac,
@@ -359,6 +393,9 @@ pub fn lookup_shop_field(name: &str) -> Option<ShopField> {
         "shop.props.leave_prop" => ShopField::LeaveProp,
         "shop.props.ofuda" => ShopField::Ofuda,
         "shop.hover.title_plaque" => ShopField::HoverTitlePlaque,
+        "shop.hover.desc_plaque" => ShopField::HoverDescPlaque,
+        "shop.hover.owned_plaque" => ShopField::HoverOwnedPlaque,
+        "shop.shelf.owned_talismans" => ShopField::OwnedTalismans,
         "shop.celebrations.pack_closeup" => ShopField::CelebPackCloseup,
         "shop.celebrations.pack_reveal" => ShopField::CelebPackReveal,
         "shop.celebrations.zodiac" => ShopField::CelebZodiac,
@@ -388,6 +425,9 @@ pub fn shop_field_path(field: ShopField) -> &'static str {
         ShopField::LeaveProp => "shop.props.leave_prop",
         ShopField::Ofuda => "shop.props.ofuda",
         ShopField::HoverTitlePlaque => "shop.hover.title_plaque",
+        ShopField::HoverDescPlaque => "shop.hover.desc_plaque",
+        ShopField::HoverOwnedPlaque => "shop.hover.owned_plaque",
+        ShopField::OwnedTalismans => "shop.shelf.owned_talismans",
         ShopField::CelebPackCloseup => "shop.celebrations.pack_closeup",
         ShopField::CelebPackReveal => "shop.celebrations.pack_reveal",
         ShopField::CelebZodiac => "shop.celebrations.zodiac",
@@ -414,6 +454,8 @@ impl ShopField {
         ShopField::LeaveProp,
         ShopField::Ofuda,
         ShopField::HoverTitlePlaque,
+        ShopField::HoverDescPlaque,
+        ShopField::OwnedTalismans,
         ShopField::CelebPackCloseup,
         ShopField::CelebPackReveal,
         ShopField::CelebZodiac,
@@ -441,6 +483,9 @@ impl ShopPositions {
             ShopField::LeaveProp => &mut self.leave_prop,
             ShopField::Ofuda => &mut self.ofuda,
             ShopField::HoverTitlePlaque => &mut self.hover_title_plaque,
+            ShopField::HoverDescPlaque => &mut self.hover_desc_plaque,
+            ShopField::HoverOwnedPlaque => &mut self.hover_owned_plaque,
+            ShopField::OwnedTalismans => &mut self.owned_talismans,
             ShopField::CelebPackCloseup => &mut self.celeb_pack_closeup,
             ShopField::CelebPackReveal => &mut self.celeb_pack_reveal,
             ShopField::CelebZodiac => &mut self.celeb_zodiac,
@@ -466,6 +511,9 @@ impl ShopPositions {
             ShopField::LeaveProp => &self.leave_prop,
             ShopField::Ofuda => &self.ofuda,
             ShopField::HoverTitlePlaque => &self.hover_title_plaque,
+            ShopField::HoverDescPlaque => &self.hover_desc_plaque,
+            ShopField::HoverOwnedPlaque => &self.hover_owned_plaque,
+            ShopField::OwnedTalismans => &self.owned_talismans,
             ShopField::CelebPackCloseup => &self.celeb_pack_closeup,
             ShopField::CelebPackReveal => &self.celeb_pack_reveal,
             ShopField::CelebZodiac => &self.celeb_zodiac,
@@ -534,12 +582,18 @@ pub fn save_shop_positions(pos: &ShopPositions) -> anyhow::Result<()> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameplayPositions {
-    // ── Relic sidebar column ─────────────────────────────────────────────────
-    /// `nx` = column center, `ny` unused; top/bottom below drive vertical layout.
+    // ── Relic tray (top of screen, horizontal) ───────────────────────────────
+    /// `nx` = tray center x (window fraction). `ny` = tray center y
+    /// (window fraction). `lift_mm` is the lift of the badges above the
+    /// table. The relics render as face-on enamel medallions in a
+    /// horizontal row centered on `(nx, ny)`.
     pub relic_col: Placement,
+    /// Left edge clamp for the tray (window fraction). The row is centered
+    /// on `relic_col.nx` but will not extend past this fraction.
     pub relic_col_top_ny: f32,
+    /// Right edge clamp for the tray (window fraction).
     pub relic_col_bottom_ny: f32,
-    /// Vertical spacing between relic centers (mm).
+    /// Badge face size and horizontal stride between badge centers (mm).
     pub relic_cell_height_mm: f32,
 
     // ── Score plaque (score-panel-anchored) ──────────────────────────────────
@@ -547,10 +601,15 @@ pub struct GameplayPositions {
     /// subtracted from the score-panel center). `lift_mm` is the lift.
     pub plaque: Placement,
 
-    // ── Peg block (score-panel-anchored) ─────────────────────────────────────
-    /// `nx` is a score-panel-relative fraction (`sp.x + sp.w * nx`); `ny`
-    /// and `lift_mm` are offsets layered on the plaque anchor.
-    pub peg_block: Placement,
+    // ── Counter fans (action-bar-anchored) ───────────────────────────────────
+    /// Draws counter fan — bone tally sticks standing in front of the bronze
+    /// mirror. `nx`/`ny` are window-fraction offsets from the mirror's world
+    /// pos; `lift_mm` stacks on top of the mirror's lift; `ry_deg` yaws the
+    /// fan plane about world up so the sticks face the camera.
+    pub counter_draws_fan: Placement,
+    /// Discards counter fan — bone tally sticks in front of the discard
+    /// river. Same offset convention as `counter_draws_fan`.
+    pub counter_discards_fan: Placement,
 
     // ── Boss-rule ofuda (score-panel-anchored) ───────────────────────────────
     /// `nx`/`ny` are window fractions for the ofuda card that appears on
@@ -610,10 +669,10 @@ pub struct GameplayPositions {
 impl Default for GameplayPositions {
     fn default() -> Self {
         Self {
-            relic_col: Placement::at(0.08, 0.0, 2.144_608),
-            relic_col_top_ny: 0.14,
-            relic_col_bottom_ny: 0.75,
-            relic_cell_height_mm: 45.0,
+            relic_col: Placement::at(0.5, 0.045, 2.144_608),
+            relic_col_top_ny: 0.22,
+            relic_col_bottom_ny: 0.78,
+            relic_cell_height_mm: 42.0,
 
             plaque: Placement {
                 nx: 0.0,
@@ -624,19 +683,27 @@ impl Default for GameplayPositions {
                 rz_deg: 0.0,
             },
 
-            peg_block: Placement {
-                nx: 0.85,
-                ny: 0.0,
-                lift_mm: 2.144_608,
+            counter_draws_fan: Placement {
+                nx: -0.042_534_72,
+                ny: -0.036_121_674,
+                lift_mm: 0.744_655_5,
                 rx_deg: 0.0,
-                ry_deg: -11.0,
-                rz_deg: 0.0,
+                ry_deg: 0.0,
+                rz_deg: -30.0,
+            },
+            counter_discards_fan: Placement {
+                nx: 0.016_493_056,
+                ny: -0.102_661_6,
+                lift_mm: -25.318_287,
+                rx_deg: 0.0,
+                ry_deg: 0.0,
+                rz_deg: 45.0,
             },
 
             ofuda: Placement {
-                nx: 0.0,
+                nx: 0.002_893_518_4,
                 ny: 0.0,
-                lift_mm: 2.144_608,
+                lift_mm: -22.875_816,
                 rx_deg: -69.0,
                 ry_deg: 0.0,
                 rz_deg: 0.0,
@@ -646,16 +713,23 @@ impl Default for GameplayPositions {
 
             dora: Placement::at(0.94, 0.22, 2.144_608),
 
-            talisman_dish: Placement::at(-0.177_951_38, -0.303_707_2, 2.144_608),
+            talisman_dish: Placement::at(0.0, 0.0, 2.144_608),
 
-            bowl: Placement::at(-0.013_865_741, -0.010_155_262, 2.144_608),
-            mirror: Placement {
-                nx: -0.005_787_037,
-                ny: 0.023_764_258,
+            bowl: Placement {
+                nx: -0.002_581_019,
+                ny: 0.027_867_55,
                 lift_mm: 2.144_608,
-                rx_deg: -189.0,
-                ry_deg: -56.0,
-                rz_deg: -258.0,
+                rx_deg: 0.0,
+                ry_deg: 0.0,
+                rz_deg: -315.0,
+            },
+            mirror: Placement {
+                nx: -0.006_076_388_5,
+                ny: 0.023_764_258,
+                lift_mm: 1.995_676_9,
+                rx_deg: -159.0,
+                ry_deg: 75.0,
+                rz_deg: -78.0,
             },
 
             tablet_sort_suit: Placement::at(0.0, -0.061_787_07, 2.144_608),
@@ -721,10 +795,6 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
                     label: "Blind plaque",
                 },
                 Node::Leaf {
-                    name: "gameplay.score_panel.peg_block",
-                    label: "Peg block (plays/discards)",
-                },
-                Node::Leaf {
                     name: "gameplay.score_panel.ofuda",
                     label: "Boss-rule ofuda",
                 },
@@ -764,6 +834,20 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
                 },
             ],
         },
+        Node::Group {
+            name: "gameplay.counter",
+            label: "Counter fans",
+            children: &[
+                Node::Leaf {
+                    name: "gameplay.counter.draws_fan",
+                    label: "Draws fan",
+                },
+                Node::Leaf {
+                    name: "gameplay.counter.discards_fan",
+                    label: "Discards fan",
+                },
+            ],
+        },
         Node::Leaf {
             name: "gameplay.relic_col",
             label: "Relic sidebar",
@@ -785,7 +869,8 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
 pub enum GameplayField {
     RelicCol,
     Plaque,
-    PegBlock,
+    CounterDrawsFan,
+    CounterDiscardsFan,
     Ofuda,
     CoinPile,
     Dora,
@@ -804,7 +889,8 @@ pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
     Some(match name {
         "gameplay.relic_col" => GameplayField::RelicCol,
         "gameplay.score_panel.plaque" => GameplayField::Plaque,
-        "gameplay.score_panel.peg_block" => GameplayField::PegBlock,
+        "gameplay.counter.draws_fan" => GameplayField::CounterDrawsFan,
+        "gameplay.counter.discards_fan" => GameplayField::CounterDiscardsFan,
         "gameplay.score_panel.ofuda" => GameplayField::Ofuda,
         "gameplay.score_panel.coin_pile" => GameplayField::CoinPile,
         "gameplay.dora" => GameplayField::Dora,
@@ -826,7 +912,8 @@ pub fn gameplay_field_path(field: GameplayField) -> &'static str {
     match field {
         GameplayField::RelicCol => "gameplay.relic_col",
         GameplayField::Plaque => "gameplay.score_panel.plaque",
-        GameplayField::PegBlock => "gameplay.score_panel.peg_block",
+        GameplayField::CounterDrawsFan => "gameplay.counter.draws_fan",
+        GameplayField::CounterDiscardsFan => "gameplay.counter.discards_fan",
         GameplayField::Ofuda => "gameplay.score_panel.ofuda",
         GameplayField::CoinPile => "gameplay.score_panel.coin_pile",
         GameplayField::Dora => "gameplay.dora",
@@ -846,7 +933,8 @@ impl GameplayField {
     pub const ALL: &'static [GameplayField] = &[
         GameplayField::RelicCol,
         GameplayField::Plaque,
-        GameplayField::PegBlock,
+        GameplayField::CounterDrawsFan,
+        GameplayField::CounterDiscardsFan,
         GameplayField::Ofuda,
         GameplayField::CoinPile,
         GameplayField::Dora,
@@ -867,7 +955,8 @@ impl GameplayPositions {
         match field {
             GameplayField::RelicCol => &mut self.relic_col,
             GameplayField::Plaque => &mut self.plaque,
-            GameplayField::PegBlock => &mut self.peg_block,
+            GameplayField::CounterDrawsFan => &mut self.counter_draws_fan,
+            GameplayField::CounterDiscardsFan => &mut self.counter_discards_fan,
             GameplayField::Ofuda => &mut self.ofuda,
             GameplayField::CoinPile => &mut self.coin_pile,
             GameplayField::Dora => &mut self.dora,
@@ -887,7 +976,8 @@ impl GameplayPositions {
         match field {
             GameplayField::RelicCol => &self.relic_col,
             GameplayField::Plaque => &self.plaque,
-            GameplayField::PegBlock => &self.peg_block,
+            GameplayField::CounterDrawsFan => &self.counter_draws_fan,
+            GameplayField::CounterDiscardsFan => &self.counter_discards_fan,
             GameplayField::Ofuda => &self.ofuda,
             GameplayField::CoinPile => &self.coin_pile,
             GameplayField::Dora => &self.dora,

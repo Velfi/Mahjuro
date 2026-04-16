@@ -25,15 +25,16 @@ use crate::render::decal::{
 use crate::render::draw_cmd::{
     BookPlacement, BowlPlacement, CascadeTokenKind, CascadeTokenPlacement, CoinPlacement,
     CurioCabinetPlacement, DishExplicit, DrawCmd, ExtrudedGlyphPlacement, FallingBonePlacement,
-    GoldBarPlacement, MirrorPlacement, OfudaPlacement, PackPlacement, PegBlockPlacement,
-    PlaquePlacement, RelicPlacement, RelicShowcasePlacement, ShowcaseTilePlacement,
-    ShrinePlacement, TalismanPlacement, UiFrame, WallStackPlacement, WoodTabletPlacement,
-    YakuTabletPlacement, ZodiacRibbonPlacement,
+    GoldBarPlacement, MirrorPlacement, OfudaPlacement, PackPlacement, PlaquePlacement,
+    RelicPlacement, RelicShowcasePlacement, ShowcaseTilePlacement, ShrinePlacement,
+    TallyFanKind, TallyFanPlacement, TalismanPlacement, UiFrame, WallStackPlacement,
+    WoodTabletPlacement, YakuTabletPlacement, ZodiacRibbonPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lamp_mesh::{
     build_bug_body_mesh, build_bug_wing_mesh, build_lamp_body_mesh, build_lamp_bulb_mesh,
 };
+use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
@@ -41,7 +42,9 @@ use crate::render::lit_mesh::{
 };
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::ofuda_mesh::build_ofuda_mesh;
-use crate::render::peg_block_mesh::build_peg_block_mesh;
+use crate::render::tally_stick_mesh::{
+    build_tally_stick_base_mesh, build_tally_stick_tip_mesh,
+};
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::relic_dish::{
     build_book_mesh, build_dish_mesh, build_pack_mesh, build_relic_mesh,
@@ -57,12 +60,12 @@ use crate::render::river_mesh::{
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    mesh_y_thickness_along_local_y_to_z_up, peg_mesh_lay_on_table, ribbon_submesh,
+    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh,
     rot_euler_xyz_rad, rot_rx_ry_rz_deg, rot_rx_rz_deg, rot_ry_rx_deg, rot_ry_rx_rz_rad,
     rot_rz_rx_deg, rot_rz_ry_rx_deg, rot_x_rad, rot_z_rad, rotation_around_point_x_rad,
     score_popup_glyph_rot_rad, table_mesh_lay_flat, tile_mesh_local_to_world, translate_rot_scale,
 };
-use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
+use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
 use crate::render::texture_upload::load_pack_textures;
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
@@ -114,6 +117,37 @@ pub const MAX_POINT_LIGHTS: usize = 16;
 /// Cheap deterministic hash of `(label, width, height)` used as the cache
 /// key for rasterised tablet decals — when this changes, the renderer
 /// re-rasterises the engraved label texture and uploads it. FNV-1a 64.
+/// Grow `pool` so it holds at least `n` `LitMeshInstance` slots, creating
+/// GPU-resource-backed instances on demand. Replaces fixed-size pools
+/// (formerly `MAX_PLAQUE_SLOTS` and friends) that silently dropped draws
+/// once exceeded — fragile when multiple scene paths share one pool.
+///
+/// Kept as a free function so call sites inside `draw_frame` can split-borrow
+/// the disjoint renderer fields (the pool vs. device/layouts/views) without
+/// running into `&mut self` conflicts with the frame-scoped `&self.scene_color_view`.
+#[allow(clippy::too_many_arguments)]
+fn ensure_lit_mesh_pool(
+    pool: &mut Vec<LitMeshInstance>,
+    n: usize,
+    device: &wgpu::Device,
+    material_layout: &wgpu::BindGroupLayout,
+    shadow_caster_layout: &wgpu::BindGroupLayout,
+    white_view: &wgpu::TextureView,
+    relief_default_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) {
+    while pool.len() < n {
+        pool.push(LitMeshInstance::new(
+            device,
+            material_layout,
+            shadow_caster_layout,
+            white_view,
+            relief_default_view,
+            sampler,
+        ));
+    }
+}
+
 fn tablet_label_hash(label: &str, w: u32, h: u32) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in label.as_bytes() {
@@ -821,6 +855,15 @@ pub struct WgpuRenderer {
     /// Indexed 0..MAX_BUG_GHOST_SLOTS. Rendered with `lit_mesh_blended_pipeline`.
     bug_ghost_body_instances: Vec<LitMeshInstance>,
     bug_ghost_wing_instances: Vec<LitMeshInstance>,
+    /// Unit sphere mesh shared by every material-preview orb. The scene
+    /// supplies the per-instance `MaterialParams` so a single mesh previews
+    /// every `MaterialKind`.
+    orb_mesh: LitMeshGpu,
+    /// Per-orb instances for the material viewer scene. Bound with the 1×1
+    /// default albedo and relief textures — materials that sample heightmaps
+    /// render flat, previewing the shading model rather than any per-asset
+    /// heightmap.
+    orb_instances: Vec<LitMeshInstance>,
     /// Ofuda scroll model + pick_id (shop path-sign), one-frame-stale.
     last_ofuda_model: Option<(Mat4, u32)>,
     /// Info plaque model + pick_id (shop hover plaque), one-frame-stale.
@@ -865,18 +908,18 @@ pub struct WgpuRenderer {
     wood_tablet_mesh: LitMeshGpu,
     bowl_mesh: LitMeshGpu,
     mirror_mesh: LitMeshGpu,
-    peg_block_mesh: LitMeshGpu,
+    tally_stick_base_mesh: LitMeshGpu,
+    tally_stick_tip_mesh: LitMeshGpu,
     plaque_instances: Vec<LitMeshInstance>,
     ofuda_instances: Vec<LitMeshInstance>,
     yaku_tablet_instances: Vec<LitMeshInstance>,
     wood_tablet_instances: Vec<LitMeshInstance>,
     bowl_instances: Vec<LitMeshInstance>,
     mirror_instances: Vec<LitMeshInstance>,
-    peg_block_instances: Vec<LitMeshInstance>,
-    /// Per-peg cylinder instances. The peg cylinders reuse `coin_mesh`
-    /// (geometry) but get their own slot pool so they don't compete with the
-    /// shop scene's coin pile for slots.
-    peg_instances: Vec<LitMeshInstance>,
+    /// Per-stick instances for the tally-counter fans. Each visible stick
+    /// consumes two slots: one for the bone-colored base and one for the
+    /// colored tip cap that rides the top fraction of the stick.
+    tally_stick_instances: Vec<LitMeshInstance>,
     /// Per-wall-tile instances for the back-of-table facedown stack. Reuses
     /// `bone_tablet_mesh` for phase 1 (a plain box) — phase 7 may swap to the
     /// real tile mesh.
@@ -1042,13 +1085,15 @@ pub const MAX_BUG_SLOTS: usize = 8;
 /// emits a chain of faded past-position copies for motion blur. Sized for
 /// `MAX_BUG_SLOTS * BUG_TRAIL_SAMPLES` with headroom.
 pub const MAX_BUG_GHOST_SLOTS: usize = 48;
+/// Maximum number of material-preview orbs rendered per frame. Only the
+/// material viewer debug scene uses these; 32 covers every `MaterialKind`
+/// with room to grow.
+pub const MAX_ORB_SLOTS: usize = 32;
 /// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
 /// the relic dish and the coin dish).
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
 /// Big, Boss). Truncated silently.
 pub const MAX_SHRINE_SLOTS: usize = 4;
-/// Maximum number of hanging plaques per frame (gameplay uses 1).
-pub const MAX_PLAQUE_SLOTS: usize = 2;
 /// Maximum number of hanging ofuda per frame (gameplay uses 1).
 pub const MAX_OFUDA_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
@@ -1059,12 +1104,12 @@ pub const MAX_WOOD_TABLET_SLOTS: usize = 8;
 pub const MAX_BOWL_SLOTS: usize = 2;
 /// Maximum number of bronze mirrors per frame (gameplay uses 1: play hand).
 pub const MAX_MIRROR_SLOTS: usize = 2;
-/// Maximum number of peg blocks per frame (gameplay uses 1).
-pub const MAX_PEG_BLOCK_SLOTS: usize = 2;
-/// Maximum number of individual peg cylinders rendered per frame across all
-/// peg blocks. Each block has plays_max + discards_max pegs; this caps the
-/// visible total.
-pub const MAX_PEG_SLOTS: usize = 32;
+/// Maximum number of tally fans per frame (gameplay uses 2: draws + discards).
+pub const MAX_TALLY_FAN_SLOTS: usize = 2;
+/// Maximum total number of tally sticks rendered per frame across all fans.
+/// Each fan emits `count` base sticks plus `count` tip-cap overlays, so this
+/// bound is on the sum of both.
+pub const MAX_TALLY_STICK_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
 /// Cascade scoring bone pool (modifier strip + structure tier preview batches).
@@ -1079,7 +1124,7 @@ pub const MAX_FALLING_BONE_SLOTS: usize = 192;
 /// final beat.
 /// Score reel uses up to 2 × N_COLS slots (prev + current per spinning column)
 /// plus popup labels. 48 gives headroom for reel overflow columns.
-pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 48;
+pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 80;
 
 /// Pre-loaded background texture + bind group for the image pipeline.
 struct BackgroundTextureGpu {
@@ -3237,7 +3282,10 @@ impl WgpuRenderer {
         // this swap to a single mesh substitution; renaming is a follow-up.
         let bowl_mesh = LitMeshGpu::new(&device, &build_river_mesh(), "river");
         let mirror_mesh = LitMeshGpu::new(&device, &build_mirror_mesh(), "mirror");
-        let peg_block_mesh = LitMeshGpu::new(&device, &build_peg_block_mesh(), "peg-block");
+        let tally_stick_base_mesh =
+            LitMeshGpu::new(&device, &build_tally_stick_base_mesh(), "tally-stick-base");
+        let tally_stick_tip_mesh =
+            LitMeshGpu::new(&device, &build_tally_stick_tip_mesh(), "tally-stick-tip");
         // Shared 1×1 white texture for procedural meshes that don't sample.
         let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
@@ -3450,6 +3498,18 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
+        let orb_mesh = LitMeshGpu::new(&device, &build_orb_mesh(), "material-orb");
+        let mut orb_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_ORB_SLOTS);
+        for _ in 0..MAX_ORB_SLOTS {
+            orb_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
         // Per-kind heightmap textures for talisman tablets. Each is a PNG
         // asset loaded from assets/textures/ and uploaded as a linear RGBA8
         // texture. Falls back to a flat mid-gray 1×1 if the asset is missing.
@@ -3544,7 +3604,9 @@ impl WgpuRenderer {
                 })
                 .collect()
         };
-        let plaque_instances = make_pool(MAX_PLAQUE_SLOTS);
+        // Plaque instances grow on demand via `ensure_plaque_slots` rather
+        // than reserving a fixed cap — see that helper for context.
+        let plaque_instances: Vec<LitMeshInstance> = Vec::new();
         let ofuda_instances = make_pool(MAX_OFUDA_SLOTS);
         let yaku_tablet_instances = make_pool(MAX_YAKU_TABLET_SLOTS);
         let wood_tablet_instances = make_pool(MAX_WOOD_TABLET_SLOTS);
@@ -3568,8 +3630,10 @@ impl WgpuRenderer {
                 )
             })
             .collect();
-        let peg_block_instances = make_pool(MAX_PEG_BLOCK_SLOTS);
-        let peg_instances = make_pool(MAX_PEG_SLOTS);
+        // Each visible stick consumes two slots (bone + tip) so the pool is
+        // sized at `2 × MAX_TALLY_STICK_SLOTS` to cover the worst case of
+        // every slot populated.
+        let tally_stick_instances = make_pool(MAX_TALLY_STICK_SLOTS * 2);
         let wall_tile_instances = make_pool(MAX_WALL_TILE_SLOTS);
         let cascade_token_instances = make_pool(MAX_CASCADE_TOKEN_SLOTS);
         let falling_bone_instances = make_pool(MAX_FALLING_BONE_SLOTS);
@@ -3671,6 +3735,8 @@ impl WgpuRenderer {
             bug_wing_instances,
             bug_ghost_body_instances,
             bug_ghost_wing_instances,
+            orb_mesh,
+            orb_instances,
             last_ofuda_model: None,
             last_info_plaque_model: None,
             last_leave_prop_model: None,
@@ -3691,15 +3757,15 @@ impl WgpuRenderer {
             wood_tablet_mesh,
             bowl_mesh,
             mirror_mesh,
-            peg_block_mesh,
+            tally_stick_base_mesh,
+            tally_stick_tip_mesh,
             plaque_instances,
             ofuda_instances,
             yaku_tablet_instances,
             wood_tablet_instances,
             bowl_instances,
             mirror_instances,
-            peg_block_instances,
-            peg_instances,
+            tally_stick_instances,
             wall_tile_instances,
             cascade_token_instances,
             falling_bone_instances,
@@ -5877,7 +5943,7 @@ impl WgpuRenderer {
             WoodTabletBatch(usize),                     // index into `wood_tablet_batches`
             Bowl(usize),                                // index into `bowl_cmds`
             Mirror(usize),                              // index into `mirror_cmds`
-            PegBlock(usize),                            // index into `peg_block_cmds`
+            TallyFan(usize),                            // index into `tally_fan_cmds`
             WallStack(usize),                           // index into `wall_stack_cmds`
             CascadeTokenBatch(usize),                   // index into `cascade_token_batches`
             FallingBoneBatch(usize),                    // index into `falling_bone_batches`
@@ -5909,7 +5975,7 @@ impl WgpuRenderer {
         let mut wood_tablet_batches: Vec<&[WoodTabletPlacement]> = Vec::new();
         let mut bowl_cmds: Vec<&BowlPlacement> = Vec::new();
         let mut mirror_cmds: Vec<&MirrorPlacement> = Vec::new();
-        let mut peg_block_cmds: Vec<&PegBlockPlacement> = Vec::new();
+        let mut tally_fan_cmds: Vec<&TallyFanPlacement> = Vec::new();
         let mut wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut cascade_token_batches: Vec<&[CascadeTokenPlacement]> = Vec::new();
         let mut falling_bone_batches: Vec<&[FallingBonePlacement]> = Vec::new();
@@ -6078,10 +6144,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::Mirror(idx));
                     i += 1;
                 }
-                DrawCmd::PegBlock(p) => {
-                    let idx = peg_block_cmds.len();
-                    peg_block_cmds.push(p);
-                    ops.push(RenderOp::PegBlock(idx));
+                DrawCmd::TallyFan(p) => {
+                    let idx = tally_fan_cmds.len();
+                    tally_fan_cmds.push(p);
+                    ops.push(RenderOp::TallyFan(idx));
                     i += 1;
                 }
                 DrawCmd::WallStack(p) => {
@@ -6116,6 +6182,11 @@ impl WgpuRenderer {
                                     &format!("glyph-{}", p.label),
                                 );
                                 self.extruded_glyph_meshes.insert(p.label.clone(), gpu);
+                            } else {
+                                log::warn!(
+                                    "[extruded glyph] mesh_for returned None for label {:?} — popup will be invisible",
+                                    p.label
+                                );
                             }
                         }
                     }
@@ -6571,6 +6642,13 @@ impl WgpuRenderer {
         // physical relics. Projects screen-space rects into `relic_rects`
         // so scenes that use the showcase path for in-world badges (e.g.
         // the gameplay sidebar column) can hit-test them next frame.
+        // In gameplay, the relic column is arrangeable via the debug
+        // arrange tool (`gameplay.relic_col`). Apply a single group override
+        // so the whole stack shifts/rotates as one unit, and track the
+        // combined AABB so we can push a column-wide hit-box into
+        // `last_debug_pickables` after the loop.
+        let gameplay_relic_col = matches!(self.active_scene_key, Some("gameplay"));
+        let mut relic_col_aabb: Option<(glam::Vec3, glam::Vec3)> = None;
         for batch in &relic_showcase_batches {
             for p in batch.iter() {
                 if relic_slot_cursor >= MAX_RELIC_SLOTS {
@@ -6588,6 +6666,31 @@ impl WgpuRenderer {
                     rotation,
                     glam::Vec3::new(p.extents[0], p.extents[1], p.extents[2]),
                 );
+                let model = if gameplay_relic_col {
+                    self.apply_arrange_override("gameplay.relic_col", model)
+                } else {
+                    model
+                };
+                if gameplay_relic_col {
+                    // Expand the shared column AABB by this relic's 8 corners
+                    // in world space (post-arrange-override).
+                    for c in [
+                        glam::Vec3::new(-0.5, -0.5, -0.5),
+                        glam::Vec3::new(0.5, -0.5, -0.5),
+                        glam::Vec3::new(-0.5, 0.5, -0.5),
+                        glam::Vec3::new(0.5, 0.5, -0.5),
+                        glam::Vec3::new(-0.5, -0.5, 0.5),
+                        glam::Vec3::new(0.5, -0.5, 0.5),
+                        glam::Vec3::new(-0.5, 0.5, 0.5),
+                        glam::Vec3::new(0.5, 0.5, 0.5),
+                    ] {
+                        let wp = (model * c.extend(1.0)).truncate();
+                        relic_col_aabb = Some(match relic_col_aabb {
+                            None => (wp, wp),
+                            Some((mn, mx)) => (mn.min(wp), mx.max(wp)),
+                        });
+                    }
+                }
                 let g = p.glow.clamp(0.0, 1.0);
                 let base_color = if g > 0.0 {
                     let target = [1.55, 1.32, 0.78, p.color[3]];
@@ -6646,39 +6749,36 @@ impl WgpuRenderer {
                     self.relic_slot_texture[slot_i] = want_tex;
                 }
 
-                // Project the 8 world corners of the bounding box to screen
-                // space so scenes can hit-test relic_rects next frame.
-                let hx = p.extents[0] * 0.5;
-                let hy = p.extents[1] * 0.5;
-                let hz = p.extents[2] * 0.5;
-                let corners = [
-                    glam::Vec3::new(-hx, -hy, -hz),
-                    glam::Vec3::new(hx, -hy, -hz),
-                    glam::Vec3::new(-hx, hy, -hz),
-                    glam::Vec3::new(hx, hy, -hz),
-                    glam::Vec3::new(-hx, -hy, hz),
-                    glam::Vec3::new(hx, -hy, hz),
-                    glam::Vec3::new(-hx, hy, hz),
-                    glam::Vec3::new(hx, hy, hz),
-                ];
-                let mut mn_x = f32::INFINITY;
-                let mut mn_y = f32::INFINITY;
-                let mut mx_x = f32::NEG_INFINITY;
-                let mut mx_y = f32::NEG_INFINITY;
-                for c in corners {
-                    let world = (model * c.extend(1.0)).truncate();
-                    let (sx, sy) = project_to_screen(world);
-                    mn_x = mn_x.min(sx);
-                    mn_y = mn_y.min(sy);
-                    mx_x = mx_x.max(sx);
-                    mx_y = mx_y.max(sy);
-                }
-                self.proj
-                    .relic_rects
-                    .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
+                // Register the model so the bulk relic-rect rebuild below
+                // projects this showcase slot into `proj.relic_rects` —
+                // that's what focus-nav and cursor hit-testing read.
+                self.last_relic_models.push(model);
 
-                // Activation glow halo.
+                // Activation glow halo — project the unit-cube AABB now so
+                // we can size the bloom to the actual on-screen footprint.
                 if g > 0.0 {
+                    let corners = [
+                        glam::Vec3::new(-0.5, -0.5, -0.5),
+                        glam::Vec3::new(0.5, -0.5, -0.5),
+                        glam::Vec3::new(-0.5, 0.5, -0.5),
+                        glam::Vec3::new(0.5, 0.5, -0.5),
+                        glam::Vec3::new(-0.5, -0.5, 0.5),
+                        glam::Vec3::new(0.5, -0.5, 0.5),
+                        glam::Vec3::new(-0.5, 0.5, 0.5),
+                        glam::Vec3::new(0.5, 0.5, 0.5),
+                    ];
+                    let mut mn_x = f32::INFINITY;
+                    let mut mn_y = f32::INFINITY;
+                    let mut mx_x = f32::NEG_INFINITY;
+                    let mut mx_y = f32::NEG_INFINITY;
+                    for c in corners {
+                        let world = model.transform_point3(c);
+                        let (sx, sy) = project_to_screen(world);
+                        mn_x = mn_x.min(sx);
+                        mn_y = mn_y.min(sy);
+                        mx_x = mx_x.max(sx);
+                        mx_y = mx_y.max(sy);
+                    }
                     let rw_proj = mx_x - mn_x;
                     let rh_proj = mx_y - mn_y;
                     let pad_x = rw_proj * 0.85;
@@ -6694,6 +6794,23 @@ impl WgpuRenderer {
                     });
                 }
             }
+        }
+
+        // Column-wide debug pickable so the arrange tool can grab the whole
+        // relic stack via `gameplay.relic_col` (matching the tree entry in
+        // scene_layout).  The hitbox is the union AABB of every relic's
+        // post-arrange model, expressed in local-space with the identity
+        // model (so the slab test reads world-space directly).
+        if let Some((mn, mx)) = relic_col_aabb {
+            let center = (mn + mx) * 0.5;
+            let half = (mx - mn) * 0.5;
+            let model = Mat4::from_translation(center);
+            self.last_debug_pickables.push((
+                "gameplay.relic_col".to_string(),
+                model,
+                half,
+                0.0,
+            ));
         }
 
         // ── Pack placeholders (same mesh + pipeline as relics) ──────────
@@ -7230,12 +7347,7 @@ impl WgpuRenderer {
                     rot_rz_ry_rx_deg(t.rotation_x_deg, t.rotation_y_deg, t.rotation_z_deg),
                     glam::Vec3::new(sx, sy, sz),
                 );
-                let material = MaterialParams {
-                    kind: MaterialKind::Talisman,
-                    base_color: t.color,
-                    specular_strength: 0.55,
-                    specular_power: 48.0,
-                };
+                let material = talisman_material(t.kind, t.color);
                 // Rebind the heightmap texture if this slot's kind changed.
                 let kind_idx = crate::core::talisman::TalismanKind::all()
                     .iter()
@@ -7496,10 +7608,17 @@ impl WgpuRenderer {
             look.z.atan2(look.y.abs()).to_degrees() + 180.0
         };
         self.proj.plaque_rects.clear();
+        ensure_lit_mesh_pool(
+            &mut self.plaque_instances,
+            plaque_cmds.len(),
+            &self.device,
+            &self.lit_mesh_material_layout,
+            &self.shadow_caster_layout,
+            &self.lit_mesh_white_view,
+            &self.lit_mesh_relief_default_view,
+            &self.tile_sampler,
+        );
         for (slot_i, p) in plaque_cmds.iter().enumerate() {
-            if slot_i >= MAX_PLAQUE_SLOTS {
-                break;
-            }
             let center = pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
             // Plaque pipeline is gameplay-only (boss plaque + scoring placard).
             let plaque_name = if slot_i == 0 {
@@ -7518,7 +7637,7 @@ impl WgpuRenderer {
             // plaque uses this path with no engraved text). Otherwise
             // rasterize once when either line changes and treat the
             // texture as a transparent overlay via `has_decal = true`.
-            let has_decal_text = !p.top_text.is_empty() || !p.bot_text.is_empty();
+            let has_decal_text = !p.text.trim().is_empty();
             if has_decal_text {
                 // Size the decal texture to match the plaque face's actual
                 // aspect ratio so the bilinear sampler maps texels 1:1 onto
@@ -7529,13 +7648,11 @@ impl WgpuRenderer {
                 let decal_h = crate::render::decal::PLAQUE_DECAL_HEIGHT;
                 let face_aspect = (p.extents[0] / p.extents[1].max(1.0)).clamp(0.5, 12.0);
                 let decal_w = ((decal_h as f32 * face_aspect).round() as u32).clamp(256, 4096);
-                let combined = format!("{}\n{}", p.top_text, p.bot_text);
-                let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
+                let label_hash = tablet_label_hash(&p.text, decal_w, decal_h);
                 let inst = &mut self.plaque_instances[slot_i];
                 if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
                     let rgba = crate::render::decal::rasterize_plaque_decal(
-                        &p.top_text,
-                        &p.bot_text,
+                        &p.text,
                         self.ui_font.as_ref(),
                         decal_w,
                         decal_h,
@@ -7692,16 +7809,19 @@ impl WgpuRenderer {
                 // Active tablets warm up to a champagne tint; dim ones stay
                 // bone. The decal pass (phase 2) will paint the engraved name
                 // on top via a per-instance albedo texture.
+                // Porcelain: bright cool-white when idle; a warmer cream
+                // cast when this yaku is the selected target so it still
+                // reads as "active" against the row.
                 let base = if t.active {
-                    [1.00, 0.92, 0.72, 1.0]
+                    [1.00, 0.97, 0.90, 1.0]
                 } else {
-                    [0.93, 0.89, 0.78, 1.0]
+                    [0.97, 0.96, 0.94, 1.0]
                 };
                 let material = MaterialParams {
-                    kind: MaterialKind::Plain,
+                    kind: MaterialKind::Porcelain,
                     base_color: base,
-                    specular_strength: 0.30 + 0.20 * t.hover.clamp(0.0, 1.0),
-                    specular_power: 32.0,
+                    specular_strength: 0.65 + 0.20 * t.hover.clamp(0.0, 1.0),
+                    specular_power: 96.0,
                 };
                 // Engraved-name decal: rasterise on label change, then bind
                 // it as the per-instance albedo overlay. Cached by label hash
@@ -7842,6 +7962,7 @@ impl WgpuRenderer {
             let mut obj3d_shop_action_prop_slot: usize = 0;
             let mut obj3d_bar_slot: usize = 0;
             let mut obj3d_shrine_slot: usize = 0;
+            let mut obj3d_orb_slot: usize = 0;
             let mut _obj3d_bowl_slot: usize = 0;
             let mut _obj3d_mirror_slot: usize = 0;
 
@@ -7862,28 +7983,33 @@ impl WgpuRenderer {
                     );
 
                     match &obj.kind {
-                        Object3dKind::Plaque { top, bot, pick_id } => {
+                        Object3dKind::Plaque { text, pick_id } => {
                             let slot_i = obj3d_plaque_slot;
                             obj3d_plaque_slot += 1;
-                            if slot_i >= MAX_PLAQUE_SLOTS {
-                                continue;
-                            }
-                            let has_decal = !top.is_empty() || !bot.is_empty();
+                            ensure_lit_mesh_pool(
+                                &mut self.plaque_instances,
+                                slot_i + 1,
+                                &self.device,
+                                &self.lit_mesh_material_layout,
+                                &self.shadow_caster_layout,
+                                &self.lit_mesh_white_view,
+                                &self.lit_mesh_relief_default_view,
+                                &self.tile_sampler,
+                            );
+                            let has_decal = !text.trim().is_empty();
                             if has_decal {
                                 let decal_h = crate::render::decal::PLAQUE_DECAL_HEIGHT;
                                 let face_aspect =
                                     (obj.extents[0] / obj.extents[1].max(1.0)).clamp(0.5, 12.0);
                                 let decal_w = ((decal_h as f32 * face_aspect).round() as u32)
                                     .clamp(256, 4096);
-                                let combined = format!("{}\n{}", top, bot);
-                                let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
+                                let label_hash = tablet_label_hash(text, decal_w, decal_h);
                                 let inst = &mut self.plaque_instances[slot_i];
                                 if inst.decal_texture.is_none()
                                     || inst.decal_label_hash != label_hash
                                 {
                                     let rgba = crate::render::decal::rasterize_plaque_decal(
-                                        top,
-                                        bot,
+                                        text,
                                         self.ui_font.as_ref(),
                                         decal_w,
                                         decal_h,
@@ -7903,14 +8029,20 @@ impl WgpuRenderer {
                             }
                             // Object3dKind::Plaque is used by shop (info plaque)
                             // and gameplay (blind plaque / scoring placard);
-                            // disambiguate by scene.
-                            let plaque_name = match (self.active_scene_key, slot_i) {
-                                (Some("gameplay"), 0) => "gameplay.score_panel.plaque".to_string(),
-                                (Some("gameplay"), 1) => {
-                                    "gameplay.score_panel.scoring_placard".to_string()
+                            // disambiguate by scene. When the scene supplies an
+                            // explicit arrange_name, honor it so multiple
+                            // plaques in one scene can be placed independently.
+                            let plaque_name = if let Some(name) = obj.arrange_name {
+                                name.to_string()
+                            } else {
+                                match (self.active_scene_key, slot_i) {
+                                    (Some("gameplay"), 0) => "gameplay.score_panel.plaque".to_string(),
+                                    (Some("gameplay"), 1) => {
+                                        "gameplay.score_panel.scoring_placard".to_string()
+                                    }
+                                    (Some("shop"), i) => format!("shop.plaque[{i}]"),
+                                    (_, i) => format!("plaque[{i}]"),
                                 }
-                                (Some("shop"), i) => format!("shop.plaque[{i}]"),
-                                (_, i) => format!("plaque[{i}]"),
                             };
                             let model = self.apply_arrange_override(&plaque_name, model);
                             if let Some(pid) = pick_id {
@@ -7996,11 +8128,17 @@ impl WgpuRenderer {
                                 }
                             }
                             // Object3dKind::Ofuda fires for shop's entry-scroll
-                            // and gameplay's boss rule card.
-                            let ofuda_name = match self.active_scene_key {
-                                Some("shop") => "shop.props.ofuda".to_string(),
-                                Some("gameplay") => "gameplay.score_panel.ofuda".to_string(),
-                                _ => format!("ofuda[{slot_i}]"),
+                            // and gameplay's boss rule card. Honor an explicit
+                            // arrange_name when the scene provides one; otherwise
+                            // fall back to the scene-key convention.
+                            let ofuda_name = if let Some(name) = obj.arrange_name {
+                                name.to_string()
+                            } else {
+                                match self.active_scene_key {
+                                    Some("shop") => "shop.props.ofuda".to_string(),
+                                    Some("gameplay") => "gameplay.score_panel.ofuda".to_string(),
+                                    _ => format!("ofuda[{slot_i}]"),
+                                }
                             };
                             let model = self.apply_arrange_override(&ofuda_name, model);
                             if let Some(pid) = pick_id {
@@ -8315,9 +8453,13 @@ impl WgpuRenderer {
                             let sx = obj.extents[0] / (TALISMAN_LOCAL_HALF[0] * 2.0);
                             let sy = obj.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                             let sz = obj.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
-                            // Talismans are shop-only; all slots share one placement.
                             let _ = slot_i;
-                            let talisman_name = "shop.for_sale.talismans";
+                            // Default to the for-sale stall arrange group, but
+                            // let the caller opt into a different group (e.g.
+                            // owned-inventory talismans, which shouldn't share
+                            // the shop's Rx/Ry/Rz arrange rotation).
+                            let talisman_name =
+                                obj.arrange_name.unwrap_or("shop.for_sale.talismans");
                             let talisman_center_arr = self.apply_arrange_override(
                                 talisman_name,
                                 translate_rot_scale(
@@ -8328,12 +8470,7 @@ impl WgpuRenderer {
                             );
                             // Re-decompose center after possible override; simpler: re-derive center from matrix.
                             let talisman_model = talisman_center_arr;
-                            let material = MaterialParams {
-                                kind: MaterialKind::Talisman,
-                                base_color: obj.color,
-                                specular_strength: 0.55,
-                                specular_power: 48.0,
-                            };
+                            let material = talisman_material(*kind, obj.color);
                             let kind_idx = crate::core::talisman::TalismanKind::all()
                                 .iter()
                                 .position(|&k| k == *kind)
@@ -8986,6 +9123,20 @@ impl WgpuRenderer {
                             );
                             object3d_draw_list.push((19, slot));
                         }
+                        Object3dKind::MaterialOrb { material } => {
+                            if obj3d_orb_slot >= MAX_ORB_SLOTS {
+                                continue;
+                            }
+                            let slot_i = obj3d_orb_slot;
+                            obj3d_orb_slot += 1;
+                            self.orb_instances[slot_i].write_uniform(
+                                &self.queue,
+                                view_proj_arr,
+                                model,
+                                *material,
+                            );
+                            object3d_draw_list.push((20, slot_i));
+                        }
                         // Remaining kinds are stubs until migration is complete.
                         _ => {}
                     }
@@ -9131,135 +9282,143 @@ impl WgpuRenderer {
             ));
         }
 
-        // Peg blocks: one wood block + N peg cylinders per cmd.
+        // Tally fans: upright bone-stick counters in front of the mirror
+        // (draws) and river (discards). Each fan emits `count` base-stick
+        // instances plus `count` tinted-tip instances, interleaved so slot
+        // `2k` is a base and `2k+1` is its tip cap. Sticks keep their
+        // angular slots as the count drops — the fan thins from the
+        // outermost stick inward, so the upright core stays intact.
         self.proj.peg_rects = [None, None];
-        let mut peg_slot_cursor: usize = 0;
-        for (slot_i, p) in peg_block_cmds.iter().enumerate() {
-            if slot_i >= MAX_PEG_BLOCK_SLOTS {
+        let mut tally_slot_cursor: usize = 0;
+        for (fan_i, p) in tally_fan_cmds.iter().enumerate() {
+            if fan_i >= MAX_TALLY_FAN_SLOTS {
                 break;
             }
-            // The block itself.
-            let block_center = pixel_to_world(
+            let max_count = p.max_count.max(1);
+            let count = p.count.min(max_count) as usize;
+            let spread_rad = p.spread_deg.to_radians();
+            // Angular slot layout: `max_count` sticks span `spread_rad`
+            // symmetrically about 0. For `max_count == 1` the lone slot
+            // sits at 0 (upright). Otherwise slot k sits at
+            // `-spread/2 + k*(spread/(max_count-1))`.
+            let slot_angle = |k: u32| -> f32 {
+                if max_count <= 1 {
+                    0.0
+                } else {
+                    -spread_rad * 0.5 + (k as f32) * (spread_rad / (max_count as f32 - 1.0))
+                }
+            };
+
+            // Fan pivot in world space (at the narrow-base of each stick).
+            let pivot = pixel_to_world(w, h, p.world_pos[0], p.world_pos[1], p.world_pos[2]);
+            // Orient the stick so its local +Y (length) aligns with world +Z
+            // (up off the felt). Same convention used by the other Y-thick
+            // procedural meshes.
+            let base_orient = mesh_y_thickness_along_local_y_to_z_up();
+            // Yaw the whole fan about world +Z (table normal) so scenes can
+            // angle the fan plane toward the camera.
+            let fan_yaw = Mat4::from_rotation_z(p.rotation_y_deg.to_radians());
+
+            let base_scale = glam::Vec3::new(p.stick_wide, p.stick_len, p.stick_thickness);
+            let base_material = self.tally_stick_base_mesh.default_material;
+            let tip_material = MaterialParams {
+                kind: MaterialKind::Plain,
+                base_color: p.tip_color,
+                specular_strength: 0.40,
+                specular_power: 42.0,
+            };
+
+            // Choose the arrange-override name by fan kind so each counter
+            // gets its own tunable knob in the debug menu.
+            let arrange_name = match p.kind {
+                TallyFanKind::Draws => "gameplay.counter.draws_fan",
+                TallyFanKind::Discards => "gameplay.counter.discards_fan",
+            };
+
+            // Consume sticks from the outermost slot inward so the upright
+            // core is the last to disappear. `max_count == count` → all
+            // slots visible; `count < max_count` → the outermost
+            // `max_count - count` slots are empty. We alternate which side
+            // we thin from so the fan stays roughly symmetric.
+            let missing = (max_count as usize).saturating_sub(count);
+            let mut visible_slots: Vec<u32> = (0..max_count).collect();
+            // Thin alternately from right edge, then left edge, then
+            // second-right, etc., so the remaining fan stays roughly
+            // symmetric even at half-count.
+            for trim in 0..missing {
+                if trim % 2 == 0 {
+                    visible_slots.pop();
+                } else {
+                    visible_slots.remove(0);
+                }
+            }
+
+            for (stick_i, &k) in visible_slots.iter().enumerate() {
+                if tally_slot_cursor + 1 >= MAX_TALLY_STICK_SLOTS * 2 {
+                    break;
+                }
+                let angle = slot_angle(k);
+                // Compose the stick's rotation as
+                //   yaw · tilt · orient
+                // where `orient` stands the stick up (local +Y → world +Z),
+                // `tilt` rotates about world +Y (the axis perpendicular to
+                // the default fan plane, so sticks fan in the X-Z plane),
+                // and `yaw` then rotates the whole fan about world +Z.
+                // Because we translate to `pivot` afterward, the rotation
+                // is anchored at the narrow base of every stick.
+                let rot = fan_yaw * Mat4::from_rotation_y(angle) * base_orient;
+                let model = translate_rot_scale(pivot, rot, base_scale);
+                let model = self.apply_arrange_override(arrange_name, model);
+                // Only register the first fan's debug pickable to keep the
+                // overlay readable.
+                if stick_i == 0 {
+                    self.last_debug_pickables.push((
+                        arrange_name.to_string(),
+                        model,
+                        glam::Vec3::new(0.5, 0.5, 0.5),
+                        0.0,
+                    ));
+                }
+                // Base slot (even), tip slot (odd).
+                self.tally_stick_instances[tally_slot_cursor].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    base_material,
+                );
+                self.tally_stick_instances[tally_slot_cursor + 1].write_uniform(
+                    &self.queue,
+                    view_proj_arr,
+                    model,
+                    tip_material,
+                );
+                tally_slot_cursor += 2;
+            }
+
+            // Project a screen-space bounding rect for the fan so the focus
+            // model can find it. Approximate the fan as a unit cube scaled
+            // to cover the full angular spread at tip radius — coarse but
+            // good enough for hit-testing. The fan stands up in +Z with
+            // width along ±X (after yaw) and thickness along ±Y.
+            let fan_width = p.stick_len * (spread_rad * 0.5).sin() * 2.0 + p.stick_wide;
+            let fan_height = p.stick_len + p.stick_wide * 0.5;
+            let fan_center = pixel_to_world(
                 w,
                 h,
                 p.world_pos[0],
                 p.world_pos[1],
-                p.world_pos[2] + p.extents[1] * 0.5,
+                p.world_pos[2] + p.stick_len * 0.5,
             );
-            let block_model = translate_rot_scale(
-                block_center,
-                Mat4::IDENTITY,
-                glam::Vec3::new(p.extents[0], p.extents[1], p.extents[2]),
+            let fan_model = translate_rot_scale(
+                fan_center,
+                fan_yaw,
+                glam::Vec3::new(fan_width, p.stick_thickness * 2.0, fan_height),
             );
-            let block_model =
-                self.apply_arrange_override("gameplay.score_panel.peg_block", block_model);
-            self.peg_block_instances[slot_i].write_uniform(
-                &self.queue,
-                view_proj_arr,
-                block_model,
-                self.peg_block_mesh.default_material,
-            );
-            self.last_debug_pickables.push((
-                "gameplay.score_panel.peg_block".to_string(),
-                block_model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
-
-            // Pegs are laid on their side and
-            // arranged in two horizontal rows on the right end of the
-            // plaque: plays on top, discards below.
-            let peg_radius = 15.0_f32.max(p.extents[1] * 0.06);
-            let peg_length = p.extents[1] * 0.25;
-            let peg_step = peg_radius * 4.5;
-            let row_gap = peg_radius * 4.5;
-            let plays_lift = p.world_pos[2] + row_gap * 0.5;
-            let discards_lift = p.world_pos[2] - row_gap * 0.5;
-
-            // Project the two rows (plays on top, discards below) into
-            // screen-space rects for hit-testing and focus highlights.
-            if slot_i == 0 {
-                let plays_w = peg_step * (p.plays_max as f32 - 1.0).max(0.0) + peg_radius * 2.0;
-                let disc_w = peg_step * (p.discards_max as f32 - 1.0).max(0.0) + peg_radius * 2.0;
-                let row_h = peg_radius * 2.0;
-                let plays_center = pixel_to_world(w, h, p.world_pos[0], p.world_pos[1], plays_lift);
-                let discards_center =
-                    pixel_to_world(w, h, p.world_pos[0], p.world_pos[1], discards_lift);
-                let plays_scale = glam::Vec3::new(plays_w, row_h, p.extents[2]);
-                let disc_scale = glam::Vec3::new(disc_w, row_h, p.extents[2]);
-                let plays_model = translate_rot_scale(plays_center, Mat4::IDENTITY, plays_scale);
-                let discards_model =
-                    translate_rot_scale(discards_center, Mat4::IDENTITY, disc_scale);
-                self.proj.peg_rects[0] = Some(project_unit_cube_rect(plays_model));
-                self.proj.peg_rects[1] = Some(project_unit_cube_rect(discards_model));
-            }
-
-            let plays_color: [f32; 4] = [0.42, 0.82, 0.55, 1.0];
-            let discards_color: [f32; 4] = [0.96, 0.72, 0.28, 1.0];
-
-            let draw_row = |slot_cursor: &mut usize,
-                            peg_instances: &mut [LitMeshInstance],
-                            queue: &wgpu::Queue,
-                            start_x: f32,
-                            lift: f32,
-                            count: u32,
-                            max_count: u32,
-                            color: [f32; 4]| {
-                if max_count == 0 {
-                    return;
-                }
-                let n = count.min(max_count) as usize;
-                for k in 0..n {
-                    if *slot_cursor >= MAX_PEG_SLOTS {
-                        return;
-                    }
-                    let px = start_x + peg_step * k as f32;
-                    let center = pixel_to_world(w, h, px, p.world_pos[1], lift);
-                    let model = translate_rot_scale(
-                        center,
-                        peg_mesh_lay_on_table(),
-                        glam::Vec3::new(peg_radius * 2.0, peg_length, peg_radius * 2.0),
-                    );
-                    let material = MaterialParams {
-                        kind: MaterialKind::Plain,
-                        base_color: color,
-                        specular_strength: 0.45,
-                        specular_power: 56.0,
-                    };
-                    peg_instances[*slot_cursor].write_uniform(
-                        queue,
-                        view_proj_arr,
-                        model,
-                        material,
-                    );
-                    *slot_cursor += 1;
-                }
+            let slot = match p.kind {
+                TallyFanKind::Draws => 0,
+                TallyFanKind::Discards => 1,
             };
-
-            // Center both rows on the block's x position.
-            let max_pegs = p.plays_max.max(p.discards_max) as f32;
-            let total_row_w = peg_step * (max_pegs - 1.0).max(0.0);
-            let row_start_x = p.world_pos[0] - total_row_w * 0.5;
-            draw_row(
-                &mut peg_slot_cursor,
-                &mut self.peg_instances,
-                &self.queue,
-                row_start_x,
-                plays_lift,
-                p.plays_left,
-                p.plays_max,
-                plays_color,
-            );
-            draw_row(
-                &mut peg_slot_cursor,
-                &mut self.peg_instances,
-                &self.queue,
-                row_start_x,
-                discards_lift,
-                p.discards_left,
-                p.discards_max,
-                discards_color,
-            );
+            self.proj.peg_rects[slot] = Some(project_unit_cube_rect(fan_model));
         }
 
         // Wall stack: facedown tiles laid out in a row at the back of the
@@ -9436,11 +9595,25 @@ impl WgpuRenderer {
                     glam::Vec3::splat(g.scale),
                 );
                 let model = self.apply_arrange_override("gameplay.score_popup", model);
-                let material = MaterialParams {
-                    kind: MaterialKind::Metal,
-                    base_color: g.color,
-                    specular_strength: 0.90 + 0.10 * g.emissive.clamp(0.0, 1.0),
-                    specular_power: 188.0,
+                let material = match g.material {
+                    crate::render::draw_cmd::GlyphMaterial::Metal => MaterialParams {
+                        kind: MaterialKind::Metal,
+                        base_color: g.color,
+                        specular_strength: 1.0,
+                        specular_power: 128.0,
+                    },
+                    crate::render::draw_cmd::GlyphMaterial::Polychrome => MaterialParams {
+                        kind: MaterialKind::Polychrome,
+                        base_color: g.color,
+                        specular_strength: 0.85,
+                        specular_power: 48.0,
+                    },
+                    crate::render::draw_cmd::GlyphMaterial::Plain => MaterialParams {
+                        kind: MaterialKind::Plain,
+                        base_color: g.color,
+                        specular_strength: 0.35 + 0.20 * g.emissive.clamp(0.0, 1.0),
+                        specular_power: 96.0,
+                    },
                 };
                 self.extruded_glyph_instances[slot_i].write_uniform(
                     &self.queue,
@@ -9523,29 +9696,30 @@ impl WgpuRenderer {
             )
         };
 
-        // ── Volumetric smoke setup (camera, bounds, plumes, cursor) ─────
+        // ── Volumetric smoke setup (camera, bounds, cursor) ─────────────
         // Done before the encoder is created so the per-tile impulses
         // queued during the tile-loop above are still pending. The grid
         // is sized to comfortably bracket the table area in world units.
         if let Some(ref mut fluid) = self.fluid {
-            // Grid bounds: a box roughly enclosing the table + headroom for
-            // candle plumes. Matches the world space from `pixel_to_world`
-            // (table at y=0, x ∈ ±w/2, z ∈ ±h/2).
+            // Grid bounds: a box roughly enclosing the table with vertical
+            // headroom for smoke to rise. World space is Z-up (see
+            // `crate::render::world_space`): X is screen-horizontal, Y is
+            // screen far/near, Z is up out of the felt. The buoyancy and
+            // floor passes use world Z for height_frac, so the grid must be
+            // *tall in Z* — not Y, which was the old Y-up convention.
             let half_w = w * 0.75;
-            let half_z = h * 0.75;
-            let grid_min = glam::Vec3::new(-half_w, -12.0, -half_z);
-            // Vertical extent was h*0.75 + 12 below the rim; double total height
-            // for more plume headroom (same floor, raised ceiling).
+            let half_y = h * 0.75;
             let smoke_box_h = h * 0.75 + 12.0;
-            let grid_max = glam::Vec3::new(half_w, grid_min.y + 2.0 * smoke_box_h, half_z);
+            let grid_min = glam::Vec3::new(-half_w, -half_y, -12.0);
+            let grid_max = glam::Vec3::new(half_w, half_y, grid_min.z + 2.0 * smoke_box_h);
             fluid.set_grid_bounds(grid_min, grid_max);
 
             // Scene-driven wind gusts. Scenes (currently gameplay) push these
             // when they want a deliberate, time-shaped breath of wind on the
             // smoke — e.g. blowing the post-deal smoke off the hand strip a
             // few seconds after dealing. Coordinates are layout pixels; we
-            // run them through the same `pixel_to_world` projection used by
-            // candle plumes so the gust lands on the table plane.
+            // run them through `pixel_to_world` so the gust lands on the
+            // table plane.
             for g in frame.wind_gusts.iter() {
                 let pos = pixel_to_world(w, h, g.center_px.0, g.center_px.1, g.lift);
                 fluid.inject_impulse(
@@ -9590,10 +9764,9 @@ impl WgpuRenderer {
                                     // must span several cells so the ray-
                                     // marcher accumulates enough absorption
                                     // across multiple steps to actually see
-                                    // the smoke. Candle plumes get away with
-                                    // small radii because they inject every
-                                    // frame at the same spot; cursor puffs
-                                    // are transient.
+                                    // the smoke — cursor puffs are transient
+                                    // and need to be visible from a single
+                                    // injection.
                                     let puff_radius = 32.0 * win_scale;
 
                                     // Spacing between trail puffs — roughly
@@ -9611,12 +9784,9 @@ impl WgpuRenderer {
                                         let pos = prev + raw_delta * frac;
                                         let taper = 0.5 + 0.5 * frac;
                                         let puff_density = 0.10 * taper;
-                                        let nudge = raw_delta * (2.0 / jump.max(0.01));
-                                        let vel =
-                                            nudge + glam::Vec3::new(0.0, 0.0, 3.0 * win_scale);
                                         fluid.inject_impulse(
                                             pos + glam::Vec3::new(0.0, 0.0, 2.0 * win_scale),
-                                            vel,
+                                            glam::Vec3::ZERO,
                                             puff_radius,
                                             puff_density,
                                             0.08,
@@ -10421,15 +10591,28 @@ impl WgpuRenderer {
         for model in &self.last_relic_models {
             self.proj.relic_rects.push(project_unit_cube_rect(*model));
         }
+        // Ribbons: mesh local AABB is x ∈ [-0.5, 0.5], y ∈ [-1, 0],
+        // z ∈ [-0.05, 0.05] — not the unit cube. Project those bounds so the
+        // screen rect lines up with the actual ribbon (otherwise it ends up
+        // half-height and shifted up by half the ribbon length).
         self.proj.ribbon_rects.clear();
         for model in &self.last_ribbon_models {
-            self.proj.ribbon_rects.push(project_unit_cube_rect(*model));
+            self.proj
+                .ribbon_rects
+                .push(project_aabb_rect(*model, [0.5, 0.5, 0.05], -0.5));
         }
+        // Talismans: local mesh AABB is `TALISMAN_LOCAL_HALF` (y=0.7, z=0.09),
+        // not ±0.5. The model already bakes the world scale (see sx/sy/sz
+        // derivations against `TALISMAN_LOCAL_HALF * 2`), so we must project
+        // the real local bounds — unit-cube projection clips ~30% off height
+        // and 5.5× overstates depth.
         self.proj.talisman_rects.clear();
         for model in &self.last_talisman_models {
-            self.proj
-                .talisman_rects
-                .push(project_unit_cube_rect(*model));
+            self.proj.talisman_rects.push(project_aabb_rect(
+                *model,
+                TALISMAN_LOCAL_HALF,
+                0.0,
+            ));
         }
 
         // Sync singleton shop-prop models (journal book, reroll prop, leave
@@ -11424,43 +11607,60 @@ impl WgpuRenderer {
                     );
                     pass.draw_indexed(0..self.mirror_mesh.index_count, 0, 0..1);
                 }
-                RenderOp::PegBlock(slot_i) => {
-                    // Skip the wooden block mesh — only draw the peg
-                    // cylinders, which now float beside the plaque.
-
-                    // Peg cylinders that belong to this block.
-                    // Phase 1 wires the geometry through using the global peg
-                    // slot pool — the per-block slice math will land alongside
-                    // the gameplay-side push in phase 4.
-                    let block = peg_block_cmds[*slot_i];
+                RenderOp::TallyFan(fan_i) => {
+                    // Each fan owns `count` sticks; each stick owns two
+                    // consecutive slots in `tally_stick_instances` (base,
+                    // then tint cap). Walk previous fans to find our
+                    // starting slot, then draw our sticks as base+tip pairs
+                    // with the corresponding meshes.
+                    let fan = tally_fan_cmds[*fan_i];
                     let mut start_slot = 0usize;
-                    for prev in 0..*slot_i {
-                        let pb = peg_block_cmds[prev];
-                        start_slot += (pb.plays_left.min(pb.plays_max)
-                            + pb.discards_left.min(pb.discards_max))
-                            as usize;
+                    for prev in 0..*fan_i {
+                        let pf = tally_fan_cmds[prev];
+                        start_slot +=
+                            (pf.count.min(pf.max_count.max(1)) as usize).saturating_mul(2);
                     }
-                    let n = (block.plays_left.min(block.plays_max)
-                        + block.discards_left.min(block.discards_max))
-                        as usize;
-                    if n > 0 {
-                        pass.set_pipeline(&self.lit_mesh_pipeline);
-                        pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
-                        pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                        pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                        pass.set_vertex_buffer(0, self.coin_mesh.vertex_buffer.slice(..));
-                        pass.set_index_buffer(
-                            self.coin_mesh.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
+                    let n_sticks = fan.count.min(fan.max_count.max(1)) as usize;
+                    if n_sticks == 0 {
+                        return;
+                    }
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+
+                    // Bone base segments.
+                    pass.set_vertex_buffer(0, self.tally_stick_base_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.tally_stick_base_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    for k in 0..n_sticks {
+                        let s = start_slot + 2 * k;
+                        let Some(inst) = self.tally_stick_instances.get(s) else {
+                            break;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(
+                            0..self.tally_stick_base_mesh.index_count,
+                            0,
+                            0..1,
                         );
-                        for k in 0..n {
-                            let s = start_slot + k;
-                            let Some(inst) = self.peg_instances.get(s) else {
-                                break;
-                            };
-                            pass.set_bind_group(0, &inst.bind_group, &[]);
-                            pass.draw_indexed(0..self.coin_mesh.index_count, 0, 0..1);
-                        }
+                    }
+
+                    // Tinted tip caps.
+                    pass.set_vertex_buffer(0, self.tally_stick_tip_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.tally_stick_tip_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    for k in 0..n_sticks {
+                        let s = start_slot + 2 * k + 1;
+                        let Some(inst) = self.tally_stick_instances.get(s) else {
+                            break;
+                        };
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.tally_stick_tip_mesh.index_count, 0, 0..1);
                     }
                 }
                 RenderOp::WallStack(slot_i) => {
@@ -11566,7 +11766,13 @@ impl WgpuRenderer {
                         };
                         let Some(mesh) = self.extruded_glyph_meshes.get(&p.label) else {
                             // Mesh failed to build (font missing or empty
-                            // string) — skip this draw silently.
+                            // string). The build site at DrawCmd::ExtrudedGlyphBatch
+                            // already logs the tessellation failure; log here
+                            // too so we see the per-frame skip at draw time.
+                            log::warn!(
+                                "[extruded glyph] no GPU mesh for label {:?} — skipping draw",
+                                p.label
+                            );
                             continue;
                         };
                         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -11648,6 +11854,7 @@ impl WgpuRenderer {
                                     &self.bug_wing_mesh,
                                     self.bug_ghost_wing_instances.get(slot_i),
                                 ),
+                                20 => (&self.orb_mesh, self.orb_instances.get(slot_i)),
                                 _ => continue,
                             };
                         let Some(inst) = inst_opt else { continue };

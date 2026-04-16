@@ -650,7 +650,7 @@ impl ModalQueue {
                     .as_secs_f32()
                     * visual.ui_spin_rate_deg)
                     % 360.0,
-                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
+                rotation_x_deg: 90.0,
                 rotation_z_deg: 0.0,
                 color: page.accent_color,
                 relic_id,

@@ -142,7 +142,7 @@ impl SmokeDetail {
 
 fn default_smoke_detail() -> SmokeDetail {
     // Half-resolution is the sweet spot: ~4× cheaper than native with no
-    // visible quality loss on the candle plumes that drove this work.
+    // visible quality loss on the volumetric smoke.
     SmokeDetail::Half
 }
 

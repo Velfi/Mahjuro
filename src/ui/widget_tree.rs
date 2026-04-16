@@ -1246,7 +1246,7 @@ fn draw_item<A: Copy>(
     // of the 3D tile outline shell that selected in-game tiles get.
     if focused {
         let scale = (window.0.min(window.1)) / 600.0 * ui_scale;
-        push_focus_ring(rect, scale, frame.instances);
+        push_focus_ring(rect, scale, window.0, window.1, frame.instances);
     }
 
     match &item.kind {

@@ -671,6 +671,14 @@ RELICS = [
         "sharp, sacrificial, and symbolic.",
         "Polished steel blade, crimson inlay, dark bronze hilt, warm gold accents.",
     ),
+    (
+        "disgust",
+        "Disgust",
+        "A weather vane whose East and West cardinal arms have curled inward "
+        "and fused at the tips into a single grimacing mouth, the North and "
+        "South arms hanging slack. A pale sour wisp curls from the joined mouth.",
+        "Tarnished bronze body, muted teal patina, pale sickly green wisp, charcoal accents.",
+    ),
 ]
 
 

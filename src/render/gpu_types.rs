@@ -417,8 +417,6 @@ pub const MAX_COIN_SLOTS: usize = 64;
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
 /// Big, Boss). Truncated silently.
 pub const MAX_SHRINE_SLOTS: usize = 4;
-/// Maximum number of hanging plaques per frame (gameplay uses 1).
-pub const MAX_PLAQUE_SLOTS: usize = 2;
 /// Maximum number of hanging ofuda per frame (gameplay uses 1).
 pub const MAX_OFUDA_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
@@ -429,12 +427,12 @@ pub const MAX_WOOD_TABLET_SLOTS: usize = 8;
 pub const MAX_BOWL_SLOTS: usize = 2;
 /// Maximum number of bronze mirrors per frame (gameplay uses 1: play hand).
 pub const MAX_MIRROR_SLOTS: usize = 2;
-/// Maximum number of peg blocks per frame (gameplay uses 1).
-pub const MAX_PEG_BLOCK_SLOTS: usize = 2;
-/// Maximum number of individual peg cylinders rendered per frame across all
-/// peg blocks. Each block has plays_max + discards_max pegs; this caps the
-/// visible total.
-pub const MAX_PEG_SLOTS: usize = 32;
+/// Maximum number of tally fans per frame (gameplay uses 2: draws + discards).
+pub const MAX_TALLY_FAN_SLOTS: usize = 2;
+/// Maximum total number of tally sticks rendered per frame across all fans.
+/// Each fan emits `count` base sticks plus `count` tip-cap overlays, so this
+/// bound is on the sum of both.
+pub const MAX_TALLY_STICK_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
 /// Maximum number of cascade scoring tokens per frame across all batches.

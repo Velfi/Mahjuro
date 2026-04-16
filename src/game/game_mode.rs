@@ -86,7 +86,7 @@ impl GameMode {
             TileMaterial::Plastic => (0, 1),
         };
         Self {
-            starting_gold: 6,
+            starting_gold: 8,
             starting_plays: 4 + bonus_plays,
             starting_discards: 4 + bonus_discards,
             hand_size: 14,

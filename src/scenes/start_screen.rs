@@ -388,8 +388,7 @@ impl SceneBehavior for StartScreenScene {
             rotation: glam::Mat4::from_rotation_x((-60.0_f32).to_radians()) * cam_rot,
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Plaque {
-                top: "M A H J U R O".into(),
-                bot: prof_text,
+                text: format!("M A H J U R O\n{}", prof_text),
                 pick_id: None,
             },
             focusable: false,
@@ -413,7 +412,7 @@ impl SceneBehavior for StartScreenScene {
         if let Some(focus) = self.focus {
             if let Some(idx) = items.iter().position(|&item| item == focus) {
                 if let Some(&rect) = ctx.proj.wood_tablet_rects.get(idx) {
-                    focus_nav::push_focus_ring(rect, scale, &mut quads);
+                    focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
                 }
             }
         }

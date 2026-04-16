@@ -69,18 +69,18 @@ fn grid_dims_for_quality(quality: SmokeSimQuality) -> GridDims {
 
 // Per-frame impulse budget. Sized to comfortably fit the worst-case
 // opening frame: a full hand of sliding tiles (~14 motion impulses) +
-// the 24-cell post-deal wind sweep grid + candle plumes + the cursor
-// puff, with headroom. Used to be 32, which silently dropped the
-// scene-driven wind gusts (which come last in the inject order) when
-// the slide animation overlapped the sweep window — leaving the opening
-// smoke curtain with nothing to blow it away.
+// the 24-cell post-deal wind sweep grid + the cursor puff, with
+// headroom. Used to be 32, which silently dropped the scene-driven
+// wind gusts (which come last in the inject order) when the slide
+// animation overlapped the sweep window — leaving the opening smoke
+// curtain with nothing to blow it away.
 //
 // Must stay in sync with `MAX_INJECTIONS` and the `points` array length
 // in `shaders/fluid3_inject.wgsl`.
 const MAX_INJECTIONS: usize = 64;
 /// Keep newly injected gusts under roughly one voxel of travel per step so
 /// the BiMocq mapping update doesn't fold over when a scripted wind burst
-/// is much stronger than the steady-state plume velocities.
+/// is much stronger than the steady-state velocities.
 const MAX_ADVECT_CELLS_PER_STEP: f32 = 0.9;
 
 fn clamp_impulse_velocity_for_step(

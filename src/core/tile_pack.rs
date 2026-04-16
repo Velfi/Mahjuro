@@ -118,10 +118,10 @@ impl TilePackKind {
 
     pub fn shop_price(self) -> u32 {
         match self {
-            Self::Flowers => 9,
-            Self::Honors => 10,
-            Self::Terminals => 11,
-            Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 11,
+            Self::Flowers => 7,
+            Self::Honors => 8,
+            Self::Terminals => 9,
+            Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 10,
         }
     }
 

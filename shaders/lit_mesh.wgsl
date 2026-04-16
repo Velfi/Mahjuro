@@ -3,13 +3,19 @@
 // One pipeline, one shader; the `material_kind` field of MeshUniform selects
 // the per-fragment look:
 //
-//   0.0 = plain     — lit base color
-//   1.0 = wax       — pale beeswax with a high ambient floor (fake SSS)
-//   2.0 = wick      — dark, no specular
-//   3.0 = lacquered wood — procedural ring grain + Blinn-Phong specular
-//   5.0 = metal     — tinted-Fresnel conductor (gold coins)
-//   7.0 = talisman  — dielectric with heightmap normal perturbation (jade tablets)
-//   9.0 = glass     — faux translucent crystal / glazed glass
+//   0.0  = plain      — lit base color
+//   1.0  = wax        — pale beeswax with a high ambient floor (fake SSS)
+//   2.0  = wick       — dark, no specular
+//   3.0  = lacquered wood — procedural ring grain + Blinn-Phong specular
+//   5.0  = metal      — tinted-Fresnel conductor (gold coins)
+//   8.0  = foil       — metallic wrapping with thin-film iridescence
+//   9.0  = glass      — faux translucent crystal / glazed glass
+//   10.0 = enamel     — hard-enamel pin look
+//   11.0 = jade       — waxy carved jade with broad green sheen
+//   12.0 = moonstone — transparent feldspar with blue adularescence
+//   13.0 = pearl      — pearlescent nacre, base_color tints the sheen
+//   14.0 = gold nugget — pitted metallic gold (procedural noise normals)
+//   15.0 = polychrome  — holographic thin-film rainbow
 //
 // All material variants share the candle/spot point-light loop from the tile
 // shader so the new geometry catches the same warm pools as the hand tiles.
@@ -278,6 +284,31 @@ fn vnoise2(p: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// 3D value noise: trilinear-blends 8 hashed lattice corners. Cheap and
+// orientation-independent, used for procedural surface texture (gold
+// nugget pitting) where 2D screen-space noise would shift with view.
+fn hash31(p: vec3<f32>) -> f32 {
+    return fract(sin(dot(p, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+fn noise3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let u = f * f * (3.0 - 2.0 * f);
+    let n000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let n100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let n010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let n110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let n001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let n101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let n011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let n111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    let nx00 = mix(n000, n100, u.x);
+    let nx10 = mix(n010, n110, u.x);
+    let nx01 = mix(n001, n101, u.x);
+    let nx11 = mix(n011, n111, u.x);
+    return mix(mix(nx00, nx10, u.y), mix(nx01, nx11, u.y), u.z);
+}
+
 // 4-octave fractal value noise.
 fn fbm2(p_in: vec2<f32>) -> f32 {
     var p = p_in;
@@ -469,17 +500,27 @@ fn fs_main(
     // ── Material kind booleans ──────────────────────────────────────
     // Derived once from the float `kind` and used everywhere below.
     // Keep these in sync with MaterialKind in lit_mesh.rs.
-    //   0 = Plain, 1 = Wax, 2 = (unused), 3 = LacqueredWood,
-    //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water, 7 = Talisman,
-    //   8 = Foil, 9 = Glass, 10 = Enamel
+    //   0 = Plain, 1 = Wax, 2 = Wick, 3 = LacqueredWood,
+    //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water,
+    //   8 = Foil, 9 = Glass, 10 = Enamel,
+    //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
+    //   15 = Polychrome, 16 = Porcelain
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
     let is_water_mat = (kind > 5.5 && kind < 6.5);
-    let is_talisman  = (kind > 6.5 && kind < 7.5);
     let is_foil      = (kind > 7.5 && kind < 8.5);
     let is_glass     = (kind > 8.5 && kind < 9.5);
     let is_enamel    = (kind > 9.5 && kind < 10.5);
+    let is_jade      = (kind > 10.5 && kind < 11.5);
+    let is_moonstone = (kind > 11.5 && kind < 12.5);
+    let is_pearl     = (kind > 12.5 && kind < 13.5);
+    let is_goldnug   = (kind > 13.5 && kind < 14.5);
+    let is_poly      = (kind > 14.5 && kind < 15.5);
+    let is_porcelain = (kind > 15.5 && kind < 16.5);
+    // Any of the five carved-tablet materials: shares the heightmap
+    // normal-perturbation pipeline and the rim/SSS treatment.
+    let is_talisman  = (is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
 
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-
@@ -489,8 +530,10 @@ fn fs_main(
     // material_params.w doubles as a "this instance has an engraved decal"
     // flag for non-talisman materials. When >0.5 the texture is treated as
     // a transparent overlay (engraved label) composited *over* the procedural
-    // base material rather than multiplied with it. For talismans (kind>6.5),
-    // .w carries the sub-kind index (0=jade, 1=pearl, 2=gilded, 3=polychrome).
+    // base material rather than multiplied with it. For talismans, .w carries
+    // the per-kind heightmap index used by the relief sampling (no per-kind
+    // shader branching keys off it any more — each MaterialKind has its own
+    // dedicated branch).
     let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
@@ -643,39 +686,132 @@ fn fs_main(
         var water_spec_strength = 0.0;
         var water_spec_power = 1.0;
         if (is_water) {
-            // Use local-space XZ as a stable surface coordinate. Two
-            // scrolling noise layers at different speeds + scales perturb
-            // the normal, the sum acts as a pseudo-foam mask.
-            let p = vec2<f32>(in.local_pos.x, in.local_pos.z) * 12.0;
-            let f1 = fbm2(p + vec2<f32>(time * 0.45, time * 0.10));
-            let f2 = fbm2(p * 1.7 + vec2<f32>(time * 0.18, -time * 0.30));
-            let crest = smoothstep(0.55, 0.85, f1 * 0.6 + f2 * 0.6);
-            // Cheap finite-difference normal from the noise sum.
-            let eps = 0.6;
-            let h_c = f1 + f2;
-            let h_x = fbm2(p + vec2<f32>(eps + time * 0.45, time * 0.10))
-                    + fbm2(p * 1.7 + vec2<f32>(eps * 1.7 + time * 0.18, -time * 0.30));
-            let h_z = fbm2(p + vec2<f32>(time * 0.45, eps + time * 0.10))
-                    + fbm2(p * 1.7 + vec2<f32>(time * 0.18, eps * 1.7 - time * 0.30));
-            let bump = 0.55;
-            let dhdu = (h_x - h_c) * bump;
-            let dhdv = (h_z - h_c) * bump;
-            // Surface tangent basis is local +X / +Z (the water plane is
-            // a flat horizontal quad in local space). Build a perturbed
-            // normal pointing mostly +Y with the gradient subtracted.
-            let n_w = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
-            // Re-orient the perturbed normal into world space using the
-            // model matrix's upper 3x3 (the trough only translates +
-            // uniformly scales, so passing through is a fine
-            // approximation).
+            // Reconstruct the meander centerline so flow-relative
+            // quantities (bank distance, along-flow scroll) line up
+            // with the geometry in river_mesh.rs. Must match:
+            //   centerline_z(t) = sin(tau*1.6*t)*0.085
+            //                   + sin(tau*3.68*t + 0.7)*0.085*0.22
+            //   half_width(t)   = 0.15 + 0.055*(sin(tau*1.1*t+1.3)*0.6
+            //                                  + sin(tau*0.6*t-0.4)*0.4)
+            // uv.x carries the flow parameter t ∈ [0, 1] on water verts.
+            let t = in.uv.x;
+            let tau = 6.28318530718;
+            let center_z = sin(tau * 1.6 * t) * 0.085
+                         + sin(tau * 3.68 * t + 0.7) * 0.085 * 0.22;
+            let hw = 0.15 + 0.055 * (sin(tau * 1.1 * t + 1.3) * 0.6
+                                    + sin(tau * 0.6 * t - 0.4) * 0.4);
+            // Offset from centerline, normalized so ±1 is the shore.
+            let z_off = (in.local_pos.z - center_z) / max(hw, 0.01);
+            let bank_mask = smoothstep(0.55, 1.0, abs(z_off));
+            let centerline = clamp(1.0 - abs(z_off), 0.0, 1.0);
+
+            // Directional flow: two noise layers scrolling along the
+            // river's length parameter t (not world X), so the current
+            // follows the meander. Cross-flow noise scaled much tighter
+            // than along-flow so wavelets elongate into stream streaks.
+            let p = vec2<f32>(t * 9.0, z_off * 3.2);
+            let f1 = fbm2(p + vec2<f32>(time * 1.10, time * 0.04));
+            let f2 = fbm2(p * vec2<f32>(1.6, 2.1) + vec2<f32>(time * 0.70, -time * 0.06));
+            // Slow wide-lattice layer for long drifting swells.
+            let p_slow = vec2<f32>(t * 3.2, z_off * 1.4);
+            let f3 = fbm2(p_slow + vec2<f32>(time * 0.42, 0.0));
+            // Foam crests: streamwise ribbons, boosted against the shore
+            // where real whitewater piles up.
+            let crest_raw = f1 * 0.55 + f2 * 0.45 + f3 * 0.25;
+            let crest = smoothstep(0.55, 0.82, crest_raw)
+                      + bank_mask * 0.40 * smoothstep(0.30, 0.65, f1);
+            // Anisotropic finite-difference normal.
+            let eps_t = 0.9;
+            let eps_z = 0.30;
+            let h_c = f1 + f2 + f3 * 0.5;
+            let h_t = fbm2(p + vec2<f32>(eps_t + time * 1.10, time * 0.04))
+                    + fbm2(p * vec2<f32>(1.6, 2.1) + vec2<f32>(eps_t * 1.6 + time * 0.70, -time * 0.06))
+                    + fbm2(p_slow + vec2<f32>(eps_t + time * 0.42, 0.0)) * 0.5;
+            let h_z = fbm2(p + vec2<f32>(time * 1.10, eps_z + time * 0.04))
+                    + fbm2(p * vec2<f32>(1.6, 2.1) + vec2<f32>(time * 0.70, eps_z * 2.1 - time * 0.06))
+                    + fbm2(p_slow + vec2<f32>(time * 0.42, eps_z)) * 0.5;
+            // The water strip is nearly axis-aligned with local X (the
+            // meander angle is small) so we map these derivatives back
+            // to local X / Z with a slight rotation. Cheaper: just use
+            // the ratio, since small meander slope doesn't shift the
+            // ripple orientation noticeably at this scale.
+            var dhdu_total = (h_t - h_c) * 0.22;
+            var dhdv_total = (h_z - h_c) * 1.00;
+            // Indigo deep channel → teal lift at the shore and in the
+            // noise valleys. Centerline runs brightest.
+            let deep = vec3<f32>(0.012, 0.022, 0.058);
+            let mid  = vec3<f32>(0.050, 0.095, 0.170);
+            var albedo = mix(deep, mid, clamp(f3 * 1.0 + centerline * 0.40, 0.0, 1.0))
+                       + vec3<f32>(crest) * vec3<f32>(0.62, 0.70, 0.84);
+
+            // ── Bubbling spring source ─────────────────────────────────
+            // At the -X end the water widens into a pool (see
+            // `SPRING_CX`, `SPRING_POOL_R`, `SPRING_T` in river_mesh.rs).
+            // Inside that pool we overlay concentric ripples expanding
+            // outward from the spring eye, plus a bright upwelling foam
+            // patch at the center. The effect fades out as the water
+            // tapers into the stream.
+            //   Spring center in local XZ (match river_mesh.rs):
+            //     SPRING_CX = -0.48 + 0.315 + 0.02 = -0.145
+            //     SPRING_CZ = centerline_z(0.0) = sin(0) + sin(0.7)*0.0187 ≈ 0.0121
+            //     SPRING_POOL_R = 0.315
+            //     SPRING_T = 0.18
+            let spring_cx = -0.145;
+            let spring_cz = sin(0.7) * 0.085 * 0.22;
+            let dx = in.local_pos.x - spring_cx;
+            let dz = in.local_pos.z - spring_cz;
+            let r = sqrt(dx * dx + dz * dz);
+            // Spring region mask: strongest at the eye, fading to 0 by
+            // the time we leave the pool (r ≈ SPRING_POOL_R) or the
+            // along-flow taper finishes (t ≈ SPRING_T).
+            let r_mask = 1.0 - smoothstep(0.02, 0.315, r);
+            let t_mask = 1.0 - smoothstep(0.0, 0.18, t);
+            let spring_mask = r_mask * t_mask;
+
+            if (spring_mask > 0.001) {
+                // Concentric outgoing ripples. Phase advances with time
+                // so wavefronts travel outward. Multiple rings packed
+                // close together read as sustained bubbling, not a
+                // single splash.
+                let ripple_freq = 70.0;   // rings per unit local length
+                let ripple_speed = 4.5;   // rings per second outward
+                let ripple_phase = r * ripple_freq - time * ripple_speed;
+                let ripple_h = cos(ripple_phase);
+                // Ripple amplitude falls off from the eye and with
+                // distance so the rings don't compete with the stream.
+                let ripple_falloff = spring_mask * smoothstep(0.02, 0.28, r);
+                // Radial gradient of ripple_h ≈ -sin(phase) * freq.
+                let ripple_grad = -sin(ripple_phase) * ripple_freq * 0.012 * ripple_falloff;
+                // Unit radial direction in local XZ.
+                let inv_r = 1.0 / max(r, 0.0005);
+                let rdx = dx * inv_r;
+                let rdz = dz * inv_r;
+                // Add the ripple gradient into the normal perturbation
+                // (u maps to local X, v to local Z, same basis as above).
+                dhdu_total = dhdu_total + ripple_grad * rdx;
+                dhdv_total = dhdv_total + ripple_grad * rdz;
+
+                // Upwelling foam: a soft bright disk at the very eye,
+                // modulated by a second fast noise for roiling texture.
+                let eye_mask = pow(1.0 - smoothstep(0.0, 0.11, r), 2.0);
+                let turb = fbm2(vec2<f32>(dx * 28.0, dz * 28.0)
+                              + vec2<f32>(time * 2.1, -time * 1.6));
+                let boil = clamp(turb * 1.2 - 0.15, 0.0, 1.0);
+                let upwell_foam = eye_mask * (0.45 + 0.55 * boil);
+
+                // Brighter, more turquoise tone inside the pool; the
+                // center gets a warm aerated highlight from all the
+                // churn.
+                let pool_tint = vec3<f32>(0.075, 0.130, 0.195);
+                let foam_col = vec3<f32>(0.85, 0.92, 1.00);
+                albedo = mix(albedo, pool_tint, spring_mask * 0.55)
+                       + foam_col * upwell_foam * 0.75
+                       + vec3<f32>(ripple_h * 0.5 + 0.5) * spring_mask * 0.04;
+            }
+
+            let n_w = normalize(vec3<f32>(-dhdu_total, 1.0, -dhdv_total));
             water_n = normalize((mesh.model * vec4<f32>(n_w, 0.0)).xyz);
-            // Indigo deep water → teal lift in shallow noise valleys, plus
-            // bright foam where crests pile up. The Midnight Gold palette
-            // hint sits on the cool indigo side; the foam pops it.
-            let deep = vec3<f32>(0.018, 0.030, 0.075);
-            let mid  = vec3<f32>(0.045, 0.085, 0.155);
-            water_albedo = mix(deep, mid, clamp(f2 * 1.2, 0.0, 1.0))
-                         + vec3<f32>(crest) * vec3<f32>(0.55, 0.62, 0.78);
+            water_albedo = albedo;
             water_spec_strength = 1.4;
             water_spec_power = 220.0;
         } else {
@@ -691,7 +827,7 @@ fn fs_main(
 
         var lit_water = vec3<f32>(0.0);
         var spec_water = vec3<f32>(0.0);
-        let cam_pos_w = vec3<f32>(0.0, 0.0, 4000.0);
+        let cam_pos_w = ssr_globals.view_pos.xyz;
         let view_dir_w = normalize(cam_pos_w - in.world_pos);
         let count_w = lights.count.x;
         for (var i: u32 = 0u; i < count_w; i = i + 1u) {
@@ -815,8 +951,22 @@ fn fs_main(
             let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
             // Bump strength tuned for shallow carved relief on jade.
             let bump = 3.0;
-            let dhdu = (h_r - h_l) * bump;
-            let dhdv = (h_u - h_d) * bump;
+            var dhdu = (h_r - h_l) * bump;
+            var dhdv = (h_u - h_d) * bump;
+            // Gold: subtle surface variation layered on top of the carved
+            // relief — just enough to break up the highlight into soft
+            // caustic-like ripples without reading as pitted raw metal.
+            if (is_goldnug) {
+                let p2 = in.local_pos * 14.0;
+                let off = vec3<f32>(0.015, 0.0, 0.0);
+                let off_y = vec3<f32>(0.0, 0.015, 0.0);
+                let h_c2 = noise3(p2);
+                let h_x2 = noise3(p2 + off * 14.0);
+                let h_y2 = noise3(p2 + off_y * 14.0);
+                let pit_bump = 0.45;
+                dhdu = dhdu + (h_x2 - h_c2) * pit_bump;
+                dhdv = dhdv + (h_y2 - h_c2) * pit_bump;
+            }
             // Screen-space derivative tangent basis: works for any
             // orientation without needing explicit tangent attributes.
             let dp_dx = dpdx(in.world_pos);
@@ -840,7 +990,7 @@ fn fs_main(
     var coat_acc = vec3<f32>(0.0);     // clearcoat accumulator (white, untinted)
     var sheen_acc = vec3<f32>(0.0);    // talisman sheen accumulator
 
-    let cam_pos = vec3<f32>(0.0, 0.0, 4000.0); // approximate; only direction matters
+    let cam_pos = ssr_globals.view_pos.xyz;
     let view_dir = normalize(cam_pos - in.world_pos);
     let ndv_view = clamp(dot(n, view_dir), 0.0, 1.0);
 
@@ -860,29 +1010,45 @@ fn fs_main(
         wrap = 0.55;
         sss_strength = 0.55;
         sss_tint = vec3<f32>(1.00, 0.78, 0.42);
-    } else if (is_talisman) {
-        // Talisman SSS: per-kind tint so each material scatters light
-        // through its surface with the right hue. The sub-kind index
-        // lives in material_params.w (0=jade, 1=pearl, 2=gilded, 3=poly).
-        let talisman_sub = mesh.material_params.w;
+    } else if (is_jade) {
+        // Jade: warm green transmission through translucent nephrite.
         wrap = 0.45;
         sss_strength = 0.40;
-        if (talisman_sub < 0.5) {
-            // Jade: warm green transmission.
-            sss_tint = vec3<f32>(0.55, 0.92, 0.60);
-        } else if (talisman_sub < 1.5) {
-            // Pearl: cool pink-white glow.
-            sss_tint = vec3<f32>(0.90, 0.85, 0.95);
-            sss_strength = 0.30;
-        } else if (talisman_sub < 2.5) {
-            // Gilded: warm amber transmission.
-            sss_tint = vec3<f32>(0.95, 0.80, 0.40);
-            sss_strength = 0.20;
-        } else {
-            // Polychrome: cool violet-pink glow.
-            sss_tint = vec3<f32>(0.75, 0.55, 0.95);
-            sss_strength = 0.30;
-        }
+        sss_tint = vec3<f32>(0.55, 0.92, 0.60);
+    } else if (is_moonstone) {
+        // Moonstone: exaggerated schiller — the inner glow reads almost
+        // luminous, as if a cool light source were buried in the stone.
+        // Schiller colour is derived from base_color so red tablets glow
+        // red, green tablets green, etc. The saturated tint is the base
+        // colour lifted toward its bright bloom point.
+        wrap = 0.65;
+        sss_strength = 0.60;
+        sss_tint = mesh.base_color.rgb + vec3<f32>(0.30);
+    } else if (is_pearl) {
+        // Pearl: cool pink-white glow biased toward the base tint so
+        // the gold "pearl" reads warm and the white pearl reads cool.
+        wrap = 0.45;
+        sss_strength = 0.30;
+        sss_tint = mix(vec3<f32>(0.90, 0.85, 0.95), mesh.base_color.rgb, 0.40);
+    } else if (is_goldnug) {
+        // Polished gold: opaque conductor with a warm ambient glow so
+        // unlit faces pick up enough light to read as reflective metal
+        // rather than black silhouettes.
+        wrap = 0.35;
+        sss_strength = 0.20;
+        sss_tint = vec3<f32>(1.0, 0.85, 0.45);
+    } else if (is_poly) {
+        // Polychrome: cool violet-pink glow.
+        wrap = 0.45;
+        sss_strength = 0.30;
+        sss_tint = vec3<f32>(0.75, 0.55, 0.95);
+    } else if (is_porcelain) {
+        // Porcelain: soft warm wrap so the glazed ceramic reads as
+        // lit-through rather than flat painted. Tint biases slightly
+        // toward the base colour so coloured glazes stay coherent.
+        wrap = 0.40;
+        sss_strength = 0.22;
+        sss_tint = mix(vec3<f32>(1.00, 0.95, 0.90), mesh.base_color.rgb, 0.30);
     }
 
     // ── Back-transmission (Penner SSS) tunables ──────────────────────
@@ -895,25 +1061,33 @@ fn fs_main(
     // Jade uses the same model — nephrite/jadeite tablets are thin
     // enough that back-lit edges glow with a warm green.
     let back_distortion = 0.45;
-    let back_power = select(4.0, 6.0, is_talisman); // jade is denser, tighter lobe
+    let back_power = select(4.0, 6.0, is_talisman); // dense tablets get a tighter lobe
     var back_scale = 0.0;
     var back_tint = vec3<f32>(0.0);
     if (is_wax) {
         back_scale = 1.4;
         back_tint = vec3<f32>(1.00, 0.72, 0.32);
-    } else if (is_talisman) {
-        let talisman_sub_bt = mesh.material_params.w;
+    } else if (is_jade) {
         back_scale = 0.9;
-        if (talisman_sub_bt < 0.5) {
-            back_tint = vec3<f32>(0.50, 0.88, 0.55); // jade green
-        } else if (talisman_sub_bt < 1.5) {
-            back_tint = vec3<f32>(0.88, 0.82, 0.92); // pearl pink-white
-        } else if (talisman_sub_bt < 2.5) {
-            back_tint = vec3<f32>(0.92, 0.75, 0.35); // gilded amber
-            back_scale = 0.5; // metal is less translucent
-        } else {
-            back_tint = vec3<f32>(0.70, 0.50, 0.90); // polychrome violet
-        }
+        back_tint = vec3<f32>(0.50, 0.88, 0.55);
+    } else if (is_moonstone) {
+        // Moonstone: silhouettes burn with a saturated adularescent glow
+        // whose colour is driven by base_color — pushed well past plausible
+        // so the stone reads as if lit by a coloured flame behind it.
+        back_scale = 1.85;
+        back_tint = mesh.base_color.rgb + vec3<f32>(0.35);
+    } else if (is_pearl) {
+        back_scale = 0.7;
+        back_tint = mix(vec3<f32>(0.88, 0.82, 0.92), mesh.base_color.rgb, 0.45);
+    } else if (is_goldnug) {
+        // Polished gold: mostly opaque but a warm back-glow on edges
+        // so the talisman reads as luminous rather than dead on the
+        // shadow side.
+        back_scale = 0.35;
+        back_tint = vec3<f32>(1.0, 0.82, 0.40);
+    } else if (is_poly) {
+        back_scale = 0.9;
+        back_tint = vec3<f32>(0.70, 0.50, 0.90);
     }
 
     // Thickness proxy from local geometry. For wax: high near the top
@@ -1035,6 +1209,17 @@ fn fs_main(
                 let fresnel = 0.10 + 0.90 * pow(1.0 - vdh, 5.0);
                 let glass_tint = mix(vec3<f32>(0.92, 0.97, 1.0), mesh.base_color.rgb, 0.35);
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glass_tint * 1.35;
+            } else if (is_porcelain) {
+                // Porcelain glaze: tight neutral-white highlight plus a
+                // gentle Fresnel rim so curved edges brighten without the
+                // surface going translucent. Dielectric F0 ≈ 0.04.
+                let vdh = max(dot(view_dir, h), 0.0);
+                let ndv = max(dot(n, view_dir), 0.0);
+                let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
+                let glaze_tint = vec3<f32>(1.0, 0.98, 0.96);
+                let rim = 0.15 * pow(1.0 - ndv, 3.5);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glaze_tint * 1.20;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * glaze_tint;
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
@@ -1054,54 +1239,73 @@ fn fs_main(
             coat_acc = coat_acc + lc * intensity * atten * coat * cand_vis;
         }
 
-        // ── Talisman sheen lobes ──────────────────────────────────────
-        // Per-kind view-dependent sheen layered on top of the base
-        // dielectric specular. Broad lobes so the effect is visible
-        // across the whole tablet, not just at perfect mirror angles.
-        //   Jade (0)    — subtle waxy green luster
-        //   Pearl (1)   — soft pearlescent pink/blue color shift
-        //   Gilded (2)  — warm metallic gold Fresnel
-        //   Polychrome (3) — holographic thin-film rainbow
+        // ── Per-talisman-kind sheen lobes ─────────────────────────────
+        // View-dependent sheen layered on top of the base dielectric
+        // specular. Each MaterialKind gets its own block so the math
+        // can vary freely (lobe sharpness, Fresnel curve, tint source).
         if (is_talisman) {
             let h = normalize(l_dir + view_dir);
             let nh = max(dot(n, h), 0.0);
             let vdh = max(dot(view_dir, h), 0.0);
             let ndv = max(dot(n, view_dir), 0.0);
-            let tsk = mesh.material_params.w;
             // Broad wrap term: the diffuse half-vector alignment catches
             // light from a wide arc, not just the mirror direction.
             let broad = max(dot(n, l_dir), 0.0);
 
-            if (tsk < 0.5) {
-                // Jade: waxy vitreous luster. A broad green-tinted
-                // sheen that strengthens at grazing angles.
+            if (is_jade) {
+                // Jade: waxy vitreous luster — a broad green-tinted sheen
+                // that strengthens at grazing angles.
                 let fresnel = 0.08 + 0.30 * pow(1.0 - ndv, 2.5);
                 let lobe = pow(nh, 12.0) * 0.6 + broad * 0.15;
                 let tint = vec3<f32>(0.55, 0.95, 0.65);
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * tint;
-            } else if (tsk < 1.5) {
-                // Pearl: pearlescent nacre with pink-to-blue shift
-                // driven by viewing angle.
+            } else if (is_moonstone) {
+                // Moonstone: three stacked lobes for a theatrical
+                // schiller. Tight white pinpoint (surface glaze), a
+                // wide coloured halo (adularescence), and a *very*
+                // wide deep bloom that fills most of the lit
+                // hemisphere — the stone looks like it's leaking
+                // coloured light from under the surface. Halo and
+                // bloom colours come from base_color so per-suit
+                // tablets read red/green/etc. rather than always blue.
+                let fresnel = 0.12 + 0.70 * pow(1.0 - ndv, 2.5);
+                let pinpoint = pow(nh, 96.0) * 1.4;
+                let schiller = pow(nh, 4.0) * 1.10;
+                let bloom    = pow(nh, 1.5) * 0.55;
+                let halo      = mesh.base_color.rgb + vec3<f32>(0.25);
+                let deep_halo = mesh.base_color.rgb + vec3<f32>(0.15);
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * (
+                    pinpoint * fresnel * vec3<f32>(1.0) +
+                    schiller * halo +
+                    bloom    * deep_halo
+                );
+            } else if (is_pearl) {
+                // Pearl: pearlescent nacre with pink-to-blue shift driven
+                // by viewing angle. Tint biases toward the base colour so
+                // a gold-tinted pearl reads warm and a white pearl reads
+                // cool.
                 let fresnel = 0.10 + 0.50 * pow(1.0 - ndv, 3.0);
                 let phase = ndv * 3.14159;
-                let pearl_tint = vec3<f32>(
+                let pearl_white = vec3<f32>(
                     0.95 + 0.05 * cos(phase),
                     0.85 + 0.10 * cos(phase + 1.2),
                     0.90 + 0.10 * cos(phase + 2.8)
                 );
+                let pearl_tint = mix(pearl_white, mesh.base_color.rgb + vec3<f32>(0.20), 0.45);
                 let lobe = pow(nh, 16.0) * 0.7 + broad * 0.20;
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * fresnel * pearl_tint;
-            } else if (tsk < 2.5) {
-                // Gilded: metallic gold conductor — Schlick Fresnel
-                // tinted by the gold base so highlights read warm.
-                let f0 = vec3<f32>(0.95, 0.75, 0.30);
+            } else if (is_goldnug) {
+                // Polished gold: metallic conductor Schlick Fresnel with
+                // a tight highlight lobe that reads as mirror-polished
+                // sheet gold catching the candlelight.
+                let f0 = vec3<f32>(1.0, 0.82, 0.36);
                 let f_gold = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
-                let lobe = pow(nh, 24.0) * 0.8 + broad * 0.15;
+                let lobe = pow(nh, 64.0) * 1.8 + pow(nh, 12.0) * 0.35 + broad * 0.12;
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * lobe * f_gold;
-            } else {
-                // Polychrome: holographic thin-film iridescence —
-                // rainbow hue driven by the normal-to-half angle
-                // so the spectrum shifts as the light sweeps across.
+            } else if (is_poly) {
+                // Polychrome: holographic thin-film iridescence — rainbow
+                // hue driven by the normal-to-half angle so the spectrum
+                // shifts as the light sweeps across.
                 let film_angle = dot(n, h);
                 let theta = film_angle * 6.0 + ndv * 2.0;
                 let holo_r = 0.5 + 0.5 * cos(theta);
@@ -1183,6 +1387,18 @@ fn fs_main(
     if (is_enamel) {
         diffuse_scale = 0.82;
     }
+    if (is_moonstone) {
+        // Moonstone: push diffuse even lower so the body sits dark and
+        // lets the schiller/rim/SSS carry almost the entire lighting
+        // signal. The gem reads as luminous rather than lit.
+        diffuse_scale = 0.28;
+    }
+    if (is_goldnug) {
+        // Polished gold conductor: low diffuse so the look is dominated
+        // by the bright tinted Fresnel sheen, but enough to keep the
+        // body warm and luminous rather than dark.
+        diffuse_scale = 0.18;
+    }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
     // diffuse. Lerp the diffuse scale down so gold reads as metallic.
@@ -1206,27 +1422,44 @@ fn fs_main(
     // reads as a material property (always visible), not just a specular
     // highlight that depends on perfect light alignment.
     if (is_talisman) {
-        let tsk_comp = mesh.material_params.w;
         let edge = 1.0 - ndv_view;
-        if (tsk_comp < 0.5) {
+        if (is_jade) {
             // Jade: edges brighten toward a cooler, lighter green.
             let rim = pow(edge, 2.0) * 0.25;
             albedo = mix(albedo, vec3<f32>(0.6, 1.0, 0.75), rim);
-        } else if (tsk_comp < 1.5) {
-            // Pearl: edges shift toward soft pink/blue iridescence.
+        } else if (is_moonstone) {
+            // Moonstone: heavy rim pull toward a saturated, bright
+            // version of the base colour. Tight falloff (high power)
+            // + large mix amount means the silhouette burns bright
+            // while the core stays gem-tinted — the piece reads as if
+            // hollow with a coloured star inside.
+            let rim = pow(edge, 1.2) * 0.90;
+            let moon_rim = mesh.base_color.rgb + vec3<f32>(0.30);
+            albedo = mix(albedo, moon_rim, rim);
+        } else if (is_pearl) {
+            // Pearl: edges shift toward soft pink/blue iridescence
+            // overlaid onto the base tint.
             let rim = pow(edge, 1.8) * 0.35;
             let phase = ndv_view * 3.14159;
-            let pearl_edge = vec3<f32>(
+            let pearl_white = vec3<f32>(
                 0.98 + 0.02 * cos(phase),
                 0.88 + 0.06 * cos(phase + 1.5),
                 0.95 + 0.05 * cos(phase + 3.0)
             );
+            let pearl_edge = mix(pearl_white, mesh.base_color.rgb + vec3<f32>(0.18), 0.45);
             albedo = mix(albedo, pearl_edge, rim);
-        } else if (tsk_comp < 2.5) {
-            // Gilded: edges brighten toward white-gold (metallic sheen).
-            let rim = pow(edge, 2.0) * 0.30;
-            albedo = mix(albedo, vec3<f32>(1.0, 0.92, 0.65), rim);
-        } else {
+        } else if (is_goldnug) {
+            // Polished gold: strong bright rim toward white-gold that
+            // sells the shiny metallic conductor look. Subtle surface
+            // variation keeps it from reading as flat plastic.
+            let rim = pow(edge, 1.6) * 0.45;
+            albedo = mix(albedo, vec3<f32>(1.0, 0.95, 0.72), rim);
+            // Light surface variation — just enough to break up the flat
+            // gold without making it look pitted or rough.
+            let pit = noise3(in.local_pos * 14.0) * 0.7 + noise3(in.local_pos * 30.0) * 0.3;
+            let pit_signed = pit - 0.5;
+            albedo = albedo * (1.0 + pit_signed * 0.12);
+        } else if (is_poly) {
             // Polychrome: rainbow Fresnel shifts the surface hue at
             // edges, giving a holographic color-change visible from
             // any lighting angle.
@@ -1266,6 +1499,18 @@ fn fs_main(
         let rim = pow(edge, 2.0) * 0.55;
         let cool_edge = vec3<f32>(0.82, 0.93, 1.0);
         albedo = mix(albedo, cool_edge, rim);
+    }
+
+    // Metal Fresnel sheen: view-dependent rim halo tinted toward warm
+    // white-gold so the bronze mirror catches a soft edge glow even
+    // outside specular angles. Independent of light direction so the
+    // disc reads as polished bronze from every camera angle, not just
+    // when a candle aligns with the half-vector.
+    if (is_metal) {
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 3.0) * 0.55;
+        let warm_edge = mix(vec3<f32>(1.0, 0.93, 0.72), vec3<f32>(1.0), 0.25);
+        albedo = mix(albedo, warm_edge, rim);
     }
 
     // No directional shadow gating now that there's no directional light;
@@ -1368,13 +1613,24 @@ fn fs_main(
     if (is_wood) {
         coat_final = coat_final / (vec3<f32>(1.0) + coat_final * 0.7);
     }
+    // Polychrome: HUD popups (score deltas, etc.) need to read as their
+    // own base color regardless of scene lighting. The hand strip is only
+    // lit by warm candle point lights, so albedo * lit multiplies out the
+    // cool channels and a blue popup ends up orange. Add an unlit
+    // emissive floor so the popup's tint dominates; the holographic sheen
+    // and iridescent rim still layer on top as accents.
+    var emissive = vec3<f32>(0.0);
+    if (is_poly) {
+        emissive = mesh.base_color.rgb * 0.85;
+    }
     rgb = rgb
         + albedo * lit_shadowed * diffuse_scale
         + sss_acc * sss_tint
         + back_acc * back_tint
         + spec_final
         + coat_final
-        + sheen_acc;
+        + sheen_acc
+        + emissive;
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(rgb, vec3<f32>(inv_g));

@@ -29,11 +29,11 @@ pub enum Suit {
 pub enum TileEnhancement {
     /// +20 chips when this tile is part of a scored meld.
     Jade,
-    /// +30 flat chips when this tile is scored, meld or pair.
+    /// +25 flat chips when this tile is scored, meld or pair.
     Pearl,
-    /// +0.5 mult when this tile is part of a scored meld.
+    /// +0.4 mult when this tile is part of a scored meld.
     Gilded,
-    /// ×1.2 mult applied once per meld that contains this tile.
+    /// ×1.15 mult applied once per meld that contains this tile.
     Polychrome,
 }
 

@@ -86,13 +86,25 @@ pub struct MarqueeSelect {
 }
 
 impl MarqueeSelect {
-    pub fn apply(&self, selected: &mut [bool]) {
+    /// Applies the marquee to `selected` and reports how many slots
+    /// transitioned on (`added`) vs off (`removed`) relative to the prior
+    /// state. Callers use this to play distinct tick/untick SFX.
+    pub fn apply(&self, selected: &mut [bool]) -> (u32, u32) {
         let lo = self.start_slot.min(self.current_slot);
         let hi = self.start_slot.max(self.current_slot);
+        let mut added = 0u32;
+        let mut removed = 0u32;
         for (i, slot) in selected.iter_mut().enumerate() {
             let snap = self.snapshot.get(i).copied().unwrap_or(false);
-            *slot = if i >= lo && i <= hi { !snap } else { snap };
+            let next = if i >= lo && i <= hi { !snap } else { snap };
+            if next && !*slot {
+                added += 1;
+            } else if !next && *slot {
+                removed += 1;
+            }
+            *slot = next;
         }
+        (added, removed)
     }
 }
 

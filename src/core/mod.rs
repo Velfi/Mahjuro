@@ -4,6 +4,7 @@ pub mod debuff;
 pub mod deck;
 pub mod error;
 pub mod hand;
+pub mod hand_intent;
 pub mod progression;
 pub mod relic;
 pub mod rules;

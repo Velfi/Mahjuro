@@ -6,25 +6,40 @@ use std::time::Instant;
 use rand::RngExt;
 
 use crate::core::scoring::StepKind;
-use crate::render::draw_cmd::ExtrudedGlyphPlacement;
+use crate::render::draw_cmd::{ExtrudedGlyphPlacement, GlyphMaterial};
 
 /// Total lifetime of a popup from spawn to despawn (seconds).
-const LIFETIME: f32 = 1.4;
+const LIFETIME: f32 = 1.1;
 
-/// Phase boundaries on the [0, 1] normalised lifetime axis.
-const T_BIRTH_END: f32 = 0.15;
-const T_SETTLE_END: f32 = 0.35;
-const T_DRIFT_END: f32 = 0.85;
+/// Phase boundaries on the [0, 1] normalised lifetime axis. Streaming popups
+/// spend a brief moment at their source (birth + hover), then arc toward the
+/// score reel and shrink into it during the stream phase.
+const T_BIRTH_END: f32 = 0.12;
+const T_HOVER_END: f32 = 0.28;
 
 /// Slight per-popup yaw jitter so a chain of popups doesn't read as a
 /// stamped row of identical objects.
 const YAW_JITTER: f32 = 0.07;
 
 /// World-units height the popup floats above the table plane while in
-/// flight. The settle phase drifts this slightly upward; the drift phase
-/// keeps it constant.
+/// flight. The hover phase drifts this slightly upward; the stream phase
+/// arcs higher still via the bezier control point.
 const LIFT_BASE: f32 = 450.0;
-const LIFT_DRIFT: f32 = 120.0;
+const LIFT_HOVER: f32 = 120.0;
+/// Extra lift applied at the midpoint of the streaming arc. Drives the
+/// "over the top" feel of popups flying into the reel. Kept modest so
+/// the arc stays within the camera frustum across screen sizes.
+const LIFT_ARC_PEAK: f32 = 80.0;
+
+/// Sky-blue base tint for Chips popups. The Polychrome shader adds a
+/// rainbow thin-film sheen on top of this as the light sweeps across.
+const CHIPS_COLOR: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+/// Red base tint for Mult popups.
+const MULT_COLOR: [f32; 4] = [1.00, 0.42, 0.38, 1.0];
+/// Warm gold base tint for Gold popups.
+const GOLD_COLOR: [f32; 4] = [1.00, 0.84, 0.35, 1.0];
+/// Cream tint for the Final landing number (Metal material, not Polychrome).
+const FINAL_COLOR: [f32; 4] = [1.00, 0.95, 0.76, 1.0];
 
 #[derive(Clone, Debug)]
 struct ScorePopup {
@@ -32,15 +47,26 @@ struct ScorePopup {
     born_at: Instant,
     source_xy: (f32, f32),
     dest_xy: (f32, f32),
+    /// World-Z lift the stream phase eases toward at landing. Source lift
+    /// is always `LIFT_BASE`; the stream sample interpolates up to this so
+    /// popups land *at* the reel's depth instead of on the table plane.
+    dest_lift: f32,
     base_scale: f32,
     color: [f32; 4],
     yaw: f32,
     motion: PopupMotion,
+    material: GlyphMaterial,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PopupMotion {
-    Drift,
+    /// Stream from source to dest along a lifted bezier arc, shrinking to
+    /// zero as it lands in the reel. Used for Chips / Mult / Gold.
+    Stream,
+    /// Stay at source, fade out in place. Used for the Final landing beat
+    /// (which already spawns at the reel).
+    Settle,
+    /// Shake in place, then fade. Used for debuff X warnings.
     Shake,
 }
 
@@ -54,16 +80,25 @@ impl ScorePopupSystem {
     }
 
     /// Spawn a new popup. `magnitude` scales the object so more important
-    /// beats can land with a little more visual weight.
+    /// beats can land with a little more visual weight. `dest_lift` is the
+    /// world-Z the streaming phase eases toward — pass the reel's lift so
+    /// popups land *at* the reel's depth rather than on the table plane.
+    /// `None` falls back to `LIFT_BASE` (the old behavior).
     pub fn spawn(
         &mut self,
         label: String,
         source_xy: (f32, f32),
         dest_xy: (f32, f32),
+        dest_lift: Option<f32>,
         kind: StepKind,
         magnitude: f32,
     ) {
-        let color = kind_color(kind);
+        let (color, material, motion) = match kind {
+            StepKind::Chips => (CHIPS_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
+            StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
+            StepKind::Gold => (GOLD_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
+            StepKind::Final => (FINAL_COLOR, GlyphMaterial::Metal, PopupMotion::Settle),
+        };
         let mag = magnitude.abs().max(1.0);
         let scale = 205.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.42));
         let mut rng = rand::rng();
@@ -73,10 +108,12 @@ impl ScorePopupSystem {
             born_at: Instant::now(),
             source_xy,
             dest_xy,
+            dest_lift: dest_lift.unwrap_or(LIFT_BASE),
             base_scale: scale,
             color,
             yaw,
-            motion: PopupMotion::Drift,
+            motion,
+            material,
         });
     }
 
@@ -92,10 +129,12 @@ impl ScorePopupSystem {
             born_at: Instant::now(),
             source_xy,
             dest_xy: source_xy,
+            dest_lift: LIFT_BASE,
             base_scale: scale,
             color: [0.96, 0.24, 0.20, 1.0],
             yaw,
             motion: PopupMotion::Shake,
+            material: GlyphMaterial::Plain,
         });
     }
 
@@ -122,68 +161,121 @@ impl ScorePopupSystem {
                 let age = now.saturating_duration_since(p.born_at).as_secs_f32();
                 let t = (age / LIFETIME).clamp(0.0, 1.0);
 
-                // ── Lifecycle phases ───────────────────────────────────
-                let (scale_mul, alpha, pos_t, lift_extra) = if t < T_BIRTH_END {
-                    let local = t / T_BIRTH_END;
-                    let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.10;
-                    (s, 1.0, 0.0, 0.0)
-                } else if t < T_SETTLE_END {
-                    let local = (t - T_BIRTH_END) / (T_SETTLE_END - T_BIRTH_END);
-                    let s = 1.10 + (1.0 - 1.10) * local;
-                    (s, 1.0, 0.0, LIFT_DRIFT * local)
-                } else if t < T_DRIFT_END {
-                    let local = (t - T_SETTLE_END) / (T_DRIFT_END - T_SETTLE_END);
-                    let pt = local * local;
-                    (1.0, 1.0, pt, LIFT_DRIFT)
-                } else {
-                    let local = (t - T_DRIFT_END) / (1.0 - T_DRIFT_END);
-                    let s = (1.0 - local).max(0.0);
-                    let a = (1.0 - local).max(0.0);
-                    (s, a, 1.0, LIFT_DRIFT * (1.0 - local))
+                let (px, py, lift_z, scale_mul, alpha, emissive) = match p.motion {
+                    PopupMotion::Stream => stream_sample(p, t),
+                    PopupMotion::Settle => settle_sample(p, t),
+                    PopupMotion::Shake => shake_sample(p, t),
                 };
 
-                let mut px = p.source_xy.0 + (p.dest_xy.0 - p.source_xy.0) * pos_t;
-                let mut py = p.source_xy.1 + (p.dest_xy.1 - p.source_xy.1) * pos_t;
-                if p.motion == PopupMotion::Shake {
-                    let env = if t < 0.8 { 1.0 - t / 0.8 } else { 0.0 };
-                    let shake = env * p.base_scale * 0.05;
-                    px += (t * 55.0).sin() * shake;
-                    py += (t * 39.0).cos() * shake * 0.55;
-                }
                 let mut color = p.color;
                 color[3] *= alpha;
 
-                let emissive = if p.motion == PopupMotion::Shake {
-                    0.9
-                } else if t < T_BIRTH_END {
-                    1.0
-                } else if t < T_SETTLE_END {
-                    1.0 - (t - T_BIRTH_END) / (T_SETTLE_END - T_BIRTH_END)
-                } else {
-                    0.2
-                };
-
                 ExtrudedGlyphPlacement {
-                    world_pos: [px, py, LIFT_BASE + lift_extra],
+                    world_pos: [px, py, lift_z],
                     scale: p.base_scale * scale_mul,
                     rotation_x: 0.08,
                     rotation_y: p.yaw,
                     label: p.label.clone(),
                     color,
                     emissive,
+                    material: p.material,
                 }
             })
             .collect()
     }
 }
 
-fn kind_color(kind: StepKind) -> [f32; 4] {
-    match kind {
-        StepKind::Chips => [0.94, 0.86, 0.60, 1.0],
-        StepKind::Mult => [0.98, 0.90, 0.68, 1.0],
-        StepKind::Gold => [1.00, 0.91, 0.66, 1.0],
-        StepKind::Final => [1.00, 0.95, 0.76, 1.0],
+/// Streaming trajectory: brief birth/hover at source, then a lifted bezier
+/// arc into the destination, shrinking to zero as the popup lands in the
+/// reel. No separate fade phase — absorption into the reel replaces it.
+///
+/// Return tuple: `(world_x, world_y, world_z_lift, scale_mul, alpha, emissive)`.
+fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
+    if t < T_BIRTH_END {
+        let local = t / T_BIRTH_END;
+        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.10;
+        return (p.source_xy.0, p.source_xy.1, LIFT_BASE, s, 1.0, 1.0);
     }
+    if t < T_HOVER_END {
+        let local = (t - T_BIRTH_END) / (T_HOVER_END - T_BIRTH_END);
+        let s = 1.10 + (1.0 - 1.10) * local;
+        let em = 1.0 - local * 0.6;
+        return (
+            p.source_xy.0,
+            p.source_xy.1,
+            LIFT_BASE + LIFT_HOVER * local,
+            s,
+            1.0,
+            em,
+        );
+    }
+    // Stream phase: t ∈ [T_HOVER_END, 1.0]
+    let local = (t - T_HOVER_END) / (1.0 - T_HOVER_END);
+    // Ease-in-out cubic so the popup accelerates off the source and
+    // decelerates as it nears the reel.
+    let eased = if local < 0.5 {
+        4.0 * local * local * local
+    } else {
+        1.0 - (-2.0 * local + 2.0).powi(3) * 0.5
+    };
+    // Quadratic bezier control point: midpoint XY, lifted above both ends.
+    let ctrl_x = (p.source_xy.0 + p.dest_xy.0) * 0.5;
+    let ctrl_y = (p.source_xy.1 + p.dest_xy.1) * 0.5;
+    let one_m = 1.0 - eased;
+    let px = one_m * one_m * p.source_xy.0 + 2.0 * one_m * eased * ctrl_x + eased * eased * p.dest_xy.0;
+    let py = one_m * one_m * p.source_xy.1 + 2.0 * one_m * eased * ctrl_y + eased * eased * p.dest_xy.1;
+    // Ease Z from (LIFT_BASE + LIFT_HOVER) at the start of the stream phase
+    // to `dest_lift` at landing, so the popup actually meets the reel's
+    // depth. The bezier arc adds an extra peak on top, via the one_m*eased
+    // envelope (peaks at 0.25 when eased == 0.5 → scale by 4.0).
+    let start_lift = LIFT_BASE + LIFT_HOVER;
+    let lerp_lift = start_lift + (p.dest_lift - start_lift) * eased;
+    let arc_env = 4.0 * one_m * eased;
+    let lift_z = lerp_lift + LIFT_ARC_PEAK * arc_env;
+    // Shrink to zero over the last 30% so the popup "lands into" the reel.
+    let shrink = if local < 0.7 {
+        1.0
+    } else {
+        ((1.0 - local) / 0.3).max(0.0)
+    };
+    (px, py, lift_z, shrink, 1.0, 0.35)
+}
+
+/// In-place settle with fade-out. Used by the Final landing number.
+fn settle_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
+    let (px, py) = p.source_xy;
+    if t < T_BIRTH_END {
+        let local = t / T_BIRTH_END;
+        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.10;
+        return (px, py, LIFT_BASE, s, 1.0, 1.0);
+    }
+    let local = (t - T_BIRTH_END) / (1.0 - T_BIRTH_END);
+    let fade = if local < 0.6 {
+        1.0
+    } else {
+        ((1.0 - local) / 0.4).max(0.0)
+    };
+    let s = 1.10 + (1.0 - 1.10) * local.min(0.3) / 0.3;
+    let em = 1.0 - local.min(0.3) / 0.3 * 0.75;
+    (px, py, LIFT_BASE + LIFT_HOVER, s * fade.max(0.01), fade, em)
+}
+
+/// Shake-in-place for debuff X warnings.
+fn shake_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
+    let env = if t < 0.8 { 1.0 - t / 0.8 } else { 0.0 };
+    let shake = env * p.base_scale * 0.05;
+    let px = p.source_xy.0 + (t * 55.0).sin() * shake;
+    let py = p.source_xy.1 + (t * 39.0).cos() * shake * 0.55;
+    let (scale_mul, alpha) = if t < T_BIRTH_END {
+        let local = t / T_BIRTH_END;
+        ((local * std::f32::consts::FRAC_PI_2).sin() * 1.10, 1.0)
+    } else if t < 0.85 {
+        (1.0, 1.0)
+    } else {
+        let local = (t - 0.85) / 0.15;
+        ((1.0 - local).max(0.0), (1.0 - local).max(0.0))
+    };
+    (px, py, LIFT_BASE, scale_mul, alpha, 0.9)
 }
 
 impl Default for ScorePopupSystem {

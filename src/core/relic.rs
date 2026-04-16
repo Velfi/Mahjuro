@@ -75,7 +75,7 @@ pub enum RelicId {
     PearlDiver,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
     LowTide,
-    /// Relics cost $1 less in the shop (minimum $1).
+    /// Relics cost 25% less in the shop, rounded down (minimum $1).
     MerchantsEye,
     /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
     EdgeRunner,
@@ -176,6 +176,10 @@ pub enum RelicId {
     /// Destroy the relic to the right; gain permanent mult equal to
     /// double its sell value.
     RitualBlade,
+    /// East + n West tiles count as a pair / triplet / kong (n = 1 / 2 / 3).
+    /// Validation happens by relabelling the West tiles as East before the
+    /// standard meld decomposition runs.
+    Disgust,
 }
 
 impl RelicId {
@@ -261,6 +265,7 @@ impl RelicId {
             RelicId::SmokeBomb => "smoke_bomb.png",
             RelicId::PhantomRelic => "phantom_relic.png",
             RelicId::RitualBlade => "ritual_blade.png",
+            RelicId::Disgust => "disgust.png",
         }
     }
 }
@@ -407,7 +412,7 @@ pub fn relic_buy_price(id: RelicId) -> u32 {
 pub fn relic_shop_price(id: RelicId, relics: &RelicState) -> u32 {
     let mut price = relic_buy_price(id);
     if relics.has(RelicId::MerchantsEye) {
-        price = price.saturating_sub(1).max(1);
+        price = (price * 3 / 4).max(1);
     }
     price
 }
@@ -738,7 +743,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::MerchantsEye,
             name: "Merchant's Eye",
-            description: "Relics cost $1 less in the shop",
+            description: "Relics cost 25% less in the shop",
             rarity: Rarity::Common,
         },
         RelicDef {
@@ -1006,6 +1011,12 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             description: "Destroy the next relic for permanent mult",
             rarity: Rarity::Rare,
         },
+        RelicDef {
+            id: RelicId::Disgust,
+            name: "Disgust",
+            description: "East + 1/2/3 West tiles count as pair/triplet/kong",
+            rarity: Rarity::Rare,
+        },
     ]
 }
 
@@ -1169,15 +1180,14 @@ mod tests {
     }
 
     #[test]
-    fn merchants_eye_reduces_shop_price_by_one() {
+    fn merchants_eye_reduces_shop_price_by_25_percent() {
         let mut relics = RelicState::default();
         relics.active.push(RelicId::MerchantsEye);
 
+        let base = relic_buy_price(RelicId::TripletBoost);
         assert_eq!(
             relic_shop_price(RelicId::TripletBoost, &relics),
-            relic_buy_price(RelicId::TripletBoost)
-                .saturating_sub(1)
-                .max(1)
+            (base * 3 / 4).max(1)
         );
     }
 }

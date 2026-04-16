@@ -10,6 +10,9 @@ use crate::core::deck::Wall;
 use crate::core::hand::{
     DetectedSet, SetKind, detect_all_sets, enumerate_decompositions, validate_selection_with_rules,
 };
+use crate::core::hand_intent::{
+    DecompositionBias, decomposition_affinity, infer_decomposition_bias,
+};
 use crate::core::structure::{
     StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
     is_winning_structure_shape,
@@ -650,6 +653,10 @@ pub struct RunState {
         crate::core::yaku::YakuKind,
         u32,
     )>,
+    /// Data from a dismissed zodiac celebration overlay, consumed by the
+    /// underlying scene (shop) to spawn a score popup + particle burst.
+    #[serde(skip)]
+    pub finished_zodiac_celebration: Option<(&'static str, u32)>,
     /// Permanent per-tile chip bonus accumulated by the Tile Polisher
     /// relic. Each scored tile adds +3 to this counter for the rest of
     /// the run. Applied in Phase 2 of scoring.
@@ -818,6 +825,7 @@ impl RunState {
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
+            finished_zodiac_celebration: None,
             tile_polisher_bonus: 0,
             relic_counters: std::collections::BTreeMap::new(),
             river_runner_bonus: 0,
@@ -1026,6 +1034,9 @@ impl RunState {
             &self.tile_enhancements,
             overflow,
         );
+        if self.relics.has(crate::core::relic::RelicId::DoraCrown) {
+            self.wall.reveal_extra_dora_indicator();
+        }
         self.hand.clear();
         let draw_count = self.mode.hand_size;
         for _ in 0..draw_count {
@@ -1333,8 +1344,12 @@ impl RunState {
                 if selected_indices.is_empty() {
                     return;
                 }
-                let leftmost = selected_indices.iter().copied().min().unwrap();
-                let template = self.hand[leftmost];
+                if self.hand.is_empty() {
+                    return;
+                }
+                let mut rng = rand::rng();
+                let template_idx = rng.random_range(0..self.hand.len());
+                let template = self.hand[template_idx];
                 for i in selected_indices {
                     self.hand[i].suit = template.suit;
                     self.hand[i].rank = template.rank;
@@ -1512,6 +1527,9 @@ impl RunState {
             &self.tile_enhancements,
             overflow,
         );
+        if self.relics.has(crate::core::relic::RelicId::DoraCrown) {
+            self.wall.reveal_extra_dora_indicator();
+        }
         self.hand.clear();
         let draw_count = boss::effective_hand_size(self);
         for _ in 0..draw_count {
@@ -2123,30 +2141,50 @@ impl RunState {
 
     /// When the submission could be a full winning hand (14+ tiles), enumerate
     /// every valid meld decomposition and pick the highest-scoring one. For
-    /// shorter plays (partial structure commits, small selections), keep the
-    /// backtracker's first-found decomposition — ambiguity is rare and the
-    /// enumeration overhead isn't worth it.
+    /// shorter plays (partial structure commits), only re-rank when the
+    /// player's full hand reveals a clear pairs-vs-triplets lean — otherwise
+    /// the backtracker's first-found decomposition is fine and enumeration
+    /// overhead isn't worth it.
     ///
-    /// Ties fall back to the first decomposition found.
+    /// Ties on full hands fall back to affinity, then to the first
+    /// decomposition found.
     fn pick_best_decomposition(
         &self,
         default_sets: Vec<DetectedSet>,
         scoring_tiles: &[Tile],
         original_tiles: &[Tile],
     ) -> Vec<DetectedSet> {
-        // Only search alternatives when the submission is plausibly a full hand.
         // A full hand has 14 + kong_count tiles (kongs use 4 tiles each).
         let kongs = default_sets
             .iter()
             .filter(|s| s.kind == SetKind::Kong)
             .count();
-        if scoring_tiles.len() < HAND_SIZE || scoring_tiles.len() != HAND_SIZE + kongs {
+        let is_full_hand = scoring_tiles.len() >= HAND_SIZE
+            && scoring_tiles.len() == HAND_SIZE + kongs;
+        let bias = infer_decomposition_bias(&self.hand);
+        // Partial submissions only need re-ranking when the player's hand
+        // reveals an intent the greedy backtracker would override (e.g.
+        // committing 1-1-1-1 as two pairs while building Chiitoitsu).
+        if !is_full_hand && matches!(bias, DecompositionBias::Neutral) {
             return default_sets;
         }
         let rules = self.validation_rules_for_current_mode();
         let alternatives = enumerate_decompositions(scoring_tiles, &rules);
         if alternatives.len() <= 1 {
             return default_sets;
+        }
+        if !is_full_hand {
+            // Affinity-only pick: no scoring engine for partial commits.
+            let mut best = default_sets;
+            let mut best_affinity = decomposition_affinity(&best, bias);
+            for candidate in alternatives {
+                let affinity = decomposition_affinity(&candidate, bias);
+                if affinity > best_affinity {
+                    best_affinity = affinity;
+                    best = candidate;
+                }
+            }
+            return best;
         }
         let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
@@ -2180,6 +2218,7 @@ impl RunState {
             original_tiles,
         )
         .total;
+        let mut best_affinity = decomposition_affinity(&best, bias);
         for candidate in alternatives {
             let total = score_sets_with_original(
                 scoring_tiles,
@@ -2189,8 +2228,11 @@ impl RunState {
                 original_tiles,
             )
             .total;
-            if total > best_total {
+            let affinity = decomposition_affinity(&candidate, bias);
+            let take = total > best_total || (total == best_total && affinity > best_affinity);
+            if take {
                 best_total = total;
+                best_affinity = affinity;
                 best = candidate;
             }
         }
@@ -2279,6 +2321,19 @@ impl RunState {
         // JokerTile: try substituting one tile with each possible face.
         if self.relics.has(RelicId::JokerTile) && !self.joker_used {
             if let Some(result) = try_joker_substitution(tiles, &validation_rules) {
+                return Some(result);
+            }
+        }
+
+        // Disgust: relabel West tiles as East so EW / EWW / EWWW validate as
+        // pair / triplet / kong. Runs before WildWinds because it is strictly
+        // narrower (only fires with E+W present) and can chain into WildWinds
+        // for any *other* wind tiles in the selection.
+        if self.relics.has(RelicId::Disgust) {
+            let chain_winds = self.relics.has(RelicId::WildWinds);
+            if let Some(result) =
+                try_disgust_substitution(tiles, &validation_rules, chain_winds)
+            {
                 return Some(result);
             }
         }
@@ -2772,6 +2827,7 @@ mod tests {
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
+            finished_zodiac_celebration: None,
             tile_polisher_bonus: 0,
             relic_counters: BTreeMap::new(),
             river_runner_bonus: 0,
@@ -3625,10 +3681,22 @@ fn try_wind_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
 ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    try_wind_substitution_excluding(tiles, &[], rules)
+}
+
+/// Like [`try_wind_substitution`] but leaves the wind tiles whose indices
+/// appear in `frozen` untouched. Used by Disgust + WildWinds chaining: Disgust
+/// freezes the East/West tiles it consumed so WildWinds can play with the
+/// remaining winds without breaking the synthetic pair/triplet/kong.
+fn try_wind_substitution_excluding(
+    tiles: &[Tile],
+    frozen: &[usize],
+    rules: &[RuleModifier],
+) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
     let wind_indices: Vec<usize> = tiles
         .iter()
         .enumerate()
-        .filter(|(_, t)| t.suit == Suit::Wind)
+        .filter(|(i, t)| t.suit == Suit::Wind && !frozen.contains(i))
         .map(|(i, _)| i)
         .collect();
     if wind_indices.is_empty() {
@@ -3663,6 +3731,58 @@ fn try_wind_substitution(
     }
     let mut modified = tiles.to_vec();
     substitute_recursive(&mut modified, &wind_indices, 0, &candidates, rules)
+}
+
+/// Disgust relic: relabel West tiles as East before validation so that
+/// E+W = pair, E+W+W = triplet, E+W+W+W = kong. Only fires when the
+/// selection contains at least one East and one West tile.
+///
+/// When `chain_winds` is true (player also owns WildWinds), any *other* wind
+/// tiles in the selection are then treated as wildcards via
+/// [`try_wind_substitution_excluding`], with the East/relabeled-West tiles
+/// frozen so the synthetic pair/triplet/kong stays intact.
+fn try_disgust_substitution(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+    chain_winds: bool,
+) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    let has_east = tiles
+        .iter()
+        .any(|t| t.suit == Suit::Wind && t.rank == 1);
+    let has_west = tiles
+        .iter()
+        .any(|t| t.suit == Suit::Wind && t.rank == 3);
+    if !has_east || !has_west {
+        return None;
+    }
+    // Indices of every tile that contributes to the synthetic Disgust set —
+    // the original Easts plus the Wests we're about to relabel.
+    let frozen: Vec<usize> = tiles
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.suit == Suit::Wind && (t.rank == 1 || t.rank == 3))
+        .map(|(i, _)| i)
+        .collect();
+    let modified: Vec<Tile> = tiles
+        .iter()
+        .map(|t| {
+            if t.suit == Suit::Wind && t.rank == 3 {
+                let mut east = Tile::new(Suit::Wind, 1, t.id);
+                east.enhancement = t.enhancement;
+                east.debuffed_visual = t.debuffed_visual;
+                east
+            } else {
+                *t
+            }
+        })
+        .collect();
+    if let Some(sets) = validate_selection_with_rules(&modified, rules) {
+        return Some((sets, modified));
+    }
+    if chain_winds {
+        return try_wind_substitution_excluding(&modified, &frozen, rules);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -3868,5 +3988,68 @@ mod progression_snapshot_tests {
         let mut next_run = RunState::new_demo();
         next_run.apply_progression(&progress);
         assert!(next_run.available_relics.contains(&RelicId::JokerTile));
+    }
+}
+
+#[cfg(test)]
+mod disgust_tests {
+    use super::*;
+
+    fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
+        Tile::new(suit, rank, id)
+    }
+
+    #[test]
+    fn ew_validates_as_pair() {
+        let tiles = vec![tile(Suit::Wind, 1, 0), tile(Suit::Wind, 3, 1)];
+        let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EW should be a pair");
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Pair);
+    }
+
+    #[test]
+    fn eww_validates_as_triplet() {
+        let tiles = vec![
+            tile(Suit::Wind, 1, 0),
+            tile(Suit::Wind, 3, 1),
+            tile(Suit::Wind, 3, 2),
+        ];
+        let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EWW should be a triplet");
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Triplet);
+    }
+
+    #[test]
+    fn ewww_validates_as_kong() {
+        let tiles = vec![
+            tile(Suit::Wind, 1, 0),
+            tile(Suit::Wind, 3, 1),
+            tile(Suit::Wind, 3, 2),
+            tile(Suit::Wind, 3, 3),
+        ];
+        let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EWWW should be a kong");
+        assert_eq!(sets.len(), 1);
+        assert_eq!(sets[0].kind, SetKind::Kong);
+    }
+
+    #[test]
+    fn requires_both_east_and_west() {
+        // No East: should not fire.
+        let tiles = vec![tile(Suit::Wind, 3, 0), tile(Suit::Wind, 3, 1)];
+        assert!(try_disgust_substitution(&tiles, &[], false).is_none());
+        // No West: should not fire.
+        let tiles = vec![tile(Suit::Wind, 1, 0), tile(Suit::Wind, 1, 1)];
+        assert!(try_disgust_substitution(&tiles, &[], false).is_none());
+    }
+
+    #[test]
+    fn nonsense_selection_still_invalid() {
+        // EW + a stray bamboo cannot decompose even after relabel.
+        let tiles = vec![
+            tile(Suit::Wind, 1, 0),
+            tile(Suit::Wind, 3, 1),
+            tile(Suit::Bamboos, 5, 2),
+        ];
+        assert!(try_disgust_substitution(&tiles, &[], false).is_none());
     }
 }
