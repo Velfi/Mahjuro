@@ -886,6 +886,7 @@ fn layout_tile_groups(
                 hovered: false,
                 outline: false,
                 glow: false,
+                glow_color: None,
                 pick_id: None,
             });
             cursor_x += tile_size;

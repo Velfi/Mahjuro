@@ -100,7 +100,9 @@ pub static GLOSSARY: &[GlossaryEntry] = &[
     GlossaryEntry {
         term: "Dora",
         aliases: &[],
-        description: "Bonus tiles worth +30 points each when scored in a meld.",
+        description: "The brass plinth shows the dora tile. Each dora tile in \
+                      a scored set adds +25 chips, or +35 with the Dora Crown \
+                      relic. Dora Crown also reveals a second dora.",
     },
     GlossaryEntry {
         term: "Hand",

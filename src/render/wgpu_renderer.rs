@@ -57,6 +57,7 @@ use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
     build_river_mesh,
 };
+use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
@@ -498,6 +499,7 @@ pub struct ProjectionCache {
     pub bowl_rect: Option<[f32; 4]>,
     pub mirror_rect: Option<[f32; 4]>,
     pub aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
+    pub dora_plinth_rect: Option<[f32; 4]>,
 }
 
 /// Active arrange-mode override for the renderer. When set, the matching
@@ -667,6 +669,10 @@ pub struct WgpuRenderer {
     /// Last cursor world position (table-plane intersection) for cursor-driven
     /// smoke wind impulses.
     prev_cursor_world: Option<glam::Vec3>,
+    /// Last cursor screen position. Used to gate smoke emission on actual
+    /// pointer motion — otherwise a static cursor over an orbiting/swaying
+    /// camera would emit continuous puffs as the unprojected world hit drifts.
+    prev_cursor_screen: Option<(f32, f32)>,
 
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
@@ -796,6 +802,9 @@ pub struct WgpuRenderer {
     cabinet_mesh: LitMeshGpu,
     /// Procedural shrine mesh used by the pick-blind scene.
     shrine_mesh: LitMeshGpu,
+    /// Procedural ornate brass plinth used by the gameplay scene to hold
+    /// the dora indicator tile(s).
+    dora_plinth_mesh: LitMeshGpu,
     /// Per-ribbon draw-slot instances (shop scene). Each textured ribbon uses
     /// up to 3 slots (top/mid/bot); untextured ribbons use 1. Truncated at
     /// `MAX_RIBBON_SLOTS`.
@@ -879,6 +888,10 @@ pub struct WgpuRenderer {
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
     /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
     shrine_instances: Vec<LitMeshInstance>,
+    /// Per-dora-plinth instances (gameplay scene). Truncated at
+    /// `MAX_DORA_PLINTH_SLOTS`. The gameplay scene only ever pushes one
+    /// plinth per frame, but the slot pool tolerates more without allocation.
+    dora_plinth_instances: Vec<LitMeshInstance>,
     /// Per-explicit-dish instances (shop scene). Indexed sequentially by
     /// `DishExplicit` placement order; grown on demand.
     aux_dish_instances: Vec<LitMeshInstance>,
@@ -1094,6 +1107,8 @@ pub const MAX_ORB_SLOTS: usize = 32;
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
 /// Big, Boss). Truncated silently.
 pub const MAX_SHRINE_SLOTS: usize = 4;
+/// Maximum number of dora-plinth instances per frame (gameplay uses 1).
+pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
 /// Maximum number of hanging ofuda per frame (gameplay uses 1).
 pub const MAX_OFUDA_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
@@ -3269,6 +3284,8 @@ impl WgpuRenderer {
         let cabinet_mesh = LitMeshGpu::new(&device, &build_curio_cabinet_mesh(), "curio-cabinet");
         let book_mesh = LitMeshGpu::new(&device, &build_book_mesh(), "book");
         let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
+        let dora_plinth_mesh =
+            LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
         let lamp_body_mesh = LitMeshGpu::new(&device, &build_lamp_body_mesh(), "lamp-body");
         let lamp_bulb_mesh = LitMeshGpu::new(&device, &build_lamp_bulb_mesh(), "lamp-bulb");
         // Skeuomorphic gameplay HUD meshes (phase 1).
@@ -3587,6 +3604,18 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
+        let mut dora_plinth_instances: Vec<LitMeshInstance> =
+            Vec::with_capacity(MAX_DORA_PLINTH_SLOTS);
+        for _ in 0..MAX_DORA_PLINTH_SLOTS {
+            dora_plinth_instances.push(LitMeshInstance::new(
+                &device,
+                &lit_mesh_material_layout,
+                &shadow_caster_layout,
+                &lit_mesh_white_view,
+                &lit_mesh_relief_default_view,
+                &tile_sampler,
+            ));
+        }
         let aux_dish_instances: Vec<LitMeshInstance> = Vec::new();
 
         // ── Skeuomorphic gameplay HUD slot pools (phase 1) ─────────────
@@ -3711,6 +3740,7 @@ impl WgpuRenderer {
             coin_mesh,
             cabinet_mesh,
             shrine_mesh,
+            dora_plinth_mesh,
             ribbon_instances,
             ribbon_slot_zodiac,
             ribbon_zodiac_tex,
@@ -3744,6 +3774,7 @@ impl WgpuRenderer {
             last_sell_tray_model: None,
             cabinet_instance,
             shrine_instances,
+            dora_plinth_instances,
             aux_dish_instances,
             last_ribbon_models: Vec::new(),
             last_ribbon_slot_count: 0,
@@ -3796,6 +3827,7 @@ impl WgpuRenderer {
             fluid_render_bg_dirty: true,
             prev_tile_world: HashMap::new(),
             prev_cursor_world: None,
+            prev_cursor_screen: None,
             lit_mesh_material_layout,
             lit_mesh_ssr_layout,
             lit_mesh_ssr_buffer,
@@ -5064,6 +5096,7 @@ impl WgpuRenderer {
         }
         self.prev_tile_world.clear();
         self.prev_cursor_world = None;
+        self.prev_cursor_screen = None;
     }
 
     /// Render one frame.
@@ -7536,6 +7569,7 @@ impl WgpuRenderer {
         self.proj.wood_tablet_rects.clear();
         self.proj.bowl_rect = None;
         self.proj.mirror_rect = None;
+        self.proj.dora_plinth_rect = None;
         self.last_yaku_tablet_models.clear();
         self.last_wood_tablet_models.clear();
         self.last_bowl_model = None;
@@ -7962,6 +7996,7 @@ impl WgpuRenderer {
             let mut obj3d_shop_action_prop_slot: usize = 0;
             let mut obj3d_bar_slot: usize = 0;
             let mut obj3d_shrine_slot: usize = 0;
+            let mut obj3d_dora_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
             let mut _obj3d_bowl_slot: usize = 0;
             let mut _obj3d_mirror_slot: usize = 0;
@@ -8821,6 +8856,93 @@ impl WgpuRenderer {
                                 0.0,
                             ));
                             object3d_draw_list.push((11, slot_i));
+                        }
+                        Object3dKind::DoraPlinth { glow } => {
+                            if obj3d_dora_plinth_slot >= MAX_DORA_PLINTH_SLOTS {
+                                continue;
+                            }
+                            let slot_i = obj3d_dora_plinth_slot;
+                            obj3d_dora_plinth_slot += 1;
+                            let plinth_name = "gameplay.dora_plinth";
+                            // Mesh is built Y-up centered; lift the world position
+                            // by half-height so `obj.pos` describes the plinth's
+                            // base sitting on the table felt.
+                            let plinth_center = pixel_to_world(
+                                w,
+                                h,
+                                obj.pos[0],
+                                obj.pos[1],
+                                obj.pos[2] + obj.extents[1] * 0.5,
+                            );
+                            let plinth_rot =
+                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation;
+                            let plinth_model = self.apply_arrange_override(
+                                plinth_name,
+                                translate_rot_scale(
+                                    plinth_center,
+                                    plinth_rot,
+                                    glam::Vec3::from(obj.extents),
+                                ),
+                            );
+                            let g = glow.clamp(0.0, 1.0);
+                            let base_color = if g > 0.0 {
+                                let target = [1.10, 0.95, 0.55, obj.color[3]];
+                                [
+                                    obj.color[0] + (target[0] - obj.color[0]) * g,
+                                    obj.color[1] + (target[1] - obj.color[1]) * g,
+                                    obj.color[2] + (target[2] - obj.color[2]) * g,
+                                    obj.color[3],
+                                ]
+                            } else {
+                                obj.color
+                            };
+                            let material = MaterialParams {
+                                kind: MaterialKind::Metal,
+                                base_color,
+                                specular_strength: 0.85,
+                                specular_power: 64.0,
+                            };
+                            self.dora_plinth_instances[slot_i].write_uniform(
+                                &self.queue,
+                                view_proj_arr,
+                                plinth_model,
+                                material,
+                            );
+                            // Project AABB → screen rect for hover/focus.
+                            let plinth_world_center = plinth_model.w_axis.truncate();
+                            let [hx, hy, hz] = [
+                                obj.extents[0] * 0.5,
+                                obj.extents[1] * 0.5,
+                                obj.extents[2] * 0.5,
+                            ];
+                            let (mut mn_x, mut mn_y, mut mx_x, mut mx_y) = (
+                                f32::INFINITY,
+                                f32::INFINITY,
+                                f32::NEG_INFINITY,
+                                f32::NEG_INFINITY,
+                            );
+                            for cx in [-hx, hx] {
+                                for cy in [-hy, hy] {
+                                    for cz in [-hz, hz] {
+                                        let world =
+                                            plinth_world_center + glam::Vec3::new(cx, cy, cz);
+                                        let (px, py) = project_to_screen(world);
+                                        mn_x = mn_x.min(px);
+                                        mn_y = mn_y.min(py);
+                                        mx_x = mx_x.max(px);
+                                        mx_y = mx_y.max(py);
+                                    }
+                                }
+                            }
+                            self.proj.dora_plinth_rect =
+                                Some([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
+                            self.last_debug_pickables.push((
+                                plinth_name.to_string(),
+                                plinth_model,
+                                glam::Vec3::new(hx, hy, hz),
+                                0.0,
+                            ));
+                            object3d_draw_list.push((21, slot_i));
                         }
                         Object3dKind::ShopActionProp {
                             label,
@@ -9738,6 +9860,15 @@ impl WgpuRenderer {
             // puffs so the trail has no gaps even at low frame rates or
             // fast flicks.
             if let Some((cx, cy)) = frame.cursor_pos {
+                // Gate on actual screen-space pointer motion. Without this,
+                // a stationary cursor over an orbiting/swaying camera would
+                // emit continuous puffs as the unprojected table-plane hit
+                // drifts with the camera.
+                let screen_moved = match self.prev_cursor_screen {
+                    Some((pcx, pcy)) => (cx - pcx).abs() > 0.01 || (cy - pcy).abs() > 0.01,
+                    None => false,
+                };
+                self.prev_cursor_screen = Some((cx, cy));
                 let inv_vp = view_proj.inverse();
                 let nx = (cx / w) * 2.0 - 1.0;
                 let ny = 1.0 - (cy / h) * 2.0;
@@ -9756,23 +9887,18 @@ impl WgpuRenderer {
                             let jump = raw_delta.length();
                             let win_scale = (h / 1080.0).max(0.5);
                             let max_jump = 42.0 * win_scale;
-                            if jump.is_finite() && jump <= max_jump {
+                            if screen_moved && jump.is_finite() && jump <= max_jump {
                                 let speed_threshold = 0.4 * win_scale;
                                 if jump > speed_threshold {
-                                    // The fluid grid at Standard quality has
-                                    // cells ~30 world units wide. Puff radius
-                                    // must span several cells so the ray-
-                                    // marcher accumulates enough absorption
-                                    // across multiple steps to actually see
-                                    // the smoke — cursor puffs are transient
-                                    // and need to be visible from a single
-                                    // injection.
-                                    let puff_radius = 32.0 * win_scale;
-
-                                    // Spacing between trail puffs — roughly
-                                    // one puff-radius apart so they overlap
-                                    // into a continuous ribbon.
-                                    let step_size = puff_radius * 0.9;
+                                    // Drop a line of overlapping gaussian
+                                    // puffs between the previous and
+                                    // current cursor world positions. The
+                                    // new density-only sim transports them
+                                    // upward via its drift + curl field,
+                                    // so we just need to seed enough mass
+                                    // for the plume to read as solid smoke.
+                                    let puff_radius = 36.0 * win_scale;
+                                    let step_size = puff_radius * 0.7;
                                     let n_puffs = ((jump / step_size).ceil() as u32).clamp(1, 8);
 
                                     for i in 0..n_puffs {
@@ -9782,15 +9908,13 @@ impl WgpuRenderer {
                                             (i as f32 + 1.0) / n_puffs as f32
                                         };
                                         let pos = prev + raw_delta * frac;
-                                        let taper = 0.5 + 0.5 * frac;
-                                        let puff_density = 0.10 * taper;
                                         fluid.inject_impulse(
-                                            pos + glam::Vec3::new(0.0, 0.0, 2.0 * win_scale),
+                                            pos + glam::Vec3::new(0.0, 0.0, 4.0 * win_scale),
                                             glam::Vec3::ZERO,
                                             puff_radius,
-                                            puff_density,
-                                            0.08,
-                                            i as f32 * 0.37,
+                                            0.35,
+                                            0.0,
+                                            0.0,
                                         );
                                     }
                                 }
@@ -10453,7 +10577,7 @@ impl WgpuRenderer {
                             let gy = overlay_y + (overlay_h - gh) * 0.5;
                             tile_glows.push(GpuInstance {
                                 rect: [gx, gy, gw, gh],
-                                color: [1.00, 0.78, 0.32, 0.55],
+                                color: p.glow_color.unwrap_or([1.00, 0.78, 0.32, 0.55]),
                             });
                         }
                     }
@@ -11855,6 +11979,10 @@ impl WgpuRenderer {
                                     self.bug_ghost_wing_instances.get(slot_i),
                                 ),
                                 20 => (&self.orb_mesh, self.orb_instances.get(slot_i)),
+                                21 => (
+                                    &self.dora_plinth_mesh,
+                                    self.dora_plinth_instances.get(slot_i),
+                                ),
                                 _ => continue,
                             };
                         let Some(inst) = inst_opt else { continue };

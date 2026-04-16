@@ -15,18 +15,17 @@
 //! ## Slot budget
 //!
 //! Each column renders three glyph meshes stacked vertically (prev, current,
-//! next) so that the spin transition clips naturally. With 7 columns that is
-//! 21 slots. The caller is responsible for ensuring `MAX_EXTRUDED_GLYPH_SLOTS`
-//! is large enough.
+//! next) so that the spin transition clips naturally. The column count starts
+//! at the target score's digit width (set via `reset_for_target`) and only
+//! grows if the player's score overflows; it is reset back down at round
+//! start. The caller is responsible for ensuring `MAX_EXTRUDED_GLYPH_SLOTS`
+//! is large enough for the worst-case column count.
 
 use std::time::Instant;
 
 use crate::render::draw_cmd::{ExtrudedGlyphPlacement, GlyphMaterial};
 
 // ── Tuning constants ──────────────────────────────────────────────────────
-
-/// Number of digit columns when the score fits within 7 digits (0–9 999 999).
-const BASE_COLUMNS: usize = 7;
 
 /// World-unit width of one digit column (controls spacing between digits).
 const COLUMN_WIDTH: f32 = 95.0;
@@ -120,15 +119,31 @@ pub struct ScoreReel {
     columns: Vec<ReelColumn>,
     /// The score value the reel currently represents.
     displayed: u64,
+    /// Minimum column count for the current round — equals the target score's
+    /// digit width. The reel never shrinks below this mid-round; it grows
+    /// beyond it only if the player's score overflows.
+    min_columns: usize,
 }
 
 impl ScoreReel {
     pub fn new() -> Self {
-        let columns = (0..BASE_COLUMNS).map(|_| ReelColumn::new(0)).collect();
+        // Default to a single zero until a round sets its target.
         Self {
-            columns,
+            columns: vec![ReelColumn::new(0)],
             displayed: 0,
+            min_columns: 1,
         }
+    }
+
+    /// Reset the reel for a new round: shrink back to the target score's
+    /// digit width and zero every column. Call at round start so the reel
+    /// only shows as many zeros as the target requires; extra columns added
+    /// mid-round (when the player overshot) are dropped.
+    pub fn reset_for_target(&mut self, target: u64) {
+        let n = digits_for(target).max(1);
+        self.min_columns = n;
+        self.columns = (0..n).map(|_| ReelColumn::new(0)).collect();
+        self.displayed = 0;
     }
 
     /// Drive the reel to show `score`. Changed digit columns spin with a
@@ -136,8 +151,10 @@ impl ScoreReel {
     ///
     /// `now` is the current frame timestamp (used to stagger spin starts).
     pub fn set_score(&mut self, score: u64, now: Instant) {
-        // Grow columns if the score overflows the current width.
-        let needed = digits_needed(score);
+        // Grow columns if the score overflows the current width. We never
+        // shrink here — columns added after overshoot persist until the next
+        // `reset_for_target` call.
+        let needed = digits_for(score).max(self.min_columns);
         if needed > self.columns.len() {
             let extra = needed - self.columns.len();
             for _ in 0..extra {
@@ -170,13 +187,14 @@ impl ScoreReel {
 
     /// Instantly snap all columns to `score` with no spin animation.
     /// Use this on scene init or round start to avoid a spurious roll from 0.
-    /// No-op if already displaying `score`.
+    /// No-op if already displaying `score`. Column count floor is the current
+    /// `min_columns` (set via `reset_for_target`) so snapping to a mid-round
+    /// score keeps any overflow columns already shown.
     pub fn snap(&mut self, score: u64) {
-        if score == self.displayed {
+        if score == self.displayed && !self.columns.is_empty() {
             return;
         }
-        let needed = digits_needed(score);
-        let n = needed.max(BASE_COLUMNS);
+        let n = digits_for(score).max(self.min_columns).max(1);
         let digits = decompose(score, n);
         self.columns = digits.iter().map(|&d| ReelColumn::new(d)).collect();
         self.displayed = score;
@@ -372,13 +390,13 @@ fn decompose(score: u64, n: usize) -> Vec<u8> {
     v
 }
 
-/// Minimum number of digit columns needed to represent `score`.
-fn digits_needed(score: u64) -> usize {
+/// Number of decimal digits needed to represent `score` (minimum 1).
+fn digits_for(score: u64) -> usize {
     if score == 0 {
-        return BASE_COLUMNS;
+        1
+    } else {
+        score.ilog10() as usize + 1
     }
-    let d = score.ilog10() as usize + 1;
-    d.max(BASE_COLUMNS)
 }
 
 fn digit_label(d: u8) -> String {

@@ -62,10 +62,9 @@ struct PointLights {
 
 @group(0) @binding(0) var<uniform> u: FluidUniforms;
 @group(0) @binding(1) var src_vd: texture_3d<f32>;
-@group(0) @binding(2) var src_temp: texture_3d<f32>;
-@group(0) @binding(3) var dst_lit: texture_storage_3d<rgba16float, write>;
-@group(0) @binding(4) var<uniform> cam: VolumeCamera;
-@group(0) @binding(5) var<uniform> lights: PointLights;
+@group(0) @binding(2) var dst_lit: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(3) var<uniform> cam: VolumeCamera;
+@group(0) @binding(4) var<uniform> lights: PointLights;
 
 fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     let uvw = (c + vec3<f32>(0.5)) / u.grid_size.xyz;
@@ -80,10 +79,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let coord = vec3<i32>(i32(gid.x), i32(gid.y), i32(gid.z));
 
-    // Density lives in the W channel of the velocity-density texture.
+    // Density lives in the W channel of the density texture. Temperature
+    // was removed along with the fluid solver — approximate a "warmer near
+    // the base" reading from height_frac further down so lit plumes still
+    // pick up warmth near candles without needing a per-voxel temp field.
     let vd_sample = textureLoad(src_vd, coord, 0);
     let density = max(vd_sample.w, 0.0);
-    let temperature = max(textureLoad(src_temp, coord, 0).x, 0.0);
 
     // World-space center of the voxel — same `cell_to_world` convention
     // every other fluid pass uses, so the lighting matches the actual
@@ -155,7 +156,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // own albedo and clip to white.
     lit = lit / (vec3<f32>(1.0) + lit * 0.6);
     let density_band = smoothstep(0.02, 0.22, density);
-    let thermal_band = smoothstep(0.02, 0.28, temperature);
+    // Approximate thermal tint from height: warmer at the base (closer to
+    // candles / hot sources), cooler near the top of the column.
+    let thermal_band = 1.0 - smoothstep(0.05, 0.60, height_frac);
     let core_albedo = vec3<f32>(0.25, 0.24, 0.23);
     let edge_albedo = vec3<f32>(0.50, 0.47, 0.43);
     let warm_tint = vec3<f32>(1.02, 0.99, 0.95);

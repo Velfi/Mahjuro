@@ -5,6 +5,7 @@ pub mod candle_mesh;
 pub mod coin_mesh;
 pub mod curio_cabinet_mesh;
 pub mod decal;
+pub mod dora_plinth_mesh;
 pub mod draw_cmd;
 pub mod falling_bones;
 pub mod fluid;

@@ -1,22 +1,25 @@
-//! GPU-accelerated 3D Eulerian fluid simulation for volumetric smoke.
+//! Volumetric smoke — density-only, no fluid simulation.
 //!
-//! Runs a Navier-Stokes step on a 3D grid via compute shaders, then renders
-//! the smoke as a ray-marched, depth-occluded fullscreen pass that lights
-//! from the same point lights as the rest of the 3D scene.
+//! This module used to run a full Navier-Stokes + BiMocq solver. That system
+//! was doing too much work, fighting its own tuning for the cursor-trail use
+//! case, and losing density through long-advection BiMocq reconstructions.
+//! It's been replaced by a simpler pipeline:
 //!
-//! Pipeline per frame:
-//!   1. inject       — splat impulses into vd/temp ping[0] → ping[1]
-//!   2. advect vd    — pure transport+dissipation, vd[1] → vd[0]
-//!   3. advect temp  — pure transport+dissipation, temp[1] → temp[0]
-//!   4. buoyancy     — apply cooling/drag/buoyancy, vd[0]/temp[0] → vd[1]/temp[1]
-//!   5. turbulence   — vorticity confinement, vd[1]/temp[1] → vd[0]/temp[0]
-//!   6. divergence   — compute ∇·v from vd[0], clear pressure[0]
-//!   7. jacobi N×    — pressure_a ↔ pressure_b (forced even so result lands in [0])
-//!   8. project      — subtract ∇p from vd[0] → vd[1]
-//!   9. copy         — vd[1] → vd[0] so next frame's inject reads "current"
+//!   1. advect      — each voxel backtraces along `drift + curl_noise`,
+//!                    bilinear-samples the previous density, applies
+//!                    dissipation. See `shaders/fluid3_advect.wgsl`.
+//!   2. inject      — gaussian splat of impulse points into the density
+//!                    field. See `shaders/fluid3_inject.wgsl`.
+//!   3. lightbake   — per-voxel candle lighting, writes `lit_density`.
+//!                    See `shaders/fluid3_lightbake.wgsl` (unchanged).
+//!   4. raymarch    — fullscreen volumetric composite pass, reads the
+//!                    pre-lit density. See `shaders/fluid3_volume.wgsl`
+//!                    and `shaders/fluid3_composite.wgsl` (unchanged).
 //!
-//! Velocity + density share an `Rgba16Float` 3D texture (xyz=velocity, w=density).
-//! Temperature, pressure, and divergence use `R32Float`.
+//! The 3D density texture is `Rgba16Float`: `w` = density, `xyz` = a decaying
+//! velocity stash that the inject pass writes and the advect pass reads back
+//! the next frame. This lets tile drags and scripted wind gusts still nudge
+//! the smoke even though there's no real velocity field.
 
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
@@ -37,7 +40,6 @@ const MAX_GRID_XY: u32 = 128;
 /// Vertical resolution along world +Z.
 const MAX_GRID_Z_UP: u32 = 80;
 const WG: u32 = 4;
-const BIMOCQ_REINIT_FRAMES: u32 = 32;
 
 #[derive(Clone, Copy)]
 struct GridDims {
@@ -68,42 +70,12 @@ fn grid_dims_for_quality(quality: SmokeSimQuality) -> GridDims {
 }
 
 // Per-frame impulse budget. Sized to comfortably fit the worst-case
-// opening frame: a full hand of sliding tiles (~14 motion impulses) +
-// the 24-cell post-deal wind sweep grid + the cursor puff, with
-// headroom. Used to be 32, which silently dropped the scene-driven
-// wind gusts (which come last in the inject order) when the slide
-// animation overlapped the sweep window — leaving the opening smoke
-// curtain with nothing to blow it away.
+// opening frame: a full hand of sliding tiles + the 24-cell post-deal
+// wind sweep + the cursor puff, with headroom.
 //
 // Must stay in sync with `MAX_INJECTIONS` and the `points` array length
 // in `shaders/fluid3_inject.wgsl`.
 const MAX_INJECTIONS: usize = 64;
-/// Keep newly injected gusts under roughly one voxel of travel per step so
-/// the BiMocq mapping update doesn't fold over when a scripted wind burst
-/// is much stronger than the steady-state velocities.
-const MAX_ADVECT_CELLS_PER_STEP: f32 = 0.9;
-
-fn clamp_impulse_velocity_for_step(
-    velocity: Vec3,
-    dt: f32,
-    grid_min: Vec3,
-    grid_max: Vec3,
-    grid_size: GridDims,
-) -> Vec3 {
-    if dt <= 0.0 {
-        return velocity;
-    }
-
-    let extent = (grid_max - grid_min).max(Vec3::splat(1e-3));
-    let cell_size = extent / Vec3::from(grid_size);
-    let max_velocity = cell_size * (MAX_ADVECT_CELLS_PER_STEP / dt);
-
-    Vec3::new(
-        velocity.x.clamp(-max_velocity.x, max_velocity.x),
-        velocity.y.clamp(-max_velocity.y, max_velocity.y),
-        velocity.z.clamp(-max_velocity.z, max_velocity.z),
-    )
-}
 
 fn handle_pre_step_state(
     pending_clear: &mut bool,
@@ -133,10 +105,12 @@ struct FluidUniformsGpu {
     grid_min: [f32; 4],
     grid_max: [f32; 4],
     inv_extent: [f32; 4],
-    /// x = dt, y = density_dissipation, z = velocity_dissipation, w = buoyancy
+    /// x = dt, y = density_dissipation, z = drift_speed (+Z world u/s),
+    /// w = curl_strength (world u/s amplitude)
     params: [f32; 4],
-    /// x = temperature_dissipation, y = turbulence_strength,
-    /// z = floor_damping, w = density_buoyancy_mix
+    /// x = curl_spatial_scale, y = curl_time_scale,
+    /// z = stored_vel_mix (0..1 — scales the injected velocity the advect
+    /// shader reads back out of xyz), w = unused.
     force_params: [f32; 4],
 }
 
@@ -145,6 +119,8 @@ struct FluidUniformsGpu {
 struct InjectionPointGpu {
     pos_radius: [f32; 4],
     vel_density: [f32; 4],
+    /// Kept only so the shader struct layout matches what Rust writes;
+    /// the new inject shader doesn't read these fields.
     temperature_phase: [f32; 4],
 }
 
@@ -182,7 +158,12 @@ pub struct Impulse {
     pub world_vel: Vec3,
     pub radius: f32,
     pub density: f32,
+    /// Accepted for API stability but ignored — the old fluid solver used
+    /// this to feed a per-voxel temperature field; the simplified pipeline
+    /// approximates thermal tint from height alone.
     pub temperature: f32,
+    /// Accepted for API stability but ignored (was dead weight in the old
+    /// solver too — the inject shader never read it).
     pub phase: f32,
 }
 
@@ -191,137 +172,48 @@ pub struct Impulse {
 // ──────────────────────────────────────────────────────────────────────
 
 pub struct FluidSim {
-    // Storage textures (ping-pong vd; ping-pong pressure; single divergence).
-    // The Texture handles are kept alive so the underlying GPU memory backing
-    // the bound views isn't freed; we read/write through the views below.
+    // Ping-pong density textures. `w` = density, `xyz` = decaying velocity
+    // stash written by the inject pass and read by the advect pass next
+    // frame so tile drags and scripted wind gusts still nudge smoke.
     #[allow(dead_code)]
     vd: [wgpu::Texture; 2],
     vd_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    temp: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    temp_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    map_back: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    map_back_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    map_forward: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    map_forward_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    origin_vd: wgpu::Texture,
-    #[allow(dead_code)]
-    origin_vd_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    origin_temp: wgpu::Texture,
-    #[allow(dead_code)]
-    origin_temp_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    delta_vd: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    delta_vd_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    delta_temp: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    delta_temp_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    advected_vd: wgpu::Texture,
-    #[allow(dead_code)]
-    advected_vd_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    advected_temp: wgpu::Texture,
-    #[allow(dead_code)]
-    advected_temp_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    pressure: [wgpu::Texture; 2],
-    #[allow(dead_code)]
-    pressure_view: [wgpu::TextureView; 2],
-    #[allow(dead_code)]
-    divergence: wgpu::Texture,
-    #[allow(dead_code)]
-    divergence_view: wgpu::TextureView,
 
-    /// Pre-lit smoke field. After projection, a small compute pass walks
-    /// every voxel and writes `(rgb = lit smoke colour, a = density)` here.
-    /// The volumetric raymarch samples this directly and skips its
-    /// per-step lighting loop entirely. See `shaders/fluid3_lightbake.wgsl`.
+    /// Pre-lit smoke field. After the inject pass, the lightbake walks every
+    /// voxel and writes `(rgb = lit smoke colour, a = density)` here. The
+    /// volumetric raymarch samples this directly.
     #[allow(dead_code)]
     lit_density: wgpu::Texture,
     lit_density_view: wgpu::TextureView,
 
-    // Filtered sampler used by advect & volume render.
     linear_sampler: wgpu::Sampler,
 
-    // Uniform buffers.
     fluid_uniforms_buf: wgpu::Buffer,
     injection_buf: wgpu::Buffer,
     cam_buf: wgpu::Buffer,
 
     /// Tiny staging buffers for toggling the render mode via
-    /// `encoder.copy_buffer_to_buffer` (avoids `queue.write_buffer`
-    /// batching, which would collapse both writes into the last value).
-    /// Debug-only: used by the smoke-only profiling sub-pass.
+    /// `encoder.copy_buffer_to_buffer`. Debug-only.
     #[cfg(debug_assertions)]
     mode_buf_smoke_only: wgpu::Buffer,
     #[cfg(debug_assertions)]
     mode_buf_default: wgpu::Buffer,
 
     // Compute pipelines.
+    advect_pipeline: wgpu::ComputePipeline,
     inject_pipeline: wgpu::ComputePipeline,
-    map_back_pipeline: wgpu::ComputePipeline,
-    map_forward_pipeline: wgpu::ComputePipeline,
-    reconstruct_vd_pipeline: wgpu::ComputePipeline,
-    reconstruct_temp_pipeline: wgpu::ComputePipeline,
-    buoyancy_pipeline: wgpu::ComputePipeline,
-    divergence_pipeline: wgpu::ComputePipeline,
-    jacobi_pipeline: wgpu::ComputePipeline,
-    project_pipeline: wgpu::ComputePipeline,
-    vorticity_pipeline: wgpu::ComputePipeline,
-    accumulate_vd_pipeline: wgpu::ComputePipeline,
-    accumulate_temp_pipeline: wgpu::ComputePipeline,
-    clear_current_pipeline: wgpu::ComputePipeline,
-    reinit_fields_pipeline: wgpu::ComputePipeline,
-    reinit_maps_pipeline: wgpu::ComputePipeline,
-    /// Per-voxel pre-lighting bake. Reads the post-project `vd[0]` and
-    /// writes pre-lit colour into `lit_density`.
     lightbake_pipeline: wgpu::ComputePipeline,
     lightbake_layout: wgpu::BindGroupLayout,
     /// Built lazily by `rebuild_render_bind_group` because it references
     /// the renderer-owned `point_lights_buffer`.
     lightbake_bg: Option<wgpu::BindGroup>,
 
-    // Compute bind groups.
-    /// inject_bg: src=vd/temp[0], dst=vd/temp[1]
-    inject_bg: wgpu::BindGroup,
-    map_back_bg: wgpu::BindGroup,
-    map_forward_bg: wgpu::BindGroup,
-    reconstruct_vd_bg: wgpu::BindGroup,
-    reconstruct_temp_bg: wgpu::BindGroup,
-    /// buoyancy_bg: src=vd/temp[0], dst=vd/temp[1]
-    #[allow(dead_code)]
-    buoyancy_bg: wgpu::BindGroup,
-    buoyancy_rev_bg: wgpu::BindGroup,
-    /// divergence_bg: src=vd[0]
-    #[allow(dead_code)]
-    divergence_bg: wgpu::BindGroup,
-    divergence_rev_bg: wgpu::BindGroup,
-    /// jacobi_bgs[0]: read p[0] write p[1]
-    /// jacobi_bgs[1]: read p[1] write p[0]
-    jacobi_bgs: [wgpu::BindGroup; 2],
-    /// project_bg: read vd[0]+pressure[0], write vd[1]
-    #[allow(dead_code)]
-    project_bg: wgpu::BindGroup,
-    project_rev_bg: wgpu::BindGroup,
-    /// vorticity_bg: read force-applied vd/temp[1], write confined vd/temp[0]
-    #[allow(dead_code)]
-    vorticity_bg: wgpu::BindGroup,
-    vorticity_rev_bg: wgpu::BindGroup,
-    accumulate_vd_bg: wgpu::BindGroup,
-    accumulate_temp_bg: wgpu::BindGroup,
-    clear_current_bg: wgpu::BindGroup,
-    reinit_fields_bg: wgpu::BindGroup,
-    reinit_maps_bg: wgpu::BindGroup,
+    /// advect_bgs[0] reads vd[0] and writes vd[1]; advect_bgs[1] reverses.
+    advect_bgs: [wgpu::BindGroup; 2],
+    /// inject_bgs[0] reads vd[1] and writes vd[0]; inject_bgs[1] reverses.
+    /// Ordering is chosen so the final density each frame lands in vd[0],
+    /// where the lightbake and raymarch bind groups expect it.
+    inject_bgs: [wgpu::BindGroup; 2],
 
     // Volume render pipeline. Renders into an offscreen Rgba16Float target
     // (NOT the swap chain) using REPLACE blending — the offscreen target is
@@ -337,35 +229,22 @@ pub struct FluidSim {
     composite_sampler: wgpu::Sampler,
     composite_bg: Option<wgpu::BindGroup>,
 
-    // Offscreen render target. Allocated lazily by `set_detail` so it can
-    // be reshaped on resize and on detail-level changes.
     offscreen_texture: Option<wgpu::Texture>,
     offscreen_view: Option<wgpu::TextureView>,
-    /// Width of the offscreen target in pixels (`screen_w / detail.divisor()`).
     offscreen_w: u32,
-    /// Height of the offscreen target in pixels.
     offscreen_h: u32,
-    /// Detail level the current offscreen target was allocated for.
-    /// `None` until the first `set_detail` call.
     current_detail: Option<SmokeDetail>,
 
-    // Pending impulses for this frame.
     impulses: Vec<Impulse>,
 
-    // Last camera/bounds set for this frame.
     grid_min: Vec3,
     grid_max: Vec3,
     grid_size: GridDims,
 
-    // Current frame size (for the depth read in the render pass).
     screen_w: f32,
     screen_h: f32,
 
-    /// When set, the next `step` zeroes out the velocity/density field
-    /// (dissipation = 0) and drains pending impulses so the smoke vanishes
-    /// instantly. Cleared automatically after one step.
     pending_clear: bool,
-    frames_since_reinit: u32,
     sim_time: f32,
 }
 
@@ -378,7 +257,6 @@ impl FluidSim {
         screen_w: f32,
         screen_h: f32,
     ) -> Self {
-        let _ = surface_format; // surface format is now consumed by the composite pipeline below.
         // ── 3D textures ────────────────────────────────────────────────
         let extent3d = wgpu::Extent3d {
             width: MAX_GRID_XY,
@@ -404,38 +282,9 @@ impl FluidSim {
             make_3d("fluid3-vd-a", wgpu::TextureFormat::Rgba16Float),
             make_3d("fluid3-vd-b", wgpu::TextureFormat::Rgba16Float),
         ];
-        let temp = [
-            make_3d("fluid3-temp-a", wgpu::TextureFormat::R32Float),
-            make_3d("fluid3-temp-b", wgpu::TextureFormat::R32Float),
-        ];
-        let map_back = [
-            make_3d("fluid3-map-back-a", wgpu::TextureFormat::Rgba16Float),
-            make_3d("fluid3-map-back-b", wgpu::TextureFormat::Rgba16Float),
-        ];
-        let map_forward = [
-            make_3d("fluid3-map-forward-a", wgpu::TextureFormat::Rgba16Float),
-            make_3d("fluid3-map-forward-b", wgpu::TextureFormat::Rgba16Float),
-        ];
-        let origin_vd = make_3d("fluid3-origin-vd", wgpu::TextureFormat::Rgba16Float);
-        let origin_temp = make_3d("fluid3-origin-temp", wgpu::TextureFormat::R32Float);
-        let delta_vd = [
-            make_3d("fluid3-delta-vd-a", wgpu::TextureFormat::Rgba16Float),
-            make_3d("fluid3-delta-vd-b", wgpu::TextureFormat::Rgba16Float),
-        ];
-        let delta_temp = [
-            make_3d("fluid3-delta-temp-a", wgpu::TextureFormat::R32Float),
-            make_3d("fluid3-delta-temp-b", wgpu::TextureFormat::R32Float),
-        ];
-        let advected_vd = make_3d("fluid3-advected-vd", wgpu::TextureFormat::Rgba16Float);
-        let advected_temp = make_3d("fluid3-advected-temp", wgpu::TextureFormat::R32Float);
-        let pressure = [
-            make_3d("fluid3-p-a", wgpu::TextureFormat::R32Float),
-            make_3d("fluid3-p-b", wgpu::TextureFormat::R32Float),
-        ];
-        let divergence = make_3d("fluid3-div", wgpu::TextureFormat::R32Float);
-        // Pre-lit smoke field. Same dims/format as `vd` so the lightbake
-        // compute can write through `texture_storage_3d<rgba16float, write>`
-        // and the raymarch can sample it filtered.
+        // Pre-lit smoke field — same dims/format so the lightbake can write
+        // through `texture_storage_3d<rgba16float, write>` and the raymarch
+        // can sample it filtered.
         let lit_density = make_3d("fluid3-lit-density", wgpu::TextureFormat::Rgba16Float);
 
         let view_desc = wgpu::TextureViewDescriptor {
@@ -443,36 +292,7 @@ impl FluidSim {
             ..Default::default()
         };
         let vd_view = [vd[0].create_view(&view_desc), vd[1].create_view(&view_desc)];
-        let temp_view = [
-            temp[0].create_view(&view_desc),
-            temp[1].create_view(&view_desc),
-        ];
-        let map_back_view = [
-            map_back[0].create_view(&view_desc),
-            map_back[1].create_view(&view_desc),
-        ];
-        let map_forward_view = [
-            map_forward[0].create_view(&view_desc),
-            map_forward[1].create_view(&view_desc),
-        ];
-        let origin_vd_view = origin_vd.create_view(&view_desc);
-        let origin_temp_view = origin_temp.create_view(&view_desc);
-        let delta_vd_view = [
-            delta_vd[0].create_view(&view_desc),
-            delta_vd[1].create_view(&view_desc),
-        ];
-        let delta_temp_view = [
-            delta_temp[0].create_view(&view_desc),
-            delta_temp[1].create_view(&view_desc),
-        ];
-        let advected_vd_view = advected_vd.create_view(&view_desc);
-        let advected_temp_view = advected_temp.create_view(&view_desc);
         let lit_density_view = lit_density.create_view(&view_desc);
-        let pressure_view = [
-            pressure[0].create_view(&view_desc),
-            pressure[1].create_view(&view_desc),
-        ];
-        let divergence_view = divergence.create_view(&view_desc);
 
         let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("fluid3-sampler"),
@@ -486,20 +306,21 @@ impl FluidSim {
         });
 
         // ── Uniform buffers ────────────────────────────────────────────
+        let default_grid = grid_dims_for_quality(SmokeSimQuality::High);
         let fluid_uniforms_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("fluid3-uniforms"),
             contents: bytemuck::bytes_of(&FluidUniformsGpu {
                 grid_size: [
-                    grid_dims_for_quality(SmokeSimQuality::High).x as f32,
-                    grid_dims_for_quality(SmokeSimQuality::High).y as f32,
-                    grid_dims_for_quality(SmokeSimQuality::High).z as f32,
+                    default_grid.x as f32,
+                    default_grid.y as f32,
+                    default_grid.z as f32,
                     0.0,
                 ],
                 grid_min: [-100.0, -100.0, 0.0, 0.0],
                 grid_max: [100.0, 100.0, 60.0, 0.0],
-                inv_extent: [1.0 / 200.0, 1.0 / 60.0, 1.0 / 200.0, 0.0],
-                params: [1.0 / 60.0, 0.998, 0.99, 14.0],
-                force_params: [0.985, 1.0, 0.16, 0.18],
+                inv_extent: [1.0 / 200.0, 1.0 / 200.0, 1.0 / 60.0, 0.0],
+                params: [1.0 / 60.0, 0.995, 6.0, 4.0],
+                force_params: [0.012, 0.35, 1.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -524,9 +345,9 @@ impl FluidSim {
                 grid_min: [-100.0, -100.0, 0.0, 0.0],
                 grid_max: [100.0, 100.0, 60.0, 0.0],
                 grid_size: [
-                    grid_dims_for_quality(SmokeSimQuality::High).x as f32,
-                    grid_dims_for_quality(SmokeSimQuality::High).y as f32,
-                    grid_dims_for_quality(SmokeSimQuality::High).z as f32,
+                    default_grid.x as f32,
+                    default_grid.y as f32,
+                    default_grid.z as f32,
                     0.0,
                 ],
                 params: [0.5, 36.0, 1.5, 0.1],
@@ -554,116 +375,18 @@ impl FluidSim {
                 source: wgpu::ShaderSource::Wgsl(src.into()),
             })
         };
+        let advect_shader = make_shader(
+            "fluid3-advect",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_advect.wgsl"
+            )),
+        );
         let inject_shader = make_shader(
             "fluid3-inject",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/shaders/fluid3_inject.wgsl"
-            )),
-        );
-        let map_back_shader = make_shader(
-            "fluid3-map-back",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_map_back.wgsl"
-            )),
-        );
-        let map_forward_shader = make_shader(
-            "fluid3-map-forward",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_map_forward.wgsl"
-            )),
-        );
-        let reconstruct_vd_shader = make_shader(
-            "fluid3-reconstruct-vd",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_reconstruct_vd.wgsl"
-            )),
-        );
-        let reconstruct_temp_shader = make_shader(
-            "fluid3-reconstruct-temp",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_reconstruct_temp.wgsl"
-            )),
-        );
-        let buoyancy_shader = make_shader(
-            "fluid3-buoyancy",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_buoyancy.wgsl"
-            )),
-        );
-        let divergence_shader = make_shader(
-            "fluid3-divergence",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_divergence.wgsl"
-            )),
-        );
-        let jacobi_shader = make_shader(
-            "fluid3-jacobi",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_jacobi.wgsl"
-            )),
-        );
-        let project_shader = make_shader(
-            "fluid3-project",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_project.wgsl"
-            )),
-        );
-        let vorticity_shader = make_shader(
-            "fluid3-vorticity",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_vorticity.wgsl"
-            )),
-        );
-        let accumulate_vd_shader = make_shader(
-            "fluid3-accumulate-vd",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_accumulate_vd.wgsl"
-            )),
-        );
-        let accumulate_temp_shader = make_shader(
-            "fluid3-accumulate-temp",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_accumulate_temp.wgsl"
-            )),
-        );
-        let clear_current_shader = make_shader(
-            "fluid3-clear-current",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_clear_current.wgsl"
-            )),
-        );
-        let reinit_fields_shader = make_shader(
-            "fluid3-reinit-fields",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_reinit_fields.wgsl"
-            )),
-        );
-        let reinit_maps_shader = make_shader(
-            "fluid3-reinit-maps",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_reinit_maps.wgsl"
-            )),
-        );
-        let volume_shader = make_shader(
-            "fluid3-volume",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/fluid3_volume.wgsl"
             )),
         );
         let lightbake_shader = make_shader(
@@ -673,489 +396,136 @@ impl FluidSim {
                 "/shaders/fluid3_lightbake.wgsl"
             )),
         );
+        let volume_shader = make_shader(
+            "fluid3-volume",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/shaders/fluid3_volume.wgsl"
+            )),
+        );
 
-        // ── Bind group layouts ─────────────────────────────────────────
+        // ── Compute pipelines ──────────────────────────────────────────
+        // Advect: uniforms, src density (filterable), sampler, dst density.
+        let advect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid3-advect-bgl"),
+            entries: &[
+                bgl_uniform(0),
+                bgl_tex3d_float(1),
+                bgl_sampler(2),
+                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
+            ],
+        });
+        let advect_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fluid3-advect-pl"),
+            bind_group_layouts: &[Some(&advect_layout)],
+            immediate_size: 0,
+        });
+        let advect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("fluid3-advect-pipeline"),
+            layout: Some(&advect_pl_layout),
+            module: &advect_shader,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        // Inject: uniforms, injection uniform, src density, dst density.
         let inject_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid3-inject-bgl"),
             entries: &[
                 bgl_uniform(0),
                 bgl_uniform(1),
-                bgl_tex3d_float(2),
-                bgl_tex3d_unfiltered(3),
-                bgl_storage3d(4, wgpu::TextureFormat::Rgba16Float),
-                bgl_storage3d(5, wgpu::TextureFormat::R32Float),
-            ],
-        });
-        let map_back_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-map-back-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_float(1),
-                bgl_tex3d_float(2),
-                bgl_sampler(3),
-                bgl_storage3d(4, wgpu::TextureFormat::Rgba16Float),
-            ],
-        });
-        let map_forward_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-map-forward-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_float(2),
-                    bgl_sampler(3),
-                    bgl_storage3d(4, wgpu::TextureFormat::Rgba16Float),
-                ],
-            });
-        let reconstruct_vd_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-reconstruct-vd-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_float(2),
-                    bgl_tex3d_float(3),
-                    bgl_sampler(4),
-                    bgl_storage3d(5, wgpu::TextureFormat::Rgba16Float),
-                ],
-            });
-        let reconstruct_temp_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-reconstruct-temp-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_unfiltered(2),
-                    bgl_tex3d_unfiltered(3),
-                    bgl_storage3d(4, wgpu::TextureFormat::R32Float),
-                ],
-            });
-        let buoyancy_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-buoyancy-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_float(1),
-                bgl_tex3d_unfiltered(2),
-                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
-                bgl_storage3d(4, wgpu::TextureFormat::R32Float),
-            ],
-        });
-        let divergence_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-div-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_float(1),
-                bgl_storage3d(2, wgpu::TextureFormat::R32Float),
-                bgl_storage3d(3, wgpu::TextureFormat::R32Float),
-            ],
-        });
-        let jacobi_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-jacobi-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_unfiltered(1),
-                bgl_tex3d_unfiltered(2),
-                bgl_storage3d(3, wgpu::TextureFormat::R32Float),
-            ],
-        });
-        let project_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-project-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_float(1),
                 bgl_tex3d_unfiltered(2),
                 bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
             ],
         });
-        let vorticity_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("fluid3-vorticity-bgl"),
-            entries: &[
-                bgl_uniform(0),
-                bgl_tex3d_float(1),
-                bgl_tex3d_unfiltered(2),
-                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
-                bgl_storage3d(4, wgpu::TextureFormat::R32Float),
-            ],
+        let inject_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fluid3-inject-pl"),
+            bind_group_layouts: &[Some(&inject_layout)],
+            immediate_size: 0,
         });
-        let accumulate_vd_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-accumulate-vd-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_float(2),
-                    bgl_tex3d_float(3),
-                    bgl_tex3d_float(4),
-                    bgl_sampler(5),
-                    bgl_storage3d(6, wgpu::TextureFormat::Rgba16Float),
-                ],
-            });
-        let accumulate_temp_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-accumulate-temp-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_unfiltered(2),
-                    bgl_tex3d_unfiltered(3),
-                    bgl_tex3d_unfiltered(4),
-                    bgl_storage3d(5, wgpu::TextureFormat::R32Float),
-                ],
-            });
-        let clear_current_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-clear-current-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_storage3d(1, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(2, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(3, wgpu::TextureFormat::R32Float),
-                    bgl_storage3d(4, wgpu::TextureFormat::R32Float),
-                ],
-            });
-        let reinit_fields_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-reinit-fields-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_tex3d_float(1),
-                    bgl_tex3d_unfiltered(2),
-                    bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(4, wgpu::TextureFormat::R32Float),
-                    bgl_storage3d(5, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(6, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(7, wgpu::TextureFormat::R32Float),
-                    bgl_storage3d(8, wgpu::TextureFormat::R32Float),
-                ],
-            });
-        let reinit_maps_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("fluid3-reinit-maps-bgl"),
-                entries: &[
-                    bgl_uniform(0),
-                    bgl_storage3d(1, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(2, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
-                    bgl_storage3d(4, wgpu::TextureFormat::Rgba16Float),
-                ],
-            });
-        // Lightbake reads vd[0] (filterable so it can also be sampled by
-        // the raymarch elsewhere — for the bake we use textureLoad which
-        // doesn't care about filterability), writes lit_density as a
-        // storage texture, and references the camera + lights uniforms.
+        let inject_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("fluid3-inject-pipeline"),
+            layout: Some(&inject_pl_layout),
+            module: &inject_shader,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
+        // Lightbake: uniforms, src density, dst lit_density, cam, lights.
         let lightbake_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid3-lightbake-bgl"),
             entries: &[
                 bgl_uniform(0),
-                bgl_tex3d_float(1),
-                bgl_tex3d_unfiltered(2),
-                bgl_storage3d(3, wgpu::TextureFormat::Rgba16Float),
+                bgl_tex3d_unfiltered(1),
+                bgl_storage3d(2, wgpu::TextureFormat::Rgba16Float),
+                bgl_uniform(3),
                 bgl_uniform(4),
-                bgl_uniform(5),
             ],
         });
-
-        // ── Compute pipelines ──────────────────────────────────────────
-        let make_compute = |label: &str,
-                            shader: &wgpu::ShaderModule,
-                            layout: &wgpu::BindGroupLayout|
-         -> wgpu::ComputePipeline {
-            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(label),
-                bind_group_layouts: &[Some(layout)],
-                immediate_size: 0,
-            });
+        let lightbake_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("fluid3-lightbake-pl"),
+            bind_group_layouts: &[Some(&lightbake_layout)],
+            immediate_size: 0,
+        });
+        let lightbake_pipeline =
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pl),
-                module: shader,
+                label: Some("fluid3-lightbake-pipeline"),
+                layout: Some(&lightbake_pl_layout),
+                module: &lightbake_shader,
                 entry_point: Some("main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 cache: None,
-            })
-        };
-        let inject_pipeline = make_compute("fluid3-inject-pl", &inject_shader, &inject_layout);
-        let map_back_pipeline =
-            make_compute("fluid3-map-back-pl", &map_back_shader, &map_back_layout);
-        let map_forward_pipeline = make_compute(
-            "fluid3-map-forward-pl",
-            &map_forward_shader,
-            &map_forward_layout,
-        );
-        let reconstruct_vd_pipeline = make_compute(
-            "fluid3-reconstruct-vd-pl",
-            &reconstruct_vd_shader,
-            &reconstruct_vd_layout,
-        );
-        let reconstruct_temp_pipeline = make_compute(
-            "fluid3-reconstruct-temp-pl",
-            &reconstruct_temp_shader,
-            &reconstruct_temp_layout,
-        );
-        let buoyancy_pipeline =
-            make_compute("fluid3-buoyancy-pl", &buoyancy_shader, &buoyancy_layout);
-        let divergence_pipeline =
-            make_compute("fluid3-div-pl", &divergence_shader, &divergence_layout);
-        let jacobi_pipeline = make_compute("fluid3-jacobi-pl", &jacobi_shader, &jacobi_layout);
-        let project_pipeline = make_compute("fluid3-project-pl", &project_shader, &project_layout);
-        let vorticity_pipeline =
-            make_compute("fluid3-vorticity-pl", &vorticity_shader, &vorticity_layout);
-        let accumulate_vd_pipeline = make_compute(
-            "fluid3-accumulate-vd-pl",
-            &accumulate_vd_shader,
-            &accumulate_vd_layout,
-        );
-        let accumulate_temp_pipeline = make_compute(
-            "fluid3-accumulate-temp-pl",
-            &accumulate_temp_shader,
-            &accumulate_temp_layout,
-        );
-        let clear_current_pipeline = make_compute(
-            "fluid3-clear-current-pl",
-            &clear_current_shader,
-            &clear_current_layout,
-        );
-        let reinit_fields_pipeline = make_compute(
-            "fluid3-reinit-fields-pl",
-            &reinit_fields_shader,
-            &reinit_fields_layout,
-        );
-        let reinit_maps_pipeline = make_compute(
-            "fluid3-reinit-maps-pl",
-            &reinit_maps_shader,
-            &reinit_maps_layout,
-        );
-        let lightbake_pipeline =
-            make_compute("fluid3-lightbake-pl", &lightbake_shader, &lightbake_layout);
+            });
 
-        // ── Compute bind groups (fixed src/dst orientations) ───────────
-        let inject_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-inject-bg"),
-            layout: &inject_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, injection_buf.as_entire_binding()),
-                bge(2, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(5, wgpu::BindingResource::TextureView(&temp_view[1])),
-            ],
-        });
-        let map_back_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-map-back-bg"),
-            layout: &map_back_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&map_back_view[0])),
-                bge(3, wgpu::BindingResource::Sampler(&linear_sampler)),
-                bge(4, wgpu::BindingResource::TextureView(&map_back_view[1])),
-            ],
-        });
-        let map_forward_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-map-forward-bg"),
-            layout: &map_forward_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&map_forward_view[0])),
-                bge(3, wgpu::BindingResource::Sampler(&linear_sampler)),
-                bge(4, wgpu::BindingResource::TextureView(&map_forward_view[1])),
-            ],
-        });
-        let reconstruct_vd_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-reconstruct-vd-bg"),
-            layout: &reconstruct_vd_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&map_back_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&origin_vd_view)),
-                bge(3, wgpu::BindingResource::TextureView(&delta_vd_view[0])),
-                bge(4, wgpu::BindingResource::Sampler(&linear_sampler)),
-                bge(5, wgpu::BindingResource::TextureView(&vd_view[0])),
-            ],
-        });
-        let reconstruct_temp_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-reconstruct-temp-bg"),
-            layout: &reconstruct_temp_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&map_back_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&origin_temp_view)),
-                bge(3, wgpu::BindingResource::TextureView(&delta_temp_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[0])),
-            ],
-        });
-        let buoyancy_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-buoyancy-bg"),
-            layout: &buoyancy_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[1])),
-            ],
-        });
-        let buoyancy_rev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-buoyancy-rev-bg"),
-            layout: &buoyancy_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&temp_view[1])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[0])),
-            ],
-        });
-        let divergence_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-div-bg"),
-            layout: &divergence_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
-                bge(3, wgpu::BindingResource::TextureView(&pressure_view[0])),
-            ],
-        });
-        let divergence_rev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-div-rev-bg"),
-            layout: &divergence_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
-                bge(3, wgpu::BindingResource::TextureView(&pressure_view[0])),
-            ],
-        });
-        let jacobi_bgs = [
-            // read p[0], write p[1]
+        // Advect/inject bind groups. The flow each frame is:
+        //   vd[0]  --advect-->  vd[1]  --inject-->  vd[0]
+        // so the final density always lands in vd[0] for lightbake/raymarch.
+        let advect_bgs = [
             device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("fluid3-jacobi-bg-0"),
-                layout: &jacobi_layout,
+                label: Some("fluid3-advect-bg-0-to-1"),
+                layout: &advect_layout,
                 entries: &[
                     bge(0, fluid_uniforms_buf.as_entire_binding()),
-                    bge(1, wgpu::BindingResource::TextureView(&pressure_view[0])),
-                    bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
-                    bge(3, wgpu::BindingResource::TextureView(&pressure_view[1])),
+                    bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
+                    bge(2, wgpu::BindingResource::Sampler(&linear_sampler)),
+                    bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
                 ],
             }),
-            // read p[1], write p[0]
             device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("fluid3-jacobi-bg-1"),
-                layout: &jacobi_layout,
+                label: Some("fluid3-advect-bg-1-to-0"),
+                layout: &advect_layout,
                 entries: &[
                     bge(0, fluid_uniforms_buf.as_entire_binding()),
-                    bge(1, wgpu::BindingResource::TextureView(&pressure_view[1])),
-                    bge(2, wgpu::BindingResource::TextureView(&divergence_view)),
-                    bge(3, wgpu::BindingResource::TextureView(&pressure_view[0])),
+                    bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
+                    bge(2, wgpu::BindingResource::Sampler(&linear_sampler)),
+                    bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
                 ],
             }),
         ];
-        let project_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-project-bg"),
-            layout: &project_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&pressure_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
-            ],
-        });
-        let project_rev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-project-rev-bg"),
-            layout: &project_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&pressure_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
-            ],
-        });
-        let vorticity_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-vorticity-bg"),
-            layout: &vorticity_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&temp_view[1])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[0])),
-            ],
-        });
-        let vorticity_rev_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-vorticity-rev-bg"),
-            layout: &vorticity_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[1])),
-            ],
-        });
-        let accumulate_vd_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-accumulate-vd-bg"),
-            layout: &accumulate_vd_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&map_forward_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&advected_vd_view)),
-                bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&delta_vd_view[0])),
-                bge(5, wgpu::BindingResource::Sampler(&linear_sampler)),
-                bge(6, wgpu::BindingResource::TextureView(&delta_vd_view[1])),
-            ],
-        });
-        let accumulate_temp_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-accumulate-temp-bg"),
-            layout: &accumulate_temp_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&map_forward_view[1])),
-                bge(2, wgpu::BindingResource::TextureView(&advected_temp_view)),
-                bge(3, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&delta_temp_view[0])),
-                bge(5, wgpu::BindingResource::TextureView(&delta_temp_view[1])),
-            ],
-        });
-        let clear_current_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-clear-current-bg"),
-            layout: &clear_current_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&vd_view[1])),
-                bge(3, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&temp_view[1])),
-            ],
-        });
-        let reinit_fields_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-reinit-fields-bg"),
-            layout: &reinit_fields_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&temp_view[0])),
-                bge(3, wgpu::BindingResource::TextureView(&origin_vd_view)),
-                bge(4, wgpu::BindingResource::TextureView(&origin_temp_view)),
-                bge(5, wgpu::BindingResource::TextureView(&delta_vd_view[0])),
-                bge(6, wgpu::BindingResource::TextureView(&delta_vd_view[1])),
-                bge(7, wgpu::BindingResource::TextureView(&delta_temp_view[0])),
-                bge(8, wgpu::BindingResource::TextureView(&delta_temp_view[1])),
-            ],
-        });
-        let reinit_maps_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("fluid3-reinit-maps-bg"),
-            layout: &reinit_maps_layout,
-            entries: &[
-                bge(0, fluid_uniforms_buf.as_entire_binding()),
-                bge(1, wgpu::BindingResource::TextureView(&map_back_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&map_back_view[1])),
-                bge(3, wgpu::BindingResource::TextureView(&map_forward_view[0])),
-                bge(4, wgpu::BindingResource::TextureView(&map_forward_view[1])),
-            ],
-        });
+        let inject_bgs = [
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fluid3-inject-bg-1-to-0"),
+                layout: &inject_layout,
+                entries: &[
+                    bge(0, fluid_uniforms_buf.as_entire_binding()),
+                    bge(1, injection_buf.as_entire_binding()),
+                    bge(2, wgpu::BindingResource::TextureView(&vd_view[1])),
+                    bge(3, wgpu::BindingResource::TextureView(&vd_view[0])),
+                ],
+            }),
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fluid3-inject-bg-0-to-1"),
+                layout: &inject_layout,
+                entries: &[
+                    bge(0, fluid_uniforms_buf.as_entire_binding()),
+                    bge(1, injection_buf.as_entire_binding()),
+                    bge(2, wgpu::BindingResource::TextureView(&vd_view[0])),
+                    bge(3, wgpu::BindingResource::TextureView(&vd_view[1])),
+                ],
+            }),
+        ];
 
         // ── Render (volumetric raymarch) pipeline ──────────────────────
         let render_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1172,7 +542,7 @@ impl FluidSim {
                     },
                     count: None,
                 },
-                // 1: density 3D texture (filterable)
+                // 1: lit_density 3D texture (filterable)
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1190,7 +560,7 @@ impl FluidSim {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                // 3: depth texture (non-filterable depth)
+                // 3: depth texture
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1201,7 +571,7 @@ impl FluidSim {
                     },
                     count: None,
                 },
-                // 4: point lights (for SDF candle flame emission)
+                // 4: point lights
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1212,8 +582,8 @@ impl FluidSim {
                     },
                     count: None,
                 },
-                // 5: velocity-density 3D texture (for flame wind sampling
-                // via textureLoad — non-filterable since we don't use a sampler)
+                // 5: density 3D texture (unfiltered — used via textureLoad
+                // to sample fluid velocity near candle wicks for flame bend)
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1246,11 +616,6 @@ impl FluidSim {
                 module: &volume_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                // Render into the offscreen Rgba16Float target. The pass
-                // clears the target each frame, so blend = REPLACE: the
-                // shader output IS the colour. Premultiplied alpha is
-                // applied by the composite pass when blending into the
-                // swap chain.
                 targets: &[Some(wgpu::ColorTargetState {
                     format: SMOKE_OFFSCREEN_FORMAT,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -1261,8 +626,6 @@ impl FluidSim {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
-            // Offscreen target has no depth attachment — depth occlusion
-            // is handled inside the shader by sampling `depth_tex`.
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
@@ -1270,9 +633,6 @@ impl FluidSim {
         });
 
         // ── Composite pipeline ──────────────────────────────────────────
-        // Samples the offscreen target with bilinear filtering and blends
-        // it onto the swap chain with PREMULTIPLIED_ALPHA. Lives entirely
-        // in `fluid3_composite.wgsl`.
         let composite_shader = make_shader(
             "fluid3-composite",
             include_str!(concat!(
@@ -1283,7 +643,6 @@ impl FluidSim {
         let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid3-composite-bgl"),
             entries: &[
-                // 0: offscreen colour texture (filterable float)
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1294,14 +653,12 @@ impl FluidSim {
                     },
                     count: None,
                 },
-                // 1: bilinear sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                // 2: scene depth texture for bilateral upsampling
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1353,10 +710,6 @@ impl FluidSim {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
             },
-            // Same matched-attachment trick as the original render pass: the
-            // composite runs inside the existing post-smoke pass which has a
-            // depth attachment, so we declare a depth state with always-pass
-            // and no writes.
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: Some(false),
@@ -1372,28 +725,6 @@ impl FluidSim {
         Self {
             vd,
             vd_view,
-            temp,
-            temp_view,
-            map_back,
-            map_back_view,
-            map_forward,
-            map_forward_view,
-            origin_vd,
-            origin_vd_view,
-            origin_temp,
-            origin_temp_view,
-            delta_vd,
-            delta_vd_view,
-            delta_temp,
-            delta_temp_view,
-            advected_vd,
-            advected_vd_view,
-            advected_temp,
-            advected_temp_view,
-            pressure,
-            pressure_view,
-            divergence,
-            divergence_view,
             lit_density,
             lit_density_view,
             linear_sampler,
@@ -1404,43 +735,13 @@ impl FluidSim {
             mode_buf_smoke_only,
             #[cfg(debug_assertions)]
             mode_buf_default,
+            advect_pipeline,
             inject_pipeline,
-            map_back_pipeline,
-            map_forward_pipeline,
-            reconstruct_vd_pipeline,
-            reconstruct_temp_pipeline,
-            buoyancy_pipeline,
-            divergence_pipeline,
-            jacobi_pipeline,
-            project_pipeline,
-            vorticity_pipeline,
-            accumulate_vd_pipeline,
-            accumulate_temp_pipeline,
-            clear_current_pipeline,
-            reinit_fields_pipeline,
-            reinit_maps_pipeline,
             lightbake_pipeline,
             lightbake_layout,
             lightbake_bg: None,
-            inject_bg,
-            map_back_bg,
-            map_forward_bg,
-            reconstruct_vd_bg,
-            reconstruct_temp_bg,
-            buoyancy_bg,
-            buoyancy_rev_bg,
-            divergence_bg,
-            divergence_rev_bg,
-            jacobi_bgs,
-            project_bg,
-            project_rev_bg,
-            vorticity_bg,
-            vorticity_rev_bg,
-            accumulate_vd_bg,
-            accumulate_temp_bg,
-            clear_current_bg,
-            reinit_fields_bg,
-            reinit_maps_bg,
+            advect_bgs,
+            inject_bgs,
             render_pipeline,
             render_layout,
             render_bg: None,
@@ -1456,11 +757,10 @@ impl FluidSim {
             impulses: Vec::new(),
             grid_min: Vec3::new(-100.0, -100.0, 0.0),
             grid_max: Vec3::new(100.0, 100.0, 60.0),
-            grid_size: grid_dims_for_quality(SmokeSimQuality::High),
+            grid_size: default_grid,
             screen_w,
             screen_h,
             pending_clear: false,
-            frames_since_reinit: BIMOCQ_REINIT_FRAMES,
             sim_time: 0.0,
         }
     }
@@ -1468,15 +768,9 @@ impl FluidSim {
     pub fn update_screen_size(&mut self, w: f32, h: f32) {
         self.screen_w = w;
         self.screen_h = h;
-        // Force the next set_detail() call to reallocate at the new
-        // resolution even if the detail level is unchanged.
         self.current_detail = None;
     }
 
-    /// (Re)allocate the offscreen render target for `detail` at the current
-    /// screen resolution. Cheap to call every frame — does nothing when the
-    /// existing target already matches the requested size and detail level.
-    /// Also rebuilds the composite bind group so it points at the new view.
     pub fn set_detail(
         &mut self,
         device: &wgpu::Device,
@@ -1493,9 +787,6 @@ impl FluidSim {
         {
             return;
         }
-        // Drop the previous allocation explicitly so the GPU memory is
-        // freed before the new one is created — at native res this matters
-        // (~16 MB at 1080p Rgba16F).
         if let Some(t) = self.offscreen_texture.take() {
             t.destroy();
         }
@@ -1530,14 +821,6 @@ impl FluidSim {
         self.current_detail = Some(detail);
     }
 
-    /// Project the smoke grid AABB into the offscreen target's pixel space
-    /// and return a bounding rect (x, y, w, h). Used as a scissor on the
-    /// offscreen pass so the raymarch only runs on pixels the plume can
-    /// actually reach.
-    ///
-    /// Returns `None` when the AABB is fully behind the camera; returns the
-    /// full target rect when corners straddle the camera plane (cheap
-    /// fallback rather than implementing proper homogeneous clipping).
     pub fn screen_aabb_rect(&self, view_proj: Mat4) -> Option<(u32, u32, u32, u32)> {
         use glam::Vec4;
 
@@ -1571,7 +854,6 @@ impl FluidSim {
             }
             let ndc_x = clip.x / clip.w;
             let ndc_y = clip.y / clip.w;
-            // NDC y up → pixel y down.
             let sx = (ndc_x * 0.5 + 0.5) * target_w as f32;
             let sy = (1.0 - (ndc_y * 0.5 + 0.5)) * target_h as f32;
             min_x = min_x.min(sx);
@@ -1583,11 +865,8 @@ impl FluidSim {
             return None;
         }
         if behind > 0 {
-            // Some corners straddle the camera plane — fall back to full rect.
             return Some((0, 0, target_w, target_h));
         }
-        // Add a 1-pixel safety margin so bilinear sampling at composite
-        // time doesn't bleed in zeros from outside the rasterised region.
         let pad = 1.0;
         let min_x = ((min_x - pad).floor().max(0.0) as u32).min(target_w);
         let min_y = ((min_y - pad).floor().max(0.0) as u32).min(target_h);
@@ -1599,13 +878,14 @@ impl FluidSim {
         Some((min_x, min_y, max_x - min_x, max_y - min_y))
     }
 
-    /// Set the smoke volume bounds for the current frame.
     pub fn set_grid_bounds(&mut self, grid_min: Vec3, grid_max: Vec3) {
         self.grid_min = grid_min;
         self.grid_max = grid_max;
     }
 
-    /// Queue a world-space impulse for the current frame.
+    /// Queue a world-space impulse for the current frame. `temperature` and
+    /// `phase` are accepted for API stability but ignored internally — the
+    /// simplified pipeline doesn't run a temperature field.
     pub fn inject_impulse(
         &mut self,
         world_pos: Vec3,
@@ -1627,7 +907,6 @@ impl FluidSim {
         }
     }
 
-    /// Schedule a full clear of the smoke field on the next `step`.
     pub fn clear(&mut self) {
         self.pending_clear = true;
     }
@@ -1638,29 +917,6 @@ impl FluidSim {
             height: self.grid_size.y,
             depth_or_array_layers: self.grid_size.z,
         }
-    }
-
-    fn copy_texture(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        src: &wgpu::Texture,
-        dst: &wgpu::Texture,
-    ) {
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: src,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: dst,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            self.active_grid_extent(),
-        );
     }
 
     fn dispatch_3d_pass(
@@ -1681,28 +937,6 @@ impl FluidSim {
         p.dispatch_workgroups(wg_x, wg_y, wg_z);
     }
 
-    fn run_reinit(&mut self, encoder: &mut wgpu::CommandEncoder, wg_x: u32, wg_y: u32, wg_z: u32) {
-        Self::dispatch_3d_pass(
-            encoder,
-            "fluid3-reinit-fields",
-            &self.reinit_fields_pipeline,
-            &self.reinit_fields_bg,
-            wg_x,
-            wg_y,
-            wg_z,
-        );
-        Self::dispatch_3d_pass(
-            encoder,
-            "fluid3-reinit-maps",
-            &self.reinit_maps_pipeline,
-            &self.reinit_maps_bg,
-            wg_x,
-            wg_y,
-            wg_z,
-        );
-        self.frames_since_reinit = 0;
-    }
-
     /// Run one simulation step. Call before beginning the render pass.
     pub fn step(
         &mut self,
@@ -1717,43 +951,17 @@ impl FluidSim {
             return;
         }
         self.grid_size = grid_dims_for_quality(sim_quality);
-        let (density_dis, vel_dis, temp_dis, buoyancy, turbulence, mut jacobi_iters) =
-            match (intensity, sim_quality) {
-                (SmokeIntensity::Off, _) => (0.0_f64, 0.0_f64, 0.0_f64, 0.0, 0.0, 2u32),
-                (SmokeIntensity::Subtle, SmokeSimQuality::Standard) => {
-                    (0.9945, 0.9955, 0.978, 6.4, 0.70, 40)
-                }
-                (SmokeIntensity::Subtle, SmokeSimQuality::High) => {
-                    (0.9955, 0.9962, 0.981, 7.1, 0.88, 48)
-                }
-                (SmokeIntensity::Subtle, SmokeSimQuality::Ultra) => {
-                    (0.9964, 0.9968, 0.984, 7.8, 1.02, 56)
-                }
-                (SmokeIntensity::Strong, SmokeSimQuality::Standard) => {
-                    (0.9960, 0.9965, 0.983, 9.8, 1.00, 48)
-                }
-                (SmokeIntensity::Strong, SmokeSimQuality::High) => {
-                    (0.9970, 0.9970, 0.986, 10.7, 1.18, 56)
-                }
-                (SmokeIntensity::Strong, SmokeSimQuality::Ultra) => {
-                    (0.9978, 0.9975, 0.988, 11.6, 1.32, 64)
-                }
-                (SmokeIntensity::OverTheTop, SmokeSimQuality::Standard) => {
-                    (0.9975, 0.9970, 0.986, 12.4, 1.24, 56)
-                }
-                (SmokeIntensity::OverTheTop, SmokeSimQuality::High) => {
-                    (0.9983, 0.9976, 0.989, 13.6, 1.42, 64)
-                }
-                (SmokeIntensity::OverTheTop, SmokeSimQuality::Ultra) => {
-                    (0.9988, 0.9980, 0.991, 14.8, 1.58, 72)
-                }
-            };
-        // Force even iteration count so the final result lands in pressure[0].
-        if jacobi_iters % 2 != 0 {
-            jacobi_iters += 1;
-        }
 
-        // ── Upload uniforms ────────────────────────────────────────────
+        // Per-intensity tuning: dissipation + drift + curl strength.
+        //
+        // dissipation is per 60-Hz frame; we rescale to real dt below.
+        let (density_dis, drift_speed, curl_strength) = match intensity {
+            SmokeIntensity::Off => (0.0_f64, 0.0_f32, 0.0_f32),
+            SmokeIntensity::Subtle => (0.820, 4.0, 4.5),
+            SmokeIntensity::Strong => (0.885, 6.0, 6.5),
+            SmokeIntensity::OverTheTop => (0.935, 8.0, 9.0),
+        };
+
         let extent = self.grid_max - self.grid_min;
         let inv_extent = Vec3::new(
             1.0 / extent.x.max(1e-3),
@@ -1761,23 +969,14 @@ impl FluidSim {
             1.0 / extent.z.max(1e-3),
         );
         let dt_clamped = dt.min(0.05);
-        // Advance sim time for time-evolving curl-noise forcing. Wrap to keep
-        // fp precision from drifting over long sessions; any wrap-safe period
-        // longer than the noise frequency works, so use a round constant.
         self.sim_time = (self.sim_time + dt_clamped) % 3600.0;
-        // Make per-step density/velocity dissipation framerate-independent.
-        // The intensity table above lists the *per-frame at 60 Hz reference*
-        // multiplier; the shader applies whatever value we upload once per
-        // step, so without this rescale a low frame rate causes far fewer
-        // multiplies per wall second and the smoke lingers visibly longer
-        // (manifests as the post-deal opening curtain "sometimes taking
-        // forever" to clear when the round-start work hitches the FPS).
+
+        // Make per-step density dissipation framerate-independent.
         // pow(c, dt*60) is the closed-form continuous decay equivalent and
-        // reproduces the old behavior exactly when dt = 1/60.
+        // reproduces the old behaviour exactly when dt = 1/60.
         let dt_scale = dt_clamped * 60.0;
         let density_dis_step = (density_dis as f32).powf(dt_scale);
-        let vel_dis_step = (vel_dis as f32).powf(dt_scale);
-        let temp_dis_step = (temp_dis as f32).powf(dt_scale);
+
         queue.write_buffer(
             &self.fluid_uniforms_buf,
             0,
@@ -1791,10 +990,12 @@ impl FluidSim {
                 grid_min: [self.grid_min.x, self.grid_min.y, self.grid_min.z, 0.0],
                 grid_max: [self.grid_max.x, self.grid_max.y, self.grid_max.z, 0.0],
                 inv_extent: [inv_extent.x, inv_extent.y, inv_extent.z, 0.0],
-                params: [dt_clamped, density_dis_step, vel_dis_step, buoyancy],
-                force_params: [temp_dis_step, turbulence, 0.12, 0.15],
+                params: [dt_clamped, density_dis_step, drift_speed, curl_strength],
+                // curl_spatial_scale, curl_time_scale, stored_vel_mix, unused
+                force_params: [0.022, 0.55, 1.0, 0.0],
             }),
         );
+
         // ── Pack impulses ──────────────────────────────────────────────
         let mut injection = InjectionParamsGpu {
             points: [InjectionPointGpu {
@@ -1805,13 +1006,6 @@ impl FluidSim {
             active_count: [self.impulses.len().min(MAX_INJECTIONS) as u32, 0, 0, 0],
         };
         for (i, imp) in self.impulses.iter().take(MAX_INJECTIONS).enumerate() {
-            let stable_vel = clamp_impulse_velocity_for_step(
-                imp.world_vel,
-                dt_clamped,
-                self.grid_min,
-                self.grid_max,
-                self.grid_size,
-            );
             injection.points[i] = InjectionPointGpu {
                 pos_radius: [
                     imp.world_pos.x,
@@ -1819,7 +1013,7 @@ impl FluidSim {
                     imp.world_pos.z,
                     imp.radius,
                 ],
-                vel_density: [stable_vel.x, stable_vel.y, stable_vel.z, imp.density],
+                vel_density: [imp.world_vel.x, imp.world_vel.y, imp.world_vel.z, imp.density],
                 temperature_phase: [imp.temperature, imp.phase, 0.0, 0.0],
             };
         }
@@ -1831,168 +1025,44 @@ impl FluidSim {
         let wg_z = self.grid_size.z.div_ceil(WG);
 
         if clearing {
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-clear-current",
-                &self.clear_current_pipeline,
-                &self.clear_current_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-            self.run_reinit(encoder, wg_x, wg_y, wg_z);
+            // Clear both ping-pong slices so nothing leaks across the wipe.
+            let full_range = wgpu::ImageSubresourceRange {
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: None,
+                base_array_layer: 0,
+                array_layer_count: None,
+            };
+            encoder.clear_texture(&self.vd[0], &full_range);
+            encoder.clear_texture(&self.vd[1], &full_range);
         } else {
-            if self.frames_since_reinit >= BIMOCQ_REINIT_FRAMES {
-                self.run_reinit(encoder, wg_x, wg_y, wg_z);
-            }
-
-            // 1. Update the long-lived BiMocq mappings from the current field.
+            // 1. Advect vd[0] → vd[1], applying dissipation + drift + curl.
             Self::dispatch_3d_pass(
                 encoder,
-                "fluid3-map-back",
-                &self.map_back_pipeline,
-                &self.map_back_bg,
+                "fluid3-advect",
+                &self.advect_pipeline,
+                &self.advect_bgs[0],
                 wg_x,
                 wg_y,
                 wg_z,
             );
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-map-forward",
-                &self.map_forward_pipeline,
-                &self.map_forward_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-
-            // 3. Reconstruct the advected state from the origin buffers plus
-            // accumulated non-advective changes.
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-reconstruct-vd",
-                &self.reconstruct_vd_pipeline,
-                &self.reconstruct_vd_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-reconstruct-temp",
-                &self.reconstruct_temp_pipeline,
-                &self.reconstruct_temp_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-            self.copy_texture(encoder, &self.vd[0], &self.advected_vd);
-            self.copy_texture(encoder, &self.temp[0], &self.advected_temp);
-
-            // 4. Add source terms such as candle plumes and cursor gusts.
+            // 2. Inject impulses from vd[1] → vd[0] so the final density
+            //    lands in vd[0] for the lightbake and raymarch.
             Self::dispatch_3d_pass(
                 encoder,
                 "fluid3-inject",
                 &self.inject_pipeline,
-                &self.inject_bg,
+                &self.inject_bgs[0],
                 wg_x,
                 wg_y,
                 wg_z,
             );
-
-            // 5. Apply cooling, floor damping, and temperature-driven buoyancy.
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-buoyancy",
-                &self.buoyancy_pipeline,
-                &self.buoyancy_rev_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-
-            // 6. Vorticity confinement on the force-applied state.
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-vorticity",
-                &self.vorticity_pipeline,
-                &self.vorticity_rev_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-
-            // 7. Divergence (reads vd[1], writes div + clears pressure[0]).
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-divergence",
-                &self.divergence_pipeline,
-                &self.divergence_rev_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-
-            // 8. Jacobi N iterations (even count → result lands in pressure[0]).
-            for j in 0..jacobi_iters {
-                let bg_idx = (j % 2) as usize;
-                Self::dispatch_3d_pass(
-                    encoder,
-                    "fluid3-jacobi",
-                    &self.jacobi_pipeline,
-                    &self.jacobi_bgs[bg_idx],
-                    wg_x,
-                    wg_y,
-                    wg_z,
-                );
-            }
-
-            // 9. Projection: vd[1] - ∇p → vd[0]
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-project",
-                &self.project_pipeline,
-                &self.project_rev_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-
-            // 10. Push the non-advective changes back into origin space.
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-accumulate-vd",
-                &self.accumulate_vd_pipeline,
-                &self.accumulate_vd_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-            Self::dispatch_3d_pass(
-                encoder,
-                "fluid3-accumulate-temp",
-                &self.accumulate_temp_pipeline,
-                &self.accumulate_temp_bg,
-                wg_x,
-                wg_y,
-                wg_z,
-            );
-            self.copy_texture(encoder, &self.map_back[1], &self.map_back[0]);
-            self.copy_texture(encoder, &self.map_forward[1], &self.map_forward[0]);
-            self.copy_texture(encoder, &self.delta_vd[1], &self.delta_vd[0]);
-            self.copy_texture(encoder, &self.delta_temp[1], &self.delta_temp[0]);
-
-            self.frames_since_reinit = self.frames_since_reinit.saturating_add(1);
-            if self.frames_since_reinit >= BIMOCQ_REINIT_FRAMES {
-                self.run_reinit(encoder, wg_x, wg_y, wg_z);
-            }
         }
-        // 11. Lightbake: walk every voxel of the freshly-projected vd[0],
-        // evaluate every candle point light at the voxel center, and
-        // write the pre-lit smoke colour into `lit_density`. Skipped on
-        // the very first frame (or after a depth recreate) until
-        // `rebuild_render_bind_group` has been called with the renderer
-        // -owned point lights buffer.
+
+        // 3. Lightbake: walk every voxel of vd[0], evaluate the candle
+        // point lights, write pre-lit colour into lit_density. Skipped on
+        // the very first frame until `rebuild_render_bind_group` has been
+        // called with the renderer-owned point lights buffer.
         if let Some(ref bg) = self.lightbake_bg {
             let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("fluid3-lightbake"),
@@ -2002,6 +1072,11 @@ impl FluidSim {
             p.set_bind_group(0, bg, &[]);
             p.dispatch_workgroups(wg_x, wg_y, wg_z);
         }
+
+        // Silence unused-method warning for `active_grid_extent` — we no
+        // longer issue texture-to-texture copies but the helper is still
+        // useful for future ops.
+        let _ = self.active_grid_extent();
     }
 
     /// Build (or rebuild) the render bind group for the current depth view
@@ -2029,28 +1104,22 @@ impl FluidSim {
                 bge(5, wgpu::BindingResource::TextureView(&self.vd_view[0])),
             ],
         }));
-        // Lightbake reads vd[0], writes lit_density, and references the
-        // camera + point lights uniforms. Built here because this is the
-        // only entry point that has the renderer-owned lights buffer.
         self.lightbake_bg = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fluid3-lightbake-bg"),
             layout: &self.lightbake_layout,
             entries: &[
                 bge(0, self.fluid_uniforms_buf.as_entire_binding()),
                 bge(1, wgpu::BindingResource::TextureView(&self.vd_view[0])),
-                bge(2, wgpu::BindingResource::TextureView(&self.temp_view[0])),
                 bge(
-                    3,
+                    2,
                     wgpu::BindingResource::TextureView(&self.lit_density_view),
                 ),
-                bge(4, self.cam_buf.as_entire_binding()),
-                bge(5, point_lights_buffer.as_entire_binding()),
+                bge(3, self.cam_buf.as_entire_binding()),
+                bge(4, point_lights_buffer.as_entire_binding()),
             ],
         }));
     }
 
-    /// Upload the per-frame volume camera uniform. Call after `set_camera` and
-    /// before issuing the render pass.
     pub fn upload_camera_uniform(
         &mut self,
         queue: &wgpu::Queue,
@@ -2094,9 +1163,6 @@ impl FluidSim {
         );
     }
 
-    /// Copy a pre-baked render mode into the camera uniform via the command
-    /// encoder. Unlike `queue.write_buffer`, this takes effect at the correct
-    /// point in the GPU command stream (between recorded render passes).
     #[cfg(debug_assertions)]
     pub fn set_render_mode_encoder(&self, encoder: &mut wgpu::CommandEncoder, smoke_only: bool) {
         let src = if smoke_only {
@@ -2108,15 +1174,6 @@ impl FluidSim {
         encoder.copy_buffer_to_buffer(src, 0, &self.cam_buf, offset, 16);
     }
 
-    /// Render the volumetric raymarch into the offscreen smoke target. Begins
-    /// its own render pass on `encoder`, scissoring to the smoke AABB's
-    /// projected screen rect when one is supplied so the fragment shader
-    /// only runs on pixels the plume can possibly cover.
-    ///
-    /// `globals_bind_group` is the renderer-wide group 0 (screen + time +
-    /// gamma uniform) — the volume shader needs it to convert NDC into
-    /// depth-texture pixel coordinates. Caller is responsible for ensuring
-    /// `set_detail` has been called at least once before this method.
     pub fn render_offscreen(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -2134,8 +1191,6 @@ impl FluidSim {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    // Cleared to fully transparent so pixels outside the
-                    // scissor stay invisible during composite.
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     store: wgpu::StoreOp::Store,
                 },
@@ -2147,8 +1202,6 @@ impl FluidSim {
             multiview_mask: None,
         });
         if let Some((x, y, w, h)) = scissor {
-            // Guard against zero-size or out-of-bounds rects which wgpu
-            // rejects as a validation error.
             if w > 0 && h > 0 && x + w <= self.offscreen_w && y + h <= self.offscreen_h {
                 pass.set_scissor_rect(x, y, w, h);
             }
@@ -2159,11 +1212,6 @@ impl FluidSim {
         pass.draw(0..3, 0..1);
     }
 
-    /// Composite the offscreen smoke target onto the swap chain. Called from
-    /// inside the existing post-smoke render pass at the location of the
-    /// `RenderOp::FluidSmoke` marker — the existing pass already has the
-    /// right load ops on color/depth, so the composite is just a fullscreen
-    /// triangle with premultiplied-alpha blending.
     pub fn draw_composite(&self, pass: &mut wgpu::RenderPass<'_>) {
         let Some(ref bg) = self.composite_bg else {
             return;
@@ -2246,42 +1294,6 @@ fn bgl_sampler(binding: u32) -> wgpu::BindGroupLayoutEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn impulse_velocity_clamps_to_under_one_cell_per_step() {
-        let grid_min = Vec3::new(-100.0, -100.0, 0.0);
-        let grid_max = Vec3::new(100.0, 100.0, 60.0);
-        let grid_size = GridDims::new(100, 100, 60);
-        let dt = 0.05;
-        let clamped = clamp_impulse_velocity_for_step(
-            Vec3::new(9999.0, -9999.0, 9999.0),
-            dt,
-            grid_min,
-            grid_max,
-            grid_size,
-        );
-
-        let cell_size = (grid_max - grid_min) / Vec3::from(grid_size);
-        let cell_travel = clamped * dt / cell_size;
-
-        assert!(cell_travel.x.abs() <= MAX_ADVECT_CELLS_PER_STEP + 1e-5);
-        assert!(cell_travel.y.abs() <= MAX_ADVECT_CELLS_PER_STEP + 1e-5);
-        assert!(cell_travel.z.abs() <= MAX_ADVECT_CELLS_PER_STEP + 1e-5);
-    }
-
-    #[test]
-    fn impulse_velocity_within_limit_is_unchanged() {
-        let velocity = Vec3::new(4.0, 2.0, -3.0);
-        let clamped = clamp_impulse_velocity_for_step(
-            velocity,
-            1.0 / 60.0,
-            Vec3::new(-100.0, -100.0, 0.0),
-            Vec3::new(100.0, 100.0, 60.0),
-            GridDims::new(96, 96, 48),
-        );
-
-        assert_eq!(clamped, velocity);
-    }
 
     #[test]
     fn off_step_drains_pending_impulses() {

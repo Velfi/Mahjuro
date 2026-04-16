@@ -76,6 +76,13 @@ pub enum SfxId {
     Pause,
     /// Pause menu dismissed (game resumed).
     Unpause,
+    /// One chime per dora tile in a scored hand. Queued sequentially so
+    /// multiple dora play as a rolling ding-ding-ding rather than a single
+    /// stacked hit.
+    DoraScored,
+    /// Structure cashed in (manual Trigger or auto-full). Bright bell-stack
+    /// chime that precedes the scoring cascade.
+    CashIn,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -121,6 +128,8 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::Sell,
         SfxId::Pause,
         SfxId::Unpause,
+        SfxId::DoraScored,
+        SfxId::CashIn,
     ]
 }
 
@@ -166,6 +175,8 @@ impl SfxId {
             SfxId::Sell => "kenney_interface-sounds/Audio/confirmation_002.ogg",
             SfxId::Pause => "kenney_interface-sounds/Audio/minimize_003.ogg",
             SfxId::Unpause => "kenney_interface-sounds/Audio/maximize_003.ogg",
+            SfxId::DoraScored => "kenney_interface-sounds/Audio/glass_002.ogg",
+            SfxId::CashIn => "cash_in.ogg",
         }
     }
 }

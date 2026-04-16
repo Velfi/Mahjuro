@@ -150,7 +150,7 @@ pub fn talisman_material(
     let (mat_kind, spec_strength, spec_power) = match kind {
         T::Jade => (MaterialKind::Jade, 0.55, 48.0),
         T::Pearl => (MaterialKind::Pearl, 0.60, 64.0),
-        T::Gilded => (MaterialKind::GoldNugget, 0.95, 160.0),
+        T::Gilded => (MaterialKind::Foil, 0.70, 48.0),
         T::Polychrome => (MaterialKind::Polychrome, 0.70, 32.0),
         T::Kiln => (MaterialKind::Polychrome, 0.70, 32.0),
         T::Bamboo | T::Dots | T::Characters | T::Conformity => {

@@ -90,16 +90,37 @@ pub fn shuffle_wall(wall: &mut [Tile]) {
 pub struct Wall {
     tiles: Vec<Tile>,
     cursor: usize,
-    /// Dora indicator tiles (face determines which tiles are dora).
+    /// Dora tiles, displayed on the plinth and used to score the bonus.
+    /// Stored as the actual dora face (not the traditional +1 indicator),
+    /// so the tile the player sees is the tile that pays out.
     dora_indicators: Vec<Tile>,
+}
+
+/// Traditional mahjong picks an "indicator" tile and the dora is the next rank.
+/// We skip that indirection: given a raw wall tile, this returns the dora face
+/// directly (preserving the source tile's id so dedup and wall-tracking still
+/// work).
+fn dora_from_wall_pick(t: Tile) -> Tile {
+    let next_rank = match t.suit {
+        Suit::Characters | Suit::Bamboos | Suit::Circles => {
+            if t.rank >= 9 { 1 } else { t.rank + 1 }
+        }
+        Suit::Wind => if t.rank >= 4 { 1 } else { t.rank + 1 },
+        Suit::Dragon => if t.rank >= 3 { 1 } else { t.rank + 1 },
+        Suit::Flower | Suit::Season => return t,
+    };
+    Tile { rank: next_rank, ..t }
 }
 
 impl Wall {
     pub fn new(mut tiles: Vec<Tile>) -> Self {
         shuffle_wall(&mut tiles);
-        // Last tile becomes the dora indicator.
-        let indicator = tiles.last().copied();
-        let dora_indicators = indicator.into_iter().collect();
+        let dora_indicators = tiles
+            .last()
+            .copied()
+            .map(dora_from_wall_pick)
+            .into_iter()
+            .collect();
         Self {
             tiles,
             cursor: 0,
@@ -110,8 +131,12 @@ impl Wall {
     /// Create a wall from tiles without shuffling (for deterministic tests).
     #[allow(dead_code)]
     pub fn from_unshuffled(tiles: Vec<Tile>) -> Self {
-        let indicator = tiles.last().copied();
-        let dora_indicators = indicator.into_iter().collect();
+        let dora_indicators = tiles
+            .last()
+            .copied()
+            .map(dora_from_wall_pick)
+            .into_iter()
+            .collect();
         Self {
             tiles,
             cursor: 0,
@@ -157,39 +182,12 @@ impl Wall {
         Self::new(tiles)
     }
 
-    /// The tile faces that count as dora (one rank above each indicator, wrapping).
-    /// Flower tiles are never dora indicators or dora targets.
+    /// The tile faces that count as dora. Flower/Season tiles are never dora.
     pub fn dora_faces(&self) -> Vec<(Suit, u8)> {
         self.dora_indicators
             .iter()
             .filter(|t| !matches!(t.suit, Suit::Flower | Suit::Season))
-            .map(|t| {
-                let next_rank = match t.suit {
-                    Suit::Characters | Suit::Bamboos | Suit::Circles => {
-                        if t.rank >= 9 {
-                            1
-                        } else {
-                            t.rank + 1
-                        }
-                    }
-                    Suit::Wind => {
-                        if t.rank >= 4 {
-                            1
-                        } else {
-                            t.rank + 1
-                        }
-                    }
-                    Suit::Dragon => {
-                        if t.rank >= 3 {
-                            1
-                        } else {
-                            t.rank + 1
-                        }
-                    }
-                    Suit::Flower | Suit::Season => unreachable!(),
-                };
-                (t.suit, next_rank)
-            })
+            .map(|t| (t.suit, t.rank))
             .collect()
     }
 
@@ -198,9 +196,24 @@ impl Wall {
         &self.dora_indicators
     }
 
-    /// Reveal an additional dora indicator (used by the Dora Crown relic).
-    /// Picks the next unused wall tile from the back so it does not collide
-    /// with the existing indicator and never gets drawn into a hand.
+    /// Replace the dora indicator list with a single tile of the given face.
+    /// Reuses the id of an existing wall tile matching the face when possible
+    /// so any id-keyed bookkeeping (dedup, enhancement lookups) stays valid;
+    /// otherwise synthesizes a high id that won't collide with live tiles.
+    pub fn set_sole_dora(&mut self, suit: Suit, rank: u8) {
+        let id = self
+            .tiles
+            .iter()
+            .find(|t| t.suit == suit && t.rank == rank)
+            .map(|t| t.id)
+            .unwrap_or(u32::MAX);
+        self.dora_indicators = vec![Tile::new(suit, rank, id)];
+    }
+
+    /// Reveal an additional dora (used by the Dora Crown relic). Picks the
+    /// next unused wall tile from the back — by id, so it never collides with
+    /// an existing pick and never gets drawn into a hand — then stores the
+    /// corresponding dora face.
     pub fn reveal_extra_dora_indicator(&mut self) {
         let mut idx = self.tiles.len();
         while idx > 0 {
@@ -212,7 +225,7 @@ impl Wall {
             if self.dora_indicators.iter().any(|t| t.id == candidate.id) {
                 continue;
             }
-            self.dora_indicators.push(candidate);
+            self.dora_indicators.push(dora_from_wall_pick(candidate));
             return;
         }
     }

@@ -61,9 +61,7 @@ fn active_sample_uvw(uvw: vec3<f32>) -> vec3<f32> {
     let dims = textureDimensions(lit_density_tex);
     let full_dims = vec3<f32>(f32(dims.x), f32(dims.y), f32(dims.z));
     let active_dims = cam.grid_size.xyz;
-    let min_uvw = 0.5 / full_dims;
-    let max_uvw = (active_dims - 0.5) / full_dims;
-    return mix(min_uvw, max_uvw, uvw);
+    return uvw * active_dims / full_dims;
 }
 
 struct VsOut {

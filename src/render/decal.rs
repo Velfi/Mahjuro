@@ -806,11 +806,17 @@ pub fn rasterize_ofuda_decal(
 
         // Rule: word-wrap on a rough character budget per line so the body
         // reads as 2–3 stacked lines. The wrapped block gets the remaining
-        // vertical room after the title and gap.
+        // vertical room after the title and gap. Target the larger of "rule_h
+        // / 3" and "inner_w / 7" so narrow portrait papers (in-round HUD
+        // ofuda) still get tall glyphs even when there's lots of vertical
+        // room and very little horizontal room — width is the binding
+        // constraint there, not height.
         let rule_h = inner_h.saturating_sub(title_h + gap_h).max(1);
-        let rule_px_target = (rule_h as f32 / 3.0).clamp(48.0, 140.0);
-        let approx_glyph_w = rule_px_target * 0.45;
-        let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(10);
+        let rule_px_target = (rule_h as f32 / 3.0)
+            .max(inner_w as f32 / 7.0)
+            .clamp(72.0, 160.0);
+        let approx_glyph_w = rule_px_target * 0.50;
+        let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(8);
         let wrapped_rule = wrap_text(rule, chars_per_line);
         let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
         let rule_px = fit_multiline_font_px(
@@ -820,7 +826,7 @@ pub fn rasterize_ofuda_decal(
             inner_w,
             rule_h,
             rule_px_target,
-            22.0,
+            44.0,
         );
 
         let title_band = rasterize_label_styled(
