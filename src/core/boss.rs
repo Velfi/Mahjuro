@@ -377,9 +377,9 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
 
     for &relic in &run.relics.active {
         match relic {
-            RelicId::InkBrush => characters += 3,
+            RelicId::RedSerpent => characters += 3,
             RelicId::JadeSerpent => bamboos += 3,
-            RelicId::PearlDiver => circles += 3,
+            RelicId::BlueSerpent => circles += 3,
             RelicId::HonorFury
             | RelicId::RedDragonRage
             | RelicId::GreenLuck
@@ -661,12 +661,12 @@ pub static ALL_BOSSES: &[BossDef] = &[
     BossDef {
         kind: BossKind::Drunkard,
         name: "The Drunkard",
-        description: "Rank-5 tiles score 0",
+        description: "Rank-5 tiles are debuffed",
         tier: BossTier::Medium,
         min_ante: 3,
         effect: BossEffect {
-            rule_pushes: &[RuleModifier::MiddleTilesZero],
-            tile_debuffs: &[],
+            rule_pushes: &[],
+            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::MiddleTiles)],
             relic_debuffs: &[],
             on_apply: None,
             on_play: None,
@@ -706,7 +706,7 @@ pub static ALL_BOSSES: &[BossDef] = &[
     BossDef {
         kind: BossKind::Relic,
         name: "The Iconoclast",
-        description: "Honor tiles score for less",
+        description: "Honor tiles are debuffed",
         tier: BossTier::Medium,
         min_ante: 3,
         effect: BossEffect {
@@ -850,7 +850,7 @@ pub static ALL_BOSSES: &[BossDef] = &[
 pub static FINAL_BOSSES: &[BossDef] = &[BossDef {
     kind: BossKind::Dragon,
     name: "The Dragon",
-    description: "Hands without honors are debuffed",
+    description: "Structures without an honor score zero",
     tier: BossTier::Final,
     min_ante: 7,
     effect: BossEffect {

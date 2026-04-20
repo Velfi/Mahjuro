@@ -10,7 +10,6 @@
 
 use rand::RngExt;
 
-use crate::render::draw_cmd::CoinPlacement;
 
 // ── Physics constants ────────────────────────────────────────────────────
 
@@ -246,8 +245,9 @@ impl FlyingCoinSystem {
         });
     }
 
-    /// Build placements for the renderer. Merges directly into a coin batch.
-    pub fn placements(&self) -> Vec<CoinPlacement> {
+    /// Build placements for the renderer. Merges directly into an Object3d batch.
+    pub fn placements(&self) -> Vec<crate::render::draw_cmd::Object3d> {
+        use crate::render::draw_cmd::{Object3d, Object3dKind};
         self.coins
             .iter()
             .map(|c| {
@@ -258,12 +258,18 @@ impl FlyingCoinSystem {
                     (CoinFlyKind::Gain, Some(r)) => (r / REST_DURATION).clamp(0.0, 1.0),
                     _ => 1.0,
                 };
-                CoinPlacement {
-                    world_pos: [c.px, c.py, c.world_y],
-                    rotation_y: c.rot_y,
-                    radius: c.radius,
-                    thickness: c.thickness,
+                Object3d {
+                    pos: [c.px, c.py, c.world_y],
+                    extents: [c.radius * 2.0, c.thickness, c.radius * 2.0],
+                    rotation: glam::Mat4::from_rotation_y(c.rot_y),
                     color: [1.00, 0.78, 0.30, alpha],
+                    kind: Object3dKind::Coin,
+                    focusable: false,
+                    scene_shaded: true,
+                    own_light: None,
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: None,
                 }
             })
             .collect()

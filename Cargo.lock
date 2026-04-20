@@ -4142,6 +4142,8 @@ version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d832c086ece0dacc29fb2947bb4219b8f6e12fe9e40b7108f9e57c4224e47b5c"
 dependencies = [
+ "either",
+ "flate2",
  "hyper",
  "indicatif",
  "log",

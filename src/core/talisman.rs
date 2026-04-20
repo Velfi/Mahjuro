@@ -137,6 +137,25 @@ impl TalismanKind {
         }
     }
 
+    /// Tint color for this talisman's tablet. Drives the `base_color`
+    /// passed to `talisman_material`, so the jade/pearl/gilded/etc.
+    /// materials each read with their intended hue.
+    pub fn accent_color(self) -> [f32; 4] {
+        match self {
+            TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0],
+            TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
+            TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0],
+            TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
+            TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
+            TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0],
+            TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],
+            TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0],
+            TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
+            TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
+            TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
+        }
+    }
+
     /// Flat shop price in gold. Selection talismans are priced like Kiln.
     pub fn shop_price(self) -> u32 {
         match self {

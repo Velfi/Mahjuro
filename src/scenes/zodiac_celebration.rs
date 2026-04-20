@@ -4,8 +4,10 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::table_transform::rot_rz_ry_rx_deg;
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
+use crate::ui::placement::PlacementAnchor;
+use crate::ui::scene_layout::load_shop_positions;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -43,6 +45,9 @@ impl SceneBehavior for ZodiacCelebrationScene {
     }
 
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        if ctx.headless {
+            self.started_at = Instant::now() - std::time::Duration::from_secs(1);
+        }
         let has_input = ctx.actions.iter().any(|a| {
             matches!(
                 a,
@@ -77,9 +82,6 @@ impl SceneBehavior for ZodiacCelebrationScene {
         let t = self.elapsed();
         let ribbon_w = h * 0.12;
         let ribbon_l = h * 0.55;
-        let cx = w * 0.5;
-        let cy = h * 0.28;
-        let lift = h * 0.50;
 
         let sway_yaw = (t * 1.8).sin() * 12.0;
         let sway_roll = (t * 2.5 + 0.7).sin() * 6.0;
@@ -88,10 +90,49 @@ impl SceneBehavior for ZodiacCelebrationScene {
         let tilt = 90.0 + (t * 1.2).sin() * 3.0;
         let alpha = (t / 0.3).clamp(0.0, 1.0);
 
+        let base_rotation = rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll);
+        // Re-read every frame so arrange-mode commits (which write to
+        // shop.json immediately) take effect during a live celebration.
+        let positions = load_shop_positions();
+        let anchor = PlacementAnchor::new(
+            [0.0, 0.0, 0.0],
+            base_rotation,
+            &positions.celeb_zodiac,
+            "shop.celebrations.zodiac",
+            ctx.layout,
+        );
+        let cx = anchor.pos[0];
+        let cy = anchor.pos[1];
+        let lift = anchor.pos[2];
+
+        // Dramatic celestial lighting: warm key + cool fill on the hanging
+        // ribbon so `scene_shaded` meshes are not rendered black against the
+        // dimmer + starfield backdrop.
+        frame.point_lights = vec![
+            PointLight {
+                pos: [cx + w * 0.18, cy - h * 0.10, lift + h * 0.35],
+                radius: w.max(h) * 2.4,
+                color: [1.00, 0.88, 0.62],
+                intensity: 2.6,
+            },
+            PointLight {
+                pos: [cx - w * 0.22, cy + h * 0.05, lift + h * 0.20],
+                radius: w.max(h) * 2.0,
+                color: [0.55, 0.70, 1.00],
+                intensity: 1.4,
+            },
+            PointLight {
+                pos: [cx, cy - h * 0.15, lift - h * 0.15],
+                radius: w.max(h) * 1.6,
+                color: [0.95, 0.78, 0.25],
+                intensity: 1.1,
+            },
+        ];
+
         frame.object3d_batch(vec![Object3d {
-            pos: [cx, cy, lift],
+            pos: anchor.pos,
             extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
-            rotation: rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll),
+            rotation: anchor.rotation,
             color: [1.0, 1.0, 1.0, alpha],
             kind: Object3dKind::ZodiacRibbon {
                 kind: Some(self.kind),
@@ -101,7 +142,7 @@ impl SceneBehavior for ZodiacCelebrationScene {
             own_light: None,
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("shop.celebrations.zodiac"),
+            arrange_name: Some(anchor.arrange_name),
         }]);
 
         let title_font = (h * 0.04).max(24.0);

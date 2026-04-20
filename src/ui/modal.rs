@@ -6,7 +6,8 @@ use rand::RngExt;
 
 use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
-use crate::render::draw_cmd::RelicShowcasePlacement;
+use crate::render::draw_cmd::{Object3d, Object3dKind};
+use crate::render::table_transform::rot_rx_ry_rz_deg;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
@@ -404,7 +405,7 @@ impl ModalQueue {
         Vec<GpuInstance>,
         Vec<TextLabel>,
         Vec<ButtonDef>,
-        Vec<RelicShowcasePlacement>,
+        Vec<Object3d>,
     )> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
@@ -413,7 +414,7 @@ impl ModalQueue {
         let mut instances = Vec::new();
         let mut labels = Vec::new();
         let mut buttons = Vec::new();
-        let mut relic_showcases = Vec::new();
+        let mut relic_objects: Vec<Object3d> = Vec::new();
 
         // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
         let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
@@ -431,7 +432,7 @@ impl ModalQueue {
                 window_h,
                 &mut instances,
                 &mut labels,
-                &mut relic_showcases,
+                &mut relic_objects,
             );
         } else {
             self.draw_simple(
@@ -458,7 +459,7 @@ impl ModalQueue {
             UiAction::Confirm,
         ));
 
-        Some((instances, labels, buttons, relic_showcases))
+        Some((instances, labels, buttons, relic_objects))
     }
 
     /// Draw a simple title+body modal (original behavior).
@@ -563,7 +564,7 @@ impl ModalQueue {
         window_h: f32,
         instances: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
-        relic_showcases: &mut Vec<RelicShowcasePlacement>,
+        relic_objects: &mut Vec<Object3d>,
     ) {
         let page = &modal.pages[modal.current_page];
         let padding = (20.0 * scale).max(10.0);
@@ -640,21 +641,30 @@ impl ModalQueue {
             let icon_size = icon_h.min(content_w * 0.4);
             let icon_x = card_x + (card_w - icon_size) * 0.5;
             let visual = relic_visual(relic_id);
-            let face = icon_size * 0.80;
-            let thick = icon_size * 0.12 * visual.thickness_scale;
-            relic_showcases.push(RelicShowcasePlacement {
-                center_pos: [icon_x + icon_size * 0.5, y + icon_size * 0.5, icon_size * 0.38],
-                extents: [face, face, thick],
-                rotation_y_deg: (Instant::now()
-                    .saturating_duration_since(modal.shown_at)
-                    .as_secs_f32()
-                    * visual.ui_spin_rate_deg)
-                    % 360.0,
-                rotation_x_deg: 90.0,
-                rotation_z_deg: 0.0,
+            let spin_deg = (Instant::now()
+                .saturating_duration_since(modal.shown_at)
+                .as_secs_f32()
+                * visual.ui_spin_rate_deg)
+                % 360.0;
+            let face_size = icon_size * 0.80;
+            let thick = face_size * 0.12 * visual.thickness_scale;
+            relic_objects.push(Object3d {
+                pos: [icon_x + icon_size * 0.5, y + icon_size * 0.5, icon_size * 0.38],
+                extents: [face_size, thick, face_size],
+                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, spin_deg, 0.0),
                 color: page.accent_color,
-                relic_id,
-                glow: alpha * 0.35,
+                kind: Object3dKind::Relic {
+                    relic_id,
+                    glow: alpha * 0.35,
+                    silhouette: false,
+                    pick_id: None,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,
             });
             y += icon_h + icon_gap;
         }

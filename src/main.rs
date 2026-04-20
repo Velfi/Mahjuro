@@ -22,10 +22,12 @@ use std::time::Instant;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use debug_menu::{DebugAction, DebugMenuBar};
 use debug_overlays::{
-    CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
-    TuningResult,
+    CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, SmokeDebugOverlay,
+    SmokeDebugResult, TuningOverlay, TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
 };
 use game::cascade::CascadeTuning;
+use game::smoke_tuning::ShopSmokeTuning;
+use game::volumetric_tuning::VolumetricTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
 use render::animation::AnimationController;
@@ -57,9 +59,8 @@ use winit::window::{Fullscreen, Window, WindowId};
 /// Persisted visual/audio settings mirrored from the options screen.
 /// Grouped so they can be synced in one go from `OptionsScene` state.
 struct RenderSettings {
-    smoke_intensity: crate::persistence::SmokeIntensity,
-    smoke_detail: crate::persistence::SmokeDetail,
-    smoke_sim_quality: crate::persistence::SmokeSimQuality,
+    smoke_quality: crate::persistence::SmokeQuality,
+    smoke_amount: crate::persistence::SmokeAmount,
     effects_quality: crate::persistence::EffectsQuality,
     tile_preset: crate::persistence::TilePreset,
     tile_material: crate::persistence::TileMaterial,
@@ -123,6 +124,8 @@ struct DebugState {
     tuning_overlay: Option<TuningOverlay>,
     sfx_test_overlay: Option<SfxTestOverlay>,
     camera_debug_overlay: Option<CameraDebugOverlay>,
+    smoke_debug_overlay: Option<SmokeDebugOverlay>,
+    volumetric_debug_overlay: Option<VolumetricDebugOverlay>,
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     object_hit_test_armed: bool,
@@ -154,6 +157,8 @@ impl DebugState {
             tuning_overlay: None,
             sfx_test_overlay: None,
             camera_debug_overlay: None,
+            smoke_debug_overlay: None,
+            volumetric_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
@@ -166,6 +171,8 @@ impl DebugState {
             || self.sfx_test_overlay.is_some()
             || self.camera_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
+            || self.smoke_debug_overlay.is_some()
+            || self.volumetric_debug_overlay.is_some()
     }
 }
 
@@ -192,6 +199,46 @@ enum Command {
     BotGraph(BotGraphCli),
     /// Run the default tuning sweep grid.
     Sweep(SweepCli),
+    /// Render a single scene to a PNG and exit. Runs fully offscreen via
+    /// `HeadlessApp` — no window, no swapchain, no winit event loop — so
+    /// CI and iterative art review don't flake on window-server occlusion.
+    /// Iteration cost is dominated by GPU pipeline init (~5–8 s on first
+    /// run).
+    Screenshot(ScreenshotCli),
+}
+
+#[derive(Debug, Args)]
+struct ScreenshotCli {
+    /// Which scene to render. Supported: `collection`, `yaku_journal`,
+    /// `gameplay`, `pick_blind`, `shop`, `start_screen`.
+    #[arg(long)]
+    scene: String,
+    /// Output PNG path.
+    #[arg(long, default_value = "/tmp/mahjuro-screenshot.png")]
+    output: PathBuf,
+    /// Render width in pixels.
+    #[arg(long, default_value_t = 1920)]
+    width: u32,
+    /// Render height in pixels.
+    #[arg(long, default_value_t = 1080)]
+    height: u32,
+    /// How many redraw frames to render before capturing. The first frame
+    /// often arrives before late-loaded textures (relics, backgrounds) have
+    /// uploaded; bumping this gives async loaders time to settle. The
+    /// surface swapchain also frequently rejects the first 1-2 frames as
+    /// `Outdated`/`Lost`, so a generous default avoids missing captures.
+    #[arg(long, default_value_t = 12)]
+    warmup_frames: u32,
+    /// Force a specific boss for the active ante. Applies to scenes that
+    /// display boss rules (`gameplay`, `pick_blind`). Case-insensitive
+    /// BossKind name, e.g. `blight`, `dragon`, `tax_collector`.
+    #[arg(long)]
+    boss: Option<String>,
+    /// Render with a fresh (level-1) PlayerProgress instead of the saved
+    /// profile. Useful for visual QA of the Collection scene so locked
+    /// entries actually show in silhouette.
+    #[arg(long)]
+    fresh_progress: bool,
 }
 
 #[derive(Debug, Args)]
@@ -341,7 +388,10 @@ fn apply_arrange_to_layout(
     scene: &mut crate::Scene,
 ) {
     use crate::ui::placement::apply_arrange;
-    use crate::ui::scene_layout::{save_gameplay_positions, save_shop_positions};
+    use crate::ui::scene_layout::{
+        save_collection_positions, save_gameplay_positions, save_shop_positions,
+        save_start_screen_positions, save_tutorial_positions,
+    };
 
     // Every placement now uses the same responsive coordinate system:
     // nx/ny are window fractions, lift_mm is physical mm, rotations are deg.
@@ -375,6 +425,30 @@ fn apply_arrange_to_layout(
             );
             (ok, ok.then(|| save_shop_positions(p)))
         }
+        crate::Scene::Collection(c) => {
+            let p = &mut c.positions;
+            let ok = apply_arrange(
+                p, name, dnx, dny, d_lift_mm,
+                delta_rx_deg, delta_ry_deg, delta_rz_deg,
+            );
+            (ok, ok.then(|| save_collection_positions(p)))
+        }
+        crate::Scene::StartScreen(s) => {
+            let p = &mut s.positions;
+            let ok = apply_arrange(
+                p, name, dnx, dny, d_lift_mm,
+                delta_rx_deg, delta_ry_deg, delta_rz_deg,
+            );
+            (ok, ok.then(|| save_start_screen_positions(p)))
+        }
+        crate::Scene::TutorialCampaign(t) => {
+            let p = &mut t.positions;
+            let ok = apply_arrange(
+                p, name, dnx, dny, d_lift_mm,
+                delta_rx_deg, delta_ry_deg, delta_rz_deg,
+            );
+            (ok, ok.then(|| save_tutorial_positions(p)))
+        }
         _ => (false, None),
     };
 
@@ -400,6 +474,9 @@ fn sample_arrange_placement(
     match scene {
         crate::Scene::Gameplay(gp) => gp.positions.placement(name).copied(),
         crate::Scene::Shop(shop) => shop.positions.placement(name).copied(),
+        crate::Scene::Collection(c) => c.positions.placement(name).copied(),
+        crate::Scene::StartScreen(s) => s.positions.placement(name).copied(),
+        crate::Scene::TutorialCampaign(t) => t.positions.placement(name).copied(),
         _ => None,
     }
 }
@@ -408,7 +485,10 @@ fn sample_arrange_placement(
 /// persist the scene's positions struct to disk. Works for leaves and groups.
 fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
     use crate::ui::placement::reset_arrange;
-    use crate::ui::scene_layout::{save_gameplay_positions, save_shop_positions};
+    use crate::ui::scene_layout::{
+        save_collection_positions, save_gameplay_positions, save_shop_positions,
+        save_start_screen_positions, save_tutorial_positions,
+    };
 
     let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
         crate::Scene::Gameplay(gp) => {
@@ -420,6 +500,21 @@ fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
             let p = &mut shop.positions;
             let ok = reset_arrange(p, name);
             (ok, ok.then(|| save_shop_positions(p)))
+        }
+        crate::Scene::Collection(c) => {
+            let p = &mut c.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_collection_positions(p)))
+        }
+        crate::Scene::StartScreen(s) => {
+            let p = &mut s.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_start_screen_positions(p)))
+        }
+        crate::Scene::TutorialCampaign(t) => {
+            let p = &mut t.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_tutorial_positions(p)))
         }
         _ => (false, None),
     };
@@ -455,6 +550,18 @@ fn collect_committed_rotations(
         crate::Scene::Shop(shop) => (
             shop.positions.hierarchy(),
             Box::new(move |n| shop.positions.placement(n).copied()),
+        ),
+        crate::Scene::Collection(c) => (
+            c.positions.hierarchy(),
+            Box::new(move |n| c.positions.placement(n).copied()),
+        ),
+        crate::Scene::StartScreen(s) => (
+            s.positions.hierarchy(),
+            Box::new(move |n| s.positions.placement(n).copied()),
+        ),
+        crate::Scene::TutorialCampaign(t) => (
+            t.positions.hierarchy(),
+            Box::new(move |n| t.positions.placement(n).copied()),
         ),
         _ => return out,
     };
@@ -506,6 +613,9 @@ fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
     let hierarchy: &'static [Node] = match scene {
         crate::Scene::Shop(s) => s.positions.hierarchy(),
         crate::Scene::Gameplay(g) => g.positions.hierarchy(),
+        crate::Scene::Collection(c) => c.positions.hierarchy(),
+        crate::Scene::StartScreen(s) => s.positions.hierarchy(),
+        crate::Scene::TutorialCampaign(t) => t.positions.hierarchy(),
         _ => &[],
     };
     let mut out = Vec::new();
@@ -659,6 +769,12 @@ struct App {
     transition_timer: f32,
     transition_kind: TransitionKind,
     pending_scene: Option<Scene>,
+    /// Captured when `pending_scene` was set: true if the transition was
+    /// initiated by an overlay (replace overlay top at fade-end), false if
+    /// by the base scene (replace `self.scene`). Decoupling this from the
+    /// live stack depth prevents overlays pushed mid-transition (e.g. a
+    /// zodiac celebration during a skip flow) from being clobbered.
+    pending_scene_targets_overlay: bool,
     /// Pushdown stack for overlay scenes (e.g. zodiac/pack celebrations,
     /// meld guide from in-game).
     /// When non-empty, the top of the stack is the active scene: only it
@@ -674,14 +790,40 @@ struct App {
     prev_cursor: (f32, f32),
     tooltips: TooltipState,
     cascade_tuning: CascadeTuning,
+    shop_smoke_tuning: ShopSmokeTuning,
+    volumetric_tuning: VolumetricTuning,
     deferred_round_end: Option<GameEvent>,
     update_checker: update_check::UpdateChecker,
+    /// `Some(version)` while the "update available" prompt modal is on
+    /// screen. Confirming the modal triggers the install; cancelling
+    /// clears this.
+    pending_update_prompt: Option<String>,
     modifiers: ModifiersState,
     /// Shop drag-to-sell: the 3D hit that started a mouse-drag over an owned
     /// shop item, plus the cursor position at drag start.  Set on mouse-down;
     /// if the cursor moves far enough and is over the sell tray on mouse-up,
     /// a `SHOP_DRAG_DROP_ID` click is injected.
     shop_drag_start: Option<(crate::render::wgpu_renderer::ShopHit, (f32, f32))>,
+    /// When `Some`, the app boots into a single-scene capture mode: hidden
+    /// window, jump to the requested scene, render `warmup_frames`, write a
+    /// PNG, exit. Set by the `screenshot` CLI subcommand.
+    headless_screenshot: Option<HeadlessScreenshot>,
+}
+
+/// Configuration for one-shot screenshot capture (see `Command::Screenshot`).
+#[derive(Debug, Clone)]
+struct HeadlessScreenshot {
+    output: PathBuf,
+    width: u32,
+    height: u32,
+    /// Counts down on each `RedrawRequested`. When it reaches 0, the next
+    /// frame is captured and the app exits.
+    frames_remaining: u32,
+    /// Number of capture-frame retries used so far. The renderer's
+    /// `draw()` early-returns when the swapchain is Outdated/Lost and
+    /// silently drops the queued screenshot; when that happens we tick
+    /// another frame and retry, bounded by ~30 attempts.
+    retries: u32,
 }
 
 impl App {
@@ -806,6 +948,7 @@ impl App {
             transition_timer: 0.0,
             transition_kind: TransitionKind::Quick,
             pending_scene: None,
+            pending_scene_targets_overlay: false,
             overlay_stack: Vec::new(),
             quit_requested: false,
             close_saved: false,
@@ -813,9 +956,8 @@ impl App {
             pending_post_game_over_modals: Vec::new(),
             deferred_round_end: None,
             gfx: RenderSettings {
-                smoke_intensity: settings.smoke_intensity,
-                smoke_detail: settings.smoke_detail,
-                smoke_sim_quality: settings.smoke_sim_quality,
+                smoke_quality: settings.smoke_quality,
+                smoke_amount: settings.smoke_amount,
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
@@ -829,9 +971,17 @@ impl App {
             prev_cursor: (0.0, 0.0),
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
+            shop_smoke_tuning: persistence::load_tuning_override::<ShopSmokeTuning>(
+                "ShopSmokeTuning",
+            ),
+            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
+                "VolumetricTuning",
+            ),
             update_checker: update_check::UpdateChecker::spawn(),
+            pending_update_prompt: None,
             modifiers: ModifiersState::default(),
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
+            headless_screenshot: None,
         }
     }
 
@@ -1033,6 +1183,12 @@ impl App {
                     self.progress.runs_completed += 1;
                     self.progress.record_score(self.run.round_score);
                     let _ = self.progress.check_level_up();
+                    self.progress
+                        .run_history
+                        .push(crate::core::progression::RunRecord::from_run(
+                            &self.run,
+                            crate::core::progression::RunOutcome::Victory,
+                        ));
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
                     Scene::GameOver(GameOverScene::victory(&self.run))
@@ -1041,7 +1197,7 @@ impl App {
                     let shop_follows = self.run.tutorial_shop_enabled();
                     Scene::TutorialRecap(TutorialRecapScene::new(lesson, shop_follows))
                 } else if !self.run.tutorial_shop_enabled() {
-                    Scene::Gameplay(GameplayScene::new())
+                    Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
                     Scene::Shop(ShopScene::new(self.run.run_number, &mut self.run))
                 });
@@ -1063,7 +1219,10 @@ impl App {
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
-                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::new()));
+                    let retry_blind = self.run.blind;
+                    self.pending_scene = Some(Scene::Gameplay(
+                        GameplayScene::with_pending_blind(retry_blind),
+                    ));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -1099,7 +1258,10 @@ impl App {
                     );
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Success);
                     self.modals.push(modal);
-                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::new()));
+                    let retry_blind = self.run.blind;
+                    self.pending_scene = Some(Scene::Gameplay(
+                        GameplayScene::with_pending_blind(retry_blind),
+                    ));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -1114,6 +1276,12 @@ impl App {
                 self.progress.runs_completed += 1;
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
+                self.progress
+                    .run_history
+                    .push(crate::core::progression::RunRecord::from_run(
+                        &self.run,
+                        crate::core::progression::RunOutcome::Defeat { reason },
+                    ));
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
                 // Run is over — drop any saved-on-quit snapshot so the
                 // player isn't offered "Continue" into a finished game.
@@ -1189,7 +1357,9 @@ impl App {
         let app_overlay_wipe = self.modals.is_active()
             || self.debug.tuning_overlay.is_some()
             || self.debug.sfx_test_overlay.is_some()
-            || self.debug.camera_debug_overlay.is_some();
+            || self.debug.camera_debug_overlay.is_some()
+            || self.debug.smoke_debug_overlay.is_some()
+            || self.debug.volumetric_debug_overlay.is_some();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -1225,6 +1395,27 @@ impl App {
             },
             ui_scale: self.gfx.ui_scale,
             modal_active,
+            arrange_preview: if let Some(Some(ref state)) = self.debug.arrange_mode {
+                let ww = size.width as f32;
+                let wh = size.height as f32;
+                Some(crate::ui::placement::ArrangePreview {
+                    name: state.object_name.clone(),
+                    dnx: if ww > 0.0 { state.delta_px / ww } else { 0.0 },
+                    dny: if wh > 0.0 { state.delta_py / wh } else { 0.0 },
+                    // Match the live preview in `sample_arrange_placement`
+                    // (see HUD code in this file): convert the world-unit
+                    // lift step back to mm at the canonical window.
+                    d_lift_mm: state.delta_lift
+                        * crate::ui::scene_layout::HFRAC_TO_MM
+                        / crate::ui::scene_layout::CANONICAL_WINDOW_W,
+                    d_rx_deg: state.delta_rx_deg,
+                    d_ry_deg: state.delta_ry_deg,
+                    d_rz_deg: state.delta_rz_deg,
+                })
+            } else {
+                None
+            },
+            shop_smoke_tuning: &self.shop_smoke_tuning,
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -1340,24 +1531,25 @@ impl App {
 
         let size = win.inner_size();
         self.modals.update();
-        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_showcases)) = self
+        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_objects)) = self
             .modals
             .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
-            if !modal_relic_showcases.is_empty() {
-                // Use a near-orthographic top-down camera so pixel_to_world
-                // positions map cleanly onto screen space without perspective
-                // warp — same approach as the collection scene's relic cards.
+            if !modal_relic_objects.is_empty() {
+                // Near-orthographic camera looking down -Y at the felt so
+                // pixel_to_world's (world_x, world_y, lift_z) maps cleanly
+                // to screen space with Z up — matches the scene-wide axis
+                // convention used by tutorial/collection relic cards.
                 let h = size.height as f32;
                 frame.camera_override = Some(CameraParams {
-                    eye: [0.0, 0.0, h * 3.0],
+                    eye: [0.0, -h * 3.0, 0.0],
                     target: [0.0, 0.0, 0.0],
-                    up: [0.0, 1.0, 0.0],
+                    up: [0.0, 0.0, 1.0],
                     fovy_deg: 20.0,
                 });
-                frame.relic_showcase_batch(modal_relic_showcases);
+                frame.object3d_batch(modal_relic_objects);
             }
             // Replace scene buttons with modal buttons so only dismiss works.
             self.active_buttons = modal_buttons;
@@ -1401,6 +1593,24 @@ impl App {
             self.active_buttons.clear();
         }
 
+        // Shop smoke tuning overlay — on top of modals.
+        if let Some(ref overlay) = self.debug.smoke_debug_overlay {
+            let (insts, lbls) =
+                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+            frame.quads(insts);
+            frame.texts(lbls);
+            self.active_buttons.clear();
+        }
+
+        // Volumetric tuning overlay — on top of modals.
+        if let Some(ref overlay) = self.debug.volumetric_debug_overlay {
+            let (insts, lbls) =
+                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+            frame.quads(insts);
+            frame.texts(lbls);
+            self.active_buttons.clear();
+        }
+
         // Tooltip overlay — pushed *after* modals/tuning so it sits on top
         // of all scene/modal content. Suppressed whenever any modal-like
         // overlay is up so hover effects don't leak through to elements
@@ -1416,6 +1626,10 @@ impl App {
             let wh = size.height as f32;
             let btn_rects: Vec<(f32, f32, f32, f32)> =
                 self.active_buttons.iter().map(|b| b.rect).collect();
+            let owns_fortunes_favor = self
+                .run
+                .relics
+                .has(crate::core::relic::RelicId::FortunesFavor);
             self.tooltips.update_and_draw_into(
                 &mut frame,
                 cursor,
@@ -1426,6 +1640,7 @@ impl App {
                 ww,
                 wh,
                 self.gfx.ui_scale,
+                owns_fortunes_favor,
             );
         } else {
             self.tooltips.clear();
@@ -1542,17 +1757,7 @@ impl App {
                 if hide_tiles && matches!(c, DrawCmd::ShowcaseTileBatch(_)) {
                     return false;
                 }
-                if hide_inv
-                    && matches!(
-                        c,
-                        DrawCmd::Dish
-                            | DrawCmd::DishExplicit(_)
-                            | DrawCmd::RelicBatch(_)
-                            | DrawCmd::ZodiacBatch(_)
-                            | DrawCmd::TalismanBatch(_)
-                            | DrawCmd::RelicIcon(_)
-                    )
-                {
+                if hide_inv && matches!(c, DrawCmd::RelicIcon(_)) {
                     return false;
                 }
                 true
@@ -1579,6 +1784,9 @@ impl App {
         let active_scene_key: Option<&'static str> = match &self.scene {
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
+            Scene::Collection(_) => Some("collection"),
+            Scene::StartScreen(_) => Some("start_screen"),
+            Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
         };
         renderer.set_active_scene(active_scene_key);
@@ -1587,6 +1795,22 @@ impl App {
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
         renderer.set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+
+        // Push the volumetric dust-floor density so the fluid sim's inject
+        // pass seeds an ambient baseline. Cheap each frame; the renderer
+        // no-ops if the fluid sim isn't active.
+        renderer.set_dust_strength(self.volumetric_tuning.dust_strength);
+        // Push mountain-haze art-direction knobs into the haze shader's
+        // uniform — lets the Volumetric debug overlay drive density,
+        // colour, horizon band, and wind speed live.
+        renderer.set_haze_tuning(
+            self.volumetric_tuning.haze_density,
+            self.volumetric_tuning.haze_color_r,
+            self.volumetric_tuning.haze_color_g,
+            self.volumetric_tuning.haze_color_b,
+            self.volumetric_tuning.haze_horizon_y,
+            self.volumetric_tuning.haze_drift_speed,
+        );
 
         // Push arrange-mode override so the renderer draws the selected object
         // at the edited position/rotation this frame.
@@ -1608,9 +1832,8 @@ impl App {
 
         if let Err(e) = renderer.render(
             &frame,
-            self.gfx.smoke_intensity,
-            self.gfx.smoke_detail,
-            self.gfx.smoke_sim_quality,
+            self.gfx.smoke_quality,
+            self.gfx.smoke_amount,
             self.gfx.effects_quality,
             self.gfx.tile_preset,
             active_material,
@@ -1727,6 +1950,20 @@ impl App {
                     log::info!("[Debug] Opened camera debug overlay");
                 }
             }
+            DebugAction::OpenSmokeDebug => {
+                if self.debug.smoke_debug_overlay.is_none() {
+                    self.debug.smoke_debug_overlay =
+                        Some(SmokeDebugOverlay::new(&self.shop_smoke_tuning));
+                    log::info!("[Debug] Opened shop smoke debug overlay");
+                }
+            }
+            DebugAction::OpenVolumetricDebug => {
+                if self.debug.volumetric_debug_overlay.is_none() {
+                    self.debug.volumetric_debug_overlay =
+                        Some(VolumetricDebugOverlay::new(&self.volumetric_tuning));
+                    log::info!("[Debug] Opened volumetric debug overlay");
+                }
+            }
             DebugAction::ProfileGpu => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.start_gpu_profile(100);
@@ -1802,6 +2039,7 @@ impl App {
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TileLiteracy(_) => "TileLiteracy",
+                        Scene::YakuJournal(_) => "YakuJournal",
                         Scene::ZodiacCelebration(_) => "ZodiacCelebration",
                     };
                     log::warn!("[Debug] Demo Cascade ignored — current scene is {name}");
@@ -1862,26 +2100,6 @@ impl App {
                     );
                 }
             }
-            DebugAction::SaveShopLayout => {
-                if let Scene::Shop(shop) = &self.scene {
-                    match shop.save_current_layout() {
-                        Ok(()) => log::info!("[Debug] Shop layout saved"),
-                        Err(e) => log::error!("[Debug] Failed to save shop layout: {e}"),
-                    }
-                } else {
-                    log::warn!("[Debug] SaveShopLayout: not in shop scene");
-                }
-            }
-            DebugAction::SaveGameplayRelicLayout => {
-                if let Scene::Gameplay(gp) = &self.scene {
-                    match crate::ui::scene_layout::save_gameplay_positions(&gp.positions) {
-                        Ok(()) => log::info!("[Debug] Gameplay relic layout saved"),
-                        Err(e) => log::error!("[Debug] Failed to save gameplay relic layout: {e}"),
-                    }
-                } else {
-                    log::warn!("[Debug] SaveGameplayRelicLayout: not in gameplay scene");
-                }
-            }
         }
         // Request redraw to reflect changes immediately.
         if let Some(w) = self.window.as_ref() {
@@ -1900,14 +2118,27 @@ impl ApplicationHandler for App {
 
         let mut attrs = Window::default_attributes();
         attrs.title = "Mahjuro".to_string();
-        attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
+        if let Some(ref shot) = self.headless_screenshot {
+            attrs.inner_size = Some(PhysicalSize::new(shot.width, shot.height).into());
+            // Note: leaving the window visible during screenshot capture.
+            // macOS appears to mark fully-hidden windows as Occluded which
+            // makes wgpu's swapchain skip presenting frames, so the
+            // capture path never runs. Visible window costs nothing for
+            // a one-shot CLI run.
+        } else {
+            attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
+        }
 
         let t0 = Instant::now();
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.window = Some(window.clone());
         log::info!("window created in {:?}", t0.elapsed());
 
-        let renderer = WgpuRenderer::new(window.clone(), self.gfx.hdr_enabled).expect("wgpu");
+        let renderer = WgpuRenderer::new(render::wgpu_renderer::TargetInit::Windowed {
+            window: window.clone(),
+            hdr_enabled: self.gfx.hdr_enabled,
+        })
+        .expect("wgpu");
         self.renderer = Some(renderer);
 
         let t0 = Instant::now();
@@ -2084,18 +2315,92 @@ impl ApplicationHandler for App {
                             self.modals.push(modal);
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                         }
-                        GameEvent::RelicActivated(_) => {
+                        GameEvent::RelicActivated(rid) => {
                             // Visual feedback (glow + wiggle) is handled by the
-                            // active scene; audio is a soft chime layered on top.
-                            self.audio.play_sfx(audio::SfxId::ScoreStep);
+                            // active scene; audio is the per-relic stinger,
+                            // falling back to a soft chime when the relic has
+                            // no bespoke audio file.
+                            self.audio.play_relic_trigger(rid);
+                            *self
+                                .progress
+                                .relic_times_activated
+                                .entry(rid)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
+                        }
+                        GameEvent::BossEncountered(bk) => {
+                            *self
+                                .progress
+                                .boss_times_encountered
+                                .entry(bk)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
+                        }
+                        GameEvent::BossDefeated(bk) => {
+                            *self
+                                .progress
+                                .boss_times_defeated
+                                .entry(bk)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
+                        }
+                        GameEvent::TalismanPurchased(tk) => {
+                            *self
+                                .progress
+                                .talisman_times_purchased
+                                .entry(tk)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
+                        }
+                        GameEvent::TalismanUsed(tk) => {
+                            *self
+                                .progress
+                                .talisman_times_used
+                                .entry(tk)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
+                        }
+                        GameEvent::YakuScored(yk) => {
+                            *self
+                                .progress
+                                .yaku_times_scored
+                                .entry(yk)
+                                .or_insert(0) += 1;
+                            let _ = persistence::save_profile(
+                                self.active_profile,
+                                &self.progress,
+                            );
                         }
                         other => log::info!("event: {other:?}"),
                     }
                 }
 
-                // 1a. Poll background update check.
+                // 1a. Poll background update pipeline.
                 if let Some(result) = self.update_checker.poll() {
                     let modal = match result {
+                        update_check::UpdateResult::UpdateAvailable { new_version } => {
+                            let current = env!("CARGO_PKG_VERSION");
+                            let body = format!(
+                                "v{new_version} is available (you have v{current}).\n\nDownload and install now?\n\nPress Enter to install, Esc to skip."
+                            );
+                            self.pending_update_prompt = Some(new_version);
+                            Modal::new("Update Available", body, ModalTheme::Info)
+                        }
                         update_check::UpdateResult::Updated { new_version } => Modal::new(
                             "Updated!",
                             format!("v{new_version} installed.\nRestart to use the new version."),
@@ -2108,9 +2413,9 @@ impl ApplicationHandler for App {
                         } => {
                             log::warn!("auto-update to v{new_version} failed: {error}");
                             Modal::new(
-                                "Update Available",
+                                "Update Failed",
                                 format!(
-                                    "v{new_version} is available but auto-update failed.\n\n{release_url}"
+                                    "v{new_version} download/install failed.\n\nGet it manually:\n{release_url}"
                                 ),
                                 ModalTheme::Info,
                             )
@@ -2270,15 +2575,112 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
+                // 3b''''. If the shop smoke debug overlay is open, intercept
+                // input. Live-copy the overlay's tuning into the App each
+                // frame so the shop scene's next draw picks up edits.
+                if let Some(ref mut overlay) = self.debug.smoke_debug_overlay {
+                    match overlay.update(&actions) {
+                        SmokeDebugResult::Stay => {
+                            self.shop_smoke_tuning = overlay.tuning.clone();
+                        }
+                        SmokeDebugResult::Reset => {
+                            overlay.tuning = ShopSmokeTuning::default();
+                            self.shop_smoke_tuning = overlay.tuning.clone();
+                            // Clearing the override means the code default
+                            // takes over on next launch. Logs go to stderr
+                            // so tuning sessions leave a paper trail.
+                            match persistence::clear_tuning_override("ShopSmokeTuning") {
+                                Ok(()) => log::info!(
+                                    "[Debug] Cleared ShopSmokeTuning override"
+                                ),
+                                Err(e) => log::warn!(
+                                    "[Debug] Failed to clear ShopSmokeTuning override: {e}"
+                                ),
+                            }
+                        }
+                        SmokeDebugResult::SaveAsDefault => {
+                            self.shop_smoke_tuning = overlay.tuning.clone();
+                            match persistence::save_tuning_override(
+                                "ShopSmokeTuning",
+                                &overlay.tuning,
+                            ) {
+                                Ok(()) => log::info!(
+                                    "[Debug] Saved ShopSmokeTuning override"
+                                ),
+                                Err(e) => log::warn!(
+                                    "[Debug] Failed to save ShopSmokeTuning override: {e}"
+                                ),
+                            }
+                        }
+                        SmokeDebugResult::Close => {
+                            self.shop_smoke_tuning = overlay.tuning.clone();
+                            self.debug.smoke_debug_overlay = None;
+                            log::info!("[Debug] Closed shop smoke debug overlay");
+                        }
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
+                // 3b'''''. Volumetric tuning overlay — same pattern as smoke.
+                // Live-copy so `renderer.set_dust_strength` picks up edits
+                // on the next frame.
+                if let Some(ref mut overlay) = self.debug.volumetric_debug_overlay {
+                    match overlay.update(&actions) {
+                        VolumetricDebugResult::Stay => {
+                            self.volumetric_tuning = overlay.tuning;
+                        }
+                        VolumetricDebugResult::Reset => {
+                            overlay.tuning = VolumetricTuning::default();
+                            self.volumetric_tuning = overlay.tuning;
+                            match persistence::clear_tuning_override("VolumetricTuning") {
+                                Ok(()) => log::info!(
+                                    "[Debug] Cleared VolumetricTuning override"
+                                ),
+                                Err(e) => log::warn!(
+                                    "[Debug] Failed to clear VolumetricTuning override: {e}"
+                                ),
+                            }
+                        }
+                        VolumetricDebugResult::SaveAsDefault => {
+                            self.volumetric_tuning = overlay.tuning;
+                            match persistence::save_tuning_override(
+                                "VolumetricTuning",
+                                &overlay.tuning,
+                            ) {
+                                Ok(()) => log::info!(
+                                    "[Debug] Saved VolumetricTuning override"
+                                ),
+                                Err(e) => log::warn!(
+                                    "[Debug] Failed to save VolumetricTuning override: {e}"
+                                ),
+                            }
+                        }
+                        VolumetricDebugResult::Close => {
+                            self.volumetric_tuning = overlay.tuning;
+                            self.debug.volumetric_debug_overlay = None;
+                            log::info!("[Debug] Closed volumetric debug overlay");
+                        }
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
                 // 3c. If a modal is active, intercept input.
                 if self.modals.is_active() {
                     for a in &actions {
                         match a {
                             UiAction::Confirm => {
+                                if let Some(version) = self.pending_update_prompt.take() {
+                                    self.update_checker.start_install(version);
+                                }
                                 self.modals.advance_page();
                                 break;
                             }
                             UiAction::Cancel => {
+                                if self.pending_update_prompt.take().is_some() {
+                                    log::info!("user skipped update");
+                                }
                                 self.modals.dismiss();
                                 break;
                             }
@@ -2330,6 +2732,10 @@ impl ApplicationHandler for App {
                     .renderer
                     .as_ref()
                     .and_then(|r| r.pick_gameplay_object(cursor_pos.0, cursor_pos.1));
+                let picked_collection_object = self
+                    .renderer
+                    .as_ref()
+                    .and_then(|r| r.pick_collection_object(cursor_pos.0, cursor_pos.1));
                 let picked_hand_tile_for_update = self
                     .renderer
                     .as_ref()
@@ -2354,6 +2760,7 @@ impl ApplicationHandler for App {
                     cascade_tuning: &self.cascade_tuning,
                     picked_shop_object,
                     picked_gameplay_object,
+                    picked_collection_object,
                     input_mode: self
                         .input
                         .as_ref()
@@ -2368,7 +2775,9 @@ impl ApplicationHandler for App {
                     resume_scene: self.resume_scene,
                     transitioning: self.pending_scene.is_some(),
                     overlay_request: &mut overlay_request,
+                    headless: false,
                 };
+                let updated_overlay = !self.overlay_stack.is_empty();
                 let update_result = if let Some(top) = self.overlay_stack.last_mut() {
                     top.update(ctx)
                 } else {
@@ -2416,6 +2825,7 @@ impl ApplicationHandler for App {
                     self.transition_timer = 0.0;
                     // Start fade-out transition.
                     self.pending_scene = Some(next_scene);
+                    self.pending_scene_targets_overlay = updated_overlay;
                     self.transition_alpha = 1.0;
                 }
 
@@ -2441,9 +2851,8 @@ impl ApplicationHandler for App {
                     self.audio.set_sfx_volume(opts.sfx_volume);
                     self.audio.set_music_volume(opts.music_volume);
                     self.audio.set_enabled(opts.sfx_enabled);
-                    self.gfx.smoke_intensity = opts.smoke_intensity;
-                    self.gfx.smoke_detail = opts.smoke_detail;
-                    self.gfx.smoke_sim_quality = opts.smoke_sim_quality;
+                    self.gfx.smoke_quality = opts.smoke_quality;
+                    self.gfx.smoke_amount = opts.smoke_amount;
                     self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
                     self.gfx.tile_material = opts.tile_material;
@@ -2541,11 +2950,21 @@ impl ApplicationHandler for App {
                                     | (Scene::TutorialCampaign(_), Scene::Shop(_))
                                     | (Scene::Shop(_), Scene::PickBlind(_))
                             );
-                            if let Some(top) = self.overlay_stack.last_mut() {
-                                *top = next;
+                            // Route the new scene to the target recorded
+                            // when the transition started, not whatever is
+                            // on top now — overlays may have been pushed
+                            // mid-fade (e.g. a zodiac celebration after a
+                            // skip) and must not clobber them.
+                            if self.pending_scene_targets_overlay {
+                                if let Some(top) = self.overlay_stack.last_mut() {
+                                    *top = next;
+                                } else {
+                                    self.scene = next;
+                                }
                             } else {
                                 self.scene = next;
                             }
+                            self.pending_scene_targets_overlay = false;
                             if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                                 self.resume_scene = scene;
                             }
@@ -2587,10 +3006,72 @@ impl ApplicationHandler for App {
                     self.quit_requested = true;
                 }
 
+                // Headless screenshot tick. We render `warmup_frames + 1`
+                // total frames: warmup frames let async loaders settle, then
+                // the final draw is the one captured. The renderer writes
+                // the PNG synchronously during that draw (between submit
+                // and present). After it returns, the file is on disk.
+                let mut should_capture_this_frame = false;
+                if let Some(shot) = self.headless_screenshot.as_ref() {
+                    if shot.frames_remaining == 0 {
+                        should_capture_this_frame = true;
+                        let path = shot.output.clone();
+                        if let Some(r) = self.renderer.as_ref() {
+                            r.queue_screenshot(path);
+                        }
+                    }
+                }
+
                 // Cursor → smoke impulses are now injected by the renderer
                 // itself (it has the gameplay camera matrices required to
                 // unproject the cursor onto the table plane).
                 self.draw();
+
+                if let Some(shot) = self.headless_screenshot.as_mut() {
+                    if should_capture_this_frame {
+                        // Verify the renderer actually consumed the
+                        // queued screenshot — when the swapchain returns
+                        // Outdated/Lost the draw early-returns and the
+                        // queued path is left untouched. In that case,
+                        // tick to the next frame instead of exiting
+                        // with no file written. Bounded by `retries` so
+                        // a permanently-broken swapchain doesn't loop.
+                        let still_pending = self
+                            .renderer
+                            .as_ref()
+                            .map(|r| r.screenshot_pending())
+                            .unwrap_or(false);
+                        if still_pending && shot.retries < 30 {
+                            shot.retries += 1;
+                            log::warn!(
+                                "screenshot: capture frame dropped, retry {}",
+                                shot.retries
+                            );
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                        } else {
+                            if still_pending {
+                                log::error!(
+                                    "screenshot: still pending after {} retries, exiting anyway",
+                                    shot.retries
+                                );
+                            } else {
+                                log::info!(
+                                    "screenshot saved → {}",
+                                    shot.output.display()
+                                );
+                            }
+                            self.headless_screenshot = None;
+                            event_loop.exit();
+                        }
+                    } else {
+                        shot.frames_remaining = shot.frames_remaining.saturating_sub(1);
+                        if let Some(w) = self.window.as_ref() {
+                            w.request_redraw();
+                        }
+                    }
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
@@ -3179,8 +3660,9 @@ impl ApplicationHandler for App {
                     }
 
                     let mut v = Vec::new();
+                    let shift = self.modifiers.shift_key();
                     let mode_changed = if let Some(input) = self.input.as_mut() {
-                        input.on_key(event.physical_key, &mut v)
+                        input.on_key(event.physical_key, shift, &mut v)
                     } else {
                         false
                     };
@@ -3231,7 +3713,7 @@ impl ApplicationHandler for App {
             || collection_3d
             || transitioning
             || self.modals.needs_redraw()
-            || self.gfx.smoke_intensity != crate::persistence::SmokeIntensity::Off
+            || self.gfx.smoke_quality != crate::persistence::SmokeQuality::Off
             || self.tooltips.is_active()
             || gameplay_active
             || shop_active
@@ -3242,6 +3724,254 @@ impl ApplicationHandler for App {
                 w.request_redraw();
             }
         }
+    }
+}
+
+/// Map a user-supplied `--boss` slug (case-insensitive, spaces/underscores
+/// interchangeable) to a `BossKind`. Matches against canonical `name()`
+/// strings so e.g. "tax_collector", "Tax Collector", and "TaxCollector"
+/// all resolve to `BossKind::TaxCollector`.
+fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
+    let normalized = slug
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-', ' '], "");
+    let normalize = |s: &str| {
+        s.to_ascii_lowercase()
+            .replace(['_', '-', ' ', '\''], "")
+            .replace("the", "")
+    };
+    for def in crate::core::boss::ALL_BOSSES
+        .iter()
+        .chain(crate::core::boss::FINAL_BOSSES.iter())
+    {
+        if normalize(def.name) == normalized
+            || format!("{:?}", def.kind).to_ascii_lowercase() == normalized
+        {
+            return Ok(def.kind);
+        }
+    }
+    anyhow::bail!("unknown --boss '{slug}'");
+}
+
+/// Force the given run into the Boss blind with `kind` as the upcoming
+/// boss, and resolve the boss effect so gameplay-side rendering picks up
+/// the rule override. Used by the `screenshot` CLI to preview boss cards
+/// and in-round ofuda art without walking through pick_blind.
+fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
+    run.blind = crate::core::rules::BlindKind::Boss;
+    run.upcoming_blind = crate::core::rules::BlindKind::Boss;
+    run.ante = kind.def().min_ante.max(run.ante);
+    run.boss.upcoming = Some(kind);
+    run.resolve_upcoming_boss();
+    run.apply_blind(crate::core::rules::BlindKind::Boss);
+}
+
+/// Minimal non-winit runner used by the `screenshot` CLI path. Builds an
+/// offscreen `WgpuRenderer`, renders `warmup_frames + 1` frames of the
+/// target scene, and writes the PNG through the same renderer code path
+/// the interactive capture uses. No window, no `ApplicationHandler`, no
+/// swapchain `Outdated` retries — on macOS this is what lets CI + local
+/// screenshot tests work without needing a visible foreground window.
+///
+/// `App` is deeply coupled to `winit::ApplicationHandler` and threads a
+/// `Window` through its whole lifecycle; duplicating that coupling here
+/// would be worse than this slim parallel runner. The scene draw path
+/// (`Scene::draw_frame` + `WgpuRenderer::render`) is what both paths share.
+struct HeadlessApp {
+    renderer: WgpuRenderer,
+    layout_engine: UiLayout,
+    scene: Scene,
+    run: RunState,
+    anim: AnimationController,
+    progress: crate::core::progression::PlayerProgress,
+    active_profile: usize,
+    gfx: RenderSettings,
+    shop_smoke_tuning: ShopSmokeTuning,
+    volumetric_tuning: VolumetricTuning,
+    width: u32,
+    height: u32,
+    game_in_progress: bool,
+}
+
+impl HeadlessApp {
+    fn with_run(
+        scene: Scene,
+        run: RunState,
+        width: u32,
+        height: u32,
+        game_in_progress: bool,
+        fresh_progress: bool,
+    ) -> anyhow::Result<Self> {
+        let settings = persistence::load_settings();
+        let active_profile = settings.active_profile;
+        let progress = if fresh_progress {
+            crate::core::progression::PlayerProgress::new()
+        } else {
+            persistence::load_profile(active_profile)
+        };
+        let renderer = WgpuRenderer::new(render::wgpu_renderer::TargetInit::Headless {
+            width,
+            height,
+            hdr_enabled: false,
+        })?;
+        Ok(Self {
+            renderer,
+            layout_engine: UiLayout::new(),
+            scene,
+            run,
+            anim: AnimationController::new(),
+            progress,
+            active_profile,
+            gfx: RenderSettings {
+                smoke_quality: settings.smoke_quality,
+                smoke_amount: settings.smoke_amount,
+                effects_quality: settings.effects_quality,
+                tile_preset: settings.tile_preset,
+                tile_material: settings.tile_material,
+                gamma: settings.gamma,
+                shadows_enabled: settings.shadows_enabled,
+                ssr_enabled: settings.ssr_enabled,
+                hdr_enabled: false,
+                ui_scale: settings.ui_scale,
+            },
+            shop_smoke_tuning: persistence::load_tuning_override::<ShopSmokeTuning>(
+                "ShopSmokeTuning",
+            ),
+            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
+                "VolumetricTuning",
+            ),
+            width,
+            height,
+            game_in_progress,
+        })
+    }
+
+    fn tick(&mut self) {
+        let now = Instant::now();
+        self.anim.update(now);
+        let layout = self
+            .layout_engine
+            .solve(self.width as f32, self.height as f32);
+        let mut bus = EventBus::default();
+        let mut quit_requested = false;
+        let mut switch_profile: Option<usize> = None;
+        let mut delete_profile: Option<usize> = None;
+        let mut complete_onboarding = false;
+        let mut overlay_request: Option<scenes::OverlayRequest> = None;
+        let update_ctx = UpdateCtx {
+            actions: &[],
+            button_clicks: &[],
+            progress: &self.progress,
+            run: &mut self.run,
+            bus: &mut bus,
+            anim: &mut self.anim,
+            layout: &layout,
+            focus_tile_index: 0,
+            quit_requested: &mut quit_requested,
+            switch_profile: &mut switch_profile,
+            delete_profile: &mut delete_profile,
+            complete_onboarding: &mut complete_onboarding,
+            cursor_pos: (0.0, 0.0),
+            loading_done: !self.renderer.is_loading(),
+            cascade_tuning: &CascadeTuning::default(),
+            picked_shop_object: None,
+            picked_gameplay_object: None,
+            picked_collection_object: None,
+            input_mode: InputMode::Cursor,
+            picked_hand_tile: None,
+            scroll_lines: 0.0,
+            ui_scale: self.gfx.ui_scale,
+            tutorial_eligible: false,
+            multiple_materials: self.progress.plastic_unlocked(),
+            resume_scene: persistence::ResumeScene::default(),
+            transitioning: false,
+            overlay_request: &mut overlay_request,
+            headless: true,
+        };
+        let _ = self.scene.update(update_ctx);
+        let ctx = DrawCtx {
+            layout: &layout,
+            anim: &self.anim,
+            run: &self.run,
+            progress: &self.progress,
+            active_profile: self.active_profile,
+            game_in_progress: self.game_in_progress,
+            proj: self.renderer.projections(),
+            picked_gameplay_object: None,
+            picked_shop_object: None,
+            debug_visibility: scenes::DebugVisibility {
+                hide_candles: false,
+                hide_blind_plaque: false,
+                hide_scoring_placard: false,
+            },
+            ui_scale: self.gfx.ui_scale,
+            modal_active: false,
+            arrange_preview: None,
+            shop_smoke_tuning: &self.shop_smoke_tuning,
+        };
+        let frame: UiFrame = self.scene.draw_frame(ctx);
+
+        let active_scene_key: Option<&'static str> = match &self.scene {
+            Scene::Shop(_) => Some("shop"),
+            Scene::Gameplay(_) => Some("gameplay"),
+            Scene::Collection(_) => Some("collection"),
+            Scene::StartScreen(_) => Some("start_screen"),
+            Scene::TutorialCampaign(_) => Some("tutorial"),
+            _ => None,
+        };
+        self.renderer.set_active_scene(active_scene_key);
+        self.renderer
+            .set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+        self.renderer
+            .set_dust_strength(self.volumetric_tuning.dust_strength);
+        self.renderer.set_haze_tuning(
+            self.volumetric_tuning.haze_density,
+            self.volumetric_tuning.haze_color_r,
+            self.volumetric_tuning.haze_color_g,
+            self.volumetric_tuning.haze_color_b,
+            self.volumetric_tuning.haze_horizon_y,
+            self.volumetric_tuning.haze_drift_speed,
+        );
+
+        let active_material = frame
+            .tile_material_override
+            .unwrap_or(self.gfx.tile_material);
+
+        if let Err(e) = self.renderer.render(
+            &frame,
+            self.gfx.smoke_quality,
+            self.gfx.smoke_amount,
+            self.gfx.effects_quality,
+            self.gfx.tile_preset,
+            active_material,
+            8.0,
+            10.0,
+            self.gfx.gamma,
+            self.gfx.shadows_enabled,
+            self.gfx.ssr_enabled,
+        ) {
+            log::error!("headless render: {e:?}");
+        }
+    }
+
+    /// Render `warmup_frames + 1` frames, queue a screenshot on the last
+    /// frame, and return. The PNG is written synchronously during the
+    /// final `render()` call (see `WgpuRenderer::render` end-of-frame).
+    fn run_screenshot(mut self, output: PathBuf, warmup_frames: u32) -> anyhow::Result<()> {
+        for _ in 0..warmup_frames {
+            self.tick();
+        }
+        self.renderer.queue_screenshot(output.clone());
+        self.tick();
+        if self.renderer.screenshot_pending() {
+            anyhow::bail!(
+                "headless screenshot: final tick did not consume the queued path ({})",
+                output.display()
+            );
+        }
+        log::info!("screenshot saved → {}", output.display());
+        Ok(())
     }
 }
 
@@ -3315,6 +4045,42 @@ fn main() -> anyhow::Result<()> {
             );
             render_bot_graphs(repo_root)?;
             println!("regenerated docs bot balance graphs");
+            return Ok(());
+        }
+        Some(Command::Screenshot(s)) => {
+            asset_path::log_all_assets();
+            let boss_override = s
+                .boss
+                .as_deref()
+                .map(parse_boss_slug)
+                .transpose()?;
+            let mut run = RunState::new_demo();
+            if let Some(kind) = boss_override {
+                force_boss_blind(&mut run, kind);
+            }
+            let (scene, game_in_progress) = match s.scene.as_str() {
+                "collection" => (Scene::Collection(scenes::CollectionScene::new()), false),
+                "yaku_journal" => (Scene::YakuJournal(scenes::YakuJournalScene::new()), false),
+                "gameplay" => (Scene::Gameplay(GameplayScene::new()), true),
+                "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
+                "shop" => (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true),
+                "start_screen" => (Scene::StartScreen(scenes::StartScreenScene::new()), false),
+                other => {
+                    anyhow::bail!(
+                        "unsupported --scene '{other}' (supported: collection, \
+                        yaku_journal, gameplay, pick_blind, shop, start_screen)"
+                    )
+                }
+            };
+            let app = HeadlessApp::with_run(
+                scene,
+                run,
+                s.width.max(1),
+                s.height.max(1),
+                game_in_progress,
+                s.fresh_progress,
+            )?;
+            app.run_screenshot(s.output.clone(), s.warmup_frames)?;
             return Ok(());
         }
         None => {}

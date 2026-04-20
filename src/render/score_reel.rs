@@ -23,7 +23,7 @@
 
 use std::time::Instant;
 
-use crate::render::draw_cmd::{ExtrudedGlyphPlacement, GlyphMaterial};
+use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
 
 // ── Tuning constants ──────────────────────────────────────────────────────
 
@@ -219,7 +219,7 @@ impl ScoreReel {
         rot_y: f32,
         target: Option<u64>,
         scale: f32,
-    ) -> Vec<ExtrudedGlyphPlacement> {
+    ) -> Vec<Object3d> {
         let col_w = COLUMN_WIDTH * scale;
         let slot_h = SLOT_HEIGHT * scale;
         let digit_scale = DIGIT_SCALE * scale;
@@ -430,15 +430,25 @@ fn make_placement(
     color: [f32; 4],
     emissive: f32,
     digit_scale: f32,
-) -> ExtrudedGlyphPlacement {
-    ExtrudedGlyphPlacement {
-        world_pos: [col_px, anchor_py, lift + z_offset],
-        scale: digit_scale,
-        rotation_x: PITCH,
-        rotation_y: rot_y,
-        label: label.to_string(),
+) -> Object3d {
+    Object3d {
+        pos: [col_px, anchor_py, lift + z_offset],
+        extents: [1.0, 1.0, 1.0],
+        rotation: glam::Mat4::IDENTITY,
         color,
-        emissive,
-        material: GlyphMaterial::Plain,
+        kind: Object3dKind::ExtrudedGlyph {
+            scale: digit_scale,
+            rotation_x: PITCH,
+            rotation_y: rot_y,
+            label: label.to_string(),
+            emissive,
+            material: GlyphMaterial::Plain,
+        },
+        focusable: false,
+        scene_shaded: true,
+        own_light: None,
+        hover_target: 0.0,
+        anim_id: 0,
+        arrange_name: None,
     }
 }

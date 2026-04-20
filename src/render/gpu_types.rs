@@ -439,10 +439,6 @@ pub const MAX_WALL_TILE_SLOTS: usize = 80;
 /// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
 /// strip adds 2 more during an active cascade.
 pub const MAX_CASCADE_TOKEN_SLOTS: usize = 32;
-/// Maximum number of physical falling-bone instances in flight at once.
-/// Sized to comfortably hold a multi-step cascade's worth of bursts (each
-/// scoring step spawns a small handful) without overflowing the pool.
-pub const MAX_FALLING_BONE_SLOTS: usize = 192;
 /// Maximum number of in-flight 3D extruded-glyph score popups. A single
 /// cascade rarely fires more than 8-10 steps, so 32 is plenty for the
 /// per-step popups plus the running-total readout that holds across the

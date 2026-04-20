@@ -40,150 +40,126 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Smoke effect intensity levels.
+/// Smoke simulation quality. Bundles grid resolution, raymarch step floor,
+/// and offscreen-target downsampling into a single perf knob. `Off`
+/// short-circuits the simulation entirely.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SmokeIntensity {
+pub enum SmokeQuality {
     Off,
-    Subtle,
-    Strong,
-    OverTheTop,
-}
-
-impl SmokeIntensity {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::Subtle,
-            Self::Subtle => Self::Strong,
-            Self::Strong => Self::OverTheTop,
-            Self::OverTheTop => Self::Off,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Off => Self::OverTheTop,
-            Self::Subtle => Self::Off,
-            Self::Strong => Self::Subtle,
-            Self::OverTheTop => Self::Strong,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Subtle => "Subtle",
-            Self::Strong => "Strong",
-            Self::OverTheTop => "Over the Top",
-        }
-    }
-}
-
-fn default_smoke() -> SmokeIntensity {
-    SmokeIntensity::Subtle
-}
-
-/// Smoke render detail — controls the resolution scale of the offscreen
-/// raymarch target. The volumetric pass is the dominant frame cost on most
-/// machines (a per-pixel ray-march with per-step lighting), so dropping it
-/// to half/quarter/eighth resolution and bilinearly upsampling buys back
-/// 3-8× of that pass for a barely perceptible quality hit on the smoke
-/// itself, which is naturally low-frequency.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SmokeDetail {
-    /// Render the volumetric pass at native swapchain resolution.
-    Full,
-    /// Half the swapchain in each axis (1/4 the pixels).
-    Half,
-    /// Quarter resolution in each axis (1/16 the pixels).
-    Quarter,
-    /// Eighth resolution in each axis (1/64 the pixels).
-    Eighth,
-}
-
-impl SmokeDetail {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Full => Self::Half,
-            Self::Half => Self::Quarter,
-            Self::Quarter => Self::Eighth,
-            Self::Eighth => Self::Full,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Full => Self::Eighth,
-            Self::Half => Self::Full,
-            Self::Quarter => Self::Half,
-            Self::Eighth => Self::Quarter,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Full => "1x (Native)",
-            Self::Half => "2x (Half)",
-            Self::Quarter => "4x (Quarter)",
-            Self::Eighth => "8x (Eighth)",
-        }
-    }
-
-    /// Linear divisor applied to width and height. The offscreen smoke
-    /// target is `(screen_w / divisor()) × (screen_h / divisor())`.
-    pub fn divisor(self) -> u32 {
-        match self {
-            Self::Full => 1,
-            Self::Half => 2,
-            Self::Quarter => 4,
-            Self::Eighth => 8,
-        }
-    }
-}
-
-fn default_smoke_detail() -> SmokeDetail {
-    // Half-resolution is the sweet spot: ~4× cheaper than native with no
-    // visible quality loss on the volumetric smoke.
-    SmokeDetail::Half
-}
-
-/// Simulation quality for the volumetric smoke field itself. This is
-/// independent from [`SmokeDetail`], which only controls the resolution of
-/// the offscreen raymarch/composite target.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SmokeSimQuality {
-    Standard,
+    Low,
+    Medium,
     High,
     Ultra,
 }
 
-impl SmokeSimQuality {
+impl SmokeQuality {
     pub fn next(self) -> Self {
         match self {
-            Self::Standard => Self::High,
+            Self::Off => Self::Low,
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
             Self::High => Self::Ultra,
-            Self::Ultra => Self::Standard,
+            Self::Ultra => Self::Off,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Standard => Self::Ultra,
-            Self::High => Self::Standard,
+            Self::Off => Self::Ultra,
+            Self::Low => Self::Off,
+            Self::Medium => Self::Low,
+            Self::High => Self::Medium,
             Self::Ultra => Self::High,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Standard => "Standard",
+            Self::Off => "Off",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
             Self::High => "High",
             Self::Ultra => "Ultra",
         }
     }
+
+    /// Linear divisor for the offscreen raymarch target. Smoke is a
+    /// low-frequency field — the bilateral composite upsample hides the
+    /// divisor cleanly, and the raymarch is fullscreen-fragment-bound, so
+    /// halving the target is a ~4× win. Temporal reprojection in the
+    /// raymarch reconstructs detail across frames, so even Ultra can run
+    /// at half-res without visible softening.
+    pub fn target_divisor(self) -> u32 {
+        match self {
+            Self::Off => 1,
+            Self::Low => 4,
+            Self::Medium => 2,
+            Self::High => 2,
+            Self::Ultra => 2,
+        }
+    }
 }
 
-fn default_smoke_sim_quality() -> SmokeSimQuality {
-    SmokeSimQuality::High
+fn default_smoke_quality() -> SmokeQuality {
+    SmokeQuality::High
+}
+
+/// How much smoke the cursor injects per puff. Pure look knob — doesn't
+/// touch sim cost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SmokeAmount {
+    Light,
+    Medium,
+    Heavy,
+}
+
+impl SmokeAmount {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Light => Self::Medium,
+            Self::Medium => Self::Heavy,
+            Self::Heavy => Self::Light,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Light => Self::Heavy,
+            Self::Medium => Self::Light,
+            Self::Heavy => Self::Medium,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Light => "Light",
+            Self::Medium => "Medium",
+            Self::Heavy => "Heavy",
+        }
+    }
+
+    /// Multiplier applied to per-puff injection density.
+    pub fn density_mul(self) -> f32 {
+        match self {
+            Self::Light => 0.55,
+            Self::Medium => 1.0,
+            Self::Heavy => 1.6,
+        }
+    }
+
+    /// Maximum alpha the volumetric composite is allowed to reach. Heavier
+    /// amounts let dense plumes silhouette properly.
+    pub fn max_alpha(self) -> f32 {
+        match self {
+            Self::Light => 0.50,
+            Self::Medium => 0.70,
+            Self::Heavy => 0.88,
+        }
+    }
+}
+
+fn default_smoke_amount() -> SmokeAmount {
+    SmokeAmount::Medium
 }
 
 /// Controls the quality of fullscreen vignette effects (starfield, ember
@@ -374,12 +350,10 @@ pub struct AppSettings {
     pub music_volume: f32,
     #[serde(default = "default_true")]
     pub sfx_enabled: bool,
-    #[serde(default = "default_smoke")]
-    pub smoke_intensity: SmokeIntensity,
-    #[serde(default = "default_smoke_detail")]
-    pub smoke_detail: SmokeDetail,
-    #[serde(default = "default_smoke_sim_quality")]
-    pub smoke_sim_quality: SmokeSimQuality,
+    #[serde(default = "default_smoke_quality")]
+    pub smoke_quality: SmokeQuality,
+    #[serde(default = "default_smoke_amount")]
+    pub smoke_amount: SmokeAmount,
     #[serde(default = "default_effects_quality")]
     pub effects_quality: EffectsQuality,
     #[serde(default = "default_tile_preset")]
@@ -431,9 +405,8 @@ impl Default for AppSettings {
             sfx_volume: 0.7,
             music_volume: 0.7,
             sfx_enabled: true,
-            smoke_intensity: SmokeIntensity::Subtle,
-            smoke_detail: SmokeDetail::Half,
-            smoke_sim_quality: SmokeSimQuality::High,
+            smoke_quality: SmokeQuality::High,
+            smoke_amount: SmokeAmount::Medium,
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
@@ -469,6 +442,70 @@ pub fn load_settings() -> AppSettings {
 pub fn save_settings(settings: &AppSettings) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(settings).context("serialize settings")?;
     fs::write(settings_path(), json).context("write settings")
+}
+
+// ── Tuning overrides ────────────────────────────────────────────────────
+//
+// A small persistence layer that lets the debug overlays promote a live-
+// edited tuning struct to a "user default" that survives restarts. Values
+// live in `tuning_overrides.json` keyed by struct name. `load_or_default`
+// reads the override if present, falling back to `Default::default()`.
+// When a value is promoted into code (copied into the `Default` impl),
+// clear the override with `clear_tuning_override` so the code default
+// takes over again.
+
+const TUNING_OVERRIDES_NAME: &str = "tuning_overrides.json";
+
+fn tuning_overrides_path() -> PathBuf {
+    data_dir().join(TUNING_OVERRIDES_NAME)
+}
+
+fn read_tuning_overrides() -> serde_json::Map<String, serde_json::Value> {
+    let path = tuning_overrides_path();
+    if !path.exists() {
+        return serde_json::Map::new();
+    }
+    let data = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return serde_json::Map::new(),
+    };
+    match serde_json::from_str::<serde_json::Value>(&data) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
+    }
+}
+
+fn write_tuning_overrides(map: &serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(map).context("serialize tuning overrides")?;
+    fs::write(tuning_overrides_path(), json).context("write tuning overrides")
+}
+
+/// Load an override for `T` keyed by `name`, or fall back to `Default`.
+/// `name` should uniquely identify the struct (typically its type name).
+pub fn load_tuning_override<T: serde::de::DeserializeOwned + Default>(name: &str) -> T {
+    let map = read_tuning_overrides();
+    match map.get(name) {
+        Some(v) => serde_json::from_value(v.clone()).unwrap_or_default(),
+        None => T::default(),
+    }
+}
+
+/// Promote the current value of `T` to the persistent override.
+pub fn save_tuning_override<T: serde::Serialize>(name: &str, value: &T) -> anyhow::Result<()> {
+    let mut map = read_tuning_overrides();
+    let v = serde_json::to_value(value).context("serialize tuning value")?;
+    map.insert(name.to_string(), v);
+    write_tuning_overrides(&map)
+}
+
+/// Remove a persisted override so the code default applies on next load.
+pub fn clear_tuning_override(name: &str) -> anyhow::Result<()> {
+    let mut map = read_tuning_overrides();
+    if map.remove(name).is_some() {
+        write_tuning_overrides(&map)
+    } else {
+        Ok(())
+    }
 }
 
 fn profile_path(index: usize) -> PathBuf {

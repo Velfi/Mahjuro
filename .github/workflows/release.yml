@@ -434,12 +434,40 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if python3 scripts/extract_release_notes.py "$RELEASE_TAG" > release-notes.md; then
+            echo "have_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no CHANGELOG section for $RELEASE_TAG — falling back to auto-generated notes" >&2
+            echo "have_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release (with CHANGELOG body)
+        if: steps.notes.outputs.have_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Mahjuro ${{ env.RELEASE_TAG }}
+          draft: false
+          prerelease: false
+          body_path: release-notes.md
+          files: artifacts/*
+
+      - name: Create GitHub Release (auto-generated fallback)
+        if: steps.notes.outputs.have_notes != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}

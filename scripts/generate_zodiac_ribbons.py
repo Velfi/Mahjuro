@@ -52,33 +52,41 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "textures"
 # Shared style constants
 # ---------------------------------------------------------------------------
 
-# Base style shared by all three pieces. The silk fabric MUST fill the
-# entire frame edge-to-edge — any background bleed shows as a halo on
-# the 3D ribbon mesh.
+# Base style shared by all three pieces. The silk fabric fills the entire
+# frame edge-to-edge; any background bleed would show as a halo on the 3D
+# ribbon mesh. The three pieces are generated in independent API calls, so
+# the per-piece styles below cannot reference "the other pieces" — they
+# must state absolute constraints (e.g. exact silk color and weave
+# direction at the joining edge) that each piece can satisfy on its own.
 STYLE_BASE = (
     "Texture tile for a hanging silk ribbon in a 'Midnight Gold' mahjong "
-    "roguelite video game. The image is a SQUARE filled edge-to-edge with "
+    "roguelite video game. The image is a square filled edge-to-edge with "
     "woven silk fabric — the silk reaches all four borders of the frame, "
-    "with NO outer background, NO drop shadow, NO vignette, NO floor, NO "
-    "wall, NO surrounding scene. The texture will be wrapped onto a 3D "
-    "ribbon mesh, so the entire frame must be the ribbon itself. "
-    "The silk has a subtle vertical weave grain and a soft satin sheen, "
-    "with a thin metallic gold trim braid running down each long (left "
-    "and right) edge. "
-    "Flat orthographic front-on view, no perspective, no foreshortening. "
-    "No text, no letters, no numbers, no logos, no watermarks, no "
-    "signatures."
+    "and the silk IS the whole image (no surrounding scene, no mount, no "
+    "shadow, no vignette). The texture will be wrapped onto a 3D ribbon "
+    "mesh, so the entire frame must be the ribbon itself. "
+    "The silk has a subtle vertical weave grain (weave threads run top-to-"
+    "bottom) and a soft satin sheen, with a thin metallic gold trim braid "
+    "running down each long (left and right) edge. "
+    "Flat orthographic front-on view, purely pictorial decoration only — "
+    "no written glyphs, numerals, or logos of any language on the silk."
 )
 
 # Per-piece style suffixes.
+#
+# IMPORTANT: each piece is generated independently, so "tile seamlessly with
+# the other piece" is not an instruction the model can verify. Instead we
+# describe the absolute state of the joining edge: a band of plain silk of
+# the specified `Silk color`, vertical weave direction, no decoration.
 STYLE_TOP = (
     "This is the TOP CAP of the ribbon. The top edge has a decorative "
     "gold tassel knot or finial — an ornate gathered fabric rosette with "
-    "a hanging loop, as if the ribbon is pinned to a wall. The bottom "
-    "edge is plain silk that will tile seamlessly with the middle piece, "
-    "so it must be uninterrupted fabric with no decoration near the "
-    "bottom border. No animal, no embroidery subject — only the knot "
-    "and plain silk."
+    "a hanging loop, as if the ribbon is pinned to a wall. "
+    "The bottom 15% of the tile is an unbroken band of plain silk in the "
+    "exact silk color specified below, with the vertical weave running "
+    "top-to-bottom and no decoration, embroidery, or gradient crossing "
+    "into that band. This bottom band is the joining edge; the silk color "
+    "and weave must be identical there to the rest of the silk."
 )
 
 STYLE_MID = (
@@ -87,20 +95,26 @@ STYLE_MID = (
     "clean readable silhouette, slight cartoon personality (animal is "
     "mildly self-aware, deadpan), bold flat shapes with thick darker "
     "outlines so it reads from across the room. "
-    "The top and bottom edges are plain uninterrupted silk so this tile "
-    "can repeat vertically and also tile seamlessly with the top and "
-    "bottom cap pieces. No decoration touches the top or bottom border."
+    "The top 15% and bottom 15% of the tile are unbroken bands of plain "
+    "silk in the exact silk color specified below, with the vertical weave "
+    "running top-to-bottom and no embroidery or decoration crossing into "
+    "those bands. These bands are the joining edges — the silk color, "
+    "weave direction, and brightness must be identical at the very top "
+    "pixel row and the very bottom pixel row so the tile can repeat "
+    "vertically without a visible seam."
 )
 
 STYLE_BOT = (
     "This is the BOTTOM CAP of the ribbon. The bottom edge tapers to a "
-    "decorative point or V-notch cut, with a small abstract gold "
-    "ornamental flourish (NOT a letter, NOT a Chinese character, NOT a "
-    "number) and delicate gold fringe threads hanging from the tip. The "
-    "top edge is plain silk that will tile seamlessly with the middle "
-    "piece, so it must be uninterrupted fabric with no decoration near "
-    "the top border. No animal, no embroidery subject — only the fringe "
-    "and plain silk."
+    "decorative point or V-notch cut with delicate gold fringe threads "
+    "hanging from the tip, plus one small purely-pictorial gold flourish "
+    "near the point — shaped as a dot, curl, teardrop, or small geometric "
+    "motif, with no resemblance to any script or numeral. "
+    "The top 15% of the tile is an unbroken band of plain silk in the "
+    "exact silk color specified below, with the vertical weave running "
+    "top-to-bottom and no decoration, embroidery, or gradient crossing "
+    "into that band. This top band is the joining edge; the silk color "
+    "and weave must be identical there to the rest of the silk."
 )
 
 PIECE_STYLES = {

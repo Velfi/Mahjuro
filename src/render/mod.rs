@@ -1,13 +1,13 @@
 pub mod animation;
 pub mod bone_tablet_mesh;
+pub mod brass_mesh;
+pub mod cabinet_mesh;
 
 pub mod candle_mesh;
 pub mod coin_mesh;
-pub mod curio_cabinet_mesh;
 pub mod decal;
 pub mod dora_plinth_mesh;
 pub mod draw_cmd;
-pub mod falling_bones;
 pub mod fluid;
 pub mod flying_coins;
 pub mod glyph_mesh;

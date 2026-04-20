@@ -76,6 +76,11 @@ pub enum MaterialKind {
     /// so the ceramic reads as glazed rather than matte plastic.
     /// Composites engraved decals (same `has_decal` path as Plain).
     Porcelain = 16,
+    /// Polished brass — warmer-biased conductor with a broader specular
+    /// lobe than [`MaterialKind::Metal`] so shelf fittings and display
+    /// rails read as museum-grade brass rather than steel. No heightmap;
+    /// the surface is smooth. `base_color` tints the conductor hue.
+    Brass = 17,
 }
 
 /// Compact per-mesh material parameters.

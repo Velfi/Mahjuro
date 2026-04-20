@@ -16,6 +16,7 @@
 //!   2/3  main pass (Pass A)
 //!   4/5  post-smoke pass (Pass B, optional)
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 const NUM_PASSES: usize = 5;
@@ -68,8 +69,10 @@ pub struct GpuProfiler {
     /// is on screen).
     pass_frame_counts: [u32; NUM_PASSES],
     /// Which passes ran in the most recent frame, so the readback knows
-    /// which slot pairs to trust.
-    last_frame_passes: [bool; NUM_PASSES],
+    /// which slot pairs to trust. Written via `Cell` from `pass_writes`
+    /// because callers hold an immutable borrow of `self` (closures
+    /// capturing `&self` for other fields) while encoding the frame.
+    last_frame_passes: [Cell<bool>; NUM_PASSES],
 }
 
 impl GpuProfiler {
@@ -107,7 +110,7 @@ impl GpuProfiler {
             capture_height: 0,
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
-            last_frame_passes: [false; NUM_PASSES],
+            last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
         }
     }
 
@@ -125,7 +128,7 @@ impl GpuProfiler {
             capture_height: 0,
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
-            last_frame_passes: [false; NUM_PASSES],
+            last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
         }
     }
 
@@ -151,7 +154,9 @@ impl GpuProfiler {
         self.capture_height = height;
         self.accum_ms = [0.0; NUM_PASSES];
         self.pass_frame_counts = [0; NUM_PASSES];
-        self.last_frame_passes = [false; NUM_PASSES];
+        for c in &self.last_frame_passes {
+            c.set(false);
+        }
         log::info!("[GpuProfiler] starting capture over {frames} frames");
     }
 
@@ -163,13 +168,13 @@ impl GpuProfiler {
     /// Build the timestamp_writes descriptor for a render pass slot. Returns
     /// `None` when no session is active so callers can pass it straight into
     /// `RenderPassDescriptor`. Records that the pass ran this frame.
-    pub fn pass_writes(&mut self, slot: PassSlot) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+    pub fn pass_writes(&self, slot: PassSlot) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         if !self.sampling {
             return None;
         }
         let qs = self.query_set.as_ref()?;
         let idx = slot as usize;
-        self.last_frame_passes[idx] = true;
+        self.last_frame_passes[idx].set(true);
         let begin = (idx * 2) as u32;
         Some(wgpu::RenderPassTimestampWrites {
             query_set: qs,
@@ -200,7 +205,7 @@ impl GpuProfiler {
             return;
         };
         let idx = slot as usize;
-        self.last_frame_passes[idx] = true;
+        self.last_frame_passes[idx].set(true);
         let query_idx = (idx * 2) as u32 + u32::from(is_end);
         encoder.write_timestamp(qs, query_idx);
     }
@@ -252,7 +257,7 @@ impl GpuProfiler {
                 let raw: &[u64] = bytemuck::cast_slice(&view);
                 debug_assert_eq!(raw.len(), NUM_PASSES * 2);
                 for (i, label) in PASS_LABELS.iter().enumerate() {
-                    if !self.last_frame_passes[i] {
+                    if !self.last_frame_passes[i].get() {
                         continue;
                     }
                     let begin = raw[i * 2];
@@ -279,7 +284,9 @@ impl GpuProfiler {
         }
 
         // Reset per-frame pass tracking for the next frame.
-        self.last_frame_passes = [false; NUM_PASSES];
+        for c in &self.last_frame_passes {
+            c.set(false);
+        }
 
         self.frames_remaining = self.frames_remaining.saturating_sub(1);
         if self.frames_remaining == 0 {

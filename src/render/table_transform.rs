@@ -10,8 +10,8 @@
 //! # Units
 //!
 //! - **Degrees** — parameters and [`crate::render::draw_cmd`] fields whose names end in `_deg`.
-//! - **Radians** — `*_rad` helpers, physics (`FallingBonePlacement::rotation`), hand/showcase
-//!   tile euler triples, and anything passed to [`rot_euler_xyz_rad`].
+//! - **Radians** — `*_rad` helpers, hand/showcase tile euler triples, and anything
+//!   passed to [`rot_euler_xyz_rad`].
 //!
 //! # Matrices
 //!
@@ -28,7 +28,6 @@
 //! | [`rot_rz_rx_deg`] | `Rz * Rx` | Wood / yaku HUD tablets, bronze mirror |
 //! | [`rot_rz_rx_ry_deg`] | `Rz * Rx * Ry` | General [`crate::render::draw_cmd::Object3d`] placement |
 //! | [`rot_euler_xyz_rad`] | `glam::EulerRot::XYZ` | Hand tiles + showcase tiles |
-//! | [`rot_ry_rx_rz_rad`] | `Ry * Rx * Rz` | Falling cascade bones (radians; sim integrates `rotation[]`) |
 //! | [`rot_z_rad`] / [`rot_x_rad`] | single axis | Spin / pitch in Z-up world (e.g. coins: `rot_z` = yaw on table) |
 //! | [`mesh_y_thickness_along_local_y_to_z_up`] | `Rx(+π/2)` | Coin/candle meshes with thickness on **local +Y** → **world +Z** (sits on XY felt) |
 //! | [`tile_mesh_local_to_world`] | fixed permutation | Mahjong tile GLB local → world (see doc) |
@@ -125,12 +124,6 @@ pub fn tile_mesh_local_to_world() -> Mat4 {
 #[inline]
 pub fn mesh_y_thickness_along_local_y_to_z_up() -> Mat4 {
     Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2)
-}
-
-/// `Ry * Rx * Rz` in radians — falling bone tumbling (`rotation[0]` = X, `[1]` = Y, `[2]` = Z).
-#[inline]
-pub fn rot_ry_rx_rz_rad(rot_x: f32, rot_y: f32, rot_z: f32) -> Mat4 {
-    Mat4::from_rotation_y(rot_y) * Mat4::from_rotation_x(rot_x) * Mat4::from_rotation_z(rot_z)
 }
 
 /// Extruded score popups: yaw around **Z** then pitch around **X** (pitch includes the `-π/2` camera-face term in call sites).

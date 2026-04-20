@@ -206,27 +206,3 @@ pub fn build_candle_wick_mesh() -> MeshCpu {
 /// point lights at the actual top of the candle.
 pub const WICK_TIP_Y: f32 = 0.610;
 
-/// One candle's per-frame placement, submitted by gameplay-style scenes via
-/// [`crate::render::draw_cmd::DrawCmd::CandleBatch`]. The renderer scales the
-/// shared procedural mesh by `scale` and translates it to `world_pos`.
-#[derive(Clone, Copy, Debug)]
-pub struct CandlePlacement {
-    /// World-space position of the candle's *base* (matches the wax mesh's
-    /// local origin at y=0). x/y are in pixel space (with y still measured
-    /// downward — the renderer handles the y-flip when building the model
-    /// matrix); z is the depth offset relative to the table plane.
-    pub world_pos: [f32; 3],
-    /// Uniform scale applied to the local-unit mesh. A scale of `s` produces
-    /// a candle of total visible height ≈ `s * 1.0` pixels.
-    pub scale: f32,
-    /// Per-candle flicker brightness multiplier in [0, 1]; the renderer can
-    /// use this for any future per-instance shading. Currently unused on the
-    /// mesh side — the lighting flicker is driven entirely by the candle's
-    /// matching `PointLight`.
-    #[allow(dead_code)]
-    pub flicker: f32,
-    /// Extra Y-axis scale multiplier applied on top of `scale` so each candle
-    /// can be a slightly different height without changing its width. A value
-    /// of 1.0 means the candle is its normal height.
-    pub height_scale: f32,
-}

@@ -1,12 +1,17 @@
 //! Meta progression and unlocks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::boss::BossKind;
+use crate::core::consumable::Consumable;
 use crate::core::relic::RelicId;
-use crate::core::rules::RuleModifier;
+use crate::core::rules::{BlindKind, RuleModifier};
+use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
+use crate::game::event_bus::GameOverReason;
+use crate::persistence::TileMaterial;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PlayerProgress {
@@ -29,6 +34,103 @@ pub struct PlayerProgress {
     /// Unlocks the Plastic tile material.
     #[serde(default)]
     pub has_won: bool,
+    /// Times each boss was selected via PlayBlind on a Boss blind. Keys
+    /// present in this map are "encountered" and appear in the Collection's
+    /// Bosses tab; unseen bosses stay hidden.
+    #[serde(default)]
+    pub boss_times_encountered: HashMap<BossKind, u32>,
+    /// Times each boss was defeated (blind cleared with
+    /// `reached_target: true` while `self.blind == Boss`).
+    #[serde(default)]
+    pub boss_times_defeated: HashMap<BossKind, u32>,
+    /// Times each talisman was purchased from the shop. Pack-acquired or
+    /// granted talismans don't count. Keys gate the Collection's
+    /// Talismans tab.
+    #[serde(default)]
+    pub talisman_times_purchased: HashMap<TalismanKind, u32>,
+    /// Times each talisman was consumed (used from the consumable dish).
+    /// Strict subset of purchased in practice, but kept separate because
+    /// "times used" is the more interesting stat to display.
+    #[serde(default)]
+    pub talisman_times_used: HashMap<TalismanKind, u32>,
+    /// Times each yaku was scored on a committed hand. Keys gate the
+    /// Collection's Yaku tab.
+    #[serde(default)]
+    pub yaku_times_scored: HashMap<YakuKind, u32>,
+    /// Times each relic activated (fired its effect). Drives the Relic
+    /// stats plaque; does not gate visibility (relics still use the
+    /// level-gated `available_relics()` path for the Collection grid).
+    #[serde(default)]
+    pub relic_times_activated: HashMap<RelicId, u32>,
+    /// Append-only log of every run that reached the defeat or victory
+    /// screen. One row per finished run — rage-quits and still-in-progress
+    /// runs do not land here. Source of truth for run-outcome analytics;
+    /// aggregate rollups (total victories, deaths_by_blind, etc.) can be
+    /// computed from this on demand.
+    #[serde(default)]
+    pub run_history: Vec<RunRecord>,
+}
+
+/// Terminal outcome of a single run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunOutcome {
+    Victory,
+    Defeat { reason: GameOverReason },
+}
+
+/// Snapshot of a finished run at the moment the defeat or victory screen
+/// opened. Schema mirrors `bot::RunStats` where the data exists on
+/// `RunState`; append-only so older profiles remain readable (all new
+/// fields carry `#[serde(default)]`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunRecord {
+    /// Seconds since the Unix epoch when the run ended. 0 if the system
+    /// clock is unavailable (should never happen in practice).
+    #[serde(default)]
+    pub timestamp_unix: u64,
+    pub run_number: u32,
+    pub outcome: RunOutcome,
+    // ── Where the run ended ──────────────────────────────────────────
+    /// Ante the run ended on. Victory => the cleared final ante;
+    /// defeat => the ante the player died on.
+    pub final_ante: u32,
+    /// Blind the run ended on. Victory => the final Boss blind;
+    /// defeat => the blind the player failed to clear.
+    pub final_blind: BlindKind,
+    /// Specific boss facing the player when the run ended, if any.
+    /// Only meaningful when `final_blind == Boss`.
+    #[serde(default)]
+    pub final_boss: Option<BossKind>,
+    // ── Score / resources at end of run ──────────────────────────────
+    /// Score on the final round (the losing or winning round).
+    pub round_score: u64,
+    pub target_score: u32,
+    /// Cumulative score earned across the whole run.
+    pub total_score_earned: u64,
+    pub final_gold: i32,
+    pub plays_remaining: u32,
+    pub discards_remaining: u32,
+    pub plays_max: u32,
+    pub discards_max: u32,
+    // ── Run-wide counters ────────────────────────────────────────────
+    pub tiles_played: u32,
+    pub tiles_discarded: u32,
+    pub times_restocked: u32,
+    pub best_structure_score: u64,
+    pub best_structure_name: String,
+    /// Per-yaku play counts for this run. Snapshot, not cumulative
+    /// across runs (that lives on `PlayerProgress::yaku_times_scored`).
+    #[serde(default)]
+    pub yaku_times_played: HashMap<YakuKind, u32>,
+    // ── Loadout at end of run ────────────────────────────────────────
+    pub relics_owned: Vec<RelicId>,
+    pub consumables_owned: Vec<Consumable>,
+    pub tile_material: TileMaterial,
+    /// Whether this run was a tutorial run. Tutorials reach the
+    /// defeat/victory screen too, but analytics usually wants to filter
+    /// them out.
+    #[serde(default)]
+    pub tutorial_run: bool,
 }
 
 impl PlayerProgress {
@@ -42,6 +144,13 @@ impl PlayerProgress {
             starting_relic_slots: 0,
             tutorial_completed: false,
             has_won: false,
+            boss_times_encountered: HashMap::new(),
+            boss_times_defeated: HashMap::new(),
+            talisman_times_purchased: HashMap::new(),
+            talisman_times_used: HashMap::new(),
+            yaku_times_scored: HashMap::new(),
+            relic_times_activated: HashMap::new(),
+            run_history: Vec::new(),
         }
     }
 
@@ -140,6 +249,49 @@ impl PlayerProgress {
     }
 }
 
+impl RunRecord {
+    /// Capture a run's terminal state into a `RunRecord`. Called from
+    /// the App layer when either the victory screen or the defeat screen
+    /// is about to open — whichever branch fires first wins.
+    pub fn from_run(run: &crate::game::run::RunState, outcome: RunOutcome) -> Self {
+        let timestamp_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let final_boss = if run.blind == BlindKind::Boss {
+            run.boss.upcoming
+        } else {
+            None
+        };
+        Self {
+            timestamp_unix,
+            run_number: run.run_number,
+            outcome,
+            final_ante: run.ante,
+            final_blind: run.blind,
+            final_boss,
+            round_score: run.round_score,
+            target_score: run.target_score,
+            total_score_earned: run.total_score_earned,
+            final_gold: run.gold,
+            plays_remaining: run.plays_remaining,
+            discards_remaining: run.discards_remaining,
+            plays_max: run.plays_max,
+            discards_max: run.discards_max,
+            tiles_played: run.tiles_played,
+            tiles_discarded: run.tiles_discarded,
+            times_restocked: run.times_restocked,
+            best_structure_score: run.best_structure_score,
+            best_structure_name: run.best_structure_name.clone(),
+            yaku_times_played: run.yaku_times_played.clone(),
+            relics_owned: run.relics.active.clone(),
+            consumables_owned: run.consumables.items.clone(),
+            tile_material: run.mode.tile_material,
+            tutorial_run: run.tutorial.is_some(),
+        }
+    }
+}
+
 struct LevelUnlocks {
     relics: Vec<RelicId>,
     rules: Vec<RuleModifier>,
@@ -161,9 +313,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::TripletBoost,
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
-                RelicId::ZodiacPouch,
                 RelicId::JadeSerpent,
-                RelicId::InkBrush,
+                RelicId::RedSerpent,
             ],
             rules: vec![RuleModifier::PairDoubleScore],
             yaku: vec![],
@@ -175,8 +326,15 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::GreenLuck,
                 RelicId::QuickDraw,
                 RelicId::ShantenShove,
-                RelicId::PearlDiver,
+                RelicId::BlueSerpent,
                 RelicId::LowTide,
+                RelicId::NoHonorButWealth,
+                RelicId::Sweepstakes,
+                RelicId::MeltingIce,
+                RelicId::GoldIdol,
+                RelicId::JadeAbacus,
+                RelicId::CrackedTile,
+                RelicId::Hanami,
             ],
             rules: vec![],
             yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
@@ -189,6 +347,15 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::RoundCompass,
                 RelicId::MerchantsEye,
                 RelicId::Momentum,
+                RelicId::KongCollector,
+                RelicId::BeggarsCup,
+                RelicId::Cosmopolitan,
+                RelicId::WallWeaver,
+                RelicId::NestEgg,
+                RelicId::Patience,
+                RelicId::GardenKeeper,
+                RelicId::PaperLantern,
+                RelicId::EmptyFrame,
             ],
             rules: vec![RuleModifier::SequenceWrap],
             yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
@@ -202,6 +369,12 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 // CodexCompass disabled — see core::relic::all_relic_defs.
                 RelicId::EdgeRunner,
                 RelicId::TurtleShell,
+                RelicId::Tourist,
+                RelicId::LeadingTile,
+                RelicId::GhostHand,
+                RelicId::CleanStreak,
+                RelicId::Bonfire,
+                RelicId::StarTile,
             ],
             rules: vec![RuleModifier::NoSequenceBonus],
             yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
@@ -217,6 +390,12 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::LuckySeven,
                 RelicId::Minimalist,
                 RelicId::Disgust,
+                RelicId::Heirloom,
+                RelicId::SilkThread,
+                RelicId::LowEcho,
+                RelicId::Ikebana,
+                RelicId::TilePolisher,
+                RelicId::TeaCeremony,
             ],
             rules: vec![RuleModifier::HonorTripleScore],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
@@ -230,6 +409,12 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::SecondWind,
                 RelicId::GoldFurnace,
                 RelicId::ClosedGate,
+                RelicId::RiverRunner,
+                RelicId::WayOfPurity,
+                RelicId::WayOfPairs,
+                RelicId::WayOfTriplets,
+                RelicId::WayOfSequences,
+                RelicId::Obsession,
             ],
             rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
             yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
@@ -243,6 +428,16 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::KongsBlessing,
                 RelicId::GlassCannon,
                 RelicId::Snowball,
+                RelicId::CurioCabinet,
+                RelicId::LotusBloom,
+                RelicId::LastBreath,
+                RelicId::IronLantern,
+                RelicId::FortunesFavor,
+                RelicId::SmokeBomb,
+                RelicId::PhantomRelic,
+                RelicId::RitualBlade,
+                RelicId::MirrorTile,
+                RelicId::ShadowHand,
             ],
             rules: vec![],
             yaku: vec![],

@@ -12,29 +12,36 @@ direction: enamel-pin badges (readable silhouette, metal rims, enamel fills).
     `src/render/relic_pipeline.rs`.
   • `{slug}_height.png` — grayscale **relief guide**. At runtime this path is
     the linear height / `relief_tex` bind (same stem as `RelicId::source_heightmap_path`).
+  • `{slug}_mask.png` — binary silhouette (L-mode PNG) derived from the cleaned
+    object alpha. Matches `RelicId::source_mask_path` and feeds the mesh
+    extrusion path in `src/render/relic_pipeline.rs`. Rewritten whenever the
+    object is (re)generated or re-cleaned. Disable with `--skip-mask`.
 
-**Not written here** — produced by `scripts/derive_relic_runtime_textures.py`:
+**Not written here**:
 
   • `assets/textures/relics/{slug}.png` — derived runtime albedo (preferred in-game).
-  • `source/{slug}_mask.png` — optional silhouette for mesh extrusion (`--emit-masks`).
 
 The game’s load order and fallbacks live in `src/render/relic_pipeline.rs`.
 
+Backgrounds on generated `*_object.png` are stripped in-place via `rembg`
+(u2net) so the saved PNG has a clean transparent alpha. Disable with
+`--skip-bg-removal`; rerun only the clean pass on existing files with
+`--reclean-bg`.
+
 Usage:
-    pip install openai requests
+    pip install openai requests rembg pillow onnxruntime
     export OPENAI_API_KEY="sk-..."
     python scripts/generate_relic_art.py                       # all missing source assets
     python scripts/generate_relic_art.py --artifact object     # only object renders
     python scripts/generate_relic_art.py --artifact height     # only relief/height sources
+    python scripts/generate_relic_art.py --artifact mask       # only rewrite masks from existing objects
     python scripts/generate_relic_art.py --artifact both --name overflow
     python scripts/generate_relic_art.py --force               # regenerate all
     python scripts/generate_relic_art.py --relic 17            # one relic by index
     python scripts/generate_relic_art.py --name kan_drum       # one relic by slug
     python scripts/generate_relic_art.py --list                # list all relics
     python scripts/generate_relic_art.py --dry-run             # print prompts only
-
-After source PNGs exist, run `derive_relic_runtime_textures.py` (or
-`pipeline_relic_ai.py`) so `relics/{slug}.png` and masks stay in sync.
+    python scripts/generate_relic_art.py --reclean-bg          # strip bg + rewrite masks on existing objects
 """
 
 import argparse
@@ -61,29 +68,28 @@ OUTPUT_DIR = (
 
 # Shared style prefix injected into every prompt. Tuned for isolated enamel-pin
 # style relic renders that can be reviewed directly and fed into silhouette /
-# relief derivation.
+# relief derivation. Background handling is set per-artifact in the builder
+# functions (transparent for object, black for height) — intentionally omitted here.
 STYLE_PREFIX = (
     "A single isolated collectible enamel pin relic designed for a game asset "
-    "pipeline. Front-facing or near-orthographic presentation, centered "
-    "composition, full object visible, no frame, no card backing, no "
-    "typography, no logo, no extra props, no background scene clutter. Render "
-    "it like a polished hard-enamel lapel pin with crisp metal outlines, "
-    "distinct color cells, strong silhouette readability, and minimal "
-    "perspective distortion."
+    "pipeline. Front-facing near-orthographic presentation, centered "
+    "composition, full object visible. Polished hard-enamel lapel pin look: "
+    "crisp metal outlines, distinct flat color cells, strong silhouette "
+    "readability, minimal perspective distortion."
 )
 
 
 # Each tuple: (filename_slug, display_name, visual_description, palette_hint)
 # Order and slugs MUST match RelicId::asset_filename in src/core/relic.rs.
 RELICS = [
-    # ── 15 retuned keepers ────────────────────────────────────────────────
     (
         "triplet_boost",
         "Triplet Boost",
-        "A heavy triple-barreled siege mortar on a wheeled wooden carriage, "
-        "three stubby barrels bundled together with iron bands. Parked on "
-        "muddy cobblestones, dusk sky behind. Baroque-era field weapon feel.",
-        "Dark iron barrels, warm brown carriage, ochre mud, amber dusk sky.",
+        "Three identical mahjong tiles standing upright in a straight "
+        "horizontal row on an emerald felt table, with crackling gold "
+        "lightning arcing tile-to-tile between their faces in chained bolts. "
+        "A few stray tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, crackling gold lightning, muted crimson marks.",
     ),
     (
         "sequence_surge",
@@ -96,10 +102,11 @@ RELICS = [
     (
         "pair_power",
         "Pair Power",
-        "Two identical compact steam tractors facing each other, connected "
-        "by a heavy tow chain under tension. Both are straining, smokestacks "
-        "puffing. A muddy field stretches behind them.",
-        "Dark green tractors, black smoke, rust chain, ochre mud.",
+        "Two identical mahjong tiles standing upright side by side on a felt "
+        "table, touching at the edge, with a subtle shockwave ring rippling "
+        "outward from the seam between them. A few stray tiles lie blurred "
+        "in the background.",
+        "Ivory tile faces, deep emerald felt, warm gold shockwave, muted bamboo green marks.",
     ),
     (
         "honor_fury",
@@ -152,10 +159,11 @@ RELICS = [
     (
         "quick_draw",
         "Quick Draw",
-        "A spring-loaded naval torpedo launcher on a destroyer deck, the "
-        "torpedo half-ejected in a freeze-frame moment. Spray of seawater "
-        "caught mid-splash. Dramatic side lighting.",
-        "Dark steel launcher, brass torpedo, teal ocean spray, grey deck.",
+        "A lone revolver mid-unholster from a worn leather gun belt, barrel "
+        "already clearing the lip of the holster in a freeze-frame blur. A "
+        "single brass cartridge glints in the foreground. Dusty saloon plank "
+        "floor, low raking sunlight through slats.",
+        "Blued steel revolver, tan leather belt, brass cartridge, warm dusty amber light.",
     ),
     (
         "chain_reaction",
@@ -176,10 +184,11 @@ RELICS = [
     (
         "set_magnet",
         "Set Magnet",
-        "A massive electromagnetic crane in a rail yard, its circular magnet "
-        "dangling a cluster of steel beams and scrap. A freight train waits "
-        "on adjacent tracks. Industrial scale, afternoon haze.",
-        "Dark crane arm, rust-orange magnet, steel blue scrap, ochre haze.",
+        "A chunk of raw magnetite ore resting on a felt table, with one "
+        "mahjong tile lifting free from a row of face-down wall tiles and "
+        "floating toward three matching tiles already gathered beside the "
+        "stone. Faint iron filings cling to the ore's crystalline facets.",
+        "Blue-black magnetite, silver-grey filings, ivory tile faces, deep emerald felt.",
     ),
     (
         "wild_winds",
@@ -197,14 +206,14 @@ RELICS = [
         "echo-wave arcs visible in the misty air before it.",
         "Pale concrete dish, teal mist, amber echo arcs, grey-green bluff.",
     ),
-    # ── 15 new Patch C relics ─────────────────────────────────────────────
     (
         "shanten_shove",
         "Shanten Shove",
-        "A hydraulic ram piston mounted on a factory floor, its chrome shaft "
-        "extended mid-push against a heavy steel block. Oil gleams on the "
-        "mechanism. Industrial precision, dramatic side-lighting.",
-        "Chrome piston, dark steel block, amber oil sheen, concrete floor.",
+        "A hand of mahjong tiles standing in a neat row on a felt table, "
+        "with one extra tile being nudged forward into the last open slot "
+        "by an unseen force — a faint push-line trailing behind it. The "
+        "arrangement reads as one tile away from complete.",
+        "Ivory tile faces, deep emerald felt, warm gold push line, muted ink markings.",
     ),
     (
         "kan_drum",
@@ -233,10 +242,10 @@ RELICS = [
     (
         "tenpai_talisman",
         "Tenpai Talisman",
-        "A tall narrow signal semaphore arm at a rail junction, locked in the "
-        "'clear' position. A single red lantern glows at the pivot. Iron "
-        "lattice post, gravel rail bed, dusk sky.",
-        "Iron post, crimson lantern, rust semaphore arm, amber dusk.",
+        "A folded paper omamori charm with a silk tassel and drawstring, its "
+        "face stamped with a single mahjong tile glyph surrounded by a ring "
+        "of small waiting-tile icons, as if the final tile is about to arrive.",
+        "Deep indigo silk, gold ink stamp, ivory tile glyph, crimson tassel cord.",
     ),
     (
         "river_eraser",
@@ -263,14 +272,6 @@ RELICS = [
         "Polished brass housing, cream compass card, warm teak wood.",
     ),
     (
-        "zodiac_pouch",
-        "Zodiac Pouch",
-        "A leather map case — cylindrical, with a brass cap and shoulder "
-        "strap — standing upright with a rolled star chart peeking from the "
-        "top. A brass zodiac dial is embossed on the side.",
-        "Brown leather, brass cap and dial, cream chart edge, olive strap.",
-    ),
-    (
         "lunar_almanac",
         "Lunar Almanac",
         "A thick leather-bound nautical almanac lying open on a chart table, "
@@ -289,10 +290,10 @@ RELICS = [
     (
         "kongs_blessing",
         "Kong's Blessing",
-        "Four identical artillery shells standing upright in a wooden crate, "
-        "perfectly aligned, with a thin halo of light around the group. A "
-        "quartermaster's storage room, shelves of supplies behind.",
-        "Brass shells, raw wood crate, amber halo, olive-drab shelving.",
+        "Four identical mahjong tiles stood upright side by side on an altar "
+        "cloth, perfectly aligned, with a bright ring of golden light arcing "
+        "overhead and thin incense smoke curling up past the tiles.",
+        "Ivory tile faces, deep vermilion altar cloth, bright gold halo, soft incense haze.",
     ),
     (
         "codex_compass",
@@ -302,7 +303,6 @@ RELICS = [
         "Mountain pass landscape, low clouds.",
         "Brass theodolite, dark wood tripod, cream logbook, slate mountains.",
     ),
-    # ── Flower-synergy relics ────────────────────────────────────────────
     (
         "garden_keeper",
         "Garden Keeper",
@@ -314,10 +314,10 @@ RELICS = [
     (
         "ikebana",
         "Ikebana",
-        "A ceramic kiln — dome-shaped, brick-built — with its firing door "
-        "slightly ajar, revealing a warm orange glow inside. Two finished "
-        "vases cool on a rack beside it. Rural Japanese pottery workshop.",
-        "Rust brick kiln, orange interior glow, cream vases, earth tones.",
+        "A shallow ceramic suiban vase holding a minimalist flower "
+        "arrangement — a single upright branch of pine, a curved iris stem, "
+        "and one white chrysanthemum — balanced on a tokonoma alcove shelf.",
+        "Pale celadon vase, dark pine, violet iris, white bloom, muted tatami backdrop.",
     ),
     (
         "hanami",
@@ -327,30 +327,32 @@ RELICS = [
         "Gold-painted price placards lean against the boxes. Spring market.",
         "Warm wood cart, pink petals, gold placards, soft daylight.",
     ),
-    # ── 15 new relics ────────────────────────────────────────────────────
     (
         "jade_serpent",
         "Jade Serpent",
-        "A narrow armored train car painted dark jade green, with a coiled "
-        "serpent insignia on the side. It sits on overgrown tracks in dense "
-        "bamboo forest. Vines wrap the undercarriage. Forgotten but intact.",
-        "Jade green armor plating, dark bamboo, rust tracks, grey-green vines.",
+        "A jade-green snake coiled around a bundle of bamboo stalks, its "
+        "scales formed from tiny mahjong tile faces. A simple terrarium "
+        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
+        "slightly off — the snake has too-large friendly eyes.",
+        "Cream background, jade green snake, bamboo greens, muted moss and pebble accents.",
     ),
     (
-        "ink_brush",
-        "Ink Brush",
-        "A mechanical printing press — the hand-cranked flatbed type — with "
-        "a sheet of paper mid-feed showing freshly stamped characters still "
-        "glistening wet. Ink rollers gleam. Dim workshop lighting.",
-        "Black iron press, dark ink rollers, cream paper, amber lamplight.",
+        "red_serpent",
+        "Red Serpent",
+        "A red snake coiled around a single Chinese mahjong character tile, "
+        "its scales formed from tiny mahjong tile faces. A simple terrarium "
+        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
+        "slightly off — the snake has too-large friendly eyes.",
+        "Cream background, crimson snake, ivory tile with dark ink character, muted moss and pebble accents.",
     ),
     (
-        "pearl_diver",
-        "Pearl Diver",
-        "A brass diving helmet — the classic round deep-sea type with small "
-        "viewports — sitting on a dock piling, air hose coiled beside it. "
-        "Harbour water below, diving barge in background.",
-        "Patina brass helmet, dark rubber hose, teal harbour water.",
+        "blue_serpent",
+        "Blue Serpent",
+        "A blue snake coiled around a single blue mahjong circles/dots tile, "
+        "its scales formed from tiny mahjong tile faces. A simple terrarium "
+        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
+        "slightly off — the snake has too-large friendly eyes.",
+        "Cream background, cobalt blue snake, ivory tile with blue dot pips, muted moss and pebble accents.",
     ),
     (
         "low_tide",
@@ -387,10 +389,11 @@ RELICS = [
     (
         "momentum",
         "Momentum",
-        "A Newton's cradle — five steel balls on wire frames — captured at "
-        "the moment of impact, the end ball swinging out with motion blur. "
-        "Sits on a polished mahogany desk. Executive office setting.",
-        "Chrome steel balls, dark wire frame, warm mahogany, amber light.",
+        "A stack of mahjong tiles tipping forward like falling dominoes, "
+        "with the last few tiles in the chain already airborne and trailing "
+        "bright motion streaks. Energy visibly accumulates toward the leading "
+        "edge of the cascade.",
+        "Ivory tile faces, deep ink markings, warm gold motion streaks, dark felt underneath.",
     ),
     (
         "minimalist",
@@ -427,10 +430,10 @@ RELICS = [
     (
         "snowball",
         "Snowball",
-        "A large steel ball-bearing rolling down a factory ramp, picking up "
-        "smaller ball-bearings that stick to it magnetically as it goes. "
-        "Growing noticeably larger toward the bottom. Assembly-line setting.",
-        "Chrome steel ball, smaller bearings, grey ramp, industrial green.",
+        "A hefty snowball mid-roll down a pine-shadowed hillside, its surface "
+        "crusted with bark flecks and pebbles gathered on the way. A widening "
+        "track carves through deep powder behind it.",
+        "Bright packed snow, blue shadows, dark pines, scattered debris, crisp winter light.",
     ),
     (
         "second_wind",
@@ -448,7 +451,6 @@ RELICS = [
         "the light. An oversized brass shell sits beside it, ready to load.",
         "Translucent blue-tinted glass, brass shell, hairline crack glints.",
     ),
-    # ── Balatro-inspired relics (Patch F/G) ────────────────────────────
     (
         "last_breath",
         "Last Breath",
@@ -460,10 +462,11 @@ RELICS = [
     (
         "tile_polisher",
         "Tile Polisher",
-        "A compact polishing wheel pressing against a mahjong tile face, "
-        "throwing off tiny bright sparks. Simple workshop-tool silhouette, "
-        "clean and emblematic.",
-        "Cream tile, brushed steel wheel, warm brass fittings, golden sparks.",
+        "A mahjong tile held upright on a soft cloth, its face buffed to a "
+        "mirror gloss with a bright crescent highlight and a small cluster "
+        "of sparkle glints, flanked by a folded polishing rag and a tiny "
+        "bottle of wax.",
+        "Pearl ivory tile, warm beige cloth, soft gold sparkles, deep amber wax bottle.",
     ),
     (
         "paper_lantern",
@@ -490,9 +493,10 @@ RELICS = [
     (
         "way_of_purity",
         "Way of Purity",
-        "A ceremonial crest showing a single elegant suit symbol enclosed "
-        "inside a pure circular border, minimal and disciplined.",
-        "Soft ivory, pale jade green, warm gold edging, charcoal ink accents.",
+        "Three identical suited mahjong tiles arranged in a tight vertical "
+        "stack, each bearing the same clean numeric mark, haloed by a thin "
+        "luminous ring that signals a flawless single-suit hand.",
+        "Crisp ivory tile faces, deep bamboo green marks, pale jade halo, warm gold rim light.",
     ),
     (
         "leading_tile",
@@ -504,9 +508,11 @@ RELICS = [
     (
         "low_echo",
         "Low Echo",
-        "A repeating wave motif made from small low-ranked tile symbols, "
-        "stacked like resonant echoes radiating outward.",
-        "Ivory symbols, teal shadow echoes, pale gold border, deep slate accents.",
+        "Four low-numbered mahjong tiles (1, 2, 3, 4) standing in a row on "
+        "a dark felt table, with translucent duplicate silhouettes of each "
+        "tile radiating outward behind them like acoustic echoes. Faint "
+        "concentric sound rings ripple from the group.",
+        "Ivory tile faces, deep ink numerals, pale teal echo silhouettes, dark felt, soft gold rings.",
     ),
     (
         "tea_ceremony",
@@ -660,9 +666,11 @@ RELICS = [
     (
         "phantom_relic",
         "Phantom Relic",
-        "A mysterious duplicate relic silhouette offset behind a primary one, "
-        "like a spectral afterimage of another treasure.",
-        "Cool silver body, pale cyan phantom glow, deep indigo shadows, muted gold rim.",
+        "An ornate jeweled treasure chest resting on a dark stone pedestal, "
+        "with a translucent ghostly duplicate of the same chest drifting out "
+        "of it like vapor, slightly offset and hovering. Faint wisps of mist "
+        "curl from the seam.",
+        "Aged gold chest, deep mahogany wood, pale cyan phantom glow, cool indigo shadows.",
     ),
     (
         "ritual_blade",
@@ -679,6 +687,85 @@ RELICS = [
         "South arms hanging slack. A pale sour wisp curls from the joined mouth.",
         "Tarnished bronze body, muted teal patina, pale sickly green wisp, charcoal accents.",
     ),
+    (
+        "curio_cabinet",
+        "Curio Cabinet",
+        "A miniature glass-fronted display cabinet crammed with tiny assorted "
+        "relics on stepped shelves, each visible through the door pane. A small "
+        "brass keyhole sits at the center. Collector-shelf vibe compressed to a "
+        "single badge silhouette.",
+        "Warm mahogany frame, pale amber glass, brass fittings, muted multicolor shelf contents.",
+    ),
+    (
+        "lotus_bloom",
+        "Lotus Bloom",
+        "A single stylized lotus flower in full bloom, layered petals radiating "
+        "outward from a gold seedpod center, with a trailing stem curling below. "
+        "Iconic badge framing, symmetrical.",
+        "Soft pink petals, cream inner tones, gold seedpod, deep jade leaf accents.",
+    ),
+    (
+        "wall_weaver",
+        "Wall Weaver",
+        "A loom frame weaving a tight lattice of tiny mahjong tiles together like "
+        "fabric, with a shuttle paused mid-pass. Render as a clean crest showing "
+        "a densely packed tile-wall weave.",
+        "Warm wood loom, ivory woven tiles, dark ink grid lines, muted gold shuttle.",
+    ),
+    (
+        "kong_collector",
+        "Kong Collector",
+        "Four matching mahjong tiles stacked in a perfect square bundle, bound "
+        "together by a tight gold cord with a hanging coin tassel. Trophy-like, "
+        "compact, iconic.",
+        "Ivory tiles, dark ink faces, warm gold cord, polished coin tassel.",
+    ),
+    (
+        "no_honor_but_wealth",
+        "No Honor But Wealth",
+        "A toppled honor tile lying face-down at the base of a neat stack of gold "
+        "coins, a single coin balanced on edge atop the stack. Greedy, irreverent, "
+        "badge-clean.",
+        "Ivory honor tile, warm gold coins, deep crimson accents, charcoal shadow.",
+    ),
+    (
+        "sweepstakes",
+        "Sweepstakes",
+        "A small spinning prize drum on a stand, its handle mid-turn, with a "
+        "single golden ticket half-ejected from the slot. A couple of stray "
+        "paper slips drift nearby. Carnival-lucky energy.",
+        "Polished brass drum, cream tickets, muted crimson stand, soft gold highlights.",
+    ),
+    (
+        "beggars_cup",
+        "Beggar's Cup",
+        "A dented tin alms cup resting on worn cobblestones, a single gold coin "
+        "inside and a second coin balanced on the rim. Humble but slowly filling.",
+        "Battered pewter cup, warm gold coins, muted slate cobbles, soft amber highlight.",
+    ),
+    (
+        "cosmopolitan",
+        "Cosmopolitan",
+        "A compact travel trunk plastered with small yaku-symbol stamps like "
+        "passport stickers, a pair of leather straps crossing the lid. Worldly, "
+        "well-traveled, badge-readable.",
+        "Warm tan leather, dark brass corners, muted multicolor stamps, ivory highlights.",
+    ),
+    (
+        "heirloom",
+        "Heirloom",
+        "An ornate antique pocket watch hanging from a fine chain, its engraved "
+        "back faintly worn from generations of handling. A subtle patina gleam "
+        "catches the rim. Timeless keepsake feel.",
+        "Deep gold casing, warm amber patina, ivory watch face, dark brown chain accents.",
+    ),
+    (
+        "tourist",
+        "Tourist",
+        "A small brass compass lying atop a folded paper map, with a tiny camera "
+        "and a luggage tag beside it. Travelogue motif packed into a single crest.",
+        "Warm brass compass, cream paper map, muted teal tag, soft tan luggage tones.",
+    ),
 ]
 
 
@@ -686,29 +773,99 @@ def build_object_prompt(name: str, visual: str, palette: str) -> str:
     """Prompt for the transparent color render (`*_object.png` — albedo fallback for the loader)."""
     return (
         f"{STYLE_PREFIX}\n\n"
-        f"Asset type: 3D relic source object render\n"
-        f"Primary request: create the relic '{name}' as a single enamel pin relic.\n"
-        f"Subject: reinterpret this motif as an enamel pin badge rather than a full scene: {visual}\n"
+        f"Asset type: enamel pin relic color render (RGBA, transparent background).\n"
+        f"Relic name: '{name}'.\n"
+        f"Subject: use only the central subject from this description; ignore any environment, scene, or setting words: {visual}\n"
         f"Color palette: {palette}\n"
-        "Style/medium: polished stylized 3D enamel pin render, readable at game-camera scale.\n"
-        "Composition/framing: centered, square, object fills about 75% of the frame, front-facing, minimal tilt.\n"
-        "Lighting/mood: neutral studio key light plus soft rim light, very little cast shadow.\n"
-        "Materials/textures: hard enamel color fills separated by raised polished metal borders; outer rim should be thick and readable.\n"
-        "Constraints: the provided grayscale relief guide is the source of truth for SHAPE and SILHOUETTE only. Match it exactly: same outer silhouette, same centered placement, same internal divider layout, same major shapes, same front-facing orientation. Only add color/material information on top of that structure. "
-        "Interpreting the relief guide: ONLY pure black pixels OUTSIDE the outer silhouette are empty background. Any gray or dark-gray region INSIDE the silhouette is a low-relief recessed enamel fill — it must be painted as solid opaque enamel in the color render, NOT left transparent, NOT rendered as a hole, cutout, gap, window, or opening. The pin is a single continuous solid object; do not punch holes through it and do not show anything behind it. "
-        "Do not invent or remove parts, do not change proportions, do not rotate or recompose the badge. Transparent or plain isolated background OUTSIDE the silhouette only, no text, no border, no extra objects, no tabletop scene, no environment."
+        "Style/medium: polished stylized enamel pin render, readable at game-camera scale.\n"
+        "Composition/framing: centered square, badge fills most of the frame with a small uniform margin, front-facing, minimal tilt.\n"
+        "Lighting/mood: neutral studio key plus soft rim light, faint contact shadow only.\n"
+        "Materials: hard enamel color fills separated by raised polished metal borders; the outer rim is thick and legible.\n"
+        "Background: fully transparent alpha outside the badge silhouette. The pin is a single continuous solid object — every region inside the outer silhouette is opaque enamel or metal, never a cutout or window.\n"
+        "Relief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add only color and material on top. Any gray region INSIDE the silhouette is a recessed enamel fill (paint it as solid opaque enamel), not a hole. Only the pure-black area OUTSIDE the silhouette becomes transparent.\n"
+        "Keep proportions, parts, and framing of the relief guide intact."
     )
 
 
 def build_height_prompt(name: str, visual: str) -> str:
     """Prompt for `*_height.png` — matches object silhouette; bound as linear GPU relief."""
     return (
-        f"Create a grayscale relief guide for the enamel pin relic '{name}'.\n"
-        f"Subject: reinterpret this motif as the same enamel pin badge design: {visual}\n"
-        "Output a centered square image on a black background with the same front-facing silhouette and internal partitions as the enamel pin object render.\n"
-        "White = highest polished metal rim or raised divider, mid-gray = enamel fill surface, black = empty background or deepest recess.\n"
-        "Design this as a clean blueprint for the later color object render. Do not invent a new composition, do not show perspective, do not add extra objects, no color, no text, no border."
+        f"Grayscale relief guide for the enamel pin relic '{name}'.\n"
+        f"Subject: use only the central subject from this description; ignore any environment, scene, or setting words: {visual}\n"
+        "Output: centered square, pure black background, front-facing near-orthographic enamel pin silhouette with clean internal partitions.\n"
+        "Tonal key (strict, flat regions with hard edges — no gradients, no texture, no noise within a region):\n"
+        "  - White: highest polished metal rim or raised divider.\n"
+        "  - Mid-gray: recessed enamel fill surface inside the silhouette.\n"
+        "  - Black: only the area OUTSIDE the outer silhouette.\n"
+        "Every area inside the outer silhouette must be gray or white — never black — so the later color pass treats it as a solid opaque enamel fill, not a cutout.\n"
+        "Monochrome only, no color, no text, no border, no frame."
     )
+
+
+_REMBG_SESSION = None
+
+
+def remove_background(path: Path) -> None:
+    """Replace `path` in-place with an alpha-matted RGBA PNG via rembg (u2net)."""
+    global _REMBG_SESSION
+    try:
+        from rembg import remove, new_session
+    except ImportError as e:
+        raise SystemExit(
+            "Error: rembg not installed. Run: pip install rembg pillow onnxruntime\n"
+            f"(import failed: {e})"
+        )
+    from PIL import Image
+    import io
+
+    if _REMBG_SESSION is None:
+        _REMBG_SESSION = new_session("u2net")
+
+    out_bytes = remove(path.read_bytes(), session=_REMBG_SESSION)
+    Image.open(io.BytesIO(out_bytes)).convert("RGBA").save(path, format="PNG")
+
+
+# Alpha threshold for the binary mask. Anti-aliased edge pixels sit in the
+# 1..254 range; anything at or above this becomes silhouette. Matches what a
+# forward-rendered extrusion would accept without eating feathered edges.
+MASK_ALPHA_THRESHOLD = 16
+
+
+def flatten_height_to_black_bg(path: Path) -> None:
+    """Composite `path` over pure black and save as grayscale L-mode PNG.
+
+    The height prompt asks for a black background, but the model sometimes
+    returns a transparent alpha or a near-black but non-zero background.
+    The relief loader reads this as linear height, so a non-black background
+    bleeds into the extrusion silhouette. Force it to true black here.
+    """
+    from PIL import Image
+
+    with Image.open(path) as im:
+        rgba = im.convert("RGBA")
+    black = Image.new("RGB", rgba.size, (0, 0, 0))
+    black.paste(rgba, mask=rgba.split()[-1])
+    black.convert("L").save(path, format="PNG")
+
+
+def write_mask_from_object(object_path: Path, mask_path: Path) -> bool:
+    """Write `mask_path` as a binary L-mode silhouette of `object_path`'s alpha.
+
+    Returns False if `object_path` is missing or the source is fully opaque
+    (raw API output before `rembg` — producing a full-rectangle mask would
+    be useless, so we refuse rather than write garbage).
+    """
+    from PIL import Image
+
+    if not object_path.exists():
+        return False
+    with Image.open(object_path) as im:
+        alpha = im.convert("RGBA").split()[-1]
+    if alpha.getextrema()[0] >= MASK_ALPHA_THRESHOLD:
+        return False
+    mask = alpha.point(lambda a: 255 if a >= MASK_ALPHA_THRESHOLD else 0, mode="L")
+    mask.save(mask_path, format="PNG")
+    return True
 
 
 def generate_image(
@@ -769,6 +926,8 @@ def artifact_targets(base_dir: Path, slug: str, artifact: str) -> list[tuple[str
         return [("object", base_dir / f"{slug}_object.png")]
     if artifact == "height":
         return [("height", base_dir / f"{slug}_height.png")]
+    if artifact == "mask":
+        return [("mask", base_dir / f"{slug}_mask.png")]
     return [
         ("height", base_dir / f"{slug}_height.png"),
         ("object", base_dir / f"{slug}_object.png"),
@@ -806,9 +965,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--artifact",
-        choices=("object", "height", "both"),
+        choices=("object", "height", "mask", "both"),
         default="both",
-        help="Which asset artifact to generate per relic (default: both).",
+        help=(
+            "Which asset artifact to generate per relic (default: both → "
+            "height+object+mask). 'mask' only re-derives masks from existing objects."
+        ),
+    )
+    parser.add_argument(
+        "--skip-mask",
+        action="store_true",
+        help="Do not rewrite *_mask.png when the object changes.",
     )
     parser.add_argument(
         "--model",
@@ -831,8 +998,8 @@ def main() -> None:
     parser.add_argument(
         "--delay",
         type=float,
-        default=2.0,
-        help="Seconds to sleep between API calls (default: 2.0).",
+        default=0.0,
+        help="Seconds to sleep between API calls (default: 0.0).",
     )
     parser.add_argument(
         "--height-mode",
@@ -864,16 +1031,29 @@ def main() -> None:
         default="high",
         help="Input fidelity for reference-based object generation (default: high).",
     )
+    parser.add_argument(
+        "--skip-bg-removal",
+        action="store_true",
+        help="Do not run rembg on generated *_object.png files.",
+    )
+    parser.add_argument(
+        "--reclean-bg",
+        action="store_true",
+        help=(
+            "Skip generation; just run rembg on existing *_object.png for the "
+            "selected relics. Useful for cleaning old assets."
+        ),
+    )
     args = parser.parse_args()
 
     if args.list:
         for i, (slug, name, _, _) in enumerate(RELICS, 1):
             print(
                 f"  {i:2d}. {name:<22s}  "
-                f"source/{slug}_object.png, source/{slug}_height.png"
+                f"source/{slug}_object.png, source/{slug}_height.png, source/{slug}_mask.png"
             )
         print(
-            "\n  Runtime: relics/{slug}.png (+ optional source/{slug}_mask.png) via derive_relic_runtime_textures.py"
+            "\n  Runtime albedo: relics/{slug}.png (derived separately)."
         )
         return
 
@@ -900,6 +1080,54 @@ def main() -> None:
         targets = [match]
     else:
         targets = list(enumerate(RELICS))
+
+    if args.reclean_bg:
+        cleaned = 0
+        missing = 0
+        for idx, (slug, name, _, _) in targets:
+            path = out_dir / f"{slug}_object.png"
+            if not path.exists():
+                print(f"[{idx + 1}] {name}: no {path.name} — skipping")
+                missing += 1
+                continue
+            print(f"[{idx + 1}] {name}: cleaning {path.name}")
+            remove_background(path)
+            cleaned += 1
+            if not args.skip_mask:
+                mask_path = out_dir / f"{slug}_mask.png"
+                if write_mask_from_object(path, mask_path):
+                    print(f"  Wrote mask: {mask_path.name}")
+                else:
+                    print(f"  Skipped mask: {path.name} is fully opaque")
+        print(f"\nDone. cleaned={cleaned} missing={missing} → {out_dir}")
+        return
+
+    if args.artifact == "mask":
+        wrote = 0
+        missing = 0
+        for idx, (slug, name, _, _) in targets:
+            obj = out_dir / f"{slug}_object.png"
+            mask_path = out_dir / f"{slug}_mask.png"
+            if mask_path.exists() and not args.force:
+                print(
+                    f"[{idx + 1}] {name}: mask exists — use --force to regenerate"
+                )
+                continue
+            if not obj.exists():
+                print(f"[{idx + 1}] {name}: no {obj.name} — skipping")
+                missing += 1
+                continue
+            if not write_mask_from_object(obj, mask_path):
+                print(
+                    f"[{idx + 1}] {name}: {obj.name} is fully opaque "
+                    "(run --reclean-bg first) — skipping"
+                )
+                missing += 1
+                continue
+            print(f"[{idx + 1}] {name}: wrote {mask_path.name}")
+            wrote += 1
+        print(f"\nDone. wrote={wrote} missing={missing} → {out_dir}")
+        return
 
     client = None
     if not args.dry_run:
@@ -952,6 +1180,13 @@ def main() -> None:
                             args.size,
                         )
                         generated += 1
+                        if not args.skip_bg_removal:
+                            remove_background(object_output_path)
+                            print(f"  Cleaned bg: {object_output_path.name}")
+                        if not args.skip_mask:
+                            mask_path = out_dir / f"{slug}_mask.png"
+                            if write_mask_from_object(object_output_path, mask_path):
+                                print(f"  Wrote mask: {mask_path.name}")
                     generate_from_reference(
                         client,
                         prompt,
@@ -982,6 +1217,8 @@ def main() -> None:
                                 args.model,
                                 args.size,
                             )
+                        flatten_height_to_black_bg(height_output_path)
+                        print(f"  Black bg: {height_output_path.name}")
                         generated += 1
                     generate_from_reference(
                         client,
@@ -994,6 +1231,16 @@ def main() -> None:
                 else:
                     generate_image(client, prompt, output_path, args.model, args.size)
                 generated += 1
+                if artifact_name == "object" and not args.skip_bg_removal:
+                    remove_background(output_path)
+                    print(f"  Cleaned bg: {output_path.name}")
+                if artifact_name == "object" and not args.skip_mask:
+                    mask_path = out_dir / f"{slug}_mask.png"
+                    if write_mask_from_object(output_path, mask_path):
+                        print(f"  Wrote mask: {mask_path.name}")
+                if artifact_name == "height":
+                    flatten_height_to_black_bg(output_path)
+                    print(f"  Black bg: {output_path.name}")
             except Exception as e:
                 print(f"  Error generating {name} [{artifact_name}]: {e}")
                 failed += 1

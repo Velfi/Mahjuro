@@ -5,7 +5,7 @@
 //! spawned it (mirroring CSS parent-containment).  Glossary terms inside the
 //! tooltip are themselves hoverable, creating an unbounded nesting chain.
 
-use crate::core::relic::all_relic_defs;
+use crate::core::relic::{RelicId, all_relic_defs};
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::color as themec;
@@ -82,6 +82,7 @@ impl TooltipState {
         window_w: f32,
         window_h: f32,
         ui_scale: f32,
+        owns_fortunes_favor: bool,
     ) {
         let font = match load_ui_font() {
             Some(f) => f,
@@ -110,7 +111,7 @@ impl TooltipState {
         let mut base_regions = text_regions;
         // Relic icons are first-class hover regions: hovering an icon shows
         // its name + description like any glossary term.
-        base_regions.extend(relic_hover_regions(relic_icons));
+        base_regions.extend(relic_hover_regions(relic_icons, owns_fortunes_favor));
         // Scene-supplied glossary anchors: arbitrary screen rects (e.g. the
         // gold-coin pile, the wall stack) that resolve to a glossary entry
         // by name. Lets 3D objects without a text label become hoverable.
@@ -213,8 +214,9 @@ fn glossary_anchor_regions(anchors: &[([f32; 4], &'static str)]) -> Vec<HoverReg
 }
 
 /// Build a hoverable region for each visible relic icon.  The title and
-/// description come from the relic's static def.
-fn relic_hover_regions(icons: &[RelicIcon]) -> Vec<HoverRegion> {
+/// description come from the relic's static def, with overrides for relics
+/// whose probabilities change while Fortune's Favor is owned.
+fn relic_hover_regions(icons: &[RelicIcon], owns_fortunes_favor: bool) -> Vec<HoverRegion> {
     let defs = all_relic_defs();
     icons
         .iter()
@@ -223,11 +225,31 @@ fn relic_hover_regions(icons: &[RelicIcon]) -> Vec<HoverRegion> {
                 .find(|d| d.id == icon.relic_id)
                 .map(|d| HoverRegion {
                     title: d.name,
-                    description: d.description,
+                    description: relic_description(d.id, d.description, owns_fortunes_favor),
                     rect: icon.rect,
                 })
         })
         .collect()
+}
+
+/// Returns the description string for a relic, swapping in doubled-probability
+/// text when Fortune's Favor is owned. Only relics whose effects FF actually
+/// modifies get an alternate string; everything else falls through to the
+/// static def description.
+fn relic_description(
+    id: RelicId,
+    default: &'static str,
+    owns_fortunes_favor: bool,
+) -> &'static str {
+    if !owns_fortunes_favor {
+        return default;
+    }
+    match id {
+        RelicId::StarTile => "1-in-2 chance to level up a scored yaku",
+        RelicId::PaperLantern => "+6 mult; 1-in-10 chance to burn at round end",
+        RelicId::IronLantern => "×2 mult; 1-in-2000 chance to break at round end",
+        _ => default,
+    }
 }
 
 fn rects_overlap(a: [f32; 4], b: [f32; 4]) -> bool {

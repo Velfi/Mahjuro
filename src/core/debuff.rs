@@ -8,6 +8,7 @@ pub enum TileDebuffClass {
     Honors,
     Terminals,
     Simples,
+    MiddleTiles,
 }
 
 impl TileDebuffClass {
@@ -16,6 +17,7 @@ impl TileDebuffClass {
             TileDebuffClass::Honors => "Honors",
             TileDebuffClass::Terminals => "Terminals",
             TileDebuffClass::Simples => "Simples",
+            TileDebuffClass::MiddleTiles => "Rank-5 tiles",
         }
     }
 
@@ -29,6 +31,10 @@ impl TileDebuffClass {
             TileDebuffClass::Simples => {
                 matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
                     && matches!(tile.rank, 2..=8)
+            }
+            TileDebuffClass::MiddleTiles => {
+                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+                    && tile.rank == 5
             }
         }
     }

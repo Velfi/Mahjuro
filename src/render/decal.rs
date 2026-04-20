@@ -545,6 +545,7 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 pub fn rasterize_plaque_decal(
     text: &str,
     ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
     w: u32,
     h: u32,
 ) -> Vec<u8> {
@@ -573,14 +574,14 @@ pub fn rasterize_plaque_decal(
     //   no single line's advance exceeds inner_w.
     // Forced newlines in the input (`\n`) are honored as hard breaks.
     let (chosen_px, chosen_lines) =
-        fit_plaque_text(font, text, inner_w as f32, inner_h as f32);
+        fit_plaque_text(font, emoji_font, text, inner_w as f32, inner_h as f32);
 
     // Rasterize the wrapped block at the chosen size. `rasterize_block`
     // handles multi-line layout (stable line-height, per-line alignment).
     let line_refs: Vec<&str> = chosen_lines.iter().map(|s| s.as_str()).collect();
     let block = rasterize_block(
         font,
-        None,
+        emoji_font,
         &line_refs,
         inner_w,
         inner_h,
@@ -627,6 +628,7 @@ pub fn rasterize_plaque_decal(
 /// `\n` as hard line breaks.
 fn fit_plaque_text(
     font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
     text: &str,
     w: f32,
     h: f32,
@@ -639,7 +641,7 @@ fn fit_plaque_text(
 
     let min_px = 10.0_f32;
     loop {
-        let lines = wrap_lines(font, text, candidate, w);
+        let lines = wrap_lines(font, emoji_font, text, candidate, w);
         let line_metrics = font.horizontal_line_metrics(candidate);
         let line_h = line_metrics
             .map(|lm| lm.new_line_size)
@@ -648,7 +650,7 @@ fn fit_plaque_text(
         // Widest line's advance at this size.
         let widest = lines
             .iter()
-            .map(|s| advance_width(font, s, candidate))
+            .map(|s| advance_width(font, emoji_font, s, candidate))
             .fold(0.0_f32, f32::max);
         if total_h <= h && widest <= w {
             return (candidate, lines);
@@ -668,7 +670,13 @@ fn fit_plaque_text(
 /// `\n` as hard line breaks and otherwise greedy-wraps on whitespace. If a
 /// single word is wider than `max_w`, it's placed on its own line (we don't
 /// break inside words — the size-fit loop will shrink further instead).
-fn wrap_lines(font: &fontdue::Font, text: &str, font_px: f32, max_w: f32) -> Vec<String> {
+fn wrap_lines(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    text: &str,
+    font_px: f32,
+    max_w: f32,
+) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for hard in text.split('\n') {
         let mut line = String::new();
@@ -678,7 +686,7 @@ fn wrap_lines(font: &fontdue::Font, text: &str, font_px: f32, max_w: f32) -> Vec
             } else {
                 format!("{} {}", line, word)
             };
-            if advance_width(font, &candidate, font_px) <= max_w || line.is_empty() {
+            if advance_width(font, emoji_font, &candidate, font_px) <= max_w || line.is_empty() {
                 line = candidate;
             } else {
                 out.push(std::mem::take(&mut line));
@@ -698,9 +706,14 @@ fn wrap_lines(font: &fontdue::Font, text: &str, font_px: f32, max_w: f32) -> Vec
     out
 }
 
-fn advance_width(font: &fontdue::Font, text: &str, font_px: f32) -> f32 {
+fn advance_width(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    text: &str,
+    font_px: f32,
+) -> f32 {
     text.chars()
-        .map(|ch| font.metrics(ch, font_px).advance_width)
+        .map(|ch| pick_font(font, emoji_font, ch).metrics(ch, font_px).advance_width)
         .sum()
 }
 
@@ -709,6 +722,109 @@ fn advance_width(font: &fontdue::Font, text: &str, font_px: f32) -> f32 {
 /// ratio so glyphs don't get stretched by the bilinear sampler when the face
 /// isn't ~landscape — see the call site in `wgpu_renderer.rs`.
 pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
+
+/// Per-cell dimensions of the cabinet's 6-label decal strip. Each cell
+/// is a vertically-tall rectangle (matches the cabinet face aspect: tall
+/// hex faces). The strip is `CABINET_DECAL_CELL_W * 6` wide × `_H` tall.
+pub const CABINET_DECAL_CELL_W: u32 = 256;
+pub const CABINET_DECAL_CELL_H: u32 = 768;
+
+/// Rasterise a horizontal 6-cell decal strip with one tab name per cell.
+///
+/// Each cell renders the corresponding `labels[i]` in gilded letters
+/// against a transparent background, so the lit-mesh material's wood
+/// shows through the cell's empty regions and only the engraved glyphs
+/// tint the wood. The cabinet mesh's side-face UVs are laid out so face
+/// `i` samples `[i/6, (i+1)/6]` × `[0, 1]` of this strip.
+///
+/// UV `[0, 0]` (the top-left corner) is left transparent so cap, base,
+/// and groove geometry — which all sample that corner — render as plain
+/// wood with no decal contribution.
+pub fn rasterize_cabinet_strip_decal(
+    labels: [&str; 6],
+    ui_font: Option<&fontdue::Font>,
+) -> Vec<u8> {
+    let cell_w = CABINET_DECAL_CELL_W;
+    let cell_h = CABINET_DECAL_CELL_H;
+    let strip_w = cell_w * 6;
+    let mut rgba = vec![0u8; (strip_w * cell_h * 4) as usize];
+    let Some(font) = ui_font else {
+        return rgba;
+    };
+
+    // Per-cell rasterisation. Use the same gilded three-pass treatment
+    // (umber drop, gold body, champagne highlight) as the plaque decal
+    // so the engraving reads consistently with other catalogued labels.
+    // Glyphs are oriented so the text reads upright when the cabinet
+    // is standing on the table — the strip's V axis runs from cabinet
+    // top (V=0) down to cabinet bottom (V=1).
+    let pad_x = (cell_w as f32 * 0.10) as u32;
+    let pad_y = (cell_h as f32 * 0.06) as u32;
+    let inner_w = cell_w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = cell_h.saturating_sub(pad_y * 2).max(1);
+
+    let gold_base = [0.92_f32, 0.74, 0.28, 1.0];
+    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0];
+    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92];
+
+    for (cell_idx, label) in labels.iter().enumerate() {
+        if label.trim().is_empty() {
+            continue;
+        }
+        // Pick the largest font size whose single-line render fits the
+        // cell's inner area. Tab names are short so we can be aggressive.
+        let (chosen_px, chosen_lines) =
+            fit_plaque_text(font, None, label, inner_w as f32, inner_h as f32);
+        let line_refs: Vec<&str> = chosen_lines.iter().map(|s| s.as_str()).collect();
+        let block = rasterize_block(
+            font,
+            None,
+            &line_refs,
+            inner_w,
+            inner_h,
+            Some(chosen_px),
+            LabelAlign::Center,
+        );
+
+        let cell_x_origin = cell_idx as u32 * cell_w + pad_x;
+        let cell_y_origin = pad_y;
+
+        // Three passes: umber shadow offset down-right, gold body,
+        // champagne highlight offset up-left.
+        blit_tinted(
+            &block,
+            inner_w,
+            inner_h,
+            &mut rgba,
+            strip_w,
+            cell_x_origin + 3,
+            cell_y_origin + 3,
+            gold_shadow,
+        );
+        blit_tinted(
+            &block,
+            inner_w,
+            inner_h,
+            &mut rgba,
+            strip_w,
+            cell_x_origin,
+            cell_y_origin,
+            gold_base,
+        );
+        blit_tinted(
+            &block,
+            inner_w,
+            inner_h,
+            &mut rgba,
+            strip_w,
+            cell_x_origin.saturating_sub(1),
+            cell_y_origin.saturating_sub(1),
+            gold_highlight,
+        );
+    }
+
+    rgba
+}
 
 /// Measure how tall a plaque needs to be to fit `text` at `font_px`, wrapping
 /// at `inner_w` pixels. Returns `(line_count, line_height_px)` — multiply and
@@ -728,7 +844,7 @@ pub fn measure_plaque_wrap(
         .horizontal_line_metrics(font_px)
         .map(|lm| lm.new_line_size)
         .unwrap_or(font_px * 1.2);
-    let lines = wrap_lines(font, text, font_px, inner_w);
+    let lines = wrap_lines(font, None, text, font_px, inner_w);
     (lines.len().max(1), line_h)
 }
 
@@ -756,8 +872,8 @@ pub fn rasterize_ofuda_decal(
     // Keep the paper margins visibly present, but let the calligraphy occupy
     // more of the sheet. The previous 8% inset left the body copy floating in
     // an overly narrow center column on portrait boss ofuda.
-    let pad_x = (w as f32 * 0.05) as u32;
-    let pad_y = (h as f32 * 0.06) as u32;
+    let pad_x = (w as f32 * 0.025) as u32;
+    let pad_y = (h as f32 * 0.03) as u32;
     let inner_w = w.saturating_sub(pad_x * 2).max(1);
     let inner_h = h.saturating_sub(pad_y * 2).max(1);
 

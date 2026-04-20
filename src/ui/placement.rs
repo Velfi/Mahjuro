@@ -106,6 +106,113 @@ impl Placement {
     }
 }
 
+/// Anchor derived from a [`Placement`] for constructing an `Object3d` that
+/// will be auto-rotated by the renderer via `committed_arrange_rotations`.
+///
+/// This is the safe way to wire a scene `Placement` into an `Object3d`: it
+/// folds the placement's `nx`/`ny`/`lift_mm` into the draw-site anchor and
+/// leaves the rotation equal to `base_rotation` — the renderer composes the
+/// placement's `rx_deg`/`ry_deg`/`rz_deg` on top of that via
+/// `apply_arrange_override`, so the construction site MUST NOT read those
+/// fields itself. Writing them into the rotation matrix here is exactly the
+/// double-apply bug this type prevents.
+///
+/// Construction sites build an `Object3d` like so:
+///
+/// ```ignore
+/// let anchor = PlacementAnchor::new(
+///     [base_px, base_py, base_lift],       // draw-site anchor
+///     base_rotation,                        // rotation that is NOT in the placement
+///     &self.positions.my_thing,
+///     "scene.my_thing",
+///     layout,
+/// );
+/// Object3d {
+///     pos: anchor.pos,
+///     rotation: anchor.rotation,
+///     arrange_name: Some(anchor.arrange_name),
+///     // ...
+/// }
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct PlacementAnchor {
+    pub pos: [f32; 3],
+    pub rotation: glam::Mat4,
+    pub arrange_name: &'static str,
+}
+
+impl PlacementAnchor {
+    /// Build a `PlacementAnchor` by folding a scene `Placement` into a
+    /// draw-site anchor. See the type docs for contract details.
+    pub fn new(
+        base_pos: [f32; 3],
+        base_rotation: glam::Mat4,
+        placement: &Placement,
+        arrange_name: &'static str,
+        layout: &crate::ui::layout::LayoutResult,
+    ) -> Self {
+        Self {
+            pos: [
+                base_pos[0] + placement.nx * layout.window_w,
+                base_pos[1] + placement.ny * layout.window_h,
+                base_pos[2] + layout.mm(placement.lift_mm),
+            ],
+            rotation: base_rotation,
+            arrange_name,
+        }
+    }
+}
+
+/// Staged arrange-mode delta for the currently-selected object (or group).
+/// Passed to scenes via `DrawCtx::arrange_preview` so that non-`Object3d`
+/// draws (wind emitters, particle sources, etc.) can apply the same live
+/// preview that `apply_arrange_override` provides for mesh-backed placements.
+///
+/// Unlike the renderer's `DebugArrangeOverride` (which is in mixed pixel /
+/// world units), these deltas are pre-normalised — ready to fold into a
+/// `Placement` via [`Placement::apply_delta`].
+#[derive(Clone, Debug)]
+pub struct ArrangePreview {
+    /// Selected leaf or group name (canonical dotted path).
+    pub name: String,
+    /// Normalised X delta (pixel delta ÷ window width).
+    pub dnx: f32,
+    /// Normalised Y delta (pixel delta ÷ window height).
+    pub dny: f32,
+    /// Lift delta in millimetres.
+    pub d_lift_mm: f32,
+    pub d_rx_deg: f32,
+    pub d_ry_deg: f32,
+    pub d_rz_deg: f32,
+}
+
+impl ArrangePreview {
+    /// If `leaf` is the preview's target — either directly, or as a descendant
+    /// of a selected group in `hierarchy` — return a copy of `base` with the
+    /// staged deltas folded in. Otherwise return `base` unchanged.
+    pub fn applied_to(
+        &self,
+        hierarchy: &'static [Node],
+        leaf: &str,
+        base: Placement,
+    ) -> Placement {
+        let affected = expand_name(hierarchy, &self.name);
+        if !affected.iter().any(|n| *n == leaf) {
+            return base;
+        }
+        let mut p = base;
+        p.apply_delta(
+            self.dnx,
+            self.dny,
+            self.d_lift_mm,
+            self.d_rx_deg,
+            self.d_ry_deg,
+            self.d_rz_deg,
+        );
+        p
+    }
+}
+
 // ── Hierarchy ─────────────────────────────────────────────────────────────────
 
 /// One entry in a scene's [`ArrangeTarget`] hierarchy. Either a leaf pointing

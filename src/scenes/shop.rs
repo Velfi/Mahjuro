@@ -22,7 +22,7 @@ use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::onboarding::OnboardingPhase;
 use crate::render::draw_cmd::{
-    CameraParams, DishExplicit, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
+    CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
     camera_facing_rotation,
 };
 use crate::render::decal::{load_ui_font, measure_plaque_wrap};
@@ -131,8 +131,8 @@ impl ShopFocus {
 /// corresponding `ShopAction`. Pure lookup against the current shop
 /// stock + run state — no mutation. Dishes are info-only and return
 /// `None`. Returns `None` for the journal book too; the caller handles
-/// the journal toggle separately because it switches scene state
-/// (`self.journal.open`) rather than running an action.
+/// the journal separately because it pushes the `YakuJournalScene`
+/// overlay rather than running a scene action.
 fn shop_action_for_hit(
     hit: ShopHit,
     items: &[ShopItem],
@@ -208,6 +208,105 @@ fn focused_sell_action(
         }
         ShopFocus::Talisman(i) if i >= talisman_items.len() => {
             owned_talisman_inventory_index(i, talisman_items, run).map(ShopAction::SellConsumable)
+        }
+        _ => None,
+    }
+}
+
+/// Row of owned items that a sell action affected, used to normalize the
+/// post-sell focus in [`focus_after_sell`].
+#[derive(Clone, Copy)]
+enum SoldRow {
+    Relic,
+    Ribbon,
+    Talisman,
+}
+
+/// Pick the focus to adopt after an owned item is sold, so the player's
+/// focus stays roughly where it was instead of snapping to `None`.
+///
+/// The sold item was at owned-index `sold_owned_idx` in `row`. If the
+/// current focus is in the same row, it's rebased to the left neighbor
+/// (or the item that shifted into the sold slot). If the row is now
+/// empty, focus falls back to the sell tray. Focus in other rows is
+/// left untouched so selling a ribbon doesn't yank the player off a
+/// relic they were looking at.
+fn focus_after_sell(
+    focus: Option<ShopFocus>,
+    row: SoldRow,
+    sold_owned_idx: usize,
+    n_for_sale_relics: usize,
+    n_for_sale_ribbons: usize,
+    n_for_sale_talismans: usize,
+    owned_relics_after: usize,
+    owned_ribbons_after: usize,
+    owned_talismans_after: usize,
+) -> Option<ShopFocus> {
+    let rebase = |flat: usize, for_sale: usize, owned_after: usize| -> Option<usize> {
+        if flat < for_sale {
+            return Some(flat);
+        }
+        if owned_after == 0 {
+            return None;
+        }
+        let cur_owned = flat - for_sale;
+        let new_owned = if cur_owned > sold_owned_idx {
+            cur_owned - 1
+        } else if cur_owned == sold_owned_idx {
+            sold_owned_idx.saturating_sub(1)
+        } else {
+            cur_owned
+        };
+        let new_owned = new_owned.min(owned_after - 1);
+        Some(for_sale + new_owned)
+    };
+    let f = focus?;
+    match (row, f) {
+        (SoldRow::Relic, ShopFocus::Relic(i)) => Some(
+            rebase(i, n_for_sale_relics, owned_relics_after)
+                .map(ShopFocus::Relic)
+                .unwrap_or(ShopFocus::SellTray),
+        ),
+        (SoldRow::Ribbon, ShopFocus::Ribbon(i)) => Some(
+            rebase(i, n_for_sale_ribbons, owned_ribbons_after)
+                .map(ShopFocus::Ribbon)
+                .unwrap_or(ShopFocus::SellTray),
+        ),
+        (SoldRow::Talisman, ShopFocus::Talisman(i)) => Some(
+            rebase(i, n_for_sale_talismans, owned_talismans_after)
+                .map(ShopFocus::Talisman)
+                .unwrap_or(ShopFocus::SellTray),
+        ),
+        _ => Some(f),
+    }
+}
+
+/// Classify a sell action by its owned row and the owned-row-relative
+/// index of the item being sold, peeking `run` *before* the sell applies.
+/// Returns `None` for actions that aren't sells or whose target index is
+/// out of range.
+fn classify_sell(
+    action: ShopAction,
+    run: &crate::game::run::RunState,
+) -> Option<(SoldRow, usize)> {
+    match action {
+        ShopAction::SellRelic(i) if i < run.relics.active.len() => Some((SoldRow::Relic, i)),
+        ShopAction::SellConsumable(inv_idx) => {
+            let item = run.consumables.items.get(inv_idx).copied()?;
+            let (row, matcher): (SoldRow, fn(Consumable) -> bool) = match item {
+                Consumable::Zodiac(_) => (SoldRow::Ribbon, |c| matches!(c, Consumable::Zodiac(_))),
+                Consumable::Talisman(_) => {
+                    (SoldRow::Talisman, |c| matches!(c, Consumable::Talisman(_)))
+                }
+            };
+            let owned_idx = run
+                .consumables
+                .items
+                .iter()
+                .take(inv_idx)
+                .filter(|&&c| matcher(c))
+                .count();
+            Some((row, owned_idx))
         }
         _ => None,
     }
@@ -444,6 +543,11 @@ fn apply_shop_action(
                     bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::audio::SfxId::Purchase,
                     ));
+                    if let Consumable::Talisman(tk) = consumable {
+                        bus.push(
+                            crate::game::event_bus::GameEvent::TalismanPurchased(tk),
+                        );
+                    }
                     talisman_items.remove(idx);
                 }
             }
@@ -818,7 +922,6 @@ pub struct ShopScene {
     /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
     reroll_cost: u32,
     pause_menu: PauseMenu,
-    journal: super::journal::JournalOverlay,
     /// Currently focused shop element. `None` until the player presses a
     /// directional input or moves the cursor over a shop object.
     focus: Option<ShopFocus>,
@@ -859,12 +962,6 @@ pub struct ShopScene {
     /// over an owned item; cleared when the button is released. If released
     /// over the sell tray, the item is sold.
     mouse_drag: Option<ShopDragSource>,
-    /// Last observed cursor position in layout-pixel space. Stashed in
-    /// `update()` so `draw_frame` can seed a faint wind gust at the cursor.
-    last_cursor_px: (f32, f32),
-    /// Cursor position from the previous frame, used to derive a velocity
-    /// for the cursor-driven wind gust.
-    prev_cursor_px: (f32, f32),
     /// Per-`ShopHit` world-space overrides for the hover title/description
     /// plaque anchor. When a key is present, the scene uses the stored
     /// `(px, py, wz)` instead of the default layout-derived anchor for that
@@ -1182,7 +1279,6 @@ impl ShopScene {
             pack_items,
             reroll_cost,
             pause_menu: PauseMenu::new(),
-            journal: super::journal::JournalOverlay::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             pack_celebration: None,
@@ -1203,14 +1299,7 @@ impl ShopScene {
             held_item_drag: None,
             mouse_drag: None,
             hover_anchor_overrides: std::collections::HashMap::new(),
-            last_cursor_px: (0.0, 0.0),
-            prev_cursor_px: (0.0, 0.0),
         }
-    }
-
-    /// Write the current [`ShopPositions`] to JSON in the app's config directory.
-    pub fn save_current_layout(&self) -> anyhow::Result<()> {
-        crate::ui::scene_layout::save_shop_positions(&self.positions)
     }
 
     fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
@@ -1219,9 +1308,57 @@ impl ShopScene {
                 onboarding.phase = OnboardingPhase::Finale;
             }
             run.begin_onboarding_finale();
-            Scene::Gameplay(super::gameplay::GameplayScene::new())
+            Scene::Gameplay(super::gameplay::GameplayScene::with_pending_blind(
+                crate::core::rules::BlindKind::Boss,
+            ))
         } else {
             Scene::PickBlind(PickBlindScene::new())
+        }
+    }
+
+    /// Apply a sell action and update `self.focus` so it stays on a
+    /// neighbor of the sold item instead of snapping to `None`. Focus
+    /// pointing at a different row is preserved; focus pointing at the
+    /// sold row is rebased to the left neighbor (falling back to the
+    /// sell tray when the row empties).
+    fn apply_sell_action(
+        &mut self,
+        action: ShopAction,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+        cursor_pos: (f32, f32),
+        overlay_request: &mut Option<super::OverlayRequest>,
+    ) {
+        let classified = classify_sell(action, run);
+        let result = apply_shop_action(
+            action,
+            &mut self.items,
+            &mut self.zodiac_items,
+            &mut self.talisman_items,
+            &mut self.pack_items,
+            run,
+            bus,
+        );
+        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
+        if let Some((row, sold_owned_idx)) = classified {
+            let owned_relics_after = run.relics.active.len();
+            let owned_ribbons_after =
+                owned_consumable_count(run, |c| matches!(c, Consumable::Zodiac(_)));
+            let owned_talismans_after =
+                owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)));
+            self.focus = focus_after_sell(
+                self.focus,
+                row,
+                sold_owned_idx,
+                self.items.len(),
+                self.zodiac_items.len(),
+                self.talisman_items.len(),
+                owned_relics_after,
+                owned_ribbons_after,
+                owned_talismans_after,
+            );
+        } else {
+            self.focus = None;
         }
     }
 
@@ -1638,19 +1775,7 @@ fn consumable_color(c: Consumable) -> [f32; 4] {
             ];
             palette[(z as usize) % palette.len()]
         }
-        Consumable::Talisman(t) => match t {
-            TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0], // jade green
-            TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0], // pearl white
-            TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0], // shining gold
-            TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0], // iridescent violet
-            TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0], // kiln orange-red
-            TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
-            TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],   // sapphire
-            TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
-            TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
-            TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
-            TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
-        },
+        Consumable::Talisman(t) => t.accent_color(),
     }
 }
 
@@ -1806,9 +1931,7 @@ impl SceneBehavior for ShopScene {
     }
 
     fn has_blocking_overlay(&self) -> bool {
-        self.pause_menu.paused
-            || self.journal.open
-            || self.pack_celebration.is_some()
+        self.pause_menu.paused || self.pack_celebration.is_some()
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -1816,8 +1939,6 @@ impl SceneBehavior for ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
-        self.prev_cursor_px = self.last_cursor_px;
-        self.last_cursor_px = ctx.cursor_pos;
         self.particles.update(dt);
         // Advance bug orbit phases.
         for (i, phase) in self.bug_phases.iter_mut().enumerate() {
@@ -1868,15 +1989,6 @@ impl SceneBehavior for ShopScene {
             *ctx.overlay_request = Some(super::OverlayRequest::Push(
                 Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
             ));
-            return None;
-        }
-
-        // Yaku Journal overlay — opened by clicking the Journal book on
-        // the counter (routed via the 3D-hit dispatcher below as
-        // `ShopHit::Dish(PICK_JOURNAL_BOOK)`).
-        if self.journal.open {
-            self.journal
-                .handle_input(ctx.actions, ctx.button_clicks, ctx.scroll_lines);
             return None;
         }
 
@@ -2005,17 +2117,13 @@ impl SceneBehavior for ShopScene {
                             let n_for_sale = self.items.len();
                             if i >= n_for_sale {
                                 let owned_idx = i - n_for_sale;
-                                let result = apply_shop_action(
+                                self.apply_sell_action(
                                     ShopAction::SellRelic(owned_idx),
-                                    &mut self.items,
-                                    &mut self.zodiac_items,
-                                    &mut self.talisman_items,
-                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
+                                    ctx.cursor_pos,
+                                    ctx.overlay_request,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                                self.focus = None;
                             }
                             continue;
                         }
@@ -2023,17 +2131,13 @@ impl SceneBehavior for ShopScene {
                             if let Some(inv_idx) =
                                 owned_ribbon_inventory_index(i, &self.zodiac_items, ctx.run)
                             {
-                                let result = apply_shop_action(
+                                self.apply_sell_action(
                                     ShopAction::SellConsumable(inv_idx),
-                                    &mut self.items,
-                                    &mut self.zodiac_items,
-                                    &mut self.talisman_items,
-                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
+                                    ctx.cursor_pos,
+                                    ctx.overlay_request,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                                self.focus = None;
                             }
                             continue;
                         }
@@ -2041,17 +2145,13 @@ impl SceneBehavior for ShopScene {
                             if let Some(inv_idx) =
                                 owned_talisman_inventory_index(i, &self.talisman_items, ctx.run)
                             {
-                                let result = apply_shop_action(
+                                self.apply_sell_action(
                                     ShopAction::SellConsumable(inv_idx),
-                                    &mut self.items,
-                                    &mut self.zodiac_items,
-                                    &mut self.talisman_items,
-                                    &mut self.pack_items,
                                     ctx.run,
                                     ctx.bus,
+                                    ctx.cursor_pos,
+                                    ctx.overlay_request,
                                 );
-                                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                                self.focus = None;
                             }
                             continue;
                         }
@@ -2142,8 +2242,9 @@ impl SceneBehavior for ShopScene {
                             );
                             self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                            // Journal book: same toggle as the click path.
-                            self.journal.toggle();
+                            *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                                super::Scene::YakuJournal(super::YakuJournalScene::new()),
+                            ));
                             return None;
                         }
                     }
@@ -2155,17 +2256,13 @@ impl SceneBehavior for ShopScene {
             if matches!(a, UiAction::ConfirmRelease) {
                 if let Some(drag) = self.held_item_drag.take() {
                     if matches!(self.focus, Some(ShopFocus::SellTray)) {
-                        let result = apply_shop_action(
+                        self.apply_sell_action(
                             drag.sell_action(),
-                            &mut self.items,
-                            &mut self.zodiac_items,
-                            &mut self.talisman_items,
-                            &mut self.pack_items,
                             ctx.run,
                             ctx.bus,
+                            ctx.cursor_pos,
+                            ctx.overlay_request,
                         );
-                        self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                        self.focus = None;
                     }
                 }
                 continue;
@@ -2190,32 +2287,24 @@ impl SceneBehavior for ShopScene {
         for &cid in ctx.button_clicks {
             if cid >= SHOP_SELL_RELIC_BASE && cid < SHOP_SELL_RELIC_BASE + 64 {
                 let idx = (cid - SHOP_SELL_RELIC_BASE) as usize;
-                let result = apply_shop_action(
+                self.apply_sell_action(
                     ShopAction::SellRelic(idx),
-                    &mut self.items,
-                    &mut self.zodiac_items,
-                    &mut self.talisman_items,
-                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
+                    ctx.cursor_pos,
+                    ctx.overlay_request,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                self.focus = None;
                 return None;
             }
             if cid >= SHOP_SELL_CONSUMABLE_BASE && cid < SHOP_SELL_CONSUMABLE_BASE + 32 {
                 let idx = (cid - SHOP_SELL_CONSUMABLE_BASE) as usize;
-                let result = apply_shop_action(
+                self.apply_sell_action(
                     ShopAction::SellConsumable(idx),
-                    &mut self.items,
-                    &mut self.zodiac_items,
-                    &mut self.talisman_items,
-                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
+                    ctx.cursor_pos,
+                    ctx.overlay_request,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                self.focus = None;
                 return None;
             }
             if cid == SHOP_NEXT_ROUND_ID {
@@ -2237,17 +2326,13 @@ impl SceneBehavior for ShopScene {
                 continue;
             }
             if let Some(drag) = self.mouse_drag.take() {
-                let result = apply_shop_action(
+                self.apply_sell_action(
                     drag.sell_action(),
-                    &mut self.items,
-                    &mut self.zodiac_items,
-                    &mut self.talisman_items,
-                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
+                    ctx.cursor_pos,
+                    ctx.overlay_request,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
-                self.focus = None;
             }
             return None;
         }
@@ -2263,7 +2348,9 @@ impl SceneBehavior for ShopScene {
             };
             // Journal book intercept.
             if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                self.journal.toggle();
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                    super::Scene::YakuJournal(super::YakuJournalScene::new()),
+                ));
                 return None;
             }
             // Leave prop — advance to next scene.
@@ -2290,16 +2377,13 @@ impl SceneBehavior for ShopScene {
                     )
                 });
                 if let Some(action) = sell_action {
-                    let result = apply_shop_action(
+                    self.apply_sell_action(
                         action,
-                        &mut self.items,
-                        &mut self.zodiac_items,
-                        &mut self.talisman_items,
-                        &mut self.pack_items,
                         ctx.run,
                         ctx.bus,
+                        ctx.cursor_pos,
+                        ctx.overlay_request,
                     );
-                    self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
                 }
                 return None;
             }
@@ -2373,67 +2457,117 @@ impl SceneBehavior for ShopScene {
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
+        // Procedural mountain-haze wash. Additively composed onto the black
+        // background, sits behind the 3D scene and above the volumetric
+        // smoke curtain so the scene reads as "shop on a foggy mountain."
+        frame.mountain_haze();
         frame.camera_override = Some(layout.camera);
 
         let (plaque_top_text, plaque_bot_text) = shop_plaque_lines(self, ctx.run);
 
         // ── Kiosk counter slab (thin wide dish — reads as a face-up surface) ─
         // center_pos is (pixel_x, pixel_y, lift_z); extents are (width_x, rim_z, depth_y).
-        frame.dish_explicit(DishExplicit {
-            center_pos: [
+        frame.object3d(Object3d {
+            pos: [
                 layout.counter_pixel_x,
                 layout.counter_world_y + h * 0.5,
                 0.0,
             ],
             extents: layout.counter_extents,
-            pick_id: None,
-            ..Default::default()
+            rotation: glam::Mat4::IDENTITY,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: None,
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,
         });
 
         // ── Foreground dishes (relic + talisman + ribbon trays + gold) ─
-        frame.dish_explicit(DishExplicit {
-            center_pos: [
+        frame.object3d(Object3d {
+            pos: [
                 layout.relic_dish_center_px.0,
                 layout.relic_dish_center_px.1,
                 layout.relic_dish_center_px.2,
             ],
             extents: layout.relic_dish_extents,
-            pick_id: Some(PICK_RELIC_DISH),
+            rotation: glam::Mat4::IDENTITY,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: Some(PICK_RELIC_DISH),
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
             arrange_name: Some("shop.shelf.relic_dish"),
-            ..Default::default()
         });
-        frame.dish_explicit(DishExplicit {
-            center_pos: [
+        frame.object3d(Object3d {
+            pos: [
                 layout.talisman_tray_center_px.0,
                 layout.talisman_tray_center_px.1,
                 layout.talisman_tray_center_px.2,
             ],
             extents: layout.talisman_tray_extents,
-            pick_id: None,
+            rotation: glam::Mat4::IDENTITY,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: None,
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
             arrange_name: Some("shop.shelf.talisman_tray"),
-            ..Default::default()
         });
-        frame.dish_explicit(DishExplicit {
-            center_pos: [
+        frame.object3d(Object3d {
+            pos: [
                 layout.ribbon_tray_center_px.0,
                 layout.ribbon_tray_center_px.1,
                 layout.ribbon_tray_center_px.2,
             ],
             extents: layout.ribbon_tray_extents,
-            pick_id: None,
+            rotation: glam::Mat4::IDENTITY,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: None,
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
             arrange_name: Some("shop.shelf.ribbon_tray"),
-            ..Default::default()
         });
-        frame.dish_explicit(DishExplicit {
-            center_pos: [
+        frame.object3d(Object3d {
+            pos: [
                 layout.coin_dish_center_px.0,
                 layout.coin_dish_center_px.1,
                 layout.coin_dish_center_px.2,
             ],
             extents: layout.coin_dish_extents,
-            pick_id: Some(PICK_COIN_DISH),
-            round: true,
-            ..Default::default()
+            rotation: glam::Mat4::IDENTITY,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: Some(PICK_COIN_DISH),
+                round: true,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,
         });
         // Yaku Journal — left of the bottom inventory row.
         let journal_cx = self.positions.book.nx * w;
@@ -2461,7 +2595,10 @@ impl SceneBehavior for ShopScene {
         });
 
         // Tile packs — two flanking positions in column 2, on the counter.
-        {
+        // Hidden while the pack-opening celebration is active: the celebration
+        // draws its own large closeup pack centered on screen, and the 2D dim
+        // quad can't depth-occlude the shelf packs behind it.
+        if self.pack_celebration.is_none() {
             let ext = layout.pack_extents;
             let mut pack_objs: Vec<Object3d> = Vec::new();
             for (i, pack) in self.pack_items.iter().enumerate() {
@@ -2517,6 +2654,8 @@ impl SceneBehavior for ShopScene {
                 kind: Object3dKind::Relic {
                     relic_id: item.relic,
                     glow: 0.0,
+                    silhouette: false,
+                    pick_id: None,
                 },
                 focusable: true,
                 scene_shaded: true,
@@ -2565,6 +2704,8 @@ impl SceneBehavior for ShopScene {
                 kind: Object3dKind::Relic {
                     relic_id: rid,
                     glow,
+                    silhouette: false,
+                    pick_id: None,
                 },
                 focusable: true,
                 scene_shaded: true,
@@ -2722,12 +2863,24 @@ impl SceneBehavior for ShopScene {
         // at world_z = h*0.52 (lamp_lift_h_frac).
         let lp = layout.lamp_center_px;
         let lamp_hang_z = lp.2; // apex z — lamp hangs downward from here
+        // Flicker: layered sines at incommensurate rates plus an occasional
+        // brownout dip sell a failing bulb on a foggy mountain. Held in
+        // `lamp_flicker` so the shade glow, point lights, and god-rays all
+        // pulse in lockstep.
+        let tf = self.age_secs;
+        let flick_fast = (tf * 37.3).sin() * 0.04 + (tf * 61.7).sin() * 0.025;
+        let flick_slow = (tf * 4.1).sin() * 0.06;
+        let brownout = {
+            let d = (tf * 0.73).sin() * (tf * 1.19).sin();
+            (d - 0.55).max(0.0) * 0.35
+        };
+        let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.55, 1.12);
         frame.object3d(Object3d {
             pos: [lp.0, lp.1, lamp_hang_z],
             extents: [lamp_w, lamp_h, lamp_w],
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::ShopLamp { glow: 1.0 },
+            kind: Object3dKind::ShopLamp { glow: lamp_flicker },
             focusable: false,
             scene_shaded: true,
             own_light: None,
@@ -2748,9 +2901,27 @@ impl SceneBehavior for ShopScene {
             let bulb_wz = lamp_hang_z + LAMP_BULB_LOCAL_Z * lamp_h;
             let bug_body_len = h * 0.022;
 
+            // Wing flap parameters. Real moths beat their wings ~20-30 Hz
+            // (hawkmoths even faster); we pick 25 Hz for a species-accurate
+            // feel. At 60 fps a single flap cycle is only ~2.4 frames, so
+            // the live wing would strobe on its own — the swept-fan blur
+            // surrogate mesh (`build_bug_wing_blur_mesh`) is what actually
+            // sells this as motion blur rather than aliasing: the live wing
+            // fades near mid-stroke and the pre-swept fan takes over, then
+            // vice-versa at the turnarounds. Amplitude 1.1 rad (~63°) sweeps
+            // from below horizontal up past vertical, matching the way moths
+            // clap their wings above the body between strokes. Per-bug phase
+            // offsets keep the swarm from flapping in unison.
+            let flap_hz: f32 = 25.0;
+            let flap_amp: f32 = 1.1;
+
             // Sample a bug's full transform at `t_back` seconds in the past.
-            // Ghost trails reuse this with t_back > 0; live bug uses 0.
-            let sample_bug = |i: usize, t_back: f32| -> ([f32; 3], [f32; 3], glam::Mat4) {
+            // Kept parametric (rather than inlined at t_back = 0) so callers
+            // that want to predict a bug's pose at a nearby moment — e.g.
+            // shadow prediction, debug overlays — can reuse the same math.
+            // Returns `(pos, extents, body_rot, flap_rad)` where `flap_rad`
+            // is the wing angle at that moment (rotating about body +X).
+            let sample_bug = |i: usize, t_back: f32| -> ([f32; 3], [f32; 3], glam::Mat4, f32) {
                 let (r_frac, z_frac, speed, size_frac) = BUG_PARAMS[i];
                 let fi = i as f32;
                 let t = t_now - t_back;
@@ -2767,7 +2938,14 @@ impl SceneBehavior for ShopScene {
 
                 let local_z = (bug_wz - lamp_hang_z) / lamp_h;
                 let min_r_local = shade_exclusion_radius(local_z);
-                let min_r_world = min_r_local * (lamp_w / SHADE_RIM_R) + bug_body_len * 0.6;
+                // Clear the shade by the body radius plus the inside wing's
+                // span. The body is oriented tangent to the orbit, so wings
+                // extend radially — the inner wing is the one that could
+                // clip the shade, and it reaches ~1.13 units in local Y
+                // (see moth_wing_outline) scaled by `size_frac`.
+                let wing_half_span = 1.13 * size_frac * bug_body_len;
+                let min_r_world =
+                    min_r_local * (lamp_w / SHADE_RIM_R) + bug_body_len * 0.6 + wing_half_span;
                 let orbit_r = (r_nom + r_drift).max(min_r_world);
 
                 let bug_wx = bulb_wx + orbit_r * phase.cos();
@@ -2788,53 +2966,41 @@ impl SceneBehavior for ShopScene {
                 );
                 let rot =
                     yaw * glam::Mat4::from_rotation_x(bank) * glam::Mat4::from_rotation_y(pitch);
-                ([bug_px, bug_py, bug_wz], [bug_sz, bug_sz, bug_sz], rot)
+                // Flap angle at time `t`. Sine wave in radians, offset per
+                // bug index so the swarm's wingbeats are phase-staggered.
+                let flap = flap_amp
+                    * (t * flap_hz * std::f32::consts::TAU + fi * 1.3).sin();
+                ([bug_px, bug_py, bug_wz], [bug_sz, bug_sz, bug_sz], rot, flap)
             };
 
-            // Motion-blur trail — ghosts sampled back along each bug's
-            // analytic orbit, with alpha + size fading toward the tail.
-            const TRAIL_SAMPLES: usize = 6;
-            const TRAIL_DT: f32 = 0.020;
+            // Live bugs — the ghost-trail system is gone; each bug now emits
+            // two swept-fan blur-surrogate draws (L/R) alongside its crisp
+            // live wings. The live wing fades where the real wing would blur
+            // (mid-stroke) and the blur fan fades where the real wing would
+            // read crisply (turnarounds), producing a coherent moth that
+            // looks like a 1/60 s exposure.
             for i in 0..BUG_COUNT {
-                for k in 1..=TRAIL_SAMPLES {
-                    let kf = k as f32 / TRAIL_SAMPLES as f32;
-                    let (pos, extents, rot) = sample_bug(i, k as f32 * TRAIL_DT);
-                    let fade = 1.0 - kf;
-                    let alpha = 0.55 * fade;
-                    let shrink = 0.65 + 0.35 * fade;
-                    let ghost_slot = i * TRAIL_SAMPLES + (k - 1);
-                    frame.object3d(Object3d {
-                        pos,
-                        extents: [
-                            extents[0] * shrink,
-                            extents[1] * shrink,
-                            extents[2] * shrink,
-                        ],
-                        rotation: rot,
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::BugGhost {
-                            slot: ghost_slot,
-                            alpha,
-                        },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
-                        hover_target: 0.0,
-                        anim_id: 0,
-                        arrange_name: None,
-                    });
-                }
-            }
-
-            // Live bugs — drawn after ghosts so they read as the "head".
-            for i in 0..BUG_COUNT {
-                let (pos, extents, rot) = sample_bug(i, 0.0);
+                let (pos, extents, rot, flap_rad) = sample_bug(i, 0.0);
+                // Angular-speed factor in [0, 1]: 0 at the flap turnarounds
+                // (where sin() peaks, cos() is 0) and 1 at mid-stroke. This
+                // is |d/dt sin(w t)| / max, which reduces to |cos(w t)|.
+                let fi = i as f32;
+                let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3)
+                    .cos()
+                    .abs();
+                let live_wing_alpha = 1.0 - 0.7 * speed_factor;
+                let blur_alpha = 0.6 * speed_factor;
                 frame.object3d(Object3d {
                     pos,
                     extents,
                     rotation: rot,
                     color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::Bug { slot: i },
+                    kind: Object3dKind::Bug {
+                        slot: i,
+                        flap_rad,
+                        live_wing_alpha,
+                        blur_alpha,
+                    },
                     focusable: false,
                     scene_shaded: true,
                     own_light: None,
@@ -2842,6 +3008,67 @@ impl SceneBehavior for ShopScene {
                     anim_id: 0,
                     arrange_name: None,
                 });
+                // Shadow casters: body + two wings as separate Gaussian
+                // occluders so the lamp's god-ray shafts show recognisable
+                // moth silhouettes instead of round blobs. Wing centres
+                // are mesh-local (±Y, ~0.40 out from body) rotated through
+                // the bug's orientation matrix so banking/pitch rotate
+                // the silhouette with the live mesh.
+                //
+                // Wing flap: the occluder offset along ±Y shrinks as the
+                // wings sweep toward vertical (edge-on to the lamp) and
+                // swells back to full when the wings lie flat. That's
+                // what makes the shaft silhouettes "flap" in sync with
+                // the visible mesh — without this, the shafts would show
+                // a static two-wing shape while the mesh moves.
+                //
+                // `pos` is `[pixel_x, pixel_y, world_z]`; occluder storage
+                // expects pixel-space XY with world-space Z. Converting a
+                // world-space offset back to pixel coords is `(+dx, -dy)`
+                // because pixel-Y points down while world-Y points up (see
+                // `pixel_to_world` in `render/world_space.rs`).
+                // Body is a slender near-cylindrical mesh; Y/Z radius is
+                // 0.11 in mesh-local units (see `build_bug_body_mesh`).
+                let body_r = extents[0] * 0.24;
+                let flap_c = flap_rad.cos();
+                let flap_s = flap_rad.sin();
+                // Edge-on wings cast almost no shadow; use cos(flap) to
+                // collapse the Gaussian radius toward zero at ±90°.
+                // Centroid of the moth-wing outline sits around Y ≈ 0.55
+                // in mesh-local units; the Gaussian radius scales with the
+                // wing area projected onto the shaft plane (cos(flap)).
+                let wing_r = extents[0] * (0.40 + 0.32 * flap_c.abs());
+                let wing_offset_y = 0.55_f32 * flap_c;
+                let wing_offset_z = 0.55_f32 * flap_s;
+                // Body occluder — compact core at the bug's centre.
+                frame
+                    .bug_occluders
+                    .push(crate::render::draw_cmd::BugOccluder {
+                        center_px: (pos[0], pos[1]),
+                        lift: pos[2],
+                        radius: body_r,
+                        strength: 28.0,
+                    });
+                // Wing occluders — rotated offsets from the body centre.
+                // Left wing flaps to +Z, right to −Z (mirror across body).
+                let wing_locals = [
+                    glam::Vec3::new(0.0, wing_offset_y, wing_offset_z),
+                    glam::Vec3::new(0.0, -wing_offset_y, wing_offset_z),
+                ];
+                for wl in wing_locals {
+                    let rotated = rot.transform_vector3(wl * extents[0]);
+                    let cx_px = pos[0] + rotated.x;
+                    let cy_px = pos[1] - rotated.y;
+                    let cz = pos[2] + rotated.z;
+                    frame
+                        .bug_occluders
+                        .push(crate::render::draw_cmd::BugOccluder {
+                            center_px: (cx_px, cy_px),
+                            lift: cz,
+                            radius: wing_r,
+                            strength: 22.0,
+                        });
+                }
             }
         }
 
@@ -2851,80 +3078,63 @@ impl SceneBehavior for ShopScene {
         // renders as a slow, rolling sheet behind the stall items.
         // Phase offsets per-emitter break the row up so it reads as a
         // drape, not a uniform wall.
+        //
+        // Arrange-mode: `positions.smoke_curtain` nudges the row's center
+        // (`nx` horizontal, `ny` vertical) and lifts it (`lift_mm`). The
+        // curtain has no mesh, so it's cycle-only via Tab (not clickable).
+        // Live preview folds the staged arrange delta in here because
+        // wind gusts don't go through `apply_arrange_override`.
+        //
+        // Magnitudes (density, radius, velocity, lift, emitter count) are
+        // driven by `ctx.shop_smoke_tuning`, live-editable from the
+        // "Shop Smoke..." debug overlay.
         let t = self.age_secs;
-        const N_EMITTERS: usize = 9;
-        let back_pixel_y = h * 0.02;
+        let smoke = ctx.shop_smoke_tuning;
+        let n_emitters = smoke.emitter_count.max(1) as usize;
+        let curtain_p = match ctx.arrange_preview.as_ref() {
+            Some(prev) => prev.applied_to(
+                crate::ui::scene_layout::SHOP_HIERARCHY,
+                "shop.props.smoke_curtain",
+                self.positions.smoke_curtain,
+            ),
+            None => self.positions.smoke_curtain,
+        };
+        let curtain_cx = curtain_p.nx * w;
+        let back_pixel_y = curtain_p.ny * h;
         let span = w * 0.88;
-        let curtain_lift = h * 0.55;
-        for i in 0..N_EMITTERS {
-            let f = if N_EMITTERS <= 1 {
+        let curtain_lift = h * smoke.lift_fraction + layout.mm(curtain_p.lift_mm);
+        for i in 0..n_emitters {
+            let f = if n_emitters <= 1 {
                 0.0
             } else {
-                i as f32 / (N_EMITTERS as f32 - 1.0) - 0.5
+                i as f32 / (n_emitters as f32 - 1.0) - 0.5
             };
-            let cx = w * 0.5 + f * span;
+            let cx = curtain_cx + f * span;
             let phase = i as f32 * 1.37;
+            // Three overlapping sines at different rates give the curtain a
+            // rolling, non-repeating billow instead of a uniform sway.
             let sway = (t * 0.45 + phase).sin();
             let roll = (t * 0.72 + phase * 0.6).sin();
+            let billow = (t * 0.31 + phase * 0.9).sin();
+            // Forward pulse breathes the sheet toward/away from camera.
+            let breathe = 0.5 + 0.5 * (t * 0.38 + phase * 0.45).sin();
             frame.wind_gusts.push(crate::render::draw_cmd::WindGust {
-                center_px: (cx + sway * w * 0.015, back_pixel_y),
-                lift: curtain_lift + roll * h * 0.04,
-                velocity: [sway * 6.0, -4.0 - roll * 2.0, 14.0 + roll * 3.0],
-                radius: h * 0.18,
-                density: 0.55 + 0.15 * roll,
-            });
-        }
-
-        // ── Corner fans ────────────────────────────────────────────────
-        // Two fans tucked in the back corners of the room wafting smoke
-        // forward toward the camera (world −Y). A slow sinusoid on the
-        // magnitude sells the "blade spin cycle" without a visible fan
-        // mesh, and a small lateral sway keeps the stream from reading
-        // as a perfectly rigid jet.
-        let fan_pixel_y = h * 0.08;
-        let fan_lift = h * 0.28;
-        let fan_radius = h * 0.14;
-        for side in [-1.0_f32, 1.0_f32] {
-            let fan_px = w * 0.5 + side * w * 0.44;
-            // Out-of-phase pulse between the two fans so the room doesn't
-            // breathe in unison.
-            let fan_phase = if side < 0.0 { 0.0 } else { 1.9 };
-            let pulse = 0.75 + 0.25 * (t * 1.6 + fan_phase).sin();
-            let wobble = (t * 2.3 + fan_phase).sin();
-            frame.wind_gusts.push(crate::render::draw_cmd::WindGust {
-                center_px: (fan_px, fan_pixel_y),
-                lift: fan_lift + wobble * h * 0.02,
-                // −Y pushes smoke toward the camera. A touch of inward X
-                // aims each fan toward center so the streams converge on
-                // the counter.
+                center_px: (
+                    cx + sway * w * 0.045 + billow * w * 0.02,
+                    back_pixel_y + billow * h * 0.03,
+                ),
+                lift: curtain_lift + roll * h * 0.09 + billow * h * 0.05,
                 velocity: [
-                    -side * 4.0 + wobble * 2.0,
-                    -28.0 * pulse,
-                    2.0 + wobble * 1.5,
+                    sway * 14.0 + billow * 6.0,
+                    -6.0 - roll * 5.0,
+                    smoke.forward_velocity_base
+                        + breathe * smoke.forward_velocity_breathe_amp
+                        + roll * 4.0,
                 ],
-                radius: fan_radius,
-                density: 0.35 * pulse,
-            });
-        }
-
-        // ── Cursor breeze ──────────────────────────────────────────────
-        // A faint wind gust that follows the cursor, derived from its
-        // frame-to-frame motion. Small radius/density so it only ruffles
-        // the curtain rather than fogging the scene.
-        let (cx_px, cy_px) = self.last_cursor_px;
-        let (px_px, py_px) = self.prev_cursor_px;
-        if cx_px > 0.0 && cy_px > 0.0 {
-            let dx = cx_px - px_px;
-            let dy = cy_px - py_px;
-            // Pixel +y is world -y, so flip y when pushing smoke.
-            let vx = dx.clamp(-w * 0.05, w * 0.05) * 0.6;
-            let vy = -dy.clamp(-h * 0.05, h * 0.05) * 0.6;
-            frame.wind_gusts.push(crate::render::draw_cmd::WindGust {
-                center_px: (cx_px, cy_px),
-                lift: h * 0.12,
-                velocity: [vx, vy, 2.0],
-                radius: h * 0.08,
-                density: 0.05,
+                radius: h * (smoke.radius_base + smoke.radius_billow_amp * billow),
+                density: smoke.density_base
+                    + smoke.density_roll_amp * roll
+                    + smoke.density_billow_amp * billow,
             });
         }
 
@@ -2936,12 +3146,11 @@ impl SceneBehavior for ShopScene {
         // a flat black UI page.
         frame.fluid_smoke();
 
-        // ── Lighting: cool lamp key + fill on counter ──────────────────
-        // Warm point light at the bulb. LAMP_BULB_LOCAL_Z is negative (below apex),
-        // scaled by lamp_h (the Z scale of the lamp).
+        // ── Lighting: cold fluorescent lamp + purple rim ───────────────
+        // LAMP_BULB_LOCAL_Z is negative (below apex), scaled by lamp_h.
         let lamp_bulb_pos = [lp.0, lp.1, lamp_hang_z + LAMP_BULB_LOCAL_Z * lamp_h];
         let mut point_lights: Vec<PointLight> = vec![
-            // Cool overhead key — represents ambient moonlight / ceiling bounce.
+            // Cold fluorescent key — slightly greenish-white, typical of tube lighting.
             PointLight {
                 pos: [
                     layout.lamp_center_px.0,
@@ -2949,67 +3158,22 @@ impl SceneBehavior for ShopScene {
                     layout.lamp_center_px.2,
                 ],
                 radius: h * 1.15,
-                color: [0.72, 0.88, 1.00],
-                intensity: 2.15,
+                color: [0.86, 0.96, 0.98],
+                intensity: 2.15 * lamp_flicker,
             },
-            // Warm incandescent fill from the lamp bulb itself.
+            // Cold fluorescent fill at the bulb itself.
             PointLight {
                 pos: lamp_bulb_pos,
                 radius: h * 1.30,
-                color: [1.00, 0.88, 0.58],
-                intensity: 2.60,
+                color: [0.82, 0.94, 1.00],
+                intensity: 2.60 * lamp_flicker,
             },
+            // Purple rim highlight — offset beside the bulb to catch edges.
             PointLight {
-                pos: [w * 0.22, h * 0.22, h * 0.28],
-                radius: h * 0.75,
-                color: [0.55, 0.62, 0.72],
-                intensity: 0.55,
-            },
-            PointLight {
-                pos: [
-                    layout.relic_dish_center_px.0,
-                    layout.relic_dish_center_px.1,
-                    h * 0.20,
-                ],
-                radius: h * 0.65,
-                color: [1.00, 0.88, 0.60],
-                intensity: 2.40,
-            },
-            PointLight {
-                pos: [
-                    layout.talisman_tray_center_px.0,
-                    layout.talisman_tray_center_px.1,
-                    h * 0.18,
-                ],
-                radius: h * 0.50,
-                color: [0.90, 1.00, 0.92],
-                intensity: 2.20,
-            },
-            PointLight {
-                pos: [
-                    layout.ribbon_tray_center_px.0,
-                    layout.ribbon_tray_center_px.1,
-                    h * 0.18,
-                ],
-                radius: h * 0.50,
-                color: [1.00, 0.90, 0.62],
-                intensity: 2.20,
-            },
-            PointLight {
-                pos: [
-                    layout.coin_dish_center_px.0,
-                    layout.coin_dish_center_px.1,
-                    h * 0.24,
-                ],
-                radius: h * 0.38,
-                color: [1.00, 0.94, 0.55],
-                intensity: 3.40 + 0.20 * (self.age_secs * 0.7).sin(),
-            },
-            PointLight {
-                pos: [journal_cx, journal_cy, h * 0.10],
-                radius: h * 0.30,
-                color: [1.00, 0.90, 0.64],
-                intensity: 2.40,
+                pos: [lamp_bulb_pos[0], lamp_bulb_pos[1], lamp_bulb_pos[2] - h * 0.04],
+                radius: h * 0.70,
+                color: [0.72, 0.38, 1.00],
+                intensity: 1.80 * lamp_flicker,
             },
         ];
 
@@ -3568,6 +3732,7 @@ impl SceneBehavior for ShopScene {
             kind: Object3dKind::Plaque {
                 text: format!("Gold\n{}g", ctx.run.gold.max(0)),
                 pick_id: None,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -3598,6 +3763,27 @@ impl SceneBehavior for ShopScene {
                         glam::Mat4::from_rotation_x((-80.0_f32).to_radians()) * cam_rot;
                     let plaque_z = layout.mm(4.0);
 
+                    // Clamp a plaque's pixel-X so its full width stays inside
+                    // the camera frustum at the plaque's world depth. Without
+                    // this, plaques anchored to edge items (far-left relics or
+                    // far-right ribbons) slide past the screen edge.
+                    let clamp_plaque_px =
+                        |center_px: f32, plaque_w: f32, py: f32, wz: f32| -> f32 {
+                            let world_y = h * 0.5 - py;
+                            let (fw_min, fw_max) =
+                                layout.camera.frustum_x_range_at(w, h, world_y, wz);
+                            let px_min = (fw_min + w * 0.5).max(0.0);
+                            let px_max = (fw_max + w * 0.5).min(w);
+                            let margin = w * 0.01;
+                            let lo = px_min + plaque_w * 0.5 + margin;
+                            let hi = px_max - plaque_w * 0.5 - margin;
+                            if hi <= lo {
+                                (px_min + px_max) * 0.5
+                            } else {
+                                center_px.clamp(lo, hi)
+                            }
+                        };
+
                     if hover_is_owned {
                         // Combined owned-item plaque: title / sell price /
                         // description, stacked on one sign. Width sized like
@@ -3623,9 +3809,9 @@ impl SceneBehavior for ShopScene {
                         let content_h = line_count as f32 * line_h;
                         let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
 
-                        let px = tpx + owned_p.nx * w;
                         let py = tpy + owned_p.ny * h;
                         let wz = (twz + h * 0.05 + layout.mm(owned_p.lift_mm)).max(0.0);
+                        let px = clamp_plaque_px(tpx + owned_p.nx * w, plaque_w, py, wz);
                         frame.object3d(Object3d {
                             pos: [px, py, wz],
                             extents: [plaque_w, plaque_h, plaque_z],
@@ -3634,6 +3820,7 @@ impl SceneBehavior for ShopScene {
                             kind: Object3dKind::Plaque {
                                 text,
                                 pick_id: None,
+                                silhouette: false,
                             },
                             focusable: false,
                             scene_shaded: true,
@@ -3660,9 +3847,10 @@ impl SceneBehavior for ShopScene {
                         // forward toward the camera. Arrange-mode placement
                         // contributes additive deltas.
                         let title_p = &self.positions.hover_title_plaque;
-                        let title_px = tpx + title_p.nx * w;
                         let title_py = tpy - h * 0.28 + title_p.ny * h;
                         let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
+                        let title_px =
+                            clamp_plaque_px(tpx + title_p.nx * w, plaque_w, title_py, title_wz);
                         frame.object3d(Object3d {
                             pos: [title_px, title_py, title_wz],
                             extents: [plaque_w, plaque_h, plaque_z],
@@ -3671,6 +3859,7 @@ impl SceneBehavior for ShopScene {
                             kind: Object3dKind::Plaque {
                                 text: format!("{}\n{}", title, cta),
                                 pick_id: None,
+                                silhouette: false,
                             },
                             focusable: false,
                             scene_shaded: true,
@@ -3694,7 +3883,6 @@ impl SceneBehavior for ShopScene {
                         // talisman actually does.
                         if !desc.is_empty() {
                             let desc_p = &self.positions.hover_desc_plaque;
-                            let desc_px = tpx + desc_p.nx * w;
                             // Wider + shorter than the title plaque.
                             let desc_w = w * 0.38;
                             let font_px = (h * 0.022).max(14.0);
@@ -3711,6 +3899,8 @@ impl SceneBehavior for ShopScene {
                             let desc_py = tpy + h * 0.10 + desc_p.ny * h;
                             let desc_wz =
                                 (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
+                            let desc_px =
+                                clamp_plaque_px(tpx + desc_p.nx * w, desc_w, desc_py, desc_wz);
                             frame.object3d(Object3d {
                                 pos: [desc_px, desc_py, desc_wz],
                                 extents: [desc_w, desc_h, plaque_z],
@@ -3719,6 +3909,7 @@ impl SceneBehavior for ShopScene {
                                 kind: Object3dKind::Plaque {
                                     text: desc.clone(),
                                     pick_id: None,
+                                    silhouette: false,
                                 },
                                 focusable: false,
                                 scene_shaded: true,
@@ -4054,9 +4245,9 @@ impl SceneBehavior for ShopScene {
         }
 
         // Push the brass focus ring on top of the 2D HUD layer so it
-        // sits above the cabinet wood and dishes. Skipped during pause /
-        // overlay states because the overlay's own buttons take focus.
-        if !self.pause_menu.paused && !self.journal.open {
+        // sits above the cabinet wood and dishes. Skipped during pause
+        // because the overlay's own buttons take focus.
+        if !self.pause_menu.paused {
             if let Some(target) = self.focus {
                 let rect_lookup = focus_rect_graph
                     .iter()
@@ -4100,20 +4291,6 @@ impl SceneBehavior for ShopScene {
         // Fullscreen click-blocker behind the pause menu's own buttons so
         // missed clicks become no-ops instead of falling through.
         if self.pause_menu.paused {
-            buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
-        }
-
-        // Yaku Journal overlay (drawn last so it covers everything).
-        self.journal.draw(
-            w,
-            h,
-            ui_scale,
-            ctx.run,
-            &mut quads,
-            &mut texts,
-            &mut buttons,
-        );
-        if self.journal.open {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
 
@@ -4175,7 +4352,7 @@ impl SceneBehavior for ShopScene {
                         own_light: None,
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: None,
+                        arrange_name: Some("shop.celebrations.pack_closeup"),
                     }]);
 
                     // "Click to open" prompt at the bottom.
@@ -4197,12 +4374,17 @@ impl SceneBehavior for ShopScene {
                     let tile_size = h * 0.13;
                     let gap = tile_size * 0.25;
                     let total_w = n as f32 * tile_size + (n.saturating_sub(1)) as f32 * gap;
-                    let row_x0 = (w - total_w) * 0.5;
+                    let row_x0 = (w - total_w) * 0.5 + w * self.positions.celeb_pack_reveal.nx;
                     let row_py = h * self.positions.celeb_pack_reveal.ny;
                     let row_lift = layout.mm(self.positions.celeb_pack_reveal.lift_mm);
                     let src_px = w * 0.5;
                     let src_py = h * self.positions.celeb_pack_closeup.ny;
                     let src_lift = row_lift + h * 0.15;
+                    let row_rx = self.positions.celeb_pack_reveal.rx_deg.to_radians()
+                        + 60.0_f32.to_radians();
+                    let row_ry = self.positions.celeb_pack_reveal.ry_deg.to_radians();
+                    let row_rz = self.positions.celeb_pack_reveal.rz_deg.to_radians()
+                        + std::f32::consts::PI;
 
                     let mut placements = Vec::with_capacity(n);
                     for i in 0..n {
@@ -4218,7 +4400,7 @@ impl SceneBehavior for ShopScene {
                         placements.push(ShowcaseTilePlacement {
                             tile: celeb.tiles[i].clone(),
                             center_pos: [px, py, lift],
-                            rotation: [60.0_f32.to_radians(), 0.0, std::f32::consts::PI],
+                            rotation: [row_rx, row_ry, row_rz],
                             scale,
                             size_px: tile_size,
                             brightness: 1.0,
@@ -4236,6 +4418,12 @@ impl SceneBehavior for ShopScene {
                         .push(crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(
                             placements,
                         ));
+                    // Pack-reveal tiles render through `ShowcaseTileBatch`,
+                    // which has no per-tile `arrange_name`, so committed
+                    // placement values (read above as `nx/ny/lift_mm/rx/ry/rz`)
+                    // are the only way to nudge them. Select
+                    // `shop.celebrations.pack_reveal` from the arrange-mode
+                    // hierarchy via Tab — there is no clickable mesh anchor.
 
                     // Dismiss prompt — pinned near the bottom.
                     if celeb.fully_settled() {
@@ -4264,7 +4452,7 @@ impl SceneBehavior for ShopScene {
         let popup_scale = w.min(h) / 1080.0;
         let glyph_placements = self.score_popups.placements(now, popup_scale);
         if !glyph_placements.is_empty() {
-            frame.extruded_glyph_batch(glyph_placements);
+            frame.object3d_batch(glyph_placements);
         }
         for (rect, color) in self.particles.instances() {
             frame.quad(GpuInstance { rect, color });

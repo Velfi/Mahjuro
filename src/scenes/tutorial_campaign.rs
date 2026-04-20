@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio::SfxId;
 use crate::core::relic::RelicId;
-use crate::core::relic::relic_visual;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
@@ -12,10 +11,11 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::game::onboarding::OnboardingPhase;
 use crate::render::draw_cmd::{
-    CameraParams, DrawCmd, MirrorPlacement, PackPlacement, RelicShowcasePlacement,
+    CameraParams, DrawCmd, Object3d, Object3dKind,
     ShowcaseTilePlacement,
-    TalismanPlacement, UiFrame, WoodTabletPlacement, ZodiacRibbonPlacement,
+    UiFrame,
 };
+use crate::render::table_transform::rot_rx_ry_rz_deg;
 use crate::render::world_space::LayoutAnchorPx;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
@@ -55,6 +55,9 @@ pub struct TutorialCampaignScene {
     tree: TreeState,
     /// Demo rhythm: 0 = idle, 1 = banked (after Play), 2 = scored (after Trigger).
     try_it_phase: u8,
+    /// Arrange-mode-tunable placements for the shop preview props and the
+    /// try-it-demo Mirror/Trigger pair.
+    pub positions: crate::ui::scene_layout::TutorialPositions,
 }
 
 struct TileGroup {
@@ -499,7 +502,7 @@ const PAGES: &[TutorialPage] = &[
             "Relic = passive run bonus",
             "Shrine = one round with a score target (Small, Big, or Boss)",
             "Boss = extra rule on the Boss shrine",
-            "Debuff = tiles score for less, not gone",
+            "Debuff = tile scores 0 but still counts toward the hand",
             "Honors = wind and dragon tiles",
         ],
         callout: Some("Next you will browse the shop: buy upgrades, then face the tutorial boss."),
@@ -546,6 +549,7 @@ impl TutorialCampaignScene {
             page: 0,
             tree: TreeState::new(),
             try_it_phase: 0,
+            positions: crate::ui::scene_layout::load_tutorial_positions(),
         }
     }
 
@@ -608,43 +612,62 @@ impl TutorialCampaignScene {
         item_y: f32,
         h: f32,
         scale: f32,
-    ) -> ZodiacRibbonPlacement {
-        ZodiacRibbonPlacement {
-            anchor_pos: [center_x, item_y + 2.0 * scale, h * 0.18],
-            length: 46.0 * scale,
-            width: 24.0 * scale,
-            // Match the normal shop's wall-hung display pose.
-            rotation_y_deg: 0.0,
-            rotation_x_deg: 0.0,
-            rotation_z_deg: 0.0,
+    ) -> Object3d {
+        let length = 46.0 * scale;
+        let width = 24.0 * scale;
+        Object3d {
+            pos: [center_x, item_y + 2.0 * scale, h * 0.18],
+            extents: [width, length, width * 0.15],
+            rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Some(ZodiacKind::Dragon),
+            kind: Object3dKind::ZodiacRibbon {
+                kind: Some(ZodiacKind::Dragon),
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("tutorial.shop.ribbon"),
         }
     }
 
-    fn shop_preview_talisman(center_x: f32, item_y: f32, h: f32, scale: f32) -> TalismanPlacement {
-        TalismanPlacement {
-            center_pos: [center_x, item_y + 22.0 * scale, h * 0.13],
+    fn shop_preview_talisman(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
+        Object3d {
+            pos: [center_x, item_y + 22.0 * scale, h * 0.13],
             extents: [22.0 * scale, 32.0 * scale, 4.5 * scale],
             // Match the normal shop's upright wall display pose.
-            rotation_y_deg: 0.0,
-            rotation_x_deg: 0.0,
-            rotation_z_deg: 0.0,
+            rotation: glam::Mat4::IDENTITY,
             color: [0.42, 0.82, 0.55, 1.0],
-            kind: TalismanKind::Jade,
+            kind: Object3dKind::Talisman {
+                kind: TalismanKind::Jade,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("tutorial.shop.talisman"),
         }
     }
 
-    fn shop_preview_pack(center_x: f32, item_y: f32, h: f32, scale: f32) -> PackPlacement {
-        PackPlacement {
-            world_pos: [center_x, item_y + 24.0 * scale, h * 0.14],
-            half_extents: [18.0 * scale, 24.0 * scale, 5.5 * scale],
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: TilePackKind::CoinCache,
+    fn shop_preview_pack(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
+        Object3d {
+            pos: [center_x, item_y + 24.0 * scale, h * 0.14],
+            extents: [36.0 * scale, 48.0 * scale, 11.0 * scale],
             // Match the normal shop's gentle shelf lean.
-            rotation_x_deg: -5.0,
-            rotation_y_deg: 0.0,
-            pick_id: None,
+            rotation: crate::render::table_transform::rot_ry_rx_deg(-5.0, 0.0),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Pack {
+                kind: TilePackKind::CoinCache,
+                pick_id: None,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("tutorial.shop.pack"),
         }
     }
 
@@ -899,13 +922,13 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut bg_quads = Vec::new();
         let mut fg_quads = Vec::new();
         let mut texts = Vec::new();
-        let mut relic_showcases = Vec::new();
-        let mut ribbon_placements = Vec::new();
-        let mut talisman_placements = Vec::new();
-        let mut pack_placements = Vec::new();
+        let mut relic_objects: Vec<Object3d> = Vec::new();
+        let mut ribbon_placements: Vec<Object3d> = Vec::new();
+        let mut talisman_placements: Vec<Object3d> = Vec::new();
+        let mut pack_placements: Vec<Object3d> = Vec::new();
         let mut showcase_tiles = Vec::new();
-        let mut wood_tablet_placements: Vec<WoodTabletPlacement> = Vec::new();
-        let mut mirror_placement: Option<MirrorPlacement> = None;
+        let mut wood_tablet_placements: Vec<Object3d> = Vec::new();
+        let mut mirror_placement: Option<Object3d> = None;
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
         frame.starfield();
@@ -1018,40 +1041,71 @@ impl SceneBehavior for TutorialCampaignScene {
                 |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
             let relic_size = 42.0 * scale;
             let relic_id = RelicId::MerchantsEye;
-            let visual = relic_visual(relic_id);
-            let face = relic_size * 0.82;
-            let thick = relic_size * 0.28 * visual.thickness_scale;
-            relic_showcases.push(RelicShowcasePlacement {
-                center_pos: [center_x(0), item_y + relic_size * 0.55, relic_size * 0.35],
-                extents: [face, face, thick],
-                rotation_y_deg: 30.0,
-                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
-                rotation_z_deg: 0.0,
+            let visual = crate::core::relic::relic_visual(relic_id);
+            let face_size = relic_size * 0.82;
+            let thick = face_size * 0.28 * visual.thickness_scale;
+            let rp = &self.positions.shop_relic;
+            relic_objects.push(Object3d {
+                pos: [
+                    center_x(0) + w * rp.nx,
+                    item_y + relic_size * 0.55 + h * rp.ny,
+                    relic_size * 0.35 + ctx.layout.mm(rp.lift_mm),
+                ],
+                extents: [face_size, thick, face_size],
+                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 30.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
-                relic_id,
-                glow: 0.0,
+                kind: Object3dKind::Relic { relic_id, glow: 0.0, silhouette: false, pick_id: None },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("tutorial.shop.relic"),
             });
-            ribbon_placements.push(Self::shop_preview_ribbon(center_x(1), item_y, h, scale));
-            talisman_placements.push(Self::shop_preview_talisman(center_x(2), item_y, h, scale));
-            pack_placements.push(Self::shop_preview_pack(center_x(3), item_y, h, scale));
+            let rib_p = &self.positions.shop_ribbon;
+            let mut ribbon = Self::shop_preview_ribbon(center_x(1), item_y, h, scale);
+            ribbon.pos[0] += w * rib_p.nx;
+            ribbon.pos[1] += h * rib_p.ny;
+            ribbon.pos[2] += ctx.layout.mm(rib_p.lift_mm);
+            ribbon_placements.push(ribbon);
+            let tal_p = &self.positions.shop_talisman;
+            let mut tal = Self::shop_preview_talisman(center_x(2), item_y, h, scale);
+            tal.pos[0] += w * tal_p.nx;
+            tal.pos[1] += h * tal_p.ny;
+            tal.pos[2] += ctx.layout.mm(tal_p.lift_mm);
+            talisman_placements.push(tal);
+            let pk_p = &self.positions.shop_pack;
+            let mut pk = Self::shop_preview_pack(center_x(3), item_y, h, scale);
+            pk.pos[0] += w * pk_p.nx;
+            pk.pos[1] += h * pk_p.ny;
+            pk.pos[2] += ctx.layout.mm(pk_p.lift_mm);
+            pack_placements.push(pk);
         } else if self.page == TUTORIAL_PAGE_RELICS {
             let item_y = label_y - 56.0 * scale;
             let center_x =
                 |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
             let relic_size = 48.0 * scale;
             let relic_id = RelicId::MerchantsEye;
-            let visual = relic_visual(relic_id);
-            let face = relic_size * 0.88;
-            let thick = relic_size * 0.30 * visual.thickness_scale;
-            relic_showcases.push(RelicShowcasePlacement {
-                center_pos: [center_x(0), item_y + relic_size * 0.5, relic_size * 0.38],
-                extents: [face, face, thick],
-                rotation_y_deg: 24.0,
-                rotation_x_deg: 90.0 + visual.ui_tilt_x_deg,
-                rotation_z_deg: 0.0,
+            let visual = crate::core::relic::relic_visual(relic_id);
+            let face_size = relic_size * 0.88;
+            let thick = face_size * 0.30 * visual.thickness_scale;
+            let rp = &self.positions.shop_relic;
+            relic_objects.push(Object3d {
+                pos: [
+                    center_x(0) + w * rp.nx,
+                    item_y + relic_size * 0.5 + h * rp.ny,
+                    relic_size * 0.38 + ctx.layout.mm(rp.lift_mm),
+                ],
+                extents: [face_size, thick, face_size],
+                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 24.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
-                relic_id,
-                glow: 0.0,
+                kind: Object3dKind::Relic { relic_id, glow: 0.0, silhouette: false, pick_id: None },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("tutorial.shop.relic"),
             });
         }
 
@@ -1084,39 +1138,69 @@ impl SceneBehavior for TutorialCampaignScene {
             let mirror_diam = layout.play_rect[2]
                 .max(layout.play_rect[3] * 1.8)
                 .max(72.0 * scale);
-            mirror_placement = Some(MirrorPlacement {
-                world_pos: LayoutAnchorPx {
-                    px: play_center_x,
-                    py: play_center_y + try_it_world_z_py_nudge,
-                    lift_z: try_it_lift,
-                }
-                .to_draw_cmd_triple(),
+            let mp = &self.positions.try_it_mirror;
+            let mirror_pos = LayoutAnchorPx {
+                px: play_center_x,
+                py: play_center_y + try_it_world_z_py_nudge,
+                lift_z: try_it_lift,
+            }
+            .to_draw_cmd_triple();
+            mirror_placement = Some(Object3d {
+                pos: [
+                    mirror_pos[0] + w * mp.nx,
+                    mirror_pos[1] + h * mp.ny,
+                    mirror_pos[2] + ctx.layout.mm(mp.lift_mm),
+                ],
                 extents: [mirror_diam, mirror_diam, mirror_diam],
-                hover: if play_focused { 1.0 } else { 0.0 },
-                rotation_x_deg: 36.0,
-                rotation_z_deg: (wobble_t * 2.4).sin() * 7.5,
+                rotation: glam::Mat4::IDENTITY,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Mirror {
+                    rotation_x_deg: 36.0,
+                    rotation_z_deg: (wobble_t * 2.4).sin() * 7.5,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: if play_focused { 1.0 } else { 0.0 },
+                anim_id: 2,
+                arrange_name: Some("tutorial.try_it.mirror"),
             });
-            wood_tablet_placements.push(WoodTabletPlacement {
-                world_pos: LayoutAnchorPx {
-                    px: trigger_center_x,
-                    py: trigger_center_y + try_it_world_z_py_nudge,
-                    lift_z: try_it_lift,
-                }
-                .to_draw_cmd_triple(),
+            let tp = &self.positions.try_it_trigger;
+            let trigger_pos = LayoutAnchorPx {
+                px: trigger_center_x,
+                py: trigger_center_y + try_it_world_z_py_nudge,
+                lift_z: try_it_lift,
+            }
+            .to_draw_cmd_triple();
+            wood_tablet_placements.push(Object3d {
+                pos: [
+                    trigger_pos[0] + w * tp.nx,
+                    trigger_pos[1] + h * tp.ny,
+                    trigger_pos[2] + ctx.layout.mm(tp.lift_mm),
+                ],
                 extents: [
                     layout.trigger_rect[2],
                     (layout.trigger_rect[3] * 0.35).max(8.0),
                     layout.trigger_rect[3],
                 ],
-                label: "Trigger".to_string(),
-                pressed: 0.0,
-                hover: if trigger_focused && trigger_enabled {
-                    1.0
-                } else {
-                    0.0
+                rotation: glam::Mat4::IDENTITY,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::WoodTablet {
+                    label: "Trigger".to_string(),
+                    pressed: 0.0,
+                    hover: if trigger_focused && trigger_enabled {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    disabled: !trigger_enabled,
                 },
-                rotation_z_deg: 0.0,
-                disabled: !trigger_enabled,
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("tutorial.try_it.trigger"),
             });
             texts.push(TextLabel {
                 rect: [
@@ -1322,23 +1406,23 @@ impl SceneBehavior for TutorialCampaignScene {
         if !showcase_tiles.is_empty() {
             frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles));
         }
-        if !relic_showcases.is_empty() {
-            frame.relic_showcase_batch(relic_showcases);
+        if !relic_objects.is_empty() {
+            frame.object3d_batch(relic_objects);
         }
         if !ribbon_placements.is_empty() {
-            frame.zodiac_batch(ribbon_placements);
+            frame.object3d_batch(ribbon_placements);
         }
         if !talisman_placements.is_empty() {
-            frame.talisman_batch(talisman_placements);
+            frame.object3d_batch(talisman_placements);
         }
         if !pack_placements.is_empty() {
-            frame.pack_batch(pack_placements);
+            frame.object3d_batch(pack_placements);
         }
         if let Some(mirror) = mirror_placement {
-            frame.mirror(mirror);
+            frame.object3d(mirror);
         }
         if !wood_tablet_placements.is_empty() {
-            frame.wood_tablet_batch(wood_tablet_placements);
+            frame.object3d_batch(wood_tablet_placements);
         }
         // Broad, forgiving lighting for educational showcase objects.
         let light_y = h * 0.18;

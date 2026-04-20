@@ -7,7 +7,7 @@ use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
-use crate::render::candle_mesh::{CandlePlacement, WICK_TIP_Y};
+use crate::render::candle_mesh::WICK_TIP_Y;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
@@ -94,6 +94,9 @@ pub struct StartScreenScene {
     /// Cached cursor position from the most recent `update()` for the
     /// starfield parallax effect in `draw_frame()`.
     cursor_pos: (f32, f32),
+    /// Arrange-mode-tunable placements for the menu tablets, candles, and
+    /// title plaque.
+    pub positions: crate::ui::scene_layout::StartScreenPositions,
 }
 
 impl StartScreenScene {
@@ -104,6 +107,7 @@ impl StartScreenScene {
             last_frame: Instant::now(),
             last_focus_rects: RefCell::new(Vec::new()),
             cursor_pos: (0.0, 0.0),
+            positions: crate::ui::scene_layout::load_start_screen_positions(),
         }
     }
 
@@ -293,11 +297,15 @@ impl SceneBehavior for StartScreenScene {
         let tablet_z = h * 0.06;
 
         let cam_rot = camera_facing_rotation(camera.eye, camera.target);
+        let menu_p = &self.positions.menu_tablets;
+        let menu_dx = w * menu_p.nx;
+        let menu_dy = h * menu_p.ny;
+        let menu_dz = layout.mm(menu_p.lift_mm);
         let mut tablets: Vec<Object3d> = Vec::new();
         for (i, &item) in items.iter().enumerate() {
             let ty = start_y + i as f32 * (tablet_h + gap);
             tablets.push(Object3d {
-                pos: [cx, ty, tablet_z],
+                pos: [cx + menu_dx, ty + menu_dy, tablet_z + menu_dz],
                 extents: [tablet_w, tablet_depth, tablet_h],
                 rotation: cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
@@ -312,7 +320,8 @@ impl SceneBehavior for StartScreenScene {
                 own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,            });
+                arrange_name: Some("start_screen.menu_tablets"),
+            });
         }
 
         // ── Candles: two flanking the menu column ───────────────────────
@@ -320,28 +329,57 @@ impl SceneBehavior for StartScreenScene {
         let candle_offset_x = tablet_w * 0.5 + h * 0.09;
         let candle_y = center_y;
 
-        let candle_placements = vec![
-            CandlePlacement {
-                world_pos: [cx - candle_offset_x, candle_y, 0.0],
-                scale: candle_h,
-                flicker: 1.0,
-                height_scale: 1.0,
-            },
-            CandlePlacement {
-                world_pos: [cx + candle_offset_x, candle_y, 0.0],
-                scale: candle_h,
-                flicker: 1.0,
-                height_scale: 0.92,
-            },
+        let cl_p = &self.positions.candle_left;
+        let cr_p = &self.positions.candle_right;
+        let candle_info: [([f32; 3], f32, f32, &'static str); 2] = [
+            (
+                [
+                    cx - candle_offset_x + w * cl_p.nx,
+                    candle_y + h * cl_p.ny,
+                    layout.mm(cl_p.lift_mm),
+                ],
+                candle_h,
+                1.0,
+                "start_screen.candle_left",
+            ),
+            (
+                [
+                    cx + candle_offset_x + w * cr_p.nx,
+                    candle_y + h * cr_p.ny,
+                    layout.mm(cr_p.lift_mm),
+                ],
+                candle_h,
+                0.92,
+                "start_screen.candle_right",
+            ),
         ];
+        let candle_placements: Vec<Object3d> = candle_info
+            .iter()
+            .map(|&(pos, scale, height_scale, name)| Object3d {
+                pos,
+                extents: [1.0, 1.0, 1.0],
+                rotation: glam::Mat4::IDENTITY,
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Candle {
+                    scale,
+                    height_scale,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some(name),
+            })
+            .collect();
 
         // ── Point lights at wick tips ───────────────────────────────────
         let radius_px = h * 0.5;
         let mut point_lights: Vec<PointLight> = Vec::new();
-        for candle in &candle_placements {
-            let wick_y = WICK_TIP_Y * candle.scale * candle.height_scale;
+        for &(pos, scale, height_scale, _) in &candle_info {
+            let wick_y = WICK_TIP_Y * scale * height_scale;
             point_lights.push(PointLight {
-                pos: [candle.world_pos[0], candle.world_pos[1], wick_y],
+                pos: [pos[0], pos[1], wick_y],
                 radius: radius_px,
                 color: [1.0, 0.55, 0.22],
                 intensity: 2.0,
@@ -352,9 +390,9 @@ impl SceneBehavior for StartScreenScene {
         let flame_w = h * 0.025;
         let flame_h = h * 0.042;
         let mut flame_instances: Vec<GpuInstance> = Vec::new();
-        for (i, candle) in candle_placements.iter().enumerate() {
-            let fx = candle.world_pos[0] - flame_w * 0.5;
-            let fy = candle.world_pos[1] - flame_h * 1.2;
+        for (i, &(pos, _, _, _)) in candle_info.iter().enumerate() {
+            let fx = pos[0] - flame_w * 0.5;
+            let fy = pos[1] - flame_h * 1.2;
             let phase = i as f32 * 0.37;
             flame_instances.push(GpuInstance {
                 rect: [fx, fy, flame_w, flame_h],
@@ -382,21 +420,28 @@ impl SceneBehavior for StartScreenScene {
             format!("Profile {}  —  New", active + 1)
         };
 
+        let tp_p = &self.positions.title_plaque;
         let plaque = Object3d {
-            pos: [cx, plaque_y + -69.0, plaque_h * 0.5],
+            pos: [
+                cx + w * tp_p.nx,
+                plaque_y + -69.0 + h * tp_p.ny,
+                plaque_h * 0.5 + layout.mm(tp_p.lift_mm),
+            ],
             extents: [plaque_w, plaque_h, plaque_depth],
             rotation: glam::Mat4::from_rotation_x((-60.0_f32).to_radians()) * cam_rot,
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Plaque {
                 text: format!("M A H J U R O\n{}", prof_text),
                 pick_id: None,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
             own_light: None,
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: None,        };
+            arrange_name: Some("start_screen.title_plaque"),
+        };
 
         // ── Update focus rect graph for next frame's update() ───────────
         let mut focus_rects = Vec::new();
@@ -438,7 +483,7 @@ impl SceneBehavior for StartScreenScene {
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
         frame.table();
-        frame.candles(candle_placements);
+        frame.object3d_batch(candle_placements);
         frame.object3d(plaque);
         frame.object3d_batch(tablets);
         frame.starfield();

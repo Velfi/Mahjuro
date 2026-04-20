@@ -214,6 +214,7 @@ struct VsOut {
     @location(1) world_n: vec3<f32>,
     @location(2) local_pos: vec3<f32>,
     @location(3) uv: vec2<f32>,
+    @location(4) local_n: vec3<f32>,
 };
 
 @vertex
@@ -260,6 +261,7 @@ fn vs_main(
     // basis at the same surface coordinate the VS displaced from.
     o.local_pos = pos;
     o.uv = uv;
+    o.local_n = n;
     return o;
 }
 
@@ -504,7 +506,7 @@ fn fs_main(
     //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water,
     //   8 = Foil, 9 = Glass, 10 = Enamel,
     //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
-    //   15 = Polychrome, 16 = Porcelain
+    //   15 = Polychrome, 16 = Porcelain, 17 = Brass
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
@@ -518,6 +520,12 @@ fn fs_main(
     let is_goldnug   = (kind > 13.5 && kind < 14.5);
     let is_poly      = (kind > 14.5 && kind < 15.5);
     let is_porcelain = (kind > 15.5 && kind < 16.5);
+    let is_brass     = (kind > 16.5 && kind < 17.5);
+    // Brass is a conductor too; group with metal for the per-light
+    // Fresnel-spec branch and for the rim halo. Skips the coin-face
+    // heightmap perturbation since brass fittings are smooth, not
+    // engraved.
+    let is_conductor = (is_metal || is_brass);
     // Any of the five carved-tablet materials: shares the heightmap
     // normal-perturbation pipeline and the rim/SSS treatment.
     let is_talisman  = (is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
@@ -548,6 +556,11 @@ fn fs_main(
         // normal-perturbation block below.
         albedo = mesh.base_color.rgb;
     }
+    if (is_brass) {
+        // Brass: smooth polished conductor, no heightmap. Albedo is the
+        // base tint and the conductor Fresnel sheen does the rest.
+        albedo = mesh.base_color.rgb;
+    }
     if (is_foil) {
         // Foil: base_color.rgb is the metallic wrapper tint; the texture is
         // a decal whose alpha masks where the art sits on the front of the
@@ -561,8 +574,12 @@ fn fs_main(
         if (mesh.material_params.w > 0.5) {
             albedo = mesh.base_color.rgb;
         } else {
+            // Keep ~18% of the foil tint bleeding through even fully-opaque
+            // art so the metallic sheen in the lighting pass has a tinted
+            // base to modulate. Pure-white decal pixels otherwise wash out
+            // the wrapper and kill the "foil card pack" read.
             let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
-            let decal_mask = tex_sample.a * front_face;
+            let decal_mask = tex_sample.a * front_face * 0.82;
             albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
         }
     }
@@ -572,10 +589,11 @@ fn fs_main(
         albedo = mix(mesh.base_color.rgb * 0.85, tex_rgb, 0.55);
     }
     if (is_enamel) {
-        // Relic mesh caps have local ±Y normals; the world normal's Y
-        // component is the correct discriminator for the front face (even
-        // under the small ui_tilt that collection/modal showcases apply).
-        let cap_mask = smoothstep(0.55, 0.82, abs(in.world_n.y));
+        // Relic mesh caps have local ±Y normals; discriminate in LOCAL
+        // space so the texture shows regardless of how the placement
+        // orients the mesh in world space (collection uses a Y-up
+        // overhead camera; shop/gameplay use the Z-up table camera).
+        let cap_mask = smoothstep(0.55, 0.82, abs(in.local_n.y));
         albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
     }
     var wood_grain = 0.0;
@@ -958,7 +976,7 @@ fn fs_main(
             let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
             let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
             // Bump strength tuned for shallow carved relief on jade.
-            let bump = 3.0;
+            let bump = 10.0;
             var dhdu = (h_r - h_l) * bump;
             var dhdv = (h_u - h_d) * bump;
             // Gold: subtle surface variation layered on top of the carved
@@ -971,7 +989,7 @@ fn fs_main(
                 let h_c2 = noise3(p2);
                 let h_x2 = noise3(p2 + off * 14.0);
                 let h_y2 = noise3(p2 + off_y * 14.0);
-                let pit_bump = 0.45;
+                let pit_bump = 1.0;
                 dhdu = dhdu + (h_x2 - h_c2) * pit_bump;
                 dhdv = dhdv + (h_y2 - h_c2) * pit_bump;
             }
@@ -1196,15 +1214,20 @@ fn fs_main(
             if (is_wood) {
                 s = s * mix(0.55, 1.15, wood_grain) * (1.0 - wood_pore * 0.85);
             }
-            if (is_metal) {
+            if (is_conductor) {
                 // Conductor: Schlick Fresnel against the half-vector with
                 // F0 = base colour. The reflected light then takes on the
                 // metal's tint (no white "plastic" highlight) and swells
-                // toward full reflectivity at glancing angles.
+                // toward full reflectivity at glancing angles. Brass uses
+                // the same lobe shape; a softer sheen is produced by the
+                // caller picking a lower `specular_power`.
                 let vdh = max(dot(view_dir, h), 0.0);
                 let f0 = mesh.base_color.rgb;
                 let f_metal = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal;
+                // Brass is slightly less reflective than "Metal" so the
+                // warm body tone stays readable under museum lighting.
+                let conductor_scale = select(1.0, 0.85, is_brass);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * f_metal * conductor_scale;
             } else if (is_enamel) {
                 let vdh = max(dot(view_dir, h), 0.0);
                 let ridge_f0 = mesh.base_color.rgb;
@@ -1218,15 +1241,19 @@ fn fs_main(
                 let glass_tint = mix(vec3<f32>(0.92, 0.97, 1.0), mesh.base_color.rgb, 0.35);
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glass_tint * 1.35;
             } else if (is_porcelain) {
-                // Porcelain glaze: tight neutral-white highlight plus a
-                // gentle Fresnel rim so curved edges brighten without the
-                // surface going translucent. Dielectric F0 ≈ 0.04.
+                // Porcelain glaze (chiclet/pillow look): a tight pinpoint
+                // highlight sits inside a broader wet-glaze lobe, then a
+                // punchy Fresnel rim wraps the silhouette so the shape
+                // reads as a rounded candy-coated pebble. Dielectric
+                // F0 ≈ 0.04; the wide lobe is what sells the "wet glaze".
                 let vdh = max(dot(view_dir, h), 0.0);
                 let ndv = max(dot(n, view_dir), 0.0);
                 let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
                 let glaze_tint = vec3<f32>(1.0, 0.98, 0.96);
-                let rim = 0.15 * pow(1.0 - ndv, 3.5);
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glaze_tint * 1.20;
+                let wide_lobe = pow(nh, max(spec_power * 0.35, 1.0)) * 0.55;
+                let rim = 0.45 * pow(1.0 - ndv, 3.0);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glaze_tint * 1.55;
+                spec_acc = spec_acc + lc * intensity * atten * wide_lobe * cand_vis * glaze_tint * 0.80;
                 spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * glaze_tint;
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
@@ -1327,35 +1354,70 @@ fn fs_main(
         }
 
         // ── Foil sheen (metallic wrapping with iridescence) ──────────
-        // Combines a tight conductor specular (the foil's mirror) with a
-        // broad thin-film rainbow (the holographic overprint). The albedo
-        // carries the actual pack art; the sheen sits on top.
+        // Three stacked layers that, together, read as a shiny plastic
+        // foil card pack: (1) a tight tinted mirror for the conductor
+        // highlight, (2) anisotropic vertical streaks so the wrapper
+        // picks up a brushed-foil look rather than a plastic gloss, and
+        // (3) a view-swept holographic band that slides across the front
+        // as the camera / pack angle changes — the signature "tilt it
+        // in your hand" rainbow.
         if (is_foil) {
             let h = normalize(l_dir + view_dir);
             let nh = max(dot(n, h), 0.0);
             let vdh = max(dot(view_dir, h), 0.0);
             let ndv = max(dot(n, view_dir), 0.0);
-            let broad = max(dot(n, l_dir), 0.0);
             // Tinted conductor Fresnel — F0 is the foil's own colour so a
             // gold-tinted instance reflects gold, a silver one reflects
             // silver, etc. Real metallic foil wrappers take their sheen
             // from the metal itself, not a neutral spec.
             let f0 = mesh.base_color.rgb;
             let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, 5.0);
-            let mirror_lobe = pow(nh, 48.0) * 1.6;
+
+            // Anisotropic streak modulation. Real foil wrappers have
+            // micro-ridges along the long axis of the pack; those ridges
+            // smear the specular into vertical streaks rather than a
+            // single round highlight. We fake it by modulating the
+            // mirror lobe with a high-frequency cosine keyed to UV.x
+            // (which runs across the width of the front face — see
+            // build_pack_mesh). material_params.w > 0.5 marks the
+            // talisman path, which has no UV art and shouldn't streak.
+            var streak = 1.0;
+            if (mesh.material_params.w <= 0.5) {
+                let streak_wave = 0.5 + 0.5 * cos(in.uv.x * 64.0);
+                // Gentle bias (0.55..1.35) so streaks add contrast
+                // without darkening the wrapper overall.
+                streak = mix(0.55, 1.35, streak_wave);
+            }
+
+            // Main mirror highlight — tighter and brighter than before so
+            // the specular actually punches through the scene lighting.
+            let mirror_lobe = pow(nh, 96.0) * 2.6 * streak;
             spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
-            // Holographic thin-film iridescence — subtle rainbow shimmer
-            // layered over the dominant mirror specular. Kept gentle so the
-            // foil reads as shiny metallic wrapping, not a green-tinted mess.
-            let film_angle = dot(n, h);
-            let theta = film_angle * 8.0 + ndv * 3.0;
-            let holo_r = 0.5 + 0.5 * cos(theta);
-            let holo_g = 0.5 + 0.5 * cos(theta + 2.094);
-            let holo_b = 0.5 + 0.5 * cos(theta + 4.189);
-            let holo_tint = vec3<f32>(holo_r, holo_g, holo_b);
-            let fresnel = 0.05 + 0.35 * pow(1.0 - ndv, 3.0);
-            let holo_lobe = pow(nh, 12.0) * 0.35;
-            sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * holo_lobe * fresnel * holo_tint;
+
+            // Broad diffuse-wrapped sheen — keeps the lit side of the
+            // pack obviously brighter than the shadow side even when the
+            // camera misses the mirror lobe.
+            let broad_lobe = pow(nh, 16.0) * 0.8 * streak;
+            spec_acc = spec_acc + lc * intensity * atten * cand_vis * broad_lobe * f_foil * 0.7;
+
+            // View-swept holographic band. `ndv` goes 1→0 as we look
+            // toward the grazing edge; combined with a per-light term it
+            // forms a rainbow stripe that slides across the front face as
+            // the pack tilts. Only fires on the decaled front (material
+            // params.w == 0 path) — edges already carry the streaks.
+            if (mesh.material_params.w <= 0.5) {
+                let band_pos = ndv * 5.5 + in.uv.y * 2.8 + dot(n, l_dir) * 3.0;
+                let band_r = 0.5 + 0.5 * cos(band_pos);
+                let band_g = 0.5 + 0.5 * cos(band_pos + 2.094);
+                let band_b = 0.5 + 0.5 * cos(band_pos + 4.189);
+                let band_tint = vec3<f32>(band_r, band_g, band_b);
+                // Band is strongest at glancing angles; stays visible but
+                // reduced straight-on so the wrapper looks alive from any
+                // viewing angle.
+                let band_gain = (0.15 + 0.5 * pow(1.0 - ndv, 2.0)) * streak;
+                let band_lobe = pow(nh, 18.0) * 0.55;
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis * band_lobe * band_gain * band_tint;
+            }
         }
 
         // Gold-leaf specular lobe on carved decal text. Conductor Fresnel
@@ -1384,6 +1446,12 @@ fn fs_main(
         // response is in the tinted Fresnel spec lobe above. Leave a
         // sliver of diffuse so unlit-side coins don't read as cutouts.
         diffuse_scale = 0.08;
+    }
+    if (is_brass) {
+        // Brass fittings keep a bit more diffuse so shelf rails etc.
+        // read as warm polished metal even outside specular angles —
+        // otherwise the rails go near-black in overhead museum light.
+        diffuse_scale = 0.22;
     }
     if (is_foil) {
         // Semi-metallic foil: more diffuse than a pure conductor (the
@@ -1491,18 +1559,25 @@ fn fs_main(
         albedo = mix(albedo, albedo * 1.10 + vec3<f32>(0.04, 0.04, 0.05), glaze);
     }
 
-    // Foil Fresnel edge tint: subtle rainbow color-shift at grazing
-    // angles so the wrapper catches a hint of iridescence in ambient.
-    if (is_foil) {
+    // Foil Fresnel edge tint: strong rainbow color-shift at grazing
+    // angles so the wrapper catches iridescence even when no direct
+    // light hits the mirror lobe. Combined with the lifted-tint albedo
+    // and the per-light swept band, this is what reads as "glossy
+    // holographic plastic" rather than a flat card.
+    if (is_foil && mesh.material_params.w <= 0.5) {
         let edge = 1.0 - ndv_view;
-        let rim = pow(edge, 2.5) * 0.15;
-        let theta = ndv_view * 6.0 + in.uv.x * 2.0;
+        // Tint boost that runs from 0 dead-on to ~0.55 at silhouette.
+        let rim = pow(edge, 2.0) * 0.32;
+        let theta = ndv_view * 7.0 + in.uv.x * 3.5 + in.uv.y * 1.8;
         let holo = vec3<f32>(
             0.5 + 0.5 * cos(theta),
             0.5 + 0.5 * cos(theta + 2.094),
             0.5 + 0.5 * cos(theta + 4.189)
         );
-        albedo = mix(albedo, holo, rim);
+        // Brighten the rim — foil wrappers catch ambient indirect even
+        // on shadowed edges, which the per-light spec can't deliver.
+        let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
+        albedo = rim_gain;
     }
     if (is_glass) {
         let edge = 1.0 - ndv_view;
@@ -1520,6 +1595,15 @@ fn fs_main(
         let edge = 1.0 - ndv_view;
         let rim = pow(edge, 3.0) * 0.55;
         let warm_edge = mix(vec3<f32>(1.0, 0.93, 0.72), vec3<f32>(1.0), 0.25);
+        albedo = mix(albedo, warm_edge, rim);
+    }
+    if (is_brass) {
+        // Brass rim halo: same warm-gold tint as Metal but a wider,
+        // softer edge so shelf rails and fittings read as polished
+        // brass from any camera angle, not just at grazing view.
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 2.0) * 0.40;
+        let warm_edge = vec3<f32>(1.00, 0.88, 0.60);
         albedo = mix(albedo, warm_edge, rim);
     }
 

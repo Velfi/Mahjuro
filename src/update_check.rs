@@ -1,4 +1,8 @@
 //! Background self-updater using GitHub releases.
+//!
+//! Two-phase: a background check first discovers whether an update exists
+//! (cheap, network-only). The user is then prompted before we actually
+//! download and replace the binary.
 
 use std::sync::mpsc;
 use std::thread;
@@ -8,11 +12,14 @@ use self_update::backends::github;
 const REPO_OWNER: &str = "Velfi";
 const REPO_NAME: &str = "Mahjuro";
 
-/// Outcome of a background update attempt.
+/// Outcome of the background update pipeline.
 pub enum UpdateResult {
+    /// A newer version exists. Present this to the user and, if they
+    /// confirm, call [`UpdateChecker::start_install`].
+    UpdateAvailable { new_version: String },
     /// Successfully replaced the binary. The user should restart.
     Updated { new_version: String },
-    /// A newer version exists but the update failed. Includes the
+    /// The user opted in but the download/apply step failed. Includes the
     /// release page URL so the user can download manually.
     UpdateFailed {
         new_version: String,
@@ -21,40 +28,45 @@ pub enum UpdateResult {
     },
 }
 
-/// Handle to a one-shot background update. Poll each frame with
+/// Handle to the background update pipeline. Poll each frame with
 /// [`poll`](UpdateChecker::poll).
 pub struct UpdateChecker {
     rx: mpsc::Receiver<Option<UpdateResult>>,
+    tx: mpsc::Sender<Option<UpdateResult>>,
     done: bool,
 }
 
 impl UpdateChecker {
-    /// Spawn a background thread that checks for (and applies) updates.
+    /// Spawn a background thread that checks whether an update is
+    /// available. Does **not** download or apply — that happens only after
+    /// the user confirms via [`start_install`](Self::start_install).
     pub fn spawn() -> Self {
         let (tx, rx) = mpsc::channel();
 
+        let tx_clone = tx.clone();
         thread::Builder::new()
             .name("update-check".into())
             .spawn(move || {
-                let result = run_update();
-                let _ = tx.send(result);
+                let result = run_check();
+                let _ = tx_clone.send(result);
             })
             .expect("spawn update-check thread");
 
-        Self { rx, done: false }
+        Self {
+            rx,
+            tx,
+            done: false,
+        }
     }
 
-    /// Non-blocking poll. Returns `Some` exactly once when the check
-    /// completes and an update was attempted.
+    /// Non-blocking poll. Returns `Some` each time the background pipeline
+    /// produces a new result (availability, success, or failure).
     pub fn poll(&mut self) -> Option<UpdateResult> {
         if self.done {
             return None;
         }
         match self.rx.try_recv() {
-            Ok(Some(result)) => {
-                self.done = true;
-                Some(result)
-            }
+            Ok(Some(result)) => Some(result),
             Ok(None) => {
                 self.done = true;
                 None
@@ -65,6 +77,20 @@ impl UpdateChecker {
                 None
             }
         }
+    }
+
+    /// Spawn a second background thread that downloads and applies the
+    /// update for `new_version`. The result is delivered via
+    /// [`poll`](Self::poll).
+    pub fn start_install(&mut self, new_version: String) {
+        let tx = self.tx.clone();
+        thread::Builder::new()
+            .name("update-install".into())
+            .spawn(move || {
+                let result = Some(run_install(new_version));
+                let _ = tx.send(result);
+            })
+            .expect("spawn update-install thread");
     }
 }
 
@@ -80,20 +106,26 @@ fn update_target() -> &'static str {
     }
 }
 
-fn run_update() -> Option<UpdateResult> {
-    let current = env!("CARGO_PKG_VERSION");
-    log::info!("checking for updates (current: v{current})...");
-
-    let bin_name = if cfg!(target_os = "windows") {
+fn bin_name() -> &'static str {
+    if cfg!(target_os = "windows") {
         "mahjuro.exe"
     } else {
         "mahjuro"
-    };
+    }
+}
+
+fn release_url_for(version: &str) -> String {
+    format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{version}")
+}
+
+fn run_check() -> Option<UpdateResult> {
+    let current = env!("CARGO_PKG_VERSION");
+    log::info!("checking for updates (current: v{current})...");
 
     let updater = match github::Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
-        .bin_name(bin_name)
+        .bin_name(bin_name())
         .target(update_target())
         .current_version(current)
         .no_confirm(true)
@@ -116,30 +148,56 @@ fn run_update() -> Option<UpdateResult> {
         }
     };
 
-    let latest_version = latest.version.trim_start_matches('v');
-    if !version_is_newer(current, latest_version) {
+    let latest_version = latest.version.trim_start_matches('v').to_string();
+    if !version_is_newer(current, &latest_version) {
         log::info!("already up to date (v{current})");
         return None;
     }
 
     log::info!("update available: v{current} -> v{latest_version}");
-    log::info!("downloading and applying update...");
+    Some(UpdateResult::UpdateAvailable {
+        new_version: latest_version,
+    })
+}
 
-    let new_version = latest_version.to_string();
+fn run_install(new_version: String) -> UpdateResult {
+    let current = env!("CARGO_PKG_VERSION");
+    log::info!("user accepted update; downloading v{new_version}...");
+
+    let updater = match github::Update::configure()
+        .repo_owner(REPO_OWNER)
+        .repo_name(REPO_NAME)
+        .bin_name(bin_name())
+        .target(update_target())
+        .current_version(current)
+        .no_confirm(true)
+        .show_output(false)
+        .show_download_progress(false)
+        .build()
+    {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("update install configure failed: {e}");
+            return UpdateResult::UpdateFailed {
+                new_version: new_version.clone(),
+                release_url: release_url_for(&new_version),
+                error: e.to_string(),
+            };
+        }
+    };
+
     match updater.update() {
         Ok(status) => {
             log::info!("update applied: {status:?}");
-            Some(UpdateResult::Updated { new_version })
+            UpdateResult::Updated { new_version }
         }
         Err(e) => {
-            let release_url =
-                format!("https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/tag/v{new_version}");
             log::warn!("update download/apply failed: {e}");
-            Some(UpdateResult::UpdateFailed {
-                new_version,
-                release_url,
+            UpdateResult::UpdateFailed {
+                new_version: new_version.clone(),
+                release_url: release_url_for(&new_version),
                 error: e.to_string(),
-            })
+            }
         }
     }
 }

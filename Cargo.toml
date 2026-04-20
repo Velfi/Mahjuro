@@ -33,7 +33,7 @@ arboard = "3.6.1"
 enum_dispatch = "0.3"
 rodio = { version = "0.19", features = ["vorbis"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
-self_update = { version = "0.42", features = ["archive-zip", "archive-tar"] }
+self_update = { version = "0.42", features = ["archive-zip", "archive-tar", "compression-flate2"] }
 rayon = "1.11.0"
 human_format = "1.2.1"
 

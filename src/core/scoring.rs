@@ -182,7 +182,6 @@ fn score_sets_inner(
     let no_seq_bonus = rules.contains(&RuleModifier::NoSequenceBonus);
     let pairs_zero = rules.contains(&RuleModifier::PairsScoreZero);
     let sequences_halved = rules.contains(&RuleModifier::SequencesHalved);
-    let middle_tiles_zero = rules.contains(&RuleModifier::MiddleTilesZero);
     let censor_repeats = rules.contains(&RuleModifier::CensorRepeats);
     let effective_point_value = |t: &Tile| -> i32 {
         if tile_is_debuffed(t, ctx.tile_debuffs) {
@@ -275,16 +274,12 @@ fn score_sets_inner(
     // builds on top of:
     //   * `pairs_zero`        → pair melds contribute nothing
     //   * `sequences_halved`  → sequence melds contribute half
-    //   * `middle_tiles_zero` → rank-5 tiles contribute 0 point value
     let mut base_chips: i32 = 0;
     for s in sets {
         let mut meld_contrib = meld_chip_bonus(s.kind);
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
-                let mut v = effective_point_value(t);
-                if middle_tiles_zero && t.rank == 5 {
-                    v = 0;
-                }
+                let v = effective_point_value(t);
                 meld_contrib += v;
             }
         }
@@ -348,14 +343,14 @@ fn score_sets_inner(
         }
     }
 
-    // Suit-specific chip relics: Jade Serpent (Bamboos), Ink Brush
-    // (Characters), Pearl Diver (Circles). Same per-tile pattern as Honor Fury.
+    // Suit-specific chip relics: Jade Serpent (Bamboos), Red Serpent
+    // (Characters), Blue Serpent (Circles). Same per-tile pattern as Honor Fury.
     let has_jade_serpent = has(RelicId::JadeSerpent);
-    let has_ink_brush = has(RelicId::InkBrush);
-    let has_pearl_diver = has(RelicId::PearlDiver);
+    let has_red_serpent = has(RelicId::RedSerpent);
+    let has_blue_serpent = has(RelicId::BlueSerpent);
     let has_edge_runner = has(RelicId::EdgeRunner);
     let has_low_tide = has(RelicId::LowTide);
-    if has_jade_serpent || has_ink_brush || has_pearl_diver || has_edge_runner || has_low_tide {
+    if has_jade_serpent || has_red_serpent || has_blue_serpent || has_edge_runner || has_low_tide {
         for s in sets {
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -367,11 +362,11 @@ fn score_sets_inner(
                 if has_jade_serpent && t.suit == Suit::Bamboos {
                     push_chips!("Jade Serpent", 8);
                 }
-                if has_ink_brush && t.suit == Suit::Characters {
-                    push_chips!("Ink Brush", 8);
+                if has_red_serpent && t.suit == Suit::Characters {
+                    push_chips!("Red Serpent", 8);
                 }
-                if has_pearl_diver && t.suit == Suit::Circles {
-                    push_chips!("Pearl Diver", 8);
+                if has_blue_serpent && t.suit == Suit::Circles {
+                    push_chips!("Blue Serpent", 8);
                 }
                 // Edge Runner: terminal tiles (rank 1 or 9) in numbered suits.
                 if has_edge_runner
@@ -1040,6 +1035,95 @@ fn score_sets_inner(
         let empty = ctx.relics.max_slots.saturating_sub(ctx.relics.active.len());
         if empty > 0 {
             push_mult!("Empty Frame", 1.5 * empty as f64);
+        }
+    }
+
+    // Curio Cabinet: +mult equal to the summed live sell value of every
+    // *other* relic in the inventory (Curio Cabinet itself excluded).
+    if has(RelicId::CurioCabinet) {
+        let bonus: u32 = ctx
+            .relics
+            .active
+            .iter()
+            .copied()
+            .filter(|&id| id != RelicId::CurioCabinet)
+            .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic_counters))
+            .sum();
+        if bonus > 0 {
+            push_mult!("Curio Cabinet", bonus as f64);
+        }
+    }
+
+    // Lotus Bloom: +0.5 mult per flower drawn or scored this run (counter
+    // lives in relic_counters[LotusBloom], bumped by run.rs on draw/score).
+    if has(RelicId::LotusBloom) {
+        let blooms = ctx
+            .relic_counters
+            .get(&RelicId::LotusBloom)
+            .copied()
+            .unwrap_or(0);
+        if blooms > 0 {
+            push_mult!("Lotus Bloom", 0.5 * blooms as f64);
+        }
+    }
+
+    // Wall Weaver: +0.2 mult per tile in the wall beyond the base 140.
+    // Overflow is a fixed +68; relic_counters[WallWeaver] accumulates any
+    // other mid-run tile adds (future effects) so both sources stack.
+    if has(RelicId::WallWeaver) {
+        let overflow_extras = if ctx.relics.has(RelicId::Overflow) { 68 } else { 0 };
+        let extra_added = ctx
+            .relic_counters
+            .get(&RelicId::WallWeaver)
+            .copied()
+            .unwrap_or(0)
+            .max(0);
+        let excess = overflow_extras + extra_added;
+        if excess > 0 {
+            push_mult!("Wall Weaver", 0.2 * excess as f64);
+        }
+    }
+
+    // Heirloom: +1 mult per boss defeated this run.
+    if has(RelicId::Heirloom) {
+        let bosses = ctx
+            .relic_counters
+            .get(&RelicId::Heirloom)
+            .copied()
+            .unwrap_or(0)
+            .max(0);
+        if bosses > 0 {
+            push_mult!("Heirloom", bosses as f64);
+        }
+    }
+
+    // Tourist: +3 mult per distinct suit among scored tiles. All six suits
+    // count (Flower included).
+    if has(RelicId::Tourist) {
+        let mut seen = [false; 6];
+        for s in sets {
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    continue;
+                };
+                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                    continue;
+                }
+                let idx = match t.suit {
+                    Suit::Characters => 0,
+                    Suit::Bamboos => 1,
+                    Suit::Circles => 2,
+                    Suit::Wind => 3,
+                    Suit::Dragon => 4,
+                    Suit::Flower => 5,
+                    Suit::Season => continue,
+                };
+                seen[idx] = true;
+            }
+        }
+        let distinct = seen.iter().filter(|b| **b).count();
+        if distinct > 0 {
+            push_mult!("Tourist", 3.0 * distinct as f64);
         }
     }
 

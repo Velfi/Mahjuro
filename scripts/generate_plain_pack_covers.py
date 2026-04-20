@@ -46,28 +46,24 @@ FINAL_SIZE = (256, 384)
 
 STYLE_PREFIX = (
     "A tall vertical 2:3 portrait image of a booster-pack cover for a "
-    "mahjong video game. FLAT VECTOR STYLE, PLAIN COLORS ONLY.\n\n"
-    "HARD STYLE RULES — these are non-negotiable:\n"
-    "- Pure solid color fills only. Every region is ONE flat RGB value "
-    "with crisp hard edges between regions.\n"
-    "- NO gradients. NO shading. NO highlights. NO shadows. NO ambient "
-    "occlusion. NO volumetric lighting. NO glow. NO bloom.\n"
-    "- NO textures of any kind: no paper, no foil, no metal, no fabric, "
-    "no noise, no grain, no brushstrokes, no crinkles, no creases.\n"
-    "- NO holographic shimmer, NO iridescence, NO reflections, NO specular.\n"
-    "- NO text, NO letters, NO numerals, NO logos, NO glyphs, NO runes, "
-    "NO script of any kind.\n"
-    "- Simple flat-vector illustration is OK — characters, creatures, "
-    "objects, and scenery are allowed but must be drawn as simple flat "
-    "color shapes (think minimalist vector icon / flat-design poster), "
-    "NOT painted, NOT rendered, NOT shaded.\n"
-    "- Use only a small palette of flat fills per illustration element; "
-    "do NOT blend colors.\n"
-    "- Flat front-on view, orthographic, as if drawn with a vector tool "
-    "using fill-only shapes (think Adobe Illustrator flat fills, or "
-    "SVG <path>/<rect>/<circle> elements with NO filters applied).\n"
-    "- The image fills the full frame edge-to-edge with the background "
-    "color; no drop shadow, no mockup, no surface beneath.\n"
+    "mahjong video game, drawn as a flat-design vector poster scene. "
+    "The whole image IS the pack — the frame fills edge-to-edge with "
+    "the background color, no tabletop, mockup, or drop shadow.\n\n"
+    "Hard style rules — non-negotiable:\n"
+    "- Every region is a single flat RGB value with crisp hard edges "
+    "between regions. Surfaces must look like vector cutouts, like "
+    "construction paper — not painted, not rendered, not photographed.\n"
+    "- Use only a small palette of flat fills per element; colors are "
+    "placed next to each other, never blended.\n"
+    "- Characters, creatures, objects, and scenery are drawn as simple "
+    "flat color shapes in the style of a minimalist vector icon or "
+    "flat-design poster — as if built from SVG <path>, <rect>, and "
+    "<circle> elements with no filters applied.\n"
+    "- Flat front-on view, orthographic.\n"
+    "- Purely pictorial decoration only. No written glyphs, numerals, "
+    "or logos of any language anywhere in the image; any shape that "
+    "resembles a letter or number must be replaced with a plain "
+    "geometric mark.\n"
 )
 
 
@@ -80,38 +76,35 @@ PACKS = [
     (
         "honors",
         "deep navy #0e1838",
-        "COMPOSITION: a single tall vertical ivory (#f2ead6) column "
-        "running down the center of the frame, about one-third the "
-        "image width, extending nearly top-to-bottom — a ceremonial "
-        "totem. Stacked on this column are SEVEN flat-color symbols, "
-        "evenly spaced vertically from top to bottom: "
-        "(1) a flat ice-blue (#7ec8e3) arrow pointing up, "
-        "(2) a flat ember-orange (#e07a3c) arrow pointing right, "
-        "(3) a flat jade-green (#4ea87a) arrow pointing down, "
-        "(4) a flat storm-violet (#7a4ea8) arrow pointing left, "
-        "(5) a flat red (#e23b3b) solid circle, "
-        "(6) a flat green (#3aa84e) solid circle, "
-        "(7) a flat white (#f8f8f8) solid circle outlined thinly in "
-        "navy. All symbols are plain flat shapes, no decoration.",
+        "Composition: a single tall vertical ivory (#f2ead6) column "
+        "running down the center of the frame, a narrow central stripe "
+        "extending nearly top-to-bottom — a ceremonial totem. Stacked "
+        "on this column is a column of flat-color symbols, evenly "
+        "spaced vertically: in the upper half, four bold arrows "
+        "pointing up, right, down, and left in ice-blue (#7ec8e3), "
+        "ember-orange (#e07a3c), jade-green (#4ea87a), and "
+        "storm-violet (#7a4ea8); in the lower half, three solid "
+        "circles in red (#e23b3b), green (#3aa84e), and white "
+        "(#f8f8f8) with a thin navy outline on the white one. All "
+        "symbols are plain flat shapes.",
     ),
     (
         "polychrome",
         "pure black #000000",
-        "COMPOSITION: a single large flat white (#f2f2f2) upright "
+        "Composition: a single large flat white (#f2f2f2) upright "
         "rounded-rectangle mahjong-tile shape in the dead center of "
-        "the frame, about one-third the image width. Radiating outward "
-        "from this tile in all directions, TEN flat triangular shards "
-        "of pure color forming a starburst/explosion pattern that "
-        "reaches toward the edges of the frame. Each shard is a "
-        "different flat color, clockwise from top: red (#e23b3b), "
-        "orange (#e88a2a), yellow (#e8d23a), lime (#8ae83a), green "
-        "(#3aa84e), teal (#3ae8c4), blue (#3a6ee8), indigo (#5a3ae8), "
-        "violet (#8a3ae8), magenta (#e83ac4). Hard triangular edges.",
+        "the frame. Radiating outward from this tile in all "
+        "directions, a starburst of flat triangular shards reaches "
+        "toward the edges of the frame. The shards sweep through a "
+        "full rainbow around the tile — warm reds and oranges on one "
+        "side transitioning through yellow, green, teal, blue, and "
+        "violet around to magenta — each shard a single saturated "
+        "flat fill with hard triangular edges.",
     ),
     (
         "terminals",
         "warm obsidian #1a1412",
-        "COMPOSITION: an architectural gateway. Two massive flat amber "
+        "Composition: an architectural gateway. Two massive flat amber "
         "(#e8a84a) trapezoidal pillars stand on the left and right "
         "edges of the frame, widening slightly at the base, nearly "
         "full height. A flat gold (#c8882a) horizontal triangular peak "
@@ -124,57 +117,59 @@ PACKS = [
     (
         "flowers",
         "plum-black #1c0f1e",
-        "COMPOSITION: a 2x2 grid of four distinctly different flat "
+        "Composition: a 2x2 grid of four distinctly different flat "
         "flowers fills the frame, evenly spaced. "
-        "Top-left: a pink (#f2a6c0) 5-petal plum blossom with a small "
-        "gold (#e8c46a) center. "
-        "Top-right: a violet (#b08ae0) 6-petal orchid with a magenta "
-        "(#e06a8a) center. "
-        "Bottom-left: a gold (#e8c46a) many-petal chrysanthemum, many "
-        "thin flat petal shapes in a circle around an amber center. "
-        "Bottom-right: a flat green (#4ea87a) bamboo leaf sprig — two "
-        "or three simple pointed leaf shapes on a short stem. "
-        "All flowers are plain flat-color shapes, no shading.",
+        "Top-left: a pink (#f2a6c0) five-petal plum blossom with a "
+        "small gold (#e8c46a) round center. "
+        "Top-right: a violet (#b08ae0) multi-petal orchid with a "
+        "magenta (#e06a8a) center. "
+        "Bottom-left: a gold (#e8c46a) chrysanthemum shown as many "
+        "thin flat petal shapes arranged in a circle around an amber "
+        "center. "
+        "Bottom-right: a flat green (#4ea87a) bamboo leaf sprig — a "
+        "few simple pointed leaf shapes on a short stem. "
+        "All flowers are plain flat-color shapes.",
     ),
     (
         "bamboo_grove",
         "deep forest-black #0a1a0e",
-        "COMPOSITION: a horizontal forest scene. Eight flat emerald-"
-        "green (#3aa84e) vertical bamboo stalks of VARYING heights "
-        "stand side by side across the full width of the frame, "
-        "uneven tops forming a jagged canopy silhouette. Each stalk "
-        "has 2–3 thin darker green (#1a6a2e) horizontal segment "
-        "bands. Hanging in the center-right area between stalks is "
-        "one flat round gold (#e8c46a) lantern with a short dark "
-        "string above it. Scattered among the stalks are 4 small "
-        "flat yellow (#f8e87a) dot-fireflies. Reads as a scene.",
+        "Composition: a horizontal forest scene. A row of flat "
+        "emerald-green (#3aa84e) vertical bamboo stalks of varying "
+        "heights stand side by side across the full width of the "
+        "frame, uneven tops forming a jagged canopy silhouette. Each "
+        "stalk is broken by a couple of thin darker green (#1a6a2e) "
+        "horizontal segment bands. Hanging in the center-right area "
+        "between stalks is one flat round gold (#e8c46a) lantern with "
+        "a short dark string above it. Scattered among the stalks are "
+        "a handful of small flat yellow (#f8e87a) dot-fireflies.",
     ),
     (
         "coin_cache",
         "burgundy-black #1a0e12",
-        "COMPOSITION: a diagonal cascade of coins. In the lower-left "
+        "Composition: a diagonal cascade of coins. In the lower-left "
         "corner, a flat dark-red (#6a1a24) tipped-over rectangular "
         "chest shape with a flat gold (#c8882a) rim along its open "
-        "top edge. From the chest, SEVEN flat gold (#e8c46a) ring-"
-        "coins tumble in a diagonal arc toward the upper-right of "
-        "the frame, each coin a solid circle with a smaller square "
+        "top edge. From the chest, a stream of flat gold (#e8c46a) "
+        "ring-coins tumbles in a diagonal arc toward the upper-right "
+        "of the frame, each coin a solid circle with a smaller square "
         "hole punched out of its center (classic Chinese cash-coin "
         "shape). The coins grow progressively smaller as they reach "
-        "the upper-right. Clear sense of motion along the diagonal.",
+        "the upper-right, giving a clear sense of motion along the "
+        "diagonal.",
     ),
     (
         "scroll_library",
         "sepia-black #1a140a",
-        "COMPOSITION: an interior wall of shelves. A 3-column by "
-        "4-row grid of flat brown (#6a4a1a) rectangular cubbyhole "
-        "openings fills most of the frame, evenly spaced with thin "
-        "flat amber (#e8b86a) dividers between them. Two specific "
-        "cubbies contain a flat cream (#f2ead6) rolled scroll "
-        "partially pulled out — one in the top-row middle cubby and "
-        "one in the bottom-row right cubby, each scroll shown as a "
+        "Composition: an interior wall of shelves. A grid of flat "
+        "brown (#6a4a1a) rectangular cubbyhole openings — three "
+        "columns wide and several rows tall — fills most of the "
+        "frame, evenly spaced with thin flat amber (#e8b86a) dividers "
+        "between them. A couple of cubbies contain a flat cream "
+        "(#f2ead6) rolled scroll partially pulled out — one in the "
+        "upper rows, one in the lower rows — each scroll shown as a "
         "small flat cream cylinder sticking out. In the lower-left "
         "corner in front of the shelves, one small flat amber "
-        "(#e8c46a) round lantern shape. Reads as architecture.",
+        "(#e8c46a) round lantern shape.",
     ),
 ]
 
@@ -183,9 +178,7 @@ def build_prompt(bg_color: str, composition: str) -> str:
     return (
         f"{STYLE_PREFIX}\n"
         f"Background color (fills the full image edge-to-edge): {bg_color}.\n\n"
-        f"Composition: {composition}\n\n"
-        "Reminder: every color region must be a pure flat fill. No "
-        "gradients. No shading. No textures. No text. No illustration."
+        f"{composition}"
     )
 
 

@@ -83,6 +83,31 @@ pub enum SfxId {
     /// Structure cashed in (manual Trigger or auto-full). Bright bell-stack
     /// chime that precedes the scoring cascade.
     CashIn,
+    /// Chips/×/mult trio snaps together at the start of the hand-off
+    /// tween — signals "the accounting is done, here's the total".
+    CascadeMerge,
+    /// Merged total leaves the pad and begins its flight toward the score
+    /// reel — a rising whoosh that cues the upward motion.
+    CascadeLaunch,
+    /// Merged total lands in the score reel at the end of the flight —
+    /// crisp impact paired with the reel finishing its tick-up.
+    CascadeLand,
+    /// One stinger per yaku detected in a scored hand. Emitted from the
+    /// scoring loop so stacked yaku play as a rolling sequence of distinct
+    /// cues rather than a single hit.
+    YakuTanyao,
+    YakuToitoi,
+    YakuFullHand,
+    YakuYakuhai,
+    YakuIipeikou,
+    YakuSanshokuDoujun,
+    YakuIttsu,
+    YakuHonitsu,
+    YakuChinitsu,
+    YakuJunchan,
+    YakuHonroutou,
+    YakuChiitoitsu,
+    YakuChickenHand,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -130,6 +155,22 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::Unpause,
         SfxId::DoraScored,
         SfxId::CashIn,
+        SfxId::CascadeMerge,
+        SfxId::CascadeLaunch,
+        SfxId::CascadeLand,
+        SfxId::YakuTanyao,
+        SfxId::YakuToitoi,
+        SfxId::YakuFullHand,
+        SfxId::YakuYakuhai,
+        SfxId::YakuIipeikou,
+        SfxId::YakuSanshokuDoujun,
+        SfxId::YakuIttsu,
+        SfxId::YakuHonitsu,
+        SfxId::YakuChinitsu,
+        SfxId::YakuJunchan,
+        SfxId::YakuHonroutou,
+        SfxId::YakuChiitoitsu,
+        SfxId::YakuChickenHand,
     ]
 }
 
@@ -177,6 +218,45 @@ impl SfxId {
             SfxId::Unpause => "kenney_interface-sounds/Audio/maximize_003.ogg",
             SfxId::DoraScored => "kenney_interface-sounds/Audio/glass_002.ogg",
             SfxId::CashIn => "cash_in.ogg",
+            SfxId::CascadeMerge => "vwomp1.ogg",
+            SfxId::CascadeLaunch => "intake.ogg",
+            SfxId::CascadeLand => "Snap.ogg",
+            SfxId::YakuTanyao => "yaku_tanyao.ogg",
+            SfxId::YakuToitoi => "yaku_toitoi.ogg",
+            SfxId::YakuFullHand => "yaku_full_hand.ogg",
+            SfxId::YakuYakuhai => "yaku_yakuhai.ogg",
+            SfxId::YakuIipeikou => "yaku_iipeikou.ogg",
+            SfxId::YakuSanshokuDoujun => "yaku_sanshoku_doujun.ogg",
+            SfxId::YakuIttsu => "yaku_ittsu.ogg",
+            SfxId::YakuHonitsu => "yaku_honitsu.ogg",
+            SfxId::YakuChinitsu => "yaku_chinitsu.ogg",
+            SfxId::YakuJunchan => "yaku_junchan.ogg",
+            SfxId::YakuHonroutou => "yaku_honroutou.ogg",
+            SfxId::YakuChiitoitsu => "yaku_chiitoitsu.ogg",
+            SfxId::YakuChickenHand => "yaku_chicken_hand.ogg",
+        }
+    }
+
+    /// Per-yaku stinger for `kind`, emitted once per detected yaku during
+    /// scoring. Missing audio files no-op in [`AudioManager::play_sfx`], so
+    /// dropping new `.ogg` assets into `assets/audio/` with the filenames
+    /// above is all it takes to enable these.
+    pub fn for_yaku(kind: crate::core::yaku::YakuKind) -> SfxId {
+        use crate::core::yaku::YakuKind;
+        match kind {
+            YakuKind::Tanyao => SfxId::YakuTanyao,
+            YakuKind::Toitoi => SfxId::YakuToitoi,
+            YakuKind::FullHand => SfxId::YakuFullHand,
+            YakuKind::Yakuhai => SfxId::YakuYakuhai,
+            YakuKind::Iipeikou => SfxId::YakuIipeikou,
+            YakuKind::SanshokuDoujun => SfxId::YakuSanshokuDoujun,
+            YakuKind::Ittsu => SfxId::YakuIttsu,
+            YakuKind::Honitsu => SfxId::YakuHonitsu,
+            YakuKind::Chinitsu => SfxId::YakuChinitsu,
+            YakuKind::Junchan => SfxId::YakuJunchan,
+            YakuKind::Honroutou => SfxId::YakuHonroutou,
+            YakuKind::Chiitoitsu => SfxId::YakuChiitoitsu,
+            YakuKind::ChickenHand => SfxId::YakuChickenHand,
         }
     }
 }
@@ -206,6 +286,10 @@ pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
     sfx_data: HashMap<SfxId, Vec<u8>>,
+    /// Per-relic trigger samples loaded from `assets/audio/relics/<slug>.ogg`
+    /// at startup. Lookup is by `RelicId`; missing entries fall back to
+    /// [`SfxId::ScoreStep`] in [`AudioManager::play_relic_trigger`].
+    relic_trigger_data: HashMap<crate::core::relic::RelicId, Vec<u8>>,
     /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
     /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
     active_sinks: Vec<Sink>,
@@ -239,10 +323,26 @@ impl AudioManager {
             log::info!("Loaded {} sound effect(s).", sfx_data.len());
         }
 
+        let mut relic_trigger_data = HashMap::new();
+        for def in crate::core::relic::all_relic_defs() {
+            let slug = def.id.asset_filename().trim_end_matches(".png");
+            let asset_path = format!("audio/relics/{slug}.ogg");
+            if let Some(file) = crate::asset_path::get(&asset_path) {
+                relic_trigger_data.insert(def.id, file.data.to_vec());
+            }
+        }
+        if !relic_trigger_data.is_empty() {
+            log::info!(
+                "Loaded {} per-relic trigger sound(s).",
+                relic_trigger_data.len()
+            );
+        }
+
         Self {
             _stream: stream,
             handle,
             sfx_data,
+            relic_trigger_data,
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
             master_volume: 0.7,
             sfx_volume: 0.7,
@@ -265,25 +365,41 @@ impl AudioManager {
     }
 
     fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {
-        if !self.enabled {
-            log::debug!("play_sfx({id:?}): disabled");
-            return;
-        }
-        let Some(handle) = &self.handle else {
-            log::debug!("play_sfx({id:?}): no handle");
-            return;
-        };
-        let Some(data) = self.sfx_data.get(&id) else {
+        let Some(data) = self.sfx_data.get(&id).cloned() else {
             log::debug!("play_sfx({id:?}): no data");
             return;
         };
-        let cursor = Cursor::new(data.clone());
+        self.play_raw(&format!("{id:?}"), data, speed);
+    }
+
+    /// Play the per-relic trigger stinger for `rid`. Falls back to
+    /// [`SfxId::ScoreStep`] when no `audio/relics/<slug>.ogg` is loaded for
+    /// this relic, so new relics get a reasonable default until bespoke
+    /// audio is added.
+    pub fn play_relic_trigger(&mut self, rid: crate::core::relic::RelicId) {
+        if let Some(data) = self.relic_trigger_data.get(&rid).cloned() {
+            self.play_raw(&format!("Relic({rid:?})"), data, 1.0);
+        } else {
+            self.play_sfx(SfxId::ScoreStep);
+        }
+    }
+
+    fn play_raw(&mut self, tag: &str, data: Vec<u8>, speed: f32) {
+        if !self.enabled {
+            log::debug!("play_raw({tag}): disabled");
+            return;
+        }
+        let Some(handle) = &self.handle else {
+            log::debug!("play_raw({tag}): no handle");
+            return;
+        };
+        let cursor = Cursor::new(data);
         let Ok(source) = Decoder::new(cursor) else {
-            log::warn!("play_sfx({id:?}): decoder failed");
+            log::warn!("play_raw({tag}): decoder failed");
             return;
         };
         let Ok(sink) = Sink::try_new(handle) else {
-            log::warn!("play_sfx({id:?}): sink creation failed");
+            log::warn!("play_raw({tag}): sink creation failed");
             return;
         };
 
@@ -291,7 +407,7 @@ impl AudioManager {
         if self.active_sinks.len() >= MAX_CONCURRENT_SFX {
             let dropped = self.active_sinks.remove(0);
             log::debug!(
-                "play_sfx({id:?}): concurrent cap hit, dropping oldest sink (live={})",
+                "play_raw({tag}): concurrent cap hit, dropping oldest sink (live={})",
                 self.active_sinks.len() + 1,
             );
             drop(dropped);
@@ -299,7 +415,7 @@ impl AudioManager {
 
         let effective_vol = self.master_volume * self.sfx_volume;
         log::debug!(
-            "play_sfx({id:?}): vol={effective_vol:.2} live={}",
+            "play_raw({tag}): vol={effective_vol:.2} live={}",
             self.active_sinks.len() + 1,
         );
         let amplified = source.speed(speed).amplify(effective_vol);

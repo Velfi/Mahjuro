@@ -132,6 +132,55 @@ pub fn shanten_estimate(tiles: &[Tile]) -> i32 {
     shanten.max(1)
 }
 
+/// True iff the hand contains at least one *invested* partial — a set that
+/// the player has committed tiles toward and that is one specific tile away
+/// from being playable.
+///
+/// Counts:
+///   * pair → triplet (two matching faces, wanting a third)
+///   * triplet → kong (three matching faces, wanting a fourth)
+///   * sequence partial (two numbered tiles same suit, rank diff 1 or 2)
+///
+/// Lone singletons are *not* counted: every hand has those, so they'd make
+/// the check trivially true and reduce any gated effect to "always on."
+/// Flowers are ignored. Honors can only form pair/triplet partials.
+pub fn has_scoring_partial(tiles: &[Tile]) -> bool {
+    use std::collections::HashMap;
+    let mut counts: HashMap<(Suit, u8), usize> = HashMap::new();
+    for t in tiles {
+        if t.is_flower() {
+            continue;
+        }
+        *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
+    }
+    // Pair or triplet on its own face (2 or 3 copies; a 4-stack is already a kong).
+    if counts.values().any(|&c| c == 2 || c == 3) {
+        return true;
+    }
+    // Sequence partial: two numbered tiles in the same suit within rank 2.
+    let mut nums: Vec<(Suit, u8)> = counts
+        .iter()
+        .filter(|((s, _), _)| matches!(s, Suit::Characters | Suit::Bamboos | Suit::Circles))
+        .flat_map(|(&k, &c)| std::iter::repeat(k).take(c))
+        .collect();
+    nums.sort();
+    for i in 0..nums.len() {
+        for j in (i + 1)..nums.len() {
+            if nums[j].0 != nums[i].0 {
+                break;
+            }
+            let diff = nums[j].1 as i32 - nums[i].1 as i32;
+            if diff == 1 || diff == 2 {
+                return true;
+            }
+            if diff > 2 {
+                break;
+            }
+        }
+    }
+    false
+}
+
 /// Count "partial melds": pairs of tiles that could become a sequence with
 /// one more tile (edge wait, kanchan, ryanmen). Honor pairs that aren't
 /// already triplets are *not* counted here — `find_pairs_and_triplets` has
@@ -235,6 +284,49 @@ mod tests {
         assert!(!is_complete(&hand));
         assert!(is_tenpai(&hand));
         assert_eq!(shanten_estimate(&hand), 0);
+    }
+
+    #[test]
+    fn partial_detection_covers_invested_waits() {
+        // Pair (triplet wait).
+        assert!(has_scoring_partial(&[
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+        ]));
+        // Triplet (kong wait).
+        assert!(has_scoring_partial(&[
+            t(Suit::Wind, 1, 0),
+            t(Suit::Wind, 1, 1),
+            t(Suit::Wind, 1, 2),
+        ]));
+        // Ryanmen (4-5 waiting on 3 or 6).
+        assert!(has_scoring_partial(&[
+            t(Suit::Characters, 4, 0),
+            t(Suit::Characters, 5, 1),
+        ]));
+        // Kanchan (4-6 waiting on 5).
+        assert!(has_scoring_partial(&[
+            t(Suit::Circles, 4, 0),
+            t(Suit::Circles, 6, 1),
+        ]));
+    }
+
+    #[test]
+    fn partial_detection_rejects_uninvested_hands() {
+        // A single lone tile isn't a commitment.
+        assert!(!has_scoring_partial(&[t(Suit::Bamboos, 5, 0)]));
+        // Cross-suit "adjacency" is not a sequence partial.
+        assert!(!has_scoring_partial(&[
+            t(Suit::Bamboos, 4, 0),
+            t(Suit::Circles, 5, 1),
+        ]));
+        // Same-suit tiles more than 2 ranks apart don't form a sequence partial.
+        assert!(!has_scoring_partial(&[
+            t(Suit::Characters, 2, 0),
+            t(Suit::Characters, 7, 1),
+        ]));
+        // Empty hand: nothing to shove.
+        assert!(!has_scoring_partial(&[]));
     }
 
     #[test]

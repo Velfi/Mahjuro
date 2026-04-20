@@ -36,6 +36,41 @@ fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     return mix(fluid.grid_min.xyz, fluid.grid_max.xyz, uvw);
 }
 
+// ── Noise helpers (shared with fluid3_volume.wgsl) ───────────────────────
+fn hash31(p: vec3<f32>) -> f32 {
+    let h = dot(p, vec3<f32>(127.1, 311.7, 74.7));
+    return fract(sin(h) * 43758.5453123);
+}
+
+fn vnoise3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
+    let b = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
+    let c = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
+    let d = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
+    let e = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
+    let ff = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
+    let g = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
+    let h = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
+    let x0 = mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    let x1 = mix(mix(e, ff, u.x), mix(g, h, u.x), u.y);
+    return mix(x0, x1, u.z);
+}
+
+fn fbm3(p: vec3<f32>) -> f32 {
+    var v = 0.0;
+    var amp = 0.5;
+    var pp = p;
+    for (var i = 0; i < 3; i = i + 1) {
+        v = v + amp * vnoise3(pp);
+        pp = pp * 2.03;
+        amp = amp * 0.5;
+    }
+    return v;
+}
+
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dims = vec3<u32>(u32(fluid.grid_size.x), u32(fluid.grid_size.y), u32(fluid.grid_size.z));
@@ -68,6 +103,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             out.z = out.z + pt.vel_density.z * gauss;
             out.w = max(out.w + pt.vel_density.w * gauss, 0.0);
         }
+    }
+
+    // Ambient dust floor — a slowly-drifting FBM field establishes a
+    // global density baseline that the volume raymarch's in-scatter pass
+    // lights as god-ray shafts. Uses `max` (not `+=`) so impulse smoke
+    // always dominates; dust only fills the empty cells.
+    let dust_strength = fluid.force_params.w;
+    if (dust_strength > 0.0) {
+        let n_coord = world * 0.04 + vec3<f32>(0.0, 0.0, fluid.grid_size.w * 0.02);
+        let n = fbm3(n_coord);
+        let dust = dust_strength * (0.4 + 0.8 * n);
+        out.w = max(out.w, dust);
     }
 
     textureStore(dst_density, coord, out);
