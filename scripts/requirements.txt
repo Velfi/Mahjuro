@@ -1,0 +1,28 @@
+# Python deps for the scripts/ helpers.
+#
+# Install with:
+#     pip install -r scripts/requirements.txt
+#
+# Grouped by which scripts need what — you can slim this down if you only
+# run a subset.
+
+# OpenAI image API — all generate_*.py / gen_*.py asset scripts.
+openai
+
+# Pillow — image load/save/resize in most generator scripts.
+Pillow
+
+# HTTP fetch when the image API returns a URL instead of base64.
+# Used by generate_relic_art, generate_coin_heightmap,
+# generate_mirror_heightmap, generate_zodiac_ribbons,
+# generate_pack_covers, generate_plain_pack_covers.
+requests
+
+# Background removal on *_object.png renders (generate_relic_art --bg-removal).
+# onnxruntime is the ML runtime rembg loads u2net through.
+rembg
+onnxruntime
+
+# Balance-simulation plotting (plot_bot_balance.py).
+numpy
+matplotlib

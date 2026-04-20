@@ -4,7 +4,6 @@
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
-pub mod journal;
 pub mod material_viewer;
 pub mod meld_guide;
 pub mod options;
@@ -21,6 +20,7 @@ pub mod tutorial_campaign;
 pub mod tutorial_overlay;
 pub mod tutorial_recap;
 pub mod tutorial_summary;
+pub mod yaku_journal;
 pub mod zodiac_celebration;
 
 pub use collection::CollectionScene;
@@ -40,12 +40,14 @@ pub use tile_literacy::TileLiteracyScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
+pub use yaku_journal::YakuJournalScene;
 pub use zodiac_celebration::ZodiacCelebrationScene;
 
 use enum_dispatch::enum_dispatch;
 
 use crate::core::relic::{RelicId, RelicState};
 use crate::game::cascade::CascadeTuning;
+use crate::game::smoke_tuning::ShopSmokeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 use crate::persistence::ResumeScene;
@@ -136,6 +138,12 @@ pub struct UpdateCtx<'a> {
     /// update() to route mouse clicks to 3D action objects (sort/play
     /// wood tablets and the discard bowl).
     pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
+    /// Result of `pick_collection_object` for the cursor this frame, when
+    /// the collection scene is active. Carries the artifact index (the
+    /// `pick_id` the scene stamped onto its `Object3dKind::Relic` draws)
+    /// of whichever relic the ray passes through, so clicks on the real
+    /// silhouette — not the loose cell rect — select the artifact.
+    pub picked_collection_object: Option<u32>,
     /// Which input device the player most recently used. Mirrors
     /// `DrawCtx::input_mode` so scenes can route directional actions
     /// vs. cursor activity in `update()` without re-deriving it.
@@ -167,6 +175,12 @@ pub struct UpdateCtx<'a> {
     /// to the scene beneath. `SceneTransition` continues to mean "replace
     /// the current top of the stack" — overlays are orthogonal to that.
     pub overlay_request: &'a mut Option<OverlayRequest>,
+    /// True when running under the headless screenshot harness. Scenes
+    /// should fast-forward any wall-clock-gated intro animations (candle
+    /// light ramps, smoke curtains, wind gusts) to their final state so
+    /// a one-shot capture renders the scene as the player would see it
+    /// after settling, not as a dark mid-fade-in.
+    pub headless: bool,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
@@ -207,6 +221,13 @@ pub struct DrawCtx<'a> {
     /// Whether an app-level modal overlay is active (modal queue, debug
     /// overlays, etc). Scenes should suppress hover tooltips when true.
     pub modal_active: bool,
+    /// Staged arrange-mode delta for the active selection. Scenes use this to
+    /// live-preview nudges on placements that can't be routed through
+    /// `apply_arrange_override` (wind emitters, particle sources, etc.).
+    pub arrange_preview: Option<crate::ui::placement::ArrangePreview>,
+    /// Shop back-wall smoke curtain tuning, live-editable via the
+    /// "Shop Smoke..." debug overlay.
+    pub shop_smoke_tuning: &'a ShopSmokeTuning,
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -407,5 +428,6 @@ pub enum Scene {
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TileLiteracy(TileLiteracyScene),
+    YakuJournal(YakuJournalScene),
     ZodiacCelebration(ZodiacCelebrationScene),
 }

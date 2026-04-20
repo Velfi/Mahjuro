@@ -21,9 +21,8 @@
 use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
-use crate::render::candle_mesh::CandlePlacement;
 use crate::render::lit_mesh::MaterialParams;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
 
@@ -130,161 +129,23 @@ pub struct WindGust {
     pub density: f32,
 }
 
-/// One physical relic placeholder sitting in the dish on the table.
-///
-/// Coordinates use the same convention as `CandlePlacement`: `world_pos` is
-/// `(pixel_x, pixel_y, lift)` — the renderer maps the pixel x/y onto
-/// the table plane and uses `lift` as the height above the wood (**+Z**).
+/// Opaque occluder sampled by the smoke lightbake so the object casts a
+/// soft shadow through the volume. Positions are pixel-space (same
+/// convention as `WindGust`): the renderer maps pixel x/y to the felt
+/// plane and uses `lift` as world **+Z**. Only a handful are uploaded per
+/// frame, so the list is intentionally tiny.
 #[derive(Clone, Copy, Debug)]
-pub struct RelicPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the box's *base center*.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Half-extents of the relic box in world units (x = width/2, y = height/2,
-    /// z = depth/2). Each placeholder gets a slightly different size so the
-    /// row reads as a collection of distinct objects.
-    pub half_extents: [f32; 3],
-    /// Tint color (linear RGBA). Driven by relic rarity in the gameplay scene.
-    pub color: [f32; 4],
-    /// Which relic this placeholder represents — used by the scene to look up
-    /// the name + description for the hover tooltip.
-    pub relic_id: RelicId,
-    /// Activation glow intensity in [0, 1]. The gameplay scene drives this
-    /// with a fast attack + smooth decay envelope when a scoring cascade
-    /// step credits this relic. The renderer brightens the relic's base
-    /// color and emits an additive halo around its projected screen rect.
-    /// Zero (the default) means "not glowing" and skips both effects.
-    pub glow: f32,
-    /// Rotation around the local X axis in degrees. Positive tilts the top
-    /// of the box backward (away from the camera). Used by the shop scene to
-    /// lean for-sale relics against the back of the cabinet shelf.
-    pub rotation_x_deg: f32,
-    /// Rotation around the local Z axis in degrees. Used for the activation
-    /// wiggle — the scene drives a decaying sinusoidal oscillation so the
-    /// relic wobbles when its scoring effect triggers.
-    pub rotation_z_deg: f32,
-}
-
-/// A centered 3D relic viewer placement used by collection cards, tutorial
-/// panels, and unlock modals. Orientation is **`Rx * Ry * Rz`**
-/// ([`crate::render::table_transform::rot_rx_ry_rz_deg`]).
-#[derive(Clone, Copy, Debug)]
-pub struct RelicShowcasePlacement {
-    /// `(pixel_x, pixel_y, lift)` for the object's center.
-    pub center_pos: [f32; 3],
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees.
-    pub rotation_y_deg: f32,
-    /// Pitch rotation about world X in degrees.
-    pub rotation_x_deg: f32,
-    /// Roll rotation about world Z in degrees.
-    pub rotation_z_deg: f32,
-    /// Base tint (linear RGBA).
-    pub color: [f32; 4],
-    pub relic_id: RelicId,
-    /// Optional reveal/activation glow in [0, 1].
-    pub glow: f32,
-}
-
-/// A tile-pack box on the shop shelf. Rendered as an axis-aligned box (not
-/// the relic cylinder mesh) with foil pack art. `rotation_x_deg` leans the box
-/// against the shelf back.
-#[derive(Clone, Copy, Debug)]
-pub struct PackPlacement {
-    pub world_pos: WorldSurfaceAnchor,
-    pub half_extents: [f32; 3],
-    pub color: [f32; 4],
-    pub kind: TilePackKind,
-    /// Rotation around the local X axis in degrees (tilt forward/back).
-    pub rotation_x_deg: f32,
-    /// Rotation around the local Y axis in degrees (turn left/right).
-    pub rotation_y_deg: f32,
-    /// Optional pick id so hit-testing can identify this pack.
-    pub pick_id: Option<u32>,
-}
-
-/// One zodiac/talisman ribbon hanging from an anchor point.
-///
-/// Used by the shop scene for both the wall-pinned for-sale ribbons (in the
-/// curio cabinet) and the player's owned-consumable fan in front of the
-/// counter. `rotation_y_deg` lets the same mesh be reused for the radial fan
-/// (set per-ribbon to spread them) and for plain vertical drops (set 0).
-///
-/// Same **`Rz * Ry * Rx`** composition as [`TalismanPlacement`]
-/// ([`crate::render::table_transform::rot_rz_ry_rx_deg`]).
-#[derive(Clone, Copy, Debug)]
-pub struct ZodiacRibbonPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the ribbon's *top anchor*.
-    pub anchor_pos: [f32; 3],
-    /// Length the ribbon hangs in world units.
-    pub length: f32,
-    /// Width of the ribbon in world units.
-    pub width: f32,
-    /// Yaw rotation about world Y around the anchor, in degrees. 0 = the
-    /// ribbon hangs straight down with its face toward the camera.
-    pub rotation_y_deg: f32,
-    /// Pitch rotation about world X around the anchor, in degrees. Used by
-    /// the inventory fan to drape ribbons forward toward the camera.
-    pub rotation_x_deg: f32,
-    /// World **Z** rotation in degrees — outer factor in **`Rz * Ry * Rx`**
-    /// ([`crate::render::table_transform::rot_rz_ry_rx_deg`]). Shop wall ribbons
-    /// usually leave this at 0; collection applies the slow spin here.
-    pub rotation_z_deg: f32,
-    /// Linear-space RGBA tint. When `kind` is `Some`, this is multiplied
-    /// against the silk texture (use white to show the texture unmodified;
-    /// drop alpha to dim sold ribbons).
-    pub color: [f32; 4],
-    /// Which zodiac silk texture to bind. `None` falls back to the flat
-    /// untextured ribbon (used as a generic placeholder).
-    pub kind: Option<crate::core::zodiac::ZodiacKind>,
-}
-
-/// One hanging talisman tablet (jade-amulet pendant). Used by the shop scene
-/// for the for-sale talismans pinned in the curio cabinet — distinct from the
-/// silken zodiac ribbons hanging next to them.
-///
-/// Rotations compose as **`Rz * Ry * Rx`** — see
-/// [`crate::render::table_transform::rot_rz_ry_rx_deg`]. For a top-down
-/// collection camera, **yaw (`rotation_y_deg`)** spins the tablet in the table
-/// plane; **pitch (`rotation_x_deg`)** tips the face toward/away from the camera
-/// (e.g. `-90` for face-on from above).
-#[derive(Clone, Copy, Debug)]
-pub struct TalismanPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the tablet's *center*.
-    pub center_pos: [f32; 3],
-    /// Width × height × thickness in world units.
-    pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees (turntable in the table plane).
-    pub rotation_y_deg: f32,
-    /// Pitch rotation about world X in degrees. 0 = mesh-default standing pose.
-    /// `-90` lays the tablet face-up on the table (face normal toward +Y).
-    pub rotation_x_deg: f32,
-    /// Roll rotation about world Z in degrees (in-plane wobble after pitch/yaw).
-    pub rotation_z_deg: f32,
-    /// Linear-space RGBA tint.
-    pub color: [f32; 4],
-    /// Which talisman variant — determines the heightmap motif.
-    pub kind: crate::core::talisman::TalismanKind,
-}
-
-/// One physical gold coin sitting in (or on) the coin dish.
-///
-/// Coins are stamped via the lit-mesh pipeline using a shared 16-prism
-/// cylinder mesh; per-instance position + rotation + scale supply the visual
-/// variety in a stacked pile.
-#[derive(Clone, Copy, Debug)]
-pub struct CoinPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the coin's center.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Yaw rotation about world Y in radians (small per-coin jitter).
-    pub rotation_y: f32,
-    /// World-units radius (typically a few pixels).
+pub struct BugOccluder {
+    /// `(pixel_x, pixel_y)` of the occluder center.
+    pub center_px: (f32, f32),
+    /// Height in world **+Z** above the felt.
+    pub lift: f32,
+    /// Gaussian radius in world units — controls shadow softness.
     pub radius: f32,
-    /// World-units thickness.
-    pub thickness: f32,
-    /// Linear-space RGBA tint.
-    pub color: [f32; 4],
+    /// Strength multiplier (density-equivalent). Higher = darker shadow.
+    pub strength: f32,
 }
+
 
 /// One gold bar (big or mini) sitting in the coin dish area.
 ///
@@ -302,64 +163,6 @@ pub struct GoldBarPlacement {
     pub color: [f32; 4],
 }
 
-/// A standing book rendered via the book mesh (rounded spine, page inset).
-/// Used by the shop scene for the Yaku Journal bookend on the inventory shelf.
-#[derive(Clone, Copy, Debug)]
-pub struct BookPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the book's base center.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Yaw rotation about world Y in radians.
-    pub rotation_y: f32,
-    /// Half-extents in world units (width/2, height/2, depth/2).
-    pub half_extents: [f32; 3],
-    /// Linear-space RGBA tint for the cover.
-    pub color: [f32; 4],
-    /// Optional pick id for hit testing.
-    pub pick_id: Option<u32>,
-}
-
-/// One free-standing dish placement in world space (no auto-sizing from a
-/// relic batch). Used by the shop scene to draw the foreground relic dish
-/// and the coin dish at fixed positions, independent of the for-sale relics
-/// living up in the curio cabinet.
-#[derive(Clone, Copy, Debug)]
-pub struct DishExplicit {
-    /// `(pixel_x, pixel_y, lift)` for the dish base center.
-    pub center_pos: [f32; 3],
-    /// Full extents in world units (width × height × depth). The dish mesh
-    /// itself is a wide low box; height ≈ rim height.
-    pub extents: [f32; 3],
-    /// Optional id used by `pick_shop_object` to recognize a hit on this
-    /// dish (e.g. so the scene can route a click on the coin dish to "show
-    /// gold count" rather than to a relic).
-    pub pick_id: Option<u32>,
-    /// Rotation applied to the dish mesh in world space. Use
-    /// `glam::Mat4::IDENTITY` (or omit via `..Default::default()`) for the
-    /// default Y-up orientation. The pick-blind floor plane uses
-    /// `mesh_y_thickness_along_local_y_to_z_up()` to lay flat.
-    pub rotation: glam::Mat4,
-    /// Name exposed to arrange mode (`pick_debug_object` + `apply_arrange_override`).
-    /// `None` means the dish is not selectable in arrange mode.
-    pub arrange_name: Option<&'static str>,
-    /// If true, render with the round dish mesh (circular rim + recessed
-    /// floor). Default false uses the legacy square dish mesh so existing
-    /// callers (relic dish, ribbon/talisman trays) keep their look.
-    pub round: bool,
-}
-
-impl Default for DishExplicit {
-    fn default() -> Self {
-        Self {
-            center_pos: [0.0; 3],
-            extents: [1.0, 1.0, 1.0],
-            pick_id: None,
-            rotation: glam::Mat4::IDENTITY,
-            arrange_name: None,
-            round: false,
-        }
-    }
-}
-
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
 //
 // Phase 1 of the in-game UI redesign: physical objects rendered through the
@@ -374,39 +177,6 @@ impl Default for DishExplicit {
 /// Hanging blind/score plaque suspended above the gameplay table.
 #[allow(dead_code)]
 ///
-/// The wood + chain mesh is uploaded once at renderer init; per-instance
-/// position + extents drive a model matrix and the renderer rasterizes the
-/// `text` payload into a decal texture sampled by the lit-mesh shader.
-#[derive(Clone, Debug)]
-pub struct PlaquePlacement {
-    /// `(pixel_x, pixel_y, lift)` for the plaque's *center*.
-    pub center_pos: [f32; 3],
-    /// Width × height × thickness in world units.
-    pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees (0 = facing the camera).
-    pub rotation_y_deg: f32,
-    /// Plaque text. May contain `\n` for hard line breaks; otherwise it's
-    /// word-wrapped to fit the plaque face. The renderer picks the largest
-    /// font size where the wrapped layout fits the face.
-    pub text: String,
-}
-
-/// Hanging boss-rule ofuda paper.
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct OfudaPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the ofuda's *center*.
-    pub center_pos: [f32; 3],
-    /// Width × height × thickness in world units.
-    pub extents: [f32; 3],
-    /// Yaw rotation about world Y in degrees.
-    pub rotation_y_deg: f32,
-    /// Boss name (large title at the top of the paper).
-    pub title: String,
-    /// Boss rule description (smaller body text below the title).
-    pub rule: String,
-}
-
 /// One yaku selector tablet (carved bone, sitting in a row below the hand).
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -427,62 +197,7 @@ pub struct YakuTabletPlacement {
     pub hover: f32,
 }
 
-/// One sort/play action wood tablet. Same mesh as the yaku tablets but
-/// lacquered wood; visually consistent with the table.
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct WoodTabletPlacement {
-    /// Tablet *base center* as [`WorldSurfaceAnchor`] (third component = **+Z** lift).
-    pub world_pos: WorldSurfaceAnchor,
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
-    /// Engraved label (Sort by Suit, Sort by Rank, Play, …).
-    pub label: String,
-    /// Press envelope in [0, 1] (1.0 = fully pressed in).
-    pub pressed: f32,
-    /// Hover lift envelope in [0, 1].
-    pub hover: f32,
-    /// Rotation around the local Z axis in degrees. Used for excited idle
-    /// wiggles such as the gameplay cash-in prompt when a full structure is ready.
-    pub rotation_z_deg: f32,
-    /// True if the action is currently disabled (e.g. no tiles selected).
-    pub disabled: bool,
-}
-
-/// The discard bowl. Click target = drop selected tile in.
-#[derive(Clone, Copy, Debug)]
-pub struct BowlPlacement {
-    /// Bowl *base center* as [`WorldSurfaceAnchor`].
-    pub world_pos: WorldSurfaceAnchor,
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
-    /// Hover lift envelope in [0, 1].
-    pub hover: f32,
-    /// Base pitch rotation about world X in degrees, applied before the
-    /// hover tilt animation. 0 = mesh default orientation.
-    pub rotation_x_deg: f32,
-}
-
-/// The bronze mirror. Click target = play the selected hand. Visual
-/// counterpart to the discard bowl, sharing the same flat-on-table
-/// footprint and hover-lift convention.
-#[derive(Clone, Copy, Debug)]
-pub struct MirrorPlacement {
-    /// Mirror *base center* as [`WorldSurfaceAnchor`].
-    pub world_pos: WorldSurfaceAnchor,
-    /// Width × height × depth in world units.
-    pub extents: [f32; 3],
-    /// Hover lift envelope in [0, 1].
-    pub hover: f32,
-    /// Base pitch toward/away from the camera in degrees. Positive tips the
-    /// reflective face toward the player before hover animation is applied.
-    pub rotation_x_deg: f32,
-    /// Roll around the local Z axis in degrees. Used for scene-authored idle
-    /// wobble without affecting the shared hover envelope.
-    pub rotation_z_deg: f32,
-}
-
-/// Which counter fan this `TallyFanPlacement` represents. Drives per-fan
+/// Which counter fan an `Object3dKind::TallyFan` represents. Drives per-fan
 /// focus rect slot and tooltip wiring on the gameplay scene side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TallyFanKind {
@@ -490,41 +205,6 @@ pub enum TallyFanKind {
     Draws,
     /// Discards-remaining fan, anchored in front of the river.
     Discards,
-}
-
-/// An upright fan of bone tally sticks — one fan per counter (draws in front of
-/// the mirror, discards in front of the river). The fan's pivot is the narrow
-/// base of each stick; sticks radiate upward/outward through a total spread
-/// angle, evenly spaced across `max_count` slots. Sticks keep their *original*
-/// angular slots as the count drops (the fan thins from the outermost stick
-/// first) so consumption reads as a spent stick rather than a re-deal.
-#[derive(Clone, Copy, Debug)]
-pub struct TallyFanPlacement {
-    /// Fan pivot — `(pixel_x, pixel_y, lift)` at the base of each stick.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Stick height (world units, from narrow base to wide tip).
-    pub stick_len: f32,
-    /// Wide-end width (world units, at the tip). Narrow-end width is
-    /// baked into the mesh at half the wide end (2:1 taper).
-    pub stick_wide: f32,
-    /// Thickness along the fan's forward axis (world units).
-    pub stick_thickness: f32,
-    /// Sticks currently visible (the live count).
-    pub count: u32,
-    /// Slot count the fan is sized for (determines stick spacing and outer
-    /// angular slots).
-    pub max_count: u32,
-    /// Total arc the fan spreads across at `max_count` (degrees, symmetric
-    /// about vertical). Typical value ~60°.
-    pub spread_deg: f32,
-    /// RGBA tint for the upper cap of each stick. The tip cap's length is
-    /// baked into the tally-stick mesh (`TIP_FRAC`).
-    pub tip_color: [f32; 4],
-    /// Yaw rotation of the fan plane about world up (degrees). Lets scenes
-    /// angle the fan to face the camera.
-    pub rotation_y_deg: f32,
-    /// Which counter this fan represents.
-    pub kind: TallyFanKind,
 }
 
 /// Stack of facedown wall tiles at the back of the table.
@@ -548,66 +228,7 @@ pub enum CascadeTokenKind {
     Mult,
 }
 
-/// One engraved bone token in the cascade scoring readout. Reuses the
-/// `bone_tablet_mesh` geometry, tinted per axis (chips = cool indigo,
-/// mult = warm crimson). The gameplay scene drives the per-frame `pulse`
-/// envelope from the existing cascade timing math; the renderer turns it
-/// into a brief uniform scale-up so the active token visibly pops on each
-/// scoring step.
-#[derive(Clone, Copy, Debug)]
-pub struct CascadeTokenPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the token's *center*.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Width × thickness × depth in world units.
-    pub extents: [f32; 3],
-    /// Which scoring axis this token shows.
-    pub kind: CascadeTokenKind,
-    /// Pulse envelope in [0, 1] from the cascade frame's pop-in/settle
-    /// timing. 1.0 = freshly fired, 0.0 = settled.
-    pub pulse: f32,
-}
-
-/// One floating 3D extruded-glyph score popup ("+50", "×3", "=12500"). The
-/// renderer turns each placement into one indexed draw of the glyph mesh
-/// cached for `label` (lazily built on first use), positioned and tinted
-/// per-instance. Popups are short-lived: the gameplay scene's
-/// `ScorePopupSystem` spawns them on each cascade reveal-edge and clears
-/// them when the cascade ends.
-#[derive(Clone, Debug)]
-pub struct ExtrudedGlyphPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the popup's *center*. Pixel
-    /// x/y resolve via [`crate::render::world_space::pixel_to_world`]; `lift` is the
-    /// height above the table plane the popup currently floats at.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Uniform world-units scale applied to the glyph mesh. The mesh itself
-    /// is normalised to a height of 1.0 unit, so this directly sets the
-    /// rendered character height in world space.
-    pub scale: f32,
-    /// Pitch rotation (radians) about world X (combined with `-π/2` camera-face in
-    /// the renderer — see [`crate::render::table_transform::score_popup_glyph_rot_rad`]).
-    pub rotation_x: f32,
-    /// Yaw rotation (radians) about world Y — small per-popup random
-    /// jitter so a chain of popups doesn't read as a stamped row.
-    pub rotation_y: f32,
-    /// The label string ("+50", "×3", "=12500"). Used as the cache key for
-    /// the renderer's lazy `GlyphMeshCache` upload.
-    pub label: String,
-    /// Linear-space RGBA tint. Alpha is multiplied by the lit_mesh
-    /// material's base alpha so the popup can fade out at end of life.
-    pub color: [f32; 4],
-    /// Emissive boost in [0, 1]. The renderer adds this to the lit base
-    /// color so popups read against busy backgrounds without depending on
-    /// candle illumination.
-    pub emissive: f32,
-    /// Which lit-mesh material to render the glyph with. `Plain` is the
-    /// default flat/specular look used by debuff Xs and other simple popups.
-    /// `Metal` gives Fresnel-tinted specular highlights for the score reel.
-    /// `Polychrome` adds a thin-film rainbow sheen over the base color,
-    /// used by the streaming chip/mult/gold popups.
-    pub material: GlyphMaterial,
-}
-
-/// Material selector for [`ExtrudedGlyphPlacement`]. Maps to the lit-mesh
+/// Material selector for the extruded-glyph score popup. Maps to the lit-mesh
 /// shader's `MaterialKind` branch at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphMaterial {
@@ -660,31 +281,6 @@ pub struct ShowcaseTilePlacement {
     pub pick_id: Option<usize>,
 }
 
-/// One physical scoring bone tumbling onto the play space during a cascade.
-/// Reuses the `bone_tablet_mesh` geometry; per-instance tint matches the
-/// cascade token kind so chips bones read cool indigo and mult bones read
-/// warm crimson, tying the falling pile back to the HUD readout it spawned
-/// from. The simulation lives in `crate::render::falling_bones` and is
-/// driven by the gameplay scene's cascade reveal events.
-#[derive(Clone, Copy, Debug)]
-pub struct FallingBonePlacement {
-    /// `(pixel_x, pixel_y, world_z)` for the bone's *center*. Pixel x/y
-    /// resolve via [`crate::render::world_space::pixel_to_world`]; `world_z` is the live
-    /// height above the table plane that the simulation drives under
-    /// gravity.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Width × thickness × depth in world units.
-    pub extents: [f32; 3],
-    /// Tumble euler angles `(rot_x, rot_y, rot_z)` in radians — composition
-    /// **`Ry * Rx * Rz`**, see [`crate::render::table_transform::rot_ry_rx_rz_rad`].
-    pub rotation: [f32; 3],
-    /// Which scoring axis this bone represents (drives the tint).
-    pub kind: CascadeTokenKind,
-    /// Linear alpha multiplier in [0, 1]. Stays at 1.0 in flight; ramps to
-    /// 0.0 once the bone has landed and its rest timer is bleeding out.
-    pub alpha: f32,
-}
-
 /// One shrine placement (used by the pick-blind scene to draw the three
 /// blind shrines side by side, each scaled by `extents`). Geometry is the
 /// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
@@ -703,15 +299,6 @@ pub struct ShrinePlacement {
     /// 0 so it reads as the active choice even before the spotlight
     /// `PointLight` adds its bloom on top.
     pub glow: f32,
-}
-
-/// One curio-cabinet placement (single instance — the back wall of the shop).
-#[derive(Clone, Copy, Debug)]
-pub struct CurioCabinetPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the cabinet's *center*.
-    pub center_pos: [f32; 3],
-    /// Full extents in world units (width × height × depth).
-    pub extents: [f32; 3],
 }
 
 // ── General-purpose 3D placement ─────────────────────────────────────────
@@ -752,6 +339,11 @@ pub enum Object3dKind {
     Plaque {
         text: String,
         pick_id: Option<u32>,
+        /// When true, render as a near-black matte silhouette of the mesh
+        /// (no decal, no texture, no shading) — used by the Collection
+        /// scene for locked entries so the slot silhouette still reads as
+        /// the real artifact.
+        silhouette: bool,
     },
     /// Paper slab + eyelet with a title + body-rule decal.
     Ofuda {
@@ -782,10 +374,24 @@ pub enum Object3dKind {
     /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
     /// resting on the platform on top.
     DoraPlinth { glow: f32 },
-    /// Colored relic placeholder box sitting in the dish.
-    Relic { relic_id: RelicId, glow: f32 },
-    /// 3D relic viewer (collection card, modal, tutorial).
-    RelicShowcase { relic_id: RelicId, glow: f32 },
+    /// Relic medallion — shop for-sale, owned dish row, gameplay HUD
+    /// tray, collection cards, tutorial panels, and unlock modals all use
+    /// this single kind; callers pick the rotation so the face points at
+    /// the scene's camera.
+    Relic {
+        relic_id: RelicId,
+        glow: f32,
+        /// Render as a near-black matte silhouette (no texture, no glow)
+        /// for locked Collection entries.
+        silhouette: bool,
+        /// Optional pick id. When `Some`, the renderer snapshots this
+        /// relic's model matrix into `last_collection_relic_pickables` so
+        /// `pick_collection_object` can return the pick id for clicks that
+        /// land inside the relic's real silhouette. Leave `None` for
+        /// relics that shouldn't be individually clickable (e.g., the
+        /// featured pedestal showpiece that's already selected).
+        pick_id: Option<u32>,
+    },
     /// Tile-pack box on the shop shelf.
     Pack {
         kind: TilePackKind,
@@ -803,6 +409,11 @@ pub enum Object3dKind {
     Coin,
     /// Gold bar rendered as a Metal-material box.
     GoldBar,
+    /// Polished brass rectangular fitting — shelf rails, display-case
+    /// trim, pedestal collars. Rendered as a unit box with the `Brass`
+    /// material and `obj.color` as the tint. Smooth (no heightmap), so
+    /// it reads as a single polished surface rather than engraved metal.
+    BrassRail,
     /// Standing book (Yaku Journal).
     Book { pick_id: Option<u32> },
     /// Discard bowl. Hover animation is driven by [`Object3d::hover_target`].
@@ -820,9 +431,11 @@ pub enum Object3dKind {
     /// Engraved bone cascade token with a pulse-pop envelope.
     CascadeToken { kind: CascadeTokenKind, pulse: f32 },
     /// Free-standing dish (explicit size/position, not auto-sized from relics).
-    Dish { pick_id: Option<u32> },
-    /// Curio cabinet back-wall shadow box.
-    CurioCabinet,
+    /// `round` = true picks the round-rim mesh; false uses the legacy square mesh.
+    Dish {
+        pick_id: Option<u32>,
+        round: bool,
+    },
     /// Counter-end action prop (Leave / Restock) rendered as a labelled rectangle.
     ShopActionProp {
         label: String,
@@ -838,15 +451,79 @@ pub enum Object3dKind {
     /// `glow` drives the bulb brightness envelope \[0, 1\]; 1.0 = full lamp-on
     /// emission boost on the glass material.
     ShopLamp { glow: f32 },
+    /// Floating 3D extruded-glyph score popup ("+50", "×3", "=12500"). The
+    /// renderer lazily builds a per-string mesh on first use and reuses it
+    /// on subsequent frames. `Object3d::pos` sets the popup center;
+    /// `Object3d::extents`/`rotation` are ignored — the fields below supply
+    /// the full pose/material.
+    ExtrudedGlyph {
+        scale: f32,
+        rotation_x: f32,
+        rotation_y: f32,
+        label: String,
+        emissive: f32,
+        material: GlyphMaterial,
+    },
+    /// Procedural candle mesh (wax body + wick). `Object3d::pos` sets the
+    /// base; `extents`/`rotation` are ignored — the renderer uses the
+    /// `scale` and `height_scale` fields to size the shared unit mesh.
+    Candle {
+        /// Uniform scale applied to the local-unit mesh.
+        scale: f32,
+        /// Extra Y-axis scale (height multiplier) on top of `scale`.
+        height_scale: f32,
+    },
+    /// Upright fan of bone tally sticks. `Object3d::pos` is the fan pivot;
+    /// `Object3d::extents` is unused (stick dimensions come from the fields
+    /// below); `Object3d::rotation` is also unused — the fan is yawed via
+    /// `rotation_y_deg` in the kind payload so the renderer can cleanly
+    /// compose the per-stick angular layout.
+    TallyFan {
+        /// Stick length (world units, narrow base to wide tip).
+        stick_len: f32,
+        /// Wide-end width.
+        stick_wide: f32,
+        /// Fan-forward thickness.
+        stick_thickness: f32,
+        /// Sticks currently visible.
+        count: u32,
+        /// Total slot count the fan is sized for.
+        max_count: u32,
+        /// Total arc the fan spreads across (degrees, symmetric about vertical).
+        spread_deg: f32,
+        /// RGBA tint for the tip cap.
+        tip_color: [f32; 4],
+        /// Yaw of the fan plane about world up (degrees).
+        rotation_y_deg: f32,
+        /// Which counter this fan represents (drives arrange-name + peg_rects slot).
+        kind: TallyFanKind,
+    },
     /// One hovering insect near the lamp.  The scene emits one `Bug` per bug
     /// per frame, with `slot` ∈ `0..MAX_BUG_SLOTS` identifying the instance
     /// buffer entry.  `rotation` orients the body so +X faces the orbit tangent.
     /// Body and wings share the same `pos` / `extents` / `rotation`.
-    Bug { slot: usize },
-    /// Ghost trail copy of a bug, rendered through the alpha-blended pipeline.
-    /// `slot` ∈ `0..MAX_BUG_GHOST_SLOTS` indexes a separate instance pool;
-    /// `alpha` ∈ [0, 1] scales the body/wing material's RGBA output.
-    BugGhost { slot: usize, alpha: f32 },
+    ///
+    /// `flap_rad` is the per-frame wing flap angle in radians about the body's
+    /// local +X axis. The left wing rotates by `+flap_rad` and the right wing
+    /// (drawn from the same mesh with mirrored Y) by `-flap_rad`, so the two
+    /// counter-sweep like a real moth. Zero = wings horizontal.
+    ///
+    /// `live_wing_alpha` ∈ [0, 1] scales the crisp live-wing material alpha.
+    /// The scene drops this near mid-stroke (where the real wing would be a
+    /// blur on a 1/60 s exposure) and raises it at the turnarounds so the
+    /// sharp silhouette reads.
+    ///
+    /// `blur_alpha` ∈ [0, 1] scales the swept-fan blur-surrogate mesh's
+    /// material alpha. Peaks near mid-stroke (where the angular speed is
+    /// highest) and fades to 0 at the turnarounds, the visual inverse of
+    /// `live_wing_alpha`. Together they produce a moth that reads like a
+    /// photograph: a crisp body flanked by blurred wing fans.
+    Bug {
+        slot: usize,
+        flap_rad: f32,
+        live_wing_alpha: f32,
+        blur_alpha: f32,
+    },
     /// Material preview orb — a shared unit sphere drawn with a caller-supplied
     /// `MaterialParams`. Used only by the material viewer debug scene. The
     /// instance pool binds the 1×1 default albedo and relief textures so
@@ -854,6 +531,15 @@ pub enum Object3dKind {
     /// displacement (i.e. every orb previews the shading model itself, not a
     /// per-asset heightmap).
     MaterialOrb { material: MaterialParams },
+    /// Hexagonal display cabinet — a tall lacquered-wood column with
+    /// overhanging cap and base. Used by the collection scene as the
+    /// rotating tower that holds catalogued artifacts on its 6 faces.
+    /// Mesh is local-Z-up; `Object3d.extents` maps `(width, depth, height)`
+    /// to `(mesh_X, mesh_Y, mesh_Z)`. Each face renders an engraved
+    /// label from `face_labels` (face 0 along world +X, then CCW
+    /// around +Z); the cabinet body draws with both wood and brass-rail
+    /// instances per the renderer's Cabinet dispatch.
+    Cabinet { face_labels: [String; 6] },
 }
 
 /// A single lit mesh placed in the world.
@@ -933,6 +619,10 @@ pub enum DrawCmd {
     MoonlitWater,
     /// Procedural sun hovering above rippling water (fullscreen triangle, no data).
     SunlitWater,
+    /// Procedural mountain-haze atmosphere (fullscreen triangle, no data).
+    /// FBM scrolling noise + vertical gradient, additively blended — reads as
+    /// slow drifting mountain fog without the cost of a volumetric sim.
+    MountainHaze,
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
@@ -942,61 +632,32 @@ pub enum DrawCmd {
     /// 3D candle meshes for the gameplay scene. Each placement becomes one
     /// wax-body draw + one wick draw via the `lit_mesh_pipeline`. Limited to
     /// the renderer's pre-allocated candle slot pool (currently 7).
-    CandleBatch(Vec<CandlePlacement>),
-    /// 3D dish mesh sitting on the table — a wide low brass tray that holds
-    /// the physical relic placeholders. The renderer reads the placement out
-    /// of `RelicBatch` (the dish auto-sizes to enclose the row).
-    Dish,
-    /// Batch of physical relic placeholders sitting in the dish. Each
-    /// placement is a colored axis-aligned box rendered via the
-    /// `lit_mesh_pipeline`, instanced from the renderer's pre-allocated
-    /// relic slot pool.
-    RelicBatch(Vec<RelicPlacement>),
     /// Tile-pack boxes rendered on the shop shelf. Uses the same unit-box
     /// mesh and lit-mesh pipeline as relics, with pack art textures.
-    PackBatch(Vec<PackPlacement>),
-    /// Free-standing dish placement (alternative to `Dish` which auto-sizes
-    /// from `RelicBatch`). Used by the shop scene to draw multiple dishes at
-    /// fixed positions in the same frame.
-    DishExplicit(DishExplicit),
-    /// Single curio-cabinet (back-wall shadow box) placement. The shop scene
-    /// uses one per frame; gameplay leaves this empty.
-    #[allow(dead_code)]
-    CurioCabinet(CurioCabinetPlacement),
-    /// Batch of shrine meshes drawn via the lit-mesh pipeline, instanced
-    /// from the renderer's pre-allocated shrine slot pool. The pick-blind
-    /// scene uses one batch of three (Small / Big / Boss) per frame.
-    ShrineBatch(Vec<ShrinePlacement>),
     /// Batch of zodiac/talisman ribbons drawn via the lit-mesh pipeline,
     /// instanced from the renderer's pre-allocated ribbon slot pool. Used by
     /// the shop scene for both the wall-pinned for-sale ribbons and the
     /// owned-consumable inventory fan.
-    ZodiacBatch(Vec<ZodiacRibbonPlacement>),
     /// Batch of jade talisman tablets drawn via the lit-mesh pipeline,
     /// instanced from the renderer's pre-allocated talisman slot pool. Used
     /// by the shop scene for the for-sale talismans pinned in the curio
     /// cabinet next to the zodiac ribbons.
-    TalismanBatch(Vec<TalismanPlacement>),
     /// Batch of physical gold coins drawn via the lit-mesh pipeline,
     /// instanced from the renderer's pre-allocated coin slot pool. Used by
     /// the shop scene to display the player's gold as a pile of coins in a
     /// dish.
-    CoinBatch(Vec<CoinPlacement>),
-    /// Gold bars rendered as unit-box meshes with Metal material. Used by
-    /// the shop scene when the player has ≥100 gold.
-    GoldBarBatch(Vec<GoldBarPlacement>),
-    /// A standing book mesh (Yaku Journal). Single placement per frame.
-    Book(BookPlacement),
     /// Fluid smoke overlay. Renderer owns the simulation state.
     FluidSmoke,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
-    /// Batch of 3D relic viewer placements for collection cards, tutorial
-    /// panels, and reward reveals.
-    RelicShowcaseBatch(Vec<RelicShowcasePlacement>),
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
+    /// Alpha-feathered 2D quad — solid `color` in the centre, falling off
+    /// to full transparency toward the edges. Used as a soft dark backer
+    /// behind HUD content so panels read against busy backgrounds without
+    /// a hard-edged letterbox. See `shaders/gradient_quad.wgsl`.
+    GradientQuad(crate::render::wgpu_renderer::GradientQuadInstance),
     /// Procedural candle flame (additive blend, animated by globals.time).
     /// Instance `color.a` carries a per-flame phase offset in [0,1].
     Flame(GpuInstance),
@@ -1006,37 +667,10 @@ pub enum DrawCmd {
     #[allow(dead_code)]
     RelicIcon(RelicIcon),
     // ── Skeuomorphic gameplay HUD ──
-    /// Hanging blind/score plaque (gameplay HUD). Single placement per cmd.
-    Plaque(PlaquePlacement),
-    /// Hanging boss-rule ofuda paper (gameplay HUD). Single placement per cmd.
-    Ofuda(OfudaPlacement),
-    /// Batch of bone yaku tablets sitting in a row below the hand.
-    YakuTabletBatch(Vec<YakuTabletPlacement>),
     /// Batch of wood action tablets (sort suit / sort rank / play).
-    WoodTabletBatch(Vec<WoodTabletPlacement>),
-    /// The discard bowl.
-    Bowl(BowlPlacement),
-    /// The bronze "play hand" mirror.
-    Mirror(MirrorPlacement),
-    /// A counter fan — upright bone tally sticks, one fan per counter.
-    /// Gameplay pushes two per frame: draws (jade tips, at the mirror) and
-    /// discards (amber tips, at the river).
-    TallyFan(TallyFanPlacement),
-    /// The wall stack (facedown tiles at the back of the table).
-    #[allow(dead_code)]
-    WallStack(WallStackPlacement),
-    /// Engraved bone scoring tokens that pop in during a cascade. Reuses
-    /// the bone-tablet mesh; per-instance tint distinguishes chips vs mult.
-    CascadeTokenBatch(Vec<CascadeTokenPlacement>),
-    /// Physical scoring bones tumbling onto the play space during a cascade.
-    /// Same bone-tablet mesh as the cascade tokens, with full 3D model
-    /// matrices (gravity-driven world_z + euler tumble) instead of static
-    /// HUD positioning.
-    FallingBoneBatch(Vec<FallingBonePlacement>),
     /// Floating 3D extruded-glyph score popups. Each placement carries its
     /// own label string; the renderer lazily builds a per-string mesh on
     /// first use and reuses it on subsequent frames.
-    ExtrudedGlyphBatch(Vec<ExtrudedGlyphPlacement>),
     /// Non-rendered hover region anchored at a screen rect that resolves
     /// to a glossary term. Lets scenes attach a tooltip to a 3D object
     /// (e.g. the coin pile, the wall stack) by giving its approximate
@@ -1050,6 +684,28 @@ pub enum DrawCmd {
     Object3dBatch(Vec<Object3d>),
 }
 
+/// Axis along which an [`ArrangeClamp`] constrains a placement.
+#[derive(Copy, Clone, Debug)]
+#[allow(dead_code)]
+pub enum ClampAxis {
+    Horizontal,
+    Vertical,
+}
+
+/// Scene-provided hint describing the clamp band that constrains a pickable's
+/// effective position. When the named pickable is the current arrange-mode
+/// selection, the renderer draws the band so the user can see why nudges may
+/// stop having an effect. `center_frac` is the *unclamped* placement value; if
+/// it's outside `[lo_frac, hi_frac]` the renderer flags the pinning wall.
+#[derive(Clone, Debug)]
+pub struct ArrangeClamp {
+    pub name: String,
+    pub axis: ClampAxis,
+    pub lo_frac: f32,
+    pub hi_frac: f32,
+    pub center_frac: f32,
+}
+
 /// Everything a frame's draw needs: an ordered command list plus per-frame
 /// state used by hand-tile markers, hit testing, and the main loop.
 pub struct UiFrame {
@@ -1059,6 +715,10 @@ pub struct UiFrame {
     /// Active point lights this frame. Uploaded to the tile pipeline so the
     /// 3D hand-tile shader can apply candle / spot illumination.
     pub point_lights: Vec<PointLight>,
+    /// Active spotlights this frame. Only sampled by the tile pipeline (not
+    /// the lit_mesh or smoke shaders). Use for focused visual highlights
+    /// on specific tiles — e.g. hint indicators pooling green on a tile face.
+    pub spot_lights: Vec<SpotLight>,
     /// How many of the leading entries in `point_lights` are candle lights
     /// (as opposed to hint lights, spot lights, etc.). The volumetric flame
     /// emission in the lightbake shader only fires for the first
@@ -1076,6 +736,10 @@ pub struct UiFrame {
     /// top of the per-cursor wind. Used by gameplay to "blow" smoke off the
     /// hand strip a few seconds after dealing.
     pub wind_gusts: Vec<WindGust>,
+    /// Soft shadow casters for the smoke lightbake. Each entry Gaussian-
+    /// splats optical depth into the per-light shadow ray so the bug
+    /// (or whatever) darkens smoke behind it along the candle direction.
+    pub bug_occluders: Vec<BugOccluder>,
     /// Optional 3D camera override. When `Some`, the renderer uses this
     /// camera (eye/target/up/fovy) for all 3D draws this frame instead of
     /// the default "person at the table" gameplay camera. The shop scene
@@ -1099,6 +763,15 @@ pub struct UiFrame {
     /// Scene-transition progress (0.0 = inactive, >0.0 = animating).
     /// Uploaded to the GPU `Globals` uniform for the cascade shader.
     pub transition_progress: f32,
+    /// Arrange-mode clamp hints. Drawn as a faint band when the named
+    /// pickable is the current selection — see [`ArrangeClamp`].
+    pub arrange_clamps: Vec<ArrangeClamp>,
+    /// Barrel / fisheye lens distortion applied in the final composite.
+    /// 0.0 = off (no distortion). Positive = outward barrel (center
+    /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
+    /// that want the "looking into infinity" effect (e.g. the collection
+    /// corridor) set this to pull the viewport toward a fisheye lens.
+    pub fisheye_strength: f32,
 }
 
 impl UiFrame {
@@ -1106,16 +779,20 @@ impl UiFrame {
         Self {
             cmds: Vec::new(),
             point_lights: Vec::new(),
+            spot_lights: Vec::new(),
             candle_light_count: 0,
             flame_height_world: 0.0,
             cursor_pos: None,
             wind_gusts: Vec::new(),
+            bug_occluders: Vec::new(),
             camera_override: None,
             debug_axes: false,
             tile_material_override: None,
             buttons: Vec::new(),
             window_title: String::new(),
             transition_progress: 0.0,
+            arrange_clamps: Vec::new(),
+            fisheye_strength: 0.0,
         }
     }
 
@@ -1138,6 +815,9 @@ impl UiFrame {
     pub fn sunlit_water(&mut self) {
         self.cmds.push(DrawCmd::SunlitWater);
     }
+    pub fn mountain_haze(&mut self) {
+        self.cmds.push(DrawCmd::MountainHaze);
+    }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
     }
@@ -1147,58 +827,26 @@ impl UiFrame {
     pub fn table(&mut self) {
         self.cmds.push(DrawCmd::Table);
     }
-    pub fn candles(&mut self, placements: Vec<CandlePlacement>) {
-        self.cmds.push(DrawCmd::CandleBatch(placements));
-    }
-    pub fn pack_batch(&mut self, placements: Vec<PackPlacement>) {
-        self.cmds.push(DrawCmd::PackBatch(placements));
-    }
-    pub fn relic_showcase_batch(&mut self, placements: Vec<RelicShowcasePlacement>) {
-        self.cmds.push(DrawCmd::RelicShowcaseBatch(placements));
-    }
-    pub fn dish_explicit(&mut self, dish: DishExplicit) {
-        self.cmds.push(DrawCmd::DishExplicit(dish));
-    }
-    pub fn zodiac_batch(&mut self, placements: Vec<ZodiacRibbonPlacement>) {
-        self.cmds.push(DrawCmd::ZodiacBatch(placements));
-    }
-    pub fn talisman_batch(&mut self, placements: Vec<TalismanPlacement>) {
-        self.cmds.push(DrawCmd::TalismanBatch(placements));
-    }
-    pub fn coin_batch(&mut self, placements: Vec<CoinPlacement>) {
-        self.cmds.push(DrawCmd::CoinBatch(placements));
-    }
-    #[allow(dead_code)]
-    pub fn gold_bar_batch(&mut self, placements: Vec<GoldBarPlacement>) {
-        self.cmds.push(DrawCmd::GoldBarBatch(placements));
-    }
-    pub fn wood_tablet_batch(&mut self, placements: Vec<WoodTabletPlacement>) {
-        self.cmds.push(DrawCmd::WoodTabletBatch(placements));
-    }
-    pub fn bowl(&mut self, p: BowlPlacement) {
-        self.cmds.push(DrawCmd::Bowl(p));
-    }
-    pub fn mirror(&mut self, p: MirrorPlacement) {
-        self.cmds.push(DrawCmd::Mirror(p));
-    }
-    pub fn tally_fan(&mut self, p: TallyFanPlacement) {
-        self.cmds.push(DrawCmd::TallyFan(p));
-    }
-    #[allow(dead_code)]
-    pub fn wall_stack(&mut self, p: WallStackPlacement) {
-        self.cmds.push(DrawCmd::WallStack(p));
-    }
-    pub fn cascade_token_batch(&mut self, placements: Vec<CascadeTokenPlacement>) {
-        self.cmds.push(DrawCmd::CascadeTokenBatch(placements));
-    }
-    pub fn extruded_glyph_batch(&mut self, placements: Vec<ExtrudedGlyphPlacement>) {
-        self.cmds.push(DrawCmd::ExtrudedGlyphBatch(placements));
-    }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
     }
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
+    }
+    #[allow(dead_code)]
+    pub fn gradient_quad(
+        &mut self,
+        inst: crate::render::wgpu_renderer::GradientQuadInstance,
+    ) {
+        self.cmds.push(DrawCmd::GradientQuad(inst));
+    }
+    pub fn gradient_quads<
+        I: IntoIterator<Item = crate::render::wgpu_renderer::GradientQuadInstance>,
+    >(
+        &mut self,
+        iter: I,
+    ) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::GradientQuad));
     }
     pub fn flames<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Flame));
@@ -1236,6 +884,7 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally
                 // because the underlying scene quads behind it fade.
@@ -1250,35 +899,12 @@ impl UiFrame {
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::FluidSmoke
                 | DrawCmd::Table
-                | DrawCmd::CandleBatch(_)
-                | DrawCmd::Dish
-                | DrawCmd::RelicBatch(_)
-                | DrawCmd::PackBatch(_)
-                | DrawCmd::RelicShowcaseBatch(_)
-                | DrawCmd::DishExplicit(_)
-                | DrawCmd::CurioCabinet(_)
-                | DrawCmd::ShrineBatch(_)
-                | DrawCmd::ZodiacBatch(_)
-                | DrawCmd::TalismanBatch(_)
-                | DrawCmd::CoinBatch(_)
                 | DrawCmd::RelicIcon(_)
-                | DrawCmd::Plaque(_)
-                | DrawCmd::Ofuda(_)
-                | DrawCmd::YakuTabletBatch(_)
-                | DrawCmd::WoodTabletBatch(_)
-                | DrawCmd::Bowl(_)
-                | DrawCmd::Mirror(_)
-                | DrawCmd::TallyFan(_)
-                | DrawCmd::WallStack(_)
-                | DrawCmd::CascadeTokenBatch(_)
-                | DrawCmd::FallingBoneBatch(_)
-                | DrawCmd::ExtrudedGlyphBatch(_)
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::GlossaryAnchor { .. }
-                | DrawCmd::GoldBarBatch(_)
-                | DrawCmd::Book(_)
                 | DrawCmd::Object3d(_)
-                | DrawCmd::Object3dBatch(_) => {}
+                | DrawCmd::Object3dBatch(_)
+                | DrawCmd::MountainHaze => {}
             }
         }
     }

@@ -82,6 +82,13 @@ impl Default for CascadeTuning {
 /// closing crescendo.
 const PRE_TOTAL_FREEZE_MS: u64 = 70;
 
+/// Duration of the hand-off tween — the chips/×/mult trio merges into a
+/// single `= TOTAL` label, then physically flies up from under the plaque
+/// into the score reel while the reel ticks up to the new round score.
+const HANDOFF_MS: u64 = 520;
+/// Fraction of `HANDOFF_MS` spent on the in-place merge before flight begins.
+const HANDOFF_MERGE_FRAC: f32 = 0.35;
+
 impl CascadeTuning {
     /// Slow-motion cascade for tutorial lesson 5. Kept intentionally
     /// generous so the player can read each step while the gameplay
@@ -124,6 +131,10 @@ enum Phase {
     PreTotalFreeze,
     /// Holding on the final total.
     ShowTotal,
+    /// Chips/×/mult trio merges into `= TOTAL`, then physically flies up
+    /// into the score reel. The reel ticks from `score_before` to the new
+    /// round score over this same window.
+    HandOff,
     /// Cascade complete.
     Done,
 }
@@ -173,6 +184,19 @@ pub struct CascadeFrame {
     /// Tutorial annotation text to display alongside the current phase.
     /// `None` when not in annotated tutorial mode.
     pub tutorial_annotation: Option<&'static str>,
+    /// `Some(t)` during the hand-off tween (0..1, linear through the window).
+    /// `None` in every other phase. Drives the chips/×/mult merge and the
+    /// physical fly-up into the score reel.
+    pub handoff_t: Option<f32>,
+    /// `Some(t)` during the in-place merge sub-phase of `HandOff`
+    /// (0..1, eased). After this reaches 1, the flight sub-phase begins.
+    pub handoff_merge_t: Option<f32>,
+    /// `Some(t)` during the flight sub-phase of `HandOff` (0..1, eased).
+    /// `None` during merge and all other phases.
+    pub handoff_flight_t: Option<f32>,
+    /// The running chip pile × mult product that the merged label displays.
+    /// Matches what the score reel will land on.
+    pub handoff_total: u64,
 }
 
 impl ScoringCascade {
@@ -244,6 +268,12 @@ impl ScoringCascade {
             }
             Phase::ShowTotal => {
                 if elapsed >= self.tuning.total_hold() {
+                    self.phase = Phase::HandOff;
+                    self.phase_started = now;
+                }
+            }
+            Phase::HandOff => {
+                if elapsed >= Duration::from_millis(HANDOFF_MS) {
                     self.phase = Phase::Done;
                     self.phase_started = now;
                 }
@@ -260,7 +290,7 @@ impl ScoringCascade {
     /// Is the cascade currently on the final-total beat (or already done)?
     /// The scene uses this to detect the edge into `ShowTotal` for audio.
     pub fn is_in_total(&self) -> bool {
-        matches!(self.phase, Phase::ShowTotal | Phase::Done)
+        matches!(self.phase, Phase::ShowTotal | Phase::HandOff | Phase::Done)
     }
 
     /// Build the current frame for rendering.
@@ -287,57 +317,46 @@ impl ScoringCascade {
             Phase::ShowTotal => {
                 (elapsed.as_secs_f32() / self.tuning.total_hold().as_secs_f32()).min(1.0)
             }
+            Phase::HandOff => (elapsed.as_millis() as f32 / HANDOFF_MS as f32).min(1.0),
             Phase::Done => 1.0,
         };
 
         // Determine the ticking score target and which step (if any) just fired.
+        //
+        // The reel stays pinned at `score_before` while the chips/×/mult trio
+        // does the reveal work. Only during `HandOff` does the reel actually
+        // tick — and it ticks all the way from `score_before` to the new
+        // round total in one sweep, synced to the fly-up of the merged label.
         let (score_target, new_step_index, reveal_ordinal) = match &self.phase {
             Phase::ShowBaseIntro => (self.score_before, None, None),
             Phase::ShowBaseStep(i) => {
                 let i = *i;
-                let step = &self.breakdown.base_steps[i];
-                let from = if i > 0 {
-                    self.score_before + self.breakdown.base_steps[i - 1].running_total
-                } else {
-                    self.score_before
-                };
-                let to = self.score_before + step.running_total;
-                (lerp_u64(from, to, tick_t), None, Some(i))
+                (self.score_before, None, Some(i))
             }
             Phase::ShowStep(i) => {
                 let i = *i;
-                let running = self.breakdown.steps[i].running_total;
-                let prev_running = if i > 0 {
-                    self.breakdown.steps[i - 1].running_total
-                } else if let Some(last_base) = self.breakdown.base_steps.last() {
-                    last_base.running_total
-                } else {
-                    0
-                };
-                let from = self.score_before + prev_running;
-                let to = self.score_before + running;
                 (
-                    lerp_u64(from, to, tick_t),
+                    self.score_before,
                     Some(i),
                     Some(self.breakdown.base_steps.len() + i),
                 )
             }
-            Phase::PreTotalFreeze => {
-                // Hold on whatever the *last* step landed on. We're hanging
-                // here on purpose so the player anticipates the final beat.
-                let last = self
-                    .breakdown
-                    .steps
-                    .last()
-                    .or_else(|| self.breakdown.base_steps.last())
-                    .map(|s| s.running_total)
-                    .unwrap_or(0);
-                (self.score_before + last, None, None)
+            Phase::PreTotalFreeze => (self.score_before, None, None),
+            Phase::ShowTotal => (self.score_before, None, None),
+            Phase::HandOff => {
+                let from = self.score_before;
+                let to = self.score_before + self.earned;
+                // Linear fraction through the handoff window.
+                let handoff_linear =
+                    (elapsed.as_millis() as f32 / HANDOFF_MS as f32).clamp(0.0, 1.0);
+                // Reel ticks during the flight sub-phase, so the digits
+                // climb as the label physically flies into the reel.
+                let tick = ((handoff_linear - HANDOFF_MERGE_FRAC)
+                    / (1.0 - HANDOFF_MERGE_FRAC))
+                    .clamp(0.0, 1.0);
+                (lerp_u64(from, to, tick), None, None)
             }
-            Phase::ShowTotal | Phase::Done => {
-                let total = self.score_before + self.earned;
-                (total, None, None)
-            }
+            Phase::Done => (self.score_before + self.earned, None, None),
         };
 
         // ── Two-axis chips/mult readout ────────────────────────────────────
@@ -411,7 +430,7 @@ impl ScoringCascade {
                         step.tile_ids.clone(),
                     )
                 }
-                Phase::ShowTotal | Phase::Done => {
+                Phase::ShowTotal | Phase::HandOff | Phase::Done => {
                     // Hold the final values.
                     let chips = self
                         .breakdown
@@ -451,7 +470,7 @@ impl ScoringCascade {
                         None
                     }
                 }
-                Phase::ShowTotal | Phase::Done => {
+                Phase::ShowTotal | Phase::HandOff | Phase::Done => {
                     Some("Chips \u{00d7} Mult = your final score on the panel")
                 }
                 Phase::PreTotalFreeze => Some("And now the grand total..."),
@@ -459,6 +478,33 @@ impl ScoringCascade {
         } else {
             None
         };
+
+        // ── Hand-off tween bookkeeping ─────────────────────────────────────
+        let (handoff_t, handoff_merge_t, handoff_flight_t) = match &self.phase {
+            Phase::HandOff => {
+                let linear = (elapsed.as_millis() as f32 / HANDOFF_MS as f32).clamp(0.0, 1.0);
+                let merge = (linear / HANDOFF_MERGE_FRAC).clamp(0.0, 1.0);
+                // Ease-out cubic on the merge so the trio snaps together
+                // crisply, then settles for a beat before flight begins.
+                let merge_eased = 1.0 - (1.0 - merge).powi(3);
+                let flight_raw =
+                    ((linear - HANDOFF_MERGE_FRAC) / (1.0 - HANDOFF_MERGE_FRAC)).clamp(0.0, 1.0);
+                // Ease-out cubic on flight: accelerates off the pad, softens
+                // into the reel.
+                let flight_eased = 1.0 - (1.0 - flight_raw).powi(3);
+                (
+                    Some(linear),
+                    Some(merge_eased),
+                    if flight_raw > 0.0 {
+                        Some(flight_eased)
+                    } else {
+                        None
+                    },
+                )
+            }
+            _ => (None, None, None),
+        };
+        let handoff_total = self.score_before + self.earned;
 
         CascadeFrame {
             displayed_score: score_target,
@@ -472,6 +518,10 @@ impl ScoringCascade {
             pulse_axis,
             highlight_tile_ids,
             tutorial_annotation,
+            handoff_t,
+            handoff_merge_t,
+            handoff_flight_t,
+            handoff_total,
         }
     }
 }

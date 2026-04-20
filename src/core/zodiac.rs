@@ -16,7 +16,7 @@
 //!   * Shop              → 4 gold per single, 6 gold per Festival pack
 //!
 //! The consumable inventory holds 2 cards by default and is expandable via
-//! the Zodiac Pouch (+1) and Lunar Almanac (+1) relics.
+//! the Lunar Almanac (+1) relic.
 
 use serde::{Deserialize, Serialize};
 
@@ -137,8 +137,8 @@ impl ZodiacKind {
 }
 
 /// Small inventory of Zodiac cards held mid-run. Capacity is set by the run
-/// (default 2, +1 from Zodiac Pouch, +1 from Lunar Almanac). Pushing past
-/// capacity is rejected — the caller chooses to use, sell, or skip.
+/// (default 2, +1 from Lunar Almanac). Pushing past capacity is rejected —
+/// the caller chooses to use, sell, or skip.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ZodiacInventory {
     pub items: Vec<ZodiacKind>,

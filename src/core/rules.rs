@@ -21,8 +21,6 @@ pub enum RuleModifier {
     PairsScoreZero,
     /// Sequences contribute half their normal base chips. (The Forest boss.)
     SequencesHalved,
-    /// Tiles of rank 5 contribute zero point value. (The Drunkard boss.)
-    MiddleTilesZero,
     /// Selection must contain exactly 5 tiles. (The Bureaucrat boss.)
     MustPlayFive,
     /// Structure in the selection must contain at least one Honor
@@ -44,7 +42,6 @@ impl RuleModifier {
             RuleModifier::NoSequenceBonus => "No-Seq Bonus",
             RuleModifier::PairsScoreZero => "Silent Pairs",
             RuleModifier::SequencesHalved => "Withered Sequences",
-            RuleModifier::MiddleTilesZero => "Drunken Middles",
             RuleModifier::MustPlayFive => "Bureaucratic Form",
             RuleModifier::RequireHonor => "Honor Required",
             RuleModifier::CensorRepeats => "Repeats Censored",
@@ -61,7 +58,6 @@ impl RuleModifier {
             RuleModifier::NoSequenceBonus => "No sequences in hand → +80 bonus",
             RuleModifier::PairsScoreZero => "Pairs score 0 base chips",
             RuleModifier::SequencesHalved => "Sequences score half base chips",
-            RuleModifier::MiddleTilesZero => "Rank-5 tiles score 0",
             RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
             RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",

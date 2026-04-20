@@ -144,6 +144,9 @@ impl GameOverScene {
 
 impl SceneBehavior for GameOverScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        if ctx.headless {
+            self.opened_at = Instant::now() - std::time::Duration::from_secs(2);
+        }
         let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,

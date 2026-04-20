@@ -26,8 +26,10 @@ pub enum RelicId {
     WildWinds,
     DragonEcho,
     // ── 15 new relics introduced in Patch C ────────────────────────────
-    /// When a discard-refill brings the hand to tenpai (shanten 0), draw 1
-    /// extra tile from the wall. Tempo relic — one more chance to complete.
+    /// After refill, if the hand contains a partial you've invested in — a
+    /// pair wanting a third, a triplet wanting a kong, or two numbered tiles
+    /// of the same suit within 2 ranks wanting a sequence — draw 1 extra tile
+    /// from the wall.
     ShantenShove,
     /// Kongs grant +1 play this round and +4 mult when scored.
     KanDrum,
@@ -47,8 +49,6 @@ pub enum RelicId {
     FuritenWard,
     /// Round Wind triplets/kongs grant +6 mult instead of the base +3.
     RoundCompass,
-    /// +1 zodiac inventory slot.
-    ZodiacPouch,
     /// +1 zodiac inventory slot; every 3rd Zodiac you use is duplicated.
     LunarAlmanac,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
@@ -70,9 +70,9 @@ pub enum RelicId {
     /// Bamboo-suit tiles in scored sets: +8 chips each.
     JadeSerpent,
     /// Characters-suit tiles in scored sets: +8 chips each.
-    InkBrush,
+    RedSerpent,
     /// Dots-suit tiles in scored sets: +8 chips each.
-    PearlDiver,
+    BlueSerpent,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
     LowTide,
     /// Relics cost 25% less in the shop, rounded down (minimum $1).
@@ -180,6 +180,36 @@ pub enum RelicId {
     /// Validation happens by relabelling the West tiles as East before the
     /// standard meld decomposition runs.
     Disgust,
+    // ── Patch H: economy & scaling relics ─────────────────────────────
+    /// +mult equal to the summed live sell value of every *other* relic
+    /// in your inventory. Grows as relics accumulate sell-value counters
+    /// (e.g. Nest Egg) and as you collect more relics.
+    CurioCabinet,
+    /// +0.5 mult permanently each time a flower is drawn or scored.
+    /// Counter lives in `relic_counters[LotusBloom]`.
+    LotusBloom,
+    /// +0.2 mult per tile in the wall beyond the base 140. Sums Overflow's
+    /// 68 extras and any tiles added mid-run (tracked in
+    /// `relic_counters[WallWeaver]`).
+    WallWeaver,
+    /// +$5 per kong scored this round, paid at round end. Counter in
+    /// `relic_counters[KongCollector]` resets on round advance.
+    KongCollector,
+    /// +$1 each time an honor tile is discarded.
+    NoHonorButWealth,
+    /// Round start: 25% +$2, 25% +$4, 50% nothing.
+    Sweepstakes,
+    /// +$1 at round end; permanent +$1 per boss blind defeated
+    /// (tracked in `relic_counters[BeggarsCup]`).
+    BeggarsCup,
+    /// +$1 at round end per unique yaku scored this round.
+    Cosmopolitan,
+    /// +1 mult per blind *played* this run (skips don't count). Counter in
+    /// `relic_counters[Heirloom]` increments in `advance_round`, which runs
+    /// only after clearing a blind — `skip_to_next_blind` is a separate path.
+    Heirloom,
+    /// +3 mult per distinct suit among scored tiles (Flower counts).
+    Tourist,
 }
 
 impl RelicId {
@@ -211,7 +241,6 @@ impl RelicId {
             RelicId::RiverEraser => "river_eraser.png",
             RelicId::FuritenWard => "furiten_ward.png",
             RelicId::RoundCompass => "round_compass.png",
-            RelicId::ZodiacPouch => "zodiac_pouch.png",
             RelicId::LunarAlmanac => "lunar_almanac.png",
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
@@ -220,8 +249,8 @@ impl RelicId {
             RelicId::Ikebana => "ikebana.png",
             RelicId::Hanami => "hanami.png",
             RelicId::JadeSerpent => "jade_serpent.png",
-            RelicId::InkBrush => "ink_brush.png",
-            RelicId::PearlDiver => "pearl_diver.png",
+            RelicId::RedSerpent => "red_serpent.png",
+            RelicId::BlueSerpent => "blue_serpent.png",
             RelicId::LowTide => "low_tide.png",
             RelicId::MerchantsEye => "merchants_eye.png",
             RelicId::EdgeRunner => "edge_runner.png",
@@ -266,6 +295,16 @@ impl RelicId {
             RelicId::PhantomRelic => "phantom_relic.png",
             RelicId::RitualBlade => "ritual_blade.png",
             RelicId::Disgust => "disgust.png",
+            RelicId::CurioCabinet => "curio_cabinet.png",
+            RelicId::LotusBloom => "lotus_bloom.png",
+            RelicId::WallWeaver => "wall_weaver.png",
+            RelicId::KongCollector => "kong_collector.png",
+            RelicId::NoHonorButWealth => "no_honor_but_wealth.png",
+            RelicId::Sweepstakes => "sweepstakes.png",
+            RelicId::BeggarsCup => "beggars_cup.png",
+            RelicId::Cosmopolitan => "cosmopolitan.png",
+            RelicId::Heirloom => "heirloom.png",
+            RelicId::Tourist => "tourist.png",
         }
     }
 }
@@ -280,10 +319,10 @@ pub enum Rarity {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RelicRenderMaterial {
-    Metal,
-    Plastic,
-    Glass,
-    Wax,
+    Iron,
+    Copper,
+    Silver,
+    Gold,
 }
 
 #[derive(Clone, Debug)]
@@ -347,40 +386,26 @@ impl RelicId {
 }
 
 pub fn relic_visual(id: RelicId) -> RelicVisualDef {
-    use RelicId::*;
-    use RelicRenderMaterial::{Glass, Metal, Plastic, Wax};
+    use RelicRenderMaterial::{Copper, Gold, Iron, Silver};
 
-    let material = match id {
-        GlassCannon | WhiteSilence | MeltingIce | MirrorTile | PearlDiver => Glass,
-        PaperLantern | TeaCeremony | SmokeBomb | Hanami | GreenLuck => Wax,
-        JokerTile
-        | Overflow
-        | QuickDraw
-        | ChainReaction
-        | MultiplierMaster
-        | SetMagnet
-        | WildWinds
-        | ShantenShove
-        | RoundCompass
-        | ZodiacPouch
-        | LunarAlmanac
-        | EdgeRunner
-        | LuckySeven
-        | Momentum
-        | Minimalist
-        | TurtleShell
-        | NestEgg
-        | CrackedTile
-        | StarTile
-        | PhantomRelic => Plastic,
-        _ => Metal,
+    let rarity = all_relic_defs()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.rarity)
+        .unwrap_or(Rarity::Common);
+
+    let material = match rarity {
+        Rarity::Common => Iron,
+        Rarity::Uncommon => Copper,
+        Rarity::Rare => Silver,
+        Rarity::Legendary => Gold,
     };
 
     let (ui_tilt_x_deg, ui_spin_rate_deg, thickness_scale) = match material {
-        Metal => (-18.0, 28.0, 1.0),
-        Plastic => (-16.0, 32.0, 0.92),
-        Glass => (-22.0, 24.0, 0.86),
-        Wax => (-14.0, 20.0, 1.08),
+        Iron => (-18.0, 28.0, 1.0),
+        Copper => (-18.0, 28.0, 1.0),
+        Silver => (-18.0, 28.0, 1.02),
+        Gold => (-18.0, 28.0, 1.04),
     };
 
     RelicVisualDef {
@@ -619,7 +644,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::ShantenShove,
             name: "Shanten Shove",
-            description: "When a discard brings you to tenpai, draw 1 extra tile from the wall",
+            description: "After refill, if a pair/triplet/sequence partial is in hand, draw 1 extra tile",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
@@ -673,12 +698,6 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             rarity: Rarity::Uncommon,
         },
         RelicDef {
-            id: RelicId::ZodiacPouch,
-            name: "Zodiac Pouch",
-            description: "+1 Zodiac inventory slot",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
             id: RelicId::LunarAlmanac,
             name: "Lunar Almanac",
             description: "+1 Zodiac slot; every 3rd Zodiac use is duplicated",
@@ -723,14 +742,14 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             rarity: Rarity::Common,
         },
         RelicDef {
-            id: RelicId::InkBrush,
-            name: "Ink Brush",
+            id: RelicId::RedSerpent,
+            name: "Red Serpent",
             description: "Characters tiles in scored sets: +8 chips each",
             rarity: Rarity::Common,
         },
         RelicDef {
-            id: RelicId::PearlDiver,
-            name: "Pearl Diver",
+            id: RelicId::BlueSerpent,
+            name: "Blue Serpent",
             description: "Dots tiles in scored sets: +8 chips each",
             rarity: Rarity::Common,
         },
@@ -1016,6 +1035,67 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             name: "Disgust",
             description: "East + 1/2/3 West tiles count as pair/triplet/kong",
             rarity: Rarity::Rare,
+        },
+        // ── Patch H: economy & scaling relics ──────────────────────────
+        RelicDef {
+            id: RelicId::CurioCabinet,
+            name: "Curio Cabinet",
+            description: "+mult equal to the summed sell value of your other relics",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::LotusBloom,
+            name: "Lotus Bloom",
+            description: "+0.5 mult permanently per flower drawn or scored",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::WallWeaver,
+            name: "Wall Weaver",
+            description: "+0.2 mult per tile in the wall beyond 140",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::KongCollector,
+            name: "Kong Collector",
+            description: "+$5 per kong scored this round, paid at round end",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::NoHonorButWealth,
+            name: "No Honor But Wealth",
+            description: "+$1 each time an honor tile is discarded",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::Sweepstakes,
+            name: "Sweepstakes",
+            description: "Round start: 25% +$2, 25% +$4, 50% nothing",
+            rarity: Rarity::Common,
+        },
+        RelicDef {
+            id: RelicId::BeggarsCup,
+            name: "Beggar's Cup",
+            description: "+$1 at round end, +$1 more per boss defeated",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Cosmopolitan,
+            name: "Cosmopolitan",
+            description: "+$1 at round end per unique yaku scored this round",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Heirloom,
+            name: "Heirloom",
+            description: "+1 mult per blind played (skips don't count)",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Tourist,
+            name: "Tourist",
+            description: "+3 mult per distinct suit among scored tiles",
+            rarity: Rarity::Uncommon,
         },
     ]
 }

@@ -6,7 +6,7 @@ use std::time::Instant;
 use rand::RngExt;
 
 use crate::core::scoring::StepKind;
-use crate::render::draw_cmd::{ExtrudedGlyphPlacement, GlyphMaterial};
+use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
 
 /// Total lifetime of a popup from spawn to despawn (seconds).
 const LIFETIME: f32 = 1.1;
@@ -159,7 +159,7 @@ impl ScorePopupSystem {
     /// readable at the current window size. Callers derive this from
     /// `min(window_w, window_h) / 1080.0` so small windows get proportionally
     /// smaller popups.
-    pub fn placements(&self, now: Instant, screen_scale: f32) -> Vec<ExtrudedGlyphPlacement> {
+    pub fn placements(&self, now: Instant, screen_scale: f32) -> Vec<Object3d> {
         self.popups
             .iter()
             .map(|p| {
@@ -175,15 +175,25 @@ impl ScorePopupSystem {
                 let mut color = p.color;
                 color[3] *= alpha;
 
-                ExtrudedGlyphPlacement {
-                    world_pos: [px, py, lift_z],
-                    scale: p.base_scale * scale_mul * screen_scale,
-                    rotation_x: 0.08,
-                    rotation_y: p.yaw,
-                    label: p.label.clone(),
+                Object3d {
+                    pos: [px, py, lift_z],
+                    extents: [1.0, 1.0, 1.0],
+                    rotation: glam::Mat4::IDENTITY,
                     color,
-                    emissive,
-                    material: p.material,
+                    kind: Object3dKind::ExtrudedGlyph {
+                        scale: p.base_scale * scale_mul * screen_scale,
+                        rotation_x: 0.08,
+                        rotation_y: p.yaw,
+                        label: p.label.clone(),
+                        emissive,
+                        material: p.material,
+                    },
+                    focusable: false,
+                    scene_shaded: true,
+                    own_light: None,
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: None,
                 }
             })
             .collect()

@@ -3,7 +3,7 @@
 use crate::audio::SfxId;
 use crate::core::tile::Tile;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GameOverReason {
     OutOfPlays,
     NoActionsRemaining,
@@ -88,6 +88,21 @@ pub enum GameEvent {
     InvalidAction,
     /// Play a one-shot UI / tutorial sound (no gameplay side effects).
     UiSound(SfxId),
+    /// Player started a Boss blind against this boss — App layer bumps
+    /// `PlayerProgress::boss_times_encountered` and saves.
+    BossEncountered(crate::core::boss::BossKind),
+    /// Boss blind cleared with target reached — App layer bumps
+    /// `PlayerProgress::boss_times_defeated` and saves.
+    BossDefeated(crate::core::boss::BossKind),
+    /// Player just bought a talisman from the shop — App layer bumps
+    /// `PlayerProgress::talisman_times_purchased` and saves.
+    TalismanPurchased(crate::core::talisman::TalismanKind),
+    /// Player consumed a talisman from the dish — App layer bumps
+    /// `PlayerProgress::talisman_times_used` and saves.
+    TalismanUsed(crate::core::talisman::TalismanKind),
+    /// A committed hand awarded this yaku — App layer bumps
+    /// `PlayerProgress::yaku_times_scored` and saves.
+    YakuScored(crate::core::yaku::YakuKind),
 }
 
 #[derive(Default)]

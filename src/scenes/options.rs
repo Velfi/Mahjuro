@@ -69,9 +69,8 @@ enum Row {
     Sfx,
     SfxToggle,
     Gamma,
-    Smoke,
-    SmokeDetail,
-    SmokeSimQuality,
+    SmokeQuality,
+    SmokeAmount,
     Effects,
     Tile,
     TileMaterial,
@@ -107,9 +106,8 @@ const ROWS: &[Row] = &[
     Row::Sfx,
     Row::SfxToggle,
     Row::Gamma,
-    Row::Smoke,
-    Row::SmokeDetail,
-    Row::SmokeSimQuality,
+    Row::SmokeQuality,
+    Row::SmokeAmount,
     Row::Effects,
     Row::Tile,
     Row::TileMaterial,
@@ -137,9 +135,8 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::SfxToggle),
     ContentSlot::Header(Section::Visual),
     ContentSlot::Row(Row::Gamma),
-    ContentSlot::Row(Row::Smoke),
-    ContentSlot::Row(Row::SmokeDetail),
-    ContentSlot::Row(Row::SmokeSimQuality),
+    ContentSlot::Row(Row::SmokeQuality),
+    ContentSlot::Row(Row::SmokeAmount),
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::TileMaterial),
@@ -290,9 +287,8 @@ pub struct OptionsScene {
     pub sfx_volume: f32,
     pub music_volume: f32,
     pub sfx_enabled: bool,
-    pub smoke_intensity: crate::persistence::SmokeIntensity,
-    pub smoke_detail: crate::persistence::SmokeDetail,
-    pub smoke_sim_quality: crate::persistence::SmokeSimQuality,
+    pub smoke_quality: crate::persistence::SmokeQuality,
+    pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
@@ -319,9 +315,8 @@ impl OptionsScene {
             sfx_volume: settings.sfx_volume,
             music_volume: settings.music_volume,
             sfx_enabled: settings.sfx_enabled,
-            smoke_intensity: settings.smoke_intensity,
-            smoke_detail: settings.smoke_detail,
-            smoke_sim_quality: settings.smoke_sim_quality,
+            smoke_quality: settings.smoke_quality,
+            smoke_amount: settings.smoke_amount,
             effects_quality: settings.effects_quality,
             tile_preset: settings.tile_preset,
             tile_material: settings.tile_material,
@@ -341,9 +336,8 @@ impl OptionsScene {
         settings.sfx_volume = self.sfx_volume;
         settings.music_volume = self.music_volume;
         settings.sfx_enabled = self.sfx_enabled;
-        settings.smoke_intensity = self.smoke_intensity;
-        settings.smoke_detail = self.smoke_detail;
-        settings.smoke_sim_quality = self.smoke_sim_quality;
+        settings.smoke_quality = self.smoke_quality;
+        settings.smoke_amount = self.smoke_amount;
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tile_material = self.tile_material;
@@ -452,9 +446,8 @@ impl OptionsScene {
         }
         match focused {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
-            Row::Smoke => self.smoke_intensity = self.smoke_intensity.next(),
-            Row::SmokeDetail => self.smoke_detail = self.smoke_detail.next(),
-            Row::SmokeSimQuality => self.smoke_sim_quality = self.smoke_sim_quality.next(),
+            Row::SmokeQuality => self.smoke_quality = self.smoke_quality.next(),
+            Row::SmokeAmount => self.smoke_amount = self.smoke_amount.next(),
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::TileMaterial => self.tile_material = self.tile_material.next(),
@@ -479,9 +472,8 @@ impl OptionsScene {
         }
         match focused {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
-            Row::Smoke => self.smoke_intensity = self.smoke_intensity.prev(),
-            Row::SmokeDetail => self.smoke_detail = self.smoke_detail.prev(),
-            Row::SmokeSimQuality => self.smoke_sim_quality = self.smoke_sim_quality.prev(),
+            Row::SmokeQuality => self.smoke_quality = self.smoke_quality.prev(),
+            Row::SmokeAmount => self.smoke_amount = self.smoke_amount.prev(),
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::TileMaterial => self.tile_material = self.tile_material.prev(),
@@ -517,16 +509,12 @@ impl OptionsScene {
                 self.sfx_enabled = !self.sfx_enabled;
                 self.save_settings();
             }
-            Row::Smoke => {
-                self.smoke_intensity = self.smoke_intensity.next();
+            Row::SmokeQuality => {
+                self.smoke_quality = self.smoke_quality.next();
                 self.save_settings();
             }
-            Row::SmokeDetail => {
-                self.smoke_detail = self.smoke_detail.next();
-                self.save_settings();
-            }
-            Row::SmokeSimQuality => {
-                self.smoke_sim_quality = self.smoke_sim_quality.next();
+            Row::SmokeAmount => {
+                self.smoke_amount = self.smoke_amount.next();
                 self.save_settings();
             }
             Row::Effects => {
@@ -1009,12 +997,11 @@ impl OptionsScene {
                         "Sound Effects: {}",
                         if self.sfx_enabled { "ON" } else { "OFF" }
                     ),
-                    Row::Smoke => format!("Smoke: {}", self.smoke_intensity.label()),
-                    Row::SmokeDetail => {
-                        format!("Smoke Detail: {}", self.smoke_detail.label())
+                    Row::SmokeQuality => {
+                        format!("Smoke Quality: {}", self.smoke_quality.label())
                     }
-                    Row::SmokeSimQuality => {
-                        format!("Smoke Sim: {}", self.smoke_sim_quality.label())
+                    Row::SmokeAmount => {
+                        format!("Smoke Amount: {}", self.smoke_amount.label())
                     }
                     Row::Effects => {
                         format!("Effects: {}", self.effects_quality.label())

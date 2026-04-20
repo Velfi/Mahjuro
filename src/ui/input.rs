@@ -40,6 +40,14 @@ pub enum UiAction {
     NavigateHudPrev,
     SortBySuit,
     SortByRank,
+    /// Cycle to the next tab in a tabbed scene (Tab key, RB).
+    TabNext,
+    /// Cycle to the previous tab in a tabbed scene (Shift+Tab, LB).
+    TabPrev,
+    /// Step to the next page within the current tab (PageDown).
+    PageNext,
+    /// Step to the previous page within the current tab (PageUp).
+    PagePrev,
     /// Pause the game (Escape / Start button).
     Pause,
     /// Open the glossary / help overlay (`?`, `F1`, `H`, gamepad Select).
@@ -246,8 +254,14 @@ impl InputState {
                 ButtonPressed(Button::DPadUp, _) => actions.push(UiAction::FocusUp),
                 ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
                 ButtonPressed(Button::Select, _) => actions.push(UiAction::Help),
-                ButtonPressed(Button::LeftTrigger, _) => actions.push(UiAction::NavigateHudPrev),
-                ButtonPressed(Button::RightTrigger, _) => actions.push(UiAction::NavigateHudNext),
+                ButtonPressed(Button::LeftTrigger, _) => {
+                    actions.push(UiAction::NavigateHudPrev);
+                    actions.push(UiAction::TabPrev);
+                }
+                ButtonPressed(Button::RightTrigger, _) => {
+                    actions.push(UiAction::NavigateHudNext);
+                    actions.push(UiAction::TabNext);
+                }
                 _ => {}
             }
         }
@@ -260,7 +274,12 @@ impl InputState {
 
     /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
     /// Returns true if the mode changed.
-    pub fn on_key(&mut self, key: PhysicalKey, actions: &mut Vec<UiAction>) -> bool {
+    pub fn on_key(
+        &mut self,
+        key: PhysicalKey,
+        shift: bool,
+        actions: &mut Vec<UiAction>,
+    ) -> bool {
         let PhysicalKey::Code(code) = key else {
             return false;
         };
@@ -268,16 +287,29 @@ impl InputState {
         match code {
             KeyCode::ArrowRight | KeyCode::KeyD => actions.push(UiAction::FocusNext),
             KeyCode::ArrowLeft | KeyCode::KeyA => actions.push(UiAction::FocusPrev),
-            KeyCode::ArrowDown => actions.push(UiAction::FocusDown),
+            KeyCode::ArrowDown | KeyCode::KeyS => actions.push(UiAction::FocusDown),
             KeyCode::ArrowUp | KeyCode::KeyW => actions.push(UiAction::FocusUp),
             KeyCode::Space => actions.push(UiAction::Confirm),
             KeyCode::Escape => actions.push(UiAction::Pause),
             KeyCode::Backspace => actions.push(UiAction::Cancel),
             KeyCode::Delete | KeyCode::KeyX => actions.push(UiAction::Delete),
-            KeyCode::KeyS => actions.push(UiAction::ScoreHand),
             KeyCode::KeyT => actions.push(UiAction::TriggerStructure),
             KeyCode::Enter | KeyCode::NumpadEnter => actions.push(UiAction::Confirm),
-            KeyCode::Tab => actions.push(UiAction::SortBySuit),
+            // Tab is dual-purpose: scenes that opt in to TabNext/TabPrev
+            // (e.g. the collection browser) get tab-cycle semantics; the
+            // gameplay scene treats SortBySuit identically to a Tab press.
+            // Both actions are emitted so each scene can pick the one it
+            // cares about and ignore the other.
+            KeyCode::Tab => {
+                if shift {
+                    actions.push(UiAction::TabPrev);
+                } else {
+                    actions.push(UiAction::TabNext);
+                    actions.push(UiAction::SortBySuit);
+                }
+            }
+            KeyCode::PageDown => actions.push(UiAction::PageNext),
+            KeyCode::PageUp => actions.push(UiAction::PagePrev),
             KeyCode::Backquote => actions.push(UiAction::SortByRank),
             // HUD strip nav (consumable focus on the gameplay scene). Mirrors
             // the LB / RB shoulder buttons on the controller so keyboard
@@ -448,7 +480,11 @@ pub fn apply_ui_actions(
             | UiAction::FocusDown
             | UiAction::FocusUp
             | UiAction::NavigateHudNext
-            | UiAction::NavigateHudPrev => {}
+            | UiAction::NavigateHudPrev
+            | UiAction::TabNext
+            | UiAction::TabPrev
+            | UiAction::PageNext
+            | UiAction::PagePrev => {}
         }
     }
 }

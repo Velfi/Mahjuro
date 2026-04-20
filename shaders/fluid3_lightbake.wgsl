@@ -60,11 +60,26 @@ struct PointLights {
     lights: array<PointLight, 16>,
 };
 
+// Opaque occluders (e.g. the shop bugs). Each splats a Gaussian of optical
+// depth along the per-light shadow ray so the occluder darkens smoke
+// behind it along each candle's direction. Kept as a small fixed array —
+// `MAX_OCCLUDERS` must match `MAX_BUG_OCCLUDERS` in `src/render/fluid.rs`.
+const MAX_OCCLUDERS: u32 = 16u;
+struct Occluder {
+    pos_radius: vec4<f32>, // xyz world pos, w radius (world units)
+    params:     vec4<f32>, // x = strength (density-equivalent), yzw unused
+};
+struct Occluders {
+    count: vec4<u32>,      // x = active count
+    items: array<Occluder, 16>,
+};
+
 @group(0) @binding(0) var<uniform> u: FluidUniforms;
 @group(0) @binding(1) var src_vd: texture_3d<f32>;
 @group(0) @binding(2) var dst_lit: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(3) var<uniform> cam: VolumeCamera;
 @group(0) @binding(4) var<uniform> lights: PointLights;
+@group(0) @binding(5) var<uniform> occluders: Occluders;
 
 fn cell_to_world(c: vec3<f32>) -> vec3<f32> {
     let uvw = (c + vec3<f32>(0.5)) / u.grid_size.xyz;
@@ -121,7 +136,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let extent = u.grid_max.xyz - u.grid_min.xyz;
     let inv_extent = vec3<f32>(1.0 / max(extent.x, 1e-3), 1.0 / max(extent.y, 1e-3), 1.0 / max(extent.z, 1e-3));
     let sigma_t = 0.065;
-    let shadow_taps = 4;
+    // 8 taps gives sharp enough bug silhouettes in the bake that the
+    // raymarch's god-ray shafts read as real shadow cuts rather than
+    // blurry blobs. Compute cost is still trivial at voxel rate.
+    let shadow_taps = 8;
 
     var lit = vec3<f32>(ambient);
     for (var li: u32 = 0u; li < lcount; li = li + 1u) {
@@ -140,6 +158,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let shadow_dir = to_light / dist;
         let shadow_step = shadow_len / f32(shadow_taps);
         var tau = 0.0;
+        let occ_count = occluders.count.x;
         for (var s: i32 = 1; s <= shadow_taps; s = s + 1) {
             let sp = pos + shadow_dir * (f32(s) - 0.5) * shadow_step;
             let uvw = (sp - u.grid_min.xyz) * inv_extent;
@@ -147,6 +166,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let sc = vec3<i32>(i32(uvw.x * u.grid_size.x), i32(uvw.y * u.grid_size.y), i32(uvw.z * u.grid_size.z));
                 let sd = max(textureLoad(src_vd, sc, 0).w, 0.0);
                 tau = tau + sd * sigma_t * shadow_step;
+            }
+            // Opaque occluders: Gaussian splat of optical depth at this
+            // shadow-ray tap. Summed *outside* the grid-bounds check so a
+            // bug just beyond the grid edge still casts into a voxel that
+            // sits inside.
+            for (var oi: u32 = 0u; oi < occ_count; oi = oi + 1u) {
+                let oc = occluders.items[oi];
+                let orad = max(oc.pos_radius.w, 0.001);
+                let d = sp - oc.pos_radius.xyz;
+                let d2 = dot(d, d);
+                let g = exp(-d2 / (2.0 * orad * orad));
+                tau = tau + oc.params.x * g * sigma_t * shadow_step;
             }
         }
         let shadow = exp(-tau);

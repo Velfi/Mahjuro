@@ -76,7 +76,7 @@ pub fn finale_failure_feedback(
 
     if score_pct >= 75 {
         return format!(
-            "Close — {} / {} ({}%). Honors score for less on this shrine; lean on the three suits. Bigger melds and a yaku raise mult more than pairs alone.",
+            "Close — {} / {} ({}%). Honors are debuffed on this shrine; lean on the three suits. Bigger melds and a yaku raise mult more than pairs alone.",
             round_score, target, score_pct,
         );
     }

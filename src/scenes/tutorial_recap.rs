@@ -64,7 +64,7 @@ impl SceneBehavior for TutorialRecapScene {
             return Some(if self.shop_follows {
                 Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run))
             } else {
-                Scene::Gameplay(GameplayScene::new())
+                Scene::Gameplay(GameplayScene::with_pending_blind(ctx.run.upcoming_blind))
             });
         }
         None

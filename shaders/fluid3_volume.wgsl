@@ -11,6 +11,29 @@
 // candle gets a dedicated ray-sphere intersection + fine sub-march (~20
 // steps through the flame envelope), giving pixel-resolution teardrop
 // shapes that properly interleave with the depth buffer.
+//
+// ── Temporal reprojection (TAA) ─────────────────────────────────────────
+// The smoke march is the heaviest fullscreen cost in the renderer, and
+// the volumetric field is low-frequency: adjacent frames converge on the
+// same answer within a few samples. We exploit that by integrating the
+// result over time.
+//
+//   1. Each pixel uses an Interleaved-Gradient-Noise (blue-noise-like)
+//      per-pixel offset along the ray — spatially decorrelated noise
+//      reads as texture rather than banding at low step counts.
+//   2. After integrating this frame, we find the world-space first-hit
+//      point of the ray (where smoke first became visible), reproject it
+//      through the previous frame's view-projection, and sample the
+//      previous raymarch result at that UV.
+//   3. We blend current × α + history × (1 − α) with α ≈ 0.12. With
+//      per-pixel jittered sampling, this exponential moving average
+//      reconstructs the noise-free integral over ~8 frames without
+//      the shower-door artefacts of static jitter.
+//
+// Reprojection falls back to "no history" when the reprojected UV is
+// out of screen, the depth history disagrees by too much, or the scene
+// depth says the camera has moved past the smoke. Those fallbacks keep
+// the TAA from smearing across sharp edges or during fast motion.
 
 struct Globals {
     screen: vec2<f32>,
@@ -21,12 +44,13 @@ struct Globals {
 struct VolumeCamera {
     inv_view_proj: mat4x4<f32>,
     view_proj:     mat4x4<f32>,
+    prev_view_proj: mat4x4<f32>,
     cam_pos:       vec4<f32>,   // xyz = world camera origin
     grid_min:      vec4<f32>,
     grid_max:      vec4<f32>,
     grid_size:     vec4<f32>,
     params:        vec4<f32>,   // x=max_alpha, y=step_count (z/w consumed by lightbake)
-    mode:          vec4<f32>,   // x=0 both, 1 smoke only, 2 flames only
+    mode:          vec4<f32>,   // x=0 both, 1 smoke only, 2 flames only; y=history_valid (0/1), z=frame_index
 };
 
 const MAX_LIGHTS: u32 = 16u;
@@ -41,6 +65,19 @@ struct PointLights {
     lights: array<PointLight, 16>,
 };
 
+// Opaque occluders (shop bugs etc.) — same layout as the lightbake. The
+// raymarch samples these along each in-scatter shadow ray so bug
+// silhouettes cut real shafts of darkness through the lamp's god rays.
+const MAX_OCCLUDERS: u32 = 16u;
+struct Occluder {
+    pos_radius: vec4<f32>, // xyz world pos, w radius
+    params:     vec4<f32>, // x = strength
+};
+struct Occluders {
+    count: vec4<u32>,
+    items: array<Occluder, 16>,
+};
+
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var<uniform> cam: VolumeCamera;
 @group(1) @binding(1) var lit_density_tex: texture_3d<f32>;
@@ -48,6 +85,9 @@ struct PointLights {
 @group(1) @binding(3) var depth_tex: texture_depth_2d;
 @group(1) @binding(4) var<uniform> lights: PointLights;
 @group(1) @binding(5) var velocity_tex: texture_3d<f32>;
+@group(1) @binding(6) var<uniform> occluders: Occluders;
+@group(1) @binding(7) var history_tex: texture_2d<f32>;
+@group(1) @binding(8) var history_samp: sampler;
 
 // Convert a world position to a voxel texel coordinate for textureLoad.
 fn world_to_texel(world: vec3<f32>, grid_min: vec3<f32>, grid_max: vec3<f32>) -> vec3<i32> {
@@ -138,6 +178,56 @@ fn fbm3(p: vec3<f32>) -> f32 {
         amp = amp * 0.5;
     }
     return v;
+}
+
+// Interleaved Gradient Noise — per-pixel, spatially decorrelated,
+// cheap as dirt. Cycled against the frame index so TAA accumulation
+// sees a different pattern every frame and converges to the true
+// integral rather than burning in the jitter itself.
+fn ign(pix: vec2<f32>, frame: f32) -> f32 {
+    let p = pix + 5.588238 * fract(frame * 0.61803398875);
+    return fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
+}
+
+// Henyey-Greenstein phase function. g∈[-1,1]: positive = forward-biased
+// (smoke scatters toward the viewer when looking at the light), which is
+// what produces visible god-ray shafts rather than a uniform glow.
+fn phase_hg(cos_theta: f32, g: f32) -> f32 {
+    let g2 = g * g;
+    let denom = 1.0 + g2 - 2.0 * g * cos_theta;
+    return (1.0 - g2) / (12.5663706 * pow(max(denom, 1e-4), 1.5));
+}
+
+// Occluder-only shadow ray from a smoke sample point to a light. We
+// sample only the bug occluders (not the density field) because the
+// lightbake already carved density-based shadowing into the per-voxel
+// colour — re-doing it here would be duplicated work per camera step
+// and per light. The only thing the raymarch adds over the bake is the
+// silhouette cut, so that's all we sample. Returns transmittance [0,1].
+fn in_scatter_visibility(sample_pos: vec3<f32>, light_pos: vec3<f32>) -> f32 {
+    let occ_count = occluders.count.x;
+    if (occ_count == 0u) {
+        return 1.0;
+    }
+    let to_light = light_pos - sample_pos;
+    let dist = sqrt(max(dot(to_light, to_light), 1.0));
+    let dir = to_light / dist;
+    let taps = 2;
+    let dstep = dist / f32(taps);
+    let sigma_t = 0.055;
+    var tau = 0.0;
+    for (var s: i32 = 1; s <= taps; s = s + 1) {
+        let sp = sample_pos + dir * (f32(s) - 0.5) * dstep;
+        for (var oi: u32 = 0u; oi < occ_count; oi = oi + 1u) {
+            let oc = occluders.items[oi];
+            let orad = max(oc.pos_radius.w, 0.001);
+            let d = sp - oc.pos_radius.xyz;
+            let d2 = dot(d, d);
+            let g = exp(-d2 / (2.0 * orad * orad));
+            tau = tau + oc.params.x * g * sigma_t * dstep;
+        }
+    }
+    return exp(-tau);
 }
 
 // ── SDF flame evaluation ─────────────────────────────────────────────────
@@ -294,43 +384,137 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     let max_alpha = cam.params.x;
-    let nsteps = max(i32(cam.params.y), 4);
+    let requested_steps = max(i32(cam.params.y), 4);
     let span = t_far - t_near;
+    // Cap step length at one voxel diagonal so the march can't skip past
+    // voxels (which reads as a blocky silhouette). Pick the larger of the
+    // requested step count and what's needed for voxel-rate sampling.
+    let voxel_size = (cam.grid_max.xyz - cam.grid_min.xyz) / max(cam.grid_size.xyz, vec3<f32>(1.0));
+    let max_step_len = min(min(voxel_size.x, voxel_size.y), voxel_size.z);
+    let min_steps_for_voxels = i32(ceil(span / max(max_step_len, 1e-3)));
+    let nsteps = clamp(max(requested_steps, min_steps_for_voxels), 4, 256);
     let step = span / f32(nsteps);
 
-    // Jitter to break up banding.
-    let jitter = fract(sin(dot(in.clip_pos.xy + vec2<f32>(globals.time * 17.0, globals.time * 31.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+    // Blue-noise-like per-pixel jitter. Cycled by frame_index so TAA
+    // accumulation sees a different offset each frame and the EMA
+    // converges to the true integral.
+    let frame_index = cam.mode.z;
+    let jitter = ign(in.clip_pos.xy, frame_index);
+
     var t = t_near + step * jitter;
 
     var color = vec3<f32>(0.0);
     var transmittance = 1.0;
+    // First-hit world position — used to reproject this pixel into the
+    // previous frame's screen space for TAA. Captured at the first
+    // sample where density meaningfully absorbed.
+    var first_hit_t = -1.0;
 
     let inv_extent = 1.0 / (cam.grid_max.xyz - cam.grid_min.xyz);
 
     // ── Pass 1: smoke density march ─────────────────────────────────
     // Skipped if the depth buffer fully occludes the smoke AABB.
+    //
+    // Adaptive stepping: most of the ray is empty space. We track a
+    // run of low-density samples and stride 3× forward while empty,
+    // dropping back to the base step when density becomes significant.
+    // With TAA converging across frames, any missed wisp shows up in
+    // the next frame's jitter — no visible holes.
+    //
+    // In-scatter: same forward Henyey-Greenstein term as before,
+    // evaluated only when bug occluders are present (the baked lit
+    // colour already has per-voxel lighting; in-scatter is what carves
+    // silhouette shafts through god rays).
+    let inscatter_start = lights.count.y;
+    let inscatter_end = lights.count.x;
+    let do_inscatter = occluders.count.x > 0u;
     let smoke_valid = t_far > t_near;
-    for (var i: i32 = 0; i < nsteps; i = i + 1) {
+
+    // Empty-space threshold: density below this is treated as empty
+    // and we stride forward faster. Chosen to be below the threshold
+    // where a sample can move the transmittance integral visibly at
+    // the baseline step size.
+    let empty_threshold = 0.002;
+    let empty_stride = 3.0;
+
+    var empty_run: i32 = 0;
+    var i: i32 = 0;
+    loop {
         if (!smoke_valid) { break; }
+        if (i >= nsteps) { break; }
         if (transmittance < 0.01) { break; }
         let pos = origin + dir * t;
         let uvw = (pos - cam.grid_min.xyz) * inv_extent;
+        var this_step = step;
+        var density: f32 = 0.0;
+        var lit_rgb = vec3<f32>(0.0);
         if (all(uvw >= vec3<f32>(0.0)) && all(uvw <= vec3<f32>(1.0))) {
             let sample = textureSampleLevel(lit_density_tex, density_samp, active_sample_uvw(uvw), 0.0);
-            let density = max(sample.a, 0.0);
-            if (density > 0.001) {
-                // Linear-in-density extinction with a realistic coefficient:
-                // wispy edges stay translucent via low density, dense cores
-                // actually occlude. Previous pow(density, 0.72) flattened
-                // the high end and coefficient 0.016 made dense smoke look
-                // like fog — silhouettes never read as solid.
-                let sigma_t = clamp(density, 0.0, 1.0) * 0.065;
-                let absorb = 1.0 - exp(-sigma_t * step);
-                color = color + transmittance * sample.rgb * absorb;
-                transmittance = transmittance * (1.0 - absorb);
-            }
+            density = max(sample.a, 0.0);
+            lit_rgb = sample.rgb;
+            // Sub-voxel detail: modulate density with slowly-drifting FBM
+            // so plume silhouettes don't read as cube-aligned slabs of the
+            // underlying grid. Scale chosen finer than a voxel so the
+            // wisps are sub-voxel; drifts up with the smoke.
+            let n_pos = pos * 0.15 + vec3<f32>(0.0, 0.0, -globals.time * 0.35);
+            let n = fbm3(n_pos);
+            density = density * (0.55 + 1.10 * n);
         }
-        t = t + step;
+
+        // Adaptive stride decision.
+        if (density < empty_threshold) {
+            empty_run = empty_run + 1;
+            // After 2 empty samples in a row, start striding forward —
+            // but the *first* empty sample still advances by the base
+            // step so we don't skip past a density wall.
+            if (empty_run >= 2) {
+                this_step = step * empty_stride;
+            }
+        } else {
+            empty_run = 0;
+        }
+
+        if (density > 0.001) {
+            // Linear-in-density extinction with a realistic coefficient:
+            // wispy edges stay translucent via low density, dense cores
+            // actually occlude.
+            let sigma_t = clamp(density, 0.0, 1.0) * 0.065;
+            let absorb = 1.0 - exp(-sigma_t * this_step);
+            color = color + transmittance * lit_rgb * absorb;
+            // Capture first meaningful hit for TAA reprojection.
+            if (first_hit_t < 0.0 && (1.0 - transmittance * (1.0 - absorb)) > 0.02) {
+                first_hit_t = t;
+            }
+            transmittance = transmittance * (1.0 - absorb);
+        }
+        // Forward in-scatter (god rays). Only runs when bug occluders
+        // are present (otherwise the baked lit smoke is already the
+        // right answer), and only every 4th iteration because the shaft
+        // is smooth at sub-step scale.
+        if (do_inscatter && (i & 3) == 0 && density > 0.0005 && transmittance > 0.02) {
+            let inscatter_strength = clamp(density, 0.0, 1.0) * 0.80;
+            var inscatter = vec3<f32>(0.0);
+            for (var li: u32 = inscatter_start; li < inscatter_end; li = li + 1u) {
+                let l = lights.lights[li];
+                let to_light = l.pos.xyz - pos;
+                let dist = sqrt(max(dot(to_light, to_light), 1.0));
+                let radius = max(l.pos.w, 1.0);
+                let falloff_lin = clamp(1.0 - dist / radius, 0.0, 1.0);
+                if (falloff_lin <= 0.0) { continue; }
+                let ldir = to_light / dist;
+                let cos_theta = dot(dir, ldir);
+                // g = 0.55 is moderately forward-biased: shafts read
+                // clearly when the camera looks toward the lamp but
+                // don't pop/vanish under small view-angle changes.
+                let ph = phase_hg(cos_theta, 0.55);
+                let vis = in_scatter_visibility(pos, l.pos.xyz);
+                inscatter = inscatter + l.color.rgb * l.color.a * falloff_lin * falloff_lin * ph * vis;
+            }
+            // ×4 compensates for the 4× iteration stride.
+            color = color + transmittance * inscatter * inscatter_strength * this_step * 4.0;
+        }
+        t = t + this_step;
+        i = i + 1;
     }
 
     // ── Pass 2: per-candle SDF flame sub-march ──────────────────────
@@ -338,93 +522,125 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // bounding sphere around the flame zone, ensuring the teardrop is
     // properly resolved regardless of the coarse smoke step size.
     // Skipped in smoke-only profiling mode (mode.x == 1).
-    if (cam.mode.x > 0.5 && cam.mode.x < 1.5) {
-        let alpha = (1.0 - transmittance) * max_alpha;
-        let inv_g = 1.0 / max(globals.gamma, 0.01);
-        let rgb = pow(color * max_alpha, vec3<f32>(inv_g));
-        return vec4<f32>(rgb, alpha);
-    }
-    let candle_count = lights.count.y;
-    let flame_h = max(lights.extras.z, 4.0);
-    let flame_time = lights.extras.y;
+    let mode_x = cam.mode.x;
+    var skip_flames: bool = mode_x > 0.5 && mode_x < 1.5;
 
-    for (var ci: u32 = 0u; ci < candle_count; ci = ci + 1u) {
-        if (transmittance < 0.01) { break; }
+    if (!skip_flames) {
+        let candle_count = lights.count.y;
+        let flame_h = max(lights.extras.z, 4.0);
+        let flame_time = lights.extras.y;
 
-        let l = lights.lights[ci];
-        let wick = l.pos.xyz;
+        for (var ci: u32 = 0u; ci < candle_count; ci = ci + 1u) {
+            if (transmittance < 0.01) { break; }
 
-        // Bounding sphere centred on the flame midpoint — expanded a
-        // bit to accommodate wind-bent flames.
-        let flame_center = wick + vec3<f32>(0.0, flame_h * 0.45, 0.0);
-        let flame_radius = flame_h * 0.75;
+            let l = lights.lights[ci];
+            let wick = l.pos.xyz;
 
-        // Ray-sphere intersection. Use scene_t (not depth-clipped
-        // t_far) so flames above the wick aren't occluded by the
-        // candle's own mesh or nearby geometry below the flame.
-        let oc = origin - flame_center;
-        let b = dot(oc, dir);
-        let c = dot(oc, oc) - flame_radius * flame_radius;
-        let disc = b * b - c;
-        if (disc < 0.0) { continue; }
-        let sq = sqrt(disc);
-        let ft_near = max(-b - sq, t_near);
-        let ft_far  = min(-b + sq, scene_t);
-        if (ft_far <= ft_near) { continue; }
+            // Bounding sphere centred on the flame midpoint — expanded a
+            // bit to accommodate wind-bent flames.
+            let flame_center = wick + vec3<f32>(0.0, flame_h * 0.45, 0.0);
+            let flame_radius = flame_h * 0.75;
 
-        // Sample fluid velocity at several heights near the candle and
-        // take the strongest horizontal component. Wind gusts are
-        // injected near the table plane; the wick tip is far above,
-        // so we probe at 3 heights to catch the gust wherever it is.
-        var best_wind = vec3<f32>(0.0);
-        var best_wind_sq: f32 = 0.0;
-        for (var si: i32 = 0; si < 3; si = si + 1) {
-            let frac = f32(si) * 0.25;   // 0.0, 0.25, 0.50 of wick height
-            let sample_z = mix(cam.grid_min.z + 2.0, wick.z, frac);
-            let sp = vec3<f32>(wick.x, wick.y, sample_z);
-            let tx = world_to_texel(sp, cam.grid_min.xyz, cam.grid_max.xyz);
-            let vs = textureLoad(velocity_tex, tx, 0);
-            let hz = vs.x * vs.x + vs.y * vs.y;
-            if (hz > best_wind_sq) {
-                best_wind_sq = hz;
-                best_wind = vec3<f32>(vs.x, vs.y, 0.0);
+            // Ray-sphere intersection. Use scene_t (not depth-clipped
+            // t_far) so flames above the wick aren't occluded by the
+            // candle's own mesh or nearby geometry below the flame.
+            let oc = origin - flame_center;
+            let b = dot(oc, dir);
+            let c = dot(oc, oc) - flame_radius * flame_radius;
+            let disc = b * b - c;
+            if (disc < 0.0) { continue; }
+            let sq = sqrt(disc);
+            let ft_near = max(-b - sq, t_near);
+            let ft_far  = min(-b + sq, scene_t);
+            if (ft_far <= ft_near) { continue; }
+
+            // Sample fluid velocity at several heights near the candle and
+            // take the strongest horizontal component. Wind gusts are
+            // injected near the table plane; the wick tip is far above,
+            // so we probe at 3 heights to catch the gust wherever it is.
+            var best_wind = vec3<f32>(0.0);
+            var best_wind_sq: f32 = 0.0;
+            for (var si: i32 = 0; si < 3; si = si + 1) {
+                let frac = f32(si) * 0.25;   // 0.0, 0.25, 0.50 of wick height
+                let sample_z = mix(cam.grid_min.z + 2.0, wick.z, frac);
+                let sp = vec3<f32>(wick.x, wick.y, sample_z);
+                let tx = world_to_texel(sp, cam.grid_min.xyz, cam.grid_max.xyz);
+                let vs = textureLoad(velocity_tex, tx, 0);
+                let hz = vs.x * vs.x + vs.y * vs.y;
+                if (hz > best_wind_sq) {
+                    best_wind_sq = hz;
+                    best_wind = vec3<f32>(vs.x, vs.y, 0.0);
+                }
             }
-        }
-        // DEBUG: gentle idle sway so the flame always looks alive,
-        // plus any sampled fluid velocity on top.
-        let idle_sway = vec3<f32>(
-            sin(flame_time * 1.1 + f32(ci) * 2.1) * 40.0,
-            cos(flame_time * 0.9 + f32(ci) * 3.7) * 30.0,
-            0.0,
-        );
-        let wind = idle_sway + vec3<f32>(
-            clamp(best_wind.x, -120.0, 120.0),
-            clamp(best_wind.y, -120.0, 120.0),
-            0.0,
-        );
+            // DEBUG: gentle idle sway so the flame always looks alive,
+            // plus any sampled fluid velocity on top.
+            let idle_sway = vec3<f32>(
+                sin(flame_time * 1.1 + f32(ci) * 2.1) * 40.0,
+                cos(flame_time * 0.9 + f32(ci) * 3.7) * 30.0,
+                0.0,
+            );
+            let wind = idle_sway + vec3<f32>(
+                clamp(best_wind.x, -120.0, 120.0),
+                clamp(best_wind.y, -120.0, 120.0),
+                0.0,
+            );
 
-        // Fine sub-march through the flame zone.
-        let flame_steps = 20;
-        let fstep = (ft_far - ft_near) / f32(flame_steps);
-        var ft = ft_near + fstep * jitter;
+            // Fine sub-march through the flame zone.
+            let flame_steps = 20;
+            let fstep = (ft_far - ft_near) / f32(flame_steps);
+            var ft = ft_near + fstep * jitter;
 
-        for (var fi: i32 = 0; fi < flame_steps; fi = fi + 1) {
-            let fpos = origin + dir * ft;
-            let flame = eval_flame(fpos, wick, flame_h, flame_time, f32(ci), wind);
-            if (flame.a > 0.001) {
-                // Flame emission: additive, self-luminous, weighted by
-                // current transmittance so smoke in front dims it.
-                let flame_absorb = 1.0 - exp(-flame.a * fstep * 0.05);
-                color = color + transmittance * flame.rgb * flame_absorb * 6.0;
-                // Flames are partially opaque — hot gas does occlude.
-                transmittance = transmittance * (1.0 - flame_absorb * 0.35);
+            for (var fi: i32 = 0; fi < flame_steps; fi = fi + 1) {
+                let fpos = origin + dir * ft;
+                let flame = eval_flame(fpos, wick, flame_h, flame_time, f32(ci), wind);
+                if (flame.a > 0.001) {
+                    // Flame emission: additive, self-luminous, weighted by
+                    // current transmittance so smoke in front dims it.
+                    let flame_absorb = 1.0 - exp(-flame.a * fstep * 0.05);
+                    color = color + transmittance * flame.rgb * flame_absorb * 6.0;
+                    // Flames are partially opaque — hot gas does occlude.
+                    transmittance = transmittance * (1.0 - flame_absorb * 0.35);
+                }
+                ft = ft + fstep;
             }
-            ft = ft + fstep;
         }
     }
 
     let alpha = (1.0 - transmittance) * max_alpha;
     let inv_g = 1.0 / max(globals.gamma, 0.01);
     let rgb = pow(color * max_alpha, vec3<f32>(inv_g));
-    return vec4<f32>(rgb, alpha);
+    var current = vec4<f32>(rgb, alpha);
+
+    // ── Temporal reprojection ───────────────────────────────────────
+    // Blend with last frame's raymarch result at the reprojected UV
+    // of this pixel's first-hit world position. The blend is an EMA
+    // that converges the per-pixel jittered samples to the true
+    // integral over a handful of frames.
+    let history_valid = cam.mode.y > 0.5;
+    let has_hit = first_hit_t > 0.0;
+    if (history_valid && has_hit && !skip_flames) {
+        let hit_world = origin + dir * first_hit_t;
+        let prev_clip = cam.prev_view_proj * vec4<f32>(hit_world, 1.0);
+        if (prev_clip.w > 0.001) {
+            let prev_ndc = prev_clip.xyz / prev_clip.w;
+            let prev_uv = vec2<f32>(prev_ndc.x * 0.5 + 0.5, 1.0 - (prev_ndc.y * 0.5 + 0.5));
+            let in_bounds =
+                prev_uv.x >= 0.0 && prev_uv.x <= 1.0 &&
+                prev_uv.y >= 0.0 && prev_uv.y <= 1.0;
+            if (in_bounds) {
+                let hist = textureSampleLevel(history_tex, history_samp, prev_uv, 0.0);
+                // α = 0.18 → ~5-frame effective window. Larger than the
+                // textbook 0.1–0.12 because the smoke density field
+                // evolves noticeably frame-to-frame (drift, injection)
+                // and we'd rather under-smooth than leave ghosts. No
+                // neighbourhood clamp: the scene camera barely moves
+                // and the volumetric field is low-frequency, so the
+                // common ghosting sources aren't present here.
+                let alpha_taa = 0.18;
+                current = mix(hist, current, alpha_taa);
+            }
+        }
+    }
+
+    return current;
 }

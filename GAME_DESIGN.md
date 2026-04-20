@@ -75,11 +75,11 @@ Yaku level up via **zodiacs**: using a zodiac consumable boosts its bound yaku b
 
 ### **F. Relics**
 
-**79 relics** are implemented across six content patches, spanning categories such as:
+**87 relics** are implemented across seven content patches, spanning categories such as:
 
 * **Core scoring** — TripletBoost, SequenceSurge, PairPower, HonorFury
 * **Info / tempo** — ShantenShove, WallPeek, KanDrum, DoraCrown, Riichi
-* **Flower / suit synergy** — GardenKeeper, Ikebana, JadeSerpent, InkBrush, PearlDiver
+* **Flower / suit synergy** — GardenKeeper, Ikebana, JadeSerpent, RedSerpent, BlueSerpent
 * **Conditional scaling** — Momentum, Minimalist, ClosedGate, GoldFurnace, Snowball
 * **Play budget** — SecondWind (+1 play), GlassCannon (fewer plays, ×2 mult)
 * **Retrigger / echo** — LeadingTile, LowEcho, TeaCeremony, GhostHand
@@ -99,7 +99,7 @@ Relics come in Common / Uncommon / Rare tiers that gate shop availability and pr
 
 ### **H. Consumables & Slots**
 
-Talismans and zodiacs share a **base inventory of 2 slots**, expandable via Zodiac Pouch (+1) and Lunar Almanac (+1, with duplication). Both are purchased from the shop and applied manually.
+Talismans and zodiacs share a **base inventory of 2 slots**, expandable via Lunar Almanac (+1, with duplication). Both are purchased from the shop and applied manually.
 
 ---
 
@@ -140,7 +140,7 @@ Tracked in `PlayerProgress` with a **7-level unlock system** driven by runs comp
 
 ## **6. Visual & UI Design**
 
-* **3D render pipeline** (wgpu) — over 30 render modules including particles, fluid simulation, falling bones, flying coins, and bone-rigged meshes
+* **3D render pipeline** (wgpu) — over 30 render modules including particles, fluid simulation, flying coins, and bone-rigged meshes
 * **Scenes implemented:** Gameplay, Pick Blind, Shop (3D curio cabinet with spotlight hover), Splash, Start Screen, Profile Select, Tutorial Overlay, Tutorial Recap, Solitaire, Collection, Journal, Options, Pause Menu, Game Over, Tile Literacy, Meld Guide
 * **Score popups** animate each chip/mult cascade step
 * **Level-up carousel** pages through newly unlocked relics, rules, and yaku after each run
@@ -182,7 +182,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 | Tile draw/discard                 | Done        | Wall refill, discard bowl, river tracking |
 | Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards                  |
 | Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
-| 10–15 relics                      | Exceeded    | **79 relics** across 6 patches            |
+| 10–15 relics                      | Exceeded    | **87 relics** across 7 patches            |
 | 1–2 rule modifiers                | Exceeded    | **12 modifiers** + 14 boss effects        |
 | Score targets                     | Done        | 8 antes × 3 blinds each                   |
 | Post-run unlocks                  | Done        | 7-level unlock gating                     |
@@ -201,7 +201,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 * Cosmetic tile sets beyond the current material unlocks
 * Leaderboards and daily seeds for score attack
 * Full Riichi optional mode for advanced players
-* Additional relic patches (patches H+) extending the 79-relic pool
+* Additional relic patches (patches I+) extending the 87-relic pool
 
 ---
 

@@ -108,6 +108,12 @@ pub struct ShopPositions {
     /// owned-inventory pendants.
     pub owned_talismans: Placement,
 
+    /// Back-wall smoke curtain emitter. Arrange-mode deltas shift the row of
+    /// wind-gust impulses that seeds the rolling haze behind the stalls:
+    /// `nx`/`ny` nudge the pixel center, `lift_mm` offsets the curtain's
+    /// world-Z rise, and `rz_deg` is currently unused (kept for parity).
+    pub smoke_curtain: Placement,
+
     // ── Camera (non-spatial; multipliers on window-derived defaults) ───────
     pub camera_eye_y_frac: f32,
     pub camera_eye_z_frac: f32,
@@ -145,12 +151,11 @@ pub const CANONICAL_WINDOW_W: f32 = 1200.0;
 impl Default for ShopPositions {
     fn default() -> Self {
         Self {
-            // For-sale columns (was col_nx=[0.22,0.40,0.58,0.76] × stalls).
             relics: Placement::at(0.22, 0.31, 39.431_37),
             packs: Placement {
-                nx: 0.413_888_9,
+                nx: 0.424_016_2,
                 ny: 0.478_250_95,
-                lift_mm: 58.172_863,
+                lift_mm: 43.875_48,
                 rx_deg: -16.0,
                 ry_deg: 0.0,
                 rz_deg: 1.0,
@@ -163,13 +168,12 @@ impl Default for ShopPositions {
                 ry_deg: 0.0,
                 rz_deg: -27.0,
             },
-            ribbons: Placement::at(0.76, 0.43, 23.431_372),
+            ribbons: Placement::at(0.76, 1.571_634_9, -105.245_094),
             relic_spread_nx: 0.075,
             ribbon_spread_nx: 0.050,
             talisman_spread_nx: 0.055,
 
             counter: Placement::at(0.5, 0.35, 0.0),
-            // Shelf row (was shelf_ny=0.84 shared).
             relic_dish: Placement::at(0.20, 0.84, 0.0),
             talisman_tray: Placement::at(0.38, 0.84, 0.0),
             ribbon_tray: Placement::at(0.56, 0.84, 0.0),
@@ -199,17 +203,24 @@ impl Default for ShopPositions {
             hover_title_plaque: Placement::at(-0.001_736_110_1, 0.285_171_06, -16.900_726),
             hover_desc_plaque: Placement::at(-0.001_446_759_2, 0.0, -29.786_219),
             hover_owned_plaque: Placement::at(0.0, -0.22, 0.0),
-            owned_talismans: Placement::at(0.0, 0.0, 0.0),
+            owned_talismans: Placement {
+                nx: 0.0,
+                ny: 0.0,
+                lift_mm: 3.574_346_5,
+                rx_deg: -34.0,
+                ry_deg: 0.0,
+                rz_deg: 0.0,
+            },
+            smoke_curtain: Placement::at(0.5, -0.642_072_3, -232.332_44),
 
             camera_eye_y_frac: 0.72,
             camera_eye_z_frac: 0.34,
             camera_target_y_frac: 0.18,
             camera_target_z_frac: 0.10,
 
-            // Celebrations (was celeb_*_lift_h_frac).
-            celeb_pack_closeup: Placement::at(0.5, 0.45, -2.573_530_7),
-            celeb_pack_reveal: Placement::at(0.5, 0.55, 36.887_23),
-            celeb_zodiac: Placement::at(0.5, 0.35, 257.352_94),
+            celeb_pack_closeup: Placement::at(0.383_101_85, 0.45, -2.573_530_7),
+            celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
+            celeb_zodiac: Placement::at(0.5, 0.967_870_7, 242.013_03),
         }
     }
 }
@@ -300,6 +311,10 @@ pub const SHOP_HIERARCHY: &[Node] = &[Node::Group {
                     name: "shop.props.ofuda",
                     label: "Ofuda sign",
                 },
+                Node::Leaf {
+                    name: "shop.props.smoke_curtain",
+                    label: "Smoke curtain",
+                },
             ],
         },
         Node::Group {
@@ -373,6 +388,7 @@ pub enum ShopField {
     HoverDescPlaque,
     HoverOwnedPlaque,
     OwnedTalismans,
+    SmokeCurtain,
     CelebPackCloseup,
     CelebPackReveal,
     CelebZodiac,
@@ -403,6 +419,7 @@ pub fn lookup_shop_field(name: &str) -> Option<ShopField> {
         "shop.hover.desc_plaque" => ShopField::HoverDescPlaque,
         "shop.hover.owned_plaque" => ShopField::HoverOwnedPlaque,
         "shop.shelf.owned_talismans" => ShopField::OwnedTalismans,
+        "shop.props.smoke_curtain" => ShopField::SmokeCurtain,
         "shop.celebrations.pack_closeup" => ShopField::CelebPackCloseup,
         "shop.celebrations.pack_reveal" => ShopField::CelebPackReveal,
         "shop.celebrations.zodiac" => ShopField::CelebZodiac,
@@ -435,6 +452,7 @@ pub fn shop_field_path(field: ShopField) -> &'static str {
         ShopField::HoverDescPlaque => "shop.hover.desc_plaque",
         ShopField::HoverOwnedPlaque => "shop.hover.owned_plaque",
         ShopField::OwnedTalismans => "shop.shelf.owned_talismans",
+        ShopField::SmokeCurtain => "shop.props.smoke_curtain",
         ShopField::CelebPackCloseup => "shop.celebrations.pack_closeup",
         ShopField::CelebPackReveal => "shop.celebrations.pack_reveal",
         ShopField::CelebZodiac => "shop.celebrations.zodiac",
@@ -463,6 +481,7 @@ impl ShopField {
         ShopField::HoverTitlePlaque,
         ShopField::HoverDescPlaque,
         ShopField::OwnedTalismans,
+        ShopField::SmokeCurtain,
         ShopField::CelebPackCloseup,
         ShopField::CelebPackReveal,
         ShopField::CelebZodiac,
@@ -493,6 +512,7 @@ impl ShopPositions {
             ShopField::HoverDescPlaque => &mut self.hover_desc_plaque,
             ShopField::HoverOwnedPlaque => &mut self.hover_owned_plaque,
             ShopField::OwnedTalismans => &mut self.owned_talismans,
+            ShopField::SmokeCurtain => &mut self.smoke_curtain,
             ShopField::CelebPackCloseup => &mut self.celeb_pack_closeup,
             ShopField::CelebPackReveal => &mut self.celeb_pack_reveal,
             ShopField::CelebZodiac => &mut self.celeb_zodiac,
@@ -521,6 +541,7 @@ impl ShopPositions {
             ShopField::HoverDescPlaque => &self.hover_desc_plaque,
             ShopField::HoverOwnedPlaque => &self.hover_owned_plaque,
             ShopField::OwnedTalismans => &self.owned_talismans,
+            ShopField::SmokeCurtain => &self.smoke_curtain,
             ShopField::CelebPackCloseup => &self.celeb_pack_closeup,
             ShopField::CelebPackReveal => &self.celeb_pack_reveal,
             ShopField::CelebZodiac => &self.celeb_zodiac,
@@ -637,6 +658,13 @@ pub struct GameplayPositions {
     /// the brass tray; rotations compose with the tray's built-in flat-lay.
     pub talisman_dish: Placement,
 
+    /// Per-pendant offset applied to talisman pendants resting on the
+    /// `talisman_dish`. Kept separate from the dish itself so arrange-mode
+    /// nudges don't drag the tray with the pendants. `nx`/`ny` are
+    /// window-fraction offsets from the per-slot pendant anchor; `lift_mm`
+    /// adds to the resting height above the dish rim.
+    pub consumable_dish_talisman: Placement,
+
     // ── Discard bowl / Bronze mirror (action-bar-anchored) ───────────────────
     /// `nx`/`ny` are window-fraction offsets from the action-bar anchor.
     pub bowl: Placement,
@@ -676,7 +704,7 @@ pub struct GameplayPositions {
 impl Default for GameplayPositions {
     fn default() -> Self {
         Self {
-            relic_col: Placement::at(-0.198_206_01, -0.145_114_06, 2.144_608),
+            relic_col: Placement::at(-0.950_520_9, 0.191_863_13, 2.144_608),
             relic_col_top_ny: 0.22,
             relic_col_bottom_ny: 0.78,
             relic_cell_height_mm: 42.0,
@@ -727,7 +755,15 @@ impl Default for GameplayPositions {
                 rz_deg: 180.0,
             },
 
-            talisman_dish: Placement::at(-0.115_740_74, -0.336_977_2, 2.144_608),
+            talisman_dish: Placement::at(-0.137_442_13, -0.336_977_2, -3.365_842_3),
+            consumable_dish_talisman: Placement {
+                nx: -0.008_575_439,
+                ny: 0.049_166_66,
+                lift_mm: 1.489_310_9,
+                rx_deg: 68.0,
+                ry_deg: -90.0,
+                rz_deg: 0.0,
+            },
 
             bowl: Placement {
                 nx: -0.051_770_832,
@@ -874,6 +910,10 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
             name: "gameplay.talisman_dish",
             label: "Talisman dish",
         },
+        Node::Leaf {
+            name: "gameplay.consumable_dish.talisman",
+            label: "Talisman pendant",
+        },
     ],
 }];
 
@@ -897,6 +937,7 @@ pub enum GameplayField {
     TabletCashIn,
     TabletJournal,
     TalismanDish,
+    ConsumableDishTalisman,
 }
 
 pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
@@ -917,6 +958,7 @@ pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
         "gameplay.hand.strip" => GameplayField::HandStrip,
         "gameplay.hand.yaku_tablet" => GameplayField::YakuTablet,
         "gameplay.talisman_dish" => GameplayField::TalismanDish,
+        "gameplay.consumable_dish.talisman" => GameplayField::ConsumableDishTalisman,
         _ => return None,
     })
 }
@@ -940,6 +982,7 @@ pub fn gameplay_field_path(field: GameplayField) -> &'static str {
         GameplayField::HandStrip => "gameplay.hand.strip",
         GameplayField::YakuTablet => "gameplay.hand.yaku_tablet",
         GameplayField::TalismanDish => "gameplay.talisman_dish",
+        GameplayField::ConsumableDishTalisman => "gameplay.consumable_dish.talisman",
     }
 }
 
@@ -961,6 +1004,7 @@ impl GameplayField {
         GameplayField::TabletCashIn,
         GameplayField::TabletJournal,
         GameplayField::TalismanDish,
+        GameplayField::ConsumableDishTalisman,
     ];
 }
 
@@ -983,6 +1027,7 @@ impl GameplayPositions {
             GameplayField::TabletCashIn => &mut self.tablet_cash_in,
             GameplayField::TabletJournal => &mut self.tablet_journal,
             GameplayField::TalismanDish => &mut self.talisman_dish,
+            GameplayField::ConsumableDishTalisman => &mut self.consumable_dish_talisman,
         }
     }
 
@@ -1004,6 +1049,7 @@ impl GameplayPositions {
             GameplayField::TabletCashIn => &self.tablet_cash_in,
             GameplayField::TabletJournal => &self.tablet_journal,
             GameplayField::TalismanDish => &self.talisman_dish,
+            GameplayField::ConsumableDishTalisman => &self.consumable_dish_talisman,
         }
     }
 }
@@ -1055,6 +1101,506 @@ pub fn save_gameplay_positions(pos: &GameplayPositions) -> anyhow::Result<()> {
     let path = layouts_dir().join("gameplay.json");
     fs::write(&path, json)?;
     log::info!("[Layout] Saved gameplay positions → {}", path.display());
+    Ok(())
+}
+
+// ── CollectionPositions ───────────────────────────────────────────────────────
+
+/// Serializable position data for the Collection scene's static furniture.
+/// The dynamically-generated artifact row is not arrangeable per-cell;
+/// callers nudge the cabinet, pedestal, and pedestal-featured artifact
+/// pose, which then governs every artifact lifted onto the pedestal.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CollectionPositions {
+    pub cabinet: Placement,
+    pub pedestal: Placement,
+    pub featured_artifact: Placement,
+    pub description_plaque: Placement,
+    pub focus_card: Placement,
+}
+
+impl Default for CollectionPositions {
+    fn default() -> Self {
+        Self {
+            cabinet: Placement::at(0.0, 0.0, 0.0),
+            pedestal: Placement::at(0.0, 0.0, 0.0),
+            featured_artifact: Placement::at(0.0, 0.0, 0.0),
+            description_plaque: Placement::at(0.0, 0.0, 0.0),
+            focus_card: Placement::at(0.0, 0.0, 0.0),
+        }
+    }
+}
+
+pub const COLLECTION_HIERARCHY: &[Node] = &[Node::Group {
+    name: "collection",
+    label: "Collection",
+    children: &[
+        Node::Leaf {
+            name: "collection.cabinet",
+            label: "Hexagonal cabinet",
+        },
+        Node::Leaf {
+            name: "collection.pedestal",
+            label: "Inspection pedestal",
+        },
+        Node::Leaf {
+            name: "collection.featured_artifact",
+            label: "Featured artifact",
+        },
+        Node::Leaf {
+            name: "collection.description_plaque",
+            label: "Description plaque",
+        },
+        Node::Leaf {
+            name: "collection.focus_card",
+            label: "Focus description card",
+        },
+    ],
+}];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionField {
+    Cabinet,
+    Pedestal,
+    FeaturedArtifact,
+    DescriptionPlaque,
+    FocusCard,
+}
+
+pub fn lookup_collection_field(name: &str) -> Option<CollectionField> {
+    Some(match name {
+        "collection.cabinet" => CollectionField::Cabinet,
+        "collection.pedestal" => CollectionField::Pedestal,
+        "collection.featured_artifact" => CollectionField::FeaturedArtifact,
+        "collection.description_plaque" => CollectionField::DescriptionPlaque,
+        "collection.focus_card" => CollectionField::FocusCard,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+pub fn collection_field_path(field: CollectionField) -> &'static str {
+    match field {
+        CollectionField::Cabinet => "collection.cabinet",
+        CollectionField::Pedestal => "collection.pedestal",
+        CollectionField::FeaturedArtifact => "collection.featured_artifact",
+        CollectionField::DescriptionPlaque => "collection.description_plaque",
+        CollectionField::FocusCard => "collection.focus_card",
+    }
+}
+
+impl CollectionField {
+    pub const ALL: &'static [CollectionField] = &[
+        CollectionField::Cabinet,
+        CollectionField::Pedestal,
+        CollectionField::FeaturedArtifact,
+        CollectionField::DescriptionPlaque,
+        CollectionField::FocusCard,
+    ];
+}
+
+impl CollectionPositions {
+    pub fn field_mut(&mut self, field: CollectionField) -> &mut Placement {
+        match field {
+            CollectionField::Cabinet => &mut self.cabinet,
+            CollectionField::Pedestal => &mut self.pedestal,
+            CollectionField::FeaturedArtifact => &mut self.featured_artifact,
+            CollectionField::DescriptionPlaque => &mut self.description_plaque,
+            CollectionField::FocusCard => &mut self.focus_card,
+        }
+    }
+
+    pub fn field_ref(&self, field: CollectionField) -> &Placement {
+        match field {
+            CollectionField::Cabinet => &self.cabinet,
+            CollectionField::Pedestal => &self.pedestal,
+            CollectionField::FeaturedArtifact => &self.featured_artifact,
+            CollectionField::DescriptionPlaque => &self.description_plaque,
+            CollectionField::FocusCard => &self.focus_card,
+        }
+    }
+}
+
+impl ArrangeTarget for CollectionPositions {
+    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
+        lookup_collection_field(name).map(|f| self.field_mut(f))
+    }
+
+    fn placement(&self, name: &str) -> Option<&Placement> {
+        lookup_collection_field(name).map(|f| self.field_ref(f))
+    }
+
+    fn hierarchy(&self) -> &'static [Node] {
+        COLLECTION_HIERARCHY
+    }
+}
+
+pub fn load_collection_positions() -> CollectionPositions {
+    let path = layouts_dir().join("collection.json");
+    let mut loaded: CollectionPositions = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    sanitize_collection_positions(&mut loaded);
+    loaded
+}
+
+pub fn sanitize_collection_positions(p: &mut CollectionPositions) {
+    let mut defaults = CollectionPositions::default();
+    for &field in CollectionField::ALL {
+        if !p.field_mut(field).is_finite() {
+            log::warn!(
+                "[Layout] collection placement {:?} had non-finite values, restoring defaults",
+                field
+            );
+            *p.field_mut(field) = *defaults.field_mut(field);
+        }
+    }
+}
+
+pub fn save_collection_positions(pos: &CollectionPositions) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(pos)?;
+    let path = layouts_dir().join("collection.json");
+    fs::write(&path, json)?;
+    log::info!("[Layout] Saved collection positions → {}", path.display());
+    Ok(())
+}
+
+// ── StartScreenPositions ──────────────────────────────────────────────────────
+
+/// Serializable position data for the Start Screen menu furniture.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StartScreenPositions {
+    pub menu_tablets: Placement,
+    pub candle_left: Placement,
+    pub candle_right: Placement,
+    pub title_plaque: Placement,
+}
+
+impl Default for StartScreenPositions {
+    fn default() -> Self {
+        Self {
+            menu_tablets: Placement::at(0.0, 0.0, 0.0),
+            candle_left: Placement::at(0.0, 0.0, 0.0),
+            candle_right: Placement::at(0.0, 0.0, 0.0),
+            title_plaque: Placement::at(0.0, 0.0, 0.0),
+        }
+    }
+}
+
+pub const START_SCREEN_HIERARCHY: &[Node] = &[Node::Group {
+    name: "start_screen",
+    label: "Start screen",
+    children: &[
+        Node::Leaf {
+            name: "start_screen.menu_tablets",
+            label: "Menu tablet column",
+        },
+        Node::Leaf {
+            name: "start_screen.candle_left",
+            label: "Candle (left)",
+        },
+        Node::Leaf {
+            name: "start_screen.candle_right",
+            label: "Candle (right)",
+        },
+        Node::Leaf {
+            name: "start_screen.title_plaque",
+            label: "Title plaque",
+        },
+    ],
+}];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartScreenField {
+    MenuTablets,
+    CandleLeft,
+    CandleRight,
+    TitlePlaque,
+}
+
+pub fn lookup_start_screen_field(name: &str) -> Option<StartScreenField> {
+    Some(match name {
+        "start_screen.menu_tablets" => StartScreenField::MenuTablets,
+        "start_screen.candle_left" => StartScreenField::CandleLeft,
+        "start_screen.candle_right" => StartScreenField::CandleRight,
+        "start_screen.title_plaque" => StartScreenField::TitlePlaque,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+pub fn start_screen_field_path(field: StartScreenField) -> &'static str {
+    match field {
+        StartScreenField::MenuTablets => "start_screen.menu_tablets",
+        StartScreenField::CandleLeft => "start_screen.candle_left",
+        StartScreenField::CandleRight => "start_screen.candle_right",
+        StartScreenField::TitlePlaque => "start_screen.title_plaque",
+    }
+}
+
+impl StartScreenField {
+    pub const ALL: &'static [StartScreenField] = &[
+        StartScreenField::MenuTablets,
+        StartScreenField::CandleLeft,
+        StartScreenField::CandleRight,
+        StartScreenField::TitlePlaque,
+    ];
+}
+
+impl StartScreenPositions {
+    pub fn field_mut(&mut self, field: StartScreenField) -> &mut Placement {
+        match field {
+            StartScreenField::MenuTablets => &mut self.menu_tablets,
+            StartScreenField::CandleLeft => &mut self.candle_left,
+            StartScreenField::CandleRight => &mut self.candle_right,
+            StartScreenField::TitlePlaque => &mut self.title_plaque,
+        }
+    }
+
+    pub fn field_ref(&self, field: StartScreenField) -> &Placement {
+        match field {
+            StartScreenField::MenuTablets => &self.menu_tablets,
+            StartScreenField::CandleLeft => &self.candle_left,
+            StartScreenField::CandleRight => &self.candle_right,
+            StartScreenField::TitlePlaque => &self.title_plaque,
+        }
+    }
+}
+
+impl ArrangeTarget for StartScreenPositions {
+    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
+        lookup_start_screen_field(name).map(|f| self.field_mut(f))
+    }
+
+    fn placement(&self, name: &str) -> Option<&Placement> {
+        lookup_start_screen_field(name).map(|f| self.field_ref(f))
+    }
+
+    fn hierarchy(&self) -> &'static [Node] {
+        START_SCREEN_HIERARCHY
+    }
+}
+
+pub fn load_start_screen_positions() -> StartScreenPositions {
+    let path = layouts_dir().join("start_screen.json");
+    let mut loaded: StartScreenPositions = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    sanitize_start_screen_positions(&mut loaded);
+    loaded
+}
+
+pub fn sanitize_start_screen_positions(p: &mut StartScreenPositions) {
+    let mut defaults = StartScreenPositions::default();
+    for &field in StartScreenField::ALL {
+        if !p.field_mut(field).is_finite() {
+            log::warn!(
+                "[Layout] start_screen placement {:?} had non-finite values, restoring defaults",
+                field
+            );
+            *p.field_mut(field) = *defaults.field_mut(field);
+        }
+    }
+}
+
+pub fn save_start_screen_positions(pos: &StartScreenPositions) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(pos)?;
+    let path = layouts_dir().join("start_screen.json");
+    fs::write(&path, json)?;
+    log::info!(
+        "[Layout] Saved start_screen positions → {}",
+        path.display()
+    );
+    Ok(())
+}
+
+// ── TutorialPositions ────────────────────────────────────────────────────────
+
+/// Serializable position data for the Tutorial Campaign scene's preview props.
+/// One placement per shop-preview kind on the SHOP page; the same `relic`
+/// placement is reused on the RELICS page so a single nudge applies to both.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TutorialPositions {
+    pub shop_relic: Placement,
+    pub shop_ribbon: Placement,
+    pub shop_talisman: Placement,
+    pub shop_pack: Placement,
+    pub try_it_mirror: Placement,
+    pub try_it_trigger: Placement,
+}
+
+impl Default for TutorialPositions {
+    fn default() -> Self {
+        Self {
+            shop_relic: Placement::at(0.0, 0.0, 0.0),
+            shop_ribbon: Placement::at(0.0, 0.0, 0.0),
+            shop_talisman: Placement::at(0.0, 0.0, 0.0),
+            shop_pack: Placement::at(0.0, 0.0, 0.0),
+            try_it_mirror: Placement::at(0.0, 0.0, 0.0),
+            try_it_trigger: Placement::at(0.0, 0.0, 0.0),
+        }
+    }
+}
+
+pub const TUTORIAL_HIERARCHY: &[Node] = &[Node::Group {
+    name: "tutorial",
+    label: "Tutorial",
+    children: &[
+        Node::Group {
+            name: "tutorial.shop",
+            label: "Shop preview",
+            children: &[
+                Node::Leaf {
+                    name: "tutorial.shop.relic",
+                    label: "Preview relic",
+                },
+                Node::Leaf {
+                    name: "tutorial.shop.ribbon",
+                    label: "Preview ribbon",
+                },
+                Node::Leaf {
+                    name: "tutorial.shop.talisman",
+                    label: "Preview talisman",
+                },
+                Node::Leaf {
+                    name: "tutorial.shop.pack",
+                    label: "Preview pack",
+                },
+            ],
+        },
+        Node::Group {
+            name: "tutorial.try_it",
+            label: "Try-it demo",
+            children: &[
+                Node::Leaf {
+                    name: "tutorial.try_it.mirror",
+                    label: "Play mirror",
+                },
+                Node::Leaf {
+                    name: "tutorial.try_it.trigger",
+                    label: "Trigger tablet",
+                },
+            ],
+        },
+    ],
+}];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TutorialField {
+    ShopRelic,
+    ShopRibbon,
+    ShopTalisman,
+    ShopPack,
+    TryItMirror,
+    TryItTrigger,
+}
+
+pub fn lookup_tutorial_field(name: &str) -> Option<TutorialField> {
+    Some(match name {
+        "tutorial.shop.relic" => TutorialField::ShopRelic,
+        "tutorial.shop.ribbon" => TutorialField::ShopRibbon,
+        "tutorial.shop.talisman" => TutorialField::ShopTalisman,
+        "tutorial.shop.pack" => TutorialField::ShopPack,
+        "tutorial.try_it.mirror" => TutorialField::TryItMirror,
+        "tutorial.try_it.trigger" => TutorialField::TryItTrigger,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+pub fn tutorial_field_path(field: TutorialField) -> &'static str {
+    match field {
+        TutorialField::ShopRelic => "tutorial.shop.relic",
+        TutorialField::ShopRibbon => "tutorial.shop.ribbon",
+        TutorialField::ShopTalisman => "tutorial.shop.talisman",
+        TutorialField::ShopPack => "tutorial.shop.pack",
+        TutorialField::TryItMirror => "tutorial.try_it.mirror",
+        TutorialField::TryItTrigger => "tutorial.try_it.trigger",
+    }
+}
+
+impl TutorialField {
+    pub const ALL: &'static [TutorialField] = &[
+        TutorialField::ShopRelic,
+        TutorialField::ShopRibbon,
+        TutorialField::ShopTalisman,
+        TutorialField::ShopPack,
+        TutorialField::TryItMirror,
+        TutorialField::TryItTrigger,
+    ];
+}
+
+impl TutorialPositions {
+    pub fn field_mut(&mut self, field: TutorialField) -> &mut Placement {
+        match field {
+            TutorialField::ShopRelic => &mut self.shop_relic,
+            TutorialField::ShopRibbon => &mut self.shop_ribbon,
+            TutorialField::ShopTalisman => &mut self.shop_talisman,
+            TutorialField::ShopPack => &mut self.shop_pack,
+            TutorialField::TryItMirror => &mut self.try_it_mirror,
+            TutorialField::TryItTrigger => &mut self.try_it_trigger,
+        }
+    }
+
+    pub fn field_ref(&self, field: TutorialField) -> &Placement {
+        match field {
+            TutorialField::ShopRelic => &self.shop_relic,
+            TutorialField::ShopRibbon => &self.shop_ribbon,
+            TutorialField::ShopTalisman => &self.shop_talisman,
+            TutorialField::ShopPack => &self.shop_pack,
+            TutorialField::TryItMirror => &self.try_it_mirror,
+            TutorialField::TryItTrigger => &self.try_it_trigger,
+        }
+    }
+}
+
+impl ArrangeTarget for TutorialPositions {
+    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
+        lookup_tutorial_field(name).map(|f| self.field_mut(f))
+    }
+
+    fn placement(&self, name: &str) -> Option<&Placement> {
+        lookup_tutorial_field(name).map(|f| self.field_ref(f))
+    }
+
+    fn hierarchy(&self) -> &'static [Node] {
+        TUTORIAL_HIERARCHY
+    }
+}
+
+pub fn load_tutorial_positions() -> TutorialPositions {
+    let path = layouts_dir().join("tutorial.json");
+    let mut loaded: TutorialPositions = fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    sanitize_tutorial_positions(&mut loaded);
+    loaded
+}
+
+pub fn sanitize_tutorial_positions(p: &mut TutorialPositions) {
+    let mut defaults = TutorialPositions::default();
+    for &field in TutorialField::ALL {
+        if !p.field_mut(field).is_finite() {
+            log::warn!(
+                "[Layout] tutorial placement {:?} had non-finite values, restoring defaults",
+                field
+            );
+            *p.field_mut(field) = *defaults.field_mut(field);
+        }
+    }
+}
+
+pub fn save_tutorial_positions(pos: &TutorialPositions) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(pos)?;
+    let path = layouts_dir().join("tutorial.json");
+    fs::write(&path, json)?;
+    log::info!("[Layout] Saved tutorial positions → {}", path.display());
     Ok(())
 }
 
@@ -1123,7 +1669,16 @@ mod tests {
         // After unification, bowl is a first-class Placement — no special nudge needed.
         let mut p = GameplayPositions::default();
         let before_nx = p.bowl.nx;
-        let ok = apply_arrange(&mut p, "gameplay.action_bar.bowl", 0.01, 0.0, 0.0, 0.0, 0.0, 0.0);
+        let ok = apply_arrange(
+            &mut p,
+            "gameplay.action_bar.bowl",
+            0.01,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert!(ok);
         assert!(approx(p.bowl.nx, before_nx + 0.01));
     }
@@ -1169,7 +1724,16 @@ mod tests {
     fn arrange_plaque_is_a_regular_placement() {
         let mut p = GameplayPositions::default();
         let before_ny = p.plaque.ny;
-        let ok = apply_arrange(&mut p, "gameplay.score_panel.plaque", 0.0, 0.01, 0.0, 0.0, 0.0, 0.0);
+        let ok = apply_arrange(
+            &mut p,
+            "gameplay.score_panel.plaque",
+            0.0,
+            0.01,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert!(ok);
         assert!(approx(p.plaque.ny, before_ny + 0.01));
     }
@@ -1296,6 +1860,71 @@ mod tests {
         p.counter.nx = 0.42;
         sanitize_shop_positions(&mut p);
         assert!(approx(p.counter.nx, 0.42));
+    }
+
+    // ── Coverage: collection / start_screen / tutorial round-trips ──────────
+
+    #[test]
+    fn collection_field_path_roundtrip() {
+        for &field in CollectionField::ALL {
+            let path = collection_field_path(field);
+            assert_eq!(lookup_collection_field(path), Some(field));
+        }
+    }
+
+    #[test]
+    fn collection_hierarchy_leaves_all_resolve() {
+        use crate::ui::placement::all_leaf_names;
+        let mut p = CollectionPositions::default();
+        for leaf in all_leaf_names(COLLECTION_HIERARCHY) {
+            assert!(
+                p.placement_mut(leaf).is_some(),
+                "COLLECTION_HIERARCHY leaf {:?} has no placement_mut arm",
+                leaf,
+            );
+        }
+    }
+
+    #[test]
+    fn start_screen_field_path_roundtrip() {
+        for &field in StartScreenField::ALL {
+            let path = start_screen_field_path(field);
+            assert_eq!(lookup_start_screen_field(path), Some(field));
+        }
+    }
+
+    #[test]
+    fn start_screen_hierarchy_leaves_all_resolve() {
+        use crate::ui::placement::all_leaf_names;
+        let mut p = StartScreenPositions::default();
+        for leaf in all_leaf_names(START_SCREEN_HIERARCHY) {
+            assert!(
+                p.placement_mut(leaf).is_some(),
+                "START_SCREEN_HIERARCHY leaf {:?} has no placement_mut arm",
+                leaf,
+            );
+        }
+    }
+
+    #[test]
+    fn tutorial_field_path_roundtrip() {
+        for &field in TutorialField::ALL {
+            let path = tutorial_field_path(field);
+            assert_eq!(lookup_tutorial_field(path), Some(field));
+        }
+    }
+
+    #[test]
+    fn tutorial_hierarchy_leaves_all_resolve() {
+        use crate::ui::placement::all_leaf_names;
+        let mut p = TutorialPositions::default();
+        for leaf in all_leaf_names(TUTORIAL_HIERARCHY) {
+            assert!(
+                p.placement_mut(leaf).is_some(),
+                "TUTORIAL_HIERARCHY leaf {:?} has no placement_mut arm",
+                leaf,
+            );
+        }
     }
 
     // ── HFRAC_TO_MM is the derived constant from layout invariants ──────────

@@ -19,7 +19,7 @@ use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
-    CameraParams, DishExplicit, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
+    CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
 use crate::render::table_transform::{
     mesh_y_thickness_along_local_y_to_z_up, rot_z_rad,
@@ -227,16 +227,18 @@ fn estimated_wrapped_lines(text: &str, max_chars: usize) -> usize {
 /// instead of using one fixed aspect for every boss.
 fn auto_size_shrine_ofuda(plaque_w: f32, plaque_h: f32, title: &str, rule: &str) -> (f32, f32) {
     let title_chars = title.chars().count();
+    let rule_chars = rule.chars().count();
     let longest_rule_word = rule
         .split_whitespace()
         .map(|word| word.chars().count())
         .max()
         .unwrap_or(0);
 
-    let width_scale = (0.42
+    let width_scale = (0.52
         + (title_chars.saturating_sub(12) as f32) * 0.012
-        + (longest_rule_word.saturating_sub(10) as f32) * 0.010)
-        .clamp(0.48, 0.66);
+        + (longest_rule_word.saturating_sub(10) as f32) * 0.010
+        + (rule_chars.saturating_sub(40) as f32) * 0.004)
+        .clamp(0.58, 0.92);
     let ofuda_w = plaque_w * width_scale;
 
     // Approximate the decal's title/rule wrapping budgets from the chosen
@@ -487,9 +489,17 @@ impl SceneBehavior for PickBlindScene {
                 Some(Scene::PickBlind(PickBlindScene::new()))
             }
             Some(BlindAction::PlayBlind) | Some(BlindAction::SkipBlind) => {
-                ctx.run.apply_blind(upcoming);
                 ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
-                Some(Scene::Gameplay(GameplayScene::new()))
+                // Record boss encounters the moment the player commits to
+                // fighting one. "Encountered" = selected via PlayBlind, so
+                // skips don't count and unseen bosses stay hidden in the
+                // Collection.
+                if upcoming == BlindKind::Boss {
+                    if let Some(bk) = ctx.run.boss.upcoming {
+                        ctx.bus.push(GameEvent::BossEncountered(bk));
+                    }
+                }
+                Some(Scene::Gameplay(GameplayScene::with_pending_blind(upcoming)))
             }
             None => None,
         }
@@ -587,13 +597,21 @@ impl SceneBehavior for PickBlindScene {
         // dish mesh + render path. The plane catches the spotlight
         // pool and grounds the shrines.
         let (fx, fy) = layout.floor_anchor_px;
-        frame.dish_explicit(DishExplicit {
-            center_pos: [fx, fy, 0.0],
+        frame.object3d(Object3d {
+            pos: [fx, fy, 0.0],
             extents: layout.floor_extents,
-            pick_id: None,
             rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: None,
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
             arrange_name: None,
-            round: false,
         });
 
         // ── Play + Skip altars on the floor in front of the shrines ─
@@ -605,13 +623,21 @@ impl SceneBehavior for PickBlindScene {
         let skip_tag = ctx.run.tag_for_blind(upcoming);
         let (play_px, play_py) = layout.play_dish_anchor_px;
         let play_dext = layout.play_dish_extents;
-        frame.dish_explicit(DishExplicit {
-            center_pos: [play_px, play_py, 0.0],
+        frame.object3d(Object3d {
+            pos: [play_px, play_py, 0.0],
             extents: play_dext,
-            pick_id: Some(PICK_PLAY_DISH),
             rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Dish {
+                pick_id: Some(PICK_PLAY_DISH),
+                round: false,
+            },
+            focusable: false,
+            scene_shaded: true,
+            own_light: None,
+            hover_target: 0.0,
+            anim_id: 0,
             arrange_name: None,
-            round: false,
         });
         // Single large golden coin in the center of the play dish.
         let play_dish_top_y = play_dext[1] + 2.0;
@@ -632,13 +658,21 @@ impl SceneBehavior for PickBlindScene {
         if can_skip {
             let (skip_px, skip_py) = layout.skip_dish_anchor_px;
             let skip_dext = layout.skip_dish_extents;
-            frame.dish_explicit(DishExplicit {
-                center_pos: [skip_px, skip_py, 0.0],
+            frame.object3d(Object3d {
+                pos: [skip_px, skip_py, 0.0],
                 extents: skip_dext,
-                pick_id: Some(PICK_SKIP_DISH),
                 rotation: mesh_y_thickness_along_local_y_to_z_up(),
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Dish {
+                    pick_id: Some(PICK_SKIP_DISH),
+                    round: false,
+                },
+                focusable: false,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: 0.0,
+                anim_id: 0,
                 arrange_name: None,
-                round: false,
             });
             // Single token on the skip dish, tinted by tag rarity.
             let dish_top_y = skip_dext[1] + 2.0;
@@ -974,6 +1008,7 @@ impl SceneBehavior for PickBlindScene {
                         upcoming.clear_reward(),
                     ),
                     pick_id: None,
+                    silhouette: false,
                 },
                 focusable: false,
                 scene_shaded: true,

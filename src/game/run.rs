@@ -556,8 +556,7 @@ pub struct RunState {
     /// Per-yaku level (default 1). Incremented by Zodiac card use.
     pub yaku_levels: crate::core::zodiac::YakuLevels,
     /// Player's shared consumable inventory — holds both Zodiacs and Talismans
-    /// in the same capped slot list. Capacity expands via Zodiac Pouch and
-    /// Lunar Almanac relics.
+    /// in the same capped slot list. Capacity expands via the Lunar Almanac relic.
     pub consumables: crate::core::consumable::ConsumableInventory,
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
@@ -940,12 +939,16 @@ impl RunState {
         self.boss.upcoming = Some(TUTORIAL_BOSS);
         self.resolve_upcoming_boss();
         self.upcoming_blind = BlindKind::Boss;
-        // Honest wall deal — no fixed "tutorial" hand; the player can fail.
-        self.apply_blind(BlindKind::Boss);
+        // Round setup (wall, hand, Sweepstakes, DoraCrown, boss on_apply) is
+        // deferred to `GameplayScene::with_pending_blind(BlindKind::Boss)` so
+        // on-round-start triggers play after the opening smoke curtain.
     }
 
     /// After losing the onboarding boss blind, reset the round and re-deal
-    /// from a fresh wall (same target and boss rules).
+    /// from a fresh wall (same target and boss rules). The fresh deal and
+    /// on-round-start triggers are fired by the gameplay scene after the
+    /// opening transition — the caller must route through
+    /// `GameplayScene::with_pending_blind(self.blind)`.
     pub fn retry_onboarding_finale(&mut self) {
         self.round_score = 0;
         self.last_breakdown = None;
@@ -955,7 +958,6 @@ impl RunState {
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
-        self.apply_blind(self.blind);
     }
 
     /// Start a tutorial run for first-time players. Uses a stripped-down
@@ -1050,8 +1052,9 @@ impl RunState {
         self.restamp_hand_enhancements();
         self.seed_tutorial_hand();
 
-        // Re-apply blind (with lowered target via retry_target_factor).
-        self.apply_blind(self.blind);
+        // Round re-apply (lowered target via retry_target_factor, fresh
+        // hand, on-round-start triggers) is deferred to the gameplay scene
+        // via `GameplayScene::with_pending_blind(self.blind)`.
     }
 
     /// Check if a set of detected meld kinds is valid for the current
@@ -1259,6 +1262,7 @@ impl RunState {
                     }
                     crate::core::talisman::apply_to_hand(&mut self.hand, t);
                 }
+                bus.push(GameEvent::TalismanUsed(t));
                 Some(ConsumableUseResult::Talisman { kind: t })
             }
         }
@@ -1442,12 +1446,8 @@ impl RunState {
     /// currently-owned relics. Idempotent — call after any relic add/remove.
     /// The inventory is shared between Zodiacs and Talismans; the base
     /// capacity comes from `GameMode::consumable_capacity` (default 2).
-    /// (Patch C: ZodiacPouch +1, LunarAlmanac +1.)
     pub fn recompute_capacities(&mut self) {
         let mut consumable_cap = self.mode.consumable_capacity;
-        if self.relics.has(RelicId::ZodiacPouch) {
-            consumable_cap += 1;
-        }
         if self.relics.has(RelicId::LunarAlmanac) {
             consumable_cap += 1;
         }
@@ -1533,8 +1533,15 @@ impl RunState {
         }
         self.hand.clear();
         let draw_count = boss::effective_hand_size(self);
+        let lotus = self.relics.has(crate::core::relic::RelicId::LotusBloom);
         for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
+                if lotus && t.suit == Suit::Flower {
+                    *self
+                        .relic_counters
+                        .entry(crate::core::relic::RelicId::LotusBloom)
+                        .or_insert(0) += 1;
+                }
                 self.hand.push(t);
             }
         }
@@ -1548,6 +1555,23 @@ impl RunState {
         let mut _sink = EventBus::default();
         self.set_magnet_draw_fourths(&mut _sink);
         self.hand.sort();
+
+        // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
+        if self.relics.has(crate::core::relic::RelicId::Sweepstakes) {
+            use rand::RngExt;
+            let mut rng = rand::rng();
+            let roll: u32 = rng.random_range(0..4);
+            let payout: i32 = match roll {
+                0 => 2,
+                1 => 4,
+                _ => 0,
+            };
+            if payout > 0 {
+                self.gold = self.gold.saturating_add(payout);
+                self.relic_activations
+                    .push(crate::core::relic::RelicId::Sweepstakes);
+            }
+        }
     }
 
     /// Commit selected melds into structure (costs one play). Alias for the
@@ -1643,6 +1667,23 @@ impl RunState {
                 *v = 0;
             } else {
                 *v += 1;
+            }
+        }
+        if self.relics.has(RelicId::LotusBloom) {
+            let flower_count = scoring_tiles
+                .iter()
+                .filter(|t| t.suit == Suit::Flower)
+                .count() as i32;
+            if flower_count > 0 {
+                *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += flower_count;
+                self.relic_activations.push(RelicId::LotusBloom);
+            }
+        }
+        if self.relics.has(RelicId::KongCollector) {
+            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+            if kong_count > 0 {
+                *self.relic_counters.entry(RelicId::KongCollector).or_insert(0) += kong_count;
+                self.relic_activations.push(RelicId::KongCollector);
             }
         }
 
@@ -1814,6 +1855,8 @@ impl RunState {
             if !self.played_yaku_this_round.contains(&y) {
                 self.played_yaku_this_round.push(y);
             }
+            bus.push(GameEvent::UiSound(SfxId::for_yaku(y)));
+            bus.push(GameEvent::YakuScored(y));
         }
         self.last_breakdown = Some(breakdown);
         self.scored_last_turn = earned > 0;
@@ -1986,13 +2029,53 @@ impl RunState {
             } else {
                 0
             };
+            let kong_collector_bonus = if self.relics.has(RelicId::KongCollector) {
+                let kongs = self
+                    .relic_counters
+                    .get(&RelicId::KongCollector)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(0) as u32;
+                let bonus = 5u32.saturating_mul(kongs);
+                if bonus > 0 {
+                    self.relic_activations.push(RelicId::KongCollector);
+                }
+                bonus
+            } else {
+                0
+            };
+            let beggars_cup_bonus = if self.relics.has(RelicId::BeggarsCup) {
+                let bosses = self
+                    .relic_counters
+                    .get(&RelicId::BeggarsCup)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(0) as u32;
+                let bonus = 1u32.saturating_add(bosses);
+                self.relic_activations.push(RelicId::BeggarsCup);
+                bonus
+            } else {
+                0
+            };
+            let cosmopolitan_bonus = if self.relics.has(RelicId::Cosmopolitan) {
+                let unique_yaku = self.played_yaku_this_round.len() as u32;
+                if unique_yaku > 0 {
+                    self.relic_activations.push(RelicId::Cosmopolitan);
+                }
+                unique_yaku
+            } else {
+                0
+            };
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
                 .saturating_add(green_luck_bonus)
                 .saturating_add(gold_idol_bonus)
                 .saturating_add(jade_abacus_bonus)
-                .saturating_add(patience_bonus);
+                .saturating_add(patience_bonus)
+                .saturating_add(kong_collector_bonus)
+                .saturating_add(beggars_cup_bonus)
+                .saturating_add(cosmopolitan_bonus);
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
                 payout: crate::game::event_bus::RoundPayout {
@@ -2003,6 +2086,11 @@ impl RunState {
                     total: gold_earned,
                 },
             });
+            if self.blind == BlindKind::Boss {
+                if let Some(bk) = self.boss.upcoming {
+                    bus.push(GameEvent::BossDefeated(bk));
+                }
+            }
         } else if let Some(reason) = self.round_failure_reason() {
             bus.push(GameEvent::GameOver {
                 final_score: self.round_score,
@@ -2405,6 +2493,19 @@ impl RunState {
             .map(|(i, _)| i)
             .rev()
             .collect();
+        // No Honor But Wealth: +$1 per honor tile discarded. Count before
+        // removal so the tile suits are still readable.
+        if self.relics.has(RelicId::NoHonorButWealth) {
+            let honors = indices
+                .iter()
+                .filter_map(|&i| self.hand.get(i))
+                .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+                .count() as i32;
+            if honors > 0 {
+                self.gold = self.gold.saturating_add(honors);
+                self.relic_activations.push(RelicId::NoHonorButWealth);
+            }
+        }
         for &i in &indices {
             self.hand.remove(i);
             bus.push(GameEvent::TileDiscarded { slot_index: i });
@@ -2442,15 +2543,21 @@ impl RunState {
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
         let target = boss::effective_hand_size(self);
         let mut restocked = false;
+        let lotus = self.relics.has(RelicId::LotusBloom);
         while self.hand.len() < target {
             let Some(t) = self.wall.draw() else { break };
+            if lotus && t.suit == Suit::Flower {
+                *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += 1;
+                self.relic_activations.push(RelicId::LotusBloom);
+            }
             self.hand.push(t);
             bus.push(GameEvent::TileDrawn(t));
             restocked = true;
         }
-        // Shanten Shove: if the refilled hand is at tenpai, draw 1 bonus tile.
+        // Shanten Shove: if the refilled hand holds at least one partial
+        // (a set one tile away from being playable), draw 1 bonus tile.
         if self.relics.has(crate::core::relic::RelicId::ShantenShove)
-            && crate::core::shanten::shanten_estimate(&self.hand) == 0
+            && crate::core::shanten::has_scoring_partial(&self.hand)
         {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
@@ -2572,7 +2679,17 @@ impl RunState {
         let was_boss = self.blind == BlindKind::Boss;
         if was_boss {
             self.ante += 1;
+            if self.relics.has(RelicId::BeggarsCup) {
+                *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
+            }
         }
+        // Heirloom: +1 mult per blind *played* (skips don't count — this
+        // path only runs when a blind was cleared).
+        if self.relics.has(RelicId::Heirloom) {
+            *self.relic_counters.entry(RelicId::Heirloom).or_insert(0) += 1;
+        }
+        // Kong Collector: per-round kong tally is consumed at round end; clear it now.
+        self.relic_counters.remove(&RelicId::KongCollector);
         self.run_number += 1;
         // `target_score` is recomputed by `apply_blind` when the next blind is picked.
         self.round_rules.clear();

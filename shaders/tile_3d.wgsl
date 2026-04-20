@@ -29,6 +29,26 @@ struct PointLights {
 
 @group(1) @binding(0) var<uniform> lights: PointLights;
 
+// ── Spotlights (group 3) ─────────────────────────────────────────────
+// Directional cone lights used for focused visual highlights (e.g. hint
+// indicators pooling green on a specific tile). Only sampled by the tile
+// pipeline — candles/table/smoke do not receive spotlight contribution.
+struct SpotLight {
+    // xyz = world-space position, w = falloff radius.
+    pos: vec4<f32>,
+    // xyz = normalized direction (light → surface), w = cos(outer half-angle).
+    dir: vec4<f32>,
+    // rgb = linear colour, a = intensity.
+    color: vec4<f32>,
+    // x = cos(inner half-angle); fully lit inside inner, smoothstep between inner and outer.
+    params: vec4<f32>,
+};
+struct SpotLights {
+    count: vec4<u32>,
+    lights: array<SpotLight, 8>,
+};
+@group(3) @binding(0) var<uniform> spot_lights: SpotLights;
+
 // ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
 struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
@@ -367,6 +387,37 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
                 sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * holo_tint;
             }
         }
+    }
+
+    // ── Spotlights ───────────────────────────────────────────────────────
+    // Same distance falloff as point lights, plus an angular mask that
+    // smoothsteps between the inner and outer cosines. Spotlights fold
+    // into `point_contrib` so downstream material composition (blocked-
+    // tile dim, hover fresnel) treats them the same as candle light.
+    let spot_count = spot_lights.count.x;
+    for (var si: u32 = 0u; si < spot_count; si = si + 1u) {
+        let s = spot_lights.lights[si];
+        let to_frag = in.world_pos - s.pos.xyz;
+        let dist = length(to_frag);
+        let radius = max(s.pos.w, 1.0);
+        let t = clamp(1.0 - dist / radius, 0.0, 1.0);
+        let atten = t * t;
+        if (atten <= 0.0) {
+            continue;
+        }
+        let to_light = -to_frag / max(dist, 0.0001);
+        let frag_dir = to_frag / max(dist, 0.0001);
+        let cos_a = dot(frag_dir, s.dir.xyz);
+        let cos_outer = s.dir.w;
+        let cos_inner = s.params.x;
+        let spot_factor = smoothstep(cos_outer, cos_inner, cos_a);
+        if (spot_factor <= 0.0) {
+            continue;
+        }
+        let nl = max(dot(n_world, to_light), 0.0);
+        let lambert = 0.35 + 0.65 * nl;
+        point_contrib = point_contrib
+            + s.color.rgb * s.color.a * atten * spot_factor * lambert;
     }
 
     // ── Enhancement fresnel albedo tint ─────────────────────────────────

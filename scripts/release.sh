@@ -10,10 +10,11 @@
 #
 # This will:
 #   1. Verify the working tree is clean and on `main`
-#   2. Update the version in Cargo.toml (and refresh Cargo.lock)
-#   3. Commit the version bump
-#   4. Create an annotated `v<version>` tag
-#   5. Push the commit and tag to `origin`, which triggers .github/workflows/release.yml
+#   2. Compile .changes/*.md fragments into CHANGELOG.md under the new version
+#   3. Update the version in Cargo.toml (and refresh Cargo.lock)
+#   4. Commit the version bump + changelog
+#   5. Create an annotated `v<version>` tag
+#   6. Push the commit and tag to `origin`, which triggers .github/workflows/release.yml
 
 set -euo pipefail
 
@@ -70,6 +71,11 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
     exit 1
 fi
 
+# Compile changelog fragments into CHANGELOG.md. This also stages the deletion
+# of the fragment files. Fails if .changes/ has no fragments — every release
+# needs at least one entry.
+python3 scripts/compile_changelog.py "$VERSION"
+
 # Bump version in the [package] section of Cargo.toml using a Python helper
 # (avoids touching dependency version strings).
 python3 - "$VERSION" <<'PY'
@@ -87,7 +93,9 @@ PY
 # Refresh Cargo.lock so the version bump is recorded
 cargo update --workspace --quiet
 
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock CHANGELOG.md
+# Stage fragment deletions (compile_changelog.py removed them from the working tree).
+git add -u .changes
 git commit -m "Release ${TAG}"
 git tag -a "${TAG}" -m "Release ${TAG}"
 

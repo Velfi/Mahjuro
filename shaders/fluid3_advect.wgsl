@@ -127,7 +127,7 @@ fn synthetic_vel(world: vec3<f32>) -> vec3<f32> {
                        fluid.grid_size.w * coarse_time * -0.4);
     let curl_coarse = curl_noise(pc) * fluid.params.w;
 
-    // Fine octave — ~4× spatial frequency, 2× time frequency, 55% amplitude.
+    // Fine octave — ~4× spatial frequency, 2× time frequency, 85% amplitude.
     // Gives in-plume wisp detail without costing another shader pass.
     let fine_space = coarse_space * 4.3;
     let fine_time = coarse_time * 2.0;
@@ -136,9 +136,9 @@ fn synthetic_vel(world: vec3<f32>) -> vec3<f32> {
                        fluid.grid_size.w * fine_time * -0.9,
                        fluid.grid_size.w * fine_time * 0.6)
            + vec3<f32>(17.3, -11.1, 5.7); // de-phase from the coarse octave
-    let curl_fine = curl_noise(pf) * (fluid.params.w * 0.55);
+    let curl_fine = curl_noise(pf) * (fluid.params.w * 0.85);
 
-    // Third octave — ~12× spatial, 3.5× time, 22% amplitude. Adds the
+    // Third octave — ~12× spatial, 3.5× time, 50% amplitude. Adds the
     // hair-thin wisp detail that reads as real turbulence rather than
     // large-blob swirl.
     let ultra_space = coarse_space * 11.7;
@@ -148,7 +148,7 @@ fn synthetic_vel(world: vec3<f32>) -> vec3<f32> {
                        fluid.grid_size.w * ultra_time * 0.8,
                        fluid.grid_size.w * ultra_time * 1.4)
            + vec3<f32>(-29.1, 53.2, -7.8);
-    let curl_ultra = curl_noise(pu) * (fluid.params.w * 0.22);
+    let curl_ultra = curl_noise(pu) * (fluid.params.w * 0.50);
 
     return drift + curl_coarse + curl_fine + curl_ultra;
 }

@@ -51,6 +51,12 @@ pub enum DebugAction {
     OpenTuning,
     OpenSfxTest,
     OpenCameraDebug,
+    /// Open the in-game shop-smoke tuning overlay — live sliders for the
+    /// shop back-wall smoke curtain's density, radius, velocity, and lift.
+    OpenSmokeDebug,
+    /// Open the volumetric tuning overlay — global dust strength (and any
+    /// future volumetric knobs).
+    OpenVolumetricDebug,
     BlowWindGust,
     /// Capture GPU pass timings averaged over the next 100 rendered frames
     /// and log the result. Only meaningful on backends that support
@@ -78,11 +84,6 @@ pub enum DebugAction {
     /// nudge its position (X/Y) or Shift+arrow to rotate it (Z/X). Press
     /// Enter to confirm and copy the result to the clipboard.
     ToggleArrangeMode,
-    /// Save the current shop scene's [`ShopPositions`] to JSON so they can be
-    /// hand-edited and reloaded without recompiling.
-    SaveShopLayout,
-    /// Save the current gameplay scene [`GameplayPositions`] to JSON.
-    SaveGameplayRelicLayout,
     /// Push the material viewer pushdown scene onto the overlay stack.
     /// Shows one preview orb per `MaterialKind` for visual inspection.
     OpenMaterialViewer,
@@ -110,126 +111,117 @@ impl DebugMenuBar {
 
         let mut mappings = Vec::new();
 
-        // ── View / Overlays ──────────────────────────────────────────────────
-        // Show FPS toggle.
+        // ── Overlays submenu ─────────────────────────────────────────────────
+        // Toggles and modal panels that live on top of the gameplay view.
+        let overlays_sub = Submenu::new("Overlays", true);
+
         let fps_item = MenuItem::new("Show FPS", true, None);
         mappings.push((fps_item.id().clone(), DebugAction::ToggleShowFps));
-        let _ = debug_menu.append(&fps_item);
+        let _ = overlays_sub.append(&fps_item);
 
-        // In-game checkbox modal that can hide tiles, candles, the blind
-        // plaque, the scoring placard, and the inventory dish independently.
-        // Lets us inspect the procedural 3D scene without the HUD in the way.
         let visibility_item = MenuItem::new("Visibility...", true, None);
         mappings.push((
             visibility_item.id().clone(),
             DebugAction::OpenDebugVisibility,
         ));
-        let _ = debug_menu.append(&visibility_item);
+        let _ = overlays_sub.append(&visibility_item);
 
-        // World-axes overlay toggle (red = +X, green = +Y, blue = +Z).
         let axes_item = MenuItem::new("World Axes Overlay", true, None);
         mappings.push((axes_item.id().clone(), DebugAction::ToggleWorldAxes));
-        let _ = debug_menu.append(&axes_item);
+        let _ = overlays_sub.append(&axes_item);
 
-        // Cascade tuning overlay.
-        let tuning_item = MenuItem::new("Cascade Tuning...", true, None);
+        let _ = debug_menu.append(&overlays_sub);
+
+        // ── Tuning submenu ───────────────────────────────────────────────────
+        // Live-editable parameter panels for FX / camera / materials.
+        let tuning_sub = Submenu::new("Tuning", true);
+
+        let tuning_item = MenuItem::new("Cascade...", true, None);
         mappings.push((tuning_item.id().clone(), DebugAction::OpenTuning));
-        let _ = debug_menu.append(&tuning_item);
+        let _ = tuning_sub.append(&tuning_item);
 
-        // Camera debug overlay.
-        let camera_item = MenuItem::new("Camera Debug...", true, None);
+        let camera_item = MenuItem::new("Camera...", true, None);
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
-        let _ = debug_menu.append(&camera_item);
+        let _ = tuning_sub.append(&camera_item);
 
-        // ── Scene / FX ───────────────────────────────────────────────────────
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+        let smoke_item = MenuItem::new("Shop Smoke...", true, None);
+        mappings.push((smoke_item.id().clone(), DebugAction::OpenSmokeDebug));
+        let _ = tuning_sub.append(&smoke_item);
 
-        // Sound effects test overlay.
+        let vol_item = MenuItem::new("Volumetric...", true, None);
+        mappings.push((vol_item.id().clone(), DebugAction::OpenVolumetricDebug));
+        let _ = tuning_sub.append(&vol_item);
+
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
-        let _ = debug_menu.append(&sfx_item);
+        let _ = tuning_sub.append(&sfx_item);
 
-        // Spawn a strong wind gust at the candle row so the flame's
-        // wind reaction is observable on demand. Mirrors pressing `B`
-        // in the gameplay scene.
-        let wind_item = MenuItem::new("Blow Wind Gust", true, None);
-        mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
-        let _ = debug_menu.append(&wind_item);
+        let _ = debug_menu.append(&tuning_sub);
 
-        // ── Performance / Picking ─────────────────────────────────────────────
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+        // ── Tools submenu ────────────────────────────────────────────────────
+        // One-shot dev tools: profiling, picking, layout capture.
+        let tools_sub = Submenu::new("Tools", true);
 
-        // Capture GPU pass timings over the next 100 frames. Result is
-        // logged via `log::info!`.
         let profile_item = MenuItem::new("Profile GPU (100 frames)", true, None);
         mappings.push((profile_item.id().clone(), DebugAction::ProfileGpu));
-        let _ = debug_menu.append(&profile_item);
+        let _ = tools_sub.append(&profile_item);
 
-        // Arm a one-shot debug picker — the next click is hit-tested
-        // against every known scene object and its name logged.
         let hit_test_item = MenuItem::new("Object Hit Test", true, None);
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
-        let _ = debug_menu.append(&hit_test_item);
+        let _ = tools_sub.append(&hit_test_item);
 
-        // Arrange mode: click an object to select it, then nudge with arrow
-        // keys, confirm with Enter to copy position/rotation to clipboard.
         let arrange_item = MenuItem::new("Arrange Mode", true, None);
         mappings.push((arrange_item.id().clone(), DebugAction::ToggleArrangeMode));
-        let _ = debug_menu.append(&arrange_item);
+        let _ = tools_sub.append(&arrange_item);
 
-        // ── Layout Save ───────────────────────────────────────────────────────
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+        let _ = debug_menu.append(&tools_sub);
 
-        let save_shop_item = MenuItem::new("Save Shop Layout", true, None);
-        mappings.push((save_shop_item.id().clone(), DebugAction::SaveShopLayout));
-        let _ = debug_menu.append(&save_shop_item);
+        // ── Scene Jumps submenu ──────────────────────────────────────────────
+        // Jump to scenes or push test overlays without playing through.
+        let jumps_sub = Submenu::new("Scene Jumps", true);
 
-        let save_relic_item = MenuItem::new("Save Gameplay Layout", true, None);
-        mappings.push((save_relic_item.id().clone(), DebugAction::SaveGameplayRelicLayout));
-        let _ = debug_menu.append(&save_relic_item);
-
-        // ── Scene Jumps / Test UI ─────────────────────────────────────────────
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
-
-        // Open the final-ante victory scene directly.
         let victory_item = MenuItem::new("Show Victory Screen", true, None);
         mappings.push((victory_item.id().clone(), DebugAction::ShowVictoryScreen));
-        let _ = debug_menu.append(&victory_item);
+        let _ = jumps_sub.append(&victory_item);
 
         let defeat_item = MenuItem::new("Show Defeat Screen", true, None);
         mappings.push((defeat_item.id().clone(), DebugAction::ShowDefeatScreen));
-        let _ = debug_menu.append(&defeat_item);
+        let _ = jumps_sub.append(&defeat_item);
 
-        // Spawn a blank test modal to verify overlay input blocking.
-        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
-        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
-        let _ = debug_menu.append(&test_overlay_item);
-
-        // Material viewer: grid of preview orbs, one per MaterialKind.
         let material_viewer_item = MenuItem::new("Material Viewer...", true, None);
         mappings.push((
             material_viewer_item.id().clone(),
             DebugAction::OpenMaterialViewer,
         ));
-        let _ = debug_menu.append(&material_viewer_item);
+        let _ = jumps_sub.append(&material_viewer_item);
 
-        // ── Gameplay Cheats ───────────────────────────────────────────────────
-        let _ = debug_menu.append(&PredefinedMenuItem::separator());
+        let test_overlay_item = MenuItem::new("Test Overlay", true, None);
+        mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
+        let _ = jumps_sub.append(&test_overlay_item);
 
-        // Free shop reroll (bypasses gold cost).
+        let _ = debug_menu.append(&jumps_sub);
+
+        // ── Cheats submenu ───────────────────────────────────────────────────
+        // Gameplay-affecting shortcuts: free items, set resources, force state.
+        let cheats_sub = Submenu::new("Cheats", true);
+
         let reroll_item = MenuItem::new("Reroll Shop", true, None);
         mappings.push((reroll_item.id().clone(), DebugAction::RerollShop));
-        let _ = debug_menu.append(&reroll_item);
+        let _ = cheats_sub.append(&reroll_item);
 
-        // Force-open a tile pack celebration (free).
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
-        let _ = debug_menu.append(&open_pack_item);
+        let _ = cheats_sub.append(&open_pack_item);
 
-        // Fire a demo popup cascade in the gameplay scene.
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));
-        let _ = debug_menu.append(&demo_cascade_item);
+        let _ = cheats_sub.append(&demo_cascade_item);
+
+        let wind_item = MenuItem::new("Blow Wind Gust", true, None);
+        mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
+        let _ = cheats_sub.append(&wind_item);
+
+        let _ = cheats_sub.append(&PredefinedMenuItem::separator());
 
         // Set Level submenu (levels 1-7).
         let level_sub = Submenu::new("Set Player Level", true);
@@ -238,7 +230,7 @@ impl DebugMenuBar {
             mappings.push((item.id().clone(), DebugAction::SetLevel(lvl)));
             let _ = level_sub.append(&item);
         }
-        let _ = debug_menu.append(&level_sub);
+        let _ = cheats_sub.append(&level_sub);
 
         // Set Gold submenu.
         let gold_sub = Submenu::new("Set Gold", true);
@@ -247,7 +239,7 @@ impl DebugMenuBar {
             mappings.push((item.id().clone(), DebugAction::SetGold(amount)));
             let _ = gold_sub.append(&item);
         }
-        let _ = debug_menu.append(&gold_sub);
+        let _ = cheats_sub.append(&gold_sub);
 
         // Relic Inventory submenu.
         let relic_sub = Submenu::new("Relic Inventory", true);
@@ -262,7 +254,7 @@ impl DebugMenuBar {
             let _ = add_sub.append(&item);
         }
         let _ = relic_sub.append(&add_sub);
-        let _ = debug_menu.append(&relic_sub);
+        let _ = cheats_sub.append(&relic_sub);
 
         // Consumable Inventory submenu — talismans + zodiacs share slots, so
         // expose both under one parent. Capacity is auto-expanded when full,
@@ -287,7 +279,7 @@ impl DebugMenuBar {
             let _ = add_zodiac_sub.append(&item);
         }
         let _ = consumable_sub.append(&add_zodiac_sub);
-        let _ = debug_menu.append(&consumable_sub);
+        let _ = cheats_sub.append(&consumable_sub);
 
         // Boss override submenu — pick any boss (regular or final) and the
         // current ante's upcoming_boss is replaced + re-resolved. Useful for
@@ -299,7 +291,7 @@ impl DebugMenuBar {
             mappings.push((item.id().clone(), DebugAction::SetBoss(def.kind)));
             let _ = boss_sub.append(&item);
         }
-        let _ = debug_menu.append(&boss_sub);
+        let _ = cheats_sub.append(&boss_sub);
 
         // Set Dora submenu — pick any non-bonus tile face (number suits,
         // winds, dragons) and the current dora indicator is replaced.
@@ -321,7 +313,9 @@ impl DebugMenuBar {
             }
             let _ = dora_sub.append(&suit_sub);
         }
-        let _ = debug_menu.append(&dora_sub);
+        let _ = cheats_sub.append(&dora_sub);
+
+        let _ = debug_menu.append(&cheats_sub);
 
         let _ = menu.append(&debug_menu);
 

@@ -337,11 +337,11 @@ impl SceneBehavior for MeldGuideScene {
 // ── Page content ──────────────────────────────────────────────────────────
 
 /// A labelled group of tiles forming one meld (or tile-category cluster).
-struct TileGroup {
-    label: &'static str,
-    tiles: Vec<Tile>,
+pub(crate) struct TileGroup {
+    pub label: &'static str,
+    pub tiles: Vec<Tile>,
     /// Accent color for the underline bar.
-    accent: [f32; 4],
+    pub accent: [f32; 4],
 }
 
 /// Meld label positioned below a tile group in screen space.
@@ -474,7 +474,7 @@ fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
 }
 
 /// Build tile groups for a yaku example hand.
-fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
+pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
     let seq_color: [f32; 4] = [0.35, 0.70, 0.85, 0.9];
     let trip_color: [f32; 4] = color::GOLD;
     let pair_color: [f32; 4] = color::CHAMPAGNE;
@@ -947,6 +947,48 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         }
         YakuKind::ChickenHand => {
             "Valid hand with no yaku \u{2014} scores base chips \u{00d7} 1 mult"
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::hand::validate_selection;
+    use crate::core::yaku::detect_yaku_with_wind;
+
+    /// Every `yaku_page()` canonical hand must actually score as its named
+    /// yaku in the real detector. The yaku journal draws these hands as
+    /// teaching examples — if one drifts out of sync with the scorer we'd
+    /// be teaching a lie, so the test locks the data to the implementation.
+    ///
+    /// Chicken Hand is skipped: by definition its hand triggers *no* yaku,
+    /// so the detector returns an empty list rather than `ChickenHand`.
+    #[test]
+    fn every_yaku_page_hand_scores_as_its_yaku() {
+        for &yk in YakuKind::all() {
+            if yk == YakuKind::ChickenHand {
+                continue;
+            }
+            let (_desc, groups) = yaku_page(yk);
+            let tiles: Vec<_> = groups.iter().flat_map(|g| g.tiles.iter().copied()).collect();
+            let sets = validate_selection(&tiles).unwrap_or_else(|| {
+                panic!(
+                    "{:?}: yaku_page hand failed to decompose into sets: {:?}",
+                    yk, tiles
+                )
+            });
+            // Yakuhai needs a round wind hint for wind triplets to count.
+            // The Yakuhai example in yaku_page uses a dragon triplet, which
+            // counts regardless, so round_wind=None is still correct.
+            let detected = detect_yaku_with_wind(&tiles, &sets, None, None);
+            assert!(
+                detected.contains(&yk),
+                "{:?}: canonical hand did not score as {:?}. detected={:?}",
+                yk,
+                yk,
+                detected,
+            );
         }
     }
 }

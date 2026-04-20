@@ -56,42 +56,44 @@ FINAL_SIZE = (256, 384)  # tall portrait, matches a booster-pack aspect ratio
 # ---------------------------------------------------------------------------
 
 STYLE_PREFIX = (
-    "A booster-pack cover for a mahjong roguelite video game. TALL "
-    "VERTICAL PORTRAIT, 2:3 aspect. 'FLAT ICON SIGIL' style: one bold "
+    "A booster-pack cover for a mahjong roguelite video game. Tall "
+    "vertical portrait, 2:3 aspect. 'Flat Icon Sigil' style: one bold "
     "centered sigil on a flat pack-color background, wrapped in a "
     "shared frame. Flat vector look, like a modern trading-card pack "
     "icon (think MTG mana symbols, Slay the Spire relics, Balatro "
-    "booster packs). Orthographic front-on view, no perspective.\n\n"
-    "SHARED FRAME (identical across every pack — this is the 'brand'):\n"
+    "booster packs). Orthographic front-on view, no perspective. The "
+    "image IS the pack — the whole frame is the pack surface, no "
+    "tabletop, mockup, or drop shadow beneath it.\n\n"
+    "Shared frame (identical across every pack — this is the 'brand'):\n"
     "- The full image is a rounded-corner rectangle, 2:3 portrait, "
     "filling the frame edge-to-edge with the pack-specific background "
     "color.\n"
     "- A thin gold (#d9b35a) hairline border sits just inside the "
-    "rounded edge, 2–3 px thick, evenly offset from the outer edge.\n"
+    "rounded edge, a couple of pixels thick, evenly offset from the "
+    "outer edge.\n"
     "- A small V-shaped tear notch is cut into the top edge, centered "
     "horizontally — a subtle visual cue that this is a pack to open.\n"
     "- A short gold (#d9b35a) hairline bar spans the bottom quarter "
     "of the frame, dividing the sigil area above from a blank title "
-    "bar region below. The title bar region is left EMPTY (no text, "
-    "no glyphs, no script — the engine overlays a real title later).\n"
+    "bar region below. The title-bar region is left as pure background "
+    "color — the engine overlays a real title later, so the image "
+    "itself shows no writing there.\n"
     "- The sigil sits in the upper three-quarters of the frame, "
     "centered horizontally, comfortably inset from the gold border.\n\n"
-    "HARD STYLE RULES — non-negotiable:\n"
-    "- Pure flat color fills. Every region is ONE flat RGB value with "
-    "crisp hard edges between regions.\n"
-    "- NO gradients. NO shading. NO highlights. NO shadows. NO ambient "
-    "occlusion. NO volumetric lighting. NO glow. NO bloom.\n"
-    "- NO textures of any kind: no foil crinkle, no paper, no grain, "
-    "no noise, no brushstrokes, no creases.\n"
-    "- NO holographic shimmer, NO iridescence, NO reflections.\n"
-    "- NO text, NO letters, NO numerals, NO logos, NO runes, NO script "
-    "of any kind anywhere in the image.\n"
-    "- The sigil must be silhouette-first — identifiable from its "
-    "shape alone at 32×32. Bold, simple, iconic. Not a scene, not a "
-    "painting, not an illustration with depth. One symbol.\n"
-    "- Small unifying flourish allowed: 2–3 tiny flat gold (#d9b35a) "
+    "Hard style rules — non-negotiable:\n"
+    "- Every region is a single flat RGB value with crisp hard edges "
+    "between regions. Solid color fills only — surfaces must look like "
+    "vector cutouts, like construction paper, not like anything painted, "
+    "rendered, or photographed.\n"
+    "- The sigil is silhouette-first — identifiable from its shape "
+    "alone at 32×32. Bold, simple, iconic. One symbol, not a scene or "
+    "a detailed illustration.\n"
+    "- Purely pictorial decoration only. No written glyphs, numerals, "
+    "or logos of any language anywhere in the image; any shape that "
+    "resembles a letter or number must be replaced with a plain "
+    "geometric mark.\n"
+    "- Small unifying flourish allowed: a few tiny flat gold (#d9b35a) "
     "dots drifting in negative space near the sigil. That's it.\n"
-    "- No watermarks, no mockup, no surface beneath the pack.\n"
 )
 
 # ---------------------------------------------------------------------------
@@ -106,83 +108,82 @@ PACKS = [
     (
         "honors",
         "Honors Pack",
-        "SIGIL: a single bold 8-pointed compass rose, flat ivory "
-        "(#f2ead6), centered. Four long cardinal points (N/E/S/W) and "
-        "four shorter diagonal points, all crisp straight triangles "
-        "meeting at a small ivory circle at the center. The compass "
-        "occupies about 55% of the sigil area. Nothing else.",
+        "Sigil: a single bold 8-pointed compass rose, flat ivory "
+        "(#f2ead6), centered. Four long cardinal points and four "
+        "shorter diagonal points, all crisp straight triangles meeting "
+        "at a small ivory circle at the center. The compass is large "
+        "and centered, filling most of the sigil area.",
         "Pack background: deep navy #0e1838, one flat fill edge-to-edge.",
     ),
     (
         "polychrome",
         "Polychrome Pack",
-        "SIGIL: a single upright rounded-rectangle mahjong-tile "
-        "silhouette, flat white (#f8f8f8), centered, occupying about "
-        "45% of the sigil-area height. From behind the tile, 8 flat "
-        "triangular shards radiate outward in a symmetric starburst, "
-        "each a different pure flat color, clockwise from top: red "
-        "(#e23b3b), orange (#e88a2a), yellow (#e8d23a), green "
-        "(#3aa84e), teal (#3ae8c4), blue (#3a6ee8), violet (#8a3ae8), "
-        "magenta (#e83ac4). Hard triangular edges, no blur.",
+        "Sigil: a single upright rounded-rectangle mahjong-tile "
+        "silhouette, flat white (#f8f8f8), centered, roughly half the "
+        "sigil-area height. From behind the tile, a symmetric starburst "
+        "of flat triangular shards radiates outward in rainbow colors "
+        "— warm hues on one side transitioning through yellow, green, "
+        "teal, blue, and violet around to magenta — each shard a single "
+        "saturated flat fill with hard triangular edges.",
         "Pack background: pure black #000000, one flat fill edge-to-edge.",
     ),
     (
         "terminals",
         "Terminals Pack",
-        "SIGIL: a simple symmetric gateway silhouette in flat amber "
+        "Sigil: a simple symmetric gateway silhouette in flat amber "
         "(#e8a84a). Two thick vertical trapezoidal pillars (wider at "
         "base) flank a narrow dark gap; a flat horizontal amber lintel "
-        "bridges the tops. The overall shape reads as a Π / torii / "
-        "gate glyph. Strong bilateral symmetry. One color (amber) "
-        "against the background. Nothing else.",
+        "bridges the tops. The overall shape reads as a torii gate. "
+        "Strong bilateral symmetry. One amber color against the "
+        "background, nothing else.",
         "Pack background: warm obsidian #1a1412, one flat fill "
         "edge-to-edge.",
     ),
     (
         "flowers",
         "Flowers Pack",
-        "SIGIL: a single bold stylized 5-petal plum blossom, flat "
+        "Sigil: a single bold stylized five-petal plum blossom, flat "
         "pink (#f2a6c0), centered, with a small flat gold (#e8c46a) "
         "round center. Five rounded petals arranged symmetrically "
         "around the center, each petal a simple convex flat shape. "
-        "The blossom occupies about 55% of the sigil area. One "
-        "blossom only — no grid, no scene, no scatter.",
+        "The blossom is large and centered, filling most of the sigil "
+        "area — a single blossom, not a spray or pattern.",
         "Pack background: plum-black #1c0f1e, one flat fill edge-to-edge.",
     ),
     (
         "bamboo_grove",
         "Bamboo Grove",
-        "SIGIL: a single upright bamboo stalk silhouette, flat jade-"
-        "green (#3aa84e), centered, running most of the sigil area's "
-        "height. The stalk is segmented by 4–5 thin darker green "
-        "(#1a6a2e) horizontal bands at even intervals. Two small flat "
-        "jade-green pointed leaf shapes angle outward from near the "
-        "top. One stalk only — no grove, no scene.",
+        "Sigil: a single upright bamboo stalk silhouette, flat "
+        "jade-green (#3aa84e), centered, running the full height of "
+        "the sigil area. The stalk is segmented by a handful of thin "
+        "darker green (#1a6a2e) horizontal bands at even intervals. A "
+        "pair of small flat jade-green pointed leaf shapes angle "
+        "outward from near the top. A single stalk, not a grove.",
         "Pack background: deep forest-black #0a1a0e, one flat fill "
         "edge-to-edge.",
     ),
     (
         "coin_cache",
         "Coin Cache",
-        "SIGIL: a single bold round Chinese cash-coin silhouette, "
-        "flat gold (#e8c46a), centered, occupying about 55% of the "
+        "Sigil: a single bold round Chinese cash-coin silhouette, "
+        "flat gold (#e8c46a), centered, large and filling most of the "
         "sigil area. A square hole is punched out of the center, "
-        "revealing the burgundy-black pack background through it. "
-        "The coin's outer edge is a clean circle; the inner square "
-        "is axis-aligned. One coin only — no cascade, no chest.",
+        "revealing the burgundy-black pack background through it. The "
+        "coin's outer edge is a clean circle; the inner square is "
+        "axis-aligned. A single coin, not a pile.",
         "Pack background: burgundy-black #1a0e12, one flat fill "
         "edge-to-edge.",
     ),
     (
         "scroll_library",
         "Scroll Library",
-        "SIGIL: a single partly-unrolled scroll silhouette, flat "
+        "Sigil: a single partly-unrolled scroll silhouette, flat "
         "cream (#f2ead6), centered, horizontally oriented. Two flat "
         "cream cylindrical rolls sit at the left and right ends; "
         "between them a flat cream rectangular sheet spans across, "
         "slightly taller than the rolls. Thin amber (#e8b86a) end-caps "
-        "on each roll. The sheet is blank — NO text, NO script, NO "
-        "glyphs. One scroll only.",
+        "on each roll. The sheet surface is a single uniform flat "
+        "cream fill with nothing on it. A single scroll, not a stack.",
         "Pack background: sepia-black #1a140a, one flat fill "
         "edge-to-edge.",
     ),
@@ -197,11 +198,7 @@ def build_prompt(sigil: str, bg_color: str) -> str:
     return (
         f"{STYLE_PREFIX}\n"
         f"{bg_color}\n\n"
-        f"{sigil}\n\n"
-        "Reminder: shared frame (rounded 2:3 rect, thin gold hairline "
-        "border, top center tear-notch, bottom gold hairline bar with "
-        "empty title region below) must be present. Flat fills only. "
-        "No gradients, no shading, no textures, no text, no script."
+        f"{sigil}"
     )
 
 
