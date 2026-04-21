@@ -269,7 +269,7 @@ pub fn cmp_sort_order(a: &Tile, b: &Tile) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod sort_order_tests {
-    use super::{cmp_sort_order, Suit, Tile};
+    use super::{Suit, Tile, cmp_sort_order};
 
     #[test]
     fn cmp_sort_order_ranks_ascending_within_suit() {

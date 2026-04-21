@@ -411,7 +411,10 @@ impl SceneBehavior for TileSelectScene {
         // Build tile preview placements for the showcase pipeline.
         let preview_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> = {
             let tiles: Vec<Tile> = if self.tutorial_mode {
-                hand_tiles.into_iter().filter(|t| !matches!(t.suit, Suit::Flower)).collect()
+                hand_tiles
+                    .into_iter()
+                    .filter(|t| !matches!(t.suit, Suit::Flower))
+                    .collect()
             } else {
                 hand_tiles
             };

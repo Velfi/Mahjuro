@@ -74,19 +74,19 @@ pub fn build_plaque_mesh() -> MeshCpu {
         &mut vertices,
         &mut indices,
         // Top bevel: connects front-face top edge to +Y side face.
-        [-0.5,  0.5 - BEVEL, HALF_Z],
-        [ 0.5,  0.5 - BEVEL, HALF_Z],
-        [ 0.5,  0.5,         HALF_Z - BEVEL],
-        [-0.5,  0.5,         HALF_Z - BEVEL],
+        [-0.5, 0.5 - BEVEL, HALF_Z],
+        [0.5, 0.5 - BEVEL, HALF_Z],
+        [0.5, 0.5, HALF_Z - BEVEL],
+        [-0.5, 0.5, HALF_Z - BEVEL],
         [0.0, s, s],
     );
     push_quad(
         &mut vertices,
         &mut indices,
         // Bottom bevel: connects front-face bottom edge to −Y side face.
-        [-0.5, -0.5,         HALF_Z - BEVEL],
-        [ 0.5, -0.5,         HALF_Z - BEVEL],
-        [ 0.5, -0.5 + BEVEL, HALF_Z],
+        [-0.5, -0.5, HALF_Z - BEVEL],
+        [0.5, -0.5, HALF_Z - BEVEL],
+        [0.5, -0.5 + BEVEL, HALF_Z],
         [-0.5, -0.5 + BEVEL, HALF_Z],
         [0.0, -s, s],
     );
@@ -94,10 +94,10 @@ pub fn build_plaque_mesh() -> MeshCpu {
         &mut vertices,
         &mut indices,
         // Left bevel: connects front-face left edge to −X side face.
-        [-0.5,         -0.5, HALF_Z - BEVEL],
+        [-0.5, -0.5, HALF_Z - BEVEL],
         [-0.5 + BEVEL, -0.5, HALF_Z],
-        [-0.5 + BEVEL,  0.5, HALF_Z],
-        [-0.5,          0.5, HALF_Z - BEVEL],
+        [-0.5 + BEVEL, 0.5, HALF_Z],
+        [-0.5, 0.5, HALF_Z - BEVEL],
         [-s, 0.0, s],
     );
     push_quad(
@@ -105,9 +105,9 @@ pub fn build_plaque_mesh() -> MeshCpu {
         &mut indices,
         // Right bevel: connects front-face right edge to +X side face.
         [0.5 - BEVEL, -0.5, HALF_Z],
-        [0.5,         -0.5, HALF_Z - BEVEL],
-        [0.5,          0.5, HALF_Z - BEVEL],
-        [0.5 - BEVEL,  0.5, HALF_Z],
+        [0.5, -0.5, HALF_Z - BEVEL],
+        [0.5, 0.5, HALF_Z - BEVEL],
+        [0.5 - BEVEL, 0.5, HALF_Z],
         [s, 0.0, s],
     );
 

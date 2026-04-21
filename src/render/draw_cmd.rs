@@ -146,7 +146,6 @@ pub struct BugOccluder {
     pub strength: f32,
 }
 
-
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
 //
 // Phase 1 of the in-game UI redesign: physical objects rendered through the
@@ -824,10 +823,7 @@ impl UiFrame {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
     }
     #[allow(dead_code)]
-    pub fn gradient_quad(
-        &mut self,
-        inst: crate::render::wgpu_renderer::GradientQuadInstance,
-    ) {
+    pub fn gradient_quad(&mut self, inst: crate::render::wgpu_renderer::GradientQuadInstance) {
         self.cmds.push(DrawCmd::GradientQuad(inst));
     }
     pub fn gradient_quads<
@@ -836,7 +832,8 @@ impl UiFrame {
         &mut self,
         iter: I,
     ) {
-        self.cmds.extend(iter.into_iter().map(DrawCmd::GradientQuad));
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::GradientQuad));
     }
     pub fn flames<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Flame));

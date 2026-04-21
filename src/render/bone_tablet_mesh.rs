@@ -268,7 +268,11 @@ fn emit_cap(
     up: bool,
 ) {
     let ring_len = ring.len() as u32;
-    let normal = if up { [0.0, 1.0, 0.0] } else { [0.0, -1.0, 0.0] };
+    let normal = if up {
+        [0.0, 1.0, 0.0]
+    } else {
+        [0.0, -1.0, 0.0]
+    };
 
     // UVs on the top cap map the rounded-rectangle rim into [0,1]²,
     // with (+u = +X, +v = +Z). Bottom cap UVs are zeroed (never used).
@@ -283,11 +287,7 @@ fn emit_cap(
     for sample in ring {
         let x = sample.x * layer.scale;
         let z = sample.z * layer.scale;
-        let uv = if up {
-            [x + 0.5, z + 0.5]
-        } else {
-            [0.0, 0.0]
-        };
+        let uv = if up { [x + 0.5, z + 0.5] } else { [0.0, 0.0] };
         vertices.push(Vertex3dTex {
             position: [x, layer.y, z],
             normal,

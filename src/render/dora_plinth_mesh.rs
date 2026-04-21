@@ -35,27 +35,36 @@ pub fn build_dora_plinth_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.50, 0.50, // x
-        -0.50, -0.40, // y
-        -0.40, 0.40, // z
+        -0.50,
+        0.50, // x
+        -0.50,
+        -0.40, // y
+        -0.40,
+        0.40, // z
     );
     // Upper plinth step — slightly inset, taller, gives a tiered silhouette
     // so the base reads as masonry rather than a single slab.
     push_box(
         &mut vertices,
         &mut indices,
-        -0.42, 0.42,
-        -0.40, -0.30,
-        -0.34, 0.34,
+        -0.42,
+        0.42,
+        -0.40,
+        -0.30,
+        -0.34,
+        0.34,
     );
 
     // ── 2. Central pillar — slim column rising to the platform height.
     push_box(
         &mut vertices,
         &mut indices,
-        -0.14, 0.14,
-        -0.30, 0.18,
-        -0.14, 0.14,
+        -0.14,
+        0.14,
+        -0.30,
+        0.18,
+        -0.14,
+        0.14,
     );
 
     // ── 3. Inset rim collar — slightly wider than the pillar, just below
@@ -64,9 +73,12 @@ pub fn build_dora_plinth_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.20, 0.20,
-        0.18, 0.24,
-        -0.20, 0.20,
+        -0.20,
+        0.20,
+        0.18,
+        0.24,
+        -0.20,
+        0.20,
     );
 
     // ── 4. Offering platform — wide thin slab on top. Sized to comfortably
@@ -76,9 +88,12 @@ pub fn build_dora_plinth_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.46, 0.46,
-        0.24, 0.32,
-        -0.30, 0.30,
+        -0.46,
+        0.46,
+        0.24,
+        0.32,
+        -0.30,
+        0.30,
     );
     // Platform lip — a thin raised rim around the perimeter so the tile
     // visually sits *in* the platform, not just on top of it. Built as
@@ -90,33 +105,45 @@ pub fn build_dora_plinth_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.46, 0.46,
-        lip_y0, lip_y1,
-        -0.30, -0.26,
+        -0.46,
+        0.46,
+        lip_y0,
+        lip_y1,
+        -0.30,
+        -0.26,
     );
     // Back lip (+Z side)
     push_box(
         &mut vertices,
         &mut indices,
-        -0.46, 0.46,
-        lip_y0, lip_y1,
-        0.26, 0.30,
+        -0.46,
+        0.46,
+        lip_y0,
+        lip_y1,
+        0.26,
+        0.30,
     );
     // Left lip (-X side)
     push_box(
         &mut vertices,
         &mut indices,
-        -0.46, -0.42,
-        lip_y0, lip_y1,
-        -0.26, 0.26,
+        -0.46,
+        -0.42,
+        lip_y0,
+        lip_y1,
+        -0.26,
+        0.26,
     );
     // Right lip (+X side)
     push_box(
         &mut vertices,
         &mut indices,
-        0.42, 0.46,
-        lip_y0, lip_y1,
-        -0.26, 0.26,
+        0.42,
+        0.46,
+        lip_y0,
+        lip_y1,
+        -0.26,
+        0.26,
     );
 
     MeshCpu {

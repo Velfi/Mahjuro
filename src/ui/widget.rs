@@ -85,20 +85,32 @@ pub fn push_inset_border(
 fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
     use color::*;
     let [x, y, w, h] = rect;
-    let o = border_t;       // offset: bevel sits just inside the border
-    let bw = 1.0_f32;       // bevel strip width (1 px looks crisp at all scales)
-    let hi = alpha(TWILIGHT, 0.55);   // top-left highlight — lighter indigo
-    let sh = alpha(OBSIDIAN, 0.70);   // bottom-right shadow — near-black
+    let o = border_t; // offset: bevel sits just inside the border
+    let bw = 1.0_f32; // bevel strip width (1 px looks crisp at all scales)
+    let hi = alpha(TWILIGHT, 0.55); // top-left highlight — lighter indigo
+    let sh = alpha(OBSIDIAN, 0.70); // bottom-right shadow — near-black
 
     // Highlight: top inner edge
-    out.push(GpuInstance { rect: [x + o, y + o, w - 2.0 * o, bw], color: hi });
+    out.push(GpuInstance {
+        rect: [x + o, y + o, w - 2.0 * o, bw],
+        color: hi,
+    });
     // Highlight: left inner edge (skip the top-left corner already covered)
-    out.push(GpuInstance { rect: [x + o, y + o + bw, bw, h - 2.0 * o - bw], color: hi });
+    out.push(GpuInstance {
+        rect: [x + o, y + o + bw, bw, h - 2.0 * o - bw],
+        color: hi,
+    });
 
     // Shadow: bottom inner edge
-    out.push(GpuInstance { rect: [x + o, y + h - o - bw, w - 2.0 * o, bw], color: sh });
+    out.push(GpuInstance {
+        rect: [x + o, y + h - o - bw, w - 2.0 * o, bw],
+        color: sh,
+    });
     // Shadow: right inner edge (skip the bottom-right corner)
-    out.push(GpuInstance { rect: [x + w - o - bw, y + o, bw, h - 2.0 * o - bw], color: sh });
+    out.push(GpuInstance {
+        rect: [x + w - o - bw, y + o, bw, h - 2.0 * o - bw],
+        color: sh,
+    });
 }
 
 /// Push a button: background + border + centered text + hit-test rect.

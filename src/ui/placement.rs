@@ -190,12 +190,7 @@ impl ArrangePreview {
     /// If `leaf` is the preview's target — either directly, or as a descendant
     /// of a selected group in `hierarchy` — return a copy of `base` with the
     /// staged deltas folded in. Otherwise return `base` unchanged.
-    pub fn applied_to(
-        &self,
-        hierarchy: &'static [Node],
-        leaf: &str,
-        base: Placement,
-    ) -> Placement {
+    pub fn applied_to(&self, hierarchy: &'static [Node], leaf: &str, base: Placement) -> Placement {
         let affected = expand_name(hierarchy, &self.name);
         if !affected.iter().any(|n| *n == leaf) {
             return base;
@@ -340,10 +335,7 @@ pub fn apply_arrange<T: ArrangeTarget + ?Sized>(
 /// Reset the placements under `name` (leaf or group) to the values from a
 /// freshly-constructed `T::default()`. Returns `true` if at least one
 /// placement was updated.
-pub fn reset_arrange<T: ArrangeTarget + Default + ?Sized>(
-    target: &mut T,
-    name: &str,
-) -> bool
+pub fn reset_arrange<T: ArrangeTarget + Default + ?Sized>(target: &mut T, name: &str) -> bool
 where
     T: Sized,
 {

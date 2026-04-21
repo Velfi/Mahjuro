@@ -104,7 +104,11 @@ pub fn build_cabinet_mesh() -> MeshCpu {
         let u_right = (i + 1) as f32 / 6.0;
 
         for &(z0, z1, is_groove) in &z_segments {
-            let r = if is_groove { groove_vertex_radius } else { vertex_radius };
+            let r = if is_groove {
+                groove_vertex_radius
+            } else {
+                vertex_radius
+            };
             let v_left = [theta_left.cos() * r, theta_left.sin() * r];
             let v_right = [theta_right.cos() * r, theta_right.sin() * r];
             let base_idx = vertices.len();
@@ -132,8 +136,8 @@ pub fn build_cabinet_mesh() -> MeshCpu {
                 // upright on the front face.
                 let v_top = 1.0 - (z1 - body_z0) / body_h;
                 let v_bot = 1.0 - (z0 - body_z0) / body_h;
-                vertices[base_idx].uv = [u_left, v_bot];      // bottom-right (face local) → texture left
-                vertices[base_idx + 1].uv = [u_left, v_top];  // top-right (face local) → texture left
+                vertices[base_idx].uv = [u_left, v_bot]; // bottom-right (face local) → texture left
+                vertices[base_idx + 1].uv = [u_left, v_top]; // top-right (face local) → texture left
                 vertices[base_idx + 2].uv = [u_right, v_top]; // top-left (face local) → texture right
                 vertices[base_idx + 3].uv = [u_right, v_bot]; // bottom-left (face local) → texture right
             }
@@ -148,10 +152,22 @@ pub fn build_cabinet_mesh() -> MeshCpu {
                 continue;
             }
             // Top of groove: face up, connects groove face to band above.
-            let v_left_in = [theta_left.cos() * groove_vertex_radius, theta_left.sin() * groove_vertex_radius];
-            let v_right_in = [theta_right.cos() * groove_vertex_radius, theta_right.sin() * groove_vertex_radius];
-            let v_left_out = [theta_left.cos() * vertex_radius, theta_left.sin() * vertex_radius];
-            let v_right_out = [theta_right.cos() * vertex_radius, theta_right.sin() * vertex_radius];
+            let v_left_in = [
+                theta_left.cos() * groove_vertex_radius,
+                theta_left.sin() * groove_vertex_radius,
+            ];
+            let v_right_in = [
+                theta_right.cos() * groove_vertex_radius,
+                theta_right.sin() * groove_vertex_radius,
+            ];
+            let v_left_out = [
+                theta_left.cos() * vertex_radius,
+                theta_left.sin() * vertex_radius,
+            ];
+            let v_right_out = [
+                theta_right.cos() * vertex_radius,
+                theta_right.sin() * vertex_radius,
+            ];
             push_quad(
                 &mut vertices,
                 &mut indices,
@@ -334,14 +350,15 @@ fn push_rotated_box(
 
     // Outward-face normals in world frame, computed by rotating local
     // axis directions.
-    let n_outx = [cos_t, sin_t, 0.0];          // local +X (outward)
-    let n_inx = [-cos_t, -sin_t, 0.0];         // local -X (inward)
-    let n_outy = [-sin_t, cos_t, 0.0];         // local +Y (tangent +)
-    let n_iny = [sin_t, -cos_t, 0.0];          // local -Y (tangent -)
+    let n_outx = [cos_t, sin_t, 0.0]; // local +X (outward)
+    let n_inx = [-cos_t, -sin_t, 0.0]; // local -X (inward)
+    let n_outy = [-sin_t, cos_t, 0.0]; // local +Y (tangent +)
+    let n_iny = [sin_t, -cos_t, 0.0]; // local -Y (tangent -)
 
     // +X (outward) face. CCW from outside.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_pm[0], p_pm[1], z0],
         [p_pp[0], p_pp[1], z0],
         [p_pp[0], p_pp[1], z1],
@@ -350,7 +367,8 @@ fn push_rotated_box(
     );
     // -X (inward) face.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_mp[0], p_mp[1], z0],
         [p_mm[0], p_mm[1], z0],
         [p_mm[0], p_mm[1], z1],
@@ -359,7 +377,8 @@ fn push_rotated_box(
     );
     // +Y (tangent) face.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_pp[0], p_pp[1], z0],
         [p_mp[0], p_mp[1], z0],
         [p_mp[0], p_mp[1], z1],
@@ -368,7 +387,8 @@ fn push_rotated_box(
     );
     // -Y (tangent) face.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_mm[0], p_mm[1], z0],
         [p_pm[0], p_pm[1], z0],
         [p_pm[0], p_pm[1], z1],
@@ -377,7 +397,8 @@ fn push_rotated_box(
     );
     // +Z cap.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_mm[0], p_mm[1], z1],
         [p_pm[0], p_pm[1], z1],
         [p_pp[0], p_pp[1], z1],
@@ -386,7 +407,8 @@ fn push_rotated_box(
     );
     // -Z cap.
     push_quad(
-        vertices, indices,
+        vertices,
+        indices,
         [p_pm[0], p_pm[1], z0],
         [p_mm[0], p_mm[1], z0],
         [p_mp[0], p_mp[1], z0],
@@ -408,7 +430,11 @@ fn push_hex_disc(
     z: f32,
     face_up: bool,
 ) {
-    let normal = if face_up { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
+    let normal = if face_up {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.0, 0.0, -1.0]
+    };
     let center_idx = vertices.len() as u32;
     vertices.push(Vertex3dTex {
         position: [0.0, 0.0, z],

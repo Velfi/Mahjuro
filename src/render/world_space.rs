@@ -43,11 +43,7 @@ use serde::{Deserialize, Serialize};
 /// - **Z** — `lift` above the felt (**+Z** up).
 #[inline]
 pub fn pixel_to_world(window_w: f32, window_h: f32, px: f32, py: f32, lift: f32) -> Vec3 {
-    Vec3::new(
-        px - window_w * 0.5,
-        window_h * 0.5 - py,
-        lift,
-    )
+    Vec3::new(px - window_w * 0.5, window_h * 0.5 - py, lift)
 }
 
 /// A position expressed as **normalized screen fractions** plus a physical lift height.

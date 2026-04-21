@@ -92,7 +92,9 @@ pub fn rot_x_rad(x_rad: f32) -> Mat4 {
 /// `T(pivot) * Rx(angle) * T(-pivot)` — hand tile tilt about its bottom-front edge.
 #[inline]
 pub fn rotation_around_point_x_rad(pivot: Vec3, angle_rad: f32) -> Mat4 {
-    Mat4::from_translation(pivot) * Mat4::from_rotation_x(angle_rad) * Mat4::from_translation(-pivot)
+    Mat4::from_translation(pivot)
+        * Mat4::from_rotation_x(angle_rad)
+        * Mat4::from_translation(-pivot)
 }
 
 /// Table procedural mesh is already in **XY** with normal **+Z**; no rotation.

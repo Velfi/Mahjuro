@@ -971,7 +971,10 @@ mod tests {
                 continue;
             }
             let (_desc, groups) = yaku_page(yk);
-            let tiles: Vec<_> = groups.iter().flat_map(|g| g.tiles.iter().copied()).collect();
+            let tiles: Vec<_> = groups
+                .iter()
+                .flat_map(|g| g.tiles.iter().copied())
+                .collect();
             let sets = validate_selection(&tiles).unwrap_or_else(|| {
                 panic!(
                     "{:?}: yaku_page hand failed to decompose into sets: {:?}",

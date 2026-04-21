@@ -21,9 +21,7 @@ use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
-use crate::render::table_transform::{
-    mesh_y_thickness_along_local_y_to_z_up, rot_z_rad,
-};
+use crate::render::table_transform::{mesh_y_thickness_along_local_y_to_z_up, rot_z_rad};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
@@ -429,13 +427,9 @@ impl SceneBehavior for PickBlindScene {
         if let Some((kind, yaku, new_level)) = ctx.run.pending_zodiac_celebration.take() {
             ctx.bus
                 .push(crate::game::event_bus::GameEvent::ZodiacReveal);
-            *ctx.overlay_request = Some(super::OverlayRequest::Push(
-                Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
-                    kind,
-                    yaku.name(),
-                    new_level,
-                )),
-            ));
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::ZodiacCelebration(
+                super::ZodiacCelebrationScene::new(kind, yaku.name(), new_level),
+            )));
             return None;
         }
 
@@ -828,8 +822,8 @@ impl SceneBehavior for PickBlindScene {
                 // Mirror the light anchor to the ofuda's drawn position below
                 // (the wider gap keeps the plaque's rotated side from clipping
                 // the paper decal).
-                let ofuda_px = (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0)
-                    .max(ofuda_w * 0.5 + 8.0);
+                let ofuda_px =
+                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
                 let ofuda_py = plaque_py + up_ext[2] * 0.15;
                 let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
                 point_lights.push(PointLight {
@@ -1076,8 +1070,8 @@ impl SceneBehavior for PickBlindScene {
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: Object3dKind::Primitive {
                             shape: crate::render::primitive::MeshId::Ofuda,
-                            material: crate::render::primitive::MaterialSpec::plain()
-                                .with_decal(crate::render::primitive::DecalSpec {
+                            material: crate::render::primitive::MaterialSpec::plain().with_decal(
+                                crate::render::primitive::DecalSpec {
                                     text: format!("{}\n{}", def.name, description),
                                     palette: crate::render::primitive::DecalPalette::ParchmentInk,
                                     layout: crate::render::primitive::DecalLayout::TitleRule {
@@ -1085,7 +1079,8 @@ impl SceneBehavior for PickBlindScene {
                                         target_short_edge:
                                             crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                                     },
-                                }),
+                                },
+                            ),
                             pick_id: None,
                             shadow_caster: false,
                             silhouette: false,

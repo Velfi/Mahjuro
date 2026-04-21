@@ -61,22 +61,58 @@ fn build_segment_mesh(y0: f32, y1: f32, base_color: [f32; 4]) -> MeshCpu {
 
     // Six faces, winding CCW when viewed from outside.
     push_quad(
-        &mut vertices, &mut indices, b10, t10, t11, b11, [1.0, 0.0, 0.0],
+        &mut vertices,
+        &mut indices,
+        b10,
+        t10,
+        t11,
+        b11,
+        [1.0, 0.0, 0.0],
     );
     push_quad(
-        &mut vertices, &mut indices, b01, t01, t00, b00, [-1.0, 0.0, 0.0],
+        &mut vertices,
+        &mut indices,
+        b01,
+        t01,
+        t00,
+        b00,
+        [-1.0, 0.0, 0.0],
     );
     push_quad(
-        &mut vertices, &mut indices, b11, t11, t01, b01, [0.0, 0.0, 1.0],
+        &mut vertices,
+        &mut indices,
+        b11,
+        t11,
+        t01,
+        b01,
+        [0.0, 0.0, 1.0],
     );
     push_quad(
-        &mut vertices, &mut indices, b00, t00, t10, b10, [0.0, 0.0, -1.0],
+        &mut vertices,
+        &mut indices,
+        b00,
+        t00,
+        t10,
+        b10,
+        [0.0, 0.0, -1.0],
     );
     push_quad(
-        &mut vertices, &mut indices, t00, t01, t11, t10, [0.0, 1.0, 0.0],
+        &mut vertices,
+        &mut indices,
+        t00,
+        t01,
+        t11,
+        t10,
+        [0.0, 1.0, 0.0],
     );
     push_quad(
-        &mut vertices, &mut indices, b00, b10, b11, b01, [0.0, -1.0, 0.0],
+        &mut vertices,
+        &mut indices,
+        b00,
+        b10,
+        b11,
+        b01,
+        [0.0, -1.0, 0.0],
     );
 
     MeshCpu {

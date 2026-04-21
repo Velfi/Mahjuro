@@ -59,8 +59,7 @@ impl SceneBehavior for ZodiacCelebrationScene {
         }
         if self.dismissed {
             ctx.bus.push(GameEvent::ZodiacLevelUp);
-            ctx.run.finished_zodiac_celebration =
-                Some((self.yaku_name, self.new_level));
+            ctx.run.finished_zodiac_celebration = Some((self.yaku_name, self.new_level));
             *ctx.overlay_request = Some(super::OverlayRequest::Pop);
         }
         None

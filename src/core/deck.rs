@@ -103,13 +103,32 @@ pub struct Wall {
 fn dora_from_wall_pick(t: Tile) -> Tile {
     let next_rank = match t.suit {
         Suit::Characters | Suit::Bamboos | Suit::Circles => {
-            if t.rank >= 9 { 1 } else { t.rank + 1 }
+            if t.rank >= 9 {
+                1
+            } else {
+                t.rank + 1
+            }
         }
-        Suit::Wind => if t.rank >= 4 { 1 } else { t.rank + 1 },
-        Suit::Dragon => if t.rank >= 3 { 1 } else { t.rank + 1 },
+        Suit::Wind => {
+            if t.rank >= 4 {
+                1
+            } else {
+                t.rank + 1
+            }
+        }
+        Suit::Dragon => {
+            if t.rank >= 3 {
+                1
+            } else {
+                t.rank + 1
+            }
+        }
         Suit::Flower | Suit::Season => return t,
     };
-    Tile { rank: next_rank, ..t }
+    Tile {
+        rank: next_rank,
+        ..t
+    }
 }
 
 impl Wall {

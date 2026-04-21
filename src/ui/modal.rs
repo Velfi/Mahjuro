@@ -649,7 +649,11 @@ impl ModalQueue {
             let face_size = icon_size * 0.80;
             let thick = face_size * 0.12 * visual.thickness_scale;
             relic_objects.push(Object3d {
-                pos: [icon_x + icon_size * 0.5, y + icon_size * 0.5, icon_size * 0.38],
+                pos: [
+                    icon_x + icon_size * 0.5,
+                    y + icon_size * 0.5,
+                    icon_size * 0.38,
+                ],
                 extents: [face_size, thick, face_size],
                 rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, spin_deg, 0.0),
                 color: page.accent_color,

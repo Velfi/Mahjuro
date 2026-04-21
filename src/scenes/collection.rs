@@ -33,12 +33,7 @@ enum Tab {
     Talismans,
 }
 
-const TABS: [Tab; 4] = [
-    Tab::Relics,
-    Tab::Yaku,
-    Tab::Bosses,
-    Tab::Talismans,
-];
+const TABS: [Tab; 4] = [Tab::Relics, Tab::Yaku, Tab::Bosses, Tab::Talismans];
 
 impl Tab {
     fn label(self) -> &'static str {
@@ -184,9 +179,7 @@ impl CollectionScene {
         let current = self.cam_anim.get();
         let (cur_col, cur_row, target_changed) = match current {
             Some(anim) => {
-                let elapsed = now
-                    .saturating_duration_since(anim.t0)
-                    .as_secs_f32();
+                let elapsed = now.saturating_duration_since(anim.t0).as_secs_f32();
                 let t = (elapsed / anim.duration).clamp(0.0, 1.0);
                 let e = ease_in_out_cubic(t);
                 let col = anim.start_col + (anim.target_col - anim.start_col) * e;
@@ -203,9 +196,7 @@ impl CollectionScene {
         if current.is_none() || target_changed {
             let start_col = cur_col;
             let start_row = cur_row;
-            if (start_col - discrete_col).abs() > 1e-4
-                || (start_row - discrete_row).abs() > 1e-4
-            {
+            if (start_col - discrete_col).abs() > 1e-4 || (start_row - discrete_row).abs() > 1e-4 {
                 self.cam_anim.set(Some(CamAnim {
                     start_col,
                     start_row,
@@ -317,14 +308,11 @@ impl CollectionScene {
             let row = (idx as u32) / layout.grid_cols;
             let col = (idx as u32) % layout.grid_cols;
             let cx = layout.grid_x_start + col as f32 * layout.grid_cell_w;
-            let cy = layout.grid_y_top
-                + (row as f32 - scroll) * layout.grid_row_pitch;
+            let cy = layout.grid_y_top + (row as f32 - scroll) * layout.grid_row_pitch;
             // Clip rows whose center lies more than half a cell outside
             // the band — those are off-screen and not meaningfully
             // clickable.
-            if cy + cell_half < layout.band_top_y
-                || cy - cell_half > layout.band_bottom_y
-            {
+            if cy + cell_half < layout.band_top_y || cy - cell_half > layout.band_bottom_y {
                 continue;
             }
             let world = pixel_to_world_xy(w, h, cx, cy, layout.shelf_top_lift);
@@ -431,8 +419,7 @@ impl CollectionScene {
         // focused-cell highlight) continue to use the discrete focus so
         // the player still gets immediate confirmation their input
         // registered.
-        let (cam_col, cam_row) =
-            self.tick_cam_focus(focus_col as f32, focus_row as f32);
+        let (cam_col, cam_row) = self.tick_cam_focus(focus_col as f32, focus_row as f32);
         let cam_world_x = (cam_col - (cols as f32 - 1.0) * 0.5) * cell_pitch;
         let cam_world_z = -(cam_row * cell_pitch);
         frame.camera_override = Some(CameraParams {
@@ -506,11 +493,7 @@ impl CollectionScene {
         let backing_h = (window_rows as f32 * 2.5) * cell_pitch;
         plaques.push(Object3d {
             // pixel_y = cab_px_y - cell*0.5 → world Y = +0.5*cell (behind plane).
-            pos: [
-                focus_px_x,
-                cab_px_y - cell * 0.5,
-                focus_world_z,
-            ],
+            pos: [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
             extents: [backing_w, backing_h, cell * 0.1],
             rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
             color: [0.10, 0.07, 0.04, 1.0],
@@ -547,8 +530,7 @@ impl CollectionScene {
                 let dc = (col - focus_col) as f32;
                 let dr = (row - focus_row) as f32;
                 let focus_d2 = dc * dc + dr * dr;
-                let fade = (1.0
-                    - focus_d2 / ((window_cols.max(window_rows) as f32).powi(2) * 0.9))
+                let fade = (1.0 - focus_d2 / ((window_cols.max(window_rows) as f32).powi(2) * 0.9))
                     .clamp(0.08, 1.0);
 
                 // (Frame geometry removed — the dark backing slab
@@ -579,8 +561,7 @@ impl CollectionScene {
                 // world Y < 0 (closer). We want nameplates CLOSER than
                 // the cabinet plane, so add to cab_px_y.
                 let is_focus = col == focus_col && row == focus_row;
-                let nameplate_py = cab_px_y
-                    + if is_focus { cell * 0.5 } else { cell * 0.15 };
+                let nameplate_py = cab_px_y + if is_focus { cell * 0.5 } else { cell * 0.15 };
                 let plate_w = cell * if is_focus { 0.78 } else { 0.62 };
                 let plate_h = cell * if is_focus { 0.78 } else { 0.62 };
                 let plate_thick = cell * 0.06;
@@ -631,11 +612,7 @@ impl CollectionScene {
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [face, thick, face],
-                            rotation: rot_rx_ry_rz_deg(
-                                180.0 + visual.ui_tilt_x_deg,
-                                0.0,
-                                0.0,
-                            ),
+                            rotation: rot_rx_ry_rz_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
                             color,
                             kind: Object3dKind::Relic {
                                 relic_id: *relic_id,
@@ -802,11 +779,7 @@ impl CollectionScene {
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [face, thick, face],
-                        rotation: rot_rx_ry_rz_deg(
-                            180.0 + visual.ui_tilt_x_deg,
-                            0.0,
-                            0.0,
-                        ),
+                        rotation: rot_rx_ry_rz_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
                         color,
                         kind: Object3dKind::Relic {
                             relic_id: *relic_id,
@@ -1016,26 +989,10 @@ impl CollectionScene {
                     (card_wx, card_half_w, card_half_h),
                 ] {
                     let corners = [
-                        glam::Vec3::new(
-                            center_wx - half_w,
-                            hud_world_y_offset,
-                            hud_wz - half_h,
-                        ),
-                        glam::Vec3::new(
-                            center_wx + half_w,
-                            hud_world_y_offset,
-                            hud_wz - half_h,
-                        ),
-                        glam::Vec3::new(
-                            center_wx + half_w,
-                            hud_world_y_offset,
-                            hud_wz + half_h,
-                        ),
-                        glam::Vec3::new(
-                            center_wx - half_w,
-                            hud_world_y_offset,
-                            hud_wz + half_h,
-                        ),
+                        glam::Vec3::new(center_wx - half_w, hud_world_y_offset, hud_wz - half_h),
+                        glam::Vec3::new(center_wx + half_w, hud_world_y_offset, hud_wz - half_h),
+                        glam::Vec3::new(center_wx + half_w, hud_world_y_offset, hud_wz + half_h),
+                        glam::Vec3::new(center_wx - half_w, hud_world_y_offset, hud_wz + half_h),
                     ];
                     let mut min_x = f32::INFINITY;
                     let mut min_y = f32::INFINITY;
@@ -1082,8 +1039,7 @@ impl CollectionScene {
         let items = self.flat_items(w, h, ctx.ui_scale, ctx.progress);
         self.tree.register_flat_buttons(&items, &mut frame.buttons);
 
-        frame.window_title =
-            format!("Mahjuro — Collection ({})", self.active_tab.label());
+        frame.window_title = format!("Mahjuro — Collection ({})", self.active_tab.label());
         frame
     }
 }
@@ -1097,8 +1053,12 @@ impl CollectionScene {
 
 impl SceneBehavior for CollectionScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items =
-            self.flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale, ctx.progress);
+        let items = self.flat_items(
+            ctx.layout.window_w,
+            ctx.layout.window_h,
+            ctx.ui_scale,
+            ctx.progress,
+        );
         // Keyboard / directional / Confirm are handled below by the
         // scene's own 2D grid navigator, which reads `self.focused_row`.
         // The tree only hit-tests mouse clicks and tracks hover focus —
@@ -1148,8 +1108,7 @@ impl SceneBehavior for CollectionScene {
         // Mouse wheel: 1 row per line tick. Negative scroll_lines (wheel
         // up) moves the content down → reduce scroll_rows.
         if ctx.scroll_lines.abs() > 0.001 && max_scroll > 0.0 {
-            let next = (self.target_scroll_rows.get() + ctx.scroll_lines)
-                .clamp(0.0, max_scroll);
+            let next = (self.target_scroll_rows.get() + ctx.scroll_lines).clamp(0.0, max_scroll);
             self.target_scroll_rows.set(next);
         }
 
@@ -1179,9 +1138,7 @@ impl SceneBehavior for CollectionScene {
             } else {
                 top
             };
-            scene
-                .target_scroll_rows
-                .set(next.clamp(0.0, max_scroll));
+            scene.target_scroll_rows.set(next.clamp(0.0, max_scroll));
         };
         // Clamp a (row, col) candidate to the last actually-present
         // artifact (the final row may be partially filled).
@@ -1213,8 +1170,7 @@ impl SceneBehavior for CollectionScene {
                 UiAction::PageNext => {
                     if max_scroll > 0.0 {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                        let next = (self.target_scroll_rows.get()
-                            + visible_rows as f32)
+                        let next = (self.target_scroll_rows.get() + visible_rows as f32)
                             .clamp(0.0, max_scroll);
                         self.target_scroll_rows.set(next);
                     }
@@ -1222,8 +1178,7 @@ impl SceneBehavior for CollectionScene {
                 UiAction::PagePrev => {
                     if max_scroll > 0.0 {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                        let next = (self.target_scroll_rows.get()
-                            - visible_rows as f32)
+                        let next = (self.target_scroll_rows.get() - visible_rows as f32)
                             .clamp(0.0, max_scroll);
                         self.target_scroll_rows.set(next);
                     }
@@ -1405,11 +1360,10 @@ impl SceneBehavior for CollectionScene {
         // when the active tab actually has rows beyond the viewport;
         // otherwise the arrow-only hint is enough.
         let all_count_hint = tab_artifacts(self.active_tab, ctx.progress).len();
-        let tab_scrollable =
-            (total_rows_for(all_count_hint) as usize) > 0 && {
-                let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
-                (probe.grid_rows as usize) > probe.visible_rows as usize
-            };
+        let tab_scrollable = (total_rows_for(all_count_hint) as usize) > 0 && {
+            let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
+            (probe.grid_rows as usize) > probe.visible_rows as usize
+        };
         // Couch-readable hint: CAPTION tier scales with window height
         // and respects the player's UI scale preference, so it stays
         // legible at TV viewing distance instead of vanishing into a
@@ -1436,13 +1390,7 @@ impl SceneBehavior for CollectionScene {
         // Infinite curio corridor: every tab renders as a procedural
         // cabinet grid with a tinted-accent nameplate per entry and a
         // description card floating in front of the focused cell.
-        self.build_corridor_frame(
-            frame,
-            quads,
-            text_labels,
-            &all_artifacts,
-            ctx,
-        )
+        self.build_corridor_frame(frame, quads, text_labels, &all_artifacts, ctx)
     }
 }
 
@@ -1471,10 +1419,7 @@ fn push_relic_stinger_for(
     }
 }
 
-fn tab_artifacts(
-    tab: Tab,
-    progress: &crate::core::progression::PlayerProgress,
-) -> Vec<Artifact> {
+fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) -> Vec<Artifact> {
     match tab {
         Tab::Relics => {
             let defs = all_relic_defs();
@@ -1556,7 +1501,9 @@ fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
         ArtifactKind::PlaqueOnly => {
             // Bosses route here (yaku now render as ribbons). Bosses
             // carry their own description text.
-            boss_by_name(&art.name).map(str::to_string).unwrap_or_default()
+            boss_by_name(&art.name)
+                .map(str::to_string)
+                .unwrap_or_default()
         }
     }
 }
@@ -1730,16 +1677,22 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     // 0.3-row bottom peek when scrollable, none when the whole tab
     // fits. Computed against the *target* row count first so the
     // expansion below knows whether to leave peek room.
-    let peek_target =
-        if grid_rows_total > target_visible_rows { 0.3 } else { 0.0 };
+    let peek_target = if grid_rows_total > target_visible_rows {
+        0.3
+    } else {
+        0.0
+    };
     // How many rows fit at the width-driven cell size (with peek).
-    let max_rows_at_width =
-        ((band_h / cell_from_width) - peek_target).floor() as u32;
+    let max_rows_at_width = ((band_h / cell_from_width) - peek_target).floor() as u32;
     let mut visible_rows_u = target_visible_rows.max(max_rows_at_width).max(1);
     if grid_rows_total > 0 && grid_rows_total <= visible_rows_u {
         visible_rows_u = grid_rows_total;
     }
-    let peek = if grid_rows_total > visible_rows_u { 0.3 } else { 0.0 };
+    let peek = if grid_rows_total > visible_rows_u {
+        0.3
+    } else {
+        0.0
+    };
     let cell_from_height = band_h / (visible_rows_u as f32 + peek);
     let cell_w = cell_from_width.min(cell_from_height);
     let grid_cell_w = cell_w;
@@ -1792,4 +1745,3 @@ fn rarity_accent(r: Rarity) -> [f32; 4] {
         Rarity::Legendary => [0.95, 0.75, 0.45, 1.0],
     }
 }
-

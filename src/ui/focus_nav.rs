@@ -39,11 +39,7 @@ pub fn rect_center(r: [f32; 4]) -> (f32, f32) {
 /// the returned rect stays centered within the *visible* portion of the
 /// element rather than disappearing off the edge of the window.
 #[inline]
-pub fn clamp_rect_to_viewport(
-    rect: [f32; 4],
-    window_w: f32,
-    window_h: f32,
-) -> Option<[f32; 4]> {
+pub fn clamp_rect_to_viewport(rect: [f32; 4], window_w: f32, window_h: f32) -> Option<[f32; 4]> {
     let x0 = rect[0].max(0.0);
     let y0 = rect[1].max(0.0);
     let x1 = (rect[0] + rect[2]).min(window_w);

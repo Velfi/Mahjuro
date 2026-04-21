@@ -109,7 +109,8 @@ pub fn compute_action_bar(
     let sort_row_right = journal_btn_cx + journal_btn_w * 0.5;
     let side_gap = btn_gap * 2.0;
     let bowl_cx = (sort_row_left - side_gap - bowl_diam * 0.5).max(bowl_diam * 0.5 + 4.0);
-    let mirror_cx = (sort_row_right + side_gap + bowl_diam * 0.5).min(layout.window_w - bowl_diam * 0.5 - 4.0);
+    let mirror_cx =
+        (sort_row_right + side_gap + bowl_diam * 0.5).min(layout.window_w - bowl_diam * 0.5 - 4.0);
     let mirror_cy = bowl_cy;
 
     let discard_btn_rect = (

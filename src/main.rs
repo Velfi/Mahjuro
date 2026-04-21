@@ -8,6 +8,12 @@ pub mod crash_guard;
 mod debug_menu;
 mod debug_overlays;
 mod game;
+#[path = "main/arrange.rs"]
+mod main_arrange;
+#[path = "main/bot_graph.rs"]
+mod main_bot_graph;
+#[path = "main/cli.rs"]
+mod main_cli;
 mod persistence;
 mod render;
 mod scenes;
@@ -15,7 +21,6 @@ mod ui;
 mod update_check;
 
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,17 +32,17 @@ use debug_overlays::{
     SmokeDebugResult, TuningOverlay, TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
 };
 use game::cascade::CascadeTuning;
-use game::smoke_tuning::ShopSmokeTuning;
-use game::volumetric_tuning::VolumetricTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
+use game::smoke_tuning::ShopSmokeTuning;
+use game::volumetric_tuning::VolumetricTuning;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
-use scenes::shop::{ShopScene, SHOP_DRAG_DROP_ID};
+use scenes::shop::{SHOP_DRAG_DROP_ID, ShopScene};
 use scenes::splash::SplashScene;
 use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::tutorial_summary::TutorialSummaryScene;
@@ -53,6 +58,16 @@ use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
+
+use main_arrange::{
+    apply_arrange_to_layout, arrange_hierarchy_flat, collect_committed_rotations,
+    reset_arrange_to_default, sample_arrange_placement,
+};
+use main_bot_graph::{
+    build_bot_graph_snapshot, default_snapshot_label, default_snapshot_slug, render_bot_graphs,
+    upsert_snapshot,
+};
+use main_cli::{Cli, Command};
 
 // Debug overlays (visibility toggles, cascade tuning, SFX test, camera
 // params) live in `debug_overlays.rs`.  See `mod debug_overlays` above.
@@ -183,596 +198,6 @@ enum TransitionKind {
     Quick,
     /// Dramatic shooting-star cascade (~1.7 s total before extra score steps).
     ShootingStarCascade,
-}
-
-#[derive(Debug, Parser)]
-#[command(author, version, about)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Run the headless bot for tuning/balance checks.
-    Bot(BotCli),
-    /// Run headless bots, update docs snapshot JSON, and regenerate graphs.
-    BotGraph(BotGraphCli),
-    /// Run the default tuning sweep grid.
-    Sweep(SweepCli),
-    /// Run N strategies × M bots each, rank by win rate. Strategies are
-    /// defined in a JSON file (see docs/strategies_example.json).
-    StrategySweep(StrategySweepCli),
-    /// For each relic, run M bots starting with it forced into the
-    /// active list (for free), plus a control. Ranks relics by their
-    /// causal effect on win rate vs control.
-    ForcedRelicSweep(ForcedRelicSweepCli),
-    /// Render a single scene to a PNG and exit. Runs fully offscreen via
-    /// `HeadlessApp` — no window, no swapchain, no winit event loop — so
-    /// CI and iterative art review don't flake on window-server occlusion.
-    /// Iteration cost is dominated by GPU pipeline init (~5–8 s on first
-    /// run).
-    Screenshot(ScreenshotCli),
-}
-
-#[derive(Debug, Args)]
-struct ScreenshotCli {
-    /// Which scene to render. Supported: `collection`, `yaku_journal`,
-    /// `gameplay`, `pick_blind`, `shop`, `start_screen`.
-    #[arg(long)]
-    scene: String,
-    /// Output PNG path.
-    #[arg(long, default_value = "/tmp/mahjuro-screenshot.png")]
-    output: PathBuf,
-    /// Render width in pixels.
-    #[arg(long, default_value_t = 1920)]
-    width: u32,
-    /// Render height in pixels.
-    #[arg(long, default_value_t = 1080)]
-    height: u32,
-    /// How many redraw frames to render before capturing. The first frame
-    /// often arrives before late-loaded textures (relics, backgrounds) have
-    /// uploaded; bumping this gives async loaders time to settle. The
-    /// surface swapchain also frequently rejects the first 1-2 frames as
-    /// `Outdated`/`Lost`, so a generous default avoids missing captures.
-    #[arg(long, default_value_t = 12)]
-    warmup_frames: u32,
-    /// Force a specific boss for the active ante. Applies to scenes that
-    /// display boss rules (`gameplay`, `pick_blind`). Case-insensitive
-    /// BossKind name, e.g. `blight`, `dragon`, `tax_collector`.
-    #[arg(long)]
-    boss: Option<String>,
-    /// Render with a fresh (level-1) PlayerProgress instead of the saved
-    /// profile. Useful for visual QA of the Collection scene so locked
-    /// entries actually show in silhouette.
-    #[arg(long)]
-    fresh_progress: bool,
-}
-
-#[derive(Debug, Args)]
-struct BotCli {
-    /// Number of runs to execute.
-    #[arg(default_value_t = 100)]
-    runs: u32,
-    /// Override the standard mode's base blind target.
-    #[arg(long)]
-    base_target: Option<u32>,
-    /// Override the standard mode's target scaling.
-    #[arg(long)]
-    target_scale: Option<f32>,
-    /// Override the standard mode's starting plays.
-    #[arg(long)]
-    plays: Option<u32>,
-    /// Override the standard mode's starting discards.
-    #[arg(long)]
-    discards: Option<u32>,
-    /// Override the standard mode's starting gold.
-    #[arg(long)]
-    gold: Option<u32>,
-    /// Print per-run bot logs in addition to the aggregate summary.
-    #[arg(long, action = ArgAction::SetTrue)]
-    bot_log: bool,
-    /// Export aggregate bot results to a JSON file.
-    #[arg(long)]
-    export_json: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct SweepCli {
-    /// Number of runs to execute per sweep cell.
-    #[arg(long, default_value_t = 40)]
-    runs: u32,
-    /// Export sweep results to a JSON file.
-    #[arg(long)]
-    export_json: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct StrategySweepCli {
-    /// Path to the JSON file defining strategies to compare.
-    /// See docs/strategies_example.json for the expected shape.
-    strategies_file: PathBuf,
-    /// Number of runs per strategy.
-    #[arg(long, default_value_t = 1000)]
-    runs: u32,
-    /// Export per-strategy aggregate stats to a JSON file.
-    #[arg(long)]
-    export_json: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct ForcedRelicSweepCli {
-    /// Number of runs per relic (+ 1 control cell).
-    #[arg(long, default_value_t = 500)]
-    runs: u32,
-    /// Export per-relic aggregate stats to a JSON file.
-    #[arg(long)]
-    export_json: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct BotGraphCli {
-    /// Number of runs to execute.
-    #[arg(default_value_t = 10_000)]
-    runs: u32,
-    /// Stable slug used to insert or replace the snapshot in docs JSON.
-    #[arg(long)]
-    slug: Option<String>,
-    /// Chart label. Supports literal \n for multi-line chart labels.
-    #[arg(long)]
-    label: Option<String>,
-    /// Override the standard mode's base blind target.
-    #[arg(long)]
-    base_target: Option<u32>,
-    /// Override the standard mode's target scaling.
-    #[arg(long)]
-    target_scale: Option<f32>,
-    /// Override the standard mode's starting plays.
-    #[arg(long)]
-    plays: Option<u32>,
-    /// Override the standard mode's starting discards.
-    #[arg(long)]
-    discards: Option<u32>,
-    /// Override the standard mode's starting gold.
-    #[arg(long)]
-    gold: Option<u32>,
-    /// Print per-run bot logs in addition to the aggregate summary.
-    #[arg(long, action = ArgAction::SetTrue)]
-    bot_log: bool,
-}
-
-impl BotCli {
-    fn bot_config(&self) -> bot::BotConfig {
-        bot::BotConfig {
-            base_target: self.base_target,
-            target_scaling: self.target_scale,
-            starting_plays: self.plays,
-            starting_discards: self.discards,
-            starting_gold: self.gold,
-            ..Default::default()
-        }
-    }
-}
-
-impl BotGraphCli {
-    fn bot_config(&self) -> bot::BotConfig {
-        bot::BotConfig {
-            base_target: self.base_target,
-            target_scaling: self.target_scale,
-            starting_plays: self.plays,
-            starting_discards: self.discards,
-            starting_gold: self.gold,
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BotGraphSnapshot {
-    slug: String,
-    label: String,
-    runs: u32,
-    win_rate: f64,
-    avg_blinds: f64,
-    avg_antes: f64,
-    avg_total_score_m: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    avg_surplus_per_blind: Option<f64>,
-    avg_plays: f64,
-    avg_discards: f64,
-    avg_skips: f64,
-    avg_relics: f64,
-    avg_gold_spent: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    avg_gold_earned: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clear_base: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clear_plays: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clear_interest: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clear_relics: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    avg_final_gold: Option<f64>,
-    deaths_by_ante: std::collections::BTreeMap<u32, u32>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    overscore_by_slot: std::collections::BTreeMap<String, u64>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    cleared_by_slot: std::collections::BTreeMap<String, u64>,
-}
-
-
-/// Apply arrange-mode deltas to the matching field in the scene's positions struct
-/// and save the result to JSON.
-///
-/// `delta_px` / `delta_py` are in layout pixel space (not normalised yet).
-/// `window_w` / `window_h` are the current surface dimensions used to compute `nx`/`ny`.
-fn apply_arrange_to_layout(
-    name: &str,
-    delta_px: f32,
-    delta_py: f32,
-    delta_lift: f32,
-    delta_rz_deg: f32,
-    delta_rx_deg: f32,
-    delta_ry_deg: f32,
-    window_w: f32,
-    window_h: f32,
-    scene: &mut crate::Scene,
-) {
-    use crate::ui::placement::apply_arrange;
-    use crate::ui::scene_layout::{
-        save_collection_positions, save_gameplay_positions, save_shop_positions,
-        save_start_screen_positions, save_tutorial_positions,
-    };
-
-    // Every placement now uses the same responsive coordinate system:
-    // nx/ny are window fractions, lift_mm is physical mm, rotations are deg.
-    // Pixel deltas from the keyboard simply normalize by window size.
-    let dnx = delta_px / window_w;
-    let dny = delta_py / window_h;
-    // `delta_lift` is in layout pixels (Q/E step size = screen px), which
-    // the live preview applies as raw world units. Convert to `lift_mm` so
-    // that at the *current* window, `layout.mm(d_lift_mm)` reproduces
-    // `delta_lift` world units on the next frame.
-    // `layout.mm(n) = (w * HAND_SLOT_W_RATIO / TILE_WIDTH_MM) * n`, so the
-    // correct inverse uses the live `window_w` (not a canonical constant —
-    // otherwise lift scales with window width on commit and the object
-    // "applies the delta twice" at non-canonical widths).
-    let d_lift_mm = delta_lift * crate::ui::scene_layout::HFRAC_TO_MM / window_w;
-
-    let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
-        crate::Scene::Gameplay(gp) => {
-            let p = &mut gp.positions;
-            let ok = apply_arrange(
-                p, name, dnx, dny, d_lift_mm,
-                delta_rx_deg, delta_ry_deg, delta_rz_deg,
-            );
-            (ok, ok.then(|| save_gameplay_positions(p)))
-        }
-        crate::Scene::Shop(shop) => {
-            let p = &mut shop.positions;
-            let ok = apply_arrange(
-                p, name, dnx, dny, d_lift_mm,
-                delta_rx_deg, delta_ry_deg, delta_rz_deg,
-            );
-            (ok, ok.then(|| save_shop_positions(p)))
-        }
-        crate::Scene::Collection(c) => {
-            let p = &mut c.positions;
-            let ok = apply_arrange(
-                p, name, dnx, dny, d_lift_mm,
-                delta_rx_deg, delta_ry_deg, delta_rz_deg,
-            );
-            (ok, ok.then(|| save_collection_positions(p)))
-        }
-        crate::Scene::StartScreen(s) => {
-            let p = &mut s.positions;
-            let ok = apply_arrange(
-                p, name, dnx, dny, d_lift_mm,
-                delta_rx_deg, delta_ry_deg, delta_rz_deg,
-            );
-            (ok, ok.then(|| save_start_screen_positions(p)))
-        }
-        crate::Scene::TutorialCampaign(t) => {
-            let p = &mut t.positions;
-            let ok = apply_arrange(
-                p, name, dnx, dny, d_lift_mm,
-                delta_rx_deg, delta_ry_deg, delta_rz_deg,
-            );
-            (ok, ok.then(|| save_tutorial_positions(p)))
-        }
-        _ => (false, None),
-    };
-
-    if matched {
-        if let Some(Err(e)) = save_result {
-            log::error!("[Arrange] Failed to save layout: {e}");
-        } else {
-            log::info!("[Arrange] Saved layout (object: {name})");
-        }
-    } else {
-        log::info!("[Arrange] '{name}' has no layout field mapping — clipboard only");
-    }
-}
-
-/// Read-only lookup of the placement registered under `name` in whichever
-/// scene is active. Returns `None` for group names, unknown names, or scenes
-/// that don't implement [`ArrangeTarget`] (start / pick-blind / end).
-fn sample_arrange_placement(
-    name: &str,
-    scene: &crate::Scene,
-) -> Option<crate::ui::placement::Placement> {
-    use crate::ui::placement::ArrangeTarget;
-    match scene {
-        crate::Scene::Gameplay(gp) => gp.positions.placement(name).copied(),
-        crate::Scene::Shop(shop) => shop.positions.placement(name).copied(),
-        crate::Scene::Collection(c) => c.positions.placement(name).copied(),
-        crate::Scene::StartScreen(s) => s.positions.placement(name).copied(),
-        crate::Scene::TutorialCampaign(t) => t.positions.placement(name).copied(),
-        _ => None,
-    }
-}
-
-/// Reset the placement(s) under `name` to their compiled-in defaults and
-/// persist the scene's positions struct to disk. Works for leaves and groups.
-fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
-    use crate::ui::placement::reset_arrange;
-    use crate::ui::scene_layout::{
-        save_collection_positions, save_gameplay_positions, save_shop_positions,
-        save_start_screen_positions, save_tutorial_positions,
-    };
-
-    let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
-        crate::Scene::Gameplay(gp) => {
-            let p = &mut gp.positions;
-            let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_gameplay_positions(p)))
-        }
-        crate::Scene::Shop(shop) => {
-            let p = &mut shop.positions;
-            let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_shop_positions(p)))
-        }
-        crate::Scene::Collection(c) => {
-            let p = &mut c.positions;
-            let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_collection_positions(p)))
-        }
-        crate::Scene::StartScreen(s) => {
-            let p = &mut s.positions;
-            let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_start_screen_positions(p)))
-        }
-        crate::Scene::TutorialCampaign(t) => {
-            let p = &mut t.positions;
-            let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_tutorial_positions(p)))
-        }
-        _ => (false, None),
-    };
-
-    if matched {
-        if let Some(Err(e)) = save_result {
-            log::error!("[Arrange] Failed to save layout after reset: {e}");
-        } else {
-            log::info!("[Arrange] Reset '{name}' to default");
-        }
-    } else {
-        log::info!("[Arrange] '{name}' has no layout field mapping — cannot reset");
-    }
-}
-
-/// Build a map of `arrange_name` → `[rx_deg, ry_deg, rz_deg]` for every leaf
-/// placement in the active scene. The renderer consumes this each frame so
-/// rotation committed into a Placement by arrange mode is applied uniformly
-/// to all arrange-tagged draws — no per-site wiring needed.
-fn collect_committed_rotations(
-    scene: &crate::Scene,
-) -> std::collections::HashMap<String, [f32; 3]> {
-    use crate::ui::placement::{all_leaf_names, ArrangeTarget};
-    let mut out = std::collections::HashMap::new();
-    let (hierarchy, lookup): (
-        &'static [crate::ui::placement::Node],
-        Box<dyn Fn(&str) -> Option<crate::ui::placement::Placement>>,
-    ) = match scene {
-        crate::Scene::Gameplay(gp) => (
-            gp.positions.hierarchy(),
-            Box::new(move |n| gp.positions.placement(n).copied()),
-        ),
-        crate::Scene::Shop(shop) => (
-            shop.positions.hierarchy(),
-            Box::new(move |n| shop.positions.placement(n).copied()),
-        ),
-        crate::Scene::Collection(c) => (
-            c.positions.hierarchy(),
-            Box::new(move |n| c.positions.placement(n).copied()),
-        ),
-        crate::Scene::StartScreen(s) => (
-            s.positions.hierarchy(),
-            Box::new(move |n| s.positions.placement(n).copied()),
-        ),
-        crate::Scene::TutorialCampaign(t) => (
-            t.positions.hierarchy(),
-            Box::new(move |n| t.positions.placement(n).copied()),
-        ),
-        _ => return out,
-    };
-    for name in all_leaf_names(hierarchy) {
-        if let Some(p) = lookup(name) {
-            if p.rx_deg != 0.0 || p.ry_deg != 0.0 || p.rz_deg != 0.0 {
-                out.insert(name.to_string(), [p.rx_deg, p.ry_deg, p.rz_deg]);
-            }
-        }
-    }
-    out
-}
-
-/// One entry in the flattened arrange-mode hierarchy list (one per Node).
-struct HierarchyEntry {
-    name: &'static str,
-    label: &'static str,
-    depth: usize,
-    is_group: bool,
-}
-
-/// Walk the active scene's arrange-mode hierarchy in document order. The
-/// arrange-mode picker uses this to build a Tab-cycleable list.
-fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
-    use crate::ui::placement::{ArrangeTarget, Node};
-
-    fn walk(nodes: &'static [Node], depth: usize, out: &mut Vec<HierarchyEntry>) {
-        for n in nodes {
-            match n {
-                Node::Leaf { name, label } => out.push(HierarchyEntry {
-                    name,
-                    label,
-                    depth,
-                    is_group: false,
-                }),
-                Node::Group { name, label, children } => {
-                    out.push(HierarchyEntry {
-                        name,
-                        label,
-                        depth,
-                        is_group: true,
-                    });
-                    walk(children, depth + 1, out);
-                }
-            }
-        }
-    }
-
-    let hierarchy: &'static [Node] = match scene {
-        crate::Scene::Shop(s) => s.positions.hierarchy(),
-        crate::Scene::Gameplay(g) => g.positions.hierarchy(),
-        crate::Scene::Collection(c) => c.positions.hierarchy(),
-        crate::Scene::StartScreen(s) => s.positions.hierarchy(),
-        crate::Scene::TutorialCampaign(t) => t.positions.hierarchy(),
-        _ => &[],
-    };
-    let mut out = Vec::new();
-    walk(hierarchy, 0, &mut out);
-    out
-}
-
-fn avg_u64(total: u64, runs: u32) -> f64 {
-    if runs == 0 {
-        0.0
-    } else {
-        total as f64 / runs as f64
-    }
-}
-
-fn avg_i64(total: i64, runs: u32) -> f64 {
-    if runs == 0 {
-        0.0
-    } else {
-        total as f64 / runs as f64
-    }
-}
-
-fn default_snapshot_slug(mode: &game::game_mode::GameMode, runs: u32) -> String {
-    format!(
-        "bt{}_ts{}_p{}_d{}_g{}_{}",
-        mode.base_target,
-        format!("{:.2}", mode.target_scaling).replace('.', "_"),
-        mode.starting_plays,
-        mode.starting_discards,
-        mode.starting_gold,
-        runs
-    )
-}
-
-fn default_snapshot_label(mode: &game::game_mode::GameMode, runs: u32) -> String {
-    format!(
-        "Base {}\nScale {:.2}\nP{} D{} G{}\n({} runs)",
-        mode.base_target,
-        mode.target_scaling,
-        mode.starting_plays,
-        mode.starting_discards,
-        mode.starting_gold,
-        runs
-    )
-}
-
-fn build_bot_graph_snapshot(
-    agg: &bot::AggregateStats,
-    slug: String,
-    label: String,
-) -> BotGraphSnapshot {
-    let runs = agg.runs;
-    BotGraphSnapshot {
-        slug,
-        label,
-        runs,
-        win_rate: if runs == 0 {
-            0.0
-        } else {
-            agg.victories as f64 * 100.0 / runs as f64
-        },
-        avg_blinds: avg_u64(agg.blinds_cleared_total, runs),
-        avg_antes: avg_u64(agg.antes_cleared_total, runs),
-        avg_total_score_m: avg_u64(agg.total_score, runs) / 1_000_000.0,
-        avg_surplus_per_blind: if agg.blinds_cleared_total == 0 {
-            Some(0.0)
-        } else {
-            Some(agg.total_overscore as f64 / agg.blinds_cleared_total as f64)
-        },
-        avg_plays: avg_u64(agg.total_plays, runs),
-        avg_discards: avg_u64(agg.total_discards, runs),
-        avg_skips: avg_u64(agg.total_blinds_skipped, runs),
-        avg_relics: avg_u64(agg.total_relics_bought, runs),
-        avg_gold_spent: avg_u64(agg.total_gold_spent, runs),
-        avg_gold_earned: Some(avg_u64(
-            agg.total_gold_from_clears + agg.total_gold_from_skip_tags,
-            runs,
-        )),
-        clear_base: Some(avg_u64(agg.total_gold_from_clear_base, runs)),
-        clear_plays: Some(avg_u64(agg.total_gold_from_unused_plays, runs)),
-        clear_interest: Some(avg_u64(agg.total_gold_from_interest, runs)),
-        clear_relics: Some(avg_u64(agg.total_gold_from_clear_relics, runs)),
-        avg_final_gold: Some(avg_i64(agg.total_final_gold, runs)),
-        deaths_by_ante: agg.deaths_by_ante.clone(),
-        overscore_by_slot: agg.overscore_by_slot.clone(),
-        cleared_by_slot: agg.cleared_by_slot.clone(),
-    }
-}
-
-fn load_snapshots(path: &Path) -> anyhow::Result<Vec<BotGraphSnapshot>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let raw = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&raw)?)
-}
-
-fn write_snapshots(path: &Path, snapshots: &[BotGraphSnapshot]) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(snapshots)?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
-fn upsert_snapshot(path: &Path, snapshot: BotGraphSnapshot) -> anyhow::Result<()> {
-    let mut snapshots = load_snapshots(path)?;
-    if let Some(existing) = snapshots.iter_mut().find(|item| item.slug == snapshot.slug) {
-        *existing = snapshot;
-    } else {
-        snapshots.push(snapshot);
-    }
-    write_snapshots(path, &snapshots)
-}
-
-fn render_bot_graphs(repo_root: &Path) -> anyhow::Result<()> {
-    let status = ProcessCommand::new("python3")
-        .arg("tools/plot_bot_balance.py")
-        .current_dir(repo_root)
-        .status()?;
-    anyhow::ensure!(status.success(), "graph render failed with status {status}");
-    Ok(())
 }
 
 struct App {
@@ -1258,9 +683,9 @@ impl App {
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
                     let retry_blind = self.run.blind;
-                    self.pending_scene = Some(Scene::Gameplay(
-                        GameplayScene::with_pending_blind(retry_blind),
-                    ));
+                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::with_pending_blind(
+                        retry_blind,
+                    )));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -1297,9 +722,9 @@ impl App {
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Success);
                     self.modals.push(modal);
                     let retry_blind = self.run.blind;
-                    self.pending_scene = Some(Scene::Gameplay(
-                        GameplayScene::with_pending_blind(retry_blind),
-                    ));
+                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::with_pending_blind(
+                        retry_blind,
+                    )));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -1444,8 +869,7 @@ impl App {
                     // Match the live preview in `sample_arrange_placement`
                     // (see HUD code in this file): convert the world-unit
                     // lift step back to mm at the canonical window.
-                    d_lift_mm: state.delta_lift
-                        * crate::ui::scene_layout::HFRAC_TO_MM
+                    d_lift_mm: state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
                         / crate::ui::scene_layout::CANONICAL_WINDOW_W,
                     d_rx_deg: state.delta_rx_deg,
                     d_ry_deg: state.delta_ry_deg,
@@ -1735,8 +1159,7 @@ impl App {
                     let text = if let Some(p) = sampled {
                         let dnx = state.delta_px / w;
                         let dny = state.delta_py / h;
-                        let d_lift_mm = state.delta_lift
-                            * crate::ui::scene_layout::HFRAC_TO_MM
+                        let d_lift_mm = state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
                             / crate::ui::scene_layout::CANONICAL_WINDOW_W;
                         format!(
                             "Arrange: {}  nx={:.4} ny={:.4} lift={:.2}mm  rx={:+.1}° ry={:+.1}° rz={:+.1}°  [step {:.0}px/{:.0}°]",
@@ -1754,9 +1177,14 @@ impl App {
                         format!(
                             "Arrange: {} (group)  Δpx={:+.1} Δpy={:+.1} Δz={:+.1}  Δrx={:+.1}° Δry={:+.1}° Δrz={:+.1}°  [step {:.0}px/{:.0}°]",
                             state.object_name,
-                            state.delta_px, state.delta_py, state.delta_lift,
-                            state.delta_rx_deg, state.delta_ry_deg, state.delta_rz_deg,
-                            state.trans_step_px, state.rot_step_deg,
+                            state.delta_px,
+                            state.delta_py,
+                            state.delta_lift,
+                            state.delta_rx_deg,
+                            state.delta_ry_deg,
+                            state.delta_rz_deg,
+                            state.trans_step_px,
+                            state.rot_step_deg,
                         )
                     };
                     (text, [0.95, 0.85, 0.35, 1.0])
@@ -1853,21 +1281,19 @@ impl App {
 
         // Push arrange-mode override so the renderer draws the selected object
         // at the edited position/rotation this frame.
-        renderer.set_arrange_override(
-            if let Some(Some(ref state)) = self.debug.arrange_mode {
-                Some(DebugArrangeOverride {
-                    name: state.object_name.clone(),
-                    delta_px: state.delta_px,
-                    delta_py: state.delta_py,
-                    delta_lift: state.delta_lift,
-                    delta_rz_deg: state.delta_rz_deg,
-                    delta_rx_deg: state.delta_rx_deg,
-                    delta_ry_deg: state.delta_ry_deg,
-                })
-            } else {
-                None
-            },
-        );
+        renderer.set_arrange_override(if let Some(Some(ref state)) = self.debug.arrange_mode {
+            Some(DebugArrangeOverride {
+                name: state.object_name.clone(),
+                delta_px: state.delta_px,
+                delta_py: state.delta_py,
+                delta_lift: state.delta_lift,
+                delta_rz_deg: state.delta_rz_deg,
+                delta_rx_deg: state.delta_rx_deg,
+                delta_ry_deg: state.delta_ry_deg,
+            })
+        } else {
+            None
+        });
 
         if let Err(e) = renderer.render(
             &frame,
@@ -2371,39 +1797,18 @@ impl ApplicationHandler for App {
                             // falling back to a soft chime when the relic has
                             // no bespoke audio file.
                             self.audio.play_relic_trigger(rid);
-                            *self
-                                .progress
-                                .relic_times_activated
-                                .entry(rid)
-                                .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            *self.progress.relic_times_activated.entry(rid).or_insert(0) += 1;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                         }
                         GameEvent::BossEncountered(bk) => {
                             self.audio.play_sfx(audio::SfxId::BossEncountered);
-                            *self
-                                .progress
-                                .boss_times_encountered
-                                .entry(bk)
-                                .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            *self.progress.boss_times_encountered.entry(bk).or_insert(0) += 1;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                         }
                         GameEvent::BossDefeated(bk) => {
                             self.audio.play_sfx(audio::SfxId::BossDefeated);
-                            *self
-                                .progress
-                                .boss_times_defeated
-                                .entry(bk)
-                                .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            *self.progress.boss_times_defeated.entry(bk).or_insert(0) += 1;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                         }
                         GameEvent::TalismanPurchased(tk) => {
                             self.audio.play_sfx(audio::SfxId::TalismanPurchased);
@@ -2412,41 +1817,22 @@ impl ApplicationHandler for App {
                                 .talisman_times_purchased
                                 .entry(tk)
                                 .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                         }
                         GameEvent::TalismanUsed(tk) => {
                             self.audio.play_sfx(audio::SfxId::TalismanUsed);
-                            *self
-                                .progress
-                                .talisman_times_used
-                                .entry(tk)
-                                .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            *self.progress.talisman_times_used.entry(tk).or_insert(0) += 1;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                         }
                         GameEvent::YakuScored(yk) => {
-                            *self
-                                .progress
-                                .yaku_times_scored
-                                .entry(yk)
-                                .or_insert(0) += 1;
-                            let _ = persistence::save_profile(
-                                self.active_profile,
-                                &self.progress,
-                            );
+                            *self.progress.yaku_times_scored.entry(yk).or_insert(0) += 1;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
                             const YAKU_STINGER_SPACING_MS: u64 = 200;
                             let offset = std::time::Duration::from_millis(
                                 (yaku_stinger_index as u64) * YAKU_STINGER_SPACING_MS,
                             );
-                            self.audio.schedule_sfx(
-                                audio::SfxId::for_yaku(yk),
-                                now + offset,
-                            );
+                            self.audio
+                                .schedule_sfx(audio::SfxId::for_yaku(yk), now + offset);
                             yaku_stinger_index += 1;
                         }
                         other => log::info!("event: {other:?}"),
@@ -2653,9 +2039,7 @@ impl ApplicationHandler for App {
                             // takes over on next launch. Logs go to stderr
                             // so tuning sessions leave a paper trail.
                             match persistence::clear_tuning_override("ShopSmokeTuning") {
-                                Ok(()) => log::info!(
-                                    "[Debug] Cleared ShopSmokeTuning override"
-                                ),
+                                Ok(()) => log::info!("[Debug] Cleared ShopSmokeTuning override"),
                                 Err(e) => log::warn!(
                                     "[Debug] Failed to clear ShopSmokeTuning override: {e}"
                                 ),
@@ -2667,9 +2051,7 @@ impl ApplicationHandler for App {
                                 "ShopSmokeTuning",
                                 &overlay.tuning,
                             ) {
-                                Ok(()) => log::info!(
-                                    "[Debug] Saved ShopSmokeTuning override"
-                                ),
+                                Ok(()) => log::info!("[Debug] Saved ShopSmokeTuning override"),
                                 Err(e) => log::warn!(
                                     "[Debug] Failed to save ShopSmokeTuning override: {e}"
                                 ),
@@ -2697,9 +2079,7 @@ impl ApplicationHandler for App {
                             overlay.tuning = VolumetricTuning::default();
                             self.volumetric_tuning = overlay.tuning;
                             match persistence::clear_tuning_override("VolumetricTuning") {
-                                Ok(()) => log::info!(
-                                    "[Debug] Cleared VolumetricTuning override"
-                                ),
+                                Ok(()) => log::info!("[Debug] Cleared VolumetricTuning override"),
                                 Err(e) => log::warn!(
                                     "[Debug] Failed to clear VolumetricTuning override: {e}"
                                 ),
@@ -2711,9 +2091,7 @@ impl ApplicationHandler for App {
                                 "VolumetricTuning",
                                 &overlay.tuning,
                             ) {
-                                Ok(()) => log::info!(
-                                    "[Debug] Saved VolumetricTuning override"
-                                ),
+                                Ok(()) => log::info!("[Debug] Saved VolumetricTuning override"),
                                 Err(e) => log::warn!(
                                     "[Debug] Failed to save VolumetricTuning override: {e}"
                                 ),
@@ -3111,10 +2489,7 @@ impl ApplicationHandler for App {
                             .unwrap_or(false);
                         if still_pending && shot.retries < 30 {
                             shot.retries += 1;
-                            log::warn!(
-                                "screenshot: capture frame dropped, retry {}",
-                                shot.retries
-                            );
+                            log::warn!("screenshot: capture frame dropped, retry {}", shot.retries);
                             if let Some(w) = self.window.as_ref() {
                                 w.request_redraw();
                             }
@@ -3125,10 +2500,7 @@ impl ApplicationHandler for App {
                                     shot.retries
                                 );
                             } else {
-                                log::info!(
-                                    "screenshot saved → {}",
-                                    shot.output.display()
-                                );
+                                log::info!("screenshot saved → {}", shot.output.display());
                             }
                             self.headless_screenshot = None;
                             event_loop.exit();
@@ -3190,31 +2562,27 @@ impl ApplicationHandler for App {
                             // Only try to select an object when nothing is
                             // selected yet (inner = None).
                             if matches!(self.debug.arrange_mode, Some(None)) {
-                                let picked = self
-                                    .renderer
-                                    .as_ref()
-                                    .and_then(|r| {
-                                        r.pick_debug_object_with_model(cursor.0, cursor.1)
-                                    });
+                                let picked = self.renderer.as_ref().and_then(|r| {
+                                    r.pick_debug_object_with_model(cursor.0, cursor.1)
+                                });
                                 match picked {
                                     Some((name, Some(model))) => {
                                         // Start with zero deltas — the override
                                         // is additive on top of the scene's own
                                         // placement, so no decomposition needed.
                                         let origin = model.transform_point3(glam::Vec3::ZERO);
-                                        self.debug.arrange_mode =
-                                            Some(Some(ArrangeModeState {
-                                                object_name: name.to_string(),
-                                                selected_world_origin: origin,
-                                                delta_px: 0.0,
-                                                delta_py: 0.0,
-                                                delta_lift: 0.0,
-                                                delta_rz_deg: 0.0,
-                                                delta_rx_deg: 0.0,
-                                                delta_ry_deg: 0.0,
-                                                trans_step_px: 1.0,
-                                                rot_step_deg: 1.0,
-                                            }));
+                                        self.debug.arrange_mode = Some(Some(ArrangeModeState {
+                                            object_name: name.to_string(),
+                                            selected_world_origin: origin,
+                                            delta_px: 0.0,
+                                            delta_py: 0.0,
+                                            delta_lift: 0.0,
+                                            delta_rz_deg: 0.0,
+                                            delta_rx_deg: 0.0,
+                                            delta_ry_deg: 0.0,
+                                            trans_step_px: 1.0,
+                                            rot_step_deg: 1.0,
+                                        }));
                                         log::info!(
                                             "[Arrange] Selected '{}' — all deltas zero, ready to nudge",
                                             name,
@@ -3231,7 +2599,9 @@ impl ApplicationHandler for App {
                                         );
                                     }
                                     None => {
-                                        log::info!("[Arrange] No object under cursor — click on an object to select it");
+                                        log::info!(
+                                            "[Arrange] No object under cursor — click on an object to select it"
+                                        );
                                     }
                                 }
                             } else if let Some(Some(ref mut st)) = self.debug.arrange_mode {
@@ -3253,11 +2623,17 @@ impl ApplicationHandler for App {
                                         st.delta_py = -(h.y - st.selected_world_origin.y);
                                         log::info!(
                                             "[Arrange] Click-move '{}' → world ({:.1}, {:.1}) | Δpx={:+.1} Δpy={:+.1}",
-                                            st.object_name, h.x, h.y, st.delta_px, st.delta_py,
+                                            st.object_name,
+                                            h.x,
+                                            h.y,
+                                            st.delta_px,
+                                            st.delta_py,
                                         );
                                     }
                                     None => {
-                                        log::info!("[Arrange] Click missed all pickables — no move");
+                                        log::info!(
+                                            "[Arrange] Click missed all pickables — no move"
+                                        );
                                     }
                                 }
                             }
@@ -3300,9 +2676,7 @@ impl ApplicationHandler for App {
                                 self.shop_drag_start = match picked {
                                     Some(ShopHit::Relic(_))
                                     | Some(ShopHit::Ribbon(_))
-                                    | Some(ShopHit::Talisman(_)) => {
-                                        picked.map(|h| (h, cursor))
-                                    }
+                                    | Some(ShopHit::Talisman(_)) => picked.map(|h| (h, cursor)),
                                     _ => None,
                                 };
                             }
@@ -3478,8 +2852,8 @@ impl ApplicationHandler for App {
                                 Some(Some(s)) => Some(s.object_name.as_str()),
                                 _ => None,
                             };
-                            let current_idx = current_name
-                                .and_then(|n| flat.iter().position(|e| e.name == n));
+                            let current_idx =
+                                current_name.and_then(|n| flat.iter().position(|e| e.name == n));
                             let reverse = self.modifiers.shift_key();
                             let next_idx = match (current_idx, reverse) {
                                 (None, false) => 0,
@@ -3529,8 +2903,8 @@ impl ApplicationHandler for App {
                     // input path is skipped so gameplay doesn't also fire.
                     if let Some(Some(ref mut state)) = self.debug.arrange_mode {
                         let shift = self.modifiers.shift_key();
-                        let step_px = state.trans_step_px;   // pixels per key press
-                        let step_deg = state.rot_step_deg;   // degrees per key press
+                        let step_px = state.trans_step_px; // pixels per key press
+                        let step_deg = state.rot_step_deg; // degrees per key press
                         let mut handled = true;
                         let mut nudged = false;
                         let mut escape_pending = false;
@@ -3557,23 +2931,61 @@ impl ApplicationHandler for App {
                                     log::info!("[Arrange] Step 4 (100 px / 90°)");
                                 }
                                 // Translation: WASD = forward/left/back/right, Q/E = down/up
-                                KeyCode::KeyD if !shift => { state.delta_px += step_px; nudged = true; }
-                                KeyCode::KeyA if !shift => { state.delta_px -= step_px; nudged = true; }
-                                KeyCode::KeyS if !shift => { state.delta_py += step_px; nudged = true; }
-                                KeyCode::KeyW if !shift => { state.delta_py -= step_px; nudged = true; }
-                                KeyCode::KeyQ if !shift => { state.delta_lift -= step_px; nudged = true; }
-                                KeyCode::KeyE if !shift => { state.delta_lift += step_px; nudged = true; }
+                                KeyCode::KeyD if !shift => {
+                                    state.delta_px += step_px;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyA if !shift => {
+                                    state.delta_px -= step_px;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyS if !shift => {
+                                    state.delta_py += step_px;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyW if !shift => {
+                                    state.delta_py -= step_px;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyQ if !shift => {
+                                    state.delta_lift -= step_px;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyE if !shift => {
+                                    state.delta_lift += step_px;
+                                    nudged = true;
+                                }
                                 // Rotation: Shift+A/D = rz, Shift+W/S = rx, Shift+Q/E = ry
-                                KeyCode::KeyD if shift => { state.delta_rz_deg += step_deg; nudged = true; }
-                                KeyCode::KeyA if shift => { state.delta_rz_deg -= step_deg; nudged = true; }
-                                KeyCode::KeyW if shift => { state.delta_rx_deg -= step_deg; nudged = true; }
-                                KeyCode::KeyS if shift => { state.delta_rx_deg += step_deg; nudged = true; }
-                                KeyCode::KeyQ if shift => { state.delta_ry_deg -= step_deg; nudged = true; }
-                                KeyCode::KeyE if shift => { state.delta_ry_deg += step_deg; nudged = true; }
+                                KeyCode::KeyD if shift => {
+                                    state.delta_rz_deg += step_deg;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyA if shift => {
+                                    state.delta_rz_deg -= step_deg;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyW if shift => {
+                                    state.delta_rx_deg -= step_deg;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyS if shift => {
+                                    state.delta_rx_deg += step_deg;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyQ if shift => {
+                                    state.delta_ry_deg -= step_deg;
+                                    nudged = true;
+                                }
+                                KeyCode::KeyE if shift => {
+                                    state.delta_ry_deg += step_deg;
+                                    nudged = true;
+                                }
                                 KeyCode::Enter | KeyCode::NumpadEnter => {
                                     // Confirm: convert pixel deltas to proportional fractions
                                     // so the output is screen-size independent.
-                                    let size = self.window.as_ref()
+                                    let size = self
+                                        .window
+                                        .as_ref()
                                         .map(|w| w.inner_size())
                                         .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
                                     let ww = size.width as f32;
@@ -3593,12 +3005,18 @@ impl ApplicationHandler for App {
                                     match arboard::Clipboard::new() {
                                         Ok(mut cb) => {
                                             if let Err(e) = cb.set_text(&text) {
-                                                log::error!("[Arrange] Clipboard write failed: {e}");
+                                                log::error!(
+                                                    "[Arrange] Clipboard write failed: {e}"
+                                                );
                                             } else {
-                                                log::info!("[Arrange] Copied to clipboard:\n{text}");
+                                                log::info!(
+                                                    "[Arrange] Copied to clipboard:\n{text}"
+                                                );
                                             }
                                         }
-                                        Err(e) => log::error!("[Arrange] Could not open clipboard: {e}"),
+                                        Err(e) => {
+                                            log::error!("[Arrange] Could not open clipboard: {e}")
+                                        }
                                     }
                                     // Apply deltas to the scene's positions struct and save to JSON.
                                     apply_arrange_to_layout(
@@ -3620,8 +3038,12 @@ impl ApplicationHandler for App {
                                     log::info!(
                                         "[Arrange] Confirmed '{}': Δnx={:.6} Δny={:.6} Δlift={:.3} Δrz={:.2}° Δrx={:.2}° Δry={:.2}°",
                                         state.object_name,
-                                        dnx, dny, state.delta_lift,
-                                        state.delta_rz_deg, state.delta_rx_deg, state.delta_ry_deg,
+                                        dnx,
+                                        dny,
+                                        state.delta_lift,
+                                        state.delta_rz_deg,
+                                        state.delta_rx_deg,
+                                        state.delta_ry_deg,
                                     );
                                     state.delta_px = 0.0;
                                     state.delta_py = 0.0;
@@ -3649,7 +3071,9 @@ impl ApplicationHandler for App {
                                     // cleanly before we overwrite the enum.
                                     escape_pending = true;
                                 }
-                                _ => { handled = false; }
+                                _ => {
+                                    handled = false;
+                                }
                             }
                         } else {
                             handled = false;
@@ -3657,7 +3081,9 @@ impl ApplicationHandler for App {
                         if nudged {
                             // Log the resolved placement (on-disk + staged delta)
                             // so both HUD and log agree on what Enter will commit.
-                            let size = self.window.as_ref()
+                            let size = self
+                                .window
+                                .as_ref()
                                 .map(|w| w.inner_size())
                                 .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
                             let ww = size.width as f32;
@@ -3672,24 +3098,35 @@ impl ApplicationHandler for App {
                             if let Some(p) = sample_arrange_placement(&name, &self.scene) {
                                 let dnx = dpx / ww;
                                 let dny = dpy / wh;
-                                let d_lift_mm = dlift
-                                    * crate::ui::scene_layout::HFRAC_TO_MM
+                                let d_lift_mm = dlift * crate::ui::scene_layout::HFRAC_TO_MM
                                     / crate::ui::scene_layout::CANONICAL_WINDOW_W;
                                 log::info!(
                                     "[Arrange] {} nx={:.4} ny={:.4} lift={:.2}mm rx={:+.1}° ry={:+.1}° rz={:+.1}°",
                                     name,
-                                    p.nx + dnx, p.ny + dny, p.lift_mm + d_lift_mm,
-                                    p.rx_deg + drx, p.ry_deg + dry, p.rz_deg + drz,
+                                    p.nx + dnx,
+                                    p.ny + dny,
+                                    p.lift_mm + d_lift_mm,
+                                    p.rx_deg + drx,
+                                    p.ry_deg + dry,
+                                    p.rz_deg + drz,
                                 );
                             } else {
                                 log::info!(
                                     "[Arrange] {} (group) Δpx={:+.1} Δpy={:+.1} Δlift={:+.1} Δrx={:+.1}° Δry={:+.1}° Δrz={:+.1}°",
-                                    name, dpx, dpy, dlift, drx, dry, drz,
+                                    name,
+                                    dpx,
+                                    dpy,
+                                    dlift,
+                                    drx,
+                                    dry,
+                                    drz,
                                 );
                             }
                         }
                         if escape_pending {
-                            log::info!("[Arrange] Selection cancelled — click another object or use Debug > Arrange Mode to exit");
+                            log::info!(
+                                "[Arrange] Selection cancelled — click another object or use Debug > Arrange Mode to exit"
+                            );
                             self.debug.arrange_mode = Some(None);
                         }
                         if handled {
@@ -3715,9 +3152,8 @@ impl ApplicationHandler for App {
                                 .iter()
                                 .any(|s| matches!(s, Scene::MaterialViewer(_)))
                             {
-                                self.overlay_stack.push(Scene::MaterialViewer(
-                                    MaterialViewerScene::new(true),
-                                ));
+                                self.overlay_stack
+                                    .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
                                 log::info!("[Debug] Opened material viewer (keyboard shortcut)");
                                 if let Some(w) = self.window.as_ref() {
                                     w.request_redraw();
@@ -4143,11 +3579,7 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Command::Screenshot(s)) => {
             asset_path::log_all_assets();
-            let boss_override = s
-                .boss
-                .as_deref()
-                .map(parse_boss_slug)
-                .transpose()?;
+            let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
             let mut run = RunState::new_demo();
             if let Some(kind) = boss_override {
                 force_boss_blind(&mut run, kind);

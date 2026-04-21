@@ -1164,11 +1164,8 @@ impl SmokeDebugOverlay {
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
         let hint_h = (14.0 * scale).max(10.0);
-        let panel_h = title_h
-            + row_gap
-            + SMOKE_ROW_COUNT as f32 * (row_h + row_gap)
-            + hint_h
-            + row_gap * 2.0;
+        let panel_h =
+            title_h + row_gap + SMOKE_ROW_COUNT as f32 * (row_h + row_gap) + hint_h + row_gap * 2.0;
         let panel_x = window_w - panel_w - margin;
         let panel_y = margin;
 
@@ -1315,8 +1312,9 @@ impl SmokeDebugOverlay {
         let hint_y = reset_y + row_h + row_gap;
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, hint_h],
-            text: "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
-                .into(),
+            text:
+                "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
+                    .into(),
             color: [0.55, 0.6, 0.75, 0.9],
             ..Default::default()
         });
@@ -1459,11 +1457,8 @@ impl VolumetricDebugOverlay {
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
         let hint_h = (14.0 * scale).max(10.0);
-        let panel_h = title_h
-            + row_gap
-            + VOL_ROW_COUNT as f32 * (row_h + row_gap)
-            + hint_h
-            + row_gap * 2.0;
+        let panel_h =
+            title_h + row_gap + VOL_ROW_COUNT as f32 * (row_h + row_gap) + hint_h + row_gap * 2.0;
         let panel_x = window_w - panel_w - margin;
         let panel_y = margin;
 
@@ -1610,8 +1605,9 @@ impl VolumetricDebugOverlay {
         let hint_y = reset_y + row_h + row_gap;
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, hint_h],
-            text: "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
-                .into(),
+            text:
+                "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
+                    .into(),
             color: [0.55, 0.6, 0.75, 0.9],
             ..Default::default()
         });

@@ -15,26 +15,23 @@ use crate::core::relic::{RelicId, RelicRenderMaterial, relic_visual};
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
+use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
 use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::decal::{
     CABINET_DECAL_CELL_H, CABINET_DECAL_CELL_W, LabelAlign, load_noto_emoji_font, load_ui_font,
-    rasterize_cabinet_strip_decal, rasterize_label_styled_with_fallback,
-    rasterize_tile_face_decal,
+    rasterize_cabinet_strip_decal, rasterize_label_styled_with_fallback, rasterize_tile_face_decal,
 };
+use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind,
-    DrawCmd,
-    ShowcaseTilePlacement, ShrinePlacement,
-    TallyFanKind, UiFrame, WallStackPlacement,
-    YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, UiFrame,
+    WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lamp_mesh::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh, build_lamp_body_mesh,
     build_lamp_bulb_mesh,
 };
-use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
@@ -42,15 +39,11 @@ use crate::render::lit_mesh::{
 };
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::ofuda_mesh::build_ofuda_mesh;
-use crate::render::tally_stick_mesh::{
-    build_tally_stick_base_mesh, build_tally_stick_tip_mesh,
-};
-use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
+use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::relic_dish::{
-    build_dish_mesh, build_pack_mesh, build_relic_mesh,
-    build_relic_mesh_from_rgba, build_round_dish_mesh, build_shop_action_prop_mesh,
-    build_tent_card_mesh,
+    build_dish_mesh, build_pack_mesh, build_relic_mesh, build_relic_mesh_from_rgba,
+    build_round_dish_mesh, build_shop_action_prop_mesh, build_tent_card_mesh,
 };
 use crate::render::relic_pipeline::spawn_relic_loader;
 use crate::render::ribbon_mesh::build_ribbon_mesh;
@@ -58,16 +51,15 @@ use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
     build_river_mesh,
 };
-use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh,
-    rot_euler_xyz_rad,
-    rot_rz_rx_deg, rot_x_rad, rotation_around_point_x_rad,
-    score_popup_glyph_rot_rad, table_mesh_lay_flat, tile_mesh_local_to_world, translate_rot_scale,
+    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad, rot_rz_rx_deg,
+    rot_x_rad, rotation_around_point_x_rad, score_popup_glyph_rot_rad, table_mesh_lay_flat,
+    tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
+use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
 use crate::render::texture_upload::load_pack_textures;
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
@@ -605,17 +597,17 @@ const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
 //   local X — long face axis  (extent ~1.000) → table-Z (front-back)
 //   local Y — thickness        (extent ~0.424) → world Y (up off table)
 //   local Z — short face axis  (extent ~0.734) → table-X (left-right)
-const LOCAL_X_EXTENT: f32 = 1.000;
-const LOCAL_Y_EXTENT: f32 = 0.424;
-const LOCAL_Z_EXTENT: f32 = 0.734;
+pub(super) const LOCAL_X_EXTENT: f32 = 1.000;
+pub(super) const LOCAL_Y_EXTENT: f32 = 0.424;
+pub(super) const LOCAL_Z_EXTENT: f32 = 0.734;
 
 /// Camera state captured at the end of a frame, for unprojecting cursor
 /// positions into world-space rays in `pick_hand_tile`.
 #[derive(Clone, Copy)]
-struct PickCamera {
-    inv_view_proj: Mat4,
-    viewport_w: f32,
-    viewport_h: f32,
+pub(super) struct PickCamera {
+    pub(super) inv_view_proj: Mat4,
+    pub(super) viewport_w: f32,
+    pub(super) viewport_h: f32,
 }
 
 /// A tile animating away from the hand. Two-phase trajectory: an
@@ -681,7 +673,7 @@ pub struct ProjectionCache {
 /// narrow cord above a wide shade), so we ray-cast against the real mesh
 /// for those objects. Add a variant here when adding a new trimesh pick.
 #[derive(Clone, Copy, Debug)]
-enum TrimeshRef {
+pub(super) enum TrimeshRef {
     LampBody,
 }
 
@@ -872,10 +864,10 @@ pub struct WgpuRenderer {
     /// `pick_hand_tile` cast a world ray through the cursor and intersect it
     /// with each tile's OBB (the normalized mesh's local AABB transformed by
     /// its model matrix). Indexed by hand position; one frame stale.
-    last_pick_models: Vec<(usize, Mat4)>,
+    pub(super) last_pick_models: Vec<(usize, Mat4)>,
     /// Camera state captured at the end of the previous frame, used by
     /// `pick_hand_tile` to unproject the cursor into a world-space ray.
-    last_pick_camera: Option<PickCamera>,
+    pub(super) last_pick_camera: Option<PickCamera>,
     /// Timestamp of the previous frame — used to compute delta time for lerping.
     last_frame: Instant,
     /// Delta time of the *current* frame in seconds (set early in
@@ -1022,12 +1014,12 @@ pub struct WgpuRenderer {
     /// CPU-side triangle lists for the fallback relic box, used by the
     /// trimesh ray-picker when a relic's per-ID mesh isn't loaded yet.
     /// Built once at renderer init from `build_relic_mesh()`.
-    relic_box_tris: Vec<[glam::Vec3; 3]>,
+    pub(super) relic_box_tris: Vec<[glam::Vec3; 3]>,
     /// CPU-side triangle lists per relic, extracted from the same CPU mesh
     /// used to build `relic_meshes`. Drives per-triangle trimesh picking so
     /// the click silhouette matches the visible relic outline instead of a
     /// loose AABB slab.
-    relic_tri_lists: HashMap<RelicId, Vec<[glam::Vec3; 3]>>,
+    pub(super) relic_tri_lists: HashMap<RelicId, Vec<[glam::Vec3; 3]>>,
     /// Pre-allocated per-candle uniform buffers + bind groups (one per
     /// primitive). Indexed by candle slot, then 0=wax/1=wick.
     candle_instances: Vec<[LitMeshInstance; 2]>,
@@ -1040,13 +1032,13 @@ pub struct WgpuRenderer {
     /// each frame for `pick_shop_object` raycasting and the bulk screen-rect
     /// reprojection. The relic id drives per-triangle trimesh picking so the
     /// click silhouette matches the visible relic outline.
-    last_relic_models: Vec<(Mat4, RelicId)>,
+    pub(super) last_relic_models: Vec<(Mat4, RelicId)>,
     /// Per-relic (pick_id, model, relic_id) snapshot for scenes that want
     /// to route clicks to a specific artifact index instead of the
     /// positional order used by `last_relic_models`. Populated from any
     /// `Object3dKind::Relic` draw whose `pick_id` is `Some`. Consumed by
     /// `pick_collection_object`.
-    last_pickable_relic_models: Vec<(u32, Mat4, RelicId)>,
+    pub(super) last_pickable_relic_models: Vec<(u32, Mat4, RelicId)>,
     /// Currently bound relic texture per slot. `Some(id)` means that slot's
     /// bind group already points at the texture for `id`; `None` means the
     /// flat-white fallback. Avoids rebuilding bind groups every frame.
@@ -1091,7 +1083,7 @@ pub struct WgpuRenderer {
     /// CPU-side triangle list for the lamp body, reused for trimesh-accurate
     /// arrange-mode picking so the hit region traces the cord + shade cone
     /// instead of the full [lamp_w, lamp_h, lamp_w] bounding box.
-    lamp_body_tris: Vec<[glam::Vec3; 3]>,
+    pub(super) lamp_body_tris: Vec<[glam::Vec3; 3]>,
     /// Tight local-space AABB half-extents + center-Y offset for the lamp
     /// body trimesh. Used by name-lookup consumers (arrange wireframe,
     /// `debug_object_origin`) that still want a boxy approximation for
@@ -1143,7 +1135,7 @@ pub struct WgpuRenderer {
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
     /// Sell tray model + pick_id, one-frame-stale.
-    last_sell_tray_model: Option<(Mat4, u32)>,
+    pub(super) last_sell_tray_model: Option<(Mat4, u32)>,
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
     /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
     shrine_instances: Vec<LitMeshInstance>,
@@ -1152,7 +1144,7 @@ pub struct WgpuRenderer {
     /// plinth per frame, but the slot pool tolerates more without allocation.
     dora_plinth_instances: Vec<LitMeshInstance>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
-    last_ribbon_models: Vec<Mat4>,
+    pub(super) last_ribbon_models: Vec<Mat4>,
     /// Total number of ribbon draw-slots populated this frame (across all
     /// `ZodiacBatch` cmds). Used by the shadow pass.
     last_ribbon_slot_count: usize,
@@ -1161,10 +1153,10 @@ pub struct WgpuRenderer {
     /// 1 per untextured).
     last_ribbon_batch_slot_counts: Vec<usize>,
     /// Per-talisman world-space model matrices for `pick_shop_object`.
-    last_talisman_models: Vec<Mat4>,
+    pub(super) last_talisman_models: Vec<Mat4>,
     /// World-space `(center, half_extents)` parallel with
     /// `last_aux_dish_rects`, used by `pick_shop_object` for AABB raycasts.
-    last_aux_dish_aabbs: Vec<(glam::Vec3, glam::Vec3)>,
+    pub(super) last_aux_dish_aabbs: Vec<(glam::Vec3, glam::Vec3)>,
 
     // ── Skeuomorphic gameplay HUD meshes (phase 1 infrastructure) ──────
     cabinet_mesh: LitMeshGpu,
@@ -1221,7 +1213,7 @@ pub struct WgpuRenderer {
     primitive_textures:
         HashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
-    last_primitive_pick_models: HashMap<u32, Mat4>,
+    pub(super) last_primitive_pick_models: HashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
     /// (one per axis: 0 = X red, 1 = Y green, 2 = Z blue). Drawn through
     /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
@@ -1229,14 +1221,14 @@ pub struct WgpuRenderer {
     debug_axes_instances: Vec<LitMeshInstance>,
     /// Per-yaku-tablet world-space model matrices for `pick_gameplay_object`.
     /// Parallel with `last_projected_yaku_tablet_rects`.
-    last_yaku_tablet_models: Vec<Mat4>,
+    pub(super) last_yaku_tablet_models: Vec<Mat4>,
     /// Per-wood-tablet world-space model matrices for `pick_gameplay_object`.
     /// Index 0 = sort suit, 1 = sort rank, 2 = play hand.
-    last_wood_tablet_models: Vec<Mat4>,
+    pub(super) last_wood_tablet_models: Vec<Mat4>,
     /// Discard bowl world-space model matrix for `pick_gameplay_object`.
-    last_bowl_model: Option<Mat4>,
+    pub(super) last_bowl_model: Option<Mat4>,
     /// Bronze mirror world-space model matrix for `pick_gameplay_object`.
-    last_mirror_model: Option<Mat4>,
+    pub(super) last_mirror_model: Option<Mat4>,
     /// Per-frame catch-all of "what's this thing under the cursor" entries
     /// used by the debug "Object Hit Test" menu action. Each entry is a
     /// `(name, model, half_extents, center_offset_y)` tuple — the same
@@ -1244,13 +1236,13 @@ pub struct WgpuRenderer {
     /// use, just with a human-readable name attached. Populated as the
     /// renderer walks the frame's draw cmds; consumed by
     /// `pick_debug_object`.
-    last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
+    pub(super) last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
     /// Trimesh pickables for objects whose tight silhouette differs enough
     /// from an AABB that the box feels wrong (lamp cord + cone shade).
     /// `(name, model, triangle_list_ref)` — triangles are stored per mesh
     /// in dedicated renderer fields (e.g. `lamp_body_tris`) and referenced
     /// here by index to avoid per-frame allocation.
-    last_debug_trimesh_pickables: Vec<(String, Mat4, TrimeshRef)>,
+    pub(super) last_debug_trimesh_pickables: Vec<(String, Mat4, TrimeshRef)>,
     /// Canonical scene-path prefix for the currently active scene — e.g.
     /// `"shop"` or `"gameplay"`. Set per-frame by `App` so the renderer can
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
@@ -1279,7 +1271,8 @@ pub struct WgpuRenderer {
     shadow_caster_layout: wgpu::BindGroupLayout,
     /// Bind-group layout for the frame-shared shadow sampling group
     /// (group 2 of every 3D scene pipeline).
-    #[allow(dead_code)] // Layout is consumed into bind groups at init; kept for resource lifetime.
+    #[allow(dead_code)]
+    // Layout is consumed into bind groups at init; kept for resource lifetime.
     shadow_sample_layout: wgpu::BindGroupLayout,
     /// Frame-shared uniform: light_view_proj + (enabled, bias, texel size).
     shadow_globals_buffer: wgpu::Buffer,
@@ -2493,15 +2486,14 @@ impl WgpuRenderer {
         // ── Mountain-haze uniform (density/colour/horizon/drift) ───────────
         // Live-driven from the Volumetric debug overlay; see
         // `set_haze_tuning` below for the per-frame write path.
-        let haze_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("haze-uniform"),
-                contents: bytemuck::bytes_of(&HazeUniform {
-                    color_density: [0.080, 0.105, 0.145, 1.0],
-                    params: [0.55, 1.0, 0.0, 0.0],
-                }),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+        let haze_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("haze-uniform"),
+            contents: bytemuck::bytes_of(&HazeUniform {
+                color_density: [0.080, 0.105, 0.145, 1.0],
+                params: [0.55, 1.0, 0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let haze_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("haze-uniform-layout"),
@@ -2711,34 +2703,35 @@ impl WgpuRenderer {
             ),
         });
 
-        let gradient_quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("gradient-quad-pipeline"),
-            layout: Some(&quad_layout),
-            vertex: wgpu::VertexState {
-                module: &gradient_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[vertex_layout.clone(), gradient_instance_layout],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &gradient_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(depth_ui.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let gradient_quad_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("gradient-quad-pipeline"),
+                layout: Some(&quad_layout),
+                vertex: wgpu::VertexState {
+                    module: &gradient_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[vertex_layout.clone(), gradient_instance_layout],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &gradient_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
 
         // Flame pipeline — 3D billboarded particle fire. The shader
         // reads per-particle world position + age from the instance
@@ -2788,9 +2781,8 @@ impl WgpuRenderer {
             immediate_size: 0,
         });
         let flame_particle_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<
-                crate::render::flame_particles::GpuFlameParticle,
-            >() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<crate::render::flame_particles::GpuFlameParticle>()
+                as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
                 // pos (xyz) + age (w) packed into a vec4 for tidy layout.
@@ -3384,12 +3376,8 @@ impl WgpuRenderer {
             create_scene_prev(&device, format, size.width.max(1), size.height.max(1));
         let (scene_color_texture, scene_color_view) =
             create_scene_color(&device, format, size.width.max(1), size.height.max(1));
-        let (cascade_offscreen_texture, cascade_offscreen_view) = create_cascade_offscreen(
-            &device,
-            format,
-            size.width.max(1),
-            size.height.max(1),
-        );
+        let (cascade_offscreen_texture, cascade_offscreen_view) =
+            create_cascade_offscreen(&device, format, size.width.max(1), size.height.max(1));
         let cascade_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cascade-composite-bg"),
             layout: &cascade_composite_layout,
@@ -4107,8 +4095,7 @@ impl WgpuRenderer {
         let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
         let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
         let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
-        let dora_plinth_mesh =
-            LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
+        let dora_plinth_mesh = LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
         let lamp_body_cpu = build_lamp_body_mesh();
         let lamp_body_tris: Vec<[glam::Vec3; 3]> = lamp_body_cpu
             .indices
@@ -4176,7 +4163,11 @@ impl WgpuRenderer {
             );
             primitive_meshes.insert(
                 MeshId::BeveledSlab,
-                std::sync::Arc::new(LitMeshGpu::new(&device, &build_plaque_mesh(), "primitive-slab")),
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_plaque_mesh(),
+                    "primitive-slab",
+                )),
             );
             primitive_meshes.insert(
                 MeshId::CabinetColumn,
@@ -4387,12 +4378,9 @@ impl WgpuRenderer {
             LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
         let mut bug_body_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
         let mut bug_wing_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
-        let mut bug_wing_r_instances: Vec<LitMeshInstance> =
-            Vec::with_capacity(MAX_BUG_SLOTS);
-        let mut bug_wing_blur_instances: Vec<LitMeshInstance> =
-            Vec::with_capacity(MAX_BUG_SLOTS);
-        let mut bug_wing_blur_r_instances: Vec<LitMeshInstance> =
-            Vec::with_capacity(MAX_BUG_SLOTS);
+        let mut bug_wing_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
+        let mut bug_wing_blur_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
+        let mut bug_wing_blur_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
         for _ in 0..MAX_BUG_SLOTS {
             bug_body_instances.push(LitMeshInstance::new(
                 &device,
@@ -4835,7 +4823,6 @@ impl WgpuRenderer {
         pending
     }
 
-
     /// Begin a GPU pass timing capture for the next `frames` frames. The
     /// debug menu binds this to the "Profile GPU…" entry. Results are
     /// emitted via `log::info!` once the capture finishes; if the adapter
@@ -5063,661 +5050,6 @@ impl WgpuRenderer {
         &self.proj
     }
 
-    /// Cast a ray from the camera through the cursor (in physical pixels,
-    /// matching the renderer's surface size) and return the index of the
-    /// closest hand tile whose OBB the ray hits, if any.
-    ///
-    /// The intersection is done in each tile's *local* mesh space: the world
-    /// ray is transformed by the inverse model matrix and tested against the
-    /// normalized mesh's local AABB (centered at origin, half-extents
-    /// `LOCAL_*_EXTENT / 2`). Model matrices include
-    /// [`crate::render::table_transform::tile_mesh_local_to_world`].
-    ///
-    /// Uses the previous frame's snapshot, so this is consistent with what
-    /// the user actually saw last frame (one-frame-stale, like the projected
-    /// hand rects).
-    pub fn pick_hand_tile(&self, cursor_x: f32, cursor_y: f32) -> Option<usize> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_pick_models.is_empty() {
-            return None;
-        }
-
-        // Cursor → NDC. wgpu uses z ∈ [0, 1] (matches Mat4::perspective_rh).
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-
-        // Unproject near and far points to world space.
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        // Local AABB of the normalized tile mesh.
-        let hx = LOCAL_X_EXTENT * 0.5;
-        let hy = LOCAL_Y_EXTENT * 0.5;
-        let hz = LOCAL_Z_EXTENT * 0.5;
-
-        let mut best: Option<(usize, f32)> = None;
-        for &(i, model) in &self.last_pick_models {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-
-            // Slab test against [-h, h] on each axis.
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            let bounds = [(lo.x, ld.x, hx), (lo.y, ld.y, hy), (lo.z, ld.z, hz)];
-            let mut hit = true;
-            for (o, d, h) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < -h || o > h {
-                        hit = false;
-                        break;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (-h - o) * inv_d;
-                    let mut t2 = (h - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        hit = false;
-                        break;
-                    }
-                }
-            }
-            if !hit {
-                continue;
-            }
-            // Ignore boxes that are entirely behind the camera.
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 {
-                continue;
-            }
-            match best {
-                Some((_, bt)) if t_enter >= bt => {}
-                _ => best = Some((i, t_enter)),
-            }
-        }
-        best.map(|(i, _)| i)
-    }
-
-    /// Cast a ray from the camera through the cursor and return the closest
-    /// shop object hit. Uses the same one-frame-stale snapshot pattern as
-    /// `pick_hand_tile`.
-    pub fn pick_shop_object(&self, cursor_x: f32, cursor_y: f32) -> Option<ShopHit> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_relic_models.is_empty()
-            && self.last_ribbon_models.is_empty()
-            && self.last_talisman_models.is_empty()
-            && self.proj.aux_dish_rects.is_empty()
-        {
-            return None;
-        }
-
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        // Slab test against the unit cube [-0.5, 0.5]^3 in local space, after
-        // transforming the world ray by the inverse model matrix. Used for
-        // both relics (relic_box_mesh) and ribbons whose mesh local bounds
-        // sit in [-0.5,0.5] x [-1,0] x ~0; we test the unit cube and accept
-        // false positives near the empty top of the ribbon (small enough that
-        // it doesn't matter for hover).
-        let slab_test = |model: glam::Mat4, hx: f32, hy: f32, hz: f32, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -hx, hx),
-                (lo.y, ld.y, -hy + oy, hy + oy),
-                (lo.z, ld.z, -hz, hz),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
-
-        let mut best: Option<(ShopHit, f32)> = None;
-        let mut consider = |hit: ShopHit, t: f32| match best {
-            Some((_, bt)) if t >= bt => {}
-            _ => best = Some((hit, t)),
-        };
-
-        // Relics: per-triangle trimesh raycast against the silhouette-
-        // derived mesh (falls back to the relic-box tris until the per-ID
-        // mesh finishes loading). Picks the real outline, not a loose AABB.
-        for (i, (model, rid)) in self.last_relic_models.iter().enumerate() {
-            let tris = self.relic_tris(*rid);
-            if let Some(t) =
-                Self::trimesh_hit_t_tris(tris, *model, world_origin, world_dir)
-            {
-                consider(ShopHit::Relic(i), t);
-            }
-        }
-        // Ribbons — local bounds x ∈ [-0.5,0.5], y ∈ [-1, 0], z ∈ [-0.05, 0.05].
-        // Express as half-extents (0.5, 0.5, 0.5) centered at y=-0.5 via offset.
-        for (i, model) in self.last_ribbon_models.iter().enumerate() {
-            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, -0.5) {
-                consider(ShopHit::Ribbon(i), t);
-            }
-        }
-        // Talismans — local AABB from TALISMAN_LOCAL_HALF, centered at origin.
-        for (i, model) in self.last_talisman_models.iter().enumerate() {
-            if let Some(t) = slab_test(
-                *model,
-                TALISMAN_LOCAL_HALF[0],
-                TALISMAN_LOCAL_HALF[1],
-                TALISMAN_LOCAL_HALF[2],
-                0.0,
-            ) {
-                consider(ShopHit::Talisman(i), t);
-            }
-        }
-        // Shop action props (Leave / Reroll counter-end) — any
-        // Primitive with a pick_id that isn't already covered by
-        // `aux_dish_rects` falls through here. The shop scene maps
-        // `ShopHit::Dish(pid)` to the right action downstream.
-        for (pid, model) in &self.last_primitive_pick_models {
-            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(*pid), t);
-            }
-        }
-        // Sell tray.
-        if let Some((model, pid)) = self.last_sell_tray_model {
-            if let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(pid), t);
-            }
-        }
-        // Auxiliary dishes (world-space AABB picks).
-        for (i, (id, _rect)) in self.proj.aux_dish_rects.iter().enumerate() {
-            let Some(pid) = id else { continue };
-            let Some((center, half)) = self.last_aux_dish_aabbs.get(i) else {
-                continue;
-            };
-            // World-space AABB slab test.
-            let bounds = [
-                (
-                    world_origin.x,
-                    world_dir.x,
-                    center.x - half.x,
-                    center.x + half.x,
-                ),
-                (
-                    world_origin.y,
-                    world_dir.y,
-                    center.y - half.y,
-                    center.y + half.y,
-                ),
-                (
-                    world_origin.z,
-                    world_dir.z,
-                    center.z - half.z,
-                    center.z + half.z,
-                ),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            let mut hit = true;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        hit = false;
-                        break;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        hit = false;
-                        break;
-                    }
-                }
-            }
-            if !hit {
-                continue;
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 {
-                continue;
-            }
-            consider(ShopHit::Dish(*pid), t_enter);
-        }
-
-        // Pack boxes — 2D projected rect hit test (packs are few, so a
-        // simple screen-space check is sufficient).
-        for (rect, pick_id) in &self.proj.pack_rects {
-            let Some(pid) = pick_id else { continue };
-            let [rx, ry, rw, rh] = *rect;
-            if cursor_x >= rx && cursor_x <= rx + rw && cursor_y >= ry && cursor_y <= ry + rh {
-                // Use a small t value so nearby 3D picks can still win.
-                consider(ShopHit::TilePack(*pid), 0.5);
-            }
-        }
-
-        best.map(|(h, _)| h)
-    }
-
-    /// Cast a ray from the camera through the cursor and return the
-    /// `pick_id` of the closest collection-scene relic the ray passes
-    /// through. Per-triangle trimesh test against the silhouette-extruded
-    /// relic mesh, so clicks that land in the empty space around a relic's
-    /// shape don't register.
-    pub fn pick_collection_object(&self, cursor_x: f32, cursor_y: f32) -> Option<u32> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_pickable_relic_models.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-        let mut best: Option<(u32, f32)> = None;
-        for (pid, model, rid) in &self.last_pickable_relic_models {
-            let tris = self.relic_tris(*rid);
-            if let Some(t) =
-                Self::trimesh_hit_t_tris(tris, *model, world_origin, world_dir)
-            {
-                match best {
-                    Some((_, bt)) if t >= bt => {}
-                    _ => best = Some((*pid, t)),
-                }
-            }
-        }
-        best.map(|(pid, _)| pid)
-    }
-
-    /// Cast a ray from the camera through the cursor and return the closest
-    /// gameplay-scene object hit (yaku tablet, wood action tablet, or
-    /// discard bowl). One-frame-stale snapshot pattern, mirroring
-    /// `pick_hand_tile` and `pick_shop_object`. The per-class local AABBs
-    /// are precomputed mesh constants — there is no per-frame screen-space
-    /// projection in the hit-test path.
-    pub fn pick_gameplay_object(&self, cursor_x: f32, cursor_y: f32) -> Option<GameplayPick> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_yaku_tablet_models.is_empty()
-            && self.last_wood_tablet_models.is_empty()
-            && self.last_bowl_model.is_none()
-            && self.last_mirror_model.is_none()
-        {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-        // Local-space slab test against an AABB centered at `(0, oy, 0)` with
-        // half-extents `(hx, hy, hz)`. Returns the entry distance along the
-        // world ray when the ray hits the box.
-        let slab_test = |model: glam::Mat4, hx: f32, hy: f32, hz: f32, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -hx, hx),
-                (lo.y, ld.y, -hy + oy, hy + oy),
-                (lo.z, ld.z, -hz, hz),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
-
-        let mut best: Option<(GameplayPick, f32)> = None;
-        let mut consider = |hit: GameplayPick, t: f32| match best {
-            Some((_, bt)) if t >= bt => {}
-            _ => best = Some((hit, t)),
-        };
-
-        // Yaku tablets — unit cube `[-0.5, 0.5]^3` (push_box convention).
-        for (i, model) in self.last_yaku_tablet_models.iter().enumerate() {
-            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
-                consider(GameplayPick::YakuTablet(i), t);
-            }
-        }
-        // Wood action tablets — same unit cube as the yaku tablets.
-        for (i, model) in self.last_wood_tablet_models.iter().enumerate() {
-            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
-                consider(GameplayPick::WoodTablet(i), t);
-            }
-        }
-        // Discard bowl — tighter local AABB from the bowl mesh constants.
-        if let Some(model) = self.last_bowl_model.as_ref() {
-            if let Some(t) = slab_test(
-                *model,
-                BOWL_LOCAL_HALF[0],
-                BOWL_LOCAL_HALF[1],
-                BOWL_LOCAL_HALF[2],
-                BOWL_LOCAL_CENTER_Y,
-            ) {
-                consider(GameplayPick::DiscardBowl, t);
-            }
-        }
-        // Bronze mirror — flat disc local AABB from the mirror mesh constants.
-        if let Some(model) = self.last_mirror_model.as_ref() {
-            if let Some(t) = slab_test(
-                *model,
-                MIRROR_LOCAL_HALF[0],
-                MIRROR_LOCAL_HALF[1],
-                MIRROR_LOCAL_HALF[2],
-                MIRROR_LOCAL_CENTER_Y,
-            ) {
-                consider(GameplayPick::BronzeMirror, t);
-            }
-        }
-
-        best.map(|(h, _)| h)
-    }
-
-    /// Resolve the cached triangle list for a relic. Falls back to the
-    /// fallback box mesh when the per-relic silhouette mesh hasn't finished
-    /// loading yet (the first few frames after the relic texture shows up).
-    fn relic_tris(&self, relic_id: RelicId) -> &[[glam::Vec3; 3]] {
-        self.relic_tri_lists
-            .get(&relic_id)
-            .map(|v| v.as_slice())
-            .unwrap_or(&self.relic_box_tris)
-    }
-
-    /// Möller–Trumbore ray vs. triangle list, with tris supplied directly
-    /// rather than looked up via `TrimeshRef`. Used for relics where the
-    /// mesh varies per-ID — the `TrimeshRef` enum stays single-variant so
-    /// the debug arrange overlay doesn't need to know about relic dispatch.
-    fn trimesh_hit_t_tris(
-        tris: &[[glam::Vec3; 3]],
-        model: glam::Mat4,
-        world_origin: glam::Vec3,
-        world_dir: glam::Vec3,
-    ) -> Option<f32> {
-        let inv = model.inverse();
-        let lo = inv.transform_point3(world_origin);
-        let ld = inv.transform_vector3(world_dir);
-        const EPS: f32 = 1e-7;
-        let mut best: Option<f32> = None;
-        for [a, b, c] in tris {
-            let e1 = *b - *a;
-            let e2 = *c - *a;
-            let p = ld.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < EPS {
-                continue;
-            }
-            let inv_det = 1.0 / det;
-            let s = lo - *a;
-            let u = s.dot(p) * inv_det;
-            if !(0.0..=1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = ld.dot(q) * inv_det;
-            if v < 0.0 || u + v > 1.0 {
-                continue;
-            }
-            let t = e2.dot(q) * inv_det;
-            if t > EPS {
-                best = Some(match best {
-                    Some(bt) if bt <= t => bt,
-                    _ => t,
-                });
-            }
-        }
-        best
-    }
-
-    /// Möller–Trumbore ray vs. triangle list in the mesh's local space.
-    /// Returns the smallest positive ray-parameter `t` (distance in local
-    /// units — the caller's world-space distance differs by the model
-    /// matrix's scale, but that still preserves depth ordering across
-    /// other same-model hits, which is all the picker compares against).
-    fn trimesh_hit_t(
-        &self,
-        model: glam::Mat4,
-        mesh: TrimeshRef,
-        world_origin: glam::Vec3,
-        world_dir: glam::Vec3,
-    ) -> Option<f32> {
-        let tris: &[[glam::Vec3; 3]] = match mesh {
-            TrimeshRef::LampBody => &self.lamp_body_tris,
-        };
-        let inv = model.inverse();
-        let lo = inv.transform_point3(world_origin);
-        let ld = inv.transform_vector3(world_dir);
-        const EPS: f32 = 1e-7;
-        let mut best: Option<f32> = None;
-        for [a, b, c] in tris {
-            let e1 = *b - *a;
-            let e2 = *c - *a;
-            let p = ld.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < EPS {
-                continue;
-            }
-            let inv_det = 1.0 / det;
-            let s = lo - *a;
-            let u = s.dot(p) * inv_det;
-            if !(0.0..=1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = ld.dot(q) * inv_det;
-            if v < 0.0 || u + v > 1.0 {
-                continue;
-            }
-            let t = e2.dot(q) * inv_det;
-            if t > EPS {
-                best = Some(match best {
-                    Some(bt) if bt <= t => bt,
-                    _ => t,
-                });
-            }
-        }
-        best
-    }
-
-    /// Debug "what is the cursor over?" picker. Walks
-    /// `last_debug_pickables` (populated as the renderer processes the
-    /// frame's draw cmds) and returns the closest hit's name. Hand tiles
-    /// are checked separately because they have their own pick path.
-    /// Returns `None` if nothing was hit.
-    pub fn pick_debug_object(&self, cursor_x: f32, cursor_y: f32) -> Option<String> {
-        // Hand tiles first — they have their own dedicated picker that
-        // already handles per-tile OBBs.
-        if let Some(idx) = self.pick_hand_tile(cursor_x, cursor_y) {
-            return Some(format!("gameplay.hand.tile[{}]", idx));
-        }
-
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -half.x, half.x),
-                (lo.y, ld.y, -half.y + oy, half.y + oy),
-                (lo.z, ld.z, -half.z, half.z),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
-
-        let mut best: Option<(&str, f32)> = None;
-        for (name, model, half, oy) in &self.last_debug_pickables {
-            if let Some(t) = slab_test(*model, *half, *oy) {
-                match best {
-                    Some((_, bt)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t)),
-                }
-            }
-        }
-        for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best {
-                    Some((_, bt)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t)),
-                }
-            }
-        }
-        best.map(|(n, _)| n.to_string())
-    }
-
     /// Set (or clear) the arrange-mode model-matrix override. Called each frame
     /// from `App` when arrange mode has a selected object. Pass `None` to clear.
     pub fn set_arrange_override(&mut self, ov: Option<DebugArrangeOverride>) {
@@ -5749,11 +5081,8 @@ impl WgpuRenderer {
             color_density: [r, g, b, density.max(0.0)],
             params: [horizon_y.clamp(0.0, 1.0), drift_speed.max(0.0), 0.0, 0.0],
         };
-        self.queue.write_buffer(
-            &self.haze_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&uniform),
-        );
+        self.queue
+            .write_buffer(&self.haze_uniform_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
     /// Replace the committed-rotation map (used to apply each Placement's
@@ -5817,7 +5146,12 @@ impl WgpuRenderer {
             let nx = r.transform_vector3(model.x_axis.truncate());
             let ny = r.transform_vector3(model.y_axis.truncate());
             let nz = r.transform_vector3(model.z_axis.truncate());
-            Mat4::from_cols(nx.extend(0.0), ny.extend(0.0), nz.extend(0.0), t.extend(1.0))
+            Mat4::from_cols(
+                nx.extend(0.0),
+                ny.extend(0.0),
+                nz.extend(0.0),
+                t.extend(1.0),
+            )
         } else {
             model
         };
@@ -5825,12 +5159,7 @@ impl WgpuRenderer {
         if let Some(ov) = staged {
             let dt = glam::Vec3::new(ov.delta_px, -ov.delta_py, ov.delta_lift);
             let t = model.w_axis.truncate() + dt;
-            model = Mat4::from_cols(
-                model.x_axis,
-                model.y_axis,
-                model.z_axis,
-                t.extend(1.0),
-            );
+            model = Mat4::from_cols(model.x_axis, model.y_axis, model.z_axis, t.extend(1.0));
         }
         model
     }
@@ -5871,189 +5200,6 @@ impl WgpuRenderer {
             .iter()
             .find(|(n, _, _)| n == name)
             .map(|(_, m, _)| m.transform_point3(glam::Vec3::ZERO))
-    }
-
-    /// Raycast the cursor ray against registered pickables and return the
-    /// world-space hit point of the nearest intersection. Used by arrange
-    /// mode's click-to-move so teleport targets land on actual geometry.
-    pub fn pick_debug_world_point(&self, cursor_x: f32, cursor_y: f32) -> Option<glam::Vec3> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
-            return None;
-        }
-        let ndc_x = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ndc_y = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -half.x, half.x),
-                (lo.y, ld.y, -half.y + oy, half.y + oy),
-                (lo.z, ld.z, -half.z, half.z),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
-
-        let mut best_t: Option<f32> = None;
-        for (_n, model, half, oy) in &self.last_debug_pickables {
-            if let Some(t) = slab_test(*model, *half, *oy) {
-                match best_t {
-                    Some(bt) if t > bt => {}
-                    _ => best_t = Some(t),
-                }
-            }
-        }
-        for (_n, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best_t {
-                    Some(bt) if t > bt => {}
-                    _ => best_t = Some(t),
-                }
-            }
-        }
-        best_t.map(|t| world_origin + world_dir * t)
-    }
-
-    /// position and rotation from the object's current transform.
-    /// Hand-tile hits return `None` for the model matrix (they don't have a
-    /// single rigid placement matrix available here).
-    pub fn pick_debug_object_with_model(
-        &self,
-        cursor_x: f32,
-        cursor_y: f32,
-    ) -> Option<(String, Option<glam::Mat4>)> {
-        // Hand tiles: clicking any tile selects the whole strip as
-        // `gameplay.hand.strip` so arrange mode can move/rotate all tiles
-        // together as a group.
-        if self.pick_hand_tile(cursor_x, cursor_y).is_some() {
-            let target = "gameplay.hand.strip";
-            let model = self
-                .last_debug_pickables
-                .iter()
-                .find(|(n, _, _, _)| n == target)
-                .map(|(_, m, _, _)| *m);
-            return Some((target.to_string(), model));
-        }
-
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -half.x, half.x),
-                (lo.y, ld.y, -half.y + oy, half.y + oy),
-                (lo.z, ld.z, -half.z, half.z),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
-
-        let mut best: Option<(&str, f32, glam::Mat4)> = None;
-        for (name, model, half, oy) in &self.last_debug_pickables {
-            if let Some(t) = slab_test(*model, *half, *oy) {
-                match best {
-                    Some((_, bt, _)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t, *model)),
-                }
-            }
-        }
-        for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best {
-                    Some((_, bt, _)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t, *model)),
-                }
-            }
-        }
-        best.map(|(n, _, m)| (n.to_string(), Some(m)))
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -6115,20 +5261,21 @@ impl WgpuRenderer {
         );
         self.cascade_offscreen_texture = cot;
         self.cascade_offscreen_view = cov;
-        self.cascade_composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cascade-composite-bg"),
-            layout: &self.cascade_composite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.cascade_offscreen_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.cascade_composite_sampler),
-                },
-            ],
-        });
+        self.cascade_composite_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cascade-composite-bg"),
+                layout: &self.cascade_composite_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.cascade_offscreen_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.cascade_composite_sampler),
+                    },
+                ],
+            });
         self.bloom_ping_texture.destroy();
         self.bloom_pong_texture.destroy();
         let bloom_w = (new_size.width.max(1) / 2).max(1);
@@ -6351,9 +5498,9 @@ impl WgpuRenderer {
         let frame_texture: &wgpu::Texture = match (&surface_frame, &self.target) {
             (Some(sf), _) => &sf.texture,
             (None, RenderTarget::Offscreen { texture, .. }) => texture,
-            (None, RenderTarget::Surface(_)) => unreachable!(
-                "Surface target always produces a surface_frame or early-returns"
-            ),
+            (None, RenderTarget::Surface(_)) => {
+                unreachable!("Surface target always produces a surface_frame or early-returns")
+            }
         };
         let view = frame_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let scene_view = &self.scene_color_view;
@@ -6447,11 +5594,7 @@ impl WgpuRenderer {
         self.queue.write_buffer(
             &self.spot_lights_buffer,
             0,
-            bytemuck::bytes_of(&SpotLightsBuf::from_lights(
-                &frame.spot_lights,
-                pl_w,
-                pl_h,
-            )),
+            bytemuck::bytes_of(&SpotLightsBuf::from_lights(&frame.spot_lights, pl_w, pl_h)),
         );
 
         // Advance departing-tile timers. The two-phase trajectory is
@@ -6698,8 +5841,8 @@ impl WgpuRenderer {
                     if falloff <= 0.0 {
                         continue;
                     }
-                    wind_world += glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2])
-                        * falloff;
+                    wind_world +=
+                        glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]) * falloff;
                 }
                 // Flame-relative wind: normalise against a reference
                 // per-candle velocity so neighbouring candles react to
@@ -7202,7 +6345,7 @@ impl WgpuRenderer {
             RelicIconDraw(usize),
             FluidSmoke,
             // Skeuomorphic gameplay HUD (phase 1).
-            ShowcaseTileBatch(usize),                   // index into `showcase_tile_batches`
+            ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
             Object3dBatch { start: usize, end: usize }, // range into `object3d_draw_list`
         }
 
@@ -7386,15 +6529,15 @@ impl WgpuRenderer {
                             count: 0,
                         });
                     } else {
-                        let buf = self.device.create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
-                                label: Some("flame-particles"),
-                                contents: bytemuck::cast_slice(
-                                    &self.flame_particle_staging[..count],
-                                ),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            },
-                        );
+                        let buf =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("flame-particles"),
+                                    contents: bytemuck::cast_slice(
+                                        &self.flame_particle_staging[..count],
+                                    ),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
                         let buf_idx = flame_buffers.len();
                         flame_buffers.push(buf);
                         ops.push(RenderOp::FlameBatch {
@@ -7924,8 +7067,10 @@ impl WgpuRenderer {
                             }
                             let inst = &mut self.cabinet_instances[body_slot];
                             if inst.decal_texture.is_none() || inst.decal_label_hash != hash {
-                                let labels: [&str; 6] = std::array::from_fn(|i| face_labels[i].as_str());
-                                let rgba = rasterize_cabinet_strip_decal(labels, self.ui_font.as_ref());
+                                let labels: [&str; 6] =
+                                    std::array::from_fn(|i| face_labels[i].as_str());
+                                let rgba =
+                                    rasterize_cabinet_strip_decal(labels, self.ui_font.as_ref());
                                 inst.set_decal(
                                     &self.device,
                                     &self.queue,
@@ -7976,7 +7121,7 @@ impl WgpuRenderer {
                             silhouette,
                         } => {
                             use crate::render::primitive::{
-                                resolve_material, shape_orientation, MeshId,
+                                MeshId, resolve_material, shape_orientation,
                             };
                             // Slot bookkeeping is per-shape so two
                             // primitives of different shapes don't
@@ -7992,7 +7137,10 @@ impl WgpuRenderer {
                             // Metal coin) work.
                             let (albedo_v, relief_v) = match self.primitive_textures.get(shape) {
                                 Some((a, r)) => (a, r),
-                                None => (&self.lit_mesh_white_view, &self.lit_mesh_relief_default_view),
+                                None => (
+                                    &self.lit_mesh_white_view,
+                                    &self.lit_mesh_relief_default_view,
+                                ),
                             };
                             let pool = self
                                 .primitive_instances
@@ -8017,10 +7165,9 @@ impl WgpuRenderer {
                                     &decal_spec.layout,
                                     obj.extents,
                                 );
-                                let label_hash =
-                                    tablet_label_hash(&decal_spec.text, dw, dh);
-                                let inst = &mut self.primitive_instances.get_mut(shape).unwrap()
-                                    [slot_i];
+                                let label_hash = tablet_label_hash(&decal_spec.text, dw, dh);
+                                let inst =
+                                    &mut self.primitive_instances.get_mut(shape).unwrap()[slot_i];
                                 if inst.decal_texture.is_none()
                                     || inst.decal_label_hash != label_hash
                                     || inst.decal_size != (dw, dh)
@@ -8066,23 +7213,22 @@ impl WgpuRenderer {
                             // without an explicit arrange_name,
                             // synthesise the legacy plaque name so
                             // saved arrange_overrides.json still works.
-                            let arrange_name: String =
-                                if let Some(name) = obj.arrange_name {
-                                    name.to_string()
-                                } else if *shape == MeshId::BeveledSlab {
-                                    match (self.active_scene_key, slot_i) {
-                                        (Some("gameplay"), 0) => {
-                                            "gameplay.score_panel.plaque".to_string()
-                                        }
-                                        (Some("gameplay"), 1) => {
-                                            "gameplay.score_panel.scoring_placard".to_string()
-                                        }
-                                        (Some("shop"), i) => format!("shop.plaque[{i}]"),
-                                        (_, i) => format!("plaque[{i}]"),
+                            let arrange_name: String = if let Some(name) = obj.arrange_name {
+                                name.to_string()
+                            } else if *shape == MeshId::BeveledSlab {
+                                match (self.active_scene_key, slot_i) {
+                                    (Some("gameplay"), 0) => {
+                                        "gameplay.score_panel.plaque".to_string()
                                     }
-                                } else {
-                                    format!("primitive.{:?}[{}]", shape, slot_i)
-                                };
+                                    (Some("gameplay"), 1) => {
+                                        "gameplay.score_panel.scoring_placard".to_string()
+                                    }
+                                    (Some("shop"), i) => format!("shop.plaque[{i}]"),
+                                    (_, i) => format!("plaque[{i}]"),
+                                }
+                            } else {
+                                format!("primitive.{:?}[{}]", shape, slot_i)
+                            };
                             let model = self.apply_arrange_override(&arrange_name, model);
                             if let Some(pid) = pick_id {
                                 self.last_primitive_pick_models.insert(*pid, model);
@@ -8154,12 +7300,9 @@ impl WgpuRenderer {
                                 mx_y = mx_y.max(sy);
                             }
                             if *shape == MeshId::BeveledSlab {
-                                self.proj.plaque_rects.push([
-                                    mn_x,
-                                    mn_y,
-                                    mx_x - mn_x,
-                                    mx_y - mn_y,
-                                ]);
+                                self.proj
+                                    .plaque_rects
+                                    .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
                             }
                             // Dish-shaped primitives feed the pick/focus
                             // `aux_dish_rects` pipeline (shop trays,
@@ -8174,17 +7317,11 @@ impl WgpuRenderer {
                                 *shape,
                                 MeshId::DiscSquare | MeshId::DiscRound | MeshId::ShopActionProp
                             ) {
-                                self.proj.aux_dish_rects.push((
-                                    *pick_id,
-                                    [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y],
-                                ));
-                                let center = pixel_to_world(
-                                    w,
-                                    h,
-                                    obj.pos[0],
-                                    obj.pos[1],
-                                    obj.pos[2],
-                                );
+                                self.proj
+                                    .aux_dish_rects
+                                    .push((*pick_id, [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]));
+                                let center =
+                                    pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
                                 let half = glam::Vec3::new(
                                     obj.extents[0] * 0.5,
                                     obj.extents[1] * 0.5,
@@ -8355,15 +7492,19 @@ impl WgpuRenderer {
                             // button), publish the rect + model into
                             // the primitive-pick channels.
                             if let Some(pid) = pick_id {
-                                self.proj.aux_dish_rects.push((
-                                    Some(*pid),
-                                    project_unit_cube_rect(model),
-                                ));
+                                self.proj
+                                    .aux_dish_rects
+                                    .push((Some(*pid), project_unit_cube_rect(model)));
                                 self.last_primitive_pick_models.insert(*pid, model);
                             }
                             object3d_draw_list.push((DrawKind::WoodTablet, slot_i));
                         }
-                        Object3dKind::Relic { relic_id, glow, silhouette, pick_id } => {
+                        Object3dKind::Relic {
+                            relic_id,
+                            glow,
+                            silhouette,
+                            pick_id,
+                        } => {
                             if obj3d_relic_slot >= MAX_RELIC_SLOTS {
                                 continue;
                             }
@@ -8379,7 +7520,11 @@ impl WgpuRenderer {
                             };
                             let model = self.apply_arrange_override(&relic_arr_name, model);
                             // obj.rotation already encodes pitch/roll; extents are full.
-                            let g = if *silhouette { 0.0 } else { glow.clamp(0.0, 1.0) };
+                            let g = if *silhouette {
+                                0.0
+                            } else {
+                                glow.clamp(0.0, 1.0)
+                            };
                             let base_color = if *silhouette {
                                 // Silhouette tint: the scene controls
                                 // this via `obj.color`. Collection scene
@@ -8516,8 +7661,7 @@ impl WgpuRenderer {
                             let slot_i = obj3d_pack_slot;
                             obj3d_pack_slot += 1;
                             let _ = slot_i;
-                            let pack_arr_name =
-                                obj.arrange_name.unwrap_or("shop.for_sale.packs");
+                            let pack_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.packs");
                             let model = self.apply_arrange_override(pack_arr_name, model);
                             let material = MaterialParams {
                                 kind: MaterialKind::Foil,
@@ -9012,8 +8156,7 @@ impl WgpuRenderer {
                                 // box with rim top at +0.5 and recess at +0.2;
                                 // we shrink the card to fit inside the rim and
                                 // sit on the recessed floor.
-                                let (scale, rot, trans) =
-                                    model.to_scale_rotation_translation();
+                                let (scale, rot, trans) = model.to_scale_rotation_translation();
                                 // Card footprint: 60% of rim diameter, height
                                 // ~70% of rim depth.
                                 // Card height is decoupled from the (very
@@ -9033,12 +8176,10 @@ impl WgpuRenderer {
                                 // card stands toward the rear of the dish
                                 // instead of centered in the recess.
                                 let local_floor = glam::Vec3::new(0.0, 0.55, -0.15);
-                                let world_floor =
-                                    trans + rot * (local_floor * scale);
+                                let world_floor = trans + rot * (local_floor * scale);
                                 // Yaw the card 100° around world +Z so the
                                 // crease faces the camera at a slight angle.
-                                let yaw =
-                                    glam::Quat::from_rotation_z(100.0_f32.to_radians());
+                                let yaw = glam::Quat::from_rotation_z(100.0_f32.to_radians());
                                 let card_rot = yaw * rot;
                                 let card_model = Mat4::from_scale_rotation_translation(
                                     card_scale,
@@ -9204,8 +8345,7 @@ impl WgpuRenderer {
                             self.bug_wing_blur_r_instances[slot].write_uniform_tinted(
                                 &self.queue,
                                 view_proj_arr,
-                                bug_model
-                                    * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0)),
+                                bug_model * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0)),
                                 blur_mat,
                                 blur_tint,
                             );
@@ -9237,10 +8377,7 @@ impl WgpuRenderer {
                             let target = obj.hover_target.clamp(0.0, 1.0);
                             let anim_id = if obj.anim_id != 0 { obj.anim_id } else { 2 };
                             let k = 1.0 - (-14.0 * self.frame_dt).exp();
-                            let e = self
-                                .obj3d_hover_state
-                                .entry(anim_id)
-                                .or_insert(0.0);
+                            let e = self.obj3d_hover_state.entry(anim_id).or_insert(0.0);
                             *e += (target - *e) * k;
                             let anim = *e;
                             let lift = anim * obj.extents[1] * 0.15;
@@ -9257,10 +8394,8 @@ impl WgpuRenderer {
                                 rot_rz_rx_deg(tilt_deg, *rotation_z_deg),
                                 glam::Vec3::from(obj.extents),
                             );
-                            let hover_model = self.apply_arrange_override(
-                                "gameplay.action_bar.mirror",
-                                hover_model,
-                            );
+                            let hover_model = self
+                                .apply_arrange_override("gameplay.action_bar.mirror", hover_model);
                             self.mirror_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -9305,16 +8440,14 @@ impl WgpuRenderer {
                                         cpu,
                                         &format!("glyph-{}", label),
                                     );
-                                    self.extruded_glyph_meshes
-                                        .insert(label.clone(), gpu);
+                                    self.extruded_glyph_meshes.insert(label.clone(), gpu);
                                 } else {
                                     continue;
                                 }
                             }
                             let slot_i = obj3d_glyph_slot;
                             obj3d_glyph_slot += 1;
-                            let g_center =
-                                pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
+                            let g_center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
                             let glyph_model = translate_rot_scale(
                                 g_center,
                                 score_popup_glyph_rot_rad(
@@ -9323,17 +8456,15 @@ impl WgpuRenderer {
                                 ),
                                 glam::Vec3::splat(*g_scale),
                             );
-                            let glyph_model = self
-                                .apply_arrange_override("gameplay.score_popup", glyph_model);
+                            let glyph_model =
+                                self.apply_arrange_override("gameplay.score_popup", glyph_model);
                             let material = match g_mat {
-                                crate::render::draw_cmd::GlyphMaterial::Metal => {
-                                    MaterialParams {
-                                        kind: MaterialKind::Metal,
-                                        base_color: obj.color,
-                                        specular_strength: 1.0,
-                                        specular_power: 128.0,
-                                    }
-                                }
+                                crate::render::draw_cmd::GlyphMaterial::Metal => MaterialParams {
+                                    kind: MaterialKind::Metal,
+                                    base_color: obj.color,
+                                    specular_strength: 1.0,
+                                    specular_power: 128.0,
+                                },
                                 crate::render::draw_cmd::GlyphMaterial::Polychrome => {
                                     MaterialParams {
                                         kind: MaterialKind::Polychrome,
@@ -9342,15 +8473,12 @@ impl WgpuRenderer {
                                         specular_power: 48.0,
                                     }
                                 }
-                                crate::render::draw_cmd::GlyphMaterial::Plain => {
-                                    MaterialParams {
-                                        kind: MaterialKind::Plain,
-                                        base_color: obj.color,
-                                        specular_strength: 0.35
-                                            + 0.20 * emissive.clamp(0.0, 1.0),
-                                        specular_power: 96.0,
-                                    }
-                                }
+                                crate::render::draw_cmd::GlyphMaterial::Plain => MaterialParams {
+                                    kind: MaterialKind::Plain,
+                                    base_color: obj.color,
+                                    specular_strength: 0.35 + 0.20 * emissive.clamp(0.0, 1.0),
+                                    specular_power: 96.0,
+                                },
                             };
                             self.extruded_glyph_instances[slot_i].write_uniform(
                                 &self.queue,
@@ -9374,8 +8502,7 @@ impl WgpuRenderer {
                             obj3d_cascade_token_slot += 1;
                             let pulse_f = pulse.clamp(0.0, 1.0);
                             let pulse_scale = 1.0 + 0.18 * pulse_f;
-                            let center =
-                                pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
+                            let center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
                             let cascade_token_name = match ck {
                                 CascadeTokenKind::Chips => "gameplay.cascade_token.chips",
                                 CascadeTokenKind::Mult => "gameplay.cascade_token.mult",
@@ -9423,8 +8550,7 @@ impl WgpuRenderer {
                             if self.candle_instances.get(slot_i).is_none() {
                                 continue;
                             }
-                            let base =
-                                pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
+                            let base = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
                             let s = *scale;
                             let candle_model = translate_rot_scale(
                                 base,
@@ -9523,20 +8649,14 @@ impl WgpuRenderer {
                                         0.0,
                                     ));
                                 }
-                                self.tally_stick_instances[obj3d_tally_stick_cursor]
-                                    .write_uniform(
-                                        &self.queue,
-                                        view_proj_arr,
-                                        model,
-                                        base_material,
-                                    );
+                                self.tally_stick_instances[obj3d_tally_stick_cursor].write_uniform(
+                                    &self.queue,
+                                    view_proj_arr,
+                                    model,
+                                    base_material,
+                                );
                                 self.tally_stick_instances[obj3d_tally_stick_cursor + 1]
-                                    .write_uniform(
-                                        &self.queue,
-                                        view_proj_arr,
-                                        model,
-                                        tip_material,
-                                    );
+                                    .write_uniform(&self.queue, view_proj_arr, model, tip_material);
                                 object3d_draw_list
                                     .push((DrawKind::TallyStickBase, obj3d_tally_stick_cursor));
                                 object3d_draw_list
@@ -9574,10 +8694,7 @@ impl WgpuRenderer {
                             let target = obj.hover_target.clamp(0.0, 1.0);
                             let anim_id = if obj.anim_id != 0 { obj.anim_id } else { 1 };
                             let k = 1.0 - (-14.0 * self.frame_dt).exp();
-                            let e = self
-                                .obj3d_hover_state
-                                .entry(anim_id)
-                                .or_insert(0.0);
+                            let e = self.obj3d_hover_state.entry(anim_id).or_insert(0.0);
                             *e += (target - *e) * k;
                             let anim = *e;
                             let lift = anim * obj.extents[1] * 0.15;
@@ -9597,10 +8714,7 @@ impl WgpuRenderer {
                                 glam::Vec3::from(obj.extents),
                             );
                             let hover_model = self
-                                .apply_arrange_override(
-                                    "gameplay.action_bar.bowl",
-                                    hover_model,
-                                );
+                                .apply_arrange_override("gameplay.action_bar.bowl", hover_model);
                             self.bowl_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -9648,7 +8762,6 @@ impl WgpuRenderer {
             }
             let _ = obj3d_cmd_idx;
         }
-
 
         // Wall stack: facedown tiles laid out in a row at the back of the
         // table, height growing slightly as the stack thickens. Phase 1 uses
@@ -9720,11 +8833,9 @@ impl WgpuRenderer {
                         .iter()
                         .find(|(n, _, _)| n == &ov.name)
                         .map(|(_, m, mesh)| match mesh {
-                            TrimeshRef::LampBody => (
-                                *m,
-                                self.lamp_body_local_half,
-                                self.lamp_body_local_center_y,
-                            ),
+                            TrimeshRef::LampBody => {
+                                (*m, self.lamp_body_local_half, self.lamp_body_local_center_y)
+                            }
                         })
                 });
             if let Some((model, half, center_y)) = aabb {
@@ -9770,11 +8881,7 @@ impl WgpuRenderer {
             // inside the band, red-thick on whichever wall is currently
             // pinning it. Tells the user at a glance why a nudge isn't
             // moving the object any further.
-            if let Some(clamp) = frame
-                .arrange_clamps
-                .iter()
-                .find(|c| c.name == ov.name)
-            {
+            if let Some(clamp) = frame.arrange_clamps.iter().find(|c| c.name == ov.name) {
                 use crate::render::draw_cmd::ClampAxis;
                 let dim = [1.0_f32, 0.85, 0.25, 0.35];
                 let pin = [1.0_f32, 0.30, 0.25, 0.95];
@@ -9782,16 +8889,8 @@ impl WgpuRenderer {
                 let pin_t = line_t * 3.0;
                 let below = clamp.center_frac < clamp.lo_frac;
                 let above = clamp.center_frac > clamp.hi_frac;
-                let (lo_color, lo_thick) = if below {
-                    (pin, pin_t)
-                } else {
-                    (dim, line_t)
-                };
-                let (hi_color, hi_thick) = if above {
-                    (pin, pin_t)
-                } else {
-                    (dim, line_t)
-                };
+                let (lo_color, lo_thick) = if below { (pin, pin_t) } else { (dim, line_t) };
+                let (hi_color, hi_thick) = if above { (pin, pin_t) } else { (dim, line_t) };
                 let clamp_quads: [GpuInstance; 2] = match clamp.axis {
                     ClampAxis::Horizontal => {
                         let lo_px = clamp.lo_frac * w;
@@ -10015,18 +9114,15 @@ impl WgpuRenderer {
                                         let offset = puff_radius * 0.9;
                                         for side in [-1.0_f32, 1.0_f32] {
                                             let s = side * lead_sign;
-                                            let pos = center
-                                                + perp * (s * offset)
+                                            let pos = center + perp * (s * offset)
                                                 - tangent * (offset * 0.4)
                                                 + z_lift;
-                                            let vel = perp * (s * swirl_vel)
-                                                - tangent * retrograde;
+                                            let vel = perp * (s * swirl_vel) - tangent * retrograde;
                                             fluid.inject_impulse(
                                                 pos,
                                                 vel,
                                                 puff_radius * 0.75 * radius_mul,
-                                                0.07 * density_mul
-                                                    * smoke_amount.density_mul(),
+                                                0.07 * density_mul * smoke_amount.density_mul(),
                                                 0.0,
                                                 0.0,
                                             );
@@ -10224,11 +9320,8 @@ impl WgpuRenderer {
                         let eff_w = o.extents[0];
                         let eff_l = o.extents[1];
                         let depth = o.extents[2];
-                        let base_transform = translate_rot_scale(
-                            anchor,
-                            o.rotation,
-                            glam::Vec3::splat(1.0),
-                        );
+                        let base_transform =
+                            translate_rot_scale(anchor, o.rotation, glam::Vec3::splat(1.0));
                         if kind.is_some() {
                             let nominal_cap = eff_w * 0.33;
                             let cap_h = if eff_l < 2.0 * nominal_cap {
@@ -10246,12 +9339,11 @@ impl WgpuRenderer {
                                 0.0,
                                 glam::Vec3::new(eff_w, cap_h, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(
-                                    &self.queue,
-                                    light_view_proj_arr,
-                                    top_model,
-                                );
+                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                                &self.queue,
+                                light_view_proj_arr,
+                                top_model,
+                            );
                             ribbon_shadow_cursor += 1;
                             if mid_h > 0.0 {
                                 let mid_model = ribbon_submesh(
@@ -10259,12 +9351,11 @@ impl WgpuRenderer {
                                     -cap_h,
                                     glam::Vec3::new(eff_w, mid_h, depth),
                                 );
-                                self.ribbon_instances[ribbon_shadow_cursor]
-                                    .write_shadow_uniform(
-                                        &self.queue,
-                                        light_view_proj_arr,
-                                        mid_model,
-                                    );
+                                self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                                    &self.queue,
+                                    light_view_proj_arr,
+                                    mid_model,
+                                );
                                 ribbon_shadow_cursor += 1;
                             }
                             let bot_model = ribbon_submesh(
@@ -10272,12 +9363,11 @@ impl WgpuRenderer {
                                 -(cap_h + mid_h),
                                 glam::Vec3::new(eff_w, cap_h, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(
-                                    &self.queue,
-                                    light_view_proj_arr,
-                                    bot_model,
-                                );
+                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                                &self.queue,
+                                light_view_proj_arr,
+                                bot_model,
+                            );
                             ribbon_shadow_cursor += 1;
                         } else {
                             let model = ribbon_submesh(
@@ -10285,8 +9375,11 @@ impl WgpuRenderer {
                                 0.0,
                                 glam::Vec3::new(eff_w, eff_l, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
+                                &self.queue,
+                                light_view_proj_arr,
+                                model,
+                            );
                             ribbon_shadow_cursor += 1;
                         }
                     }
@@ -10303,7 +9396,10 @@ impl WgpuRenderer {
                     _ => Box::new(std::iter::empty()),
                 };
                 for o in objs {
-                    if matches!(o.kind, crate::render::draw_cmd::Object3dKind::Talisman { .. }) {
+                    if matches!(
+                        o.kind,
+                        crate::render::draw_cmd::Object3dKind::Talisman { .. }
+                    ) {
                         if talisman_shadow_cursor >= MAX_TALISMAN_SLOTS {
                             break;
                         }
@@ -10311,11 +9407,8 @@ impl WgpuRenderer {
                         let sx = o.extents[0] / (TALISMAN_LOCAL_HALF[0] * 2.0);
                         let sy = o.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                         let sz = o.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
-                        let model = translate_rot_scale(
-                            center,
-                            o.rotation,
-                            glam::Vec3::new(sx, sy, sz),
-                        );
+                        let model =
+                            translate_rot_scale(center, o.rotation, glam::Vec3::new(sx, sy, sz));
                         self.talisman_instances[talisman_shadow_cursor].write_shadow_uniform(
                             &self.queue,
                             light_view_proj_arr,
@@ -10333,7 +9426,7 @@ impl WgpuRenderer {
         // `obj3d_primitive_slot` exactly so each caster maps to the
         // instance the draw-pass will select.
         {
-            use crate::render::primitive::{shape_orientation, MeshId};
+            use crate::render::primitive::{MeshId, shape_orientation};
             let mut cursors: HashMap<MeshId, usize> = HashMap::new();
             for cmd in frame.cmds.iter() {
                 let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> = match cmd {
@@ -10354,8 +9447,7 @@ impl WgpuRenderer {
                         let slot_i = *cursors.entry(*shape).or_insert(0);
                         *cursors.get_mut(shape).unwrap() += 1;
                         if *shadow_caster {
-                            let center =
-                                pixel_to_world(w, h, o.pos[0], o.pos[1], o.pos[2]);
+                            let center = pixel_to_world(w, h, o.pos[0], o.pos[1], o.pos[2]);
                             let orient = shape_orientation(*shape);
                             let model = translate_rot_scale(
                                 center,
@@ -10772,11 +9864,9 @@ impl WgpuRenderer {
         // and 5.5× overstates depth.
         self.proj.talisman_rects.clear();
         for model in &self.last_talisman_models {
-            self.proj.talisman_rects.push(project_aabb_rect(
-                *model,
-                TALISMAN_LOCAL_HALF,
-                0.0,
-            ));
+            self.proj
+                .talisman_rects
+                .push(project_aabb_rect(*model, TALISMAN_LOCAL_HALF, 0.0));
         }
 
         // Sync singleton shop-prop models (journal book, reroll prop, leave
@@ -10958,14 +10048,18 @@ impl WgpuRenderer {
                 let candle_count = frame
                     .cmds
                     .iter()
-                    .flat_map(|cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
-                        match cmd {
-                            DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
-                            DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
-                            _ => Box::new(std::iter::empty()),
-                        }
+                    .flat_map(
+                        |cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
+                            match cmd {
+                                DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
+                                DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
+                                _ => Box::new(std::iter::empty()),
+                            }
+                        },
+                    )
+                    .filter(|o| {
+                        matches!(o.kind, crate::render::draw_cmd::Object3dKind::Candle { .. })
                     })
-                    .filter(|o| matches!(o.kind, crate::render::draw_cmd::Object3dKind::Candle { .. }))
                     .count();
                 for slot_i in 0..candle_count {
                     let Some(instances) = self.candle_instances.get(slot_i) else {
@@ -11039,14 +10133,21 @@ impl WgpuRenderer {
                 let total_talismans = frame
                     .cmds
                     .iter()
-                    .flat_map(|cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
-                        match cmd {
-                            DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
-                            DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
-                            _ => Box::new(std::iter::empty()),
-                        }
+                    .flat_map(
+                        |cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
+                            match cmd {
+                                DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
+                                DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
+                                _ => Box::new(std::iter::empty()),
+                            }
+                        },
+                    )
+                    .filter(|o| {
+                        matches!(
+                            o.kind,
+                            crate::render::draw_cmd::Object3dKind::Talisman { .. }
+                        )
                     })
-                    .filter(|o| matches!(o.kind, crate::render::draw_cmd::Object3dKind::Talisman { .. }))
                     .count()
                     .min(MAX_TALISMAN_SLOTS);
                 if total_talismans > 0 {
@@ -11306,15 +10407,17 @@ impl WgpuRenderer {
                             let label: Option<&str> = frame
                                 .cmds
                                 .iter()
-                                .flat_map(|cmd| -> Box<
-                                    dyn Iterator<Item = &crate::render::draw_cmd::Object3d>,
-                                > {
-                                    match cmd {
-                                        DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
-                                        DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
-                                        _ => Box::new(std::iter::empty()),
-                                    }
-                                })
+                                .flat_map(
+                                    |cmd| -> Box<
+                                        dyn Iterator<Item = &crate::render::draw_cmd::Object3d>,
+                                    > {
+                                        match cmd {
+                                            DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
+                                            DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
+                                            _ => Box::new(std::iter::empty()),
+                                        }
+                                    },
+                                )
                                 .filter_map(|o| match &o.kind {
                                     crate::render::draw_cmd::Object3dKind::ExtrudedGlyph {
                                         label,
@@ -12233,8 +11336,7 @@ impl WgpuRenderer {
         // wgpu requires bytes_per_row to be a multiple of 256.
         let bytes_per_pixel: u32 = 4; // BGRA8 / RGBA8 — 4 bytes
         let unpadded_bytes_per_row = width * bytes_per_pixel;
-        let padded_bytes_per_row =
-            unpadded_bytes_per_row.div_ceil(256) * 256;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(256) * 256;
         let buffer_size = (padded_bytes_per_row as u64) * (height as u64);
 
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {

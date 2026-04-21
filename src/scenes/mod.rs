@@ -47,9 +47,9 @@ use enum_dispatch::enum_dispatch;
 
 use crate::core::relic::{RelicId, RelicState};
 use crate::game::cascade::CascadeTuning;
-use crate::game::smoke_tuning::ShopSmokeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
+use crate::game::smoke_tuning::ShopSmokeTuning;
 use crate::persistence::ResumeScene;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;

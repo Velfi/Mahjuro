@@ -244,8 +244,7 @@ impl ScoreReel {
             // Display index: prefix slots come first, then most-significant
             // digit, then the rest of the digits, then the tail.
             let display_idx = prefix.len() + (n - 1 - col);
-            let col_center_x =
-                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
+            let col_center_x = anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
 
             let c = &self.columns[col];
             let t = c.progress(now);
@@ -332,8 +331,7 @@ impl ScoreReel {
         // digits themselves remain the primary read.
         let dim_color = [DIGIT_COLOR[0], DIGIT_COLOR[1], DIGIT_COLOR[2], 0.55];
         for (i, ch) in prefix.iter().enumerate() {
-            let col_center_x =
-                anchor_px + (-total_w * 0.5 + (i as f32 + 0.5) * col_w);
+            let col_center_x = anchor_px + (-total_w * 0.5 + (i as f32 + 0.5) * col_w);
             out.push(make_placement(
                 &ch.to_string(),
                 col_center_x,
@@ -352,8 +350,7 @@ impl ScoreReel {
         // reads as a secondary reference.
         for (i, ch) in tail.iter().enumerate() {
             let display_idx = prefix.len() + n + i;
-            let col_center_x =
-                anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
+            let col_center_x = anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);
             out.push(make_placement(
                 &ch.to_string(),
                 col_center_x,

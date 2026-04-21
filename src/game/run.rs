@@ -18,12 +18,12 @@ use crate::core::structure::{
     is_winning_structure_shape,
 };
 
+use crate::audio::SfxId;
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
-use crate::audio::SfxId;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
@@ -1697,7 +1697,10 @@ impl RunState {
         if self.relics.has(RelicId::KongCollector) {
             let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
             if kong_count > 0 {
-                *self.relic_counters.entry(RelicId::KongCollector).or_insert(0) += kong_count;
+                *self
+                    .relic_counters
+                    .entry(RelicId::KongCollector)
+                    .or_insert(0) += kong_count;
                 self.relic_activations.push(RelicId::KongCollector);
             }
         }
@@ -2265,8 +2268,8 @@ impl RunState {
             .iter()
             .filter(|s| s.kind == SetKind::Kong)
             .count();
-        let is_full_hand = scoring_tiles.len() >= HAND_SIZE
-            && scoring_tiles.len() == HAND_SIZE + kongs;
+        let is_full_hand =
+            scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kongs;
         let bias = infer_decomposition_bias(&self.hand);
         // Partial submissions only need re-ranking when the player's hand
         // reveals an intent the greedy backtracker would override (e.g.
@@ -2437,9 +2440,7 @@ impl RunState {
         // for any *other* wind tiles in the selection.
         if self.relics.has(RelicId::Disgust) {
             let chain_winds = self.relics.has(RelicId::WildWinds);
-            if let Some(result) =
-                try_disgust_substitution(tiles, &validation_rules, chain_winds)
-            {
+            if let Some(result) = try_disgust_substitution(tiles, &validation_rules, chain_winds) {
                 return Some(result);
             }
         }
@@ -3882,12 +3883,8 @@ fn try_disgust_substitution(
     rules: &[RuleModifier],
     chain_winds: bool,
 ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
-    let has_east = tiles
-        .iter()
-        .any(|t| t.suit == Suit::Wind && t.rank == 1);
-    let has_west = tiles
-        .iter()
-        .any(|t| t.suit == Suit::Wind && t.rank == 3);
+    let has_east = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 1);
+    let has_west = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 3);
     if !has_east || !has_west {
         return None;
     }
@@ -4334,7 +4331,8 @@ mod disgust_tests {
             tile(Suit::Wind, 3, 1),
             tile(Suit::Wind, 3, 2),
         ];
-        let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EWW should be a triplet");
+        let (sets, _) =
+            try_disgust_substitution(&tiles, &[], false).expect("EWW should be a triplet");
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Triplet);
     }
@@ -4347,7 +4345,8 @@ mod disgust_tests {
             tile(Suit::Wind, 3, 2),
             tile(Suit::Wind, 3, 3),
         ];
-        let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EWWW should be a kong");
+        let (sets, _) =
+            try_disgust_substitution(&tiles, &[], false).expect("EWWW should be a kong");
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, SetKind::Kong);
     }

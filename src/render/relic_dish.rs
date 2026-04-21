@@ -53,9 +53,15 @@ pub fn build_pack_mesh() -> MeshCpu {
     // interior). Going CCW as viewed from -Y: bottom-right → top-right →
     // top-left → bottom-left.
     let corners: [([f32; 2], f32); 4] = [
-        ([0.5 - CORNER_R, -0.5 + CORNER_R], -std::f32::consts::FRAC_PI_2), // bottom-right: arc from bottom edge to right edge
+        (
+            [0.5 - CORNER_R, -0.5 + CORNER_R],
+            -std::f32::consts::FRAC_PI_2,
+        ), // bottom-right: arc from bottom edge to right edge
         ([0.5 - CORNER_R, 0.5 - CORNER_R], 0.0), // top-right: arc from right edge to top edge
-        ([-0.5 + CORNER_R, 0.5 - CORNER_R], std::f32::consts::FRAC_PI_2), // top-left: arc from top edge to left edge
+        (
+            [-0.5 + CORNER_R, 0.5 - CORNER_R],
+            std::f32::consts::FRAC_PI_2,
+        ), // top-left: arc from top edge to left edge
         ([-0.5 + CORNER_R, -0.5 + CORNER_R], std::f32::consts::PI), // bottom-left: arc from left edge to bottom edge
     ];
     for (center, start_angle) in corners.iter() {
@@ -124,11 +130,7 @@ pub fn build_pack_mesh() -> MeshCpu {
     }
     for i in 0..n {
         let next = (i + 1) % n;
-        indices.extend_from_slice(&[
-            back_center_idx,
-            back_ring_start + next,
-            back_ring_start + i,
-        ]);
+        indices.extend_from_slice(&[back_center_idx, back_ring_start + next, back_ring_start + i]);
     }
 
     // ── Side strip ────────────────────────────────────────────────────
@@ -228,8 +230,8 @@ pub fn build_shop_action_prop_mesh() -> MeshCpu {
     //   v11 (+0.5, top, -0.5)  local +X, -Z  →  screen-right, screen-top   → [1, 0]
     // With cam_rot: camera-right = local +X, camera-up = local -Z, so
     // U = 0 at left, U = 1 at right; V = 0 at top, V = 1 at bottom. ✓
-    vertices[8].uv  = [0.0, 0.0];
-    vertices[9].uv  = [0.0, 1.0];
+    vertices[8].uv = [0.0, 0.0];
+    vertices[9].uv = [0.0, 1.0];
     vertices[10].uv = [1.0, 1.0];
     vertices[11].uv = [1.0, 0.0];
 
@@ -719,14 +721,7 @@ pub fn build_tent_card_mesh() -> MeshCpu {
                 uv: *uv,
             });
         }
-        indices.extend_from_slice(&[
-            base2,
-            base2 + 2,
-            base2 + 1,
-            base2,
-            base2 + 3,
-            base2 + 2,
-        ]);
+        indices.extend_from_slice(&[base2, base2 + 2, base2 + 1, base2, base2 + 3, base2 + 2]);
     }
 
     // Side B: mirror of side A (front-right).
@@ -756,14 +751,7 @@ pub fn build_tent_card_mesh() -> MeshCpu {
                 uv: *uv,
             });
         }
-        indices.extend_from_slice(&[
-            base2,
-            base2 + 2,
-            base2 + 1,
-            base2,
-            base2 + 3,
-            base2 + 2,
-        ]);
+        indices.extend_from_slice(&[base2, base2 + 2, base2 + 1, base2, base2 + 3, base2 + 2]);
     }
 
     MeshCpu {
@@ -777,7 +765,6 @@ pub fn build_tent_card_mesh() -> MeshCpu {
         },
     }
 }
-
 
 /// Build a small octagonal relic body for both in-world props and UI turntable
 /// viewers. The broad front/back faces read well with generated object art
@@ -815,8 +802,7 @@ pub fn build_relic_mesh() -> MeshCpu {
 
     let ring: Vec<[f32; 3]> = (0..SIDES)
         .map(|i| {
-            let a = std::f32::consts::TAU * i as f32 / SIDES as f32
-                + std::f32::consts::FRAC_PI_8;
+            let a = std::f32::consts::TAU * i as f32 / SIDES as f32 + std::f32::consts::FRAC_PI_8;
             [a.cos() * R, 0.0, a.sin() * R]
         })
         .collect();
@@ -983,9 +969,7 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
             (px_y - union_cy) * 0.5 / union_extent,
         )
     };
-    let to_uv = |px_x: f32, px_y: f32| -> [f32; 2] {
-        [px_x * inv_w, px_y * inv_h]
-    };
+    let to_uv = |px_x: f32, px_y: f32| -> [f32; 2] { [px_x * inv_w, px_y * inv_h] };
 
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -1440,9 +1424,13 @@ mod silhouette_tests {
     #[ignore = "hits real asset files; run explicitly"]
     fn real_relic_masks_build_reasonable_meshes() {
         use std::path::Path;
-        let asset_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets/textures/relics/source");
-        for name in &["joker_tile", "beggars_cup", "blue_serpent", "eight_treasures"] {
+        let asset_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/relics/source");
+        for name in &[
+            "joker_tile",
+            "beggars_cup",
+            "blue_serpent",
+            "eight_treasures",
+        ] {
             let p = asset_dir.join(format!("{name}_mask.png"));
             if !p.exists() {
                 eprintln!("skip {name}: mask not found");
@@ -1478,7 +1466,10 @@ mod silhouette_tests {
         }
         let mesh =
             build_relic_mesh_from_rgba(&rgba, 16, 16).expect("mesh should build for solid block");
-        assert!(mesh.indices.len() >= 3, "mesh must have at least one triangle");
+        assert!(
+            mesh.indices.len() >= 3,
+            "mesh must have at least one triangle"
+        );
         assert!(!mesh.vertices.is_empty(), "mesh must have vertices");
         // With two caps + wall quads around a roughly-rectangular ring we
         // should see substantially more than a bare fan.

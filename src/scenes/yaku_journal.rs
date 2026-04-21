@@ -57,8 +57,7 @@ impl YakuJournalScene {
 
     fn move_focus(&mut self, drow: isize, dcol: isize) {
         let (row, col) = Self::index_to_grid(self.selected);
-        let new_row = ((row as isize + drow)
-            .rem_euclid(ROW_COUNTS.len() as isize)) as usize;
+        let new_row = ((row as isize + drow).rem_euclid(ROW_COUNTS.len() as isize)) as usize;
         let target_col = if drow != 0 {
             col.min(ROW_COUNTS[new_row] - 1)
         } else {
@@ -156,8 +155,7 @@ impl SceneBehavior for YakuJournalScene {
         const FACE_LONG_MAX: f32 = 1.5;
         let tiles_per_cell = 3usize;
         let tile_gap_frac = 0.15;
-        let tile_divisor =
-            tiles_per_cell as f32 + tile_gap_frac * (tiles_per_cell - 1) as f32;
+        let tile_divisor = tiles_per_cell as f32 + tile_gap_frac * (tiles_per_cell - 1) as f32;
         let max_tile_from_cell_w = cell_w * 0.75 / tile_divisor;
         let row_budget_v = (row_h * 0.85 - caption_block_h) / FACE_LONG_MAX;
         let tile_size = max_tile_from_cell_w.min(row_budget_v).max(32.0);
@@ -246,10 +244,22 @@ impl SceneBehavior for YakuJournalScene {
                     let rw = pad_w + mid_pad * 2.0;
                     let rh = pad_h + mid_pad * 2.0;
                     let ring_color = color::alpha(color::GOLD, 0.85);
-                    frame.quad(GpuInstance { rect: [rx, ry, rw, ring_px], color: ring_color });
-                    frame.quad(GpuInstance { rect: [rx, ry + rh - ring_px, rw, ring_px], color: ring_color });
-                    frame.quad(GpuInstance { rect: [rx, ry, ring_px, rh], color: ring_color });
-                    frame.quad(GpuInstance { rect: [rx + rw - ring_px, ry, ring_px, rh], color: ring_color });
+                    frame.quad(GpuInstance {
+                        rect: [rx, ry, rw, ring_px],
+                        color: ring_color,
+                    });
+                    frame.quad(GpuInstance {
+                        rect: [rx, ry + rh - ring_px, rw, ring_px],
+                        color: ring_color,
+                    });
+                    frame.quad(GpuInstance {
+                        rect: [rx, ry, ring_px, rh],
+                        color: ring_color,
+                    });
+                    frame.quad(GpuInstance {
+                        rect: [rx + rw - ring_px, ry, ring_px, rh],
+                        color: ring_color,
+                    });
                 }
 
                 // Name — unseen yaku read as dimmer parchment.
@@ -272,10 +282,7 @@ impl SceneBehavior for YakuJournalScene {
                 // "sealed" word just creates visual noise on the row.
                 let lvl = run.yaku_levels.level_of(yk);
                 let (level_text, level_color) = match state {
-                    ProgressionState::Unseen => (
-                        "—".into(),
-                        color::alpha(color::PARCHMENT, 0.35),
-                    ),
+                    ProgressionState::Unseen => ("—".into(), color::alpha(color::PARCHMENT, 0.35)),
                     ProgressionState::Leveled => (format!("Lv {lvl}"), color::GOLD),
                     _ => (format!("Lv {lvl}"), color::CHAMPAGNE),
                 };
@@ -310,15 +317,11 @@ impl SceneBehavior for YakuJournalScene {
                     ProgressionState::Played | ProgressionState::Leveled => {
                         let sig = signature_tiles(yk, &mut tile_id);
                         for (i, tile) in sig.iter().enumerate() {
-                            let cx = strip_x0
-                                + tile_size * 0.5
-                                + i as f32 * (tile_size + tile_gap);
+                            let cx = strip_x0 + tile_size * 0.5 + i as f32 * (tile_size + tile_gap);
                             let (brightness, tile_glow, tile_glow_color) = match state {
-                                ProgressionState::Played => (
-                                    if is_selected { 1.0 } else { 0.85 },
-                                    is_selected,
-                                    None,
-                                ),
+                                ProgressionState::Played => {
+                                    (if is_selected { 1.0 } else { 0.85 }, is_selected, None)
+                                }
                                 ProgressionState::Leveled => (
                                     1.0,
                                     true,
@@ -456,7 +459,12 @@ fn draw_sealed_slab(
     // metal into the wax rather than a flat typeface.
     let glyph_font = typography::size(typography::TITLE, window_h, ui_scale).max(28.0);
     frame.text(TextLabel {
-        rect: [cx - seal_d * 0.5, cy - glyph_font * 0.55, seal_d, glyph_font * 1.1],
+        rect: [
+            cx - seal_d * 0.5,
+            cy - glyph_font * 0.55,
+            seal_d,
+            glyph_font * 1.1,
+        ],
         text: "?".into(),
         color: color::alpha(color::CHAMPAGNE, 0.92),
         align: TextAlign::Center,
@@ -625,12 +633,20 @@ fn draw_plaque(
     let pill_y = header_y + title_h * 0.94;
     let (pill_bg, pill_fg) = match state {
         ProgressionState::Leveled => (color::GOLD, color::OBSIDIAN),
-        ProgressionState::Unseen => (color::darken(color::ANTIQUE, 0.3), color::alpha(color::CHAMPAGNE, 0.75)),
+        ProgressionState::Unseen => (
+            color::darken(color::ANTIQUE, 0.3),
+            color::alpha(color::CHAMPAGNE, 0.75),
+        ),
         ProgressionState::Played => (color::BRASS, color::OBSIDIAN),
     };
     // Pill drop shadow.
     frame.quad(GpuInstance {
-        rect: [pill_x + 1.5 * shadow_scale, pill_y + 2.0 * shadow_scale, pill_w, pill_h],
+        rect: [
+            pill_x + 1.5 * shadow_scale,
+            pill_y + 2.0 * shadow_scale,
+            pill_w,
+            pill_h,
+        ],
         color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
     });
     frame.quad(GpuInstance {
@@ -662,7 +678,12 @@ fn draw_plaque(
         _ => color::darken(color::ANTIQUE, 0.25),
     };
     frame.text(TextLabel {
-        rect: [header_x + header_w * 0.5, stat_y, header_w * 0.5, stat_font * 1.2],
+        rect: [
+            header_x + header_w * 0.5,
+            stat_y,
+            header_w * 0.5,
+            stat_font * 1.2,
+        ],
         text: stat_text,
         color: stat_color,
         align: TextAlign::Right,
@@ -687,9 +708,7 @@ fn draw_plaque(
     let desc_y = rule_y + rule_h + header_pad * 0.35;
     let (desc_text, groups) = super::meld_guide::yaku_page(yk);
     let body_text: String = match state {
-        ProgressionState::Unseen => {
-            "sealed — score this yaku to reveal its shape".into()
-        }
+        ProgressionState::Unseen => "sealed — score this yaku to reveal its shape".into(),
         _ => desc_text.into(),
     };
     frame.text(TextLabel {
@@ -755,9 +774,7 @@ fn draw_plaque(
                 let cx = cursor_x + hand_tile * 0.5;
                 let (brightness, hand_glow, hand_glow_color) = match state {
                     ProgressionState::Played => (1.0, false, None),
-                    ProgressionState::Leveled => {
-                        (1.0, true, Some(color::alpha(color::GOLD, 0.7)))
-                    }
+                    ProgressionState::Leveled => (1.0, true, Some(color::alpha(color::GOLD, 0.7))),
                     ProgressionState::Unseen => (1.0, false, None), // unreachable
                 };
                 placements.push(ShowcaseTilePlacement {
@@ -832,7 +849,11 @@ fn draw_plaque(
 /// the collection.
 fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
     let specs: &[(Suit, u8)] = match yk {
-        YakuKind::Tanyao => &[(Suit::Characters, 4), (Suit::Bamboos, 5), (Suit::Circles, 7)],
+        YakuKind::Tanyao => &[
+            (Suit::Characters, 4),
+            (Suit::Bamboos, 5),
+            (Suit::Circles, 7),
+        ],
         YakuKind::Toitoi => &[(Suit::Circles, 5), (Suit::Circles, 5), (Suit::Circles, 5)],
         YakuKind::Honroutou => &[(Suit::Characters, 1), (Suit::Bamboos, 9), (Suit::Dragon, 1)],
         YakuKind::Iipeikou => &[(Suit::Bamboos, 1), (Suit::Bamboos, 2), (Suit::Bamboos, 3)],
@@ -842,9 +863,11 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
             (Suit::Characters, 5),
         ],
         YakuKind::Chinitsu => &[(Suit::Bamboos, 2), (Suit::Bamboos, 5), (Suit::Bamboos, 8)],
-        YakuKind::SanshokuDoujun => {
-            &[(Suit::Characters, 5), (Suit::Bamboos, 5), (Suit::Circles, 5)]
-        }
+        YakuKind::SanshokuDoujun => &[
+            (Suit::Characters, 5),
+            (Suit::Bamboos, 5),
+            (Suit::Circles, 5),
+        ],
         YakuKind::Junchan => &[(Suit::Circles, 1), (Suit::Circles, 2), (Suit::Circles, 3)],
         YakuKind::Ittsu => &[(Suit::Bamboos, 1), (Suit::Bamboos, 5), (Suit::Bamboos, 9)],
         YakuKind::Honitsu => &[(Suit::Bamboos, 3), (Suit::Bamboos, 7), (Suit::Wind, 1)],

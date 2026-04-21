@@ -247,13 +247,11 @@ impl FlameParticleSystem {
                 let jz = self.rand_range(0.0, 0.10) * e.scale;
                 // Velocity: mostly upward with a small random cone.
                 let vz = self.rand_range(0.85, 1.15) * RISE_SPEED;
-                let vx = self.rand_range(-0.25, 0.25) * RISE_SPEED * 0.25
-                    + e.wind.x * WIND_ACCEL * 0.3;
+                let vx =
+                    self.rand_range(-0.25, 0.25) * RISE_SPEED * 0.25 + e.wind.x * WIND_ACCEL * 0.3;
                 let vy = self.rand_range(-0.25, 0.25) * RISE_SPEED * 0.25;
-                let lifetime =
-                    LIFETIME_MEAN + self.rand_range(-LIFETIME_JITTER, LIFETIME_JITTER);
-                let phase = self.rand01() * std::f32::consts::TAU
-                    + e.phase * std::f32::consts::TAU;
+                let lifetime = LIFETIME_MEAN + self.rand_range(-LIFETIME_JITTER, LIFETIME_JITTER);
+                let phase = self.rand01() * std::f32::consts::TAU + e.phase * std::f32::consts::TAU;
                 // Per-particle scale: ~half the candle scale, with a
                 // little jitter. The full flame silhouette is built from
                 // dozens of overlapping particles.
@@ -352,7 +350,10 @@ mod tests {
         }
         // Every live particle should be above the wick; their z velocity is positive.
         for p in sys.particles.iter().filter(|p| !p.dead) {
-            assert!(p.pos.z >= e[0].wick_world.z - 0.01, "particle fell below wick");
+            assert!(
+                p.pos.z >= e[0].wick_world.z - 0.01,
+                "particle fell below wick"
+            );
         }
     }
 
