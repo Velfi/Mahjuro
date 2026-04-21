@@ -340,6 +340,17 @@ enum CascadeHandoffStage {
     Landed,
 }
 
+/// Screen-space geometry of the chips/mult accumulator tokens inside the
+/// modifier strip. Produced by `GameplayScene::cascade_token_layout` so the
+/// draw path and the popup streaming destinations can't drift apart.
+#[derive(Clone, Copy, Debug)]
+struct CascadeTokenLayout {
+    chips_center: (f32, f32),
+    mult_center: (f32, f32),
+    pill_w: f32,
+    pill_h: f32,
+}
+
 pub struct GameplayScene {
     /// Queue of scoring cascade animations. The front entry is the active
     /// cascade; when it finishes, it is popped and the next starts
@@ -852,6 +863,31 @@ impl GameplayScene {
             }
         } else {
             self.displayed_score = ctx.run.round_score;
+        }
+    }
+
+    /// Screen-space geometry for the chips (left) and mult (right) cascade
+    /// accumulator tokens drawn inside the modifier strip. Single source of
+    /// truth for both the draw path (`CascadeToken` placements) and popup
+    /// streaming destinations, so chip/mult popups always land on the tokens
+    /// the player is watching pulse.
+    fn cascade_token_layout(layout: &crate::ui::layout::LayoutResult) -> CascadeTokenLayout {
+        let ms = layout.modifier_strip;
+        let src_h = ms.h * 0.36;
+        let pill_y = ms.y + src_h;
+        let pill_h = (ms.h - src_h - 2.0).max(8.0);
+        let inner_w = ms.w * 0.80;
+        let inner_x = ms.x + (ms.w - inner_w) * 0.5;
+        let cross_w = pill_h * 0.7;
+        let pill_w = ((inner_w - cross_w) * 0.5).max(20.0);
+        let cy = pill_y + pill_h * 0.5;
+        let chips_cx = inner_x + pill_w * 0.5;
+        let mult_cx = inner_x + pill_w + cross_w + pill_w * 0.5;
+        CascadeTokenLayout {
+            chips_center: (chips_cx, cy),
+            mult_center: (mult_cx, cy),
+            pill_w,
+            pill_h,
         }
     }
 
@@ -1704,17 +1740,26 @@ impl SceneBehavior for GameplayScene {
                                 cascade_showcase.as_ref(),
                             );
                             let sp = ctx.layout.score_panel;
-                            // Stream into the reel anchor (top quarter of the
-                            // score plaque), not the plaque center — matches
-                            // the reel position set in the draw path.
-                            let dest_xy = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.25);
-                            // Match the reel's world-Z lift (see the draw
-                            // path: `reel_lift = plaque_lift * 1.08`), so
-                            // popups actually land *on* the reel rather
-                            // than at the default `LIFT_BASE` plane (which
-                            // projects well below the tilted plaque).
+                            // Chips popups stream into the left accumulator
+                            // token, Mult popups into the right — mirroring
+                            // the token geometry set up in the draw path
+                            // around the `CascadeToken` placements. Gold and
+                            // Final still land on the reel.
+                            let reel_xy = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.25);
                             let plaque_lift = ctx.layout.mm(self.positions.plaque.lift_mm);
-                            let dest_lift = Some(plaque_lift * 1.08);
+                            let reel_lift = plaque_lift * 1.08;
+                            let (dest_xy, dest_lift) = match step.kind {
+                                StepKind::Chips | StepKind::Mult => {
+                                    let tokens = Self::cascade_token_layout(ctx.layout);
+                                    let xy = if step.kind == StepKind::Chips {
+                                        tokens.chips_center
+                                    } else {
+                                        tokens.mult_center
+                                    };
+                                    (xy, Some(24.0))
+                                }
+                                _ => (reel_xy, Some(reel_lift)),
+                            };
                             let magnitude =
                                 chip_delta.abs().max(1) as f32 + mult_delta.abs() as f32;
                             log::info!(
@@ -2679,7 +2724,6 @@ impl SceneBehavior for GameplayScene {
             };
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
-        let ms = layout.modifier_strip;
         let cascade_frame = self
             .cascade_queue
             .front()
@@ -2691,69 +2735,46 @@ impl SceneBehavior for GameplayScene {
         // labels are pushed for the modifier strip anymore.
         let mut cascade_token_placements: Vec<Object3d> = Vec::new();
         if let Some(frame) = cascade_frame.as_ref() {
-            // Layout (within the modifier strip):
-            //   top 36%  → reserved (formerly the source label)
-            //   bot 64%  → [ chips token ]  [ mult token ]
-            let src_h = ms.h * 0.36;
-            let pill_y = ms.y + src_h;
-            let pill_h = (ms.h - src_h - 2.0).max(8.0);
-            let inner_w = ms.w * 0.80;
-            let inner_x = ms.x + (ms.w - inner_w) * 0.5;
-            let cross_w = pill_h * 0.7;
-            let pill_w = ((inner_w - cross_w) * 0.5).max(20.0);
+            // Geometry (chips pill on the left, mult pill on the right of the
+            // modifier strip) lives in `cascade_token_layout` so the popup
+            // streaming destinations stay locked to the drawn tokens.
+            let tokens = Self::cascade_token_layout(layout);
+            let extents = [
+                tokens.pill_w * 0.5,
+                (tokens.pill_h * 0.6 * 0.5).max(4.0),
+                tokens.pill_h * 0.5,
+            ];
 
             // Pulse envelope: fast pop-in then settle. Active token grows ~12%.
             let pulse_strength = (1.0 - frame.phase_t * 1.6).clamp(0.0, 1.0);
-            let chip_pulse = if frame.pulse_axis == Some(StepKind::Chips) {
-                1.0 + 0.12 * pulse_strength
-            } else {
-                1.0
-            };
-            let mult_pulse = if frame.pulse_axis == Some(StepKind::Mult) {
-                1.0 + 0.12 * pulse_strength
-            } else {
-                1.0
+            let pulse_for = |axis: StepKind| {
+                if frame.pulse_axis == Some(axis) {
+                    1.0 + 0.12 * pulse_strength
+                } else {
+                    1.0
+                }
             };
 
-            // Chips token — engraved bone, cool indigo tint. The pulse
-            // envelope drives the renderer's per-instance scale-up so the
-            // active axis pops on each scoring step.
-            let chips_x = inner_x;
-            {
-                let cx = chips_x + pill_w * 0.5;
-                let cy = pill_y + pill_h * 0.5;
-                let pulse_t = ((chip_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
+            for (center, axis, token_kind) in [
+                (
+                    tokens.chips_center,
+                    StepKind::Chips,
+                    crate::render::draw_cmd::CascadeTokenKind::Chips,
+                ),
+                (
+                    tokens.mult_center,
+                    StepKind::Mult,
+                    crate::render::draw_cmd::CascadeTokenKind::Mult,
+                ),
+            ] {
+                let pulse_t = ((pulse_for(axis) - 1.0) / 0.12).clamp(0.0, 1.0);
                 cascade_token_placements.push(Object3d {
-                    pos: [cx, cy, 24.0],
-                    extents: [pill_w * 0.5, (pill_h * 0.6 * 0.5).max(4.0), pill_h * 0.5],
+                    pos: [center.0, center.1, 24.0],
+                    extents,
                     rotation: glam::Mat4::IDENTITY,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::CascadeToken {
-                        kind: crate::render::draw_cmd::CascadeTokenKind::Chips,
-                        pulse: pulse_t,
-                    },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
-                    hover_target: 0.0,
-                    anim_id: 0,
-                    arrange_name: None,
-                });
-            }
-
-            // Mult token — engraved bone, warm crimson tint.
-            let mult_x = inner_x + pill_w + cross_w;
-            {
-                let cx = mult_x + pill_w * 0.5;
-                let cy = pill_y + pill_h * 0.5;
-                let pulse_t = ((mult_pulse - 1.0) / 0.12).clamp(0.0, 1.0);
-                cascade_token_placements.push(Object3d {
-                    pos: [cx, cy, 24.0],
-                    extents: [pill_w * 0.5, (pill_h * 0.6 * 0.5).max(4.0), pill_h * 0.5],
-                    rotation: glam::Mat4::IDENTITY,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::CascadeToken {
-                        kind: crate::render::draw_cmd::CascadeTokenKind::Mult,
+                        kind: token_kind,
                         pulse: pulse_t,
                     },
                     focusable: false,
@@ -3447,6 +3468,7 @@ impl SceneBehavior for GameplayScene {
                             hover: if hovered { 1.0 } else { 0.0 },
                             pressed: 0.0,
                             disabled: false,
+                            pick_id: None,
                         },
                         focusable: true,
                         scene_shaded: true,
@@ -3618,6 +3640,7 @@ impl SceneBehavior for GameplayScene {
                             hover: target,
                             pressed: 0.0,
                             disabled: !trigger_enabled,
+                            pick_id: None,
                         },
                         focusable: true,
                         scene_shaded: true,
@@ -3701,6 +3724,7 @@ impl SceneBehavior for GameplayScene {
                 hover: if journal_hovered { 1.0 } else { 0.0 },
                 pressed: 0.0,
                 disabled: false,
+                pick_id: None,
             },
             focusable: true,
             scene_shaded: true,
@@ -4132,7 +4156,10 @@ impl SceneBehavior for GameplayScene {
             .filter(|&(_, &sel)| sel)
             .map(|(i, _)| i)
             .collect();
-        let mut hint_indices = if !selected_indices.is_empty() && self.cascade_queue.is_empty() {
+        let mut hint_indices = if run.hints_enabled
+            && !selected_indices.is_empty()
+            && self.cascade_queue.is_empty()
+        {
             suggest_completions(&run.hand, &selected_indices)
         } else {
             vec![]
@@ -5425,7 +5452,13 @@ impl SceneBehavior for GameplayScene {
         if !relic_objects.is_empty() {
             frame.object3d_batch(relic_objects);
         }
-        frame.flames(flame_instances);
+        // Flames are submitted later (just before `fluid_smoke`) so every
+        // 3D scene object — plaques, ofuda, coin pile, flying coins,
+        // tablets — lands in the main pass *before* the additive flame
+        // quads. The flame pipeline doesn't write depth, so anything
+        // drawn after it passes its Less depth test against the plain
+        // table/background and paints over the flame (e.g. the coin
+        // pile on the right-side candle).
 
         // PERSISTENT HUD: hanging plaque + ofuda (3D wood/paper) → score
         // panel pip indicators → score header text → modifier strip text →
@@ -5467,13 +5500,19 @@ impl SceneBehavior for GameplayScene {
                 extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
                 rotation: glam::Mat4::from_rotation_x((-65.0_f32).to_radians()) * cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Plaque {
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::BeveledSlab,
                     // Top line is replaced by a blank: the floating score
                     // reel occupies that band of the plaque face. The blank
                     // line keeps the bot line (gold/wall/wind) sized
                     // to ~half-height so it lives in the bottom band.
-                    text: format!("\n{}", plaque_bot_text),
+                    material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                        .with_decal(crate::render::primitive::plaque_decal(format!(
+                            "\n{}",
+                            plaque_bot_text
+                        ))),
                     pick_id: None,
+                    shadow_caster: false,
                     silhouette: false,
                 },
                 focusable: false,
@@ -5531,10 +5570,22 @@ impl SceneBehavior for GameplayScene {
                 // `committed_arrange_rotations`.
                 rotation: cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Ofuda {
-                    title: ofuda_title_text,
-                    rule: ofuda_rule_text,
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::Ofuda,
+                    material: crate::render::primitive::MaterialSpec::plain().with_decal(
+                        crate::render::primitive::DecalSpec {
+                            text: format!("{}\n{}", ofuda_title_text, ofuda_rule_text),
+                            palette: crate::render::primitive::DecalPalette::ParchmentInk,
+                            layout: crate::render::primitive::DecalLayout::TitleRule {
+                                title_height_frac: 0.40,
+                                target_short_edge:
+                                    crate::render::decal::OFUDA_DECAL_LONG_EDGE,
+                            },
+                        },
+                    ),
                     pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
                 },
                 focusable: false,
                 scene_shaded: true,
@@ -5740,7 +5791,7 @@ impl SceneBehavior for GameplayScene {
                 pos: [
                     sx + sw * 0.5 + td.nx * layout.window_w,
                     sy + sh * 0.5 + td.ny * layout.window_h,
-                    layout.mm(td.lift_mm),
+                    layout.mm(td.lift_mm) + layout.mm(10.0) * 0.5,
                 ],
                 // Brass tray rim ~10mm tall — small decorative dish.
                 extents: [
@@ -5750,9 +5801,12 @@ impl SceneBehavior for GameplayScene {
                 ],
                 rotation: glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Dish {
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::DiscSquare,
+                    material: crate::render::primitive::MaterialSpec::plain(),
                     pick_id: Some(PICK_CONSUMABLE_DISH),
-                    round: false,
+                    shadow_caster: true,
+                    silhouette: false,
                 },
                 focusable: false,
                 scene_shaded: true,
@@ -5902,14 +5956,17 @@ impl SceneBehavior for GameplayScene {
             let dish_w = scatter_half * 2.0 + coin_radius * 4.0;
             let dish_d = scatter_half * 2.0 + coin_radius * 4.0;
             frame.object3d(Object3d {
-                pos: [pile_cx, pile_cy, 0.0],
+                pos: [pile_cx, pile_cy, dish_rim * 0.5],
                 extents: [dish_w, dish_rim, dish_d],
                 rotation: glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
                     * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Dish {
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::DiscSquare,
+                    material: crate::render::primitive::MaterialSpec::plain(),
                     pick_id: None,
-                    round: false,
+                    shadow_caster: true,
+                    silhouette: false,
                 },
                 focusable: false,
                 scene_shaded: true,
@@ -5970,13 +6027,19 @@ impl SceneBehavior for GameplayScene {
                     extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
                     rotation: glam::Mat4::from_rotation_y(rot_y),
                     color: [1.00, 0.78, 0.30, 1.0],
-                    kind: Object3dKind::Coin,
+                    kind: Object3dKind::Primitive {
+                        shape: crate::render::primitive::MeshId::Cylinder,
+                        material: crate::render::primitive::MaterialSpec::metal(),
+                        pick_id: None,
+                        shadow_caster: true,
+                        silhouette: false,
+                    },
                     focusable: false,
                     scene_shaded: true,
                     own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
+                    arrange_name: Some("gameplay.score_panel.coin_pile"),
                 });
             }
             if !coins.is_empty() {
@@ -6003,6 +6066,15 @@ impl SceneBehavior for GameplayScene {
                 frame.object3d_batch(flying);
             }
         }
+
+        // Additive 2D flame quads. Submitted last among the 3D-pass
+        // draws so the coin pile, flying coins, and every other mesh
+        // are already in the depth buffer when the flame pipeline
+        // (depth-test Always, depth-write off) stamps pixels on top.
+        // This is only visible when smoke is Off — with smoke on, the
+        // flame pipeline is skipped in the renderer and flames are
+        // composited volumetrically instead.
+        frame.flames(flame_instances);
 
         // Volumetric smoke pass. Pushed *after* every persistent 3D scene
         // object (plaques, ofuda, peg block, yaku/wood tablets, bowl,

@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::time::Instant;
 
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 
@@ -108,6 +109,14 @@ pub enum SfxId {
     YakuHonroutou,
     YakuChiitoitsu,
     YakuChickenHand,
+    /// Played ~1 second after the victory screen appears.
+    Victory,
+    /// Alternate victory stinger; `Victory` / `Victory2` are picked at random.
+    Victory2,
+    /// Played ~1 second after the defeat screen appears.
+    Defeat,
+    /// Played whenever the main menu (start screen) is entered.
+    MainMenuEnter,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -171,6 +180,10 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::YakuHonroutou,
         SfxId::YakuChiitoitsu,
         SfxId::YakuChickenHand,
+        SfxId::Victory,
+        SfxId::Victory2,
+        SfxId::Defeat,
+        SfxId::MainMenuEnter,
     ]
 }
 
@@ -234,6 +247,10 @@ impl SfxId {
             SfxId::YakuHonroutou => "yaku_honroutou.ogg",
             SfxId::YakuChiitoitsu => "yaku_chiitoitsu.ogg",
             SfxId::YakuChickenHand => "yaku_chicken_hand.ogg",
+            SfxId::Victory => "victory.ogg",
+            SfxId::Victory2 => "victory2.ogg",
+            SfxId::Defeat => "defeat.ogg",
+            SfxId::MainMenuEnter => "mahjuro.ogg",
         }
     }
 
@@ -293,6 +310,11 @@ pub struct AudioManager {
     /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
     /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
     active_sinks: Vec<Sink>,
+    /// Sfx queued for future playback with their due time, kept in
+    /// ascending time order. Drained each frame by [`AudioManager::tick`]
+    /// as entries come due. Used to stagger stacked stingers (e.g. yaku
+    /// on a multi-yaku commit) so they roll out one after another.
+    pending_sfx: Vec<(Instant, SfxId)>,
     master_volume: f32,
     sfx_volume: f32,
     music_volume: f32,
@@ -344,6 +366,7 @@ impl AudioManager {
             sfx_data,
             relic_trigger_data,
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
+            pending_sfx: Vec::new(),
             master_volume: 0.7,
             sfx_volume: 0.7,
             music_volume: 0.7,
@@ -362,6 +385,21 @@ impl AudioManager {
     /// Play a sound effect. No-op if audio is unavailable or the SFX file wasn't loaded.
     pub fn play_sfx(&mut self, id: SfxId) {
         self.play_sfx_with_speed(id, 1.0);
+    }
+
+    /// Queue `id` for playback at `when`. Pair with [`AudioManager::tick`]
+    /// to actually fire it; used to stagger stacked stingers so they land
+    /// as a sequence instead of overlapping.
+    pub fn schedule_sfx(&mut self, id: SfxId, when: Instant) {
+        self.pending_sfx.push((when, id));
+    }
+
+    /// Drain any scheduled sfx whose time has arrived. Call once per frame.
+    pub fn tick(&mut self, now: Instant) {
+        while self.pending_sfx.first().is_some_and(|(t, _)| *t <= now) {
+            let (_, id) = self.pending_sfx.remove(0);
+            self.play_sfx(id);
+        }
     }
 
     fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {

@@ -92,9 +92,10 @@ impl SceneBehavior for TutorialSummaryScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.run = RunState::new_demo();
                 ctx.run.apply_progression(ctx.progress);
-                ctx.run.set_auto_cash_in_on_full_structure(
-                    persistence::load_settings().auto_cash_in_on_full_structure,
-                );
+                let settings = persistence::load_settings();
+                ctx.run
+                    .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+                ctx.run.set_hints_enabled(settings.hints_enabled);
                 Some(Scene::StartScreen(StartScreenScene::new()))
             }
             None => None,

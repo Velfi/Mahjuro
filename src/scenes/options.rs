@@ -80,6 +80,7 @@ enum Row {
     Hdr,
     SwapAb,
     AutoCashInOnFullStructure,
+    Hints,
 }
 
 impl Row {
@@ -117,6 +118,7 @@ const ROWS: &[Row] = &[
     Row::Hdr,
     Row::SwapAb,
     Row::AutoCashInOnFullStructure,
+    Row::Hints,
 ];
 
 // ── Content slots (section headers interspersed with rows) ─────────────
@@ -148,6 +150,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
+    ContentSlot::Row(Row::Hints),
 ];
 
 fn content_index_of_row(row: Row) -> usize {
@@ -298,6 +301,7 @@ pub struct OptionsScene {
     pub hdr_enabled: bool,
     pub swap_ab: bool,
     pub auto_cash_in_on_full_structure: bool,
+    pub hints_enabled: bool,
     pub ui_scale: f32,
 }
 
@@ -326,6 +330,7 @@ impl OptionsScene {
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
+            hints_enabled: settings.hints_enabled,
             ui_scale: settings.ui_scale,
         }
     }
@@ -347,6 +352,7 @@ impl OptionsScene {
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
+        settings.hints_enabled = self.hints_enabled;
         settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
     }
@@ -458,6 +464,7 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
+            Row::Hints => self.hints_enabled = !self.hints_enabled,
             _ => return,
         }
         self.save_settings();
@@ -484,6 +491,7 @@ impl OptionsScene {
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
+            Row::Hints => self.hints_enabled = !self.hints_enabled,
             _ => return,
         }
         self.save_settings();
@@ -547,6 +555,10 @@ impl OptionsScene {
             }
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
+                self.save_settings();
+            }
+            Row::Hints => {
+                self.hints_enabled = !self.hints_enabled;
                 self.save_settings();
             }
         }
@@ -1030,6 +1042,10 @@ impl OptionsScene {
                         } else {
                             "OFF"
                         }
+                    ),
+                    Row::Hints => format!(
+                        "Hints: {}",
+                        if self.hints_enabled { "ON" } else { "OFF" }
                     ),
                     _ => unreachable!(),
                 };

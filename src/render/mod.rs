@@ -1,10 +1,10 @@
 pub mod animation;
 pub mod bone_tablet_mesh;
-pub mod brass_mesh;
 pub mod cabinet_mesh;
 
 pub mod candle_mesh;
 pub mod coin_mesh;
+pub mod flame_particles;
 pub mod decal;
 pub mod dora_plinth_mesh;
 pub mod draw_cmd;
@@ -20,6 +20,7 @@ pub mod ofuda_mesh;
 pub mod orb_mesh;
 pub mod particles;
 pub mod plaque_mesh;
+pub mod primitive;
 pub mod relic_dish;
 pub mod relic_pipeline;
 pub mod ribbon_mesh;

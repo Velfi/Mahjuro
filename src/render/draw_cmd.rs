@@ -147,22 +147,6 @@ pub struct BugOccluder {
 }
 
 
-/// One gold bar (big or mini) sitting in the coin dish area.
-///
-/// Bars are rendered as unit-box meshes via the lit-mesh pipeline with the
-/// Metal material, giving them the same specular gold finish as coins.
-#[derive(Clone, Copy, Debug)]
-pub struct GoldBarPlacement {
-    /// `(pixel_x, pixel_y, lift)` for the bar's base center.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Yaw rotation about world Y in radians.
-    pub rotation_y: f32,
-    /// Half-extents of the bar in world units (width/2, height/2, depth/2).
-    pub half_extents: [f32; 3],
-    /// Linear-space RGBA tint.
-    pub color: [f32; 4],
-}
-
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
 //
 // Phase 1 of the in-game UI redesign: physical objects rendered through the
@@ -332,25 +316,10 @@ pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam:
 #[allow(dead_code)]
 pub enum Object3dKind {
     // ── Upright panels ──────────────────────────────────────────────
-    /// Lacquered wood slab + chain nubs with a dynamically-scaled engraved
-    /// decal. The renderer word-wraps `text` and picks the largest font size
-    /// that fits the face; callers format with explicit `\n` if they want a
-    /// forced line break between fields.
-    Plaque {
-        text: String,
-        pick_id: Option<u32>,
-        /// When true, render as a near-black matte silhouette of the mesh
-        /// (no decal, no texture, no shading) — used by the Collection
-        /// scene for locked entries so the slot silhouette still reads as
-        /// the real artifact.
-        silhouette: bool,
-    },
-    /// Paper slab + eyelet with a title + body-rule decal.
-    Ofuda {
-        title: String,
-        rule: String,
-        pick_id: Option<u32>,
-    },
+    // (Plaque is now modeled as `Primitive { shape: BeveledSlab, … }`.)
+    // (Ofuda is now modeled as `Primitive { shape: Ofuda, material:
+    // Plain + ParchmentInk TitleRule decal }`. Callers format the
+    // decal text as `"{title}\n{rule}"`.)
     /// Carved bone tablet with a single engraved name and progress glow.
     YakuTablet {
         label: String,
@@ -364,6 +333,13 @@ pub enum Object3dKind {
         hover: f32,
         pressed: f32,
         disabled: bool,
+        /// When `Some`, the tablet's screen-space rect is published to
+        /// `aux_dish_rects` and its model matrix to
+        /// `last_primitive_pick_models` keyed by this id. Lets scenes
+        /// that route clicks via `ShopHit::Dish(pid)` (e.g. shop's
+        /// journal button) reach a wood tablet without introducing a
+        /// separate pick channel.
+        pick_id: Option<u32>,
     },
 
     // ── Props ────────────────────────────────────────────────────────
@@ -405,17 +381,17 @@ pub enum Object3dKind {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
-    /// Stamped coin (extents encode `[radius*2, thickness, radius*2]`).
-    Coin,
-    /// Gold bar rendered as a Metal-material box.
-    GoldBar,
-    /// Polished brass rectangular fitting — shelf rails, display-case
-    /// trim, pedestal collars. Rendered as a unit box with the `Brass`
-    /// material and `obj.color` as the tint. Smooth (no heightmap), so
-    /// it reads as a single polished surface rather than engraved metal.
-    BrassRail,
-    /// Standing book (Yaku Journal).
-    Book { pick_id: Option<u32> },
+    // (Coin is now modeled as `Primitive { shape: Cylinder,
+    // material: MaterialSpec::metal(), shadow_caster: true }`. The
+    // renderer registers the engraved-coin heightmap as a per-shape
+    // texture override for MeshId::Cylinder.)
+    // (GoldBar is now modeled as `Primitive { shape: Cube,
+    // material: MaterialSpec::metal(), shadow_caster: true }`.)
+    // (BrassRail is now modeled as `Primitive { shape: Cube,
+    // material: MaterialSpec::brass() }`.)
+    // (Standing book was removed; the shop now uses an
+    // `Object3dKind::WoodTablet { label: "Journal", pick_id: Some(…)
+    // }` to match gameplay's journal affordance.)
     /// Discard bowl. Hover animation is driven by [`Object3d::hover_target`].
     Bowl,
     /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
@@ -430,18 +406,14 @@ pub enum Object3dKind {
     },
     /// Engraved bone cascade token with a pulse-pop envelope.
     CascadeToken { kind: CascadeTokenKind, pulse: f32 },
-    /// Free-standing dish (explicit size/position, not auto-sized from relics).
-    /// `round` = true picks the round-rim mesh; false uses the legacy square mesh.
-    Dish {
-        pick_id: Option<u32>,
-        round: bool,
-    },
-    /// Counter-end action prop (Leave / Restock) rendered as a labelled rectangle.
-    ShopActionProp {
-        label: String,
-        pick_id: Option<u32>,
-        disabled: bool,
-    },
+    // (Dish is now modeled as `Primitive { shape: DiscSquare or
+    // DiscRound, material: MaterialSpec::plain(), shadow_caster: true
+    // }`. Callers set `pos[2]` to the dish center (base + extents[1] *
+    // 0.5) rather than the base, since the generic dispatch no longer
+    // auto-lifts.)
+    // (ShopActionProp is now modeled as `Primitive { shape:
+    // ShopActionProp, material: Plain + GoldGilded Fixed decal }`.
+    // Disabled callers pre-apply an alpha of 0.45 to `obj.color[3]`.)
     /// Sell-return tray on the counter far-left end.
     SellTray { pick_id: Option<u32> },
     /// Overhead shop lamp — brass pole + conical shade (body mesh) plus a
@@ -540,6 +512,24 @@ pub enum Object3dKind {
     /// around +Z); the cabinet body draws with both wood and brass-rail
     /// instances per the renderer's Cabinet dispatch.
     Cabinet { face_labels: [String; 6] },
+    /// Generic shape + material. Replaces the bespoke-per-shape pattern
+    /// for simple slabs/cubes/cylinders — `obj.color` is the base tint
+    /// (honored consistently across every shape) and the optional decal
+    /// goes through a single unified rasterizer. New shapes/materials
+    /// are additive: add a [`crate::render::primitive::MeshId`] variant
+    /// and register the mesh in `WgpuRenderer::new`.
+    Primitive {
+        shape: crate::render::primitive::MeshId,
+        material: crate::render::primitive::MaterialSpec,
+        pick_id: Option<u32>,
+        /// When true, this primitive is walked by the shadow pre-pass.
+        /// Default off — thin slabs look better without self-shadow.
+        shadow_caster: bool,
+        /// When true, render as a near-black matte silhouette
+        /// (locked-collection lock state). Decal and material kind
+        /// are suppressed; `obj.color` alpha is preserved.
+        silhouette: bool,
+    },
 }
 
 /// A single lit mesh placed in the world.

@@ -372,6 +372,8 @@ pub struct AppSettings {
     pub swap_ab: bool,
     #[serde(default = "default_true")]
     pub auto_cash_in_on_full_structure: bool,
+    #[serde(default)]
+    pub hints_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
 }
@@ -416,6 +418,7 @@ impl Default for AppSettings {
             hdr_enabled: false,
             swap_ab: false,
             auto_cash_in_on_full_structure: true,
+            hints_enabled: false,
             ui_scale: 1.0,
         }
     }

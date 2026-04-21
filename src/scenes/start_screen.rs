@@ -235,9 +235,10 @@ impl SceneBehavior for StartScreenScene {
                     // Only one material available — skip tile select.
                     *ctx.run = RunState::new_with_material(TileMaterial::default());
                     ctx.run.apply_progression(ctx.progress);
-                    ctx.run.set_auto_cash_in_on_full_structure(
-                        persistence::load_settings().auto_cash_in_on_full_structure,
-                    );
+                    let settings = persistence::load_settings();
+                    ctx.run
+                        .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+                    ctx.run.set_hints_enabled(settings.hints_enabled);
                     return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)));
                 }
                 Some(MenuFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
@@ -314,6 +315,7 @@ impl SceneBehavior for StartScreenScene {
                     hover: if i < self.hover_anims.len() { self.hover_anims[i] } else { 0.0 },
                     pressed: 0.0,
                     disabled: false,
+                    pick_id: None,
                 },
                 focusable: true,
                 scene_shaded: true,
@@ -430,9 +432,15 @@ impl SceneBehavior for StartScreenScene {
             extents: [plaque_w, plaque_h, plaque_depth],
             rotation: glam::Mat4::from_rotation_x((-60.0_f32).to_radians()) * cam_rot,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Plaque {
-                text: format!("M A H J U R O\n{}", prof_text),
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::BeveledSlab,
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                    .with_decal(crate::render::primitive::plaque_decal(format!(
+                        "M A H J U R O\n{}",
+                        prof_text
+                    ))),
                 pick_id: None,
+                shadow_caster: false,
                 silhouette: false,
             },
             focusable: false,

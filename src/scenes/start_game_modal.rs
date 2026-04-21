@@ -134,21 +134,20 @@ impl TileSelectScene {
         run: &mut RunState,
         progress: &crate::core::progression::PlayerProgress,
     ) -> SceneTransition {
+        let settings = crate::persistence::load_settings();
         if self.tutorial_mode {
             *run = RunState::new_onboarding();
             run.apply_progression(progress);
-            run.set_auto_cash_in_on_full_structure(
-                crate::persistence::load_settings().auto_cash_in_on_full_structure,
-            );
+            run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+            run.set_hints_enabled(settings.hints_enabled);
             Some(Scene::TutorialCampaign(
                 super::tutorial_campaign::TutorialCampaignScene::new(),
             ))
         } else {
             *run = RunState::new_with_material(self.material);
             run.apply_progression(progress);
-            run.set_auto_cash_in_on_full_structure(
-                crate::persistence::load_settings().auto_cash_in_on_full_structure,
-            );
+            run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+            run.set_hints_enabled(settings.hints_enabled);
             Some(Scene::Shop(ShopScene::new(run.run_number, run)))
         }
     }
@@ -264,9 +263,10 @@ impl SceneBehavior for TileSelectScene {
                 *ctx.complete_onboarding = true;
                 *ctx.run = RunState::new_with_material(TileMaterial::default());
                 ctx.run.apply_progression(ctx.progress);
-                ctx.run.set_auto_cash_in_on_full_structure(
-                    crate::persistence::load_settings().auto_cash_in_on_full_structure,
-                );
+                let settings = crate::persistence::load_settings();
+                ctx.run
+                    .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+                ctx.run.set_hints_enabled(settings.hints_enabled);
                 Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)))
             }
             Some(ModalAction::Back) => {
