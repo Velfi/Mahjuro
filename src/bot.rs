@@ -39,6 +39,26 @@ fn relic_display_name(id: RelicId) -> &'static str {
         .unwrap_or("?")
 }
 
+/// Push a relic onto the run's active list and run any first-purchase
+/// bookkeeping (counter initialization, capacity recomputation). Shared
+/// by the shop buy path and by forced-relic injection at run start.
+fn acquire_relic(run: &mut RunState, id: RelicId) {
+    run.relics.active.push(id);
+    match id {
+        RelicId::MeltingIce => {
+            run.relic_counters.insert(RelicId::MeltingIce, 80);
+        }
+        RelicId::SilkThread => {
+            run.relic_counters.insert(RelicId::SilkThread, 40);
+        }
+        RelicId::TeaCeremony => {
+            run.relic_counters.insert(RelicId::TeaCeremony, 3);
+        }
+        _ => {}
+    }
+    run.recompute_capacities();
+}
+
 macro_rules! bot_log {
     ($enabled:expr, $($arg:tt)*) => {
         if $enabled {
@@ -400,6 +420,10 @@ pub struct AggregateStats {
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     /// Histogram of relics purchased (by display name).
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
+    /// Subset of `relics_picked` counted only on runs that won. Combined
+    /// with `relics_picked` gives a per-relic win rate for runs that
+    /// bought it: `relics_picked_victories[x] / relics_picked[x]`.
+    pub relics_picked_victories: std::collections::BTreeMap<&'static str, u32>,
     /// Histogram of talismans purchased (by display name).
     pub talismans_picked: std::collections::BTreeMap<&'static str, u32>,
     /// Histogram of zodiacs acquired (shop + ZodiacBlessing skip tag), by name.
@@ -462,6 +486,9 @@ impl AggregateStats {
         }
         for (name, count) in &s.relics_picked {
             *self.relics_picked.entry(name).or_insert(0) += *count;
+            if s.victory {
+                *self.relics_picked_victories.entry(name).or_insert(0) += *count;
+            }
         }
         for (name, count) in &s.talismans_picked {
             *self.talismans_picked.entry(name).or_insert(0) += *count;
@@ -530,6 +557,9 @@ impl AggregateStats {
         }
         for (name, count) in other.relics_picked {
             *self.relics_picked.entry(name).or_insert(0) += count;
+        }
+        for (name, count) in other.relics_picked_victories {
+            *self.relics_picked_victories.entry(name).or_insert(0) += count;
         }
         for (name, count) in other.talismans_picked {
             *self.talismans_picked.entry(name).or_insert(0) += count;
@@ -695,12 +725,64 @@ impl AggregateStats {
             }
         }
         if !self.relics_picked.is_empty() {
-            println!("\nrelics bought:");
+            // Require at least this many purchases to compute a
+            // win-rate correlation. Below the floor the rate is noise
+            // (5 runs of 2 wins = 40%, but essentially random).
+            const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
+            let overall_win_rate = self.victories as f64 * 100.0 / self.runs.max(1) as f64;
+
+            println!("\nrelics bought (sorted by total purchases):");
             let mut rows: Vec<(&&str, &u32)> = self.relics_picked.iter().collect();
             rows.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-            for (name, count) in rows {
-                let per_run = *count as f64 / self.runs as f64;
-                println!("  {:<22} {:>5} ({:.2}/run)", name, count, per_run);
+            println!(
+                "  {:<22} {:>7} {:>7} {:>8}",
+                "relic", "bought", "won", "win%"
+            );
+            for (name, count) in &rows {
+                let won = self.relics_picked_victories.get(*name).copied().unwrap_or(0);
+                let win_pct = if **count > 0 {
+                    won as f64 * 100.0 / **count as f64
+                } else {
+                    0.0
+                };
+                println!(
+                    "  {:<22} {:>7} {:>7} {:>7.1}%",
+                    name, count, won, win_pct
+                );
+            }
+
+            // Win-rate leaderboard: only relics with enough samples to
+            // trust. Sorted by win rate vs the overall baseline —
+            // positive delta means the bot wins more when this relic
+            // shows up.
+            let mut ranked: Vec<(&&str, &u32, u32, f64)> = rows
+                .iter()
+                .filter_map(|(name, count)| {
+                    if **count < MIN_SAMPLES_FOR_WIN_CORR {
+                        return None;
+                    }
+                    let won = self.relics_picked_victories.get(*name).copied().unwrap_or(0);
+                    let rate = won as f64 * 100.0 / **count as f64;
+                    Some((*name, *count, won, rate))
+                })
+                .collect();
+            if !ranked.is_empty() {
+                ranked.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+                println!(
+                    "\nrelics by win-rate (≥{} samples, baseline {:.1}%):",
+                    MIN_SAMPLES_FOR_WIN_CORR, overall_win_rate
+                );
+                println!(
+                    "  {:<22} {:>7} {:>7} {:>8} {:>8}",
+                    "relic", "bought", "won", "win%", "Δ"
+                );
+                for (name, count, won, rate) in ranked {
+                    let delta = rate - overall_win_rate;
+                    println!(
+                        "  {:<22} {:>7} {:>7} {:>7.1}% {:>+7.1}",
+                        name, count, won, rate, delta
+                    );
+                }
             }
         }
         if !self.talismans_picked.is_empty() {
@@ -2589,20 +2671,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 };
                 free_relic = false;
                 run.gold -= price as i32;
-                run.relics.active.push(id);
-                match id {
-                    RelicId::MeltingIce => {
-                        run.relic_counters.insert(RelicId::MeltingIce, 80);
-                    }
-                    RelicId::SilkThread => {
-                        run.relic_counters.insert(RelicId::SilkThread, 40);
-                    }
-                    RelicId::TeaCeremony => {
-                        run.relic_counters.insert(RelicId::TeaCeremony, 3);
-                    }
-                    _ => {}
-                }
-                run.recompute_capacities();
+                acquire_relic(run, id);
                 stats.relics_bought += 1;
                 *stats.relics_picked.entry(relic_display_name(id)).or_insert(0) += 1;
                 stats.gold_spent += price;
@@ -2721,6 +2790,11 @@ pub struct BotConfig {
     /// times the round target). Higher = never skip; lower = skip
     /// more aggressively.
     pub skip_threshold_multiplier: Option<f32>,
+    /// If set, inject this relic into `run.relics.active` at run start
+    /// (for free). Used by `forced-relic-sweep` to isolate each relic's
+    /// causal effect on win rate by giving every run the same starting
+    /// relic across a batch.
+    pub forced_relic: Option<RelicId>,
 }
 
 /// Resolved per-run strategy weights (all defaults applied) threaded
@@ -2737,23 +2811,32 @@ pub struct BotStrategy {
 
 impl BotStrategy {
     pub fn from_config(cfg: &BotConfig) -> Self {
+        let d = Self::default();
         Self {
-            relic_weight: cfg.relic_weight.unwrap_or(1.0),
-            zodiac_weight: cfg.zodiac_weight.unwrap_or(1.0),
-            talisman_weight: cfg.talisman_weight.unwrap_or(1.0),
-            pack_weight: cfg.pack_weight.unwrap_or(1.0),
-            skip_threshold_multiplier: cfg.skip_threshold_multiplier.unwrap_or(2.0),
+            relic_weight: cfg.relic_weight.unwrap_or(d.relic_weight),
+            zodiac_weight: cfg.zodiac_weight.unwrap_or(d.zodiac_weight),
+            talisman_weight: cfg.talisman_weight.unwrap_or(d.talisman_weight),
+            pack_weight: cfg.pack_weight.unwrap_or(d.pack_weight),
+            skip_threshold_multiplier: cfg
+                .skip_threshold_multiplier
+                .unwrap_or(d.skip_threshold_multiplier),
         }
     }
 }
 
 impl Default for BotStrategy {
+    // Defaults tuned via `strategy-sweep /tmp/relic_tuning.json --runs 1000`
+    // (12k runs on 2026-04-20). Relic-focused shopping lifts win rate from
+    // 39% baseline (all weights 1.0) to 49% — the bot was systematically
+    // under-weighting relics relative to their per-run value. Dampening
+    // the other categories to 0.5 keeps purchases varied enough to avoid
+    // missing situational steals (e.g. Chinitsu-enabling suit packs).
     fn default() -> Self {
         Self {
-            relic_weight: 1.0,
-            zodiac_weight: 1.0,
-            talisman_weight: 1.0,
-            pack_weight: 1.0,
+            relic_weight: 2.0,
+            zodiac_weight: 0.5,
+            talisman_weight: 0.5,
+            pack_weight: 0.5,
             skip_threshold_multiplier: 2.0,
         }
     }
@@ -2831,11 +2914,20 @@ fn play_run_with_options(
     run_number: Option<u32>,
 ) -> RunStats {
     let strategy = BotStrategy::from_config(&config);
+    let forced_relic = config.forced_relic;
     let mode = config.into_mode();
     let mut run = RunState::new(mode);
     let mut stats = RunStats::default();
     let mut bus = EventBus::default();
     let log = options.log;
+
+    // Forced-relic injection (for causal sweeps): grant the relic for
+    // free at run start so every run in the cell has the same build
+    // starter. The bot then plays normally from there.
+    if let Some(id) = forced_relic {
+        acquire_relic(&mut run, id);
+        bot_log!(log, "  forced relic injection: {:?}", id);
+    }
 
     bot_log!(
         log,
@@ -3183,6 +3275,7 @@ impl StrategyDef {
             starting_plays: self.starting_plays,
             starting_discards: self.starting_discards,
             starting_gold: self.starting_gold,
+            forced_relic: None,
             relic_weight: self.relic_weight,
             zodiac_weight: self.zodiac_weight,
             talisman_weight: self.talisman_weight,
@@ -3225,11 +3318,22 @@ pub fn run_strategy_sweep(
 
     // Parallelize across strategies; each strategy runs its 1000 games
     // sequentially on its own thread so rayon's pool gets one thread
-    // per strategy.
+    // per strategy. Emit a progress line as each strategy finishes so
+    // long sweeps give feedback instead of going silent for minutes.
+    let total = strategies.len();
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let start = std::time::Instant::now();
     let results: Vec<(String, AggregateStats)> = strategies
         .into_par_iter()
         .map(|(name, cfg)| {
             let agg = run_with_sequential(runs_per_strategy, cfg);
+            let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let elapsed = start.elapsed().as_secs_f64();
+            let win_pct = agg.victories as f64 * 100.0 / agg.runs.max(1) as f64;
+            println!(
+                "  [{:>2}/{}] {:<24} win {:>5.1}%  ({:>5.1}s elapsed)",
+                finished, total, name, win_pct, elapsed,
+            );
             (name, agg)
         })
         .collect();
@@ -3287,6 +3391,135 @@ pub fn run_strategy_sweep(
             Ok(()) => println!("\nexported strategy sweep JSON to {}", path.display()),
             Err(err) => eprintln!(
                 "\nfailed to export strategy sweep JSON to {}: {err}",
+                path.display()
+            ),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ForcedRelicCellExport {
+    relic: String,
+    aggregate: AggregateStats,
+}
+
+#[derive(Serialize)]
+struct ForcedRelicExport {
+    runs_per_relic: u32,
+    baseline_aggregate: AggregateStats,
+    relics: Vec<ForcedRelicCellExport>,
+}
+
+/// Run every relic as a "forced starter" across `runs_per_relic` games,
+/// plus a control cell with no forced relic, then rank by win rate
+/// vs the control. This isolates each relic's *causal* effect on win
+/// rate — unlike the `relics_picked` histogram on a normal `bot` run,
+/// which only shows correlation (the bot buys more of everything when
+/// runs go well).
+pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
+    let relic_ids: Vec<RelicId> = all_relic_defs().iter().map(|d| d.id).collect();
+    let total = relic_ids.len() + 1; // +1 control
+    println!(
+        "Forced-relic sweep: {} relics + 1 control × {} runs = {} total",
+        relic_ids.len(),
+        runs_per_relic,
+        total * runs_per_relic as usize,
+    );
+
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let start = std::time::Instant::now();
+
+    // Cell 0 is the control; threading all cells together means rayon
+    // balances the load across cores.
+    let mut cells: Vec<Option<RelicId>> = Vec::with_capacity(total);
+    cells.push(None);
+    for id in &relic_ids {
+        cells.push(Some(*id));
+    }
+
+    let results: Vec<(Option<RelicId>, AggregateStats)> = cells
+        .into_par_iter()
+        .map(|forced| {
+            let cfg = BotConfig {
+                forced_relic: forced,
+                ..Default::default()
+            };
+            let agg = run_with_sequential(runs_per_relic, cfg);
+            let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            let elapsed = start.elapsed().as_secs_f64();
+            let win_pct = agg.victories as f64 * 100.0 / agg.runs.max(1) as f64;
+            let label = match forced {
+                Some(id) => relic_display_name(id),
+                None => "(control)",
+            };
+            println!(
+                "  [{:>3}/{}] {:<24} win {:>5.1}%  ({:>5.1}s elapsed)",
+                finished, total, label, win_pct, elapsed,
+            );
+            (forced, agg)
+        })
+        .collect();
+
+    let control_agg = results
+        .iter()
+        .find_map(|(forced, agg)| if forced.is_none() { Some(agg.clone()) } else { None })
+        .expect("control cell must be present");
+    let control_win_pct = control_agg.victories as f64 * 100.0 / control_agg.runs.max(1) as f64;
+
+    let mut ranked: Vec<(RelicId, AggregateStats)> = results
+        .into_iter()
+        .filter_map(|(forced, agg)| forced.map(|id| (id, agg)))
+        .collect();
+    ranked.sort_by(|(_, a), (_, b)| {
+        let wa = a.victories as f64 / a.runs.max(1) as f64;
+        let wb = b.victories as f64 / b.runs.max(1) as f64;
+        wb.partial_cmp(&wa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    println!();
+    println!(
+        "Control (no forced relic): {:.1}% win rate over {} runs",
+        control_win_pct, control_agg.runs,
+    );
+    println!();
+    println!(
+        "{:>4}  {:<22}  {:>6}  {:>7}  {:>6}",
+        "rank", "relic", "win%", "Δ ctrl", "antes"
+    );
+    println!(
+        "{:->4}  {:-<22}  {:->6}  {:->7}  {:->6}",
+        "", "", "", "", ""
+    );
+    for (i, (id, agg)) in ranked.iter().enumerate() {
+        let win_pct = agg.victories as f64 * 100.0 / agg.runs.max(1) as f64;
+        let delta = win_pct - control_win_pct;
+        let antes = agg.antes_cleared_total as f64 / agg.runs.max(1) as f64;
+        println!(
+            "{:>4}  {:<22}  {:>5.1}%  {:>+6.1}  {:>6.2}",
+            i + 1,
+            relic_display_name(*id),
+            win_pct,
+            delta,
+            antes,
+        );
+    }
+
+    if let Some(path) = export_json {
+        let payload = ForcedRelicExport {
+            runs_per_relic,
+            baseline_aggregate: control_agg,
+            relics: ranked
+                .into_iter()
+                .map(|(id, aggregate)| ForcedRelicCellExport {
+                    relic: relic_display_name(id).to_string(),
+                    aggregate,
+                })
+                .collect(),
+        };
+        match write_json(path, &payload) {
+            Ok(()) => println!("\nexported forced-relic sweep JSON to {}", path.display()),
+            Err(err) => eprintln!(
+                "\nfailed to export forced-relic sweep JSON to {}: {err}",
                 path.display()
             ),
         }

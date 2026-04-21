@@ -117,6 +117,18 @@ pub enum SfxId {
     Defeat,
     /// Played whenever the main menu (start screen) is entered.
     MainMenuEnter,
+    /// Generic level-up stinger.
+    LevelUp,
+    /// Tiles permanently destroyed (e.g. Kiln talisman).
+    TilesDestroyed,
+    /// Boss blind encountered — ominous sting as the round begins.
+    BossEncountered,
+    /// Boss blind defeated — triumphant sting.
+    BossDefeated,
+    /// Talisman purchased from the shop.
+    TalismanPurchased,
+    /// Talisman consumed from the dish.
+    TalismanUsed,
 }
 
 /// All SFX variants in display order. Single source of truth shared by the
@@ -184,6 +196,12 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::Victory2,
         SfxId::Defeat,
         SfxId::MainMenuEnter,
+        SfxId::LevelUp,
+        SfxId::TilesDestroyed,
+        SfxId::BossEncountered,
+        SfxId::BossDefeated,
+        SfxId::TalismanPurchased,
+        SfxId::TalismanUsed,
     ]
 }
 
@@ -251,6 +269,12 @@ impl SfxId {
             SfxId::Victory2 => "victory2.ogg",
             SfxId::Defeat => "defeat.ogg",
             SfxId::MainMenuEnter => "mahjuro.ogg",
+            SfxId::LevelUp => "levelup.ogg",
+            SfxId::TilesDestroyed => "tiles_destroyed.ogg",
+            SfxId::BossEncountered => "boss_encountered.ogg",
+            SfxId::BossDefeated => "boss_defeated.ogg",
+            SfxId::TalismanPurchased => "talisman_purchased.ogg",
+            SfxId::TalismanUsed => "talisman_used.ogg",
         }
     }
 
