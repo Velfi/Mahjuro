@@ -205,4 +205,3 @@ pub fn build_candle_wick_mesh() -> MeshCpu {
 /// Wick tip y in local mesh units, used by the scene to position flames and
 /// point lights at the actual top of the candle.
 pub const WICK_TIP_Y: f32 = 0.610;
-

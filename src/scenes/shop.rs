@@ -21,11 +21,10 @@ use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::onboarding::OnboardingPhase;
-use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
-    camera_facing_rotation,
-};
 use crate::render::decal::{load_ui_font, measure_plaque_wrap};
+use crate::render::draw_cmd::{
+    CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame, camera_facing_rotation,
+};
 use crate::render::lamp_mesh::{BULB_Z as LAMP_BULB_LOCAL_Z, SHADE_RIM_R, shade_exclusion_radius};
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
@@ -175,12 +174,8 @@ fn shop_action_for_hit(
                 None
             }
         }
-        ShopHit::Dish(id) => {
-            tile_pack_index_from_pick(id).map(ShopAction::BuyPack)
-        }
-        ShopHit::TilePack(id) => {
-            tile_pack_index_from_pick(id).map(ShopAction::BuyPack)
-        }
+        ShopHit::Dish(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
+        ShopHit::TilePack(id) => tile_pack_index_from_pick(id).map(ShopAction::BuyPack),
     }
 }
 
@@ -285,10 +280,7 @@ fn focus_after_sell(
 /// index of the item being sold, peeking `run` *before* the sell applies.
 /// Returns `None` for actions that aren't sells or whose target index is
 /// out of range.
-fn classify_sell(
-    action: ShopAction,
-    run: &crate::game::run::RunState,
-) -> Option<(SoldRow, usize)> {
+fn classify_sell(action: ShopAction, run: &crate::game::run::RunState) -> Option<(SoldRow, usize)> {
     match action {
         ShopAction::SellRelic(i) if i < run.relics.active.len() => Some((SoldRow::Relic, i)),
         ShopAction::SellConsumable(inv_idx) => {
@@ -545,9 +537,7 @@ fn apply_shop_action(
                         crate::audio::SfxId::Purchase,
                     ));
                     if let Consumable::Talisman(tk) = consumable {
-                        bus.push(
-                            crate::game::event_bus::GameEvent::TalismanPurchased(tk),
-                        );
+                        bus.push(crate::game::event_bus::GameEvent::TalismanPurchased(tk));
                     }
                     talisman_items.remove(idx);
                 }
@@ -1382,11 +1372,9 @@ impl ShopScene {
                 new_level,
             } => {
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
-                *overlay_request = Some(super::OverlayRequest::Push(
-                    Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
-                        zodiac_kind, yaku_name, new_level,
-                    )),
-                ));
+                *overlay_request = Some(super::OverlayRequest::Push(Scene::ZodiacCelebration(
+                    super::ZodiacCelebrationScene::new(zodiac_kind, yaku_name, new_level),
+                )));
             }
         }
     }
@@ -1600,8 +1588,7 @@ impl ShopLayout {
         let pack_z = pack_wz + layout.mm(10.0);
         let mut pack_centers_px = [(0.0, 0.0, 0.0); N_TILE_PACKS];
         for i in 0..N_TILE_PACKS {
-            let off =
-                (i as f32 - (N_TILE_PACKS as f32 - 1.0) * 0.5) * pack_spacing;
+            let off = (i as f32 - (N_TILE_PACKS as f32 - 1.0) * 0.5) * pack_spacing;
             pack_centers_px[i] = (col_px_x[1] + off, pack_pixel_y, pack_z);
         }
 
@@ -2002,9 +1989,9 @@ impl SceneBehavior for ShopScene {
             }
         }
         if open_guide {
-            *ctx.overlay_request = Some(super::OverlayRequest::Push(
-                Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
-            ));
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::MeldGuide(
+                super::meld_guide::MeldGuideScene::new(true),
+            )));
             return None;
         }
 
@@ -2051,9 +2038,9 @@ impl SceneBehavior for ShopScene {
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
-                *ctx.overlay_request = Some(super::OverlayRequest::Push(
-                    Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
-                ));
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::MeldGuide(
+                    super::meld_guide::MeldGuideScene::new(true),
+                )));
                 return None;
             }
             return t;
@@ -2256,7 +2243,12 @@ impl SceneBehavior for ShopScene {
                                 ctx.run,
                                 ctx.bus,
                             );
-                            self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
+                            self.handle_shop_action_result(
+                                result,
+                                ctx.cursor_pos,
+                                ctx.bus,
+                                ctx.overlay_request,
+                            );
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             *ctx.overlay_request = Some(super::OverlayRequest::Push(
                                 super::Scene::YakuJournal(super::YakuJournalScene::new()),
@@ -2431,7 +2423,12 @@ impl SceneBehavior for ShopScene {
                     ctx.run,
                     ctx.bus,
                 );
-                self.handle_shop_action_result(result, ctx.cursor_pos, ctx.bus, ctx.overlay_request);
+                self.handle_shop_action_result(
+                    result,
+                    ctx.cursor_pos,
+                    ctx.bus,
+                    ctx.overlay_request,
+                );
             }
             return None;
         }
@@ -2982,9 +2979,13 @@ impl SceneBehavior for ShopScene {
                     yaw * glam::Mat4::from_rotation_x(bank) * glam::Mat4::from_rotation_y(pitch);
                 // Flap angle at time `t`. Sine wave in radians, offset per
                 // bug index so the swarm's wingbeats are phase-staggered.
-                let flap = flap_amp
-                    * (t * flap_hz * std::f32::consts::TAU + fi * 1.3).sin();
-                ([bug_px, bug_py, bug_wz], [bug_sz, bug_sz, bug_sz], rot, flap)
+                let flap = flap_amp * (t * flap_hz * std::f32::consts::TAU + fi * 1.3).sin();
+                (
+                    [bug_px, bug_py, bug_wz],
+                    [bug_sz, bug_sz, bug_sz],
+                    rot,
+                    flap,
+                )
             };
 
             // Live bugs — the ghost-trail system is gone; each bug now emits
@@ -3184,7 +3185,11 @@ impl SceneBehavior for ShopScene {
             },
             // Purple rim highlight — offset beside the bulb to catch edges.
             PointLight {
-                pos: [lamp_bulb_pos[0], lamp_bulb_pos[1], lamp_bulb_pos[2] - h * 0.04],
+                pos: [
+                    lamp_bulb_pos[0],
+                    lamp_bulb_pos[1],
+                    lamp_bulb_pos[2] - h * 0.04,
+                ],
                 radius: h * 0.70,
                 color: [0.72, 0.38, 1.00],
                 intensity: 1.80 * lamp_flicker,
@@ -3727,8 +3732,7 @@ impl SceneBehavior for ShopScene {
                         palette: crate::render::primitive::DecalPalette::ParchmentInk,
                         layout: crate::render::primitive::DecalLayout::TitleRule {
                             title_height_frac: 0.40,
-                            target_short_edge:
-                                crate::render::decal::OFUDA_DECAL_LONG_EDGE,
+                            target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                         },
                     },
                 ),
@@ -3757,11 +3761,12 @@ impl SceneBehavior for ShopScene {
             color: [0.88, 0.78, 0.42, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::BeveledSlab,
-                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                    .with_decal(crate::render::primitive::plaque_decal(format!(
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat().with_decal(
+                    crate::render::primitive::plaque_decal(format!(
                         "Gold\n{}g",
                         ctx.run.gold.max(0)
-                    ))),
+                    )),
+                ),
                 pick_id: None,
                 shadow_caster: false,
                 silhouette: false,
@@ -3832,12 +3837,8 @@ impl SceneBehavior for ShopScene {
                         let font_px = (h * 0.022).max(14.0);
                         let pad_frac = 0.1;
                         let inner_w = plaque_w * (1.0 - 2.0 * pad_frac);
-                        let (line_count, line_h) = measure_plaque_wrap(
-                            load_ui_font().as_ref(),
-                            &text,
-                            inner_w,
-                            font_px,
-                        );
+                        let (line_count, line_h) =
+                            measure_plaque_wrap(load_ui_font().as_ref(), &text, inner_w, font_px);
                         let content_h = line_count as f32 * line_h;
                         let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
 
@@ -3939,8 +3940,7 @@ impl SceneBehavior for ShopScene {
                             let content_h = line_count as f32 * line_h;
                             let desc_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.08);
                             let desc_py = tpy + h * 0.10 + desc_p.ny * h;
-                            let desc_wz =
-                                (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
+                            let desc_wz = (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
                             let desc_px =
                                 clamp_plaque_px(tpx + desc_p.nx * w, desc_w, desc_py, desc_wz);
                             frame.object3d(Object3d {
@@ -3950,8 +3950,12 @@ impl SceneBehavior for ShopScene {
                                 color: [1.0, 1.0, 1.0, 1.0],
                                 kind: Object3dKind::Primitive {
                                     shape: crate::render::primitive::MeshId::BeveledSlab,
-                                    material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                                        .with_decal(crate::render::primitive::plaque_decal(desc.clone())),
+                                    material:
+                                        crate::render::primitive::MaterialSpec::lacquered_wood_flat(
+                                        )
+                                        .with_decal(
+                                            crate::render::primitive::plaque_decal(desc.clone()),
+                                        ),
                                     pick_id: None,
                                     shadow_caster: false,
                                     silhouette: false,
@@ -4012,7 +4016,10 @@ impl SceneBehavior for ShopScene {
                         decal: Some(DecalSpec {
                             text: reroll_label,
                             palette: DecalPalette::GoldGilded,
-                            layout: DecalLayout::Fixed { width: 512, height: 192 },
+                            layout: DecalLayout::Fixed {
+                                width: 512,
+                                height: 192,
+                            },
                         }),
                     },
                     pick_id: Some(PICK_REROLL_PROP),
@@ -4058,7 +4065,10 @@ impl SceneBehavior for ShopScene {
                         decal: Some(DecalSpec {
                             text: leave_label.to_string(),
                             palette: DecalPalette::GoldGilded,
-                            layout: DecalLayout::Fixed { width: 512, height: 192 },
+                            layout: DecalLayout::Fixed {
+                                width: 512,
+                                height: 192,
+                            },
                         }),
                     },
                     pick_id: Some(PICK_LEAVE_PROP),
@@ -4167,8 +4177,7 @@ impl SceneBehavior for ShopScene {
                     .yaku_levels
                     .level_of(crate::core::yaku::YakuKind::FullHand)
                     > 1
-                || (!self.pack_items.is_empty()
-                    && self.pack_items.iter().any(|p| p.sold));
+                || (!self.pack_items.is_empty() && self.pack_items.iter().any(|p| p.sold));
             let (flavor, hint) = if has_bought {
                 (
                     "Your loadout is ready.",
@@ -4494,8 +4503,8 @@ impl SceneBehavior for ShopScene {
                     let row_rx = self.positions.celeb_pack_reveal.rx_deg.to_radians()
                         + 60.0_f32.to_radians();
                     let row_ry = self.positions.celeb_pack_reveal.ry_deg.to_radians();
-                    let row_rz = self.positions.celeb_pack_reveal.rz_deg.to_radians()
-                        + std::f32::consts::PI;
+                    let row_rz =
+                        self.positions.celeb_pack_reveal.rz_deg.to_radians() + std::f32::consts::PI;
 
                     let mut placements = Vec::with_capacity(n);
                     for i in 0..n {

@@ -200,21 +200,69 @@ fn material_entries() -> Vec<MaterialEntry> {
         specular_power: spec_p,
     };
     vec![
-        MaterialEntry { label: "Plain",            material: mk(Plain,             [0.85, 0.85, 0.85], 0.2, 32.0) },
-        MaterialEntry { label: "Wax",              material: MaterialParams::wax() },
-        MaterialEntry { label: "Wick",             material: MaterialParams::wick() },
-        MaterialEntry { label: "Lacquered Wood",   material: MaterialParams::lacquered_wood() },
-        MaterialEntry { label: "Lacq. Wood Flat",  material: mk(LacqueredWoodFlat, [1.0, 1.0, 1.0],    0.55, 96.0) },
-        MaterialEntry { label: "Metal",            material: mk(Metal,             [0.85, 0.70, 0.40], 1.0, 96.0) },
-        MaterialEntry { label: "Water",            material: mk(Water,             [0.20, 0.40, 0.65], 0.8, 64.0) },
-        MaterialEntry { label: "Foil",             material: mk(Foil,              [0.85, 0.85, 0.90], 1.0, 96.0) },
-        MaterialEntry { label: "Glass",            material: mk(Glass,             [1.00, 0.92, 0.60], 1.0, 128.0) },
-        MaterialEntry { label: "Enamel",           material: mk(Enamel,            [0.85, 0.25, 0.30], 0.9, 96.0) },
-        MaterialEntry { label: "Jade",             material: mk(Jade,              [0.35, 0.70, 0.50], 0.6, 64.0) },
-        MaterialEntry { label: "Moonstone",        material: mk(Moonstone,         [0.90, 0.92, 1.00], 0.8, 96.0) },
-        MaterialEntry { label: "Pearl",            material: mk(Pearl,             [0.95, 0.92, 0.90], 0.7, 96.0) },
-        MaterialEntry { label: "Gold Nugget",      material: mk(GoldNugget,        [0.95, 0.78, 0.30], 1.0, 96.0) },
-        MaterialEntry { label: "Polychrome",       material: mk(Polychrome,        [0.80, 0.80, 0.85], 0.9, 96.0) },
-        MaterialEntry { label: "Porcelain",        material: mk(Porcelain,         [0.95, 0.94, 0.92], 0.7, 128.0) },
+        MaterialEntry {
+            label: "Plain",
+            material: mk(Plain, [0.85, 0.85, 0.85], 0.2, 32.0),
+        },
+        MaterialEntry {
+            label: "Wax",
+            material: MaterialParams::wax(),
+        },
+        MaterialEntry {
+            label: "Wick",
+            material: MaterialParams::wick(),
+        },
+        MaterialEntry {
+            label: "Lacquered Wood",
+            material: MaterialParams::lacquered_wood(),
+        },
+        MaterialEntry {
+            label: "Lacq. Wood Flat",
+            material: mk(LacqueredWoodFlat, [1.0, 1.0, 1.0], 0.55, 96.0),
+        },
+        MaterialEntry {
+            label: "Metal",
+            material: mk(Metal, [0.85, 0.70, 0.40], 1.0, 96.0),
+        },
+        MaterialEntry {
+            label: "Water",
+            material: mk(Water, [0.20, 0.40, 0.65], 0.8, 64.0),
+        },
+        MaterialEntry {
+            label: "Foil",
+            material: mk(Foil, [0.85, 0.85, 0.90], 1.0, 96.0),
+        },
+        MaterialEntry {
+            label: "Glass",
+            material: mk(Glass, [1.00, 0.92, 0.60], 1.0, 128.0),
+        },
+        MaterialEntry {
+            label: "Enamel",
+            material: mk(Enamel, [0.85, 0.25, 0.30], 0.9, 96.0),
+        },
+        MaterialEntry {
+            label: "Jade",
+            material: mk(Jade, [0.35, 0.70, 0.50], 0.6, 64.0),
+        },
+        MaterialEntry {
+            label: "Moonstone",
+            material: mk(Moonstone, [0.90, 0.92, 1.00], 0.8, 96.0),
+        },
+        MaterialEntry {
+            label: "Pearl",
+            material: mk(Pearl, [0.95, 0.92, 0.90], 0.7, 96.0),
+        },
+        MaterialEntry {
+            label: "Gold Nugget",
+            material: mk(GoldNugget, [0.95, 0.78, 0.30], 1.0, 96.0),
+        },
+        MaterialEntry {
+            label: "Polychrome",
+            material: mk(Polychrome, [0.80, 0.80, 0.85], 0.9, 96.0),
+        },
+        MaterialEntry {
+            label: "Porcelain",
+            material: mk(Porcelain, [0.95, 0.94, 0.92], 0.7, 128.0),
+        },
     ]
 }

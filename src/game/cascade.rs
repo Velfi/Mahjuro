@@ -351,8 +351,7 @@ impl ScoringCascade {
                     (elapsed.as_millis() as f32 / HANDOFF_MS as f32).clamp(0.0, 1.0);
                 // Reel ticks during the flight sub-phase, so the digits
                 // climb as the label physically flies into the reel.
-                let tick = ((handoff_linear - HANDOFF_MERGE_FRAC)
-                    / (1.0 - HANDOFF_MERGE_FRAC))
+                let tick = ((handoff_linear - HANDOFF_MERGE_FRAC) / (1.0 - HANDOFF_MERGE_FRAC))
                     .clamp(0.0, 1.0);
                 (lerp_u64(from, to, tick), None, None)
             }

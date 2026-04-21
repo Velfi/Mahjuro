@@ -1043,10 +1043,9 @@ impl OptionsScene {
                             "OFF"
                         }
                     ),
-                    Row::Hints => format!(
-                        "Hints: {}",
-                        if self.hints_enabled { "ON" } else { "OFF" }
-                    ),
+                    Row::Hints => {
+                        format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
+                    }
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {

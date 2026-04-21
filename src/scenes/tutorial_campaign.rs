@@ -11,14 +11,12 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::game::onboarding::OnboardingPhase;
 use crate::render::draw_cmd::{
-    CameraParams, DrawCmd, Object3d, Object3dKind,
-    ShowcaseTilePlacement,
-    UiFrame,
+    CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
 };
 use crate::render::table_transform::rot_rx_ry_rz_deg;
-use crate::render::world_space::LayoutAnchorPx;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::render::world_space::LayoutAnchorPx;
 use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -607,12 +605,7 @@ impl TutorialCampaignScene {
         (heights, total_h)
     }
 
-    fn shop_preview_ribbon(
-        center_x: f32,
-        item_y: f32,
-        h: f32,
-        scale: f32,
-    ) -> Object3d {
+    fn shop_preview_ribbon(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
         let length = 46.0 * scale;
         let width = 24.0 * scale;
         Object3d {
@@ -1054,7 +1047,12 @@ impl SceneBehavior for TutorialCampaignScene {
                 extents: [face_size, thick, face_size],
                 rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 30.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
-                kind: Object3dKind::Relic { relic_id, glow: 0.0, silhouette: false, pick_id: None },
+                kind: Object3dKind::Relic {
+                    relic_id,
+                    glow: 0.0,
+                    silhouette: false,
+                    pick_id: None,
+                },
                 focusable: false,
                 scene_shaded: true,
                 own_light: None,
@@ -1099,7 +1097,12 @@ impl SceneBehavior for TutorialCampaignScene {
                 extents: [face_size, thick, face_size],
                 rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 24.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
-                kind: Object3dKind::Relic { relic_id, glow: 0.0, silhouette: false, pick_id: None },
+                kind: Object3dKind::Relic {
+                    relic_id,
+                    glow: 0.0,
+                    silhouette: false,
+                    pick_id: None,
+                },
                 focusable: false,
                 scene_shaded: true,
                 own_light: None,

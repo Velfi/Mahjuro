@@ -2134,7 +2134,9 @@ impl SceneBehavior for GameplayScene {
                 // to `None` after the last so the player can exit the
                 // strip without a separate keybind.
                 UiAction::NavigateHudNext if !consumable_targets.is_empty() => {
-                    let cur_pos = consumable_targets.iter().position(|t| Some(*t) == self.focus);
+                    let cur_pos = consumable_targets
+                        .iter()
+                        .position(|t| Some(*t) == self.focus);
                     self.focus = match cur_pos {
                         None => Some(consumable_targets[0]),
                         Some(i) if i + 1 >= consumable_targets.len() => None,
@@ -2144,8 +2146,9 @@ impl SceneBehavior for GameplayScene {
                 }
                 UiAction::NavigateHudPrev => {
                     if !consumable_targets.is_empty() {
-                        let cur_pos =
-                            consumable_targets.iter().position(|t| Some(*t) == self.focus);
+                        let cur_pos = consumable_targets
+                            .iter()
+                            .position(|t| Some(*t) == self.focus);
                         self.focus = match cur_pos {
                             None => Some(*consumable_targets.last().unwrap()),
                             Some(0) => None,
@@ -4156,14 +4159,12 @@ impl SceneBehavior for GameplayScene {
             .filter(|&(_, &sel)| sel)
             .map(|(i, _)| i)
             .collect();
-        let mut hint_indices = if run.hints_enabled
-            && !selected_indices.is_empty()
-            && self.cascade_queue.is_empty()
-        {
-            suggest_completions(&run.hand, &selected_indices)
-        } else {
-            vec![]
-        };
+        let mut hint_indices =
+            if run.hints_enabled && !selected_indices.is_empty() && self.cascade_queue.is_empty() {
+                suggest_completions(&run.hand, &selected_indices)
+            } else {
+                vec![]
+            };
         // Tutorial affinity glow: merge tutorial hints into hint_indices.
         if !self.tutorial_affinity_indices.is_empty() {
             for &idx in &self.tutorial_affinity_indices {
@@ -4604,8 +4605,8 @@ impl SceneBehavior for GameplayScene {
         // sharp and round on the face instead of spilling across the hand.
         if !hint_indices.is_empty() {
             let pulse = 0.75 + 0.25 * (self.candle_time * 4.0).sin();
-            let hint_budget = crate::render::wgpu_renderer::MAX_SPOT_LIGHTS
-                .saturating_sub(spot_lights.len());
+            let hint_budget =
+                crate::render::wgpu_renderer::MAX_SPOT_LIGHTS.saturating_sub(spot_lights.len());
             let hint_color = [0.30, 1.00, 0.45];
             // 24° inner / 36° outer — a tight pool with a soft edge.
             let cos_inner = (24.0_f32).to_radians().cos();
@@ -5578,8 +5579,7 @@ impl SceneBehavior for GameplayScene {
                             palette: crate::render::primitive::DecalPalette::ParchmentInk,
                             layout: crate::render::primitive::DecalLayout::TitleRule {
                                 title_height_frac: 0.40,
-                                target_short_edge:
-                                    crate::render::decal::OFUDA_DECAL_LONG_EDGE,
+                                target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                             },
                         },
                     ),
@@ -6343,12 +6343,10 @@ fn build_cascade_hud_placements(
     let ctrl_py = (pad_py + reel_py) * 0.5;
     let ctrl_lift = pad_lift.max(reel_lift) + 180.0;
     let one_m = 1.0 - flight_t;
-    let total_px = one_m * one_m * pad_px
-        + 2.0 * one_m * flight_t * ctrl_px
-        + flight_t * flight_t * reel_px;
-    let total_py = one_m * one_m * pad_py
-        + 2.0 * one_m * flight_t * ctrl_py
-        + flight_t * flight_t * reel_py;
+    let total_px =
+        one_m * one_m * pad_px + 2.0 * one_m * flight_t * ctrl_px + flight_t * flight_t * reel_px;
+    let total_py =
+        one_m * one_m * pad_py + 2.0 * one_m * flight_t * ctrl_py + flight_t * flight_t * reel_py;
     let total_lift = one_m * one_m * pad_lift
         + 2.0 * one_m * flight_t * ctrl_lift
         + flight_t * flight_t * reel_lift;

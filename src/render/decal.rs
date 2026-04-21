@@ -713,7 +713,11 @@ fn advance_width(
     font_px: f32,
 ) -> f32 {
     text.chars()
-        .map(|ch| pick_font(font, emoji_font, ch).metrics(ch, font_px).advance_width)
+        .map(|ch| {
+            pick_font(font, emoji_font, ch)
+                .metrics(ch, font_px)
+                .advance_width
+        })
         .sum()
 }
 
@@ -1814,7 +1818,10 @@ pub fn rasterize_decal(
             let labels: [&str; 6] = [parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]];
             rasterize_cabinet_strip_decal(labels, ui_font)
         }
-        DecalLayout::Fixed { width: fw, height: fh } => {
+        DecalLayout::Fixed {
+            width: fw,
+            height: fh,
+        } => {
             // GoldGilded: three-pass engraved-gilded treatment
             // (shadow / gold body / champagne highlight) to match the
             // shop action props and hanging plaques. Every other
@@ -1852,7 +1859,9 @@ pub fn decal_dimensions(
             let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
             (w, h)
         }
-        DecalLayout::TitleRule { target_short_edge, .. } => {
+        DecalLayout::TitleRule {
+            target_short_edge, ..
+        } => {
             // Ofuda is authored landscape; short edge is height.
             let h = *target_short_edge;
             let face_aspect = (extents[0] / extents[1].max(1.0)).clamp(0.5, 12.0);

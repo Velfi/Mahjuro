@@ -314,10 +314,7 @@ pub fn validate_selection_with_rules(
 /// Includes chiitoitsu as an alternative when 14 tiles split into 7 distinct
 /// pairs. De-duplicates decompositions that differ only by tile-id ordering
 /// (same multiset of melds by face + kind).
-pub fn enumerate_decompositions(
-    tiles: &[Tile],
-    rules: &[RuleModifier],
-) -> Vec<Vec<DetectedSet>> {
+pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<Vec<DetectedSet>> {
     if tiles.is_empty() {
         return Vec::new();
     }
@@ -382,9 +379,10 @@ pub fn enumerate_decompositions(
                 if require_honor
                     && !sets.iter().any(|set| {
                         set.tile_ids.iter().any(|id| {
-                            tiles.iter().find(|t| t.id == *id).is_some_and(|t| {
-                                matches!(t.suit, Suit::Wind | Suit::Dragon)
-                            })
+                            tiles
+                                .iter()
+                                .find(|t| t.id == *id)
+                                .is_some_and(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
                         })
                     })
                 {
@@ -474,10 +472,7 @@ fn collect_decompositions(
     }
 
     // Pair.
-    if remaining.len() >= 2
-        && remaining[1].suit == first.suit
-        && remaining[1].rank == first.rank
-    {
+    if remaining.len() >= 2 && remaining[1].suit == first.suit && remaining[1].rank == first.rank {
         found.push(DetectedSet {
             kind: SetKind::Pair,
             tile_ids: vec![remaining[0].id, remaining[1].id],
@@ -587,11 +582,7 @@ fn collect_wrap_sequence(
             }) {
                 found.push(DetectedSet {
                     kind: SetKind::Sequence,
-                    tile_ids: vec![
-                        remaining[0].id,
-                        remaining[mid_idx].id,
-                        remaining[hi_idx].id,
-                    ],
+                    tile_ids: vec![remaining[0].id, remaining[mid_idx].id, remaining[hi_idx].id],
                 });
                 let rest: Vec<Tile> = remaining
                     .iter()

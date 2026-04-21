@@ -10,7 +10,6 @@
 
 use rand::RngExt;
 
-
 // ── Physics constants ────────────────────────────────────────────────────
 
 /// Gravity acceleration (world_y units / s²). Negative = downward.

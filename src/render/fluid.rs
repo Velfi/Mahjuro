@@ -628,15 +628,14 @@ impl FluidSim {
             bind_group_layouts: &[Some(&lightbake_layout)],
             immediate_size: 0,
         });
-        let lightbake_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("fluid3-lightbake-pipeline"),
-                layout: Some(&lightbake_pl_layout),
-                module: &lightbake_shader,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
+        let lightbake_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("fluid3-lightbake-pipeline"),
+            layout: Some(&lightbake_pl_layout),
+            module: &lightbake_shader,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
 
         // Advect/inject bind groups. The flow each frame is:
         //   vd[0]  --advect-->  vd[1]  --inject-->  vd[0]
@@ -1087,12 +1086,7 @@ impl FluidSim {
             .and_then(|(mn, mx)| project_world_aabb(view_proj, mn, mx, target_w, target_h));
 
         let rect = match (smoke_rect, flame_rect) {
-            (Some(a), Some(b)) => Some((
-                a.0.min(b.0),
-                a.1.min(b.1),
-                a.2.max(b.2),
-                a.3.max(b.3),
-            )),
+            (Some(a), Some(b)) => Some((a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))),
             (Some(r), None) | (None, Some(r)) => Some(r),
             (None, None) => None,
         }?;
@@ -1383,7 +1377,12 @@ impl FluidSim {
                     imp.world_pos.z,
                     imp.radius,
                 ],
-                vel_density: [imp.world_vel.x, imp.world_vel.y, imp.world_vel.z, imp.density],
+                vel_density: [
+                    imp.world_vel.x,
+                    imp.world_vel.y,
+                    imp.world_vel.z,
+                    imp.density,
+                ],
                 temperature_phase: [imp.temperature, imp.phase, 0.0, 0.0],
             };
         }

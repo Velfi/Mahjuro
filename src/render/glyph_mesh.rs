@@ -83,11 +83,8 @@ impl ttf_parser::OutlineBuilder for LyonPathBuilder {
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.builder.cubic_bezier_to(
-            Point::new(x1, y1),
-            Point::new(x2, y2),
-            Point::new(x, y),
-        );
+        self.builder
+            .cubic_bezier_to(Point::new(x1, y1), Point::new(x2, y2), Point::new(x, y));
     }
 
     fn close(&mut self) {
@@ -289,11 +286,7 @@ fn extract_boundary_loops(triangles: &[[u32; 3]]) -> Vec<Vec<u32>> {
 // Extrusion
 // ---------------------------------------------------------------------------
 
-fn extrude_cap(
-    cap: &GlyphCap,
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-) {
+fn extrude_cap(cap: &GlyphCap, vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
     // Build the inset top cap: offset each boundary loop inward and
     // re-tessellate the inset polygon.
     let mut inset_path = Path::builder();

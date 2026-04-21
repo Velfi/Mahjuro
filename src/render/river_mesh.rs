@@ -111,7 +111,9 @@ pub const SPRING_BULGE: f32 = 0.11;
 /// Deterministic hash → [0, 1). Lets the rocks be stable across runs
 /// without pulling in an RNG dependency.
 fn hash01(i: u32, seed: u32) -> f32 {
-    let mut x = i.wrapping_mul(747796405).wrapping_add(seed.wrapping_mul(2891336453));
+    let mut x = i
+        .wrapping_mul(747796405)
+        .wrapping_add(seed.wrapping_mul(2891336453));
     x ^= x >> 16;
     x = x.wrapping_mul(2246822519);
     x ^= x >> 13;

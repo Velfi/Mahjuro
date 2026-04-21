@@ -236,8 +236,9 @@ impl SceneBehavior for StartScreenScene {
                     *ctx.run = RunState::new_with_material(TileMaterial::default());
                     ctx.run.apply_progression(ctx.progress);
                     let settings = persistence::load_settings();
-                    ctx.run
-                        .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+                    ctx.run.set_auto_cash_in_on_full_structure(
+                        settings.auto_cash_in_on_full_structure,
+                    );
                     ctx.run.set_hints_enabled(settings.hints_enabled);
                     return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)));
                 }
@@ -312,7 +313,11 @@ impl SceneBehavior for StartScreenScene {
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
                     label: label_for(item, in_progress).to_string(),
-                    hover: if i < self.hover_anims.len() { self.hover_anims[i] } else { 0.0 },
+                    hover: if i < self.hover_anims.len() {
+                        self.hover_anims[i]
+                    } else {
+                        0.0
+                    },
                     pressed: 0.0,
                     disabled: false,
                     pick_id: None,
@@ -434,11 +439,9 @@ impl SceneBehavior for StartScreenScene {
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::BeveledSlab,
-                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                    .with_decal(crate::render::primitive::plaque_decal(format!(
-                        "M A H J U R O\n{}",
-                        prof_text
-                    ))),
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat().with_decal(
+                    crate::render::primitive::plaque_decal(format!("M A H J U R O\n{}", prof_text)),
+                ),
                 pick_id: None,
                 shadow_caster: false,
                 silhouette: false,

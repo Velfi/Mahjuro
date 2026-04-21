@@ -26,21 +26,21 @@ use crate::render::tile_glb::Vertex3dTex;
 
 const BODY_SEGS: usize = 24;
 const BULB_SEGS: usize = 16;
-const BULB_LAT:  usize = 12;
+const BULB_LAT: usize = 12;
 
 // ── Cord ──────────────────────────────────────────────────────────────────────
-const CORD_R:  f32 = 0.014;
-const CORD_Z0: f32 = 0.00;  // bottom of cord = shade apex
-const CORD_Z1: f32 = 0.85;  // top of cord = ceiling attachment
+const CORD_R: f32 = 0.014;
+const CORD_Z0: f32 = 0.00; // bottom of cord = shade apex
+const CORD_Z1: f32 = 0.85; // top of cord = ceiling attachment
 
 // ── Shade ─────────────────────────────────────────────────────────────────────
 // Apex (small, closed) at z=0 (top, near ceiling attachment).
 // Rim  (wide, open)   at z=SHADE_RIM_Z (hangs downward toward counter).
-const SHADE_APEX_Z: f32 =  0.00;  // top of shade (small end)
-pub const SHADE_RIM_Z:  f32 = -0.55;  // bottom of shade (wide open end, hangs down)
-const SHADE_APEX_R: f32 =  0.07;  // small finial radius at apex
-pub const SHADE_RIM_R:  f32 =  0.72;  // wide open rim
-const SHADE_RIM_T:  f32 =  0.018; // sheet-metal rim thickness
+const SHADE_APEX_Z: f32 = 0.00; // top of shade (small end)
+pub const SHADE_RIM_Z: f32 = -0.55; // bottom of shade (wide open end, hangs down)
+const SHADE_APEX_R: f32 = 0.07; // small finial radius at apex
+pub const SHADE_RIM_R: f32 = 0.72; // wide open rim
+const SHADE_RIM_T: f32 = 0.018; // sheet-metal rim thickness
 
 /// Returns the minimum horizontal radius (in mesh-local units, before scaling)
 /// that a point at `local_z` must be at to lie *outside* the cone shade.
@@ -49,7 +49,9 @@ const SHADE_RIM_T:  f32 =  0.018; // sheet-metal rim thickness
 /// returns 0 (no constraint from the shade body). Below the rim returns the
 /// rim radius (bugs clear the open end freely).
 pub fn shade_exclusion_radius(local_z: f32) -> f32 {
-    if local_z >= SHADE_APEX_Z { return 0.0; }
+    if local_z >= SHADE_APEX_Z {
+        return 0.0;
+    }
     // Clamp to the shade z-range.
     let t = (local_z / SHADE_RIM_Z).clamp(0.0, 1.0); // 0 at apex, 1 at rim
     SHADE_APEX_R + t * (SHADE_RIM_R - SHADE_APEX_R)
@@ -59,8 +61,8 @@ pub fn shade_exclusion_radius(local_z: f32) -> f32 {
 // Sits inside the shade. z=0 is apex (near ceiling), z=SHADE_RIM_Z is open rim.
 // BULB_CZ near apex so it's tucked inside and illuminates downward.
 const BULB_CZ: f32 = -0.25; // center inside cone (upper third of shade)
-const BULB_RH: f32 =  0.09; // horizontal radius (XY plane)
-const BULB_RV: f32 =  0.10; // vertical radius (Z axis)
+const BULB_RH: f32 = 0.09; // horizontal radius (XY plane)
+const BULB_RV: f32 = 0.10; // vertical radius (Z axis)
 
 /// Exported: world-space Z of bulb center (relative to lamp anchor), used by
 /// the scene to place the point light.
@@ -73,20 +75,31 @@ pub const BULB_Z: f32 = BULB_CZ;
 /// Cylinder wall along Z, constant radius.
 fn add_cylinder_wall(
     verts: &mut Vec<Vertex3dTex>,
-    idxs:  &mut Vec<u32>,
-    r: f32, z0: f32, z1: f32, segs: usize,
+    idxs: &mut Vec<u32>,
+    r: f32,
+    z0: f32,
+    z1: f32,
+    segs: usize,
 ) {
     let base = verts.len() as u32;
     for si in 0..=segs {
         let theta = (si as f32) / (segs as f32) * std::f32::consts::TAU;
         let (c, s) = (theta.cos(), theta.sin());
         let u = si as f32 / segs as f32;
-        verts.push(Vertex3dTex { position: [r*c, r*s, z0], normal: [c, s, 0.0], uv: [u, 0.0] });
-        verts.push(Vertex3dTex { position: [r*c, r*s, z1], normal: [c, s, 0.0], uv: [u, 1.0] });
+        verts.push(Vertex3dTex {
+            position: [r * c, r * s, z0],
+            normal: [c, s, 0.0],
+            uv: [u, 0.0],
+        });
+        verts.push(Vertex3dTex {
+            position: [r * c, r * s, z1],
+            normal: [c, s, 0.0],
+            uv: [u, 1.0],
+        });
     }
     for si in 0..segs {
         let i = base + si as u32 * 2;
-        idxs.extend_from_slice(&[i, i+2, i+1,  i+1, i+2, i+3]);
+        idxs.extend_from_slice(&[i, i + 2, i + 1, i + 1, i + 2, i + 3]);
     }
 }
 
@@ -95,15 +108,20 @@ fn add_cylinder_wall(
 /// `flip` reverses winding and normal sign (for inner wall).
 fn add_frustum_wall(
     verts: &mut Vec<Vertex3dTex>,
-    idxs:  &mut Vec<u32>,
-    r0: f32, z0: f32, r1: f32, z1: f32, segs: usize, flip: bool,
+    idxs: &mut Vec<u32>,
+    r0: f32,
+    z0: f32,
+    r1: f32,
+    z1: f32,
+    segs: usize,
+    flip: bool,
 ) {
     let base = verts.len() as u32;
     // Outward normal for a frustum whose apex is at larger-z and rim at smaller-z.
     // The cone opens downward: r increases as z decreases.
     let dz = z1 - z0;
     let dr = r0 - r1; // positive when rim (r0) > apex (r1)
-    let len = (dr*dr + dz*dz).sqrt().max(1e-6);
+    let len = (dr * dr + dz * dz).sqrt().max(1e-6);
     // Axial component of normal (nz) = dr/len (positive = points away from narrow end).
     // Radial component (nr) = dz/len (positive when z1>z0 and cone opens toward z0).
     let (nz, nr) = (dr / len, dz / len);
@@ -113,22 +131,22 @@ fn add_frustum_wall(
         let (c, s) = (theta.cos(), theta.sin());
         let u = si as f32 / segs as f32;
         verts.push(Vertex3dTex {
-            position: [r0*c, r0*s, z0],
-            normal:   [ns*nr*c, ns*nr*s, ns*nz],
+            position: [r0 * c, r0 * s, z0],
+            normal: [ns * nr * c, ns * nr * s, ns * nz],
             uv: [u, 0.0],
         });
         verts.push(Vertex3dTex {
-            position: [r1*c, r1*s, z1],
-            normal:   [ns*nr*c, ns*nr*s, ns*nz],
+            position: [r1 * c, r1 * s, z1],
+            normal: [ns * nr * c, ns * nr * s, ns * nz],
             uv: [u, 1.0],
         });
     }
     for si in 0..segs {
         let i = base + si as u32 * 2;
         if flip {
-            idxs.extend_from_slice(&[i, i+1, i+2,  i+1, i+3, i+2]);
+            idxs.extend_from_slice(&[i, i + 1, i + 2, i + 1, i + 3, i + 2]);
         } else {
-            idxs.extend_from_slice(&[i, i+2, i+1,  i+1, i+2, i+3]);
+            idxs.extend_from_slice(&[i, i + 2, i + 1, i + 1, i + 2, i + 3]);
         }
     }
 }
@@ -136,27 +154,37 @@ fn add_frustum_wall(
 /// Disc (filled circle) perpendicular to Z.
 fn add_disc(
     verts: &mut Vec<Vertex3dTex>,
-    idxs:  &mut Vec<u32>,
-    r: f32, z: f32, segs: usize, face_up: bool,
+    idxs: &mut Vec<u32>,
+    r: f32,
+    z: f32,
+    segs: usize,
+    face_up: bool,
 ) {
     let nz = if face_up { 1.0_f32 } else { -1.0 };
     let center = verts.len() as u32;
-    verts.push(Vertex3dTex { position: [0.0, 0.0, z], normal: [0.0, 0.0, nz], uv: [0.5, 0.5] });
+    verts.push(Vertex3dTex {
+        position: [0.0, 0.0, z],
+        normal: [0.0, 0.0, nz],
+        uv: [0.5, 0.5],
+    });
     let rim = verts.len() as u32;
     for si in 0..segs {
         let theta = (si as f32) / (segs as f32) * std::f32::consts::TAU;
         let (c, s) = (theta.cos(), theta.sin());
         verts.push(Vertex3dTex {
-            position: [r*c, r*s, z],
+            position: [r * c, r * s, z],
             normal: [0.0, 0.0, nz],
-            uv: [0.5+0.5*c, 0.5+0.5*s],
+            uv: [0.5 + 0.5 * c, 0.5 + 0.5 * s],
         });
     }
     for si in 0..segs {
         let a = rim + si as u32;
         let b = rim + (si + 1) as u32 % segs as u32;
-        if face_up { idxs.extend_from_slice(&[center, a, b]); }
-        else        { idxs.extend_from_slice(&[center, b, a]); }
+        if face_up {
+            idxs.extend_from_slice(&[center, a, b]);
+        } else {
+            idxs.extend_from_slice(&[center, b, a]);
+        }
     }
 }
 
@@ -169,50 +197,75 @@ fn add_disc(
 /// Apex (small, closed) at z=0 (near ceiling), rim (wide, open) at z=SHADE_RIM_Z (hangs down). ✓
 pub fn build_lamp_body_mesh() -> MeshCpu {
     let mut verts: Vec<Vertex3dTex> = Vec::new();
-    let mut idxs:  Vec<u32>         = Vec::new();
+    let mut idxs: Vec<u32> = Vec::new();
 
     // ── Cord (thin cylinder along +Z, from apex up to ceiling) ───────────────
     add_cylinder_wall(&mut verts, &mut idxs, CORD_R, CORD_Z0, CORD_Z1, 8);
-    add_disc(         &mut verts, &mut idxs, CORD_R, CORD_Z1, 8, true); // top cap
+    add_disc(&mut verts, &mut idxs, CORD_R, CORD_Z1, 8, true); // top cap
 
     // ── Shade outer wall: apex (z=0, small) → rim (z=-0.85, wide) ────────────
-    add_frustum_wall(&mut verts, &mut idxs,
-        SHADE_RIM_R,  SHADE_RIM_Z,   // r0/z0 = rim (wide, low)
-        SHADE_APEX_R, SHADE_APEX_Z,  // r1/z1 = apex (small, high)
-        BODY_SEGS, false,
+    add_frustum_wall(
+        &mut verts,
+        &mut idxs,
+        SHADE_RIM_R,
+        SHADE_RIM_Z, // r0/z0 = rim (wide, low)
+        SHADE_APEX_R,
+        SHADE_APEX_Z, // r1/z1 = apex (small, high)
+        BODY_SEGS,
+        false,
     );
     // ── Shade inner wall (normals inward, lit by bulb) ────────────────────────
-    add_frustum_wall(&mut verts, &mut idxs,
-        SHADE_RIM_R  - SHADE_RIM_T,       SHADE_RIM_Z,
-        SHADE_APEX_R - SHADE_RIM_T * 0.3, SHADE_APEX_Z,
-        BODY_SEGS, true,
+    add_frustum_wall(
+        &mut verts,
+        &mut idxs,
+        SHADE_RIM_R - SHADE_RIM_T,
+        SHADE_RIM_Z,
+        SHADE_APEX_R - SHADE_RIM_T * 0.3,
+        SHADE_APEX_Z,
+        BODY_SEGS,
+        true,
     );
     // ── Open-rim annulus at z=SHADE_RIM_Z (the hanging open end) ─────────────
     {
         let r_out = SHADE_RIM_R;
-        let r_in  = SHADE_RIM_R - SHADE_RIM_T;
-        let z     = SHADE_RIM_Z;
-        let segs  = BODY_SEGS;
-        let base  = verts.len() as u32;
+        let r_in = SHADE_RIM_R - SHADE_RIM_T;
+        let z = SHADE_RIM_Z;
+        let segs = BODY_SEGS;
+        let base = verts.len() as u32;
         for si in 0..=segs {
             let theta = (si as f32) / (segs as f32) * std::f32::consts::TAU;
             let (c, s) = (theta.cos(), theta.sin());
             let u = si as f32 / segs as f32;
             // Normal faces downward (−Z) — toward the counter.
-            verts.push(Vertex3dTex { position: [r_out*c, r_out*s, z], normal: [0.0, 0.0, -1.0], uv: [u, 0.0] });
-            verts.push(Vertex3dTex { position: [r_in *c, r_in *s, z], normal: [0.0, 0.0, -1.0], uv: [u, 1.0] });
+            verts.push(Vertex3dTex {
+                position: [r_out * c, r_out * s, z],
+                normal: [0.0, 0.0, -1.0],
+                uv: [u, 0.0],
+            });
+            verts.push(Vertex3dTex {
+                position: [r_in * c, r_in * s, z],
+                normal: [0.0, 0.0, -1.0],
+                uv: [u, 1.0],
+            });
         }
         for si in 0..segs {
             let i = base + si as u32 * 2;
-            idxs.extend_from_slice(&[i, i+2, i+1,  i+1, i+2, i+3]);
+            idxs.extend_from_slice(&[i, i + 2, i + 1, i + 1, i + 2, i + 3]);
         }
     }
     // ── Finial cap at apex (z=0, small, ceiling side) — faces up ─────────────
-    add_disc(&mut verts, &mut idxs, SHADE_APEX_R, SHADE_APEX_Z, BODY_SEGS, true);
+    add_disc(
+        &mut verts,
+        &mut idxs,
+        SHADE_APEX_R,
+        SHADE_APEX_Z,
+        BODY_SEGS,
+        true,
+    );
 
     MeshCpu {
         vertices: verts,
-        indices:  idxs,
+        indices: idxs,
         default_material: MaterialParams {
             kind: MaterialKind::Metal,
             base_color: [0.82, 0.64, 0.30, 1.0], // aged brass
@@ -225,7 +278,7 @@ pub fn build_lamp_body_mesh() -> MeshCpu {
 /// Glass bulb — small ellipsoid inside the shade, rendered with `Glass`.
 pub fn build_lamp_bulb_mesh() -> MeshCpu {
     let mut verts: Vec<Vertex3dTex> = Vec::new();
-    let mut idxs:  Vec<u32>         = Vec::new();
+    let mut idxs: Vec<u32> = Vec::new();
 
     let cz = BULB_CZ;
     for lat in 0..=BULB_LAT {
@@ -235,16 +288,16 @@ pub fn build_lamp_bulb_mesh() -> MeshCpu {
             let theta = std::f32::consts::TAU * (lon as f32) / (BULB_SEGS as f32);
             let (sin_t, cos_t) = theta.sin_cos();
             // Ellipsoid in Z-up: radial = XY, axial = Z.
-            let x  = BULB_RH * sin_phi * cos_t;
-            let y  = BULB_RH * sin_phi * sin_t;
-            let z  = BULB_RV * cos_phi + cz;
+            let x = BULB_RH * sin_phi * cos_t;
+            let y = BULB_RH * sin_phi * sin_t;
+            let z = BULB_RV * cos_phi + cz;
             let nx = sin_phi * cos_t / BULB_RH;
             let ny = sin_phi * sin_t / BULB_RH;
             let nz = cos_phi / BULB_RV;
-            let nlen = (nx*nx + ny*ny + nz*nz).sqrt().max(1e-6);
+            let nlen = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
             verts.push(Vertex3dTex {
                 position: [x, y, z],
-                normal:   [nx/nlen, ny/nlen, nz/nlen],
+                normal: [nx / nlen, ny / nlen, nz / nlen],
                 uv: [lon as f32 / BULB_SEGS as f32, lat as f32 / BULB_LAT as f32],
             });
         }
@@ -252,17 +305,17 @@ pub fn build_lamp_bulb_mesh() -> MeshCpu {
     let row = BULB_SEGS + 1;
     for lat in 0..BULB_LAT {
         for lon in 0..BULB_SEGS {
-            let i00 = (lat     * row + lon    ) as u32;
-            let i01 = (lat     * row + lon + 1) as u32;
-            let i10 = ((lat+1) * row + lon    ) as u32;
-            let i11 = ((lat+1) * row + lon + 1) as u32;
-            idxs.extend_from_slice(&[i00, i10, i01,  i01, i10, i11]);
+            let i00 = (lat * row + lon) as u32;
+            let i01 = (lat * row + lon + 1) as u32;
+            let i10 = ((lat + 1) * row + lon) as u32;
+            let i11 = ((lat + 1) * row + lon + 1) as u32;
+            idxs.extend_from_slice(&[i00, i10, i01, i01, i10, i11]);
         }
     }
 
     MeshCpu {
         vertices: verts,
-        indices:  idxs,
+        indices: idxs,
         default_material: MaterialParams {
             kind: MaterialKind::Glass,
             base_color: [1.00, 0.92, 0.60, 1.0],
@@ -290,7 +343,7 @@ pub fn build_lamp_bulb_mesh() -> MeshCpu {
 //   — roughly 2.8× wingspan:body-length, typical for moths.
 
 const BUG_BODY_SEGS: usize = 14;
-const BUG_BODY_LAT:  usize = 10;
+const BUG_BODY_LAT: usize = 10;
 
 /// Chitinous insect body — elongated ellipsoid along +X.
 ///
@@ -298,7 +351,7 @@ const BUG_BODY_LAT:  usize = 10;
 /// The scene applies `extents` to scale it to world size.
 pub fn build_bug_body_mesh() -> MeshCpu {
     let mut verts: Vec<Vertex3dTex> = Vec::new();
-    let mut idxs:  Vec<u32>         = Vec::new();
+    let mut idxs: Vec<u32> = Vec::new();
 
     // Ellipsoid: rx along X (length), ry along Y (width), rz along Z (height).
     // Slender, near-circular cross-section — the moth's fuzzy tube-shaped
@@ -322,28 +375,31 @@ pub fn build_bug_body_mesh() -> MeshCpu {
             let nx = cos_phi / rx;
             let ny = sin_phi * cos_t / ry;
             let nz = sin_phi * sin_t / rz;
-            let nlen = (nx*nx + ny*ny + nz*nz).sqrt().max(1e-6);
+            let nlen = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
             verts.push(Vertex3dTex {
                 position: [x, y, z],
-                normal:   [nx/nlen, ny/nlen, nz/nlen],
-                uv: [lon as f32 / BUG_BODY_SEGS as f32, lat as f32 / BUG_BODY_LAT as f32],
+                normal: [nx / nlen, ny / nlen, nz / nlen],
+                uv: [
+                    lon as f32 / BUG_BODY_SEGS as f32,
+                    lat as f32 / BUG_BODY_LAT as f32,
+                ],
             });
         }
     }
     let row = BUG_BODY_SEGS + 1;
     for lat in 0..BUG_BODY_LAT {
         for lon in 0..BUG_BODY_SEGS {
-            let i00 = (lat     * row + lon    ) as u32;
-            let i01 = (lat     * row + lon + 1) as u32;
-            let i10 = ((lat+1) * row + lon    ) as u32;
-            let i11 = ((lat+1) * row + lon + 1) as u32;
-            idxs.extend_from_slice(&[i00, i10, i01,  i01, i10, i11]);
+            let i00 = (lat * row + lon) as u32;
+            let i01 = (lat * row + lon + 1) as u32;
+            let i10 = ((lat + 1) * row + lon) as u32;
+            let i11 = ((lat + 1) * row + lon + 1) as u32;
+            idxs.extend_from_slice(&[i00, i10, i01, i01, i10, i11]);
         }
     }
 
     MeshCpu {
         vertices: verts,
-        indices:  idxs,
+        indices: idxs,
         default_material: MaterialParams {
             kind: MaterialKind::Enamel,
             // Dark iridescent chitin — deep olive-green, almost black.
@@ -364,28 +420,28 @@ fn moth_wing_outline() -> &'static [[f32; 2]] {
     // ~1.13 units outward in +Y, so full wingspan ≈ 2.26 units.
     &[
         // --- forewing leading edge (forward, +X side) ---
-        [ 0.30,  0.00],   // root, forward corner (hinge, +X end)
-        [ 0.40,  0.16],
-        [ 0.51,  0.38],
-        [ 0.59,  0.62],
-        [ 0.61,  0.84],
-        [ 0.54,  1.03],
+        [0.30, 0.00], // root, forward corner (hinge, +X end)
+        [0.40, 0.16],
+        [0.51, 0.38],
+        [0.59, 0.62],
+        [0.61, 0.84],
+        [0.54, 1.03],
         // --- forewing apex & outer margin ---
-        [ 0.41,  1.13],   // forewing apex (pointed tip, swept forward)
-        [ 0.22,  1.11],
-        [ 0.03,  1.03],
-        [-0.14,  0.89],
+        [0.41, 1.13], // forewing apex (pointed tip, swept forward)
+        [0.22, 1.11],
+        [0.03, 1.03],
+        [-0.14, 0.89],
         // --- notch between forewing and hindwing ---
-        [-0.19,  0.73],
-        [-0.14,  0.62],
+        [-0.19, 0.73],
+        [-0.14, 0.62],
         // --- hindwing outer lobe ---
-        [-0.27,  0.54],
-        [-0.38,  0.41],
-        [-0.41,  0.27],
-        [-0.35,  0.16],
-        [-0.27,  0.08],
+        [-0.27, 0.54],
+        [-0.38, 0.41],
+        [-0.41, 0.27],
+        [-0.35, 0.16],
+        [-0.27, 0.08],
         // --- close at root (aft corner) ---
-        [-0.19,  0.00],
+        [-0.19, 0.00],
     ]
 }
 
@@ -406,7 +462,7 @@ fn moth_wing_outline() -> &'static [[f32; 2]] {
 /// share one vertex buffer while still animating each wing independently.
 pub fn build_bug_wing_mesh() -> MeshCpu {
     let mut verts: Vec<Vertex3dTex> = Vec::new();
-    let mut idxs:  Vec<u32>         = Vec::new();
+    let mut idxs: Vec<u32> = Vec::new();
 
     // Silhouette shared with the motion-blur fan; see `moth_wing_outline`.
     // Axis convention: +X is forward along the body, -X is aft, and +Y
@@ -441,9 +497,9 @@ pub fn build_bug_wing_mesh() -> MeshCpu {
         // each side is outward-facing.
         let n = outline.len() as u32;
         for k in 0..(n - 1) {
-            let a = base;              // anchor
-            let b = base + 1 + k;      // outline[k]
-            let c = base + 1 + k + 1;  // outline[k+1]
+            let a = base; // anchor
+            let b = base + 1 + k; // outline[k]
+            let c = base + 1 + k + 1; // outline[k+1]
             if nz > 0.0 {
                 idxs.extend_from_slice(&[a, b, c]);
             } else {
@@ -454,7 +510,7 @@ pub fn build_bug_wing_mesh() -> MeshCpu {
 
     MeshCpu {
         vertices: verts,
-        indices:  idxs,
+        indices: idxs,
         default_material: MaterialParams {
             kind: MaterialKind::Glass,
             // Pale iridescent wings — warm translucent amber.
@@ -543,10 +599,10 @@ pub fn build_bug_wing_blur_mesh() -> MeshCpu {
     let idx = |i: usize, j: usize| -> u32 { (i * steps + j) as u32 };
     for i in 0..(n - 1) {
         for j in 0..ANGLE_STEPS {
-            let a = idx(i,     j    );
-            let b = idx(i + 1, j    );
+            let a = idx(i, j);
+            let b = idx(i + 1, j);
             let c = idx(i + 1, j + 1);
-            let d = idx(i,     j + 1);
+            let d = idx(i, j + 1);
             // Front face
             idxs.extend_from_slice(&[a, b, c, a, c, d]);
             // Back face (reversed winding)

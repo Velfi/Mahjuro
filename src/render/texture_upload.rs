@@ -495,15 +495,8 @@ pub(crate) fn make_hand_tile_gpu(
     // stretching doesn't distort the rasterised glyphs.
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(
-        tile,
-        ui_font,
-        emoji_font,
-        DECAL_W,
-        DECAL_H,
-        tile_set,
-        true,
-    );
+    let rgba =
+        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, true);
     let (decal_texture, decal_view) =
         upload_rgba_texture(device, queue, "hand-tile-decal", &rgba, DECAL_W, DECAL_H);
 
@@ -604,12 +597,7 @@ pub(crate) fn make_hand_tile_gpu(
         outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (
-            tile.suit,
-            tile.rank,
-            tile.enhancement,
-            tile.debuffed_visual,
-        ),
+        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
         symbol,
         suit_emoji,
         suit_color,
@@ -643,15 +631,8 @@ pub(crate) fn make_showcase_tile_gpu(
 
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
-    let rgba = rasterize_tile_face_decal(
-        tile,
-        ui_font,
-        emoji_font,
-        DECAL_W,
-        DECAL_H,
-        tile_set,
-        false,
-    );
+    let rgba =
+        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, false);
     let (decal_texture, decal_view) = upload_rgba_texture(
         device,
         queue,
@@ -711,12 +692,7 @@ pub(crate) fn make_showcase_tile_gpu(
         bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
-        tile_id: (
-            tile.suit,
-            tile.rank,
-            tile.enhancement,
-            tile.debuffed_visual,
-        ),
+        tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
         decal_texture,
     }
 }

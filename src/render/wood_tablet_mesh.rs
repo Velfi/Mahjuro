@@ -50,40 +50,40 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
         &mut vertices,
         &mut indices,
         // +X edge bevel: connects top face's +X edge to +X side face.
-        [0.5 - BEVEL,  0.5, -0.5],
-        [0.5 - BEVEL,  0.5,  0.5],
-        [0.5,          0.5 - BEVEL,  0.5],
-        [0.5,          0.5 - BEVEL, -0.5],
+        [0.5 - BEVEL, 0.5, -0.5],
+        [0.5 - BEVEL, 0.5, 0.5],
+        [0.5, 0.5 - BEVEL, 0.5],
+        [0.5, 0.5 - BEVEL, -0.5],
         [s, s, 0.0],
     );
     push_quad(
         &mut vertices,
         &mut indices,
         // −X edge bevel.
-        [-0.5,          0.5 - BEVEL, -0.5],
-        [-0.5,          0.5 - BEVEL,  0.5],
-        [-0.5 + BEVEL,  0.5,          0.5],
-        [-0.5 + BEVEL,  0.5,         -0.5],
+        [-0.5, 0.5 - BEVEL, -0.5],
+        [-0.5, 0.5 - BEVEL, 0.5],
+        [-0.5 + BEVEL, 0.5, 0.5],
+        [-0.5 + BEVEL, 0.5, -0.5],
         [-s, s, 0.0],
     );
     push_quad(
         &mut vertices,
         &mut indices,
         // +Z edge bevel.
-        [-0.5,         0.5 - BEVEL, 0.5],
-        [ 0.5,         0.5 - BEVEL, 0.5],
-        [ 0.5,         0.5,         0.5 - BEVEL],
-        [-0.5,         0.5,         0.5 - BEVEL],
+        [-0.5, 0.5 - BEVEL, 0.5],
+        [0.5, 0.5 - BEVEL, 0.5],
+        [0.5, 0.5, 0.5 - BEVEL],
+        [-0.5, 0.5, 0.5 - BEVEL],
         [0.0, s, s],
     );
     push_quad(
         &mut vertices,
         &mut indices,
         // −Z edge bevel.
-        [-0.5,         0.5,         -0.5 + BEVEL],
-        [ 0.5,         0.5,         -0.5 + BEVEL],
-        [ 0.5,         0.5 - BEVEL, -0.5],
-        [-0.5,         0.5 - BEVEL, -0.5],
+        [-0.5, 0.5, -0.5 + BEVEL],
+        [0.5, 0.5, -0.5 + BEVEL],
+        [0.5, 0.5 - BEVEL, -0.5],
+        [-0.5, 0.5 - BEVEL, -0.5],
         [0.0, s, -s],
     );
 

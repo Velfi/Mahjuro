@@ -274,12 +274,7 @@ impl InputState {
 
     /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
     /// Returns true if the mode changed.
-    pub fn on_key(
-        &mut self,
-        key: PhysicalKey,
-        shift: bool,
-        actions: &mut Vec<UiAction>,
-    ) -> bool {
+    pub fn on_key(&mut self, key: PhysicalKey, shift: bool, actions: &mut Vec<UiAction>) -> bool {
         let PhysicalKey::Code(code) = key else {
             return false;
         };
@@ -337,10 +332,7 @@ impl InputState {
         let PhysicalKey::Code(code) = key else {
             return;
         };
-        if matches!(
-            code,
-            KeyCode::Space | KeyCode::Enter | KeyCode::NumpadEnter
-        ) {
+        if matches!(code, KeyCode::Space | KeyCode::Enter | KeyCode::NumpadEnter) {
             actions.push(UiAction::ConfirmRelease);
         }
     }
