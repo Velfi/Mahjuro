@@ -1194,6 +1194,7 @@ impl SceneBehavior for TutorialCampaignScene {
                         0.0
                     },
                     disabled: !trigger_enabled,
+                    pick_id: None,
                 },
                 focusable: false,
                 scene_shaded: true,

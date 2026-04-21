@@ -1776,3 +1776,90 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
         })
         .clone()
 }
+
+/// Unified entry point for decal rasterization used by the generic
+/// [`crate::render::draw_cmd::Object3dKind::Primitive`] dispatch.
+/// Dispatches to the existing layout-specialized rasterizers below.
+/// `palette` is currently honored only by layouts that expose an ink
+/// parameter ([`DecalLayout::Fixed`]); the gilded three-pass layouts
+/// (`Fit`, `HexStrip`) still use their hard-coded gilded palette —
+/// migrating their internal blits to take a palette is a follow-up.
+pub fn rasterize_decal(
+    spec: &crate::render::primitive::DecalSpec,
+    width: u32,
+    height: u32,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+) -> Vec<u8> {
+    use crate::render::primitive::{DecalLayout, DecalPalette};
+    match &spec.layout {
+        DecalLayout::Fit { .. } => {
+            rasterize_plaque_decal(&spec.text, ui_font, emoji_font, width, height)
+        }
+        DecalLayout::TitleRule { .. } => {
+            // Ofuda split: text is "title\nrule" by convention.
+            let (title, rule) = match spec.text.split_once('\n') {
+                Some((t, r)) => (t, r),
+                None => (spec.text.as_str(), ""),
+            };
+            let _ = emoji_font;
+            rasterize_ofuda_decal(title, rule, ui_font, width, height)
+        }
+        DecalLayout::HexStrip => {
+            // Six cells split on '\n'; pad with empty strings to reach 6.
+            let mut parts: Vec<&str> = spec.text.split('\n').collect();
+            while parts.len() < 6 {
+                parts.push("");
+            }
+            let labels: [&str; 6] = [parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]];
+            rasterize_cabinet_strip_decal(labels, ui_font)
+        }
+        DecalLayout::Fixed { width: fw, height: fh } => {
+            // GoldGilded: three-pass engraved-gilded treatment
+            // (shadow / gold body / champagne highlight) to match the
+            // shop action props and hanging plaques. Every other
+            // palette uses the simpler single-ink tablet label look
+            // with a soft drop shadow.
+            if matches!(spec.palette, DecalPalette::GoldGilded) {
+                let _ = (fw, fh, emoji_font); // wood_tablet is fixed 512x192
+                rasterize_wood_tablet_decal(&spec.text, ui_font)
+            } else {
+                let ink = match spec.palette {
+                    DecalPalette::GoldGilded => unreachable!(),
+                    DecalPalette::BoneInk => [0.42, 0.32, 0.18, 1.0],
+                    DecalPalette::ParchmentInk => [0.18, 0.12, 0.08, 1.0],
+                    DecalPalette::MutedInk(rgba) => rgba,
+                };
+                rasterize_tablet_label_decal(&spec.text, ui_font, emoji_font, *fw, *fh, ink)
+            }
+        }
+    }
+}
+
+/// Compute the decal texture dimensions for a [`DecalLayout`] given the
+/// host object's world-space extents. Mirrors the per-kind sizing math
+/// in the legacy dispatch arms ([wgpu_renderer.rs:7868-7872] for
+/// plaque, [`CABINET_DECAL_CELL_W`] × 6 for cabinet, etc.).
+pub fn decal_dimensions(
+    layout: &crate::render::primitive::DecalLayout,
+    extents: [f32; 3],
+) -> (u32, u32) {
+    use crate::render::primitive::DecalLayout;
+    match layout {
+        DecalLayout::Fit { target_short_edge } => {
+            let h = *target_short_edge;
+            let face_aspect = (extents[0] / extents[1].max(1.0)).clamp(0.5, 12.0);
+            let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
+            (w, h)
+        }
+        DecalLayout::TitleRule { target_short_edge, .. } => {
+            // Ofuda is authored landscape; short edge is height.
+            let h = *target_short_edge;
+            let face_aspect = (extents[0] / extents[1].max(1.0)).clamp(0.5, 12.0);
+            let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
+            (w, h)
+        }
+        DecalLayout::HexStrip => (CABINET_DECAL_CELL_W * 6, CABINET_DECAL_CELL_H),
+        DecalLayout::Fixed { width, height } => (*width, *height),
+    }
+}

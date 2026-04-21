@@ -88,6 +88,9 @@ pub enum GameEvent {
     InvalidAction,
     /// Play a one-shot UI / tutorial sound (no gameplay side effects).
     UiSound(SfxId),
+    /// Play a relic's stinger without counting it as an activation
+    /// (e.g. when a relic is purchased from the shop).
+    PlayRelicStinger(crate::core::relic::RelicId),
     /// Player started a Boss blind against this boss — App layer bumps
     /// `PlayerProgress::boss_times_encountered` and saves.
     BossEncountered(crate::core::boss::BossKind),

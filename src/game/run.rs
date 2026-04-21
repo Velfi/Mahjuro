@@ -82,6 +82,10 @@ fn default_auto_cash_in_on_full_structure() -> bool {
     true
 }
 
+fn default_hints_enabled() -> bool {
+    false
+}
+
 fn default_available_relics() -> Vec<RelicId> {
     crate::core::relic::all_relic_defs()
         .iter()
@@ -564,6 +568,8 @@ pub struct RunState {
     /// a full valid shape.
     #[serde(default = "default_auto_cash_in_on_full_structure")]
     pub auto_cash_in_on_full_structure: bool,
+    #[serde(default = "default_hints_enabled")]
+    pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
     #[serde(flatten)]
     pub boss: BossState,
@@ -795,6 +801,7 @@ impl RunState {
             },
             mode,
             auto_cash_in_on_full_structure: true,
+            hints_enabled: false,
             boss: BossState {
                 pool_remaining: boss_pool_remaining,
                 upcoming: upcoming_boss,
@@ -846,6 +853,10 @@ impl RunState {
 
     pub fn set_auto_cash_in_on_full_structure(&mut self, enabled: bool) {
         self.auto_cash_in_on_full_structure = enabled;
+    }
+
+    pub fn set_hints_enabled(&mut self, enabled: bool) {
+        self.hints_enabled = enabled;
     }
 
     pub fn apply_progression(&mut self, progress: &crate::core::progression::PlayerProgress) {
@@ -1635,9 +1646,13 @@ impl RunState {
             self.structure_tiles.extend(scoring_tiles.iter().copied());
             bus.push(GameEvent::StructureCommitted);
         } else {
-            let original = scoring_tiles.clone();
-            let _ =
-                self.apply_scored_melds(sets.clone(), scoring_tiles.clone(), original, None, bus);
+            let _ = self.apply_scored_melds(
+                sets.clone(),
+                scoring_tiles.clone(),
+                selected_tiles.clone(),
+                None,
+                bus,
+            );
         }
 
         self.plays_remaining = self.plays_remaining.saturating_sub(1);
@@ -1855,7 +1870,6 @@ impl RunState {
             if !self.played_yaku_this_round.contains(&y) {
                 self.played_yaku_this_round.push(y);
             }
-            bus.push(GameEvent::UiSound(SfxId::for_yaku(y)));
             bus.push(GameEvent::YakuScored(y));
         }
         self.last_breakdown = Some(breakdown);
@@ -1916,6 +1930,7 @@ impl RunState {
             if count == 3 {
                 if let Some(matching) = self.wall.draw_matching(suit, rank) {
                     self.hand.push(matching);
+                    self.selected.push(false);
                     bus.push(GameEvent::TileDrawn(matching));
                     self.relic_activations.push(RelicId::SetMagnet);
                 }
@@ -2912,6 +2927,7 @@ mod tests {
             last_breakdown: None,
             mode: mode.clone(),
             auto_cash_in_on_full_structure: true,
+            hints_enabled: false,
             played_yaku_this_round: vec![],
             tile_debuffs: vec![],
             honors_scored_this_round: false,
@@ -3772,8 +3788,8 @@ fn try_joker_substitution(
 /// - Any face already in `tiles` (for pairs/triplets)
 /// - Any numbered face within ±2 rank of a same-suit numbered tile (for sequences)
 fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
-    use std::collections::HashSet;
-    let mut candidates = HashSet::new();
+    use std::collections::BTreeSet;
+    let mut candidates = BTreeSet::new();
     let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
     for t in tiles {
         // Exact face: could pair/triplet with existing tiles.
@@ -4081,6 +4097,190 @@ mod wild_wind_tests {
         }
         // Should NOT include 1m (too far)
         assert!(!candidates.contains(&(Suit::Characters, 1)));
+    }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+
+        fn arb_number_tile(id: u32) -> BoxedStrategy<Tile> {
+            (0..3usize, 1..=9u8)
+                .prop_map(move |(si, rank)| Tile::new(NUMBER_SUITS[si], rank, id))
+                .boxed()
+        }
+
+        fn arb_wind_tile(id: u32) -> BoxedStrategy<Tile> {
+            (1..=4u8)
+                .prop_map(move |rank| Tile::new(Suit::Wind, rank, id))
+                .boxed()
+        }
+
+        fn arb_dragon_tile(id: u32) -> BoxedStrategy<Tile> {
+            (1..=3u8)
+                .prop_map(move |rank| Tile::new(Suit::Dragon, rank, id))
+                .boxed()
+        }
+
+        /// Mixed hand with at least one wind tile, 3..=14 tiles total.
+        fn arb_wind_hand() -> BoxedStrategy<Vec<Tile>> {
+            (1usize..=4, 2usize..=10)
+                .prop_flat_map(|(n_winds, n_other)| {
+                    let wind_strats: Vec<BoxedStrategy<Tile>> =
+                        (0..n_winds).map(|i| arb_wind_tile(i as u32)).collect();
+                    let other_strats: Vec<BoxedStrategy<Tile>> = (0..n_other)
+                        .map(|i| {
+                            let id = (n_winds + i) as u32;
+                            prop_oneof![
+                                arb_number_tile(id),
+                                arb_wind_tile(id),
+                                arb_dragon_tile(id),
+                            ]
+                            .boxed()
+                        })
+                        .collect();
+                    (wind_strats, other_strats).prop_map(|(mut w, o)| {
+                        w.extend(o);
+                        w
+                    })
+                })
+                .boxed()
+        }
+
+        /// Extract the multiset of (suit, rank) faces assigned to the wind tiles
+        /// in `original` after substitution into `modified`.
+        fn wind_face_multiset(original: &[Tile], modified: &[Tile]) -> Vec<(Suit, u8)> {
+            let wind_ids: std::collections::HashSet<u32> = original
+                .iter()
+                .filter(|t| t.suit == Suit::Wind)
+                .map(|t| t.id)
+                .collect();
+            let mut faces: Vec<(Suit, u8)> = modified
+                .iter()
+                .filter(|m| wind_ids.contains(&m.id))
+                .map(|m| (m.suit, m.rank))
+                .collect();
+            faces.sort();
+            faces
+        }
+
+        proptest! {
+            // ── Property: permutation invariance (multiset) ───────────
+            //
+            // Reordering the input tiles must not change the *multiset* of faces
+            // assigned to wind tiles. The per-id assignment can still vary when
+            // multiple valid substitutions exist (e.g. three East winds with
+            // 2m could become {1m,1m,2m,2m} with either wind taking which rank),
+            // but the set of faces produced should be invariant. The old
+            // HashSet-backed candidate list could pick structurally different
+            // substitutions based on hash iteration order — this property would
+            // catch that regression.
+            #[test]
+            fn permutation_invariance(
+                tiles in arb_wind_hand(),
+                perm_seed in any::<u64>(),
+            ) {
+                use rand::SeedableRng;
+                use rand::seq::SliceRandom;
+
+                let Some((_sets_a, modified_a)) = try_wind_substitution(&tiles, &[]) else {
+                    return Ok(());
+                };
+
+                let mut shuffled = tiles.clone();
+                let mut rng = rand::rngs::StdRng::seed_from_u64(perm_seed);
+                shuffled.shuffle(&mut rng);
+
+                let Some((_sets_b, modified_b)) = try_wind_substitution(&shuffled, &[]) else {
+                    prop_assert!(
+                        false,
+                        "permuted hand rejected while original accepted: {:?} -> {:?}",
+                        tiles,
+                        shuffled
+                    );
+                    return Ok(());
+                };
+
+                let faces_a = wind_face_multiset(&tiles, &modified_a);
+                let faces_b = wind_face_multiset(&shuffled, &modified_b);
+                prop_assert_eq!(
+                    faces_a,
+                    faces_b,
+                    "wind face multiset depends on input order (tiles={:?})",
+                    tiles
+                );
+            }
+        }
+
+        proptest! {
+            // ── Property: substitution output re-validates ────────────
+            //
+            // If substitution returns (sets, modified), the modified tile list
+            // must itself validate without any further wildcard magic — otherwise
+            // the scorer is handed melds that don't actually match the tiles.
+            #[test]
+            fn substitution_output_revalidates(tiles in arb_wind_hand()) {
+                if let Some((sets, modified)) = try_wind_substitution(&tiles, &[]) {
+                    let revalidated = crate::core::hand::validate_selection_with_rules(&modified, &[]);
+                    prop_assert!(
+                        revalidated.is_some(),
+                        "substitution output failed to revalidate: modified={:?}",
+                        modified
+                    );
+                    let revalidated = revalidated.unwrap();
+                    prop_assert_eq!(sets.len(), revalidated.len(), "set count mismatch");
+                }
+            }
+        }
+
+        proptest! {
+            // ── Property: tile IDs preserved exactly ──────────────────
+            //
+            // Substitution rewrites face (suit, rank) but must never drop,
+            // duplicate, or invent tile IDs.
+            #[test]
+            fn ids_preserved(tiles in arb_wind_hand()) {
+                if let Some((_sets, modified)) = try_wind_substitution(&tiles, &[]) {
+                    let mut input_ids: Vec<u32> = tiles.iter().map(|t| t.id).collect();
+                    let mut output_ids: Vec<u32> = modified.iter().map(|t| t.id).collect();
+                    input_ids.sort();
+                    output_ids.sort();
+                    prop_assert_eq!(input_ids, output_ids);
+                }
+            }
+        }
+
+        proptest! {
+            // ── Property: non-wind tiles unchanged ────────────────────
+            //
+            // Only wind tiles may be rewritten. A bug that substitutes the wrong
+            // index would show up here.
+            #[test]
+            fn non_winds_unchanged(tiles in arb_wind_hand()) {
+                if let Some((_sets, modified)) = try_wind_substitution(&tiles, &[]) {
+                    for orig in &tiles {
+                        if orig.suit != Suit::Wind {
+                            let m = modified.iter().find(|m| m.id == orig.id).unwrap();
+                            prop_assert_eq!(
+                                (m.suit, m.rank),
+                                (orig.suit, orig.rank),
+                                "non-wind tile id={} was rewritten",
+                                orig.id
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        proptest! {
+            // ── Property: no panics on arbitrary input ────────────────
+            #[test]
+            fn no_panic_on_arbitrary_hand(tiles in arb_wind_hand()) {
+                let _ = try_wind_substitution(&tiles, &[]);
+            }
+        }
     }
 }
 

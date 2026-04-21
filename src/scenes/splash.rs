@@ -53,28 +53,16 @@ impl SceneBehavior for SplashScene {
 
         let mut frame = UiFrame::new();
 
-        // Dark background.
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: [0.0, 0.0, 0.0, 1.0],
         });
 
-        // Title: "MAHJURO" in large capitals.
-        let title_h = (120.0 * scale).max(48.0);
-        let title_y = h * 0.30;
+        let label_h = (32.0 * scale).max(18.0);
+        let label_y = (h - label_h) * 0.5;
         frame.text(TextLabel {
-            rect: [0.0, title_y, w, title_h],
-            text: "MAHJURO".into(),
-            color: color::CHAMPAGNE,
-            ..Default::default()
-        });
-
-        // Tagline below the title.
-        let tagline_h = (28.0 * scale).max(16.0);
-        let tagline_y = title_y + title_h + h * 0.04;
-        frame.text(TextLabel {
-            rect: [w * 0.15, tagline_y, w * 0.7, tagline_h],
-            text: "Mahjong, reimagined for chaos.".into(),
+            rect: [0.0, label_y, w, label_h],
+            text: "loading...".into(),
             color: color::MIST,
             ..Default::default()
         });

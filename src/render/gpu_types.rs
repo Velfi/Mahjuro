@@ -417,8 +417,6 @@ pub const MAX_COIN_SLOTS: usize = 64;
 /// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
 /// Big, Boss). Truncated silently.
 pub const MAX_SHRINE_SLOTS: usize = 4;
-/// Maximum number of hanging ofuda per frame (gameplay uses 1).
-pub const MAX_OFUDA_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
 /// Maximum number of wood action tablets per frame (sort suit, sort rank, play).

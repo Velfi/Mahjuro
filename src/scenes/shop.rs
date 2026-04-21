@@ -403,6 +403,7 @@ fn apply_shop_action(
                     bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::audio::SfxId::Purchase,
                     ));
+                    bus.push(crate::game::event_bus::GameEvent::PlayRelicStinger(relic));
                     // Initialize counters for stateful relics.
                     match relic {
                         RelicId::MeltingIce => {
@@ -1817,7 +1818,10 @@ fn coin_display_layout(
     } else {
         0
     };
-    let total_coins = (coin_gold as usize).min(crate::render::wgpu_renderer::MAX_COIN_SLOTS);
+    // Visual cap on the shop coin pile — covers any realistic gold
+    // count without flooding the dish or burning shadow/draw time.
+    const MAX_SHOP_COINS: usize = 64;
+    let total_coins = (coin_gold as usize).min(MAX_SHOP_COINS);
 
     // ── Spatial budget ────────────────────────────────────────────────
     // Bars sit in a row at the back of the dish; coin strings sit in
@@ -1854,13 +1858,19 @@ fn coin_display_layout(
                 extents: [he[0] * 2.0, he[1] * 2.0, he[2] * 2.0],
                 rotation: rot_z_rad(rot),
                 color: bar_color,
-                kind: Object3dKind::GoldBar,
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::Cube,
+                    material: crate::render::primitive::MaterialSpec::metal(),
+                    pick_id: None,
+                    shadow_caster: true,
+                    silhouette: false,
+                },
                 focusable: false,
                 scene_shaded: true,
                 own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,
+                arrange_name: Some("shop.shelf.coin_dish"),
             });
             bar_idx += 1;
         }
@@ -1900,13 +1910,19 @@ fn coin_display_layout(
                     extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
                     rotation: rot_z_rad(base_rot + sway),
                     color: gold_color,
-                    kind: Object3dKind::Coin,
+                    kind: Object3dKind::Primitive {
+                        shape: crate::render::primitive::MeshId::Cylinder,
+                        material: crate::render::primitive::MaterialSpec::metal(),
+                        pick_id: None,
+                        shadow_caster: true,
+                        silhouette: false,
+                    },
                     focusable: false,
                     scene_shaded: true,
                     own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
+                    arrange_name: Some("shop.shelf.coin_dish"),
                 });
                 placed += 1;
             }
@@ -2471,14 +2487,17 @@ impl SceneBehavior for ShopScene {
             pos: [
                 layout.counter_pixel_x,
                 layout.counter_world_y + h * 0.5,
-                0.0,
+                layout.counter_extents[1] * 0.5,
             ],
             extents: layout.counter_extents,
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: None,
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -2493,14 +2512,17 @@ impl SceneBehavior for ShopScene {
             pos: [
                 layout.relic_dish_center_px.0,
                 layout.relic_dish_center_px.1,
-                layout.relic_dish_center_px.2,
+                layout.relic_dish_center_px.2 + layout.relic_dish_extents[1] * 0.5,
             ],
             extents: layout.relic_dish_extents,
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: Some(PICK_RELIC_DISH),
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -2513,14 +2535,17 @@ impl SceneBehavior for ShopScene {
             pos: [
                 layout.talisman_tray_center_px.0,
                 layout.talisman_tray_center_px.1,
-                layout.talisman_tray_center_px.2,
+                layout.talisman_tray_center_px.2 + layout.talisman_tray_extents[1] * 0.5,
             ],
             extents: layout.talisman_tray_extents,
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: None,
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -2533,14 +2558,17 @@ impl SceneBehavior for ShopScene {
             pos: [
                 layout.ribbon_tray_center_px.0,
                 layout.ribbon_tray_center_px.1,
-                layout.ribbon_tray_center_px.2,
+                layout.ribbon_tray_center_px.2 + layout.ribbon_tray_extents[1] * 0.5,
             ],
             extents: layout.ribbon_tray_extents,
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: None,
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -2553,14 +2581,17 @@ impl SceneBehavior for ShopScene {
             pos: [
                 layout.coin_dish_center_px.0,
                 layout.coin_dish_center_px.1,
-                layout.coin_dish_center_px.2,
+                layout.coin_dish_center_px.2 + layout.coin_dish_extents[1] * 0.5,
             ],
             extents: layout.coin_dish_extents,
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscRound,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: Some(PICK_COIN_DISH),
-                round: true,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -2569,30 +2600,13 @@ impl SceneBehavior for ShopScene {
             anim_id: 0,
             arrange_name: None,
         });
-        // Yaku Journal — left of the bottom inventory row.
+        // Yaku Journal anchor — placed later (after `cam_rot` and
+        // `hover` are in scope) as a wood action tablet. These
+        // bindings stay here because downstream lighting code keys
+        // point lights off `journal_cx/cy/cz`.
         let journal_cx = self.positions.book.nx * w;
         let journal_cy = self.positions.book.ny * h;
         let journal_cz = layout.mm(self.positions.book.lift_mm);
-        let journal_extents = [w * 0.018, h * 0.06, w * 0.025];
-        frame.object3d(Object3d {
-            pos: [journal_cx, journal_cy, journal_cz],
-            extents: [
-                journal_extents[0] * 2.0,
-                journal_extents[1] * 2.0,
-                journal_extents[2] * 2.0,
-            ],
-            rotation: rot_z_rad(0.15), // slight yaw so the spine catches the light
-            color: [0.30, 0.12, 0.08, 1.0], // oxblood leather
-            kind: Object3dKind::Book {
-                pick_id: Some(PICK_JOURNAL_BOOK),
-            },
-            focusable: true,
-            scene_shaded: true,
-            own_light: None,
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: None,
-        });
 
         // Tile packs — two flanking positions in column 2, on the counter.
         // Hidden while the pack-opening celebration is active: the celebration
@@ -3705,10 +3719,22 @@ impl SceneBehavior for ShopScene {
             // and the camera-facing yaw here.
             rotation: glam::Mat4::from_rotation_x((-82.0_f32).to_radians()) * cam_rot,
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Ofuda {
-                title: plaque_top_text.clone(),
-                rule: plaque_bot_text.clone(),
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::Ofuda,
+                material: crate::render::primitive::MaterialSpec::plain().with_decal(
+                    crate::render::primitive::DecalSpec {
+                        text: format!("{}\n{}", plaque_top_text, plaque_bot_text),
+                        palette: crate::render::primitive::DecalPalette::ParchmentInk,
+                        layout: crate::render::primitive::DecalLayout::TitleRule {
+                            title_height_frac: 0.40,
+                            target_short_edge:
+                                crate::render::decal::OFUDA_DECAL_LONG_EDGE,
+                        },
+                    },
+                ),
                 pick_id: None,
+                shadow_caster: false,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -3729,9 +3755,15 @@ impl SceneBehavior for ShopScene {
             extents: [w * 0.09, layout.mm(22.0), h * 0.045],
             rotation: cam_rot,
             color: [0.88, 0.78, 0.42, 1.0],
-            kind: Object3dKind::Plaque {
-                text: format!("Gold\n{}g", ctx.run.gold.max(0)),
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::BeveledSlab,
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                    .with_decal(crate::render::primitive::plaque_decal(format!(
+                        "Gold\n{}g",
+                        ctx.run.gold.max(0)
+                    ))),
                 pick_id: None,
+                shadow_caster: false,
                 silhouette: false,
             },
             focusable: false,
@@ -3817,9 +3849,13 @@ impl SceneBehavior for ShopScene {
                             extents: [plaque_w, plaque_h, plaque_z],
                             rotation: plaque_rot,
                             color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::Plaque {
-                                text,
+                            kind: Object3dKind::Primitive {
+                                shape: crate::render::primitive::MeshId::BeveledSlab,
+                                material:
+                                    crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                                        .with_decal(crate::render::primitive::plaque_decal(text)),
                                 pick_id: None,
+                                shadow_caster: false,
                                 silhouette: false,
                             },
                             focusable: false,
@@ -3856,9 +3892,15 @@ impl SceneBehavior for ShopScene {
                             extents: [plaque_w, plaque_h, plaque_z],
                             rotation: plaque_rot,
                             color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::Plaque {
-                                text: format!("{}\n{}", title, cta),
+                            kind: Object3dKind::Primitive {
+                                shape: crate::render::primitive::MeshId::BeveledSlab,
+                                material:
+                                    crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                                        .with_decal(crate::render::primitive::plaque_decal(
+                                            format!("{}\n{}", title, cta),
+                                        )),
                                 pick_id: None,
+                                shadow_caster: false,
                                 silhouette: false,
                             },
                             focusable: false,
@@ -3906,9 +3948,12 @@ impl SceneBehavior for ShopScene {
                                 extents: [desc_w, desc_h, plaque_z],
                                 rotation: plaque_rot,
                                 color: [1.0, 1.0, 1.0, 1.0],
-                                kind: Object3dKind::Plaque {
-                                    text: desc.clone(),
+                                kind: Object3dKind::Primitive {
+                                    shape: crate::render::primitive::MeshId::BeveledSlab,
+                                    material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                                        .with_decal(crate::render::primitive::plaque_decal(desc.clone())),
                                     pick_id: None,
+                                    shadow_caster: false,
                                     silhouette: false,
                                 },
                                 focusable: false,
@@ -3941,27 +3986,47 @@ impl SceneBehavior for ShopScene {
             [0.45, 0.42, 0.35, 1.0]
         };
         let hover_is_reroll = matches!(hover, Some(ShopHit::Dish(id)) if id == PICK_REROLL_PROP);
-        frame.object3d(Object3d {
-            pos: [
-                self.positions.reroll_prop.nx * w,
-                layout.counter_world_y + h * 0.5,
-                layout.mm(self.positions.reroll_prop.lift_mm),
-            ],
-            extents: [w * 0.09, layout.mm(35.0), h * 0.065],
-            rotation: cam_rot,
-            color: reroll_color,
-            kind: Object3dKind::ShopActionProp {
-                label: reroll_label,
-                pick_id: Some(PICK_REROLL_PROP),
-                disabled: !reroll_affordable,
-            },
-            focusable: true,
-            scene_shaded: true,
-            own_light: None,
-            hover_target: if hover_is_reroll { 1.0 } else { 0.0 },
-            anim_id: 0xAC01,
-            arrange_name: Some("shop.props.reroll_prop"),
-        });
+        {
+            use crate::render::primitive::{
+                DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+            };
+            let disabled = !reroll_affordable;
+            let alpha = if disabled { 0.45 } else { reroll_color[3] };
+            let color = [reroll_color[0], reroll_color[1], reroll_color[2], alpha];
+            frame.object3d(Object3d {
+                pos: [
+                    self.positions.reroll_prop.nx * w,
+                    layout.counter_world_y + h * 0.5,
+                    layout.mm(self.positions.reroll_prop.lift_mm),
+                ],
+                extents: [w * 0.09, layout.mm(35.0), h * 0.065],
+                rotation: cam_rot,
+                color,
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::ShopActionProp,
+                    material: MaterialSpec {
+                        kind: crate::render::lit_mesh::MaterialKind::Plain,
+                        specular_strength: 0.4,
+                        specular_power: 32.0,
+                        emissive: 0.0,
+                        decal: Some(DecalSpec {
+                            text: reroll_label,
+                            palette: DecalPalette::GoldGilded,
+                            layout: DecalLayout::Fixed { width: 512, height: 192 },
+                        }),
+                    },
+                    pick_id: Some(PICK_REROLL_PROP),
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                focusable: true,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: if hover_is_reroll { 1.0 } else { 0.0 },
+                anim_id: 0xAC01,
+                arrange_name: Some("shop.props.reroll_prop"),
+            });
+        }
 
         // Leave prop — right end of counter.
         let leave_label = if self.mode == ShopMode::Tutorial {
@@ -3970,26 +4035,72 @@ impl SceneBehavior for ShopScene {
             "Continue On"
         };
         let hover_is_leave = matches!(hover, Some(ShopHit::Dish(id)) if id == PICK_LEAVE_PROP);
+        {
+            use crate::render::primitive::{
+                DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+            };
+            frame.object3d(Object3d {
+                pos: [
+                    self.positions.leave_prop.nx * w,
+                    layout.counter_world_y + h * 0.5,
+                    layout.mm(self.positions.leave_prop.lift_mm),
+                ],
+                extents: [w * 0.09, layout.mm(35.0), h * 0.065],
+                rotation: cam_rot,
+                color: [0.92, 0.88, 0.72, 1.0],
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::ShopActionProp,
+                    material: MaterialSpec {
+                        kind: crate::render::lit_mesh::MaterialKind::Plain,
+                        specular_strength: 0.4,
+                        specular_power: 32.0,
+                        emissive: 0.0,
+                        decal: Some(DecalSpec {
+                            text: leave_label.to_string(),
+                            palette: DecalPalette::GoldGilded,
+                            layout: DecalLayout::Fixed { width: 512, height: 192 },
+                        }),
+                    },
+                    pick_id: Some(PICK_LEAVE_PROP),
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                focusable: true,
+                scene_shaded: true,
+                own_light: None,
+                hover_target: if hover_is_leave { 1.0 } else { 0.0 },
+                anim_id: 0xAC02,
+                arrange_name: Some("shop.props.leave_prop"),
+            });
+        }
+
+        // Yaku Journal — wood action tablet styled like gameplay's
+        // action-bar journal button. Replaces the 3D book prop so the
+        // journal affordance reads the same across scenes. Click
+        // routes through `ShopHit::Dish(PICK_JOURNAL_BOOK)` via the
+        // WoodTablet dispatch's `pick_id` hook.
+        let journal_hovered = matches!(
+            hover,
+            Some(ShopHit::Dish(id)) if id == PICK_JOURNAL_BOOK
+        );
         frame.object3d(Object3d {
-            pos: [
-                self.positions.leave_prop.nx * w,
-                layout.counter_world_y + h * 0.5,
-                layout.mm(self.positions.leave_prop.lift_mm),
-            ],
-            extents: [w * 0.09, layout.mm(35.0), h * 0.065],
+            pos: [journal_cx, journal_cy, journal_cz],
+            extents: [w * 0.06, layout.mm(16.0), h * 0.11],
             rotation: cam_rot,
-            color: [0.92, 0.88, 0.72, 1.0],
-            kind: Object3dKind::ShopActionProp {
-                label: leave_label.to_string(),
-                pick_id: Some(PICK_LEAVE_PROP),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::WoodTablet {
+                label: "Journal".to_string(),
+                hover: if journal_hovered { 1.0 } else { 0.0 },
+                pressed: 0.0,
                 disabled: false,
+                pick_id: Some(PICK_JOURNAL_BOOK),
             },
             focusable: true,
             scene_shaded: true,
             own_light: None,
-            hover_target: if hover_is_leave { 1.0 } else { 0.0 },
-            anim_id: 0xAC02,
-            arrange_name: Some("shop.props.leave_prop"),
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("shop.props.journal"),
         });
 
         // Sell tray — bottom shelf row, accessible from all item types.

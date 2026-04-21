@@ -38,7 +38,7 @@ const CHIPS_COLOR: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
 const MULT_COLOR: [f32; 4] = [1.00, 0.42, 0.38, 1.0];
 /// Warm gold base tint for Gold popups.
 const GOLD_COLOR: [f32; 4] = [1.00, 0.84, 0.35, 1.0];
-/// Cream tint for the Final landing number (Metal material, not Polychrome).
+/// Cream tint for the Final landing number.
 const FINAL_COLOR: [f32; 4] = [1.00, 0.95, 0.76, 1.0];
 
 #[derive(Clone, Debug)]
@@ -97,7 +97,7 @@ impl ScorePopupSystem {
             StepKind::Chips => (CHIPS_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
             StepKind::Mult => (MULT_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
             StepKind::Gold => (GOLD_COLOR, GlyphMaterial::Polychrome, PopupMotion::Stream),
-            StepKind::Final => (FINAL_COLOR, GlyphMaterial::Metal, PopupMotion::Settle),
+            StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome, PopupMotion::Settle),
         };
         let mag = magnitude.abs().max(1.0);
         let scale = 185.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.42));
@@ -134,7 +134,7 @@ impl ScorePopupSystem {
             color: [0.96, 0.24, 0.20, 1.0],
             yaw,
             motion: PopupMotion::Shake,
-            material: GlyphMaterial::Plain,
+            material: GlyphMaterial::Polychrome,
         });
     }
 

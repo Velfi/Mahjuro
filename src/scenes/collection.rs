@@ -514,9 +514,11 @@ impl CollectionScene {
             extents: [backing_w, backing_h, cell * 0.1],
             rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
             color: [0.10, 0.07, 0.04, 1.0],
-            kind: Object3dKind::Plaque {
-                text: String::new(),
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::BeveledSlab,
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat(),
                 pick_id: None,
+                shadow_caster: false,
                 silhouette: false,
             },
             focusable: false,
@@ -689,14 +691,28 @@ impl CollectionScene {
                         });
                     }
                     ArtifactKind::PlaqueOnly => {
+                        use crate::render::primitive::{
+                            DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                        };
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [plate_w, plate_h, plate_thick],
                             rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
                             color: bright,
-                            kind: Object3dKind::Plaque {
-                                text: boss.name.clone(),
+                            kind: Object3dKind::Primitive {
+                                shape: MeshId::BeveledSlab,
+                                material: MaterialSpec::lacquered_wood_flat().with_decal(
+                                    DecalSpec {
+                                        text: boss.name.clone(),
+                                        palette: DecalPalette::GoldGilded,
+                                        layout: DecalLayout::Fit {
+                                            target_short_edge:
+                                                crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                                        },
+                                    },
+                                ),
                                 pick_id: None,
+                                shadow_caster: false,
                                 silhouette: false,
                             },
                             focusable: false,
@@ -856,15 +872,34 @@ impl CollectionScene {
                             1.0,
                         ]
                     };
+                    use crate::render::primitive::{
+                        DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                    };
+                    let closeup_silhouette = !boss.unlocked;
+                    let closeup_material = if closeup_silhouette {
+                        // Silhouette overrides decal anyway, but keep
+                        // the spec tidy.
+                        MaterialSpec::lacquered_wood_flat()
+                    } else {
+                        MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                            text: label,
+                            palette: DecalPalette::GoldGilded,
+                            layout: DecalLayout::Fit {
+                                target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                            },
+                        })
+                    };
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size, closeup_size, closeup_size * 0.1],
                         rotation: closeup_anchor.rotation,
                         color,
-                        kind: Object3dKind::Plaque {
-                            text: label,
+                        kind: Object3dKind::Primitive {
+                            shape: MeshId::BeveledSlab,
+                            material: closeup_material,
                             pick_id: None,
-                            silhouette: !boss.unlocked,
+                            shadow_caster: false,
+                            silhouette: closeup_silhouette,
                         },
                         focusable: false,
                         scene_shaded: true,
@@ -893,23 +928,36 @@ impl CollectionScene {
                 "collection.focus_card",
                 ctx.layout,
             );
-            hud_plaques.push(Object3d {
-                pos: anchor.pos,
-                extents: [card_w, card_h, card_h * 0.06],
-                rotation: anchor.rotation,
-                color: [0.94, 0.86, 0.56, 1.0],
-                kind: Object3dKind::Plaque {
-                    text: card_text,
-                    pick_id: None,
-                    silhouette: false,
-                },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
-                hover_target: 1.0,
-                anim_id: 0xC0DE,
-                arrange_name: Some(anchor.arrange_name),
-            });
+            {
+                use crate::render::primitive::{
+                    DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                };
+                hud_plaques.push(Object3d {
+                    pos: anchor.pos,
+                    extents: [card_w, card_h, card_h * 0.06],
+                    rotation: anchor.rotation,
+                    color: [0.94, 0.86, 0.56, 1.0],
+                    kind: Object3dKind::Primitive {
+                        shape: MeshId::BeveledSlab,
+                        material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                            text: card_text,
+                            palette: DecalPalette::GoldGilded,
+                            layout: DecalLayout::Fit {
+                                target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                            },
+                        }),
+                        pick_id: None,
+                        shadow_caster: false,
+                        silhouette: false,
+                    },
+                    focusable: false,
+                    scene_shaded: true,
+                    own_light: None,
+                    hover_target: 1.0,
+                    anim_id: 0xC0DE,
+                    arrange_name: Some(anchor.arrange_name),
+                });
+            }
 
             // ── Stats plaque ─────────────────────────────────────────
             // Tucked under the description card, same width + darker
@@ -920,14 +968,25 @@ impl CollectionScene {
             if !stats_text.is_empty() {
                 let stats_h = h * 0.08;
                 let stats_wz = hud_wz - card_h * 0.65 - stats_h * 0.55;
+                use crate::render::primitive::{
+                    DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                };
                 hud_plaques.push(Object3d {
                     pos: [card_px, hud_py, stats_wz],
                     extents: [card_w, stats_h, stats_h * 0.06],
                     rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
                     color: [0.26, 0.22, 0.16, 1.0],
-                    kind: Object3dKind::Plaque {
-                        text: stats_text,
+                    kind: Object3dKind::Primitive {
+                        shape: MeshId::BeveledSlab,
+                        material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                            text: stats_text,
+                            palette: DecalPalette::GoldGilded,
+                            layout: DecalLayout::Fit {
+                                target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                            },
+                        }),
                         pick_id: None,
+                        shadow_caster: false,
                         silhouette: false,
                     },
                     focusable: false,
@@ -1231,6 +1290,7 @@ impl SceneBehavior for CollectionScene {
                     if let Some(i) = self.focused_row {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                         self.selected_artifact = Some(i);
+                        push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, i);
                     }
                 }
                 _ => {}
@@ -1264,6 +1324,7 @@ impl SceneBehavior for CollectionScene {
                     .unwrap_or(idx);
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.selected_artifact = Some(resolved);
+                push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, resolved);
                 // Mouse click also moves keyboard focus so subsequent
                 // arrow-key navigation continues from the clicked item
                 // instead of teleporting back to position 0.
@@ -1391,6 +1452,25 @@ impl SceneBehavior for CollectionScene {
 /// [`PlayerProgress`] to mark which items are unlocked; everything in
 /// the universe of that category is returned (locked items show as
 /// placeholders in the row so the player can see what's still to find).
+fn push_relic_stinger_for(
+    bus: &mut crate::game::event_bus::EventBus,
+    tab: Tab,
+    progress: &crate::core::progression::PlayerProgress,
+    idx: usize,
+) {
+    if !matches!(tab, Tab::Relics) {
+        return;
+    }
+    let arts = tab_artifacts(tab, progress);
+    if let Some(art) = arts.get(idx) {
+        if art.unlocked {
+            if let ArtifactKind::Relic(rid) = art.kind {
+                bus.push(GameEvent::PlayRelicStinger(rid));
+            }
+        }
+    }
+}
+
 fn tab_artifacts(
     tab: Tab,
     progress: &crate::core::progression::PlayerProgress,

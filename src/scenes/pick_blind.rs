@@ -598,13 +598,16 @@ impl SceneBehavior for PickBlindScene {
         // pool and grounds the shrines.
         let (fx, fy) = layout.floor_anchor_px;
         frame.object3d(Object3d {
-            pos: [fx, fy, 0.0],
+            pos: [fx, fy, layout.floor_extents[1] * 0.5],
             extents: layout.floor_extents,
             rotation: mesh_y_thickness_along_local_y_to_z_up(),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: None,
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -624,13 +627,16 @@ impl SceneBehavior for PickBlindScene {
         let (play_px, play_py) = layout.play_dish_anchor_px;
         let play_dext = layout.play_dish_extents;
         frame.object3d(Object3d {
-            pos: [play_px, play_py, 0.0],
+            pos: [play_px, play_py, play_dext[1] * 0.5],
             extents: play_dext,
             rotation: mesh_y_thickness_along_local_y_to_z_up(),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Dish {
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::DiscSquare,
+                material: crate::render::primitive::MaterialSpec::plain(),
                 pick_id: Some(PICK_PLAY_DISH),
-                round: false,
+                shadow_caster: true,
+                silhouette: false,
             },
             focusable: false,
             scene_shaded: true,
@@ -646,7 +652,13 @@ impl SceneBehavior for PickBlindScene {
             extents: [14.0 * 2.0, 5.5, 14.0 * 2.0],
             rotation: rot_z_rad(0.4),
             color: [1.00, 0.84, 0.30, 1.0],
-            kind: Object3dKind::Coin,
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::Cylinder,
+                material: crate::render::primitive::MaterialSpec::metal(),
+                pick_id: None,
+                shadow_caster: true,
+                silhouette: false,
+            },
             focusable: false,
             scene_shaded: true,
             own_light: None,
@@ -659,13 +671,16 @@ impl SceneBehavior for PickBlindScene {
             let (skip_px, skip_py) = layout.skip_dish_anchor_px;
             let skip_dext = layout.skip_dish_extents;
             frame.object3d(Object3d {
-                pos: [skip_px, skip_py, 0.0],
+                pos: [skip_px, skip_py, skip_dext[1] * 0.5],
                 extents: skip_dext,
                 rotation: mesh_y_thickness_along_local_y_to_z_up(),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Dish {
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::DiscSquare,
+                    material: crate::render::primitive::MaterialSpec::plain(),
                     pick_id: Some(PICK_SKIP_DISH),
-                    round: false,
+                    shadow_caster: true,
+                    silhouette: false,
                 },
                 focusable: false,
                 scene_shaded: true,
@@ -686,7 +701,13 @@ impl SceneBehavior for PickBlindScene {
                 extents: [12.0 * 2.0, 4.5, 12.0 * 2.0],
                 rotation: rot_z_rad(0.4),
                 color: tag_color,
-                kind: Object3dKind::Coin,
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::Cylinder,
+                    material: crate::render::primitive::MaterialSpec::metal(),
+                    pick_id: None,
+                    shadow_caster: true,
+                    silhouette: false,
+                },
                 focusable: false,
                 scene_shaded: true,
                 own_light: None,
@@ -998,16 +1019,19 @@ impl SceneBehavior for PickBlindScene {
                 extents: [plaque_w, plaque_h, 10.0],
                 rotation: cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Plaque {
-                    text: format!(
-                        "ANTE {}/{} · {}\nTarget {}   ·   Reward ${}",
-                        ctx.run.ante,
-                        crate::game::run::FINAL_ANTE,
-                        blind_name,
-                        target_value,
-                        upcoming.clear_reward(),
-                    ),
+                kind: Object3dKind::Primitive {
+                    shape: crate::render::primitive::MeshId::BeveledSlab,
+                    material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                        .with_decal(crate::render::primitive::plaque_decal(format!(
+                            "ANTE {}/{} · {}\nTarget {}   ·   Reward ${}",
+                            ctx.run.ante,
+                            crate::game::run::FINAL_ANTE,
+                            blind_name,
+                            target_value,
+                            upcoming.clear_reward(),
+                        ))),
                     pick_id: None,
+                    shadow_caster: false,
                     silhouette: false,
                 },
                 focusable: false,
@@ -1050,10 +1074,21 @@ impl SceneBehavior for PickBlindScene {
                         extents: [ofuda_w, ofuda_h, 3.0],
                         rotation: cam_rot,
                         color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::Ofuda {
-                            title: def.name.to_string(),
-                            rule: description.to_string(),
+                        kind: Object3dKind::Primitive {
+                            shape: crate::render::primitive::MeshId::Ofuda,
+                            material: crate::render::primitive::MaterialSpec::plain()
+                                .with_decal(crate::render::primitive::DecalSpec {
+                                    text: format!("{}\n{}", def.name, description),
+                                    palette: crate::render::primitive::DecalPalette::ParchmentInk,
+                                    layout: crate::render::primitive::DecalLayout::TitleRule {
+                                        title_height_frac: 0.40,
+                                        target_short_edge:
+                                            crate::render::decal::OFUDA_DECAL_LONG_EDGE,
+                                    },
+                                }),
                             pick_id: None,
+                            shadow_caster: false,
+                            silhouette: false,
                         },
                         focusable: false,
                         scene_shaded: true,

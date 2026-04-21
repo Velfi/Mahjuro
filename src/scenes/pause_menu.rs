@@ -324,9 +324,9 @@ impl PauseMenu {
     ) -> PauseUpdate {
         *run = RunState::new_demo();
         run.apply_progression(progress);
-        run.set_auto_cash_in_on_full_structure(
-            crate::persistence::load_settings().auto_cash_in_on_full_structure,
-        );
+        let settings = crate::persistence::load_settings();
+        run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+        run.set_hints_enabled(settings.hints_enabled);
         PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(run.run_number, run))))
     }
 

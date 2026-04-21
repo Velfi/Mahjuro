@@ -25,7 +25,6 @@ use crate::render::decal::{
 use crate::render::draw_cmd::{
     CascadeTokenKind,
     DrawCmd,
-    GoldBarPlacement,
     ShowcaseTilePlacement, ShrinePlacement,
     TallyFanKind, UiFrame, WallStackPlacement,
     YakuTabletPlacement,
@@ -49,7 +48,7 @@ use crate::render::tally_stick_mesh::{
 use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::relic_dish::{
-    build_book_mesh, build_dish_mesh, build_pack_mesh, build_relic_mesh,
+    build_dish_mesh, build_pack_mesh, build_relic_mesh,
     build_relic_mesh_from_rgba, build_round_dish_mesh, build_shop_action_prop_mesh,
     build_tent_card_mesh,
 };
@@ -65,7 +64,7 @@ use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
     mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh,
     rot_euler_xyz_rad,
-    rot_rz_rx_deg, rot_x_rad, rot_z_rad, rotation_around_point_x_rad,
+    rot_rz_rx_deg, rot_x_rad, rotation_around_point_x_rad,
     score_popup_glyph_rot_rad, table_mesh_lay_flat, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
@@ -124,6 +123,18 @@ struct CameraUniform {
 pub struct GpuInstance {
     pub rect: [f32; 4],
     pub color: [f32; 4],
+}
+
+/// View uniform consumed by the 3D flame pipeline. Mirrors
+/// `FlameView` in `shaders/flame.wgsl`: just the matrices the
+/// billboard vertex shader needs. Kept separate from `SsrGlobals`
+/// because the SSR layout restricts its uniform to the fragment
+/// stage, and the flame vertex shader needs `view_proj`.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FlameViewUniform {
+    view_proj: [f32; 16],
+    view_pos: [f32; 4],
 }
 
 /// Instance for the `gradient_quad_pipeline` — same `rect`/`color` payload
@@ -753,7 +764,22 @@ pub struct WgpuRenderer {
     ssr_prev_depth_view: wgpu::TextureView,
     quad_pipeline: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
+    /// 3D billboarded flame particle pipeline (replaces the legacy 2D
+    /// additive-quad flame when smoke is Off). See
+    /// [`crate::render::flame_particles`] and `shaders/flame.wgsl`.
     flame_pipeline: wgpu::RenderPipeline,
+    /// Per-frame camera matrices uploaded for the flame vertex shader.
+    /// Structurally identical to the view_proj + view_pos portion of
+    /// `SsrGlobals`, but with a vertex-visible binding.
+    flame_view_buffer: wgpu::Buffer,
+    flame_view_bind_group: wgpu::BindGroup,
+    /// CPU pool backing the 3D flame pipeline. Owned by the renderer so it
+    /// persists across frames (the scene just supplies per-candle
+    /// emitters each draw).
+    flame_particles: crate::render::flame_particles::FlameParticleSystem,
+    /// Reusable staging vec for uploading live particles to the GPU each
+    /// frame. Kept here to avoid per-frame allocations.
+    flame_particle_staging: Vec<crate::render::flame_particles::GpuFlameParticle>,
     starfield_pipeline: wgpu::RenderPipeline,
     ember_drift_pipeline: wgpu::RenderPipeline,
     golden_dust_pipeline: wgpu::RenderPipeline,
@@ -977,11 +1003,10 @@ pub struct WgpuRenderer {
     candle_wax_mesh: LitMeshGpu,
     candle_wick_mesh: LitMeshGpu,
     table_mesh: LitMeshGpu,
-    /// Procedural dish mesh (a low brass tray shape) + per-relic placeholder
-    /// mesh (a unit box). Both are stamped via lit-mesh instances.
-    dish_mesh: LitMeshGpu,
-    /// Round variant of `dish_mesh` for the sell tray and coin dish — circular
-    /// rim + recessed floor instead of the square box.
+    /// Round dish mesh — retained while the sell tray still lives on a
+    /// bespoke `LitMeshGpu` rather than the primitive registry. Drop
+    /// this field once `Object3dKind::SellTray` migrates to
+    /// `Primitive { shape: DiscRound, … }`.
     round_dish_mesh: LitMeshGpu,
     /// Folded "tent card" mesh sat on the sell-tray floor when focused; carries
     /// a "SELL" decal on each side via `sell_card_instance`.
@@ -990,9 +1015,6 @@ pub struct WgpuRenderer {
     /// Unit box for tile booster packs (correct UVs per face; avoids the relic
     /// cylinder's repeated side strips).
     pack_mesh: LitMeshGpu,
-    /// Rectangle for shop action props (Leave / Restock), decal on +Y face with
-    /// U along +X so landscape labels render upright.
-    shop_action_prop_mesh: LitMeshGpu,
     /// Per-relic silhouette-derived meshes generated from the loaded relic
     /// texture alpha. Falls back to `relic_box_mesh` when no usable silhouette
     /// can be derived.
@@ -1032,10 +1054,9 @@ pub struct WgpuRenderer {
     /// Pre-allocated per-pack instances (lit-mesh foil; uses `pack_mesh` geometry).
     pack_instances: Vec<LitMeshInstance>,
     pack_slot_texture: Vec<Option<TilePackKind>>,
-    // ── Shop scene meshes (curio cabinet + ribbons + talismans + coins) ─
+    // ── Shop scene meshes (curio cabinet + ribbons + talismans) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
-    coin_mesh: LitMeshGpu,
     /// Procedural shrine mesh used by the pick-blind scene.
     shrine_mesh: LitMeshGpu,
     /// Procedural ornate brass plinth used by the gameplay scene to hold
@@ -1054,27 +1075,6 @@ pub struct WgpuRenderer {
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
     talisman_instances: Vec<LitMeshInstance>,
-    /// Per-coin instances (shop scene). Indexed sequentially by `CoinBatch`
-    /// placement order; truncated at `MAX_COIN_SLOTS`.
-    coin_instances: Vec<LitMeshInstance>,
-    /// Per-gold-bar instances (shop scene). Rendered as unit-box meshes
-    /// with Metal material. Truncated at `MAX_BAR_SLOTS`.
-    bar_instances: Vec<LitMeshInstance>,
-    /// Unit-box mesh with the `Brass` material — used for shelf rails,
-    /// display-case trim, and other brass fittings.
-    brass_rail_mesh: LitMeshGpu,
-    /// Per-brass-rail instances. Grown on demand (unlike `bar_instances`
-    /// which caps at `MAX_BAR_SLOTS`); rails are cheap to allocate.
-    brass_rail_instances: Vec<LitMeshInstance>,
-    /// Procedural book mesh (rounded spine + page inset). Used by the shop
-    /// scene for the Yaku Journal bookend.
-    book_mesh: LitMeshGpu,
-    /// Single instance for the journal book.
-    book_instance: LitMeshInstance,
-    /// Book model matrix + pick_id from the last frame, for slab-test picking.
-    last_book_model: Option<(Mat4, u32)>,
-    /// Up to 2 instances for ShopActionProp (Leave / Reroll counter-end props).
-    shop_action_prop_instances: Vec<LitMeshInstance>,
     /// Single instance for SellTray.
     sell_tray_instance: LitMeshInstance,
     /// Single instance for the folded "SELL" tent card; only drawn when the
@@ -1142,14 +1142,6 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Ofuda scroll model + pick_id (shop path-sign), one-frame-stale.
-    last_ofuda_model: Option<(Mat4, u32)>,
-    /// Info plaque model + pick_id (shop hover plaque), one-frame-stale.
-    last_info_plaque_model: Option<(Mat4, u32)>,
-    /// Leave action prop model + pick_id, one-frame-stale.
-    last_leave_prop_model: Option<(Mat4, u32)>,
-    /// Reroll action prop model + pick_id, one-frame-stale.
-    last_reroll_prop_model: Option<(Mat4, u32)>,
     /// Sell tray model + pick_id, one-frame-stale.
     last_sell_tray_model: Option<(Mat4, u32)>,
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
@@ -1159,9 +1151,6 @@ pub struct WgpuRenderer {
     /// `MAX_DORA_PLINTH_SLOTS`. The gameplay scene only ever pushes one
     /// plinth per frame, but the slot pool tolerates more without allocation.
     dora_plinth_instances: Vec<LitMeshInstance>,
-    /// Per-explicit-dish instances (shop scene). Indexed sequentially by
-    /// `DishExplicit` placement order; grown on demand.
-    aux_dish_instances: Vec<LitMeshInstance>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
     last_ribbon_models: Vec<Mat4>,
     /// Total number of ribbon draw-slots populated this frame (across all
@@ -1178,20 +1167,16 @@ pub struct WgpuRenderer {
     last_aux_dish_aabbs: Vec<(glam::Vec3, glam::Vec3)>,
 
     // ── Skeuomorphic gameplay HUD meshes (phase 1 infrastructure) ──────
-    plaque_mesh: LitMeshGpu,
     cabinet_mesh: LitMeshGpu,
     cabinet_rails_mesh: LitMeshGpu,
-    ofuda_mesh: LitMeshGpu,
     bone_tablet_mesh: LitMeshGpu,
     wood_tablet_mesh: LitMeshGpu,
     bowl_mesh: LitMeshGpu,
     mirror_mesh: LitMeshGpu,
     tally_stick_base_mesh: LitMeshGpu,
     tally_stick_tip_mesh: LitMeshGpu,
-    plaque_instances: Vec<LitMeshInstance>,
     cabinet_instances: Vec<LitMeshInstance>,
     cabinet_rails_instances: Vec<LitMeshInstance>,
-    ofuda_instances: Vec<LitMeshInstance>,
     yaku_tablet_instances: Vec<LitMeshInstance>,
     wood_tablet_instances: Vec<LitMeshInstance>,
     bowl_instances: Vec<LitMeshInstance>,
@@ -1219,6 +1204,24 @@ pub struct WgpuRenderer {
     /// and reuse it on every subsequent frame the same string appears.
     glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache,
     extruded_glyph_meshes: HashMap<String, LitMeshGpu>,
+    /// Shape registry for `Object3dKind::Primitive`. During the Phase-1
+    /// migration, entries share GPU allocations with the legacy named
+    /// fields (`plaque_mesh`, `cabinet_mesh`, …) via `Arc`. Once a
+    /// legacy kind is deleted, the registry entry becomes the sole
+    /// owner.
+    primitive_meshes: HashMap<crate::render::primitive::MeshId, std::sync::Arc<LitMeshGpu>>,
+    /// Per-shape instance pools for `Object3dKind::Primitive`. Keyed by
+    /// `MeshId`; each `Vec` grows on-demand via `ensure_lit_mesh_pool`.
+    primitive_instances: HashMap<crate::render::primitive::MeshId, Vec<LitMeshInstance>>,
+    /// Per-shape texture overrides for primitive instances. When a
+    /// shape has an entry here, `dispatch_primitive` binds the
+    /// specified albedo + relief textures at instance creation instead
+    /// of the default white + flat relief. Used by meshes whose
+    /// material samples a heightmap (e.g. engraved coin faces).
+    primitive_textures:
+        HashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
+    /// Per-pick-id model matrix snapshot for primitive hit-testing.
+    last_primitive_pick_models: HashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
     /// (one per axis: 0 = X red, 1 = Y green, 2 = Z blue). Drawn through
     /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
@@ -1357,14 +1360,6 @@ pub const MAX_RELIC_SLOTS: usize = 128;
 pub const MAX_RIBBON_SLOTS: usize = 48;
 /// Maximum number of talisman tablets rendered per frame.
 pub const MAX_TALISMAN_SLOTS: usize = 8;
-/// Maximum number of physical coins rendered per frame (across all
-/// `CoinBatch` cmds). The shop tooltip still shows the true gold count when
-/// it exceeds this; the visual just caps the pile.
-pub const MAX_COIN_SLOTS: usize = 64;
-/// Maximum number of gold bars rendered per frame (across all `GoldBarBatch`
-/// cmds). With big bars worth 100 and mini bars worth 25, 16 slots covers
-/// absurdly high gold counts.
-pub const MAX_BAR_SLOTS: usize = 16;
 /// Maximum number of 3D bugs (insects near the lamp) rendered per frame.
 /// Each live bug consumes one slot for body + two for live wings + two for
 /// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.
@@ -1380,8 +1375,6 @@ pub const MAX_ORB_SLOTS: usize = 32;
 pub const MAX_SHRINE_SLOTS: usize = 4;
 /// Maximum number of dora-plinth instances per frame (gameplay uses 1).
 pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
-/// Maximum number of hanging ofuda per frame (gameplay uses 1).
-pub const MAX_OFUDA_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
 /// Maximum number of wood action tablets per frame (sort suit, sort rank, play).
@@ -2747,24 +2740,81 @@ impl WgpuRenderer {
             cache: None,
         });
 
-        // Flame pipeline — additive procedural fire on a quad. Reuses
-        // quad_layout (only needs globals.time) and shares the unit-quad
-        // vertex/instance buffers with quad_pipeline.
+        // Flame pipeline — 3D billboarded particle fire. The shader
+        // reads per-particle world position + age from the instance
+        // buffer, constructs a camera-facing quad in the vertex stage,
+        // and dissolves the billboard against an age threshold in the
+        // fragment stage. Depth-test Less + write off so the particles
+        // are correctly occluded by meshes (wax body, coin pile, etc)
+        // without self-occluding in z-fight when they overlap.
+        //
+        // Bind groups: group(0) = 2D Globals (time + screen + gamma),
+        //              group(1) = SSR globals (view_proj, view_pos).
+        //
+        // The SSR layout is created here (slightly earlier than the
+        // lit-mesh block below that would normally own it) so this
+        // flame pipeline and the lit-mesh pipeline can share a single
+        // layout object — wgpu matches bind groups to pipelines by
+        // layout identity, not structural equality.
+        let lit_mesh_ssr_layout = create_lit_mesh_ssr_layout(&device);
+        // Flame-only view layout: just the view_proj/view_pos buffer at
+        // binding(0), visible to BOTH stages (the vertex stage needs
+        // view_proj to project billboards; the fragment stage may use
+        // view_pos for view-relative tricks later). The lit-mesh SSR
+        // layout restricts binding(0) to FRAGMENT only, so we can't
+        // reuse it here.
+        let flame_view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("flame-view-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
         let flame_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("flame.wgsl"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/flame.wgsl")).into(),
             ),
         });
-
+        let flame_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("flame-pl"),
+            bind_group_layouts: &[Some(&globals_layout), Some(&flame_view_layout)],
+            immediate_size: 0,
+        });
+        let flame_particle_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<
+                crate::render::flame_particles::GpuFlameParticle,
+            >() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                // pos (xyz) + age (w) packed into a vec4 for tidy layout.
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // scale + phase + brightness + pad → vec4.
+                wgpu::VertexAttribute {
+                    offset: 16,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        };
         let flame_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("flame-pipeline"),
-            layout: Some(&quad_layout),
+            layout: Some(&flame_pl),
             vertex: wgpu::VertexState {
                 module: &flame_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[vertex_layout.clone(), instance_layout.clone()],
+                buffers: &[vertex_layout.clone(), flame_particle_layout],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &flame_shader,
@@ -2790,12 +2840,42 @@ impl WgpuRenderer {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
+                // Billboards are symmetric so cull is a footgun (we'd
+                // have to care about wind-space normal orientation).
+                cull_mode: None,
                 ..Default::default()
             },
-            depth_stencil: Some(depth_ui.clone()),
+            // Depth-test Less + write off. Matches the `lit_mesh_blended`
+            // pattern: particles are occluded by opaque geometry in front
+            // of them (coin pile, wax body) but stack freely with each
+            // other in additive blend.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
+        });
+
+        let flame_view_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("flame-view-uniform"),
+            contents: bytemuck::bytes_of(&FlameViewUniform {
+                view_proj: Mat4::IDENTITY.to_cols_array(),
+                view_pos: [0.0; 4],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let flame_view_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flame-view-bg"),
+            layout: &flame_view_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: flame_view_buffer.as_entire_binding(),
+            }],
         });
 
         // ── Fullscreen additive vignette pipelines ─────────────────────
@@ -3268,7 +3348,8 @@ impl WgpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/lit_mesh.wgsl").into()),
         });
         let lit_mesh_material_layout = create_lit_mesh_material_layout(&device);
-        let lit_mesh_ssr_layout = create_lit_mesh_ssr_layout(&device);
+        // `lit_mesh_ssr_layout` was created earlier (alongside the flame
+        // pipeline) so both pipelines share one layout object.
         let lit_mesh_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lit-mesh-pl"),
             bind_group_layouts: &[
@@ -4004,7 +4085,6 @@ impl WgpuRenderer {
         let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
         let candle_wick_mesh = LitMeshGpu::new(&device, &build_candle_wick_mesh(), "candle-wick");
         let table_mesh = LitMeshGpu::new(&device, &build_table_mesh(), "table");
-        let dish_mesh = LitMeshGpu::new(&device, &build_dish_mesh(), "relic-dish");
         let round_dish_mesh = LitMeshGpu::new(&device, &build_round_dish_mesh(), "round-dish");
         let sell_card_mesh = LitMeshGpu::new(&device, &build_tent_card_mesh(), "sell-card");
         let relic_box_cpu = build_relic_mesh();
@@ -4024,12 +4104,8 @@ impl WgpuRenderer {
             .collect();
         let relic_box_mesh = LitMeshGpu::new(&device, &relic_box_cpu, "relic-mesh");
         let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
-        let shop_action_prop_mesh =
-            LitMeshGpu::new(&device, &build_shop_action_prop_mesh(), "shop-action-prop");
         let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
-        let coin_mesh = LitMeshGpu::new(&device, &build_coin_mesh(), "coin");
         let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
-        let book_mesh = LitMeshGpu::new(&device, &build_book_mesh(), "book");
         let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
         let dora_plinth_mesh =
             LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
@@ -4064,11 +4140,112 @@ impl WgpuRenderer {
         let lamp_body_mesh = LitMeshGpu::new(&device, &lamp_body_cpu, "lamp-body");
         let lamp_bulb_mesh = LitMeshGpu::new(&device, &build_lamp_bulb_mesh(), "lamp-bulb");
         // Skeuomorphic gameplay HUD meshes (phase 1).
-        let plaque_mesh = LitMeshGpu::new(&device, &build_plaque_mesh(), "plaque");
         let cabinet_mesh = LitMeshGpu::new(&device, &build_cabinet_mesh(), "cabinet");
         let cabinet_rails_mesh =
             LitMeshGpu::new(&device, &build_cabinet_rails_mesh(), "cabinet-rails");
-        let ofuda_mesh = LitMeshGpu::new(&device, &build_ofuda_mesh(), "ofuda");
+        // Phase-1 primitive registry: parallel GPU copies of meshes
+        // the generic `Object3dKind::Primitive` dispatch can reach by
+        // `MeshId`. Legacy named fields above still own their own
+        // allocations during the migration window.
+        let mut primitive_meshes: HashMap<
+            crate::render::primitive::MeshId,
+            std::sync::Arc<LitMeshGpu>,
+        > = HashMap::new();
+        {
+            use crate::render::primitive::MeshId;
+            let unit_cube_cpu = {
+                let mut verts: Vec<crate::render::tile_glb::Vertex3dTex> = Vec::new();
+                let mut idx: Vec<u32> = Vec::new();
+                crate::render::lit_mesh::push_box(
+                    &mut verts, &mut idx, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5,
+                );
+                crate::render::lit_mesh::MeshCpu {
+                    vertices: verts,
+                    indices: idx,
+                    default_material: crate::render::lit_mesh::MaterialParams {
+                        kind: crate::render::lit_mesh::MaterialKind::Plain,
+                        base_color: [1.0, 1.0, 1.0, 1.0],
+                        specular_strength: 0.25,
+                        specular_power: 32.0,
+                    },
+                }
+            };
+            primitive_meshes.insert(
+                MeshId::Cube,
+                std::sync::Arc::new(LitMeshGpu::new(&device, &unit_cube_cpu, "primitive-cube")),
+            );
+            primitive_meshes.insert(
+                MeshId::BeveledSlab,
+                std::sync::Arc::new(LitMeshGpu::new(&device, &build_plaque_mesh(), "primitive-slab")),
+            );
+            primitive_meshes.insert(
+                MeshId::CabinetColumn,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_cabinet_mesh(),
+                    "primitive-cabinet-column",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::CabinetRails,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_cabinet_rails_mesh(),
+                    "primitive-cabinet-rails",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::ShopActionProp,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_shop_action_prop_mesh(),
+                    "primitive-shop-action-prop",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::DiscSquare,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_dish_mesh(),
+                    "primitive-dish-square",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::DiscRound,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_round_dish_mesh(),
+                    "primitive-dish-round",
+                )),
+            );
+            // Cylinder is sized by `Object3d::extents` — reuse the coin
+            // mesh (Y-up unit cylinder) so callers pay nothing extra.
+            primitive_meshes.insert(
+                MeshId::Cylinder,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_coin_mesh(),
+                    "primitive-cylinder",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::Ofuda,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_ofuda_mesh(),
+                    "primitive-ofuda",
+                )),
+            );
+        }
+        // Per-shape texture override: the coin cylinder needs its
+        // engraved heightmap bound at both albedo and relief slots so
+        // the Metal branch in lit_mesh.wgsl can sample the cash-coin
+        // relief. Populated now so `primitive_textures` is ready by
+        // the time `dispatch_primitive` first creates an instance.
+        let mut primitive_textures: HashMap<
+            crate::render::primitive::MeshId,
+            (wgpu::TextureView, wgpu::TextureView),
+        > = HashMap::new();
         let bone_tablet_mesh = LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
         let wood_tablet_mesh = LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
         // The legacy "bowl" slot now hosts the discard river mesh — a stone
@@ -4159,61 +4336,15 @@ impl WgpuRenderer {
         // so they aren't affected.
         let (lit_mesh_coin_height_tex, lit_mesh_coin_height_view) =
             load_coin_heightmap(&device, &queue);
-        let mut coin_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_COIN_SLOTS);
-        for _ in 0..MAX_COIN_SLOTS {
-            coin_instances.push(LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_coin_height_view,
-                &lit_mesh_coin_height_view,
-                &tile_sampler,
-            ));
-        }
-        // Gold bar instances — same Metal material as coins, reuses the coin
-        // heightmap for a subtle engraved look on bar faces.
-        let mut bar_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BAR_SLOTS);
-        for _ in 0..MAX_BAR_SLOTS {
-            bar_instances.push(LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_coin_height_view,
-                &lit_mesh_coin_height_view,
-                &tile_sampler,
-            ));
-        }
-        // Brass rail mesh + instances — smooth polished brass box, used
-        // for shelf rails and trim. Starts empty and grows on demand in
-        // the pre-pass; brass rails are cheap enough not to cap.
-        let brass_rail_mesh = LitMeshGpu::new(
-            &device,
-            &crate::render::brass_mesh::build_brass_rail_mesh(),
-            "brass-rail",
+        // Register the coin heightmap as the per-shape texture override
+        // for Cylinder primitives so engraved-coin callers sample it.
+        primitive_textures.insert(
+            crate::render::primitive::MeshId::Cylinder,
+            (
+                lit_mesh_coin_height_view.clone(),
+                lit_mesh_coin_height_view.clone(),
+            ),
         );
-        let brass_rail_instances: Vec<LitMeshInstance> = Vec::new();
-        // Single book instance for the journal bookend.
-        let book_instance = LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        );
-        // Up to 2 shop action prop instances (Leave / Reroll counter-end props).
-        let shop_action_prop_instances: Vec<LitMeshInstance> = (0..2)
-            .map(|_| {
-                LitMeshInstance::new(
-                    &device,
-                    &lit_mesh_material_layout,
-                    &shadow_caster_layout,
-                    &lit_mesh_white_view,
-                    &lit_mesh_relief_default_view,
-                    &tile_sampler,
-                )
-            })
-            .collect();
         // Single sell tray instance.
         let sell_tray_instance = LitMeshInstance::new(
             &device,
@@ -4397,7 +4528,6 @@ impl WgpuRenderer {
                 &tile_sampler,
             ));
         }
-        let aux_dish_instances: Vec<LitMeshInstance> = Vec::new();
 
         // ── Skeuomorphic gameplay HUD slot pools (phase 1) ─────────────
         let make_pool = |n: usize| -> Vec<LitMeshInstance> {
@@ -4416,13 +4546,11 @@ impl WgpuRenderer {
         };
         // Plaque instances grow on demand via `ensure_plaque_slots` rather
         // than reserving a fixed cap — see that helper for context.
-        let plaque_instances: Vec<LitMeshInstance> = Vec::new();
         // Cabinet instances grow on demand via `ensure_lit_mesh_pool` —
         // collection is the only consumer for now and only ever needs a
         // single instance, so reserving a fixed cap would be silly.
         let cabinet_instances: Vec<LitMeshInstance> = Vec::new();
         let cabinet_rails_instances: Vec<LitMeshInstance> = Vec::new();
-        let ofuda_instances = make_pool(MAX_OFUDA_SLOTS);
         let yaku_tablet_instances = make_pool(MAX_YAKU_TABLET_SLOTS);
         let wood_tablet_instances = make_pool(MAX_WOOD_TABLET_SLOTS);
         let bowl_instances = make_pool(MAX_BOWL_SLOTS);
@@ -4475,6 +4603,10 @@ impl WgpuRenderer {
             quad_pipeline,
             gradient_quad_pipeline,
             flame_pipeline,
+            flame_view_buffer,
+            flame_view_bind_group,
+            flame_particles: crate::render::flame_particles::FlameParticleSystem::new(),
+            flame_particle_staging: Vec::with_capacity(256),
             starfield_pipeline,
             ember_drift_pipeline,
             golden_dust_pipeline,
@@ -4535,21 +4667,12 @@ impl WgpuRenderer {
             pack_slot_texture: vec![None; 4],
             ribbon_mesh,
             talisman_mesh,
-            coin_mesh,
             shrine_mesh,
             dora_plinth_mesh,
             ribbon_instances,
             ribbon_slot_zodiac,
             ribbon_zodiac_tex,
             talisman_instances,
-            coin_instances,
-            bar_instances,
-            brass_rail_mesh,
-            brass_rail_instances,
-            book_mesh,
-            book_instance,
-            last_book_model: None,
-            shop_action_prop_instances,
             sell_tray_instance,
             sell_card_instance,
             sell_card_decal_ready: false,
@@ -4571,33 +4694,24 @@ impl WgpuRenderer {
             bug_wing_blur_r_instances,
             orb_mesh,
             orb_instances,
-            last_ofuda_model: None,
-            last_info_plaque_model: None,
-            last_leave_prop_model: None,
-            last_reroll_prop_model: None,
             last_sell_tray_model: None,
             shrine_instances,
             dora_plinth_instances,
-            aux_dish_instances,
             last_ribbon_models: Vec::new(),
             last_ribbon_slot_count: 0,
             last_ribbon_batch_slot_counts: Vec::new(),
             last_talisman_models: Vec::new(),
             last_aux_dish_aabbs: Vec::new(),
-            plaque_mesh,
             cabinet_mesh,
             cabinet_rails_mesh,
-            ofuda_mesh,
             bone_tablet_mesh,
             wood_tablet_mesh,
             bowl_mesh,
             mirror_mesh,
             tally_stick_base_mesh,
             tally_stick_tip_mesh,
-            plaque_instances,
             cabinet_instances,
             cabinet_rails_instances,
-            ofuda_instances,
             yaku_tablet_instances,
             wood_tablet_instances,
             bowl_instances,
@@ -4608,6 +4722,10 @@ impl WgpuRenderer {
             extruded_glyph_instances,
             glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache::new(),
             extruded_glyph_meshes: HashMap::new(),
+            primitive_meshes,
+            primitive_instances: HashMap::new(),
+            primitive_textures,
+            last_primitive_pick_models: HashMap::new(),
             debug_axes_instances,
             last_yaku_tablet_models: Vec::new(),
             last_wood_tablet_models: Vec::new(),
@@ -4672,14 +4790,12 @@ impl WgpuRenderer {
             candle_wax_mesh,
             candle_wick_mesh,
             table_mesh,
-            dish_mesh,
             round_dish_mesh,
             sell_card_mesh,
             relic_box_mesh,
             relic_box_tris,
             relic_tri_lists: HashMap::new(),
             pack_mesh,
-            shop_action_prop_mesh,
             relic_meshes: HashMap::new(),
             candle_instances,
             table_instance,
@@ -5153,30 +5269,13 @@ impl WgpuRenderer {
                 consider(ShopHit::Talisman(i), t);
             }
         }
-        // Book — local-space slab test (handles rotation correctly).
-        // The book mesh spans x ∈ [−0.58, 0.5] (spine bulge), y/z ∈ [−0.5, 0.5].
-        // Use half-extents (0.54, 0.5, 0.5) centered at x = −0.04 to cover the
-        // full convex hull of the mesh.
-        if let Some((model, pid)) = self.last_book_model {
-            if let Some(t) = slab_test(model, 0.54, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(pid), t);
-            }
-        }
-        // Ofuda path-sign scroll.
-        if let Some((model, pid)) = self.last_ofuda_model {
-            if let Some(t) = slab_test(model, 0.5, 0.5, 0.1, 0.0) {
-                consider(ShopHit::Dish(pid), t);
-            }
-        }
-        // Shop action props (Leave / Reroll counter-end).
-        if let Some((model, pid)) = self.last_reroll_prop_model {
-            if let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(pid), t);
-            }
-        }
-        if let Some((model, pid)) = self.last_leave_prop_model {
-            if let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(pid), t);
+        // Shop action props (Leave / Reroll counter-end) — any
+        // Primitive with a pick_id that isn't already covered by
+        // `aux_dish_rects` falls through here. The shop scene maps
+        // `ShopHit::Dish(pid)` to the right action downstream.
+        for (pid, model) in &self.last_primitive_pick_models {
+            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
+                consider(ShopHit::Dish(*pid), t);
             }
         }
         // Sell tray.
@@ -6453,6 +6552,17 @@ impl WgpuRenderer {
             }),
         );
 
+        // Matching upload for the flame pipeline's view uniform. Same
+        // camera, smaller struct — see `FlameViewUniform`.
+        self.queue.write_buffer(
+            &self.flame_view_buffer,
+            0,
+            bytemuck::bytes_of(&FlameViewUniform {
+                view_proj: view_proj_arr,
+                view_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 1.0],
+            }),
+        );
+
         // Table plane mapping: see [`crate::render::world_space::pixel_to_world`].
         // Helper: project a world position to integer screen pixels for use
         // in 2D overlay quads (selection halos, hint pulses, hover arrows).
@@ -6514,23 +6624,23 @@ impl WgpuRenderer {
             }
         }
 
-        // ── Flame screen anchors ────────────────────────────────────────
-        // The flame is a 2D additive quad in screen-pixel space, but it
-        // needs to sit on top of a 3D candle wick whose screen position
-        // depends on the gameplay-camera projection. Walk the cmd list,
-        // find the CandleBatch, project each candle's wick tip with the
-        // same view_proj we just built, and produce per-candle flame
-        // rects (x, y, w, h) sized to match the candle's projected
-        // pixel height. The Flame batching loop below consumes these in
-        // order, overriding whatever the scene chose.
+        // ── Flame emitters (world-space) ─────────────────────────────
+        // Each candle in the scene becomes one emitter for the 3D flame
+        // particle system. We walk the cmd list, find every Candle, and
+        // project the wick tip into world space using the same
+        // `pixel_to_world` mapping the rest of the scene uses. The
+        // `DrawCmd::Flame` batch loop below consumes the candle-ordered
+        // list of emitters in submission order.
         //
-        // We size the flame as a fraction of the *projected* candle
-        // height so far candles get a smaller flame than near ones — the
-        // perspective foreshortening is non-trivial because the four
-        // votives sit at noticeably different depths on the table.
-        let flame_anchors: Vec<([f32; 4], [f32; 2])> = {
-            let mut out: Vec<([f32; 4], [f32; 2])> = Vec::new();
-            // Walk all Object3ds in the frame, picking out Candles.
+        // Brightness + phase are pulled from the scene's per-candle
+        // `GpuInstance`: `color.b` = brightness, `color.a` = phase. The
+        // anchor loop also computes a per-candle wind vector by sampling
+        // `frame.wind_gusts` at the wick's world position so the particle
+        // system can lean the plume in real wind.
+        let flame_emitters: Vec<crate::render::flame_particles::FlameEmitter> = {
+            let mut out: Vec<crate::render::flame_particles::FlameEmitter> = Vec::new();
+            // Walk all Object3ds in the frame, picking out Candles in
+            // submission order (matches scene `frame.flames(...)` order).
             let candles: Vec<(&crate::render::draw_cmd::Object3d, f32, f32)> = frame
                 .cmds
                 .iter()
@@ -6555,88 +6665,68 @@ impl WgpuRenderer {
                     .collect::<Vec<_>>()
                 })
                 .collect();
+            // Scene-supplied per-flame data (brightness + phase), pulled
+            // out of the cmd stream in the same order candles appear.
+            let mut flame_cmd_iter = frame.cmds.iter().filter_map(|cmd| match cmd {
+                DrawCmd::Flame(inst) => Some(*inst),
+                _ => None,
+            });
             for (o, p_scale, p_height) in candles.into_iter() {
                 let p_pos = o.pos;
-                {
-                    {
-                        let base_world = pixel_to_world(w, h, p_pos[0], p_pos[1], 0.0);
-                        let tip_world = pixel_to_world(
-                            w,
-                            h,
-                            p_pos[0],
-                            p_pos[1],
-                            crate::render::candle_mesh::WICK_TIP_Y * p_scale * p_height,
-                        );
-                        let (_bsx, bsy) = project_to_screen(base_world);
-                        let (tsx, tsy) = project_to_screen(tip_world);
-                        // Projected pixel height of the candle from base
-                        // to wick tip — used to scale the flame so it
-                        // matches the candle's perspective foreshortening.
-                        let candle_pix_h = (bsy - tsy).abs().max(1.0);
-                        // Flame proportions relative to the candle's
-                        // total projected height. These constants reproduce
-                        // the original ~46×28 flame on a ~150-tall candle
-                        // and scale gracefully with depth.
-                        let flame_h = candle_pix_h * 0.42;
-                        let flame_w = candle_pix_h * 0.26;
-                        // Anchor: flame *base* sits at the wick tip. The
-                        // shader maps `corner.y=1` to the bottom of the
-                        // rect, so base_y = rect.y + rect.w; solve for
-                        // rect.y = tip_sy - flame_h. Center horizontally
-                        // around the projected wick.
-                        let rect_x = tsx - flame_w * 0.5;
-                        let rect_y = tsy - flame_h;
+                let tip_world = pixel_to_world(
+                    w,
+                    h,
+                    p_pos[0],
+                    p_pos[1],
+                    crate::render::candle_mesh::WICK_TIP_Y * p_scale * p_height,
+                );
+                let scene_inst = flame_cmd_iter.next();
+                let (brightness, phase) = scene_inst
+                    .map(|inst| (inst.color[2], inst.color[3]))
+                    .unwrap_or((1.0, 0.0));
 
-                        // Per-flame wind sample. Walk the active scene
-                        // wind impulses, weight each by a soft falloff
-                        // around its world-space radius, and project
-                        // their world velocities through the same view
-                        // we just used to anchor the flame. The result
-                        // is a screen-space delta that the flame shader
-                        // reads as `color.rg` and turns into a lateral
-                        // bend + extra flicker. Normalised by the flame
-                        // quad's own pixel size so distant candles bend
-                        // by the same *visual* amount as near ones.
-                        let mut wind_px = (0.0_f32, 0.0_f32);
-                        for g in frame.wind_gusts.iter() {
-                            let g_world =
-                                pixel_to_world(w, h, g.center_px.0, g.center_px.1, g.lift);
-                            let dist = (g_world - tip_world).length();
-                            let r = (g.radius * 3.0).max(1.0);
-                            let falloff = (1.0 - (dist / r).clamp(0.0, 1.0)).powf(1.5);
-                            if falloff <= 0.0 {
-                                continue;
-                            }
-                            // Project a small step along the gust
-                            // velocity to get its screen-space direction
-                            // at the candle's depth.
-                            let v = glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]);
-                            // Step the velocity ~0.12s forward so even
-                            // moderate gusts produce a clearly visible
-                            // screen-space delta after the per-flame
-                            // normalisation below.
-                            let (psx, psy) = project_to_screen(tip_world + v * 0.12);
-                            wind_px.0 += (psx - tsx) * falloff;
-                            wind_px.1 += (psy - tsy) * falloff;
-                        }
-                        // Convert from absolute screen-pixel delta into
-                        // flame-relative units (≈ multiples of the flame
-                        // half-width). 1.0 ≈ "tip pulled to the edge of
-                        // the quad" — the shader clamps at 1.5.
-                        let inv_w = 1.0 / flame_w.max(1.0);
-                        let inv_h = 1.0 / flame_h.max(1.0);
-                        let wind_norm = [
-                            (wind_px.0 * inv_w * 1.1).clamp(-1.5, 1.5),
-                            (wind_px.1 * inv_h * 1.1).clamp(-1.5, 1.5),
-                        ];
-
-                        out.push(([rect_x, rect_y, flame_w, flame_h], wind_norm));
+                // Sample scene wind gusts at the wick, weighted by a
+                // soft falloff around each gust's world-space radius.
+                // Convert the resulting world-space velocity into the
+                // flame-relative units the particle system uses.
+                let mut wind_world = glam::Vec3::ZERO;
+                for g in frame.wind_gusts.iter() {
+                    let g_world = pixel_to_world(w, h, g.center_px.0, g.center_px.1, g.lift);
+                    let dist = (g_world - tip_world).length();
+                    let r = (g.radius * 3.0).max(1.0);
+                    let falloff = (1.0 - (dist / r).clamp(0.0, 1.0)).powf(1.5);
+                    if falloff <= 0.0 {
+                        continue;
                     }
+                    wind_world += glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2])
+                        * falloff;
                 }
+                // Flame-relative wind: normalise against a reference
+                // per-candle velocity so neighbouring candles react to
+                // the same gust by the same visible amount. 300 units/s
+                // → 1.0 in flame-relative space is the heuristic that
+                // matched the previous 2D behaviour.
+                let wind_scale = 1.0 / 300.0;
+                let wind = glam::Vec2::new(
+                    (wind_world.x * wind_scale).clamp(-1.5, 1.5),
+                    (wind_world.z * wind_scale).clamp(-1.5, 1.5),
+                );
+
+                out.push(crate::render::flame_particles::FlameEmitter {
+                    wick_world: tip_world,
+                    // Scale the particle size to the candle's physical
+                    // scale. A candle drawn at scale `p_scale * p_height`
+                    // (world units) should produce a plume whose width
+                    // is a fraction of that scale; 0.22 lines up with
+                    // the previous 2D flame's visual width.
+                    scale: p_scale * p_height * 0.22,
+                    wind,
+                    brightness,
+                    phase,
+                });
             }
             out
         };
-        let mut next_flame_anchor: usize = 0;
 
         let tile_basis = tile_mesh_local_to_world();
         // After tile_basis, the tile lies flat with face normal pointing +Z.
@@ -7124,21 +7214,15 @@ impl WgpuRenderer {
         // collision or missing dispatch arm.
         #[derive(Clone, Copy, PartialEq, Eq)]
         enum DrawKind {
-            Plaque,
             Cabinet,
             CabinetRails,
-            Ofuda,
             YakuTablet,
             WoodTablet,
             Relic,
             Pack,
             Ribbon,
             Talisman,
-            Coin,
-            RelicBox,
-            Book,
             Shrine,
-            ShopActionProp,
             SellTray,
             LampBody,
             LampBulb,
@@ -7155,11 +7239,9 @@ impl WgpuRenderer {
             CandleWick,
             CascadeToken,
             ExtrudedGlyph,
-            DishSquare,
-            DishRound,
             BugWingR,
             BugWingBlurR,
-            BrassRail,
+            Primitive(crate::render::primitive::MeshId),
         }
 
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
@@ -7171,7 +7253,6 @@ impl WgpuRenderer {
         // Dead empty vecs — kept so existing shadow/draw loops that still iterate
         // these compile; scenes no longer push to these variants.
         let shrine_batches: Vec<&[ShrinePlacement]> = Vec::new();
-        let bar_batches: Vec<&[GoldBarPlacement]> = Vec::new();
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
@@ -7277,44 +7358,50 @@ impl WgpuRenderer {
                     });
                 }
                 DrawCmd::Flame(_) => {
-                    // Collect contiguous run of Flame cmds into a single batch.
-                    // Each instance's screen-space rect is overridden with the
-                    // pre-projected wick anchor for the matching candle, so the
-                    // flame stays glued to the wick under camera perspective.
-                    let mut batch: Vec<GpuInstance> = Vec::new();
-                    while let Some(DrawCmd::Flame(inst)) = frame.cmds.get(i) {
-                        let mut fixed = *inst;
-                        if let Some((rect, wind)) = flame_anchors.get(next_flame_anchor) {
-                            fixed.rect = *rect;
-                            // Pack the per-flame wind into color.rg
-                            // (the slot the gameplay scene leaves at
-                            // the unused [1,1,1] tint). The shader's
-                            // current contract is rg=wind, b=reserved,
-                            // a=phase — preserve the phase the scene
-                            // baked in so neighbouring candles still
-                            // flicker out of sync.
-                            fixed.color[0] = wind[0];
-                            fixed.color[1] = wind[1];
-                            // Preserve the brightness the scene set in
-                            // color[2] (flame shader's brightness channel).
-                            next_flame_anchor += 1;
-                        }
-                        batch.push(fixed);
+                    // Drain the contiguous run of Flame cmds. Per-flame
+                    // brightness + phase were already harvested into
+                    // `flame_emitters` above, so here we just advance `i`
+                    // and emit a single `FlameBatch` op that the dispatch
+                    // side will expand into particle-system state.
+                    while let Some(DrawCmd::Flame(_)) = frame.cmds.get(i) {
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("flame-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
+                    // Step the particle system once per frame and upload
+                    // the live particles into a fresh instance buffer.
+                    // Smoke-on paths skip the actual draw (see the
+                    // `FlameBatch` branch below), but we still step so
+                    // smoke → no-smoke toggles mid-game don't suddenly
+                    // drop an empty pool into view.
+                    self.flame_particles.step(&flame_emitters, self.frame_dt);
+                    let count = self
+                        .flame_particles
+                        .fill_gpu_instances(&flame_emitters, &mut self.flame_particle_staging);
+                    if count == 0 {
+                        // Nothing to draw yet (first frame, or all
+                        // particles expired during a pause). Still push
+                        // the op so the downstream code has a consistent
+                        // shape; the dispatch side handles count=0.
+                        ops.push(RenderOp::FlameBatch {
+                            buf_idx: usize::MAX,
+                            count: 0,
                         });
-                    let buf_idx = flame_buffers.len();
-                    flame_buffers.push(buf);
-                    ops.push(RenderOp::FlameBatch {
-                        buf_idx,
-                        count: batch.len() as u32,
-                    });
+                    } else {
+                        let buf = self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some("flame-particles"),
+                                contents: bytemuck::cast_slice(
+                                    &self.flame_particle_staging[..count],
+                                ),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            },
+                        );
+                        let buf_idx = flame_buffers.len();
+                        flame_buffers.push(buf);
+                        ops.push(RenderOp::FlameBatch {
+                            buf_idx,
+                            count: count as u32,
+                        });
+                    }
                 }
                 DrawCmd::Text(lbl) => {
                     if let Some(ref font) = self.ui_font {
@@ -7583,46 +7670,7 @@ impl WgpuRenderer {
 
         // Coins migrated to Object3dKind::Coin.
 
-        // ── Gold bar batches (shop scene) ─────────────────────────────
-        let mut bar_slot_cursor: usize = 0;
-        for batch in &bar_batches {
-            for b in batch.iter() {
-                if bar_slot_cursor >= MAX_BAR_SLOTS {
-                    break;
-                }
-                let slot_i = bar_slot_cursor;
-                bar_slot_cursor += 1;
-                let center = pixel_to_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
-                let model = translate_rot_scale(
-                    center,
-                    rot_z_rad(b.rotation_y),
-                    glam::Vec3::new(
-                        b.half_extents[0] * 2.0,
-                        b.half_extents[1] * 2.0,
-                        b.half_extents[2] * 2.0,
-                    ),
-                );
-                let material = MaterialParams {
-                    kind: MaterialKind::Metal,
-                    base_color: b.color,
-                    specular_strength: 1.0,
-                    specular_power: 96.0,
-                };
-                self.bar_instances[slot_i].write_uniform(
-                    &self.queue,
-                    view_proj_arr,
-                    model,
-                    material,
-                );
-            }
-        }
-
         // ── Reset per-frame singletons owned by Object3d handlers ──────
-        self.last_book_model = None;
-        self.last_ofuda_model = None;
-        self.last_info_plaque_model = None;
-        self.last_leave_prop_model = None;
-        self.last_reroll_prop_model = None;
         self.last_sell_tray_model = None;
         self.last_sell_card_model = None;
 
@@ -7803,20 +7851,16 @@ impl WgpuRenderer {
                 look.z.atan2(look.y.abs()).to_degrees() + 180.0
             };
 
-            let mut obj3d_plaque_slot: usize = 0;
             let mut obj3d_cabinet_slot: usize = 0;
             let mut obj3d_cabinet_rails_slot: usize = 0;
-            let mut obj3d_ofuda_slot: usize = 0;
+            let mut obj3d_primitive_slot: HashMap<crate::render::primitive::MeshId, usize> =
+                HashMap::new();
             let mut obj3d_yaku_slot: usize = 0;
             let mut obj3d_wood_slot: usize = 0;
             let mut obj3d_relic_slot: usize = 0;
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
-            let mut obj3d_coin_slot: usize = 0;
-            let mut obj3d_shop_action_prop_slot: usize = 0;
-            let mut obj3d_bar_slot: usize = 0;
-            let mut obj3d_brass_rail_slot: usize = 0;
             let mut obj3d_shrine_slot: usize = 0;
             let mut obj3d_dora_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
@@ -7827,7 +7871,6 @@ impl WgpuRenderer {
             let mut obj3d_candle_slot: usize = 0;
             let mut obj3d_cascade_token_slot: usize = 0;
             let mut obj3d_glyph_slot: usize = 0;
-            let mut obj3d_dish_slot: usize = 0;
 
             // Find the RenderOp::Object3dBatch ops to patch their start/end.
             let mut op_batch_idx: usize = 0;
@@ -7846,126 +7889,6 @@ impl WgpuRenderer {
                     );
 
                     match &obj.kind {
-                        Object3dKind::Plaque { text, pick_id, silhouette } => {
-                            let slot_i = obj3d_plaque_slot;
-                            obj3d_plaque_slot += 1;
-                            ensure_lit_mesh_pool(
-                                &mut self.plaque_instances,
-                                slot_i + 1,
-                                &self.device,
-                                &self.lit_mesh_material_layout,
-                                &self.shadow_caster_layout,
-                                &self.lit_mesh_white_view,
-                                &self.lit_mesh_relief_default_view,
-                                &self.tile_sampler,
-                            );
-                            // Silhouette locks: skip the engraved decal and
-                            // paint the plaque as a near-black matte slab so
-                            // only its shape reads.
-                            let has_decal = !*silhouette && !text.trim().is_empty();
-                            if has_decal {
-                                let decal_h = crate::render::decal::PLAQUE_DECAL_HEIGHT;
-                                let face_aspect =
-                                    (obj.extents[0] / obj.extents[1].max(1.0)).clamp(0.5, 12.0);
-                                let decal_w = ((decal_h as f32 * face_aspect).round() as u32)
-                                    .clamp(256, 4096);
-                                let label_hash = tablet_label_hash(text, decal_w, decal_h);
-                                let inst = &mut self.plaque_instances[slot_i];
-                                if inst.decal_texture.is_none()
-                                    || inst.decal_label_hash != label_hash
-                                {
-                                    let rgba = crate::render::decal::rasterize_plaque_decal(
-                                        text,
-                                        self.ui_font.as_ref(),
-                                        self.emoji_font.as_ref(),
-                                        decal_w,
-                                        decal_h,
-                                    );
-                                    inst.set_decal(
-                                        &self.device,
-                                        &self.queue,
-                                        &self.lit_mesh_material_layout,
-                                        &self.tile_sampler,
-                                        &self.lit_mesh_relief_default_view,
-                                        &rgba,
-                                        decal_w,
-                                        decal_h,
-                                    );
-                                    inst.decal_label_hash = label_hash;
-                                }
-                            }
-                            // Object3dKind::Plaque is used by shop (info plaque)
-                            // and gameplay (blind plaque / scoring placard);
-                            // disambiguate by scene. When the scene supplies an
-                            // explicit arrange_name, honor it so multiple
-                            // plaques in one scene can be placed independently.
-                            let plaque_name = if let Some(name) = obj.arrange_name {
-                                name.to_string()
-                            } else {
-                                match (self.active_scene_key, slot_i) {
-                                    (Some("gameplay"), 0) => "gameplay.score_panel.plaque".to_string(),
-                                    (Some("gameplay"), 1) => {
-                                        "gameplay.score_panel.scoring_placard".to_string()
-                                    }
-                                    (Some("shop"), i) => format!("shop.plaque[{i}]"),
-                                    (_, i) => format!("plaque[{i}]"),
-                                }
-                            };
-                            let model = self.apply_arrange_override(&plaque_name, model);
-                            if let Some(pid) = pick_id {
-                                self.last_info_plaque_model = Some((model, *pid));
-                            }
-                            if *silhouette {
-                                self.plaque_instances[slot_i].write_uniform_tinted(
-                                    &self.queue,
-                                    view_proj_arr,
-                                    model,
-                                    crate::render::lit_mesh::MaterialParams {
-                                        kind: crate::render::lit_mesh::MaterialKind::Plain,
-                                        base_color: [0.04, 0.04, 0.05, 1.0],
-                                        specular_strength: 0.0,
-                                        specular_power: 1.0,
-                                    },
-                                    [0.04, 0.04, 0.05, 1.0],
-                                );
-                            } else {
-                                self.plaque_instances[slot_i].write_uniform_with_decal(
-                                    &self.queue,
-                                    view_proj_arr,
-                                    model,
-                                    self.plaque_mesh.default_material,
-                                    has_decal,
-                                );
-                            }
-                            self.last_debug_pickables.push((
-                                plaque_name,
-                                model,
-                                glam::Vec3::new(0.5, 0.5, 0.1),
-                                0.0,
-                            ));
-                            let face_corners = [
-                                glam::Vec3::new(-0.5, -0.5, 0.5),
-                                glam::Vec3::new(0.5, -0.5, 0.5),
-                                glam::Vec3::new(-0.5, 0.5, 0.5),
-                                glam::Vec3::new(0.5, 0.5, 0.5),
-                            ];
-                            let mut mn_x = f32::INFINITY;
-                            let mut mn_y = f32::INFINITY;
-                            let mut mx_x = f32::NEG_INFINITY;
-                            let mut mx_y = f32::NEG_INFINITY;
-                            for c in face_corners {
-                                let w_pt = model.transform_point3(c);
-                                let (sx, sy) = project_to_screen(w_pt);
-                                mn_x = mn_x.min(sx);
-                                mn_y = mn_y.min(sy);
-                                mx_x = mx_x.max(sx);
-                                mx_y = mx_y.max(sy);
-                            }
-                            self.proj
-                                .plaque_rects
-                                .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
-                            object3d_draw_list.push((DrawKind::Plaque, slot_i));
-                        }
                         Object3dKind::Cabinet { face_labels } => {
                             // One Cabinet object emits TWO GPU draws: the
                             // wood body (LacqueredWoodFlat, with engraved
@@ -8045,35 +7968,69 @@ impl WgpuRenderer {
                             );
                             object3d_draw_list.push((DrawKind::CabinetRails, rails_slot));
                         }
-                        Object3dKind::Ofuda {
-                            title,
-                            rule,
+                        Object3dKind::Primitive {
+                            shape,
+                            material,
                             pick_id,
+                            shadow_caster: _,
+                            silhouette,
                         } => {
-                            let slot_i = obj3d_ofuda_slot;
-                            obj3d_ofuda_slot += 1;
-                            if slot_i >= MAX_OFUDA_SLOTS {
-                                continue;
+                            use crate::render::primitive::{
+                                resolve_material, shape_orientation, MeshId,
+                            };
+                            // Slot bookkeeping is per-shape so two
+                            // primitives of different shapes don't
+                            // fight for the same pool index.
+                            let cursor = obj3d_primitive_slot.entry(*shape).or_insert(0);
+                            let slot_i = *cursor;
+                            *cursor += 1;
+                            // Lazily grow the per-shape instance pool.
+                            // When a per-shape texture override is
+                            // registered, bind it to the instance's
+                            // albedo + relief slots so material
+                            // branches that sample heightmaps (e.g.
+                            // Metal coin) work.
+                            let (albedo_v, relief_v) = match self.primitive_textures.get(shape) {
+                                Some((a, r)) => (a, r),
+                                None => (&self.lit_mesh_white_view, &self.lit_mesh_relief_default_view),
+                            };
+                            let pool = self
+                                .primitive_instances
+                                .entry(*shape)
+                                .or_insert_with(Vec::new);
+                            while pool.len() < slot_i + 1 {
+                                pool.push(LitMeshInstance::new(
+                                    &self.device,
+                                    &self.lit_mesh_material_layout,
+                                    &self.shadow_caster_layout,
+                                    albedo_v,
+                                    relief_v,
+                                    &self.tile_sampler,
+                                ));
                             }
-                            let has_decal = !title.is_empty() || !rule.is_empty();
-                            if has_decal {
-                                let decal_h = crate::render::decal::OFUDA_DECAL_LONG_EDGE;
-                                let face_aspect =
-                                    (obj.extents[0] / obj.extents[1].max(1.0)).clamp(0.1, 4.0);
-                                let decal_w = ((decal_h as f32 * face_aspect).round() as u32)
-                                    .clamp(128, 4096);
-                                let combined = format!("{}\n{}", title, rule);
-                                let label_hash = tablet_label_hash(&combined, decal_w, decal_h);
-                                let inst = &mut self.ofuda_instances[slot_i];
+                            // Decal rasterization + cache, unified for
+                            // every shape via `rasterize_decal`.
+                            let has_decal = if *silhouette {
+                                false
+                            } else if let Some(decal_spec) = &material.decal {
+                                let (dw, dh) = crate::render::decal::decal_dimensions(
+                                    &decal_spec.layout,
+                                    obj.extents,
+                                );
+                                let label_hash =
+                                    tablet_label_hash(&decal_spec.text, dw, dh);
+                                let inst = &mut self.primitive_instances.get_mut(shape).unwrap()
+                                    [slot_i];
                                 if inst.decal_texture.is_none()
                                     || inst.decal_label_hash != label_hash
+                                    || inst.decal_size != (dw, dh)
                                 {
-                                    let rgba = crate::render::decal::rasterize_ofuda_decal(
-                                        title,
-                                        rule,
+                                    let rgba = crate::render::decal::rasterize_decal(
+                                        decal_spec,
+                                        dw,
+                                        dh,
                                         self.ui_font.as_ref(),
-                                        decal_w,
-                                        decal_h,
+                                        self.emoji_font.as_ref(),
                                     );
                                     inst.set_decal(
                                         &self.device,
@@ -8082,43 +8039,197 @@ impl WgpuRenderer {
                                         &self.tile_sampler,
                                         &self.lit_mesh_relief_default_view,
                                         &rgba,
-                                        decal_w,
-                                        decal_h,
+                                        dw,
+                                        dh,
                                     );
                                     inst.decal_label_hash = label_hash;
                                 }
-                            }
-                            // Object3dKind::Ofuda fires for shop's entry-scroll
-                            // and gameplay's boss rule card. Honor an explicit
-                            // arrange_name when the scene provides one; otherwise
-                            // fall back to the scene-key convention.
-                            let ofuda_name = if let Some(name) = obj.arrange_name {
-                                name.to_string()
+                                true
                             } else {
-                                match self.active_scene_key {
-                                    Some("shop") => "shop.props.ofuda".to_string(),
-                                    Some("gameplay") => "gameplay.score_panel.ofuda".to_string(),
-                                    _ => format!("ofuda[{slot_i}]"),
-                                }
+                                false
                             };
-                            let model = self.apply_arrange_override(&ofuda_name, model);
-                            if let Some(pid) = pick_id {
-                                self.last_ofuda_model = Some((model, *pid));
-                            }
-                            self.ofuda_instances[slot_i].write_uniform_with_decal(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                self.ofuda_mesh.default_material,
-                                has_decal,
+                            // Compose the per-shape mesh orientation
+                            // (identity for most; Y-up-to-Z-up for
+                            // Cylinder / DiscRound). Applied BEFORE
+                            // extents scaling — i.e. rotate the local
+                            // unit mesh into its canonical frame, then
+                            // scale, then translate+rotate into world.
+                            // Rebuild the model matrix here to preserve
+                            // legacy ordering `T * R * O * S`.
+                            let orient = shape_orientation(*shape);
+                            let model = translate_rot_scale(
+                                pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]),
+                                obj.rotation * orient,
+                                glam::Vec3::from(obj.extents),
                             );
+                            // Arrange-name compat shim: for BeveledSlab
+                            // without an explicit arrange_name,
+                            // synthesise the legacy plaque name so
+                            // saved arrange_overrides.json still works.
+                            let arrange_name: String =
+                                if let Some(name) = obj.arrange_name {
+                                    name.to_string()
+                                } else if *shape == MeshId::BeveledSlab {
+                                    match (self.active_scene_key, slot_i) {
+                                        (Some("gameplay"), 0) => {
+                                            "gameplay.score_panel.plaque".to_string()
+                                        }
+                                        (Some("gameplay"), 1) => {
+                                            "gameplay.score_panel.scoring_placard".to_string()
+                                        }
+                                        (Some("shop"), i) => format!("shop.plaque[{i}]"),
+                                        (_, i) => format!("plaque[{i}]"),
+                                    }
+                                } else {
+                                    format!("primitive.{:?}[{}]", shape, slot_i)
+                                };
+                            let model = self.apply_arrange_override(&arrange_name, model);
+                            if let Some(pid) = pick_id {
+                                self.last_primitive_pick_models.insert(*pid, model);
+                            }
+                            let params = resolve_material(material, obj.color, *silhouette);
+                            let tint = if *silhouette {
+                                [0.04, 0.04, 0.05, obj.color[3]]
+                            } else {
+                                obj.color
+                            };
+                            let inst =
+                                &mut self.primitive_instances.get_mut(shape).unwrap()[slot_i];
+                            if *silhouette {
+                                inst.write_uniform_tinted(
+                                    &self.queue,
+                                    view_proj_arr,
+                                    model,
+                                    params,
+                                    tint,
+                                );
+                            } else {
+                                inst.write_uniform_with_decal(
+                                    &self.queue,
+                                    view_proj_arr,
+                                    model,
+                                    params,
+                                    has_decal,
+                                );
+                            }
                             self.last_debug_pickables.push((
-                                ofuda_name,
+                                arrange_name,
                                 model,
-                                glam::Vec3::new(0.5, 0.5, 0.1),
+                                glam::Vec3::splat(0.5),
                                 0.0,
                             ));
-                            object3d_draw_list.push((DrawKind::Ofuda, slot_i));
+                            // Screen-space rect for focus/hover hit
+                            // testing. BeveledSlab projects only the
+                            // +Z face (back is never seen); other
+                            // shapes use the full AABB.
+                            let corners: &[glam::Vec3] = if *shape == MeshId::BeveledSlab {
+                                &[
+                                    glam::Vec3::new(-0.5, -0.5, 0.5),
+                                    glam::Vec3::new(0.5, -0.5, 0.5),
+                                    glam::Vec3::new(-0.5, 0.5, 0.5),
+                                    glam::Vec3::new(0.5, 0.5, 0.5),
+                                ]
+                            } else {
+                                &[
+                                    glam::Vec3::new(-0.5, -0.5, -0.5),
+                                    glam::Vec3::new(0.5, -0.5, -0.5),
+                                    glam::Vec3::new(-0.5, 0.5, -0.5),
+                                    glam::Vec3::new(0.5, 0.5, -0.5),
+                                    glam::Vec3::new(-0.5, -0.5, 0.5),
+                                    glam::Vec3::new(0.5, -0.5, 0.5),
+                                    glam::Vec3::new(-0.5, 0.5, 0.5),
+                                    glam::Vec3::new(0.5, 0.5, 0.5),
+                                ]
+                            };
+                            let mut mn_x = f32::INFINITY;
+                            let mut mn_y = f32::INFINITY;
+                            let mut mx_x = f32::NEG_INFINITY;
+                            let mut mx_y = f32::NEG_INFINITY;
+                            for c in corners {
+                                let w_pt = model.transform_point3(*c);
+                                let (sx, sy) = project_to_screen(w_pt);
+                                mn_x = mn_x.min(sx);
+                                mn_y = mn_y.min(sy);
+                                mx_x = mx_x.max(sx);
+                                mx_y = mx_y.max(sy);
+                            }
+                            if *shape == MeshId::BeveledSlab {
+                                self.proj.plaque_rects.push([
+                                    mn_x,
+                                    mn_y,
+                                    mx_x - mn_x,
+                                    mx_y - mn_y,
+                                ]);
+                            }
+                            // Dish-shaped primitives feed the pick/focus
+                            // `aux_dish_rects` pipeline (shop trays,
+                            // pick-blind altars, gameplay talisman dish)
+                            // and the raycast AABB used by mouse picking.
+                            // ShopActionProp reuses `aux_dish_rects` as
+                            // the shop's focus-nav/click channel too —
+                            // its `ShopHit::Dish(pid)` mapping is
+                            // historical from when the props piggy-backed
+                            // on the dish rect list.
+                            if matches!(
+                                *shape,
+                                MeshId::DiscSquare | MeshId::DiscRound | MeshId::ShopActionProp
+                            ) {
+                                self.proj.aux_dish_rects.push((
+                                    *pick_id,
+                                    [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y],
+                                ));
+                                let center = pixel_to_world(
+                                    w,
+                                    h,
+                                    obj.pos[0],
+                                    obj.pos[1],
+                                    obj.pos[2],
+                                );
+                                let half = glam::Vec3::new(
+                                    obj.extents[0] * 0.5,
+                                    obj.extents[1] * 0.5,
+                                    obj.extents[2] * 0.5,
+                                );
+                                self.last_aux_dish_aabbs.push((center, half));
+                            }
+                            object3d_draw_list.push((DrawKind::Primitive(*shape), slot_i));
+                            // CabinetColumn emits a linked CabinetRails
+                            // instance sharing the same world-space
+                            // model matrix (post arrange override).
+                            if *shape == MeshId::CabinetColumn {
+                                let rails_cursor = obj3d_primitive_slot
+                                    .entry(MeshId::CabinetRails)
+                                    .or_insert(0);
+                                let rails_slot = *rails_cursor;
+                                *rails_cursor += 1;
+                                let rails_pool = self
+                                    .primitive_instances
+                                    .entry(MeshId::CabinetRails)
+                                    .or_insert_with(Vec::new);
+                                while rails_pool.len() < rails_slot + 1 {
+                                    rails_pool.push(LitMeshInstance::new(
+                                        &self.device,
+                                        &self.lit_mesh_material_layout,
+                                        &self.shadow_caster_layout,
+                                        &self.lit_mesh_white_view,
+                                        &self.lit_mesh_relief_default_view,
+                                        &self.tile_sampler,
+                                    ));
+                                }
+                                let rails_mesh = self
+                                    .primitive_meshes
+                                    .get(&MeshId::CabinetRails)
+                                    .expect("CabinetRails mesh missing from registry");
+                                rails_pool[rails_slot].write_uniform_with_decal(
+                                    &self.queue,
+                                    view_proj_arr,
+                                    model,
+                                    rails_mesh.default_material,
+                                    false,
+                                );
+                                object3d_draw_list
+                                    .push((DrawKind::Primitive(MeshId::CabinetRails), rails_slot));
+                            }
                         }
                         Object3dKind::YakuTablet {
                             label,
@@ -8181,20 +8292,28 @@ impl WgpuRenderer {
                             ));
                             object3d_draw_list.push((DrawKind::YakuTablet, slot_i));
                         }
-                        Object3dKind::WoodTablet { label, .. } => {
+                        Object3dKind::WoodTablet { label, pick_id, .. } => {
                             let slot_i = obj3d_wood_slot;
                             obj3d_wood_slot += 1;
                             if slot_i >= MAX_WOOD_TABLET_SLOTS {
                                 continue;
                             }
-                            let wood_name = match slot_i {
-                                0 => "gameplay.action_bar.tablet_sort_suit",
-                                1 => "gameplay.action_bar.tablet_sort_rank",
-                                2 => "gameplay.action_bar.tablet_cash_in",
-                                3 => "gameplay.action_bar.tablet_journal",
-                                _ => "gameplay.action_bar.tablet",
+                            // Explicit `arrange_name` wins; otherwise
+                            // fall back to the legacy gameplay-slot
+                            // convention so saved arrange overrides for
+                            // the action bar keep loading.
+                            let wood_name = if let Some(name) = obj.arrange_name {
+                                name.to_string()
+                            } else {
+                                match slot_i {
+                                    0 => "gameplay.action_bar.tablet_sort_suit".to_string(),
+                                    1 => "gameplay.action_bar.tablet_sort_rank".to_string(),
+                                    2 => "gameplay.action_bar.tablet_cash_in".to_string(),
+                                    3 => "gameplay.action_bar.tablet_journal".to_string(),
+                                    _ => "gameplay.action_bar.tablet".to_string(),
+                                }
                             };
-                            let model = self.apply_arrange_override(wood_name, model);
+                            let model = self.apply_arrange_override(&wood_name, model);
                             let label_hash = tablet_label_hash(label, 512, 192);
                             let inst = &mut self.wood_tablet_instances[slot_i];
                             if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
@@ -8226,11 +8345,22 @@ impl WgpuRenderer {
                                 .push(project_unit_cube_rect(model));
                             self.last_wood_tablet_models.push(model);
                             self.last_debug_pickables.push((
-                                wood_name.to_string(),
+                                wood_name,
                                 model,
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
+                            // When a scene routes this tablet's click
+                            // via `ShopHit::Dish(pid)` (shop journal
+                            // button), publish the rect + model into
+                            // the primitive-pick channels.
+                            if let Some(pid) = pick_id {
+                                self.proj.aux_dish_rects.push((
+                                    Some(*pid),
+                                    project_unit_cube_rect(model),
+                                ));
+                                self.last_primitive_pick_models.insert(*pid, model);
+                            }
                             object3d_draw_list.push((DrawKind::WoodTablet, slot_i));
                         }
                         Object3dKind::Relic { relic_id, glow, silhouette, pick_id } => {
@@ -8641,158 +8771,6 @@ impl WgpuRenderer {
                                 object3d_draw_list.push((DrawKind::Ribbon, slot_i));
                             }
                         }
-                        Object3dKind::Coin => {
-                            if obj3d_coin_slot >= MAX_COIN_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_coin_slot;
-                            obj3d_coin_slot += 1;
-                            // Coins are decorative piles in shop (coin_dish) and
-                            // gameplay (coin_pile). One placement per scene.
-                            let _ = slot_i;
-                            let coin_name = match self.active_scene_key {
-                                Some("shop") => "shop.shelf.coin_dish".to_string(),
-                                Some("gameplay") => "gameplay.score_panel.coin_pile".to_string(),
-                                _ => "coin".to_string(),
-                            };
-                            // extents: [diameter, thickness, diameter]; rotation has yaw baked in.
-                            let coin_model = self.apply_arrange_override(
-                                &coin_name,
-                                translate_rot_scale(
-                                    center,
-                                    obj.rotation * mesh_y_thickness_along_local_y_to_z_up(),
-                                    glam::Vec3::from(obj.extents),
-                                ),
-                            );
-                            let material = MaterialParams {
-                                kind: MaterialKind::Metal,
-                                base_color: obj.color,
-                                specular_strength: 1.0,
-                                specular_power: 96.0,
-                            };
-                            self.coin_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                coin_model,
-                                material,
-                            );
-                            self.last_debug_pickables.push((
-                                coin_name,
-                                coin_model,
-                                glam::Vec3::new(0.5, 0.05, 0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::Coin, slot_i));
-                        }
-                        Object3dKind::GoldBar => {
-                            if obj3d_bar_slot >= MAX_BAR_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_bar_slot;
-                            obj3d_bar_slot += 1;
-                            // Gold bars are decorative piles in shop (coin_dish)
-                            // and gameplay (coin_pile); route to the scene's pile.
-                            let _ = slot_i;
-                            let bar_name = match self.active_scene_key {
-                                Some("shop") => "shop.shelf.coin_dish".to_string(),
-                                Some("gameplay") => "gameplay.score_panel.coin_pile".to_string(),
-                                _ => "gold_bar".to_string(),
-                            };
-                            let model = self.apply_arrange_override(&bar_name, model);
-                            let material = MaterialParams {
-                                kind: MaterialKind::Metal,
-                                base_color: obj.color,
-                                specular_strength: 1.0,
-                                specular_power: 96.0,
-                            };
-                            self.bar_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                            );
-                            self.last_debug_pickables.push((
-                                bar_name,
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::RelicBox, slot_i));
-                        }
-                        Object3dKind::BrassRail => {
-                            let slot_i = obj3d_brass_rail_slot;
-                            obj3d_brass_rail_slot += 1;
-                            // Grow the instance pool on demand — brass
-                            // rails are cheap and scene-counts vary
-                            // (collection has ~4, others may have 0).
-                            while self.brass_rail_instances.len() <= slot_i {
-                                self.brass_rail_instances.push(LitMeshInstance::new(
-                                    &self.device,
-                                    &self.lit_mesh_material_layout,
-                                    &self.shadow_caster_layout,
-                                    &self.lit_mesh_white_view,
-                                    &self.lit_mesh_relief_default_view,
-                                    &self.tile_sampler,
-                                ));
-                            }
-                            let rail_name = obj
-                                .arrange_name
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("brass_rail[{slot_i}]"));
-                            let model = self.apply_arrange_override(&rail_name, model);
-                            let material = MaterialParams {
-                                kind: MaterialKind::Brass,
-                                base_color: obj.color,
-                                specular_strength: 0.65,
-                                specular_power: 48.0,
-                            };
-                            self.brass_rail_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                            );
-                            self.last_debug_pickables.push((
-                                rail_name,
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::BrassRail, slot_i));
-                        }
-                        Object3dKind::Book { pick_id } => {
-                            // Book is a singleton — shop only.
-                            let model = self.apply_arrange_override("shop.props.book", model);
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color: obj.color,
-                                specular_strength: 0.25,
-                                specular_power: 16.0,
-                            };
-                            self.book_instance.write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                            );
-                            if let Some(pid) = pick_id {
-                                self.last_book_model = Some((model, *pid));
-                                // Project AABB to a screen rect so the shop's
-                                // focus-rect graph can reach it via keyboard
-                                // navigation.
-                                self.proj.aux_dish_rects.push((
-                                    Some(*pid),
-                                    project_unit_cube_rect(model),
-                                ));
-                            }
-                            self.last_debug_pickables.push((
-                                "shop.props.book".to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::Book, 0));
-                        }
                         Object3dKind::Shrine { glow } => {
                             if obj3d_shrine_slot >= MAX_SHRINE_SLOTS {
                                 continue;
@@ -8974,75 +8952,6 @@ impl WgpuRenderer {
                                 0.0,
                             ));
                             object3d_draw_list.push((DrawKind::DoraPlinth, slot_i));
-                        }
-                        Object3dKind::ShopActionProp {
-                            label,
-                            pick_id,
-                            disabled,
-                        } => {
-                            let slot_i = obj3d_shop_action_prop_slot;
-                            obj3d_shop_action_prop_slot += 1;
-                            if slot_i >= self.shop_action_prop_instances.len() {
-                                continue;
-                            }
-                            let arrange_name = if slot_i == 0 {
-                                "shop.props.reroll_prop"
-                            } else {
-                                "shop.props.leave_prop"
-                            };
-                            let model = self.apply_arrange_override(arrange_name, model);
-                            let alpha = if *disabled { 0.45 } else { obj.color[3] };
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color: [obj.color[0], obj.color[1], obj.color[2], alpha],
-                                specular_strength: 0.4,
-                                specular_power: 32.0,
-                            };
-                            let has_label = !label.is_empty();
-                            if has_label {
-                                let label_hash = tablet_label_hash(label, 512, 192);
-                                let inst = &mut self.shop_action_prop_instances[slot_i];
-                                if inst.decal_texture.is_none()
-                                    || inst.decal_label_hash != label_hash
-                                {
-                                    let rgba = crate::render::decal::rasterize_wood_tablet_decal(
-                                        label,
-                                        self.ui_font.as_ref(),
-                                    );
-                                    inst.set_decal(
-                                        &self.device,
-                                        &self.queue,
-                                        &self.lit_mesh_material_layout,
-                                        &self.tile_sampler,
-                                        &self.lit_mesh_relief_default_view,
-                                        &rgba,
-                                        512,
-                                        192,
-                                    );
-                                    inst.decal_label_hash = label_hash;
-                                }
-                            }
-                            self.shop_action_prop_instances[slot_i].write_uniform_with_decal(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                                has_label,
-                            );
-                            if let Some(pid) = pick_id {
-                                match slot_i {
-                                    0 => self.last_reroll_prop_model = Some((model, *pid)),
-                                    1 => self.last_leave_prop_model = Some((model, *pid)),
-                                    _ => {}
-                                }
-                            }
-                            self.last_debug_pickables.push((
-                                arrange_name.to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::ShopActionProp, slot_i));
                         }
                         Object3dKind::SellTray { pick_id } => {
                             // Round dish mesh is built Y-up; rotate local Y
@@ -9377,92 +9286,6 @@ impl WgpuRenderer {
                                 MIRROR_LOCAL_CENTER_Y,
                             ));
                             object3d_draw_list.push((DrawKind::Mirror, slot_i));
-                        }
-                        Object3dKind::Dish { pick_id, round } => {
-                            let slot_i = obj3d_dish_slot;
-                            obj3d_dish_slot += 1;
-                            while self.aux_dish_instances.len() <= slot_i {
-                                self.aux_dish_instances.push(LitMeshInstance::new(
-                                    &self.device,
-                                    &self.lit_mesh_material_layout,
-                                    &self.shadow_caster_layout,
-                                    &self.lit_mesh_white_view,
-                                    &self.lit_mesh_relief_default_view,
-                                    &self.tile_sampler,
-                                ));
-                            }
-                            let dish_center = pixel_to_world(
-                                w,
-                                h,
-                                obj.pos[0],
-                                obj.pos[1],
-                                obj.pos[2] + obj.extents[1] * 0.5,
-                            );
-                            let oriented = if *round {
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation
-                            } else {
-                                obj.rotation
-                            };
-                            let dish_model = translate_rot_scale(
-                                dish_center,
-                                oriented,
-                                glam::Vec3::from(obj.extents),
-                            );
-                            let dish_model = if let Some(name) = obj.arrange_name {
-                                self.apply_arrange_override(name, dish_model)
-                            } else {
-                                dish_model
-                            };
-                            let mesh = if *round {
-                                &self.round_dish_mesh
-                            } else {
-                                &self.dish_mesh
-                            };
-                            self.aux_dish_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                dish_model,
-                                mesh.default_material,
-                            );
-                            if let Some(name) = obj.arrange_name {
-                                self.last_debug_pickables.push((
-                                    name.to_string(),
-                                    dish_model,
-                                    glam::Vec3::splat(0.5),
-                                    0.0,
-                                ));
-                            }
-                            // Project AABB to screen + push to aux_dish_rects.
-                            let hx = obj.extents[0] * 0.5;
-                            let hy = obj.extents[1] * 0.5;
-                            let hz = obj.extents[2] * 0.5;
-                            let half = glam::Vec3::new(hx, hy, hz);
-                            let mut mn_x = f32::INFINITY;
-                            let mut mn_y = f32::INFINITY;
-                            let mut mx_x = f32::NEG_INFINITY;
-                            let mut mx_y = f32::NEG_INFINITY;
-                            for sx in [-hx, hx] {
-                                for sy in [-hy, hy] {
-                                    for sz in [-hz, hz] {
-                                        let world =
-                                            dish_center + glam::Vec3::new(sx, sy, sz);
-                                        let (px, py) = project_to_screen(world);
-                                        mn_x = mn_x.min(px);
-                                        mn_y = mn_y.min(py);
-                                        mx_x = mx_x.max(px);
-                                        mx_y = mx_y.max(py);
-                                    }
-                                }
-                            }
-                            self.proj.aux_dish_rects.push((
-                                *pick_id,
-                                [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y],
-                            ));
-                            self.last_aux_dish_aabbs.push((dish_center, half));
-                            object3d_draw_list.push((
-                                if *round { DrawKind::DishRound } else { DrawKind::DishSquare },
-                                slot_i,
-                            ));
                         }
                         Object3dKind::ExtrudedGlyph {
                             scale: g_scale,
@@ -10383,47 +10206,6 @@ impl WgpuRenderer {
                 }
             }
         }
-        // Auxiliary dish shadow casters — walk Object3dKind::Dish.
-        {
-            let mut dish_shadow_cursor: usize = 0;
-            for cmd in frame.cmds.iter() {
-                let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> = match cmd {
-                    DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
-                    DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
-                    _ => Box::new(std::iter::empty()),
-                };
-                for o in objs {
-                    if let crate::render::draw_cmd::Object3dKind::Dish { round, .. } = &o.kind {
-                        if dish_shadow_cursor >= self.aux_dish_instances.len() {
-                            break;
-                        }
-                        let center = pixel_to_world(
-                            w,
-                            h,
-                            o.pos[0],
-                            o.pos[1],
-                            o.pos[2] + o.extents[1] * 0.5,
-                        );
-                        let oriented = if *round {
-                            mesh_y_thickness_along_local_y_to_z_up() * o.rotation
-                        } else {
-                            o.rotation
-                        };
-                        let model = translate_rot_scale(
-                            center,
-                            oriented,
-                            glam::Vec3::from(o.extents),
-                        );
-                        self.aux_dish_instances[dish_shadow_cursor].write_shadow_uniform(
-                            &self.queue,
-                            light_view_proj_arr,
-                            model,
-                        );
-                        dish_shadow_cursor += 1;
-                    }
-                }
-            }
-        }
         // Ribbon shadow casters — walk Object3dKind::ZodiacRibbon.
         {
             let mut ribbon_shadow_cursor: usize = 0;
@@ -10544,9 +10326,15 @@ impl WgpuRenderer {
                 }
             }
         }
-        // Coin shadow casters: walk Object3dKind::Coin in the cmd list.
+        // Primitive shadow casters: walk every `Object3dKind::Primitive`
+        // in frame cmds whose `shadow_caster` flag is true, and upload
+        // the shadow uniform into the matching per-shape instance slot.
+        // Slot cursors must track the main dispatch's
+        // `obj3d_primitive_slot` exactly so each caster maps to the
+        // instance the draw-pass will select.
         {
-            let mut coin_shadow_cursor: usize = 0;
+            use crate::render::primitive::{shape_orientation, MeshId};
+            let mut cursors: HashMap<MeshId, usize> = HashMap::new();
             for cmd in frame.cmds.iter() {
                 let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> = match cmd {
                     DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
@@ -10554,59 +10342,46 @@ impl WgpuRenderer {
                     _ => Box::new(std::iter::empty()),
                 };
                 for o in objs {
-                    if matches!(o.kind, crate::render::draw_cmd::Object3dKind::Coin) {
-                        if coin_shadow_cursor >= MAX_COIN_SLOTS {
-                            break;
+                    if let crate::render::draw_cmd::Object3dKind::Primitive {
+                        shape,
+                        shadow_caster,
+                        ..
+                    } = &o.kind
+                    {
+                        // Step the cursor for every Primitive (matches
+                        // the main dispatch). Only *write* a shadow
+                        // uniform when `shadow_caster: true`.
+                        let slot_i = *cursors.entry(*shape).or_insert(0);
+                        *cursors.get_mut(shape).unwrap() += 1;
+                        if *shadow_caster {
+                            let center =
+                                pixel_to_world(w, h, o.pos[0], o.pos[1], o.pos[2]);
+                            let orient = shape_orientation(*shape);
+                            let model = translate_rot_scale(
+                                center,
+                                o.rotation * orient,
+                                glam::Vec3::from(o.extents),
+                            );
+                            if let Some(pool) = self.primitive_instances.get_mut(shape) {
+                                if let Some(inst) = pool.get_mut(slot_i) {
+                                    inst.write_shadow_uniform(
+                                        &self.queue,
+                                        light_view_proj_arr,
+                                        model,
+                                    );
+                                }
+                            }
                         }
-                        let center = pixel_to_world(w, h, o.pos[0], o.pos[1], o.pos[2]);
-                        let model = translate_rot_scale(
-                            center,
-                            o.rotation * mesh_y_thickness_along_local_y_to_z_up(),
-                            glam::Vec3::from(o.extents),
-                        );
-                        self.coin_instances[coin_shadow_cursor].write_shadow_uniform(
-                            &self.queue,
-                            light_view_proj_arr,
-                            model,
-                        );
-                        coin_shadow_cursor += 1;
+                        // CabinetColumn pairs with a CabinetRails
+                        // instance in the main dispatch — bump the
+                        // rails cursor so shadow slots stay in sync,
+                        // but don't cast rails shadows (too thin).
+                        if *shape == MeshId::CabinetColumn {
+                            *cursors.entry(MeshId::CabinetRails).or_insert(0) += 1;
+                        }
                     }
                 }
             }
-        }
-        // Gold bar shadow casters.
-        {
-            let mut bar_shadow_cursor: usize = 0;
-            for batch in &bar_batches {
-                for b in batch.iter() {
-                    if bar_shadow_cursor >= MAX_BAR_SLOTS {
-                        break;
-                    }
-                    let slot_i = bar_shadow_cursor;
-                    bar_shadow_cursor += 1;
-                    let center =
-                        pixel_to_world(w, h, b.world_pos[0], b.world_pos[1], b.world_pos[2]);
-                    let model = translate_rot_scale(
-                        center,
-                        rot_z_rad(b.rotation_y),
-                        glam::Vec3::new(
-                            b.half_extents[0] * 2.0,
-                            b.half_extents[1] * 2.0,
-                            b.half_extents[2] * 2.0,
-                        ),
-                    );
-                    self.bar_instances[slot_i].write_shadow_uniform(
-                        &self.queue,
-                        light_view_proj_arr,
-                        model,
-                    );
-                }
-            }
-        }
-        // Book shadow caster (reuses the model saved during the Object3d walk).
-        if let Some((model, _pid)) = self.last_book_model {
-            self.book_instance
-                .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
         }
         // Hand tile shadow uniforms — pull each tile's model matrix from
         // `tile_pick_models` (snapshot of the per-tile model written above).
@@ -11011,16 +10786,7 @@ impl WgpuRenderer {
         // only update model snapshots, so we project them here. Packs live
         // in `pack_rects` (both the PackBatch and Object3d paths populate
         // it) and get appended last.
-        for prop in [
-            self.last_book_model,
-            self.last_reroll_prop_model,
-            self.last_leave_prop_model,
-            self.last_sell_tray_model,
-        ]
-        .iter()
-        .flatten()
-        {
-            let (model, pid) = *prop;
+        if let Some((model, pid)) = self.last_sell_tray_model {
             self.proj
                 .aux_dish_rects
                 .push((Some(pid), project_unit_cube_rect(model)));
@@ -11246,57 +11012,8 @@ impl WgpuRenderer {
                 }
             }
 
-            // Auxiliary dishes — walk Object3dKind::Dish, matching the
-            // pre-pass cursor order.
-            {
-                let dish_kinds: Vec<bool> = frame
-                    .cmds
-                    .iter()
-                    .flat_map(|cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
-                        match cmd {
-                            DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
-                            DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
-                            _ => Box::new(std::iter::empty()),
-                        }
-                    })
-                    .filter_map(|o| match o.kind {
-                        crate::render::draw_cmd::Object3dKind::Dish { round, .. } => Some(round),
-                        _ => None,
-                    })
-                    .collect();
-                if !dish_kinds.is_empty() {
-                    let mut bound_round: Option<bool> = None;
-                    for (slot_i, round) in dish_kinds.iter().enumerate() {
-                        if slot_i >= self.aux_dish_instances.len() {
-                            break;
-                        }
-                        if bound_round != Some(*round) {
-                            let mesh = if *round {
-                                &self.round_dish_mesh
-                            } else {
-                                &self.dish_mesh
-                            };
-                            shadow_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                            shadow_pass.set_index_buffer(
-                                mesh.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            bound_round = Some(*round);
-                        }
-                        let mesh = if *round {
-                            &self.round_dish_mesh
-                        } else {
-                            &self.dish_mesh
-                        };
-                        shadow_pass.set_bind_group(
-                            0,
-                            &self.aux_dish_instances[slot_i].shadow_bind_group,
-                            &[],
-                        );
-                        shadow_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                    }
-                }
-            }
+            // (Dish shadow casting now flows through the generic
+            // Primitive shadow block below.)
 
             // Ribbons (shop).
             {
@@ -11348,69 +11065,53 @@ impl WgpuRenderer {
                 }
             }
 
-            // Coins (shop) — count Object3dKind::Coin entries and draw their shadow instances.
+            // Primitive shadow casters — re-walk cmds to pair slot
+            // indices with `shadow_caster: true` flags, then draw with
+            // the registered mesh. Deterministic order (matches the
+            // uniform-upload pass above).
             {
-                let total_coins = frame
-                    .cmds
-                    .iter()
-                    .flat_map(|cmd| -> Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> {
+                use crate::render::primitive::MeshId;
+                let mut cursors: std::collections::HashMap<MeshId, usize> =
+                    std::collections::HashMap::new();
+                for cmd in frame.cmds.iter() {
+                    let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> =
                         match cmd {
                             DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),
                             DrawCmd::Object3dBatch(v) => Box::new(v.iter()),
                             _ => Box::new(std::iter::empty()),
+                        };
+                    for o in objs {
+                        if let crate::render::draw_cmd::Object3dKind::Primitive {
+                            shape,
+                            shadow_caster,
+                            ..
+                        } = &o.kind
+                        {
+                            let slot_i = *cursors.entry(*shape).or_insert(0);
+                            *cursors.get_mut(shape).unwrap() += 1;
+                            if *shadow_caster {
+                                let (Some(mesh), Some(inst)) = (
+                                    self.primitive_meshes.get(shape).map(|a| a.as_ref()),
+                                    self.primitive_instances
+                                        .get(shape)
+                                        .and_then(|pool| pool.get(slot_i)),
+                                ) else {
+                                    continue;
+                                };
+                                shadow_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                                shadow_pass.set_index_buffer(
+                                    mesh.index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                shadow_pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
+                                shadow_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                            }
+                            if *shape == MeshId::CabinetColumn {
+                                *cursors.entry(MeshId::CabinetRails).or_insert(0) += 1;
+                            }
                         }
-                    })
-                    .filter(|o| matches!(o.kind, crate::render::draw_cmd::Object3dKind::Coin))
-                    .count()
-                    .min(MAX_COIN_SLOTS);
-                if total_coins > 0 {
-                    shadow_pass.set_vertex_buffer(0, self.coin_mesh.vertex_buffer.slice(..));
-                    shadow_pass.set_index_buffer(
-                        self.coin_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for slot_i in 0..total_coins {
-                        let Some(inst) = self.coin_instances.get(slot_i) else {
-                            break;
-                        };
-                        shadow_pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
-                        shadow_pass.draw_indexed(0..self.coin_mesh.index_count, 0, 0..1);
                     }
                 }
-            }
-
-            // Gold bars (shop). Uses the same unit-box mesh as relics.
-            {
-                let total_bars = bar_batches
-                    .iter()
-                    .map(|b| b.len())
-                    .sum::<usize>()
-                    .min(MAX_BAR_SLOTS);
-                if total_bars > 0 {
-                    shadow_pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                    shadow_pass.set_index_buffer(
-                        self.relic_box_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for slot_i in 0..total_bars {
-                        let Some(inst) = self.bar_instances.get(slot_i) else {
-                            break;
-                        };
-                        shadow_pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
-                        shadow_pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
-                    }
-                }
-            }
-
-            // Book shadow (journal bookend).
-            if self.last_book_model.is_some() {
-                shadow_pass.set_vertex_buffer(0, self.book_mesh.vertex_buffer.slice(..));
-                shadow_pass.set_index_buffer(
-                    self.book_mesh.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                shadow_pass.set_bind_group(0, &self.book_instance.shadow_bind_group, &[]);
-                shadow_pass.draw_indexed(0..self.book_mesh.index_count, 0, 0..1);
             }
 
             // Hand tiles — one draw per (tile, primitive). Same multi-prim
@@ -11656,9 +11357,6 @@ impl WgpuRenderer {
                             continue;
                         }
                         let (mesh, inst_opt): (&LitMeshGpu, Option<&LitMeshInstance>) = match kind {
-                            DrawKind::Plaque => {
-                                (&self.plaque_mesh, self.plaque_instances.get(slot_i))
-                            }
                             DrawKind::Cabinet => {
                                 (&self.cabinet_mesh, self.cabinet_instances.get(slot_i))
                             }
@@ -11666,9 +11364,6 @@ impl WgpuRenderer {
                                 &self.cabinet_rails_mesh,
                                 self.cabinet_rails_instances.get(slot_i),
                             ),
-                            DrawKind::Ofuda => {
-                                (&self.ofuda_mesh, self.ofuda_instances.get(slot_i))
-                            }
                             DrawKind::YakuTablet => (
                                 &self.bone_tablet_mesh,
                                 self.yaku_tablet_instances.get(slot_i),
@@ -11684,22 +11379,9 @@ impl WgpuRenderer {
                             DrawKind::Talisman => {
                                 (&self.talisman_mesh, self.talisman_instances.get(slot_i))
                             }
-                            DrawKind::Coin => (&self.coin_mesh, self.coin_instances.get(slot_i)),
-                            DrawKind::RelicBox => {
-                                (&self.relic_box_mesh, self.bar_instances.get(slot_i))
-                            }
-                            DrawKind::BrassRail => (
-                                &self.brass_rail_mesh,
-                                self.brass_rail_instances.get(slot_i),
-                            ),
-                            DrawKind::Book => (&self.book_mesh, Some(&self.book_instance)),
                             DrawKind::Shrine => {
                                 (&self.shrine_mesh, self.shrine_instances.get(slot_i))
                             }
-                            DrawKind::ShopActionProp => (
-                                &self.shop_action_prop_mesh,
-                                self.shop_action_prop_instances.get(slot_i),
-                            ),
                             DrawKind::SellTray => {
                                 (&self.round_dish_mesh, Some(&self.sell_tray_instance))
                             }
@@ -11747,11 +11429,17 @@ impl WgpuRenderer {
                                 &self.bone_tablet_mesh,
                                 self.cascade_token_instances.get(slot_i),
                             ),
-                            DrawKind::DishSquare => {
-                                (&self.dish_mesh, self.aux_dish_instances.get(slot_i))
-                            }
-                            DrawKind::DishRound => {
-                                (&self.round_dish_mesh, self.aux_dish_instances.get(slot_i))
+                            DrawKind::Primitive(mid) => {
+                                let mesh = self
+                                    .primitive_meshes
+                                    .get(&mid)
+                                    .map(|a| a.as_ref())
+                                    .expect("primitive mesh missing from registry");
+                                let inst = self
+                                    .primitive_instances
+                                    .get(&mid)
+                                    .and_then(|pool| pool.get(slot_i));
+                                (mesh, inst)
                             }
                             // Handled by the early-out blocks above.
                             DrawKind::Relic
@@ -11912,13 +11600,17 @@ impl WgpuRenderer {
                 RenderOp::FlameBatch { buf_idx, count } => {
                     // When the volumetric smoke sim is active, candle flames
                     // are rendered as 3D emission inside the volume lightbake
-                    // pass — skip the legacy 2D additive quads so we don't
-                    // double-draw. Fall back to 2D flames when smoke is Off
-                    // (the fluid sim doesn't step, so volumetric flames
-                    // wouldn't appear).
-                    if smoke_quality == crate::persistence::SmokeQuality::Off {
+                    // pass — skip the particle billboards so we don't
+                    // double-draw. With smoke Off, the fluid sim doesn't
+                    // step and volumetric flames wouldn't appear, so we
+                    // drive the 3D particle system instead.
+                    if smoke_quality == crate::persistence::SmokeQuality::Off
+                        && *count > 0
+                        && *buf_idx != usize::MAX
+                    {
                         pass.set_pipeline(&self.flame_pipeline);
                         pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_bind_group(1, &self.flame_view_bind_group, &[]);
                         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, flame_buffers[*buf_idx].slice(..));
                         pass.set_index_buffer(

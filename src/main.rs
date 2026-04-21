@@ -19,6 +19,7 @@ use std::process::Command as ProcessCommand;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Context;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use debug_menu::{DebugAction, DebugMenuBar};
 use debug_overlays::{
@@ -199,6 +200,9 @@ enum Command {
     BotGraph(BotGraphCli),
     /// Run the default tuning sweep grid.
     Sweep(SweepCli),
+    /// Run N strategies × M bots each, rank by win rate. Strategies are
+    /// defined in a JSON file (see docs/strategies_example.json).
+    StrategySweep(StrategySweepCli),
     /// Render a single scene to a PNG and exit. Runs fully offscreen via
     /// `HeadlessApp` — no window, no swapchain, no winit event loop — so
     /// CI and iterative art review don't flake on window-server occlusion.
@@ -280,6 +284,19 @@ struct SweepCli {
 }
 
 #[derive(Debug, Args)]
+struct StrategySweepCli {
+    /// Path to the JSON file defining strategies to compare.
+    /// See docs/strategies_example.json for the expected shape.
+    strategies_file: PathBuf,
+    /// Number of runs per strategy.
+    #[arg(long, default_value_t = 1000)]
+    runs: u32,
+    /// Export per-strategy aggregate stats to a JSON file.
+    #[arg(long)]
+    export_json: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
 struct BotGraphCli {
     /// Number of runs to execute.
     #[arg(default_value_t = 10_000)]
@@ -318,6 +335,7 @@ impl BotCli {
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_gold: self.gold,
+            ..Default::default()
         }
     }
 }
@@ -330,6 +348,7 @@ impl BotGraphCli {
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_gold: self.gold,
+            ..Default::default()
         }
     }
 }
@@ -914,6 +933,7 @@ impl App {
             .map(|saved| saved.run)
             .unwrap_or_else(RunState::new_demo);
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+        run.set_hints_enabled(settings.hints_enabled);
         run.apply_progression(&progress);
         let mut audio = audio::AudioManager::new();
         audio.set_master_volume(settings.master_volume);
@@ -1051,6 +1071,7 @@ impl App {
         let mut settings = persistence::load_settings();
         self.run
             .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+        self.run.set_hints_enabled(settings.hints_enabled);
         self.run.apply_progression(&self.progress);
         // Persist the active profile choice.
         settings.active_profile = new_index;
@@ -1177,6 +1198,9 @@ impl App {
                     self.modals.push(modal);
                 }
 
+                if self.run.is_run_complete() {
+                    self.audio.play_sfx(audio::SfxId::RoundWin);
+                }
                 self.pending_scene = Some(if self.run.is_run_complete() {
                     // Victory — save progress (mirrors the GameOver loss path).
                     self.progress.has_won = true;
@@ -2192,8 +2216,13 @@ impl ApplicationHandler for App {
                     .max(0.0001);
                 self.last_frame = now;
                 self.anim.update(now);
+                self.audio.tick(now);
 
                 // 1. Drain event bus — bus events can trigger scene transitions.
+                // Track yaku stinger offsets so multiple yaku scored in the
+                // same frame roll out as a staggered sequence rather than
+                // stacking on the same tick.
+                let mut yaku_stinger_index: u32 = 0;
                 for ev in self.bus.drain() {
                     match ev {
                         GameEvent::TileDrawn(_) => {
@@ -2315,6 +2344,9 @@ impl ApplicationHandler for App {
                             self.modals.push(modal);
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                         }
+                        GameEvent::PlayRelicStinger(rid) => {
+                            self.audio.play_relic_trigger(rid);
+                        }
                         GameEvent::RelicActivated(rid) => {
                             // Visual feedback (glow + wiggle) is handled by the
                             // active scene; audio is the per-relic stinger,
@@ -2385,6 +2417,15 @@ impl ApplicationHandler for App {
                                 self.active_profile,
                                 &self.progress,
                             );
+                            const YAKU_STINGER_SPACING_MS: u64 = 200;
+                            let offset = std::time::Duration::from_millis(
+                                (yaku_stinger_index as u64) * YAKU_STINGER_SPACING_MS,
+                            );
+                            self.audio.schedule_sfx(
+                                audio::SfxId::for_yaku(yk),
+                                now + offset,
+                            );
+                            yaku_stinger_index += 1;
                         }
                         other => log::info!("event: {other:?}"),
                     }
@@ -2863,6 +2904,7 @@ impl ApplicationHandler for App {
                     self.gfx.ui_scale = opts.ui_scale;
                     self.run
                         .set_auto_cash_in_on_full_structure(opts.auto_cash_in_on_full_structure);
+                    self.run.set_hints_enabled(opts.hints_enabled);
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
                     }
@@ -2955,6 +2997,7 @@ impl ApplicationHandler for App {
                             // on top now — overlays may have been pushed
                             // mid-fade (e.g. a zodiac celebration after a
                             // skip) and must not clobber them.
+                            let entering_main_menu = matches!(next, Scene::StartScreen(_));
                             if self.pending_scene_targets_overlay {
                                 if let Some(top) = self.overlay_stack.last_mut() {
                                     *top = next;
@@ -2965,6 +3008,9 @@ impl ApplicationHandler for App {
                                 self.scene = next;
                             }
                             self.pending_scene_targets_overlay = false;
+                            if entering_main_menu {
+                                self.audio.play_sfx(audio::SfxId::MainMenuEnter);
+                            }
                             if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                                 self.resume_scene = scene;
                             }
@@ -3999,6 +4045,27 @@ fn main() -> anyhow::Result<()> {
                 plays,
                 sweep.export_json.as_deref(),
             );
+            return Ok(());
+        }
+        Some(Command::StrategySweep(args)) => {
+            let bytes = std::fs::read(&args.strategies_file).with_context(|| {
+                format!(
+                    "failed to read strategies file {}",
+                    args.strategies_file.display()
+                )
+            })?;
+            let file: bot::StrategyFile = serde_json::from_slice(&bytes).with_context(|| {
+                format!(
+                    "failed to parse strategies file {}",
+                    args.strategies_file.display()
+                )
+            })?;
+            let strategies: Vec<(String, bot::BotConfig)> = file
+                .strategies
+                .into_iter()
+                .map(|s| (s.name.clone(), s.to_bot_config()))
+                .collect();
+            bot::run_strategy_sweep(strategies, args.runs, args.export_json.as_deref());
             return Ok(());
         }
         Some(Command::Bot(bot_cli)) => {

@@ -64,8 +64,12 @@ pub struct GameOverScene {
     summary: RunSummary,
     tree: TreeState,
     opened_at: Instant,
+    outcome_sfx_fired: bool,
     ui_font: Option<fontdue::Font>,
 }
+
+/// Delay between the game-over screen appearing and its outcome stinger.
+const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 
 impl GameOverScene {
     pub fn new(run: &RunState, reason: GameOverReason) -> Self {
@@ -77,6 +81,7 @@ impl GameOverScene {
             summary: RunSummary::from_run(run),
             tree: TreeState::new(),
             opened_at: Instant::now(),
+            outcome_sfx_fired: false,
             ui_font: load_ui_font_bytes().and_then(|bytes| {
                 fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
             }),
@@ -93,6 +98,7 @@ impl GameOverScene {
             summary: RunSummary::from_run(run),
             tree: TreeState::new(),
             opened_at: Instant::now(),
+            outcome_sfx_fired: false,
             ui_font: load_ui_font_bytes().and_then(|bytes| {
                 fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
             }),
@@ -147,6 +153,21 @@ impl SceneBehavior for GameOverScene {
         if ctx.headless {
             self.opened_at = Instant::now() - std::time::Duration::from_secs(2);
         }
+        if !self.outcome_sfx_fired
+            && self.opened_at.elapsed().as_secs_f32() >= OUTCOME_SFX_DELAY_SECS
+        {
+            let sfx = if self.won {
+                if self.final_score % 2 == 0 {
+                    SfxId::Victory
+                } else {
+                    SfxId::Victory2
+                }
+            } else {
+                SfxId::Defeat
+            };
+            ctx.bus.push(GameEvent::UiSound(sfx));
+            self.outcome_sfx_fired = true;
+        }
         let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,
@@ -167,9 +188,10 @@ impl SceneBehavior for GameOverScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.run = RunState::new_demo();
             ctx.run.apply_progression(ctx.progress);
-            ctx.run.set_auto_cash_in_on_full_structure(
-                persistence::load_settings().auto_cash_in_on_full_structure,
-            );
+            let settings = persistence::load_settings();
+            ctx.run
+                .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
+            ctx.run.set_hints_enabled(settings.hints_enabled);
             return Some(Scene::StartScreen(StartScreenScene::new()));
         }
         None

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8415e1bb18bf9381d5fffd598123b67a3dd7a42349070bf5d9c63f98c221ce51 # shrinks to tiles = [Tile { suit: Wind, rank: 1, id: 0, enhancement: None, debuffed_visual: false }, Tile { suit: Wind, rank: 1, id: 1, enhancement: None, debuffed_visual: false }, Tile { suit: Characters, rank: 2, id: 2, enhancement: None, debuffed_visual: false }, Tile { suit: Wind, rank: 1, id: 3, enhancement: None, debuffed_visual: false }], perm_seed = 2621423325283164057
