@@ -203,6 +203,10 @@ enum Command {
     /// Run N strategies × M bots each, rank by win rate. Strategies are
     /// defined in a JSON file (see docs/strategies_example.json).
     StrategySweep(StrategySweepCli),
+    /// For each relic, run M bots starting with it forced into the
+    /// active list (for free), plus a control. Ranks relics by their
+    /// causal effect on win rate vs control.
+    ForcedRelicSweep(ForcedRelicSweepCli),
     /// Render a single scene to a PNG and exit. Runs fully offscreen via
     /// `HeadlessApp` — no window, no swapchain, no winit event loop — so
     /// CI and iterative art review don't flake on window-server occlusion.
@@ -292,6 +296,16 @@ struct StrategySweepCli {
     #[arg(long, default_value_t = 1000)]
     runs: u32,
     /// Export per-strategy aggregate stats to a JSON file.
+    #[arg(long)]
+    export_json: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct ForcedRelicSweepCli {
+    /// Number of runs per relic (+ 1 control cell).
+    #[arg(long, default_value_t = 500)]
+    runs: u32,
+    /// Export per-relic aggregate stats to a JSON file.
     #[arg(long)]
     export_json: Option<PathBuf>,
 }
@@ -1355,6 +1369,7 @@ impl App {
                         .with_pages(pages)
                         .with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
                         self.pending_post_game_over_modals.push(modal);
+                        self.audio.play_sfx(audio::SfxId::LevelUp);
                     }
                 }
 
@@ -2286,6 +2301,9 @@ impl ApplicationHandler for App {
                         GameEvent::StructureCommitted => {
                             self.audio.play_sfx(audio::SfxId::StructureCommit);
                         }
+                        GameEvent::TilesDestroyed { .. } => {
+                            self.audio.play_sfx(audio::SfxId::TilesDestroyed);
+                        }
                         GameEvent::InvalidAction => {
                             self.audio.play_sfx(audio::SfxId::InvalidAction);
                         }
@@ -2364,6 +2382,7 @@ impl ApplicationHandler for App {
                             );
                         }
                         GameEvent::BossEncountered(bk) => {
+                            self.audio.play_sfx(audio::SfxId::BossEncountered);
                             *self
                                 .progress
                                 .boss_times_encountered
@@ -2375,6 +2394,7 @@ impl ApplicationHandler for App {
                             );
                         }
                         GameEvent::BossDefeated(bk) => {
+                            self.audio.play_sfx(audio::SfxId::BossDefeated);
                             *self
                                 .progress
                                 .boss_times_defeated
@@ -2386,6 +2406,7 @@ impl ApplicationHandler for App {
                             );
                         }
                         GameEvent::TalismanPurchased(tk) => {
+                            self.audio.play_sfx(audio::SfxId::TalismanPurchased);
                             *self
                                 .progress
                                 .talisman_times_purchased
@@ -2397,6 +2418,7 @@ impl ApplicationHandler for App {
                             );
                         }
                         GameEvent::TalismanUsed(tk) => {
+                            self.audio.play_sfx(audio::SfxId::TalismanUsed);
                             *self
                                 .progress
                                 .talisman_times_used
@@ -3764,7 +3786,8 @@ impl ApplicationHandler for App {
             || gameplay_active
             || shop_active
             || splash_active
-            || start_screen_active;
+            || start_screen_active
+            || !self.overlay_stack.is_empty();
         if needs_redraw {
             if let Some(w) = self.window.as_ref() {
                 w.request_redraw();
@@ -4066,6 +4089,10 @@ fn main() -> anyhow::Result<()> {
                 .map(|s| (s.name.clone(), s.to_bot_config()))
                 .collect();
             bot::run_strategy_sweep(strategies, args.runs, args.export_json.as_deref());
+            return Ok(());
+        }
+        Some(Command::ForcedRelicSweep(args)) => {
+            bot::run_forced_relic_sweep(args.runs, args.export_json.as_deref());
             return Ok(());
         }
         Some(Command::Bot(bot_cli)) => {

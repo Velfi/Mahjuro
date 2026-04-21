@@ -92,6 +92,7 @@ impl SceneBehavior for YakuJournalScene {
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
         let run = ctx.run;
+        let progress = ctx.progress;
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
@@ -126,14 +127,16 @@ impl SceneBehavior for YakuJournalScene {
         // ── Grid metrics ─────────────────────────────────────────
         let yaku = YakuKind::all();
         // Reserve the bottom portion of the screen for the floating
-        // plaque. The grid fills the upper two-thirds.
-        let plaque_top = h * 0.62;
-        let grid_top = h * 0.04;
+        // plaque. Grid sinks toward center (top at 7%, bottom at 66%)
+        // so rows breathe instead of hugging the window edge; plaque
+        // shrinks to ~30% of screen height, freeing vertical air.
+        let plaque_top = h * 0.64;
+        let grid_top = h * 0.05;
         let grid_bot = plaque_top - h * 0.02;
         let grid_h = grid_bot - grid_top;
         let row_h = grid_h / ROW_COUNTS.len() as f32;
 
-        let side_margin = w * 0.04;
+        let side_margin = w * 0.06;
         // Cells are sized by the widest row so every row's cells match
         // width regardless of count — row 1 (5 wide) defines the cell.
         let cell_w = (w - side_margin * 2.0) / 5.0;
@@ -184,23 +187,69 @@ impl SceneBehavior for YakuJournalScene {
                 let is_selected = yi == self.selected;
                 yi += 1;
 
-                let state = progression_state(run, yk);
+                let state = progression_state(run, progress, yk);
                 let cell_cx = row_x0 + cell_w * (col_i as f32 + 0.5);
                 let strip_w =
                     tiles_per_cell as f32 * tile_size + (tiles_per_cell - 1) as f32 * tile_gap;
                 let strip_x0 = cell_cx - strip_w * 0.5;
 
-                // Selection backing.
-                if is_selected {
-                    let pad_x = cell_w * 0.04;
-                    let bg_x = cell_cx - cell_w * 0.5 + pad_x;
-                    let bg_y = caption_y - row_h * 0.04;
-                    let bg_w = cell_w - pad_x * 2.0;
-                    let bg_h = row_h * 0.88;
+                // Discovered cells get a faint parchment-glow pad behind
+                // the tile strip so unlocked yaku read as "lit lanterns"
+                // on the table, differentiated from the sealed cards
+                // around them. Selection adds a stronger champagne halo
+                // on top of that, tightened to the tile envelope so
+                // focus sits on the tiles, not a row-wide stripe.
+                let pad_pad_y = tile_long_h * 0.18;
+                let pad_pad_x = tile_size * 0.35;
+                let pad_x0 = strip_x0 - pad_pad_x;
+                let pad_y0 = tile_cy - tile_long_h * 0.5 - pad_pad_y;
+                let pad_w = strip_w + pad_pad_x * 2.0;
+                let pad_h = tile_long_h + pad_pad_y * 2.0;
+
+                if matches!(state, ProgressionState::Played | ProgressionState::Leveled) {
                     frame.quad(GpuInstance {
-                        rect: [bg_x, bg_y, bg_w, bg_h],
-                        color: color::alpha(color::CHAMPAGNE, 0.18),
+                        rect: [pad_x0, pad_y0, pad_w, pad_h],
+                        color: color::alpha(color::PARCHMENT, 0.06),
                     });
+                }
+                if is_selected {
+                    // Stacked halo layers — outer soft pool, inner warm
+                    // wash, then a crisp 1px brass rim. Against the dark
+                    // lacquer of sealed cards the subtler version got lost,
+                    // so we push opacity up and add a visible ring to
+                    // anchor "this is the one you're reading."
+                    let halo_pad = tile_long_h * 0.30;
+                    frame.quad(GpuInstance {
+                        rect: [
+                            pad_x0 - halo_pad,
+                            pad_y0 - halo_pad,
+                            pad_w + halo_pad * 2.0,
+                            pad_h + halo_pad * 2.0,
+                        ],
+                        color: color::alpha(color::CHAMPAGNE, 0.10),
+                    });
+                    let mid_pad = tile_long_h * 0.14;
+                    frame.quad(GpuInstance {
+                        rect: [
+                            pad_x0 - mid_pad,
+                            pad_y0 - mid_pad,
+                            pad_w + mid_pad * 2.0,
+                            pad_h + mid_pad * 2.0,
+                        ],
+                        color: color::alpha(color::CHAMPAGNE, 0.22),
+                    });
+                    // Crisp brass outline — 4-edge ring so focus reads
+                    // even on dark sealed cards.
+                    let ring_px = (2.0 * (h / 1080.0)).max(1.5);
+                    let rx = pad_x0 - mid_pad;
+                    let ry = pad_y0 - mid_pad;
+                    let rw = pad_w + mid_pad * 2.0;
+                    let rh = pad_h + mid_pad * 2.0;
+                    let ring_color = color::alpha(color::GOLD, 0.85);
+                    frame.quad(GpuInstance { rect: [rx, ry, rw, ring_px], color: ring_color });
+                    frame.quad(GpuInstance { rect: [rx, ry + rh - ring_px, rw, ring_px], color: ring_color });
+                    frame.quad(GpuInstance { rect: [rx, ry, ring_px, rh], color: ring_color });
+                    frame.quad(GpuInstance { rect: [rx + rw - ring_px, ry, ring_px, rh], color: ring_color });
                 }
 
                 // Name — unseen yaku read as dimmer parchment.
@@ -218,12 +267,15 @@ impl SceneBehavior for YakuJournalScene {
                     ..Default::default()
                 });
 
-                // Level badge (or "sealed" marker for unseen).
+                // Level caption. Sealed cells get a thin en-dash —
+                // the wax seal already says "locked," so a redundant
+                // "sealed" word just creates visual noise on the row.
                 let lvl = run.yaku_levels.level_of(yk);
                 let (level_text, level_color) = match state {
-                    ProgressionState::Unseen => {
-                        ("sealed".into(), color::alpha(color::CHAMPAGNE, 0.6))
-                    }
+                    ProgressionState::Unseen => (
+                        "—".into(),
+                        color::alpha(color::PARCHMENT, 0.35),
+                    ),
                     ProgressionState::Leveled => (format!("Lv {lvl}"), color::GOLD),
                     _ => (format!("Lv {lvl}"), color::CHAMPAGNE),
                 };
@@ -300,7 +352,7 @@ impl SceneBehavior for YakuJournalScene {
 
         // ── Floating plaque for the selected yaku ────────────────
         let sel_yk = yaku[self.selected];
-        let sel_state = progression_state(run, sel_yk);
+        let sel_state = progression_state(run, progress, sel_yk);
         draw_plaque(
             &mut frame,
             &mut placements,
@@ -322,10 +374,14 @@ impl SceneBehavior for YakuJournalScene {
     }
 }
 
-/// Draw a "sealed" tablet where a tile strip would otherwise go: a dark
-/// slab with a red wax-seal disc in the center stamped with `?`. This is
-/// the grid-cell treatment for undiscovered yaku — unambiguous lock state
-/// that reads clearly at TV distance without accidentally looking broken.
+/// Draw a "sealed" tablet where a tile strip would otherwise go: a warm
+/// antique card with a stacked wax-seal disc in the center. The disc is
+/// built from concentric quads sized to read as round at TV distance, with
+/// a highlight crescent on top so the seal feels 3D rather than painted.
+///
+/// Earlier iteration used a dark obsidian slab; it read as a debug
+/// placeholder next to the warm wood table. Warm-antique card with an
+/// inked rim stays in the same material vocabulary as the plaque.
 fn draw_sealed_slab(
     frame: &mut UiFrame,
     x: f32,
@@ -335,48 +391,76 @@ fn draw_sealed_slab(
     window_h: f32,
     ui_scale: f32,
 ) {
-    // Dark obsidian slab — matches the "this is sealed" vocabulary
-    // (same ink color used by scoring panel frames).
-    let inset = (2.0 * (window_h / 1080.0)).max(1.0);
+    let scale = (window_h / 1080.0).max(1.0);
+    let inset = (2.0 * scale).max(1.0);
+
+    // Inked rim + deep-lacquer card face — darker than parchment so the
+    // seal reads as a *locked chapter* rather than a waiting page, and
+    // darker than the wood table so it stands apart from the background.
+    // Color below is roughly darkened OBSIDIAN with a warm lift, chosen
+    // by eye to contrast against both PARCHMENT and the wood grain.
     frame.quad(GpuInstance {
         rect: [x, y, w, h],
-        color: color::darken(color::ANTIQUE, 0.7),
+        color: color::darken(color::ANTIQUE, 0.75),
     });
     frame.quad(GpuInstance {
         rect: [x + inset, y + inset, w - inset * 2.0, h - inset * 2.0],
-        color: color::OBSIDIAN,
+        color: [0.14, 0.10, 0.08, 1.0],
     });
 
-    // Wax seal — two concentric red quads as a disc surrogate. Not a
-    // true circle but reads as "round stamp" at distance, especially
-    // with the smaller inner highlight disc.
-    let seal_d = h.min(w * 0.35) * 0.68;
+    // Wax seal — stacked discs. Outer shadow ring sits slightly offset
+    // down/right to fake drop shadow and give the disc lift. Then the
+    // dark wax rim, the bright wax body, and a small offset highlight
+    // crescent in champagne so the seal reads as 3D. Sized to nearly
+    // fill the short edge of the card so it's the visual anchor.
+    let seal_d = h.min(w) * 0.85;
     let cx = x + w * 0.5;
     let cy = y + h * 0.5;
-    // Outer wax ring.
-    frame.quad(GpuInstance {
-        rect: [cx - seal_d * 0.5, cy - seal_d * 0.5, seal_d, seal_d],
-        color: color::darken(color::RUBY, 0.35),
-    });
-    // Inner wax body — bright red.
-    let inner_d = seal_d * 0.82;
+
+    // Shadow pad (offset) — very translucent dark, gives the seal lift.
     frame.quad(GpuInstance {
         rect: [
-            cx - inner_d * 0.5,
-            cy - inner_d * 0.5,
-            inner_d,
-            inner_d,
+            cx - seal_d * 0.5 + 3.0 * scale,
+            cy - seal_d * 0.5 + 4.0 * scale,
+            seal_d,
+            seal_d,
         ],
+        color: color::alpha([0.05, 0.02, 0.01, 1.0], 0.55),
+    });
+    // Dark wax ring.
+    frame.quad(GpuInstance {
+        rect: [cx - seal_d * 0.5, cy - seal_d * 0.5, seal_d, seal_d],
+        color: color::darken(color::RUBY, 0.5),
+    });
+    // Wax body.
+    let body_d = seal_d * 0.86;
+    frame.quad(GpuInstance {
+        rect: [cx - body_d * 0.5, cy - body_d * 0.5, body_d, body_d],
         color: color::RUBY,
     });
-    // "?" stamp on the wax.
-    let glyph_font = typography::size(typography::HEADING, window_h, ui_scale).max(20.0);
+    // Highlight crescent — small off-center champagne square reads as a
+    // specular hit on the wax. Placed up-left of center, sized small
+    // enough that rectangular edges aren't obvious at TV distance.
+    let hl_d = body_d * 0.28;
+    frame.quad(GpuInstance {
+        rect: [
+            cx - body_d * 0.22 - hl_d * 0.5,
+            cy - body_d * 0.22 - hl_d * 0.5,
+            hl_d,
+            hl_d,
+        ],
+        color: color::alpha(color::CHAMPAGNE, 0.55),
+    });
+
+    // "?" stamp — larger glyph, champagne ink so it reads as pressed
+    // metal into the wax rather than a flat typeface.
+    let glyph_font = typography::size(typography::TITLE, window_h, ui_scale).max(28.0);
     frame.text(TextLabel {
-        rect: [cx - seal_d * 0.5, cy - glyph_font * 0.5, seal_d, glyph_font * 1.0],
+        rect: [cx - seal_d * 0.5, cy - glyph_font * 0.55, seal_d, glyph_font * 1.1],
         text: "?".into(),
-        color: color::CHAMPAGNE,
+        color: color::alpha(color::CHAMPAGNE, 0.92),
         align: TextAlign::Center,
-        font_px: Some(glyph_font * 1.3),
+        font_px: Some(glyph_font * 1.2),
         ..Default::default()
     });
 }
@@ -385,21 +469,31 @@ fn draw_sealed_slab(
 /// plaque's reveal/veil decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProgressionState {
-    /// Never scored (`yaku_times_played == 0`) and never leveled (Lv 1).
-    /// Rendered as a sealed tablet so first-time discovery stays a moment.
+    /// Never scored in any run (cumulative `PlayerProgress::yaku_times_scored`
+    /// is zero) and never leveled. Rendered as a sealed tablet so first-time
+    /// discovery stays a moment.
     Unseen,
-    /// Scored at least once, still at base level.
+    /// Scored at least once in any run's history, still at base level.
     Played,
     /// Zodiac-leveled to 2 or above. Gets a gold glow.
     Leveled,
 }
 
-fn progression_state(run: &crate::game::run::RunState, yk: YakuKind) -> ProgressionState {
+/// Once a yaku has appeared in any round, it stays unlocked forever —
+/// so the "played" check is against the cumulative
+/// `PlayerProgress::yaku_times_scored` (persisted across runs), not the
+/// per-run `RunState::yaku_times_played` which resets.
+fn progression_state(
+    run: &crate::game::run::RunState,
+    progress: &crate::core::progression::PlayerProgress,
+    yk: YakuKind,
+) -> ProgressionState {
     let lvl = run.yaku_levels.level_of(yk);
-    let played = run.yaku_times_played.get(&yk).copied().unwrap_or(0);
+    let scored_ever = progress.yaku_times_scored.get(&yk).copied().unwrap_or(0);
+    let played_this_run = run.yaku_times_played.get(&yk).copied().unwrap_or(0);
     if lvl >= 2 {
         ProgressionState::Leveled
-    } else if played >= 1 {
+    } else if scored_ever >= 1 || played_this_run >= 1 {
         ProgressionState::Played
     } else {
         ProgressionState::Unseen
@@ -413,12 +507,12 @@ fn progression_state(run: &crate::game::run::RunState, yk: YakuKind) -> Progress
 /// module — so whatever renders here is guaranteed to score as the named
 /// yaku.
 ///
-/// Header hierarchy is **score-first**: big numbers on the left
-/// (`+N MULT / +N CHIPS` stacked), name and level on the right as a
-/// subtitle. A player browsing the journal to decide where to spend a
-/// Zodiac card wants to compare score values across yaku, so those get
-/// the display weight. Identity (name) still reads clearly but doesn't
-/// compete.
+/// Header hierarchy is **identity-first**: yaku name is the title on the
+/// left with a brass level-pill tag; stat totals (`+N MULT · +N CHIPS`)
+/// sit right-aligned on the same line. A thin antique rule separates
+/// header from description. The control hint lives in a brass footer
+/// strip inside the plaque's rim so it reads as an affordance rather
+/// than orphaned caption text.
 #[allow(clippy::too_many_arguments)]
 fn draw_plaque(
     frame: &mut UiFrame,
@@ -432,9 +526,9 @@ fn draw_plaque(
     h: f32,
     ui_scale: f32,
 ) {
-    let plaque_x = w * 0.05;
-    let plaque_w = w * 0.90;
-    let plaque_h = h * 0.36;
+    let plaque_x = w * 0.06;
+    let plaque_w = w * 0.88;
+    let plaque_h = h * 0.34;
     let plaque_y = top_y;
 
     // Drop shadow — warmer brown tint (not pure black), bigger offset,
@@ -478,111 +572,119 @@ fn draw_plaque(
         ],
         color: color::BRASS,
     });
-    // Parchment face.
+    // Parchment face — stops short of the bottom to leave room for the
+    // brass footer strip (which carries the control hint).
     let pad = (14.0 * shadow_scale).max(10.0);
+    let hint_font = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
+    let footer_h = hint_font * 2.2;
     let face_x = plaque_x + pad;
     let face_y = plaque_y + pad;
     let face_w = plaque_w - pad * 2.0;
-    let face_h = plaque_h - pad * 2.0;
+    let face_h = plaque_h - pad - footer_h - bevel;
     frame.quad(GpuInstance {
         rect: [face_x, face_y, face_w, face_h],
         color: color::PARCHMENT,
     });
 
     // ── Header ───────────────────────────────────────────────────
-    // Left column: big score values — MULT on top, CHIPS below.
-    // Right column: yaku name + level as subtitle.
+    // Left: yaku name as the title + a brass level-badge pill to its
+    // right. Right: stat strip "+N MULT · +N CHIPS". A thin antique
+    // rule separates header from description.
     let header_pad = (18.0 * shadow_scale).max(12.0);
     let header_x = face_x + header_pad;
     let header_w = face_w - header_pad * 2.0;
-    let header_y = face_y + header_pad * 0.4;
+    let header_y = face_y + header_pad * 0.6;
 
     let mult = yk.mult_bonus_at(lvl);
     let chip = yk.chip_bonus_at(lvl);
 
-    let score_font = typography::size(typography::DISPLAY, h, ui_scale).max(44.0);
-    let score_label_font = typography::size(typography::CAPTION, h, ui_scale).max(16.0);
-    let score_line_h = score_font * 1.05;
-
-    // Score column: two stacked "+N LABEL" rows, numbers large.
-    let mult_text = format!("+{mult}");
-    let chip_text = format!("+{chip}");
-    // Big number — MULT.
+    // Title — yaku name in big, ink-dark ANTIQUE, left-aligned. Given
+    // a fixed-ish left lane so the level pill below has a predictable
+    // landing point regardless of how long the name is.
+    let title_font = typography::size(typography::TITLE, h, ui_scale).max(34.0);
+    let title_h = title_font * 1.05;
+    let title_lane_w = header_w * 0.5;
     frame.text(TextLabel {
-        rect: [header_x, header_y, header_w * 0.48, score_line_h],
-        text: mult_text,
-        color: color::OBSIDIAN,
-        align: TextAlign::Left,
-        font_px: Some(score_font),
-        ..Default::default()
-    });
-    // Small "MULT" caption hanging off the number.
-    let mult_caption_x = header_x + score_font * 2.2;
-    frame.text(TextLabel {
-        rect: [mult_caption_x, header_y + score_font * 0.25, header_w * 0.3, score_label_font * 1.4],
-        text: "MULT".into(),
-        color: color::darken(color::ANTIQUE, 0.15),
-        align: TextAlign::Left,
-        font_px: Some(score_label_font),
-        ..Default::default()
-    });
-    // Big number — CHIPS.
-    let chip_row_y = header_y + score_line_h * 0.92;
-    frame.text(TextLabel {
-        rect: [header_x, chip_row_y, header_w * 0.48, score_line_h],
-        text: chip_text,
-        color: color::OBSIDIAN,
-        align: TextAlign::Left,
-        font_px: Some(score_font),
-        ..Default::default()
-    });
-    frame.text(TextLabel {
-        rect: [mult_caption_x, chip_row_y + score_font * 0.25, header_w * 0.3, score_label_font * 1.4],
-        text: "CHIPS".into(),
-        color: color::darken(color::ANTIQUE, 0.15),
-        align: TextAlign::Left,
-        font_px: Some(score_label_font),
-        ..Default::default()
-    });
-
-    // Right column: name as subtitle + level badge underneath.
-    let name_font = typography::size(typography::HEADING, h, ui_scale).max(26.0);
-    let name_h = name_font * 1.1;
-    frame.text(TextLabel {
-        rect: [header_x, header_y + score_font * 0.15, header_w, name_h],
+        rect: [header_x, header_y, title_lane_w, title_h],
         text: yk.name().into(),
-        color: color::darken(color::ANTIQUE, 0.2),
-        align: TextAlign::Right,
-        font_px: Some(name_font),
+        color: color::darken(color::ANTIQUE, 0.4),
+        align: TextAlign::Left,
+        font_px: Some(title_font),
         ..Default::default()
     });
-    let level_badge_font = typography::size(typography::BODY, h, ui_scale).max(20.0);
-    let level_badge_text = match state {
-        ProgressionState::Leveled => format!("Lv {lvl}"),
-        _ => format!("Lv {lvl}"),
+
+    // Level pill — brass background, bold mono text. Sits flush
+    // underneath the title (not beside it) so variable name widths
+    // can't crash into it. Visually it tags the title and pairs
+    // with the stat strip's right-aligned neighborhood.
+    let pill_font = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
+    let pill_h = pill_font * 1.7;
+    let pill_text = format!("Lv  {lvl}");
+    let pill_w = pill_font * 5.4;
+    let pill_x = header_x;
+    let pill_y = header_y + title_h * 0.94;
+    let (pill_bg, pill_fg) = match state {
+        ProgressionState::Leveled => (color::GOLD, color::OBSIDIAN),
+        ProgressionState::Unseen => (color::darken(color::ANTIQUE, 0.3), color::alpha(color::CHAMPAGNE, 0.75)),
+        ProgressionState::Played => (color::BRASS, color::OBSIDIAN),
     };
-    let level_badge_color = match state {
-        ProgressionState::Leveled => color::GOLD,
-        _ => color::darken(color::ANTIQUE, 0.1),
+    // Pill drop shadow.
+    frame.quad(GpuInstance {
+        rect: [pill_x + 1.5 * shadow_scale, pill_y + 2.0 * shadow_scale, pill_w, pill_h],
+        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
+    });
+    frame.quad(GpuInstance {
+        rect: [pill_x, pill_y, pill_w, pill_h],
+        color: pill_bg,
+    });
+    frame.text(TextLabel {
+        rect: [pill_x, pill_y + pill_h * 0.18, pill_w, pill_h * 0.8],
+        text: pill_text,
+        color: pill_fg,
+        align: TextAlign::Center,
+        font_px: Some(pill_font * 1.15),
+        ..Default::default()
+    });
+
+    // Stat strip — right-aligned, single line, "+N MULT · +N CHIPS".
+    // Shares the header row with the title, with its own 50%-width
+    // lane on the right. Locked yaku hide score numbers (no spoilers
+    // on bonus scaling until the player has unlocked the yaku).
+    let stat_font = typography::size(typography::HEADING, h, ui_scale).max(26.0);
+    let stat_y = header_y + (title_h - stat_font * 1.05) * 0.45;
+    let stat_text = match state {
+        ProgressionState::Unseen => "— — —".into(),
+        _ => format!("+{mult}  MULT   ·   +{chip}  CHIPS"),
+    };
+    let stat_color = match state {
+        ProgressionState::Unseen => color::alpha(color::darken(color::ANTIQUE, 0.1), 0.5),
+        ProgressionState::Leveled => color::darken(color::GOLD, 0.2),
+        _ => color::darken(color::ANTIQUE, 0.25),
     };
     frame.text(TextLabel {
-        rect: [
-            header_x,
-            header_y + score_font * 0.15 + name_h,
-            header_w,
-            level_badge_font * 1.4,
-        ],
-        text: level_badge_text,
-        color: level_badge_color,
+        rect: [header_x + header_w * 0.5, stat_y, header_w * 0.5, stat_font * 1.2],
+        text: stat_text,
+        color: stat_color,
         align: TextAlign::Right,
-        font_px: Some(level_badge_font),
+        font_px: Some(stat_font * 0.95),
         ..Default::default()
+    });
+
+    // Rule line under the header — 1-2px ANTIQUE strip, separates the
+    // title + pill + stat row from the description/hand below. Must
+    // clear the pill's bottom (pill is stacked under the title now).
+    let header_bottom = (pill_y + pill_h).max(header_y + title_h);
+    let rule_y = header_bottom + header_pad * 0.4;
+    let rule_h = (1.5 * shadow_scale).max(1.0);
+    frame.quad(GpuInstance {
+        rect: [header_x, rule_y, header_w, rule_h],
+        color: color::alpha(color::ANTIQUE, 0.45),
     });
 
     // ── Description ──────────────────────────────────────────────
     let desc_font = typography::size(typography::BODY, h, ui_scale).max(20.0);
     let desc_h = desc_font * 1.4;
-    let desc_y = chip_row_y + score_line_h + header_pad * 0.2;
+    let desc_y = rule_y + rule_h + header_pad * 0.35;
     let (desc_text, groups) = super::meld_guide::yaku_page(yk);
     let body_text: String = match state {
         ProgressionState::Unseen => {
@@ -609,11 +711,9 @@ fn draw_plaque(
     }
 
     let hand_top = desc_y + desc_h + header_pad * 0.35;
-    // Leave a single-line band at the bottom of the plaque for the
-    // tucked-in control hint so it doesn't float orphaned below.
-    let hint_font = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
-    let hint_band = hint_font * 1.4;
-    let hand_bot = face_y + face_h - header_pad * 0.4 - hint_band;
+    // Hand sits inside the parchment face only; the footer owns the
+    // band below `face_y + face_h`.
+    let hand_bot = face_y + face_h - header_pad * 0.2;
     let hand_band_h = (hand_bot - hand_top).max(0.0);
 
     let num_gaps = groups.len().saturating_sub(1);
@@ -680,18 +780,47 @@ fn draw_plaque(
         }
     }
 
-    // ── Control hint, tucked inside the plaque's bottom edge ────
+    // ── Brass footer strip with control hint ────────────────────
+    // A 1-line strip along the bottom of the plaque, inside the brass
+    // rim but below the parchment face. Reads as a labeled affordance
+    // ("press these keys") rather than orphaned caption text.
+    let footer_x = plaque_x + bevel;
+    let footer_y = plaque_y + plaque_h - footer_h - bevel;
+    let footer_w = plaque_w - bevel * 2.0;
+    frame.quad(GpuInstance {
+        rect: [footer_x, footer_y, footer_w, footer_h],
+        color: color::darken(color::BRASS, 0.25),
+    });
+    // Top hairline for crisp separation between parchment and footer.
+    frame.quad(GpuInstance {
+        rect: [footer_x, footer_y, footer_w, (1.0 * shadow_scale).max(1.0)],
+        color: color::darken(color::ANTIQUE, 0.15),
+    });
+    let footer_pad = header_pad * 0.8;
     frame.text(TextLabel {
         rect: [
-            header_x,
-            face_y + face_h - hint_band - header_pad * 0.3,
-            header_w,
-            hint_band,
+            footer_x + footer_pad,
+            footer_y + footer_h * 0.18,
+            footer_w - footer_pad * 2.0,
+            footer_h * 0.7,
         ],
-        text: "← → ↑ ↓ browse   ·   Esc to return".into(),
-        color: color::alpha(color::darken(color::ANTIQUE, 0.1), 0.7),
+        text: "← → ↑ ↓  browse".into(),
+        color: color::alpha(color::OBSIDIAN, 0.75),
+        align: TextAlign::Left,
+        font_px: Some(hint_font * 1.1),
+        ..Default::default()
+    });
+    frame.text(TextLabel {
+        rect: [
+            footer_x + footer_pad,
+            footer_y + footer_h * 0.18,
+            footer_w - footer_pad * 2.0,
+            footer_h * 0.7,
+        ],
+        text: "Esc  return".into(),
+        color: color::alpha(color::OBSIDIAN, 0.75),
         align: TextAlign::Right,
-        font_px: Some(hint_font),
+        font_px: Some(hint_font * 1.1),
         ..Default::default()
     });
 }
