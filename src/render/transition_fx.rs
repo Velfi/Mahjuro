@@ -1,10 +1,9 @@
 use std::f32::consts::PI;
 
 use crate::core::tile::{Suit, Tile};
-use crate::render::decal::{tile_short_label, tile_suit_emoji};
-use crate::render::draw_cmd::UiFrame;
+use crate::render::draw_cmd::{TileFaceQuad, UiFrame};
 use crate::render::theme::color;
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::GpuInstance;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OverlayTransitionKind {
@@ -45,7 +44,7 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
     let close_span = h * 0.5 + tile_size * 0.35;
     let seq = tile_sequence();
     let mut quads = Vec::with_capacity(cols * rows * 3);
-    let mut labels = Vec::with_capacity(cols * rows * 2);
+    let mut faces = Vec::with_capacity(cols * rows);
 
     for col in 0..cols {
         let from_top = col % 2 == 0;
@@ -61,11 +60,8 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
         } else {
             h + overshoot - close_span * local_cover
         };
-        let pitch = if from_top { 0.30 } else { -0.30 };
-        let yaw = ((col % 3) as f32 - 1.0) * 0.045;
-        let roll = if from_top { PI } else { PI + 0.02 };
-        let base_lift = 38.0 + 14.0 * local_cover;
-
+        let pitch: f32 = if from_top { 0.30 } else { -0.30 };
+        let yaw: f32 = ((col % 3) as f32 - 1.0) * 0.045;
         for row in 0..rows {
             let center_y = if from_top {
                 lead_y + row as f32 * row_step
@@ -111,29 +107,17 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
             });
 
             let inset_x = tile_w * 0.10;
-            let label_color = match tile.suit {
-                Suit::Characters | Suit::Dragon => color::RUBY,
-                Suit::Bamboos | Suit::Flower | Suit::Season => color::JADE,
-                Suit::Circles => color::GOLD,
-                Suit::Wind => color::SLATE,
-            };
-            labels.push(TextLabel {
-                rect: [left + inset_x, top + tile_h * 0.12, tile_w - inset_x * 2.0, tile_h * 0.40],
-                text: tile_short_label(&tile),
-                color: color::alpha(label_color, edge_alpha),
-                font_px: Some(tile_h * 0.24),
-                align: TextAlign::Center,
-                no_glossary: true,
-                scroll_offset: 0.0,
-            });
-            labels.push(TextLabel {
-                rect: [left + inset_x, top + tile_h * 0.56, tile_w - inset_x * 2.0, tile_h * 0.22],
-                text: tile_suit_emoji(&tile).to_string(),
-                color: color::alpha(label_color, 0.90),
-                font_px: Some(tile_h * 0.16),
-                align: TextAlign::Center,
-                no_glossary: true,
-                scroll_offset: 0.0,
+            faces.push(TileFaceQuad {
+                tile,
+                inst: GpuInstance {
+                    rect: [
+                        left + inset_x,
+                        top + tile_h * 0.10,
+                        tile_w - inset_x * 2.0,
+                        tile_h * 0.74,
+                    ],
+                    color: [1.0, 1.0, 1.0, edge_alpha],
+                },
             });
         }
     }
@@ -141,8 +125,8 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
     if !quads.is_empty() {
         frame.quads(quads);
     }
-    if !labels.is_empty() {
-        frame.texts(labels);
+    if !faces.is_empty() {
+        frame.tile_face_quads(faces);
     }
 }
 

@@ -261,6 +261,18 @@ pub struct ShowcaseTilePlacement {
     pub pick_id: Option<usize>,
 }
 
+/// One flat tile-face decal drawn as a screen-space image quad.
+///
+/// Uses the same per-tile face rasterization as the 3D tile renderer but skips
+/// lighting, shadows, and mesh submission entirely.
+#[derive(Clone, Copy, Debug)]
+pub struct TileFaceQuad {
+    /// Tile identity selects the cached face decal texture.
+    pub tile: Tile,
+    /// Screen-space placement and tint. `color.a` controls overall opacity.
+    pub inst: GpuInstance,
+}
+
 /// One shrine placement (used by the pick-blind scene to draw the three
 /// blind shrines side by side, each scaled by `extents`). Geometry is the
 /// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
@@ -615,6 +627,8 @@ pub enum DrawCmd {
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
+    /// Flat screen-space tile face using the real per-tile decal art.
+    TileFaceQuad(TileFaceQuad),
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
     /// Alpha-feathered 2D quad — solid `color` in the centre, falling off
@@ -825,6 +839,9 @@ impl UiFrame {
     pub fn showcase_tile_batch(&mut self, placements: Vec<ShowcaseTilePlacement>) {
         self.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
     }
+    pub fn tile_face_quads<I: IntoIterator<Item = TileFaceQuad>>(&mut self, iter: I) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
+    }
 
     /// Apply a global alpha multiplier to every queued cmd's color.
     /// Used by the main loop for scene transition fades.
@@ -835,6 +852,7 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally

@@ -24,8 +24,8 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, UiFrame,
-    WallStackPlacement, YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, TileFaceQuad,
+    UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lamp_mesh::{
@@ -118,7 +118,7 @@ struct CameraUniform {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuInstance {
     pub rect: [f32; 4],
     pub color: [f32; 4],
@@ -565,6 +565,11 @@ struct ShowcaseTileGpu {
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
+struct TileFaceOverlayGpu {
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+}
+
 const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
 
 // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
@@ -799,6 +804,9 @@ pub struct WgpuRenderer {
     /// demand up to `MAX_SHOWCASE_TILE_SLOTS`; decals re-rasterised only
     /// when the tile identity changes.
     showcase_tiles: Vec<ShowcaseTileGpu>,
+    /// Cached 2D tile-face overlays keyed by tile identity.
+    tile_face_overlays:
+        HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     // --- Text overlay pipeline ---
@@ -1970,6 +1978,48 @@ fn make_showcase_tile_gpu(
         shadow_uniform_buffer,
         shadow_bind_group,
         tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
+    }
+}
+
+fn make_tile_face_overlay_gpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+    tile: &Tile,
+    tile_set: Option<&str>,
+) -> TileFaceOverlayGpu {
+    const DECAL_W: u32 = 192;
+    const DECAL_H: u32 = 256;
+    let rgba =
+        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, false);
+    let (texture, view) = upload_rgba_texture(
+        device,
+        queue,
+        "tile-face-overlay",
+        &rgba,
+        DECAL_W,
+        DECAL_H,
+    );
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tile-face-overlay-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    TileFaceOverlayGpu {
+        _texture: texture,
+        bind_group,
     }
 }
 
@@ -4570,6 +4620,7 @@ impl WgpuRenderer {
             tile_set: Some("original".to_string()),
             hand_tiles: Vec::new(),
             showcase_tiles: Vec::new(),
+            tile_face_overlays: HashMap::new(),
             vertex_buffer,
             index_buffer,
             text_pipeline,
@@ -6250,6 +6301,7 @@ impl WgpuRenderer {
             GradientQuadBatch { buf_idx: usize, count: u32 },
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
+            TileFaceQuad(usize),
             FluidSmoke,
             // Skeuomorphic gameplay HUD (phase 1).
             ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
@@ -6296,6 +6348,8 @@ impl WgpuRenderer {
         let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
+        let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
+        let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         // Skeuomorphic gameplay HUD cmd buffers (phase 1).
         // Dead empty vecs — kept so existing shadow/draw loops that still iterate
         // these compile; scenes no longer push to these variants.
@@ -6465,6 +6519,39 @@ impl WgpuRenderer {
                         text_draws.push(td);
                         ops.push(RenderOp::TextDraw(idx));
                     }
+                    i += 1;
+                }
+                DrawCmd::TileFaceQuad(face) => {
+                    let key = (
+                        face.tile.suit,
+                        face.tile.rank,
+                        face.tile.enhancement,
+                        face.tile.debuffed_visual,
+                    );
+                    if !self.tile_face_overlays.contains_key(&key) {
+                        let overlay = make_tile_face_overlay_gpu(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            self.ui_font.as_ref(),
+                            self.emoji_font.as_ref(),
+                            &face.tile,
+                            self.tile_set.as_deref(),
+                        );
+                        self.tile_face_overlays.insert(key, overlay);
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tile-face-quad"),
+                            contents: bytemuck::cast_slice(&[face.inst]),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let idx = tile_face_quads.len();
+                    tile_face_quads.push(*face);
+                    tile_face_inst_buffers.push(buf);
+                    ops.push(RenderOp::TileFaceQuad(idx));
                     i += 1;
                 }
                 DrawCmd::ShowcaseTileBatch(placements) => {
@@ -10522,6 +10609,27 @@ impl WgpuRenderer {
                     pass.set_vertex_buffer(1, td.inst_buf.slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
+                }
+                RenderOp::TileFaceQuad(idx) => {
+                    let face = &tile_face_quads[*idx];
+                    let key = (
+                        face.tile.suit,
+                        face.tile.rank,
+                        face.tile.enhancement,
+                        face.tile.debuffed_visual,
+                    );
+                    if let Some(gpu) = self.tile_face_overlays.get(&key) {
+                        pass.set_pipeline(&self.image_pipeline);
+                        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                        pass.set_bind_group(1, &gpu.bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                        pass.set_vertex_buffer(1, tile_face_inst_buffers[*idx].slice(..));
+                        pass.set_index_buffer(
+                            self.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
+                        pass.draw_indexed(0..6, 0, 0..1);
+                    }
                 }
             }
         }; // end process_op closure
