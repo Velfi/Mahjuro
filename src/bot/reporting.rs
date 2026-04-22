@@ -113,21 +113,6 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
     super::play_run_with_options(config, BotRunOptions::default(), None)
 }
 
-#[allow(dead_code)]
-pub fn run_with(n: u32, config: BotConfig) -> AggregateStats {
-    (0..n)
-        .into_par_iter()
-        .map(|_| play_run_with(config.clone()))
-        .fold(AggregateStats::default, |mut agg, s| {
-            agg.record(&s);
-            agg
-        })
-        .reduce(AggregateStats::default, |mut a, b| {
-            a.merge_in(b);
-            a
-        })
-}
-
 pub(crate) fn run_with_sequential(n: u32, config: BotConfig) -> AggregateStats {
     let mut agg = AggregateStats::default();
     for _ in 0..n {
@@ -164,7 +149,7 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
     for (i, s) in runs.iter().enumerate() {
         agg.record(s);
         let run_number = i as u32 + 1;
-        if run_number % 25 == 0 || run_number == n {
+        if run_number.is_multiple_of(25) || run_number == n {
             let outcome = if s.victory {
                 format!("VICTORY (ante {})", s.died_on_ante)
             } else {

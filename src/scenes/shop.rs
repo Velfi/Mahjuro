@@ -13,14 +13,16 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
-    Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price,
-    relic_sell_price_live, relic_shop_price,
+    Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price_live,
+    relic_shop_price,
 };
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
-use crate::game::onboarding::OnboardingPhase;
+use crate::game::engine::{
+    GameEngine, ShopCommand, ShopCommandData, ShopReadModel, consumable_sell_price,
+};
 use crate::render::decal::{load_ui_font, measure_plaque_wrap};
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame, camera_facing_rotation,
@@ -52,8 +54,6 @@ enum ShopAction {
     UseConsumable(usize),
     /// Buy the tile pack at the given index in `pack_items`.
     BuyPack(usize),
-    #[allow(dead_code)]
-    Reroll,
     /// Swap an owned relic one slot to the left.
     MoveRelicLeft(usize),
     /// Swap an owned relic one slot to the right.
@@ -137,7 +137,7 @@ fn shop_action_for_hit(
     items: &[ShopItem],
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<ShopAction> {
     let n_for_sale = items.len();
     match hit {
@@ -152,19 +152,7 @@ fn shop_action_for_hit(
             if i < zodiac_items.len() {
                 Some(ShopAction::BuyZodiac(i))
             } else {
-                let oi = i - zodiac_items.len();
-                let mut count = 0usize;
-                let mut inv_idx = None;
-                for (idx, c) in run.consumables.items.iter().enumerate() {
-                    if matches!(c, Consumable::Zodiac(_)) {
-                        if count == oi {
-                            inv_idx = Some(idx);
-                            break;
-                        }
-                        count += 1;
-                    }
-                }
-                inv_idx.map(ShopAction::UseConsumable)
+                owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopAction::UseConsumable)
             }
         }
         ShopHit::Talisman(i) => {
@@ -187,22 +175,22 @@ fn focused_sell_action(
     n_for_sale_relics: usize,
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<ShopAction> {
     match focus? {
         ShopFocus::Relic(i) if i >= n_for_sale_relics => {
             let owned_idx = i - n_for_sale_relics;
-            if owned_idx < run.relics.active.len() {
+            if owned_idx < shop.owned_relics.len() {
                 Some(ShopAction::SellRelic(owned_idx))
             } else {
                 None
             }
         }
         ShopFocus::Ribbon(i) if i >= zodiac_items.len() => {
-            owned_ribbon_inventory_index(i, zodiac_items, run).map(ShopAction::SellConsumable)
+            owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopAction::SellConsumable)
         }
         ShopFocus::Talisman(i) if i >= talisman_items.len() => {
-            owned_talisman_inventory_index(i, talisman_items, run).map(ShopAction::SellConsumable)
+            owned_talisman_inventory_index(i, talisman_items, shop).map(ShopAction::SellConsumable)
         }
         _ => None,
     }
@@ -226,17 +214,32 @@ enum SoldRow {
 /// empty, focus falls back to the sell tray. Focus in other rows is
 /// left untouched so selling a ribbon doesn't yank the player off a
 /// relic they were looking at.
+/// Per-row counts needed to rebase focus after a sale: how many items
+/// of each kind are for sale this round, and how many remain owned
+/// after the sale completed.
+pub struct SellRowCounts {
+    pub n_for_sale_relics: usize,
+    pub n_for_sale_ribbons: usize,
+    pub n_for_sale_talismans: usize,
+    pub owned_relics_after: usize,
+    pub owned_ribbons_after: usize,
+    pub owned_talismans_after: usize,
+}
+
 fn focus_after_sell(
     focus: Option<ShopFocus>,
     row: SoldRow,
     sold_owned_idx: usize,
-    n_for_sale_relics: usize,
-    n_for_sale_ribbons: usize,
-    n_for_sale_talismans: usize,
-    owned_relics_after: usize,
-    owned_ribbons_after: usize,
-    owned_talismans_after: usize,
+    counts: SellRowCounts,
 ) -> Option<ShopFocus> {
+    let SellRowCounts {
+        n_for_sale_relics,
+        n_for_sale_ribbons,
+        n_for_sale_talismans,
+        owned_relics_after,
+        owned_ribbons_after,
+        owned_talismans_after,
+    } = counts;
     let rebase = |flat: usize, for_sale: usize, owned_after: usize| -> Option<usize> {
         if flat < for_sale {
             return Some(flat);
@@ -280,25 +283,22 @@ fn focus_after_sell(
 /// index of the item being sold, peeking `run` *before* the sell applies.
 /// Returns `None` for actions that aren't sells or whose target index is
 /// out of range.
-fn classify_sell(action: ShopAction, run: &crate::game::run::RunState) -> Option<(SoldRow, usize)> {
+fn classify_sell(action: ShopAction, shop: &ShopReadModel) -> Option<(SoldRow, usize)> {
     match action {
-        ShopAction::SellRelic(i) if i < run.relics.active.len() => Some((SoldRow::Relic, i)),
+        ShopAction::SellRelic(i) if i < shop.owned_relics.len() => Some((SoldRow::Relic, i)),
         ShopAction::SellConsumable(inv_idx) => {
-            let item = run.consumables.items.get(inv_idx).copied()?;
-            let (row, matcher): (SoldRow, fn(Consumable) -> bool) = match item {
-                Consumable::Zodiac(_) => (SoldRow::Ribbon, |c| matches!(c, Consumable::Zodiac(_))),
-                Consumable::Talisman(_) => {
-                    (SoldRow::Talisman, |c| matches!(c, Consumable::Talisman(_)))
-                }
-            };
-            let owned_idx = run
-                .consumables
-                .items
+            if let Some(owned_idx) = shop
+                .owned_zodiacs
                 .iter()
-                .take(inv_idx)
-                .filter(|&&c| matcher(c))
-                .count();
-            Some((row, owned_idx))
+                .position(|owned| owned.inventory_index == inv_idx)
+            {
+                Some((SoldRow::Ribbon, owned_idx))
+            } else {
+                shop.owned_talismans
+                    .iter()
+                    .position(|owned| owned.inventory_index == inv_idx)
+                    .map(|owned_idx| (SoldRow::Talisman, owned_idx))
+            }
         }
         _ => None,
     }
@@ -311,18 +311,18 @@ fn drag_source_from_hit(
     n_for_sale_relics: usize,
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<ShopDragSource> {
     match hit {
         ShopHit::Relic(i) if i >= n_for_sale_relics => {
             let owned_idx = i - n_for_sale_relics;
-            (owned_idx < run.relics.active.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
+            (owned_idx < shop.owned_relics.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
         }
         ShopHit::Ribbon(i) if i >= zodiac_items.len() => {
-            owned_ribbon_inventory_index(i, zodiac_items, run).map(ShopDragSource::OwnedConsumable)
+            owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopDragSource::OwnedConsumable)
         }
         ShopHit::Talisman(i) if i >= talisman_items.len() => {
-            owned_talisman_inventory_index(i, talisman_items, run)
+            owned_talisman_inventory_index(i, talisman_items, shop)
                 .map(ShopDragSource::OwnedConsumable)
         }
         _ => None,
@@ -336,18 +336,18 @@ fn drag_source_from_focus(
     n_for_sale_relics: usize,
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<ShopDragSource> {
     match focus? {
         ShopFocus::Relic(i) if i >= n_for_sale_relics => {
             let owned_idx = i - n_for_sale_relics;
-            (owned_idx < run.relics.active.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
+            (owned_idx < shop.owned_relics.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
         }
         ShopFocus::Ribbon(i) if i >= zodiac_items.len() => {
-            owned_ribbon_inventory_index(i, zodiac_items, run).map(ShopDragSource::OwnedConsumable)
+            owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopDragSource::OwnedConsumable)
         }
         ShopFocus::Talisman(i) if i >= talisman_items.len() => {
-            owned_talisman_inventory_index(i, talisman_items, run)
+            owned_talisman_inventory_index(i, talisman_items, shop)
                 .map(ShopDragSource::OwnedConsumable)
         }
         _ => None,
@@ -383,144 +383,54 @@ fn apply_shop_action(
     run: &mut crate::game::run::RunState,
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopActionResult {
+    let mut engine = GameEngine::new(run, bus);
     match action {
         ShopAction::BuyCard(idx) => {
             if idx < items.len() {
                 let item = &items[idx];
-                if !item.sold && run.gold >= item.price as i32 && !run.relics.is_full() {
-                    let price = item.price;
-                    let relic = item.relic;
-                    run.gold -= price as i32;
-                    run.relics.active.push(relic);
-                    bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::audio::SfxId::Purchase,
-                    ));
-                    bus.push(crate::game::event_bus::GameEvent::PlayRelicStinger(relic));
-                    // Initialize counters for stateful relics.
-                    match relic {
-                        RelicId::MeltingIce => {
-                            run.relic_counters.insert(RelicId::MeltingIce, 80);
-                        }
-                        RelicId::SilkThread => {
-                            run.relic_counters.insert(RelicId::SilkThread, 40);
-                        }
-                        RelicId::TeaCeremony => {
-                            run.relic_counters.insert(RelicId::TeaCeremony, 3);
-                        }
-                        _ => {}
-                    }
-                    run.recompute_capacities();
-                    items.remove(idx);
-                    // Tutorial milestone: celebrate the first shop purchase.
-                    if let Some(ref mut tut) = run.tutorial {
-                        if tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstShopBuy) {
-                            bus.push(crate::game::event_bus::GameEvent::TutorialMilestone(
-                                crate::game::tutorial::TutorialMilestone::FirstShopBuy,
-                            ));
-                        }
+                if !item.sold {
+                    let outcome = engine.dispatch_shop(ShopCommand::BuyRelic {
+                        relic: item.relic,
+                        price: item.price,
+                    });
+                    if outcome.rejection.is_none() {
+                        items.remove(idx);
                     }
                 }
             }
         }
         ShopAction::SellRelic(idx) => {
-            if idx < run.relics.active.len() {
-                let rid = run.relics.active[idx];
-                let mut refund = relic_sell_price(rid);
-                // Smoke Bomb: sell to skip the upcoming boss blind.
-                if rid == RelicId::SmokeBomb
-                    && run.upcoming_blind == crate::core::rules::BlindKind::Boss
-                {
-                    run.relics.active.remove(idx);
-                    // Skip boss — advance the ante without playing.
-                    run.ante += 1;
-                    run.base_target = (run.base_target as f32 * run.mode.target_scaling) as u32;
-                    run.upcoming_blind = crate::core::rules::BlindKind::Small;
-                    return ShopActionResult::None;
-                }
-                // Nest Egg: sell value grows by +2 per round held.
-                if rid == RelicId::NestEgg {
-                    let rounds = run
-                        .relic_counters
-                        .get(&RelicId::NestEgg)
-                        .copied()
-                        .unwrap_or(0);
-                    refund = refund.saturating_add(2 * rounds as u32);
-                }
-                // Phantom Relic: after 3 rounds, selling duplicates a
-                // random owned relic instead of giving gold.
-                if rid == RelicId::PhantomRelic {
-                    let rounds = run
-                        .relic_counters
-                        .get(&RelicId::PhantomRelic)
-                        .copied()
-                        .unwrap_or(0);
-                    run.relics.active.remove(idx);
-                    run.relic_counters.remove(&RelicId::PhantomRelic);
-                    if rounds >= 3 && !run.relics.is_full() {
-                        use rand::seq::IndexedRandom;
-                        let mut rng = rand::rng();
-                        if let Some(&dupe) = run.relics.active.choose(&mut rng) {
-                            run.relics.active.push(dupe);
-                        }
-                    } else {
-                        run.gold = run.gold.saturating_add(refund as i32);
-                    }
-                    return ShopActionResult::None;
-                }
-                // Ritual Blade: destroy the relic to the right and gain
-                // permanent mult equal to double its sell value.
-                if rid == RelicId::RitualBlade && idx + 1 < run.relics.active.len() {
-                    let victim_id = run.relics.active[idx + 1];
-                    let victim_value = relic_sell_price(victim_id) as i32;
-                    // Remove victim first (it's at idx+1), then blade (at idx).
-                    run.relics.active.remove(idx + 1);
-                    run.relics.active.remove(idx);
-                    // Store permanent mult as ×10 integer.
-                    *run.relic_counters.entry(RelicId::RitualBlade).or_insert(0) +=
-                        victim_value * 2 * 10;
-                    run.relic_activations.push(RelicId::RitualBlade);
-                    return ShopActionResult::None;
-                }
-                run.relics.active.remove(idx);
-                run.gold = run.gold.saturating_add(refund as i32);
-                bus.push(crate::game::event_bus::GameEvent::UiSound(
-                    crate::audio::SfxId::Sell,
-                ));
-                // Bonfire: track relic sales for mult bonus.
-                *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
-                if run.relics.has(RelicId::Bonfire) {
-                    run.relic_activations.push(RelicId::Bonfire);
-                }
-            }
+            let _ = engine.dispatch_shop(ShopCommand::SellRelic { index: idx });
         }
         ShopAction::MoveRelicLeft(idx) => {
-            if idx > 0 {
-                run.relics.swap_relics(idx, idx - 1);
-            }
+            let _ = engine.dispatch_shop(ShopCommand::MoveRelicLeft { index: idx });
         }
         ShopAction::MoveRelicRight(idx) => {
-            if idx + 1 < run.relics.active.len() {
-                run.relics.swap_relics(idx, idx + 1);
-            }
+            let _ = engine.dispatch_shop(ShopCommand::MoveRelicRight { index: idx });
         }
         ShopAction::BuyZodiac(idx) => {
             if idx < zodiac_items.len() {
                 let item = &zodiac_items[idx];
-                let price = item.price();
-                if !item.sold && run.gold >= price as i32 {
+                if !item.sold {
+                    let price = item.price();
                     if let Consumable::Zodiac(z) = item.consumable {
-                        run.gold -= price as i32;
-                        bus.push(crate::game::event_bus::GameEvent::UiSound(
-                            crate::audio::SfxId::Purchase,
-                        ));
-                        let yaku = z.yaku();
-                        let new_level = run.yaku_levels.level_up(yaku);
-                        zodiac_items.remove(idx);
-                        return ShopActionResult::ZodiacApplied {
-                            zodiac_kind: z,
-                            yaku_name: yaku.name(),
+                        let outcome =
+                            engine.dispatch_shop(ShopCommand::BuyZodiac { zodiac: z, price });
+                        if outcome.rejection.is_none() {
+                            zodiac_items.remove(idx);
+                        }
+                        if let ShopCommandData::ZodiacApplied {
+                            zodiac_kind,
+                            yaku_name,
                             new_level,
-                        };
+                        } = outcome.data
+                        {
+                            return ShopActionResult::ZodiacApplied {
+                                zodiac_kind,
+                                yaku_name,
+                                new_level,
+                            };
+                        }
                     }
                 }
             }
@@ -528,103 +438,62 @@ fn apply_shop_action(
         ShopAction::BuyTalisman(idx) => {
             if idx < talisman_items.len() {
                 let item = &talisman_items[idx];
-                let price = item.price();
-                if !item.sold && run.gold >= price as i32 && !run.consumables.is_full() {
-                    let consumable = item.consumable;
-                    run.gold -= price as i32;
-                    run.consumables.items.push(consumable);
-                    bus.push(crate::game::event_bus::GameEvent::UiSound(
-                        crate::audio::SfxId::Purchase,
-                    ));
-                    if let Consumable::Talisman(tk) = consumable {
-                        bus.push(crate::game::event_bus::GameEvent::TalismanPurchased(tk));
+                if !item.sold {
+                    let price = item.price();
+                    if let Consumable::Talisman(kind) = item.consumable {
+                        let outcome =
+                            engine.dispatch_shop(ShopCommand::BuyTalisman { kind, price });
+                        if outcome.rejection.is_none() {
+                            talisman_items.remove(idx);
+                        }
                     }
-                    talisman_items.remove(idx);
                 }
             }
         }
         ShopAction::SellConsumable(idx) => {
-            if idx < run.consumables.items.len() {
-                let c = run.consumables.items[idx];
-                let refund = consumable_sell_price(c);
-                run.consumables.items.remove(idx);
-                run.gold = run.gold.saturating_add(refund as i32);
-                bus.push(crate::game::event_bus::GameEvent::UiSound(
-                    crate::audio::SfxId::Sell,
-                ));
-            }
+            let _ = engine.dispatch_shop(ShopCommand::SellConsumable { index: idx });
         }
         ShopAction::UseConsumable(idx) => {
-            if idx < run.consumables.items.len() {
-                if let Consumable::Zodiac(z) = run.consumables.items[idx] {
-                    if let Some(crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level }) =
-                        run.use_consumable(idx, bus)
-                    {
-                        return ShopActionResult::ZodiacApplied {
-                            zodiac_kind: z,
-                            yaku_name: yaku.name(),
-                            new_level,
-                        };
-                    }
-                }
+            let outcome = engine.dispatch_shop(ShopCommand::UseConsumable { index: idx });
+            if let ShopCommandData::ZodiacApplied {
+                zodiac_kind,
+                yaku_name,
+                new_level,
+            } = outcome.data
+            {
+                return ShopActionResult::ZodiacApplied {
+                    zodiac_kind,
+                    yaku_name,
+                    new_level,
+                };
             }
         }
         ShopAction::BuyPack(pack_idx) => {
-            if let Some(pack) = pack_items.get_mut(pack_idx) {
-                if !pack.sold {
-                    let price = pack.kind.shop_price();
-                    if run.gold >= price as i32 {
-                        run.gold -= price as i32;
-                        // Generate the tiles that will enter the wall.
-                        use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE};
-                        let pack_idx = run.tile_packs.len();
-                        let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
-                        let mut tiles = pack.kind.generate_tiles(start_id);
-                        // Stamp pre-enhancements (e.g. Polychrome) before
-                        // pushing the pack so IDs are deterministic.
-                        if let Some(enh) = pack.kind.pre_enhancement() {
-                            for t in &mut tiles {
-                                run.tile_enhancements.insert(t.id, enh);
-                                t.enhancement = Some(enh);
-                            }
-                        }
-                        run.tile_packs.push(pack.kind);
-                        pack.sold = true;
-                        bus.push(crate::game::event_bus::GameEvent::PackBought);
-                        let kind = pack.kind;
-                        let name = pack.kind.name();
-                        return ShopActionResult::PackCelebration(PackCelebration::new(
-                            tiles, name, kind,
-                        ));
-                    }
+            if let Some(pack) = pack_items.get_mut(pack_idx)
+                && !pack.sold
+            {
+                let outcome = engine.dispatch_shop(ShopCommand::BuyPack {
+                    kind: pack.kind,
+                    price: pack.kind.shop_price(),
+                });
+                if outcome.rejection.is_none() {
+                    pack.sold = true;
+                }
+                if let ShopCommandData::PackBought {
+                    tiles,
+                    pack_name,
+                    pack_kind,
+                } = outcome.data
+                {
+                    return ShopActionResult::PackCelebration(PackCelebration::new(
+                        tiles, pack_name, pack_kind,
+                    ));
                 }
             }
             return ShopActionResult::None;
         }
-        // Reroll is handled directly in ShopScene::update() because it
-        // needs `&mut self` — this arm keeps the match exhaustive.
-        ShopAction::Reroll => {}
     }
     ShopActionResult::None
-}
-
-/// Refund when selling a consumable — half buy price, minimum 1 gold,
-/// matching the relic sell formula.
-fn consumable_sell_price(c: Consumable) -> u32 {
-    let buy = match c {
-        Consumable::Zodiac(_) => ZodiacKind::shop_price(),
-        Consumable::Talisman(t) => t.shop_price(),
-    };
-    (buy / 2).max(1)
-}
-
-fn owned_consumable_count(run: &crate::game::run::RunState, pred: fn(Consumable) -> bool) -> usize {
-    run.consumables
-        .items
-        .iter()
-        .copied()
-        .filter(|&c| pred(c))
-        .count()
 }
 
 fn live_shop_hit(
@@ -633,18 +502,12 @@ fn live_shop_hit(
     zodiac_items: &[ConsumableShopItem],
     talisman_items: &[ConsumableShopItem],
     pack_items: &[TilePackShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<ShopHit> {
     let valid = match hit {
-        ShopHit::Relic(i) => i < items.len() + run.relics.active.len(),
-        ShopHit::Ribbon(i) => {
-            i < zodiac_items.len()
-                + owned_consumable_count(run, |c| matches!(c, Consumable::Zodiac(_)))
-        }
-        ShopHit::Talisman(i) => {
-            i < talisman_items.len()
-                + owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)))
-        }
+        ShopHit::Relic(i) => i < items.len() + shop.owned_relics.len(),
+        ShopHit::Ribbon(i) => i < zodiac_items.len() + shop.owned_zodiacs.len(),
+        ShopHit::Talisman(i) => i < talisman_items.len() + shop.owned_talismans.len(),
         ShopHit::Dish(id) => {
             if matches!(id, PICK_COIN_DISH | PICK_JOURNAL_BOOK) {
                 true
@@ -664,43 +527,27 @@ fn live_shop_hit(
 fn owned_ribbon_inventory_index(
     ribbon_idx: usize,
     zodiac_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<usize> {
     if ribbon_idx < zodiac_items.len() {
         return None;
     }
     let oi = ribbon_idx - zodiac_items.len();
-    let mut count = 0usize;
-    for (idx, c) in run.consumables.items.iter().enumerate() {
-        if matches!(c, Consumable::Zodiac(_)) {
-            if count == oi {
-                return Some(idx);
-            }
-            count += 1;
-        }
-    }
-    None
+    shop.owned_zodiacs.get(oi).map(|item| item.inventory_index)
 }
 
 fn owned_talisman_inventory_index(
     talisman_idx: usize,
     talisman_items: &[ConsumableShopItem],
-    run: &crate::game::run::RunState,
+    shop: &ShopReadModel,
 ) -> Option<usize> {
     if talisman_idx < talisman_items.len() {
         return None;
     }
     let oi = talisman_idx - talisman_items.len();
-    let mut count = 0usize;
-    for (idx, c) in run.consumables.items.iter().enumerate() {
-        if matches!(c, Consumable::Talisman(_)) {
-            if count == oi {
-                return Some(idx);
-            }
-            count += 1;
-        }
-    }
-    None
+    shop.owned_talismans
+        .get(oi)
+        .map(|item| item.inventory_index)
 }
 
 /// A purchasable relic in the shop.
@@ -1126,9 +973,9 @@ fn generate_shop_stock(
         })
         .collect();
 
-    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().iter().copied().collect();
+    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
     zodiac_pool.shuffle(&mut rng);
-    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
+    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().to_vec();
     talisman_pool.shuffle(&mut rng);
     let zodiac_items: Vec<ConsumableShopItem> = zodiac_pool
         .into_iter()
@@ -1219,7 +1066,7 @@ impl ShopScene {
     }
 
     pub fn new_tutorial(run: &mut crate::game::run::RunState) -> Self {
-        Self::new_with_mode(run.run_number, run, ShopMode::Tutorial)
+        Self::new_with_mode(GameEngine::current_run_number(run), run, ShopMode::Tutorial)
     }
 
     fn new_with_mode(
@@ -1227,20 +1074,17 @@ impl ShopScene {
         run: &mut crate::game::run::RunState,
         mode: ShopMode,
     ) -> Self {
-        let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
-        let extra_relics = if run.tag_patron_gift {
-            extra_relics.max(1)
-        } else {
-            extra_relics
-        };
+        let shop = GameEngine::read_shop(run);
+        let extra_relics = GameEngine::shop_extra_relic_stock(run);
         let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
             tutorial_shop_stock()
         } else {
-            generate_shop_stock(&run.relics, &run.available_relics, extra_relics)
+            generate_shop_stock(&shop.relic_state, &shop.available_relics, extra_relics)
         };
 
         // PatronGift: zero out one random relic's price.
-        if mode == ShopMode::Standard && run.tag_patron_gift && !items.is_empty() {
+        if mode == ShopMode::Standard && GameEngine::shop_has_patron_gift(run) && !items.is_empty()
+        {
             use rand::prelude::IndexedMutRandom;
             let mut rng = rand::rng();
             if let Some(item) = items.choose_mut(&mut rng) {
@@ -1248,18 +1092,14 @@ impl ShopScene {
             }
         }
 
+        let consumed_tags = GameEngine::consume_shop_tags(run);
         let reroll_cost = if mode == ShopMode::Tutorial {
             u32::MAX
-        } else if run.tag_free_reroll {
+        } else if consumed_tags.free_reroll {
             0
         } else {
             REROLL_BASE_COST
         };
-
-        // Clear consumed tag flags.
-        run.tag_free_reroll = false;
-        run.tag_patron_gift = false;
-        run.tag_rich_stock = false;
 
         Self {
             came_from_round,
@@ -1295,10 +1135,7 @@ impl ShopScene {
 
     fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
         if self.mode == ShopMode::Tutorial {
-            if let Some(ref mut onboarding) = run.onboarding {
-                onboarding.phase = OnboardingPhase::Finale;
-            }
-            run.begin_onboarding_finale();
+            GameEngine::transition_to_onboarding_finale(run);
             Scene::Gameplay(super::gameplay::GameplayScene::with_pending_blind(
                 crate::core::rules::BlindKind::Boss,
             ))
@@ -1320,7 +1157,7 @@ impl ShopScene {
         cursor_pos: (f32, f32),
         overlay_request: &mut Option<super::OverlayRequest>,
     ) {
-        let classified = classify_sell(action, run);
+        let classified = classify_sell(action, &GameEngine::read_shop(run));
         let result = apply_shop_action(
             action,
             &mut self.items,
@@ -1332,21 +1169,22 @@ impl ShopScene {
         );
         self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
         if let Some((row, sold_owned_idx)) = classified {
-            let owned_relics_after = run.relics.active.len();
-            let owned_ribbons_after =
-                owned_consumable_count(run, |c| matches!(c, Consumable::Zodiac(_)));
-            let owned_talismans_after =
-                owned_consumable_count(run, |c| matches!(c, Consumable::Talisman(_)));
+            let shop = GameEngine::read_shop(run);
+            let owned_relics_after = shop.owned_relics.len();
+            let owned_ribbons_after = shop.owned_zodiacs.len();
+            let owned_talismans_after = shop.owned_talismans.len();
             self.focus = focus_after_sell(
                 self.focus,
                 row,
                 sold_owned_idx,
-                self.items.len(),
-                self.zodiac_items.len(),
-                self.talisman_items.len(),
-                owned_relics_after,
-                owned_ribbons_after,
-                owned_talismans_after,
+                SellRowCounts {
+                    n_for_sale_relics: self.items.len(),
+                    n_for_sale_ribbons: self.zodiac_items.len(),
+                    n_for_sale_talismans: self.talisman_items.len(),
+                    owned_relics_after,
+                    owned_ribbons_after,
+                    owned_talismans_after,
+                },
             );
         } else {
             self.focus = None;
@@ -1372,8 +1210,12 @@ impl ShopScene {
                 new_level,
             } => {
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
-                *overlay_request = Some(super::OverlayRequest::Push(Scene::ZodiacCelebration(
-                    super::ZodiacCelebrationScene::new(zodiac_kind, yaku_name, new_level),
+                *overlay_request = Some(super::OverlayRequest::Push(Box::new(
+                    Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
+                        zodiac_kind,
+                        yaku_name,
+                        new_level,
+                    )),
                 )));
             }
         }
@@ -1384,10 +1226,17 @@ impl ShopScene {
         if self.mode == ShopMode::Tutorial {
             return;
         }
-        run.gold -= self.reroll_cost as i32;
+        let mut bus = crate::game::event_bus::EventBus::default();
+        let outcome = GameEngine::new(run, &mut bus).dispatch_shop(ShopCommand::RerollShop {
+            cost: self.reroll_cost,
+        });
+        if outcome.rejection.is_some() {
+            return;
+        }
         self.reroll_cost += REROLL_COST_INCREMENT;
+        let shop = GameEngine::read_shop(run);
         let (items, zodiac_items, talisman_items, pack_items) =
-            generate_shop_stock(&run.relics, &run.available_relics, 0);
+            generate_shop_stock(&shop.relic_state, &shop.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -1397,8 +1246,9 @@ impl ShopScene {
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
+        let shop = GameEngine::read_shop(run);
         let (items, zodiac_items, talisman_items, pack_items) =
-            generate_shop_stock(&run.relics, &run.available_relics, 0);
+            generate_shop_stock(&shop.relic_state, &shop.available_relics, 0);
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -1408,20 +1258,11 @@ impl ShopScene {
 
     /// Debug-only: open a random tile pack celebration without purchasing.
     pub fn debug_open_pack(&mut self, run: &mut crate::game::run::RunState) {
-        use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE, TilePackKind};
+        use crate::core::tile_pack::TilePackKind;
         let mut rng = rand::rng();
         let all = TilePackKind::all();
         let kind = all[rand::RngExt::random_range(&mut rng, 0..all.len())];
-        let pack_idx = run.tile_packs.len();
-        let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
-        let mut tiles = kind.generate_tiles(start_id);
-        if let Some(enh) = kind.pre_enhancement() {
-            for t in &mut tiles {
-                run.tile_enhancements.insert(t.id, enh);
-                t.enhancement = Some(enh);
-            }
-        }
-        run.tile_packs.push(kind);
+        let tiles = GameEngine::debug_add_pack(run, kind);
         self.pack_celebration = Some(PackCelebration::new(tiles, kind.name(), kind));
     }
 }
@@ -1476,17 +1317,31 @@ impl ShopLayout {
     }
 }
 
+/// Per-category counts of for-sale and owned inventory used by
+/// `ShopLayout::build` to size the shop's columns.
+struct ShopInventoryCounts {
+    n_for_sale: usize,
+    n_for_sale_zodiacs: usize,
+    n_for_sale_talismans: usize,
+    n_owned_relics: usize,
+    n_owned_zodiacs: usize,
+    n_owned_talismans: usize,
+}
+
 impl ShopLayout {
     fn build(
         layout: &crate::ui::layout::LayoutResult,
         positions: &crate::ui::scene_layout::ShopPositions,
-        n_for_sale: usize,
-        n_for_sale_zodiacs: usize,
-        n_for_sale_talismans: usize,
-        n_owned_relics: usize,
-        n_owned_zodiacs: usize,
-        n_owned_talismans: usize,
+        counts: ShopInventoryCounts,
     ) -> Self {
+        let ShopInventoryCounts {
+            n_for_sale,
+            n_for_sale_zodiacs,
+            n_for_sale_talismans,
+            n_owned_relics,
+            n_owned_zodiacs,
+            n_owned_talismans,
+        } = counts;
         let w = layout.window_w;
         let h = layout.window_h;
 
@@ -1539,13 +1394,13 @@ impl ShopLayout {
         let mut niche_centers_px = [(0.0, 0.0, 0.0); KIOSK_RELIC_SLOTS];
         let n_niches = n_for_sale.min(KIOSK_RELIC_SLOTS);
         let relic_spread = positions.relic_spread_nx * w;
-        for i in 0..n_niches {
+        for (i, slot) in niche_centers_px.iter_mut().enumerate().take(n_niches) {
             let off = if n_niches <= 1 {
                 0.0
             } else {
                 (i as f32 - (n_niches as f32 - 1.0) * 0.5) * relic_spread
             };
-            niche_centers_px[i] = (col_px_x[0] + off, relic_pixel_y, relic_wz);
+            *slot = (col_px_x[0] + off, relic_pixel_y, relic_wz);
         }
 
         // Ribbons: hanging downward from anchor points at the counter edge.
@@ -1554,20 +1409,24 @@ impl ShopLayout {
         let ribbon_pin_wz = ribbon_wz + ribbon_length;
         let mut ribbon_anchors_px = [(0.0, 0.0, 0.0); 8];
         let n_ribbons = n_for_sale_zodiacs.min(8);
-        for i in 0..n_ribbons {
+        for (i, slot) in ribbon_anchors_px.iter_mut().enumerate().take(n_ribbons) {
             let off = (i as f32 - (n_ribbons as f32 - 1.0) * 0.5) * positions.ribbon_spread_nx * w;
-            ribbon_anchors_px[i] = (col_px_x[3] + off, ribbon_pixel_y, ribbon_pin_wz);
+            *slot = (col_px_x[3] + off, ribbon_pixel_y, ribbon_pin_wz);
         }
 
         // Talismans: standing upright after Rx(-90°) rotation.
         let talisman_wall_width = h * 0.072;
         let mut talisman_anchors_px = [(0.0, 0.0, 0.0); 4];
         let n_talisman_anchors = n_for_sale_talismans.min(4);
-        for i in 0..n_talisman_anchors {
+        for (i, slot) in talisman_anchors_px
+            .iter_mut()
+            .enumerate()
+            .take(n_talisman_anchors)
+        {
             let off = (i as f32 - (n_talisman_anchors as f32 - 1.0) * 0.5)
                 * positions.talisman_spread_nx
                 * w;
-            talisman_anchors_px[i] = (
+            *slot = (
                 col_px_x[2] + off,
                 talisman_pixel_y,
                 talisman_wz + talisman_wall_width,
@@ -1587,9 +1446,9 @@ impl ShopLayout {
         let pack_spacing = pack_width + pack_gap;
         let pack_z = pack_wz + layout.mm(10.0);
         let mut pack_centers_px = [(0.0, 0.0, 0.0); N_TILE_PACKS];
-        for i in 0..N_TILE_PACKS {
+        for (i, slot) in pack_centers_px.iter_mut().enumerate() {
             let off = (i as f32 - (N_TILE_PACKS as f32 - 1.0) * 0.5) * pack_spacing;
-            pack_centers_px[i] = (col_px_x[1] + off, pack_pixel_y, pack_z);
+            *slot = (col_px_x[1] + off, pack_pixel_y, pack_z);
         }
 
         // ── Bottom owned row ─────────────────────────────────────────────
@@ -1823,15 +1682,13 @@ fn coin_display_layout(
         // Lay bars in a single row; if more than fit side-by-side, stack
         // additional layers on top.
         let max_per_row = ((footprint_x * 2.0) / (big_he[0] * 2.5)).floor().max(1.0) as usize;
-        let mut bar_idx: usize = 0;
         // Big bars first, then mini bars.
-        let bar_specs: Vec<(usize, [f32; 3])> = std::iter::repeat((0, big_he))
-            .take(big_bars as usize)
-            .chain(std::iter::repeat((1, mini_he)).take(mini_bars as usize))
+        let bar_specs: Vec<(usize, [f32; 3])> = std::iter::repeat_n((0, big_he), big_bars as usize)
+            .chain(std::iter::repeat_n((1, mini_he), mini_bars as usize))
             .collect();
         for (spec_i, (_kind, he)) in bar_specs.iter().enumerate() {
-            let row = bar_idx / max_per_row;
-            let col = bar_idx % max_per_row;
+            let row = spec_i / max_per_row;
+            let col = spec_i % max_per_row;
             let cols_this_row = max_per_row.min(total_bars - row * max_per_row);
             let row_width = cols_this_row as f32 * he[0] * 2.5;
             let x_off = -row_width * 0.5 + he[0] * 1.25 + col as f32 * he[0] * 2.5;
@@ -1852,14 +1709,10 @@ fn coin_display_layout(
                     shadow_caster: true,
                     silhouette: false,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some("shop.shelf.coin_dish"),
             });
-            bar_idx += 1;
         }
     }
 
@@ -1904,9 +1757,6 @@ fn coin_display_layout(
                         shadow_caster: true,
                         silhouette: false,
                     },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: Some("shop.shelf.coin_dish"),
@@ -1919,11 +1769,10 @@ fn coin_display_layout(
     (bars, coins)
 }
 
-fn shop_plaque_lines(scene: &ShopScene, run: &crate::game::run::RunState) -> (String, String) {
+fn shop_plaque_lines(scene: &ShopScene, shop: &ShopReadModel) -> (String, String) {
     let top = format!(
         "Shop  ·  Round {}  ·  Gold {}g",
-        scene.came_from_round,
-        run.gold.max(0)
+        scene.came_from_round, shop.display_gold
     );
     (top, String::new())
 }
@@ -1938,6 +1787,7 @@ impl SceneBehavior for ShopScene {
     }
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
+        let shop = GameEngine::read_shop(ctx.run);
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -1950,7 +1800,8 @@ impl SceneBehavior for ShopScene {
         self.score_popups.update(now);
 
         // Drain finished zodiac celebration → spawn popup + particles.
-        if let Some((yaku_name, new_level)) = ctx.run.finished_zodiac_celebration.take() {
+        if let Some((yaku_name, new_level)) = GameEngine::take_finished_zodiac_celebration(ctx.run)
+        {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
             let label = format!("{yaku_name} Lvl.{new_level}");
@@ -1968,7 +1819,7 @@ impl SceneBehavior for ShopScene {
         }
 
         // Drain relic activations and evict expired glows.
-        for rid in ctx.run.relic_activations.drain(..) {
+        for rid in GameEngine::drain_relic_activations(ctx.run) {
             self.relic_glow_starts.insert(rid, now);
             ctx.bus
                 .push(crate::game::event_bus::GameEvent::RelicActivated(rid));
@@ -1989,9 +1840,9 @@ impl SceneBehavior for ShopScene {
             }
         }
         if open_guide {
-            *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::MeldGuide(
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(Scene::MeldGuide(
                 super::meld_guide::MeldGuideScene::new(true),
-            )));
+            ))));
             return None;
         }
 
@@ -2038,8 +1889,8 @@ impl SceneBehavior for ShopScene {
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
-                *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::MeldGuide(
-                    super::meld_guide::MeldGuideScene::new(true),
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
+                    Scene::MeldGuide(super::meld_guide::MeldGuideScene::new(true)),
                 )));
                 return None;
             }
@@ -2104,10 +1955,10 @@ impl SceneBehavior for ShopScene {
                     }
                     continue;
                 }
-                if let Some(rect) = current_focus_rect {
-                    if let Some(next) = pick_neighbor(rect, dir, &focus_rects) {
-                        self.focus = Some(next);
-                    }
+                if let Some(rect) = current_focus_rect
+                    && let Some(next) = pick_neighbor(rect, dir, &focus_rects)
+                {
+                    self.focus = Some(next);
                 }
                 continue;
             }
@@ -2132,7 +1983,7 @@ impl SceneBehavior for ShopScene {
                         }
                         Some(ShopFocus::Ribbon(i)) => {
                             if let Some(inv_idx) =
-                                owned_ribbon_inventory_index(i, &self.zodiac_items, ctx.run)
+                                owned_ribbon_inventory_index(i, &self.zodiac_items, &shop)
                             {
                                 self.apply_sell_action(
                                     ShopAction::SellConsumable(inv_idx),
@@ -2146,7 +1997,7 @@ impl SceneBehavior for ShopScene {
                         }
                         Some(ShopFocus::Talisman(i)) => {
                             if let Some(inv_idx) =
-                                owned_talisman_inventory_index(i, &self.talisman_items, ctx.run)
+                                owned_talisman_inventory_index(i, &self.talisman_items, &shop)
                             {
                                 self.apply_sell_action(
                                     ShopAction::SellConsumable(inv_idx),
@@ -2180,8 +2031,9 @@ impl SceneBehavior for ShopScene {
                             ctx.bus,
                         );
                         // Update focus to follow the moved relic.
+                        let shop = GameEngine::read_shop(ctx.run);
                         if matches!(a, UiAction::NavigateHudNext)
-                            && owned_idx + 1 < ctx.run.relics.active.len()
+                            && owned_idx + 1 < shop.owned_relics.len()
                         {
                             self.focus = Some(ShopFocus::Relic(n_for_sale + owned_idx + 1));
                         } else if matches!(a, UiAction::NavigateHudPrev) && owned_idx > 0 {
@@ -2203,17 +2055,17 @@ impl SceneBehavior for ShopScene {
             // action fires instead, since mouse drag is handled separately via
             // SHOP_DRAG_DROP_ID.
             if matches!(a, UiAction::Confirm) {
-                if ctx.input_mode != InputMode::Cursor {
-                    if let Some(src) = drag_source_from_focus(
+                if ctx.input_mode != InputMode::Cursor
+                    && let Some(src) = drag_source_from_focus(
                         self.focus,
                         self.items.len(),
                         &self.zodiac_items,
                         &self.talisman_items,
-                        ctx.run,
-                    ) {
-                        self.held_item_drag = Some(src);
-                        continue;
-                    }
+                        &shop,
+                    )
+                {
+                    self.held_item_drag = Some(src);
+                    continue;
                 }
                 if let Some(focus) = self.focus {
                     if matches!(focus, ShopFocus::NextRound) {
@@ -2221,7 +2073,7 @@ impl SceneBehavior for ShopScene {
                     }
                     if matches!(focus, ShopFocus::Reroll)
                         && self.mode == ShopMode::Standard
-                        && ctx.run.gold >= self.reroll_cost as i32
+                        && shop.gold >= self.reroll_cost as i32
                     {
                         self.reroll(ctx.run);
                         continue;
@@ -2232,7 +2084,7 @@ impl SceneBehavior for ShopScene {
                             &self.items,
                             &self.zodiac_items,
                             &self.talisman_items,
-                            ctx.run,
+                            &shop,
                         ) {
                             let result = apply_shop_action(
                                 action,
@@ -2250,9 +2102,9 @@ impl SceneBehavior for ShopScene {
                                 ctx.overlay_request,
                             );
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                            *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                            *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
                                 super::Scene::YakuJournal(super::YakuJournalScene::new()),
-                            ));
+                            )));
                             return None;
                         }
                     }
@@ -2262,16 +2114,16 @@ impl SceneBehavior for ShopScene {
             // ConfirmRelease: complete a controller/keyboard "hold to sell" drag
             // if the player released Confirm while the sell tray is focused.
             if matches!(a, UiAction::ConfirmRelease) {
-                if let Some(drag) = self.held_item_drag.take() {
-                    if matches!(self.focus, Some(ShopFocus::SellTray)) {
-                        self.apply_sell_action(
-                            drag.sell_action(),
-                            ctx.run,
-                            ctx.bus,
-                            ctx.cursor_pos,
-                            ctx.overlay_request,
-                        );
-                    }
+                if let Some(drag) = self.held_item_drag.take()
+                    && matches!(self.focus, Some(ShopFocus::SellTray))
+                {
+                    self.apply_sell_action(
+                        drag.sell_action(),
+                        ctx.run,
+                        ctx.bus,
+                        ctx.cursor_pos,
+                        ctx.overlay_request,
+                    );
                 }
                 continue;
             }
@@ -2293,7 +2145,7 @@ impl SceneBehavior for ShopScene {
             }
         }
         for &cid in ctx.button_clicks {
-            if cid >= SHOP_SELL_RELIC_BASE && cid < SHOP_SELL_RELIC_BASE + 64 {
+            if (SHOP_SELL_RELIC_BASE..SHOP_SELL_RELIC_BASE + 64).contains(&cid) {
                 let idx = (cid - SHOP_SELL_RELIC_BASE) as usize;
                 self.apply_sell_action(
                     ShopAction::SellRelic(idx),
@@ -2304,7 +2156,7 @@ impl SceneBehavior for ShopScene {
                 );
                 return None;
             }
-            if cid >= SHOP_SELL_CONSUMABLE_BASE && cid < SHOP_SELL_CONSUMABLE_BASE + 32 {
+            if (SHOP_SELL_CONSUMABLE_BASE..SHOP_SELL_CONSUMABLE_BASE + 32).contains(&cid) {
                 let idx = (cid - SHOP_SELL_CONSUMABLE_BASE) as usize;
                 self.apply_sell_action(
                     ShopAction::SellConsumable(idx),
@@ -2320,7 +2172,7 @@ impl SceneBehavior for ShopScene {
             }
             if cid == SHOP_REROLL_ID
                 && self.mode == ShopMode::Standard
-                && ctx.run.gold >= self.reroll_cost as i32
+                && shop.gold >= self.reroll_cost as i32
             {
                 self.reroll(ctx.run);
                 return None;
@@ -2356,9 +2208,9 @@ impl SceneBehavior for ShopScene {
             };
             // Journal book intercept.
             if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                *ctx.overlay_request = Some(super::OverlayRequest::Push(
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
                     super::Scene::YakuJournal(super::YakuJournalScene::new()),
-                ));
+                )));
                 return None;
             }
             // Leave prop — advance to next scene.
@@ -2367,7 +2219,7 @@ impl SceneBehavior for ShopScene {
             }
             // Reroll prop — restock shop if affordable.
             if matches!(hit, ShopHit::Dish(id) if id == PICK_REROLL_PROP) {
-                if self.mode == ShopMode::Standard && ctx.run.gold >= self.reroll_cost as i32 {
+                if self.mode == ShopMode::Standard && shop.gold >= self.reroll_cost as i32 {
                     self.reroll(ctx.run);
                 }
                 return None;
@@ -2381,7 +2233,7 @@ impl SceneBehavior for ShopScene {
                         self.items.len(),
                         &self.zodiac_items,
                         &self.talisman_items,
-                        ctx.run,
+                        &shop,
                     )
                 });
                 if let Some(action) = sell_action {
@@ -2404,7 +2256,7 @@ impl SceneBehavior for ShopScene {
                 self.items.len(),
                 &self.zodiac_items,
                 &self.talisman_items,
-                ctx.run,
+                &shop,
             );
             self.mouse_drag = drag_src;
             if let Some(action) = shop_action_for_hit(
@@ -2412,7 +2264,7 @@ impl SceneBehavior for ShopScene {
                 &self.items,
                 &self.zodiac_items,
                 &self.talisman_items,
-                ctx.run,
+                &shop,
             ) {
                 let result = apply_shop_action(
                     action,
@@ -2440,32 +2292,23 @@ impl SceneBehavior for ShopScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
+        let shop = GameEngine::read_shop(ctx.run);
         let n_for_sale_zodiacs = self.zodiac_items.len();
         let n_for_sale_talismans = self.talisman_items.len();
-        let n_owned_relics = ctx.run.relics.active.len();
-        let n_owned_zodiacs = ctx
-            .run
-            .consumables
-            .items
-            .iter()
-            .filter(|c| matches!(c, Consumable::Zodiac(_)))
-            .count();
-        let n_owned_talismans = ctx
-            .run
-            .consumables
-            .items
-            .iter()
-            .filter(|c| matches!(c, Consumable::Talisman(_)))
-            .count();
+        let n_owned_relics = shop.owned_relics.len();
+        let n_owned_zodiacs = shop.owned_zodiacs.len();
+        let n_owned_talismans = shop.owned_talismans.len();
         let layout = ShopLayout::build(
             ctx.layout,
             &self.positions,
-            self.items.len(),
-            n_for_sale_zodiacs,
-            n_for_sale_talismans,
-            n_owned_relics,
-            n_owned_zodiacs,
-            n_owned_talismans,
+            ShopInventoryCounts {
+                n_for_sale: self.items.len(),
+                n_for_sale_zodiacs,
+                n_for_sale_talismans,
+                n_owned_relics,
+                n_owned_zodiacs,
+                n_owned_talismans,
+            },
         );
 
         let mut frame = UiFrame::new();
@@ -2476,7 +2319,7 @@ impl SceneBehavior for ShopScene {
         frame.mountain_haze();
         frame.camera_override = Some(layout.camera);
 
-        let (plaque_top_text, plaque_bot_text) = shop_plaque_lines(self, ctx.run);
+        let (plaque_top_text, plaque_bot_text) = shop_plaque_lines(self, &shop);
 
         // ── Kiosk counter slab (thin wide dish — reads as a face-up surface) ─
         // center_pos is (pixel_x, pixel_y, lift_z); extents are (width_x, rim_z, depth_y).
@@ -2496,9 +2339,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -2521,9 +2361,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("shop.shelf.relic_dish"),
@@ -2544,9 +2381,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("shop.shelf.talisman_tray"),
@@ -2567,9 +2401,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("shop.shelf.ribbon_tray"),
@@ -2590,9 +2421,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -2627,9 +2455,6 @@ impl SceneBehavior for ShopScene {
                         kind: pack.kind,
                         pick_id: Some(PICK_TILE_PACK_BASE + i as u32),
                     },
-                    focusable: true,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
@@ -2668,16 +2493,13 @@ impl SceneBehavior for ShopScene {
                     silhouette: false,
                     pick_id: None,
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
             });
         }
         let owned_base = layout.relic_dish_extents[0] * 0.15;
-        for (i, &rid) in ctx.run.relics.active.iter().enumerate() {
+        for (i, &rid) in shop.owned_relics.iter().enumerate() {
             let (px, py, wy) = layout.owned_relic_pos(i);
             let rarity = all_relic_defs()
                 .iter()
@@ -2718,9 +2540,6 @@ impl SceneBehavior for ShopScene {
                     silhouette: false,
                     pick_id: None,
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -2759,9 +2578,6 @@ impl SceneBehavior for ShopScene {
                         None
                     },
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -2789,9 +2605,6 @@ impl SceneBehavior for ShopScene {
                     rotation: rot_rz_ry_rx_deg(-90.0, 0.0, 0.0),
                     color: col,
                     kind: Object3dKind::Talisman { kind: tk },
-                    focusable: true,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
@@ -2800,46 +2613,36 @@ impl SceneBehavior for ShopScene {
         }
 
         // Owned consumables.
-        let mut z_ord = 0usize;
-        let mut t_ord = 0usize;
-        for c in ctx.run.consumables.items.iter() {
-            match c {
-                Consumable::Zodiac(z) => {
-                    let (ax, ay, awy) = layout.owned_ribbon_pos(z_ord);
-                    z_ord += 1;
-                    let w = layout.consumable_width;
-                    consumable_objects.push(Object3d {
-                        pos: [ax, ay, awy],
-                        extents: [w, layout.consumable_length, w * 0.15],
-                        rotation: rot_rz_ry_rx_deg(-90.0, 0.0, 0.0),
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::ZodiacRibbon { kind: Some(*z) },
-                        focusable: true,
-                        scene_shaded: true,
-                        own_light: None,
-                        hover_target: 0.0,
-                        anim_id: 0,
-                        arrange_name: None,
-                    });
-                }
-                Consumable::Talisman(tk) => {
-                    let (ax, ay, awy) = layout.owned_talisman_pos(t_ord);
-                    t_ord += 1;
-                    let w = layout.consumable_width;
-                    consumable_objects.push(Object3d {
-                        pos: [ax, ay, awy - layout.consumable_length * 0.4],
-                        extents: [w * 1.4, w * 2.0, w * 0.35],
-                        rotation: rot_rz_ry_rx_deg(-90.0, 0.0, 0.0),
-                        color: consumable_color(*c),
-                        kind: Object3dKind::Talisman { kind: *tk },
-                        focusable: true,
-                        scene_shaded: true,
-                        own_light: None,
-                        hover_target: 0.0,
-                        anim_id: 0,
-                        arrange_name: Some("shop.shelf.owned_talismans"),
-                    });
-                }
+        for (z_ord, owned) in shop.owned_zodiacs.iter().enumerate() {
+            if let Consumable::Zodiac(z) = owned.consumable {
+                let (ax, ay, awy) = layout.owned_ribbon_pos(z_ord);
+                let w = layout.consumable_width;
+                consumable_objects.push(Object3d {
+                    pos: [ax, ay, awy],
+                    extents: [w, layout.consumable_length, w * 0.15],
+                    rotation: rot_rz_ry_rx_deg(-90.0, 0.0, 0.0),
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::ZodiacRibbon { kind: Some(z) },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: None,
+                });
+            }
+        }
+        for (t_ord, owned) in shop.owned_talismans.iter().enumerate() {
+            if let Consumable::Talisman(tk) = owned.consumable {
+                let (ax, ay, awy) = layout.owned_talisman_pos(t_ord);
+                let w = layout.consumable_width;
+                consumable_objects.push(Object3d {
+                    pos: [ax, ay, awy - layout.consumable_length * 0.4],
+                    extents: [w * 1.4, w * 2.0, w * 0.35],
+                    rotation: rot_rz_ry_rx_deg(-90.0, 0.0, 0.0),
+                    color: consumable_color(owned.consumable),
+                    kind: Object3dKind::Talisman { kind: tk },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: Some("shop.shelf.owned_talismans"),
+                });
             }
         }
 
@@ -2849,7 +2652,7 @@ impl SceneBehavior for ShopScene {
 
         // ── Gold display: bars + coin strings inside the coin dish ─────
         let (bars, coins) = coin_display_layout(
-            ctx.run.gold.max(0) as u32,
+            shop.display_gold,
             layout.coin_dish_center_px,
             layout.coin_dish_extents,
             self.age_secs,
@@ -2892,9 +2695,6 @@ impl SceneBehavior for ShopScene {
             rotation: glam::Mat4::IDENTITY,
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::ShopLamp { glow: lamp_flicker },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -3016,9 +2816,6 @@ impl SceneBehavior for ShopScene {
                         live_wing_alpha,
                         blur_alpha,
                     },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
@@ -3217,12 +3014,12 @@ impl SceneBehavior for ShopScene {
                     &self.zodiac_items,
                     &self.talisman_items,
                     &self.pack_items,
-                    ctx.run,
+                    &shop,
                 )
             });
         // Pre-compute action prop state (needed for hover_info and 3D chrome rendering).
         let reroll_affordable =
-            self.mode == ShopMode::Standard && ctx.run.gold >= self.reroll_cost as i32;
+            self.mode == ShopMode::Standard && shop.gold >= self.reroll_cost as i32;
         // Pre-compute hover item info for both the 3D plaque and the 2D description overlay.
         let n_for_sale_relics_hud = self.items.len().min(layout.niche_count);
         let hover_info: Option<(String, String, String, [f32; 4])> = hover.map(|hit| {
@@ -3231,16 +3028,15 @@ impl SceneBehavior for ShopScene {
             match hit {
                 ShopHit::Relic(i) if i < n_for_sale_relics_hud => {
                     let item = &self.items[i];
-                    let can_afford = ctx.run.gold >= item.price as i32
-                        && !ctx.run.relics.is_full()
-                        && !item.sold;
+                    let can_afford =
+                        shop.gold >= item.price as i32 && !shop.relics_full && !item.sold;
                     let cta = if item.sold {
                         "SOLD".to_string()
                     } else if !can_afford {
-                        if ctx.run.relics.is_full() {
+                        if shop.relics_full {
                             "Relics full".to_string()
                         } else {
-                            format!("${} (have {}g)", item.price, ctx.run.gold.max(0))
+                            format!("${} (have {}g)", item.price, shop.display_gold)
                         }
                     } else {
                         item.buy_label()
@@ -3261,8 +3057,8 @@ impl SceneBehavior for ShopScene {
                 }
                 ShopHit::Relic(i) => {
                     let oi = i - n_for_sale_relics_hud;
-                    if oi < ctx.run.relics.active.len() {
-                        let rid = ctx.run.relics.active[oi];
+                    if oi < shop.owned_relics.len() {
+                        let rid = shop.owned_relics[oi];
                         let defs = all_relic_defs();
                         let def = defs.iter().find(|d| d.id == rid);
                         let name = def
@@ -3270,10 +3066,10 @@ impl SceneBehavior for ShopScene {
                             .unwrap_or_else(|| "Relic".into());
                         let desc = relic_description_live(
                             rid,
-                            &ctx.run.relic_counters,
-                            ctx.run.total_score_earned,
+                            &shop.relic_counters,
+                            shop.total_score_earned,
                         );
-                        let sell = relic_sell_price_live(rid, &ctx.run.relic_counters);
+                        let sell = relic_sell_price_live(rid, &shop.relic_counters);
                         (name, desc, format!("Sell {}g", sell), color::CHAMPAGNE)
                     } else {
                         (String::new(), String::new(), String::new(), color::SLATE)
@@ -3282,11 +3078,11 @@ impl SceneBehavior for ShopScene {
                 ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
                     let item = &self.zodiac_items[i];
                     let price = item.price();
-                    let can_afford = ctx.run.gold >= price as i32 && !item.sold;
+                    let can_afford = shop.gold >= price as i32 && !item.sold;
                     let cta = if item.sold {
                         "SOLD".to_string()
                     } else if !can_afford {
-                        format!("${} (have {}g)", price, ctx.run.gold.max(0))
+                        format!("${} (have {}g)", price, shop.display_gold)
                     } else if price == 0 {
                         "FREE".to_string()
                     } else {
@@ -3303,18 +3099,7 @@ impl SceneBehavior for ShopScene {
                 }
                 ShopHit::Ribbon(i) => {
                     let oi = i - n_for_sale_zodiacs;
-                    let mut owned_count = 0usize;
-                    let mut found = None;
-                    for c in ctx.run.consumables.items.iter() {
-                        if matches!(c, Consumable::Zodiac(_)) {
-                            if owned_count == oi {
-                                found = Some(*c);
-                                break;
-                            }
-                            owned_count += 1;
-                        }
-                    }
-                    if let Some(c) = found {
+                    if let Some(c) = shop.owned_zodiacs.get(oi).map(|item| item.consumable) {
                         let item = ConsumableShopItem {
                             consumable: c,
                             sold: false,
@@ -3332,16 +3117,15 @@ impl SceneBehavior for ShopScene {
                 ShopHit::Talisman(i) if i < n_for_sale_talismans => {
                     let item = &self.talisman_items[i];
                     let price = item.price();
-                    let can_afford = ctx.run.gold >= price as i32
-                        && !ctx.run.consumables.is_full()
-                        && !item.sold;
+                    let can_afford =
+                        shop.gold >= price as i32 && !shop.consumables_full && !item.sold;
                     let cta = if item.sold {
                         "SOLD".to_string()
                     } else if !can_afford {
-                        if ctx.run.consumables.is_full() {
+                        if shop.consumables_full {
                             "Inventory full".to_string()
                         } else {
-                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
+                            format!("${} (have {}g)", price, shop.display_gold)
                         }
                     } else if price == 0 {
                         "FREE".to_string()
@@ -3359,18 +3143,7 @@ impl SceneBehavior for ShopScene {
                 }
                 ShopHit::Talisman(i) => {
                     let oi = i - n_for_sale_talismans;
-                    let mut owned_count = 0usize;
-                    let mut found = None;
-                    for c in ctx.run.consumables.items.iter() {
-                        if matches!(c, Consumable::Talisman(_)) {
-                            if owned_count == oi {
-                                found = Some(*c);
-                                break;
-                            }
-                            owned_count += 1;
-                        }
-                    }
-                    if let Some(c) = found {
+                    if let Some(c) = shop.owned_talismans.get(oi).map(|item| item.consumable) {
                         let item = ConsumableShopItem {
                             consumable: c,
                             sold: false,
@@ -3388,7 +3161,7 @@ impl SceneBehavior for ShopScene {
                 ShopHit::Dish(id) if id == PICK_COIN_DISH => (
                     "Gold".to_string(),
                     "Your current treasure".to_string(),
-                    format!("{}g", ctx.run.gold),
+                    format!("{}g", shop.gold),
                     color::GOLD,
                 ),
                 ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK => (
@@ -3414,7 +3187,7 @@ impl SceneBehavior for ShopScene {
                     if reroll_affordable {
                         format!("{}g", self.reroll_cost)
                     } else {
-                        format!("${} (have {}g)", self.reroll_cost, ctx.run.gold.max(0))
+                        format!("${} (have {}g)", self.reroll_cost, shop.display_gold)
                     },
                     if reroll_affordable {
                         color::GOLD
@@ -3432,7 +3205,7 @@ impl SceneBehavior for ShopScene {
                     let idx = tile_pack_index_from_pick(id).unwrap_or(0);
                     if let Some(pack) = self.pack_items.get(idx) {
                         let price = pack.kind.shop_price();
-                        let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
+                        let can_afford = shop.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
                             "SOLD".to_string()
                         } else if price == 0 {
@@ -3440,7 +3213,7 @@ impl SceneBehavior for ShopScene {
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
-                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
+                            format!("${} (have {}g)", price, shop.display_gold)
                         };
                         (
                             pack.kind.name().to_string(),
@@ -3462,7 +3235,7 @@ impl SceneBehavior for ShopScene {
                     let idx = tile_pack_index_from_pick(id).unwrap_or(0);
                     if let Some(pack) = self.pack_items.get(idx) {
                         let price = pack.kind.shop_price();
-                        let can_afford = ctx.run.gold >= price as i32 && !pack.sold;
+                        let can_afford = shop.gold >= price as i32 && !pack.sold;
                         let cta = if pack.sold {
                             "SOLD".to_string()
                         } else if price == 0 {
@@ -3470,7 +3243,7 @@ impl SceneBehavior for ShopScene {
                         } else if can_afford {
                             format!("Buy {}g", price)
                         } else {
-                            format!("${} (have {}g)", price, ctx.run.gold.max(0))
+                            format!("${} (have {}g)", price, shop.display_gold)
                         };
                         let col = if pack.sold {
                             color::SLATE
@@ -3507,14 +3280,8 @@ impl SceneBehavior for ShopScene {
                     return None;
                 }
                 let owned_target = hit_idx - n_for_sale;
-                let mut zi = 0usize;
-                for c in ctx.run.consumables.items.iter() {
-                    if let Consumable::Zodiac(_) = c {
-                        if zi == owned_target {
-                            return Some(layout.owned_ribbon_pos(zi));
-                        }
-                        zi += 1;
-                    }
+                if owned_target < shop.owned_zodiacs.len() {
+                    return Some(layout.owned_ribbon_pos(owned_target));
                 }
                 None
             };
@@ -3527,14 +3294,8 @@ impl SceneBehavior for ShopScene {
                     return None;
                 }
                 let owned_target = hit_idx - n_for_sale;
-                let mut ti = 0usize;
-                for c in ctx.run.consumables.items.iter() {
-                    if let Consumable::Talisman(_) = c {
-                        if ti == owned_target {
-                            return Some(layout.owned_talisman_pos(ti));
-                        }
-                        ti += 1;
-                    }
+                if owned_target < shop.owned_talismans.len() {
+                    return Some(layout.owned_talisman_pos(owned_target));
                 }
                 None
             };
@@ -3731,7 +3492,6 @@ impl SceneBehavior for ShopScene {
                         text: format!("{}\n{}", plaque_top_text, plaque_bot_text),
                         palette: crate::render::primitive::DecalPalette::ParchmentInk,
                         layout: crate::render::primitive::DecalLayout::TitleRule {
-                            title_height_frac: 0.40,
                             target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                         },
                     },
@@ -3740,9 +3500,6 @@ impl SceneBehavior for ShopScene {
                 shadow_caster: false,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("shop.props.ofuda"),
@@ -3762,18 +3519,12 @@ impl SceneBehavior for ShopScene {
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::BeveledSlab,
                 material: crate::render::primitive::MaterialSpec::lacquered_wood_flat().with_decal(
-                    crate::render::primitive::plaque_decal(format!(
-                        "Gold\n{}g",
-                        ctx.run.gold.max(0)
-                    )),
+                    crate::render::primitive::plaque_decal(format!("Gold\n{}g", shop.display_gold)),
                 ),
                 pick_id: None,
                 shadow_caster: false,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0xAC10,
             arrange_name: Some("shop.shelf.coin_dish"),
@@ -3793,187 +3544,140 @@ impl SceneBehavior for ShopScene {
             Some(ShopHit::Talisman(i)) => i >= self.talisman_items.len(),
             _ => false,
         };
-        if let Some((ref title, ref desc, ref cta, cta_color)) = hover_info {
-            if !title.is_empty() {
-                if let Some((tpx, tpy, twz)) = hover_item_pos {
-                    let plaque_rot =
-                        glam::Mat4::from_rotation_x((-80.0_f32).to_radians()) * cam_rot;
-                    let plaque_z = layout.mm(4.0);
+        if let Some((ref title, ref desc, ref cta, _)) = hover_info
+            && !title.is_empty()
+            && let Some((tpx, tpy, twz)) = hover_item_pos
+        {
+            let plaque_rot = glam::Mat4::from_rotation_x((-80.0_f32).to_radians()) * cam_rot;
+            let plaque_z = layout.mm(4.0);
 
-                    // Clamp a plaque's pixel-X so its full width stays inside
-                    // the camera frustum at the plaque's world depth. Without
-                    // this, plaques anchored to edge items (far-left relics or
-                    // far-right ribbons) slide past the screen edge.
-                    let clamp_plaque_px =
-                        |center_px: f32, plaque_w: f32, py: f32, wz: f32| -> f32 {
-                            let world_y = h * 0.5 - py;
-                            let (fw_min, fw_max) =
-                                layout.camera.frustum_x_range_at(w, h, world_y, wz);
-                            let px_min = (fw_min + w * 0.5).max(0.0);
-                            let px_max = (fw_max + w * 0.5).min(w);
-                            let margin = w * 0.01;
-                            let lo = px_min + plaque_w * 0.5 + margin;
-                            let hi = px_max - plaque_w * 0.5 - margin;
-                            if hi <= lo {
-                                (px_min + px_max) * 0.5
-                            } else {
-                                center_px.clamp(lo, hi)
-                            }
-                        };
+            // Clamp a plaque's pixel-X so its full width stays inside
+            // the camera frustum at the plaque's world depth. Without
+            // this, plaques anchored to edge items (far-left relics or
+            // far-right ribbons) slide past the screen edge.
+            let clamp_plaque_px = |center_px: f32, plaque_w: f32, py: f32, wz: f32| -> f32 {
+                let world_y = h * 0.5 - py;
+                let (fw_min, fw_max) = layout.camera.frustum_x_range_at(w, h, world_y, wz);
+                let px_min = (fw_min + w * 0.5).max(0.0);
+                let px_max = (fw_max + w * 0.5).min(w);
+                let margin = w * 0.01;
+                let lo = px_min + plaque_w * 0.5 + margin;
+                let hi = px_max - plaque_w * 0.5 - margin;
+                if hi <= lo {
+                    (px_min + px_max) * 0.5
+                } else {
+                    center_px.clamp(lo, hi)
+                }
+            };
 
-                    if hover_is_owned {
-                        // Combined owned-item plaque: title / sell price /
-                        // description, stacked on one sign. Width sized like
-                        // the description plaque so long relic descriptions
-                        // don't shrink against the font clamp; height sized
-                        // to wrapped content.
-                        let owned_p = &self.positions.hover_owned_plaque;
-                        let plaque_w = w * 0.38;
-                        let text = if desc.is_empty() {
-                            format!("{}\n{}", title, cta)
-                        } else {
-                            format!("{}\n{}\n{}", title, cta, desc)
-                        };
-                        let font_px = (h * 0.022).max(14.0);
-                        let pad_frac = 0.1;
-                        let inner_w = plaque_w * (1.0 - 2.0 * pad_frac);
-                        let (line_count, line_h) =
-                            measure_plaque_wrap(load_ui_font().as_ref(), &text, inner_w, font_px);
-                        let content_h = line_count as f32 * line_h;
-                        let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
+            if hover_is_owned {
+                // Combined owned-item plaque: title / sell price /
+                // description, stacked on one sign. Width sized like
+                // the description plaque so long relic descriptions
+                // don't shrink against the font clamp; height sized
+                // to wrapped content.
+                let owned_p = &self.positions.hover_owned_plaque;
+                let plaque_w = w * 0.38;
+                let text = if desc.is_empty() {
+                    format!("{}\n{}", title, cta)
+                } else {
+                    format!("{}\n{}\n{}", title, cta, desc)
+                };
+                let font_px = (h * 0.022).max(14.0);
+                let pad_frac = 0.1;
+                let inner_w = plaque_w * (1.0 - 2.0 * pad_frac);
+                let (line_count, line_h) =
+                    measure_plaque_wrap(load_ui_font().as_ref(), &text, inner_w, font_px);
+                let content_h = line_count as f32 * line_h;
+                let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
 
-                        let py = tpy + owned_p.ny * h;
-                        let wz = (twz + h * 0.05 + layout.mm(owned_p.lift_mm)).max(0.0);
-                        let px = clamp_plaque_px(tpx + owned_p.nx * w, plaque_w, py, wz);
-                        frame.object3d(Object3d {
-                            pos: [px, py, wz],
-                            extents: [plaque_w, plaque_h, plaque_z],
-                            rotation: plaque_rot,
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::Primitive {
-                                shape: crate::render::primitive::MeshId::BeveledSlab,
-                                material:
-                                    crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                                        .with_decal(crate::render::primitive::plaque_decal(text)),
-                                pick_id: None,
-                                shadow_caster: false,
-                                silhouette: false,
-                            },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: Some(PointLight {
-                                pos: [px, py, wz + layout.mm(25.0)],
-                                radius: h * 0.30,
-                                color: [
-                                    cta_color[0].clamp(0.0, 1.0),
-                                    cta_color[1].clamp(0.0, 1.0),
-                                    cta_color[2].clamp(0.0, 1.0),
-                                ],
-                                intensity: 1.2,
-                            }),
-                            hover_target: 0.0,
-                            anim_id: 0xAC0E,
-                            arrange_name: Some("shop.hover.owned_plaque"),
-                        });
-                    } else {
-                        let plaque_w = w * 0.22;
-                        let plaque_h = h * 0.12;
+                let py = tpy + owned_p.ny * h;
+                let wz = (twz + h * 0.05 + layout.mm(owned_p.lift_mm)).max(0.0);
+                let px = clamp_plaque_px(tpx + owned_p.nx * w, plaque_w, py, wz);
+                frame.object3d(Object3d {
+                    pos: [px, py, wz],
+                    extents: [plaque_w, plaque_h, plaque_z],
+                    rotation: plaque_rot,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::Primitive {
+                        shape: crate::render::primitive::MeshId::BeveledSlab,
+                        material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                            .with_decal(crate::render::primitive::plaque_decal(text)),
+                        pick_id: None,
+                        shadow_caster: false,
+                        silhouette: false,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0xAC0E,
+                    arrange_name: Some("shop.hover.owned_plaque"),
+                });
+            } else {
+                let plaque_w = w * 0.22;
+                let plaque_h = h * 0.12;
 
-                        // Title plaque: anchored to the top face of the
-                        // item's AABB, floated up in screen-space and pulled
-                        // forward toward the camera. Arrange-mode placement
-                        // contributes additive deltas.
-                        let title_p = &self.positions.hover_title_plaque;
-                        let title_py = tpy - h * 0.28 + title_p.ny * h;
-                        let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
-                        let title_px =
-                            clamp_plaque_px(tpx + title_p.nx * w, plaque_w, title_py, title_wz);
-                        frame.object3d(Object3d {
-                            pos: [title_px, title_py, title_wz],
-                            extents: [plaque_w, plaque_h, plaque_z],
-                            rotation: plaque_rot,
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::Primitive {
-                                shape: crate::render::primitive::MeshId::BeveledSlab,
-                                material:
-                                    crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                                        .with_decal(crate::render::primitive::plaque_decal(
-                                            format!("{}\n{}", title, cta),
-                                        )),
-                                pick_id: None,
-                                shadow_caster: false,
-                                silhouette: false,
-                            },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: Some(PointLight {
-                                pos: [title_px, title_py, title_wz + layout.mm(25.0)],
-                                radius: h * 0.30,
-                                color: [
-                                    cta_color[0].clamp(0.0, 1.0),
-                                    cta_color[1].clamp(0.0, 1.0),
-                                    cta_color[2].clamp(0.0, 1.0),
-                                ],
-                                intensity: 1.2,
-                            }),
-                            hover_target: 0.0,
-                            anim_id: 0xAC00,
-                            arrange_name: Some("shop.hover.title_plaque"),
-                        });
+                // Title plaque: anchored to the top face of the
+                // item's AABB, floated up in screen-space and pulled
+                // forward toward the camera. Arrange-mode placement
+                // contributes additive deltas.
+                let title_p = &self.positions.hover_title_plaque;
+                let title_py = tpy - h * 0.28 + title_p.ny * h;
+                let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
+                let title_px = clamp_plaque_px(tpx + title_p.nx * w, plaque_w, title_py, title_wz);
+                frame.object3d(Object3d {
+                    pos: [title_px, title_py, title_wz],
+                    extents: [plaque_w, plaque_h, plaque_z],
+                    rotation: plaque_rot,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::Primitive {
+                        shape: crate::render::primitive::MeshId::BeveledSlab,
+                        material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                            .with_decal(crate::render::primitive::plaque_decal(format!(
+                                "{}\n{}",
+                                title, cta
+                            ))),
+                        pick_id: None,
+                        shadow_caster: false,
+                        silhouette: false,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0xAC00,
+                    arrange_name: Some("shop.hover.title_plaque"),
+                });
 
-                        // Description plaque: anchored below the item so the
-                        // player can read what the focused relic/ribbon/
-                        // talisman actually does.
-                        if !desc.is_empty() {
-                            let desc_p = &self.positions.hover_desc_plaque;
-                            // Wider + shorter than the title plaque.
-                            let desc_w = w * 0.38;
-                            let font_px = (h * 0.022).max(14.0);
-                            let pad_frac = 0.1;
-                            let inner_w = desc_w * (1.0 - 2.0 * pad_frac);
-                            let (line_count, line_h) = measure_plaque_wrap(
-                                load_ui_font().as_ref(),
-                                desc,
-                                inner_w,
-                                font_px,
-                            );
-                            let content_h = line_count as f32 * line_h;
-                            let desc_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.08);
-                            let desc_py = tpy + h * 0.10 + desc_p.ny * h;
-                            let desc_wz = (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
-                            let desc_px =
-                                clamp_plaque_px(tpx + desc_p.nx * w, desc_w, desc_py, desc_wz);
-                            frame.object3d(Object3d {
-                                pos: [desc_px, desc_py, desc_wz],
-                                extents: [desc_w, desc_h, plaque_z],
-                                rotation: plaque_rot,
-                                color: [1.0, 1.0, 1.0, 1.0],
-                                kind: Object3dKind::Primitive {
-                                    shape: crate::render::primitive::MeshId::BeveledSlab,
-                                    material:
-                                        crate::render::primitive::MaterialSpec::lacquered_wood_flat(
-                                        )
-                                        .with_decal(
-                                            crate::render::primitive::plaque_decal(desc.clone()),
-                                        ),
-                                    pick_id: None,
-                                    shadow_caster: false,
-                                    silhouette: false,
-                                },
-                                focusable: false,
-                                scene_shaded: true,
-                                own_light: Some(PointLight {
-                                    pos: [desc_px, desc_py, desc_wz + layout.mm(25.0)],
-                                    radius: h * 0.30,
-                                    color: [0.95, 0.90, 0.75],
-                                    intensity: 1.0,
-                                }),
-                                hover_target: 0.0,
-                                anim_id: 0xAC0D,
-                                arrange_name: Some("shop.hover.desc_plaque"),
-                            });
-                        }
-                    }
+                // Description plaque: anchored below the item so the
+                // player can read what the focused relic/ribbon/
+                // talisman actually does.
+                if !desc.is_empty() {
+                    let desc_p = &self.positions.hover_desc_plaque;
+                    // Wider + shorter than the title plaque.
+                    let desc_w = w * 0.38;
+                    let font_px = (h * 0.022).max(14.0);
+                    let pad_frac = 0.1;
+                    let inner_w = desc_w * (1.0 - 2.0 * pad_frac);
+                    let (line_count, line_h) =
+                        measure_plaque_wrap(load_ui_font().as_ref(), desc, inner_w, font_px);
+                    let content_h = line_count as f32 * line_h;
+                    let desc_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.08);
+                    let desc_py = tpy + h * 0.10 + desc_p.ny * h;
+                    let desc_wz = (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
+                    let desc_px = clamp_plaque_px(tpx + desc_p.nx * w, desc_w, desc_py, desc_wz);
+                    frame.object3d(Object3d {
+                        pos: [desc_px, desc_py, desc_wz],
+                        extents: [desc_w, desc_h, plaque_z],
+                        rotation: plaque_rot,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::Primitive {
+                            shape: crate::render::primitive::MeshId::BeveledSlab,
+                            material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
+                                .with_decal(crate::render::primitive::plaque_decal(desc.clone())),
+                            pick_id: None,
+                            shadow_caster: false,
+                            silhouette: false,
+                        },
+                        hover_target: 0.0,
+                        anim_id: 0xAC0D,
+                        arrange_name: Some("shop.hover.desc_plaque"),
+                    });
                 }
             }
         }
@@ -4012,7 +3716,6 @@ impl SceneBehavior for ShopScene {
                         kind: crate::render::lit_mesh::MaterialKind::Plain,
                         specular_strength: 0.4,
                         specular_power: 32.0,
-                        emissive: 0.0,
                         decal: Some(DecalSpec {
                             text: reroll_label,
                             palette: DecalPalette::GoldGilded,
@@ -4026,9 +3729,6 @@ impl SceneBehavior for ShopScene {
                     shadow_caster: false,
                     silhouette: false,
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: if hover_is_reroll { 1.0 } else { 0.0 },
                 anim_id: 0xAC01,
                 arrange_name: Some("shop.props.reroll_prop"),
@@ -4061,7 +3761,6 @@ impl SceneBehavior for ShopScene {
                         kind: crate::render::lit_mesh::MaterialKind::Plain,
                         specular_strength: 0.4,
                         specular_power: 32.0,
-                        emissive: 0.0,
                         decal: Some(DecalSpec {
                             text: leave_label.to_string(),
                             palette: DecalPalette::GoldGilded,
@@ -4075,9 +3774,6 @@ impl SceneBehavior for ShopScene {
                     shadow_caster: false,
                     silhouette: false,
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: if hover_is_leave { 1.0 } else { 0.0 },
                 anim_id: 0xAC02,
                 arrange_name: Some("shop.props.leave_prop"),
@@ -4089,10 +3785,6 @@ impl SceneBehavior for ShopScene {
         // journal affordance reads the same across scenes. Click
         // routes through `ShopHit::Dish(PICK_JOURNAL_BOOK)` via the
         // WoodTablet dispatch's `pick_id` hook.
-        let journal_hovered = matches!(
-            hover,
-            Some(ShopHit::Dish(id)) if id == PICK_JOURNAL_BOOK
-        );
         frame.object3d(Object3d {
             pos: [journal_cx, journal_cy, journal_cz],
             extents: [w * 0.06, layout.mm(16.0), h * 0.11],
@@ -4100,14 +3792,8 @@ impl SceneBehavior for ShopScene {
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::WoodTablet {
                 label: "Journal".to_string(),
-                hover: if journal_hovered { 1.0 } else { 0.0 },
-                pressed: 0.0,
-                disabled: false,
                 pick_id: Some(PICK_JOURNAL_BOOK),
             },
-            focusable: true,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("shop.props.journal"),
@@ -4121,7 +3807,7 @@ impl SceneBehavior for ShopScene {
             self.items.len(),
             &self.zodiac_items,
             &self.talisman_items,
-            ctx.run,
+            &shop,
         )
         .is_some();
         let has_active_drag = self.held_item_drag.is_some() || self.mouse_drag.is_some();
@@ -4147,9 +3833,6 @@ impl SceneBehavior for ShopScene {
             kind: Object3dKind::SellTray {
                 pick_id: Some(PICK_SELL_TRAY),
             },
-            focusable: true,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 1.0,
             anim_id: 0xAC03,
             arrange_name: Some("shop.props.sell_tray"),
@@ -4170,13 +3853,10 @@ impl SceneBehavior for ShopScene {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
             let n_for_sale_zodiacs = self.zodiac_items.len();
             let n_for_sale_talismans = self.talisman_items.len();
-            let has_bought = !ctx.run.relics.active.is_empty()
-                || !ctx.run.consumables.items.is_empty()
-                || ctx
-                    .run
-                    .yaku_levels
-                    .level_of(crate::core::yaku::YakuKind::FullHand)
-                    > 1
+            let has_bought = !shop.owned_relics.is_empty()
+                || !shop.owned_zodiacs.is_empty()
+                || !shop.owned_talismans.is_empty()
+                || shop.full_hand_level > 1
                 || (!self.pack_items.is_empty() && self.pack_items.iter().any(|p| p.sold));
             let (flavor, hint) = if has_bought {
                 (
@@ -4347,19 +4027,22 @@ impl SceneBehavior for ShopScene {
             }
         }
         for (pid, r) in ctx.proj.aux_dish_rects.iter() {
-            if r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite() {
-                if let Some(id) = pid {
-                    if is_tile_pack_pick(*id) {
-                        focus_rect_graph.push((ShopFocus::Pack(*id), *r));
-                    } else if *id == PICK_LEAVE_PROP {
-                        focus_rect_graph.push((ShopFocus::NextRound, *r));
-                    } else if *id == PICK_REROLL_PROP {
-                        focus_rect_graph.push((ShopFocus::Reroll, *r));
-                    } else if *id == PICK_SELL_TRAY {
-                        focus_rect_graph.push((ShopFocus::SellTray, *r));
-                    } else if *id != PICK_RELIC_DISH {
-                        focus_rect_graph.push((ShopFocus::Dish(*id), *r));
-                    }
+            if r[2] > 1.0
+                && r[3] > 1.0
+                && r[0].is_finite()
+                && r[1].is_finite()
+                && let Some(id) = pid
+            {
+                if is_tile_pack_pick(*id) {
+                    focus_rect_graph.push((ShopFocus::Pack(*id), *r));
+                } else if *id == PICK_LEAVE_PROP {
+                    focus_rect_graph.push((ShopFocus::NextRound, *r));
+                } else if *id == PICK_REROLL_PROP {
+                    focus_rect_graph.push((ShopFocus::Reroll, *r));
+                } else if *id == PICK_SELL_TRAY {
+                    focus_rect_graph.push((ShopFocus::SellTray, *r));
+                } else if *id != PICK_RELIC_DISH {
+                    focus_rect_graph.push((ShopFocus::Dish(*id), *r));
                 }
             }
         }
@@ -4367,14 +4050,14 @@ impl SceneBehavior for ShopScene {
         // Push the brass focus ring on top of the 2D HUD layer so it
         // sits above the cabinet wood and dishes. Skipped during pause
         // because the overlay's own buttons take focus.
-        if !self.pause_menu.paused {
-            if let Some(target) = self.focus {
-                let rect_lookup = focus_rect_graph
-                    .iter()
-                    .find_map(|(t, r)| (*t == target).then_some(*r));
-                if let Some(rect) = rect_lookup {
-                    push_focus_ring(rect, scale, w, h, &mut quads);
-                }
+        if !self.pause_menu.paused
+            && let Some(target) = self.focus
+        {
+            let rect_lookup = focus_rect_graph
+                .iter()
+                .find_map(|(t, r)| (*t == target).then_some(*r));
+            if let Some(rect) = rect_lookup {
+                push_focus_ring(rect, scale, w, h, &mut quads);
             }
         }
 
@@ -4406,8 +4089,17 @@ impl SceneBehavior for ShopScene {
         if self.pause_menu.paused {
             buttons.clear();
         }
-        self.pause_menu
-            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons, ui_scale);
+        self.pause_menu.draw(
+            crate::ui::layout::ViewportCtx {
+                window_w: w,
+                window_h: h,
+                ui_scale,
+            },
+            scale,
+            &mut quads,
+            &mut texts,
+            &mut buttons,
+        );
         // Fullscreen click-blocker behind the pause menu's own buttons so
         // missed clicks become no-ops instead of falling through.
         if self.pause_menu.paused {
@@ -4467,9 +4159,6 @@ impl SceneBehavior for ShopScene {
                             kind: celeb.pack_kind,
                             pick_id: None,
                         },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
                         hover_target: 0.0,
                         anim_id: 0,
                         arrange_name: Some("shop.celebrations.pack_closeup"),
@@ -4518,7 +4207,7 @@ impl SceneBehavior for ShopScene {
                         let scale = 0.3 + 0.7 * ease;
 
                         placements.push(ShowcaseTilePlacement {
-                            tile: celeb.tiles[i].clone(),
+                            tile: celeb.tiles[i],
                             center_pos: [px, py, lift],
                             rotation: [row_rx, row_ry, row_rz],
                             scale,
@@ -4581,7 +4270,7 @@ impl SceneBehavior for ShopScene {
         frame.buttons = buttons;
         frame.window_title = format!(
             "Mahjuro — Shop (Round {}) — Gold: {}",
-            self.came_from_round, ctx.run.gold
+            self.came_from_round, shop.gold
         );
 
         frame

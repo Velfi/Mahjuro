@@ -3,7 +3,10 @@ struct CameraUniform {
     model: mat4x4<f32>,
     base_color_factor: vec4<f32>,
     cam_pos: vec3<f32>,
-    _pad: f32,
+    // Per-tile seed written by the renderer (slot index as f32). Used to
+    // offset procedural noise so each tile's pattern is unique — currently
+    // only sampled by the tortoise-shell branch in `tortoise_albedo`.
+    tile_seed: f32,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
@@ -158,6 +161,45 @@ fn bamboo_albedo(local_pos: vec3<f32>, local_n: vec3<f32>) -> vec3<f32> {
     return mix(side_rgb, end_rgb, end_grain);
 }
 
+// ── Procedural tortoise shell (blonde bekko) ───────────────────────────
+// Keratin has similar optics to amber/horn: warm honey-amber base with
+// irregular dark mahogany blotches, visibly translucent (darker patches
+// recolor transmitted light). We build the mottled pattern from two
+// octaves of `vnoise2` in local-XZ, sharpened with `pow()` so the dark
+// patches stay sparse rather than dominating the surface. Depth-driven
+// warming (more saturated honey at the bottom of the slab, paler amber
+// near the top) fakes light transmission through the thin upper cap.
+fn tortoise_albedo(local_pos: vec3<f32>, seed: f32) -> vec3<f32> {
+    let honey    = vec3<f32>(0.78, 0.48, 0.18);
+    let mahogany = vec3<f32>(0.28, 0.12, 0.05);
+
+    // Per-tile seed offset: two irrational-ish scales decorrelate the X
+    // and Z shifts so neighbouring slot indices land in completely
+    // different regions of the noise field (not just a diagonal slide).
+    let seed_offset = vec2<f32>(seed * 17.37, seed * 11.91);
+
+    // Large-scale blotch shape + higher-frequency break-up so patches
+    // feel organic rather than regular. The two octaves use different
+    // XZ stretches so dark regions aren't axis-aligned.
+    let n_lo = vnoise2(vec2<f32>(local_pos.x * 5.0, local_pos.z * 6.5) + seed_offset);
+    let n_hi = vnoise2(vec2<f32>(local_pos.x * 14.0 + 5.1, local_pos.z * 17.0 - 2.3) + seed_offset);
+    let mottle = clamp(n_lo * 0.70 + n_hi * 0.30, 0.0, 1.0);
+    // Threshold + smoothstep so the dark blotches are sparse, well-
+    // defined, and reach full mahogany depth. Anything above 0.55 noise
+    // ramps toward a full dark blotch; below that stays pure honey.
+    let patch_mask = smoothstep(0.55, 0.82, mottle);
+
+    var rgb = mix(honey, mahogany, patch_mask);
+
+    // Depth-driven translucency: honey saturates deeper in the slab, the
+    // top cap reads paler as if backlit. local_pos.y spans ~[-0.212, 0.212].
+    let depth_t = smoothstep(-0.21, 0.17, local_pos.y);
+    let pale_amber = vec3<f32>(0.92, 0.70, 0.32);
+    rgb = mix(rgb, pale_amber, depth_t * 0.28);
+
+    return rgb;
+}
+
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) wn: vec3<f32>,
@@ -201,7 +243,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // cam.base_color_factor.w encodes the material variant:
     //   0 = bamboo & ivory (traditional)
     //   1 = plastic (kelly-green body, bright white face)
+    //   2 = tortoise shell (blonde bekko — honey + mahogany mottle)
     let mat_id = cam.base_color_factor.w;
+    let is_plastic = mat_id > 0.5 && mat_id < 1.5;
+    let is_tortoise = mat_id > 1.5;
 
     // Real mahjong tiles are a thin ivory/bone face layer glued onto a
     // bamboo body — the ivory wraps around the top of the side bevels
@@ -212,8 +257,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // ivory; everything below is bamboo. The bottom (-Y) face has
     // local_n.y < 0 and is excluded so it stays bamboo.
     // Plastic caps are 40% of the slab thickness (top 0.170 of the
-    // 0.424 Y extent → threshold at 0.042).
-    let ivory_layer_y: f32 = mix(0.172, 0.042, clamp(mat_id, 0.0, 1.0));
+    // 0.424 Y extent → threshold at 0.042). Tortoise shell has no cap
+    // (cut from one slab), so reuse the thin ivory-band threshold as a
+    // purely polish hint — the face tint matches the body.
+    var ivory_layer_y: f32 = 0.172;
+    if (is_plastic) { ivory_layer_y = 0.042; }
+    if (is_tortoise) { ivory_layer_y = 0.172; }
     let ivory_band_softness: f32 = 0.012; // smooth transition (~1 mm)
     let ivory_band = smoothstep(
         ivory_layer_y - ivory_band_softness,
@@ -246,8 +295,26 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let plastic_side = mix(plastic_body, plastic_face, ivory_band);
     let plastic_rgb = select(plastic_side, plastic_face, is_front);
 
+    // ── Tortoise shell (mat 2) ──────────────────────────────────────────
+    // Blonde bekko: honey-amber keratin with dark mahogany blotches.
+    // The whole tile is cut from one slab so the face and sides share
+    // the same procedural albedo — the face just reads as slightly
+    // polished (a touch lighter, with damped mottle contrast) so the
+    // decal remains legible.
+    let tortoise_body = tortoise_albedo(in.local_pos, cam.tile_seed);
+    // Polished face: the blotches are the whole point of the material,
+    // so the face shows them at nearly full intensity. A slight lift
+    // toward the honey mean keeps the decal readable over darker patches
+    // without washing the mottle out.
+    let honey_mean = vec3<f32>(0.68, 0.42, 0.16);
+    let tortoise_face = mix(tortoise_body, honey_mean, 0.20);
+    let tortoise_side = mix(tortoise_body, tortoise_face, ivory_band);
+    let tortoise_rgb = select(tortoise_side, tortoise_face, is_front);
+
     // Select material.
-    let base_rgb = mix(bamboo_rgb, plastic_rgb, clamp(mat_id, 0.0, 1.0));
+    var base_rgb = bamboo_rgb;
+    if (is_plastic) { base_rgb = plastic_rgb; }
+    if (is_tortoise) { base_rgb = tortoise_rgb; }
 
     // Project decal UVs from model-space position onto the front face.
     // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
@@ -456,6 +523,16 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // accumulated point-light contribution. No directional shadow
     // attenuation — the wicks are the only lights in the scene.
     var lit_rgb = rgb * point_contrib + sheen_acc;
+
+    // Tortoise shell: warm amber Fresnel rim at grazing angles.
+    // Scaled by the local candle contribution so the rim only blooms
+    // where a wick is actually lighting the tile — keeps dark tiles dark.
+    if (is_tortoise) {
+        let edge = 1.0 - ndv_global;
+        let rim = pow(edge, 3.0) * 0.35;
+        let rim_tint = vec3<f32>(0.95, 0.60, 0.22);
+        lit_rgb = lit_rgb + rim_tint * rim * point_contrib;
+    }
 
     // ── Blocked-tile dimming (solitaire) ───────────────────────────
     // base_color_factor.x: 1.0 = free/playable, <1.0 = blocked.

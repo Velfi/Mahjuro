@@ -82,7 +82,6 @@ impl BlindKind {
     }
 
     /// Display name for a wind rank (1=East, 2=South, 3=West, 4=North).
-    #[allow(dead_code)]
     pub fn wind_name(rank: u8) -> &'static str {
         match rank {
             1 => "East",
@@ -90,17 +89,6 @@ impl BlindKind {
             3 => "West",
             4 => "North",
             _ => "?",
-        }
-    }
-
-    /// Gold reward formerly granted for skipping this blind. Replaced by
-    /// skip-reward tags (`core::tag`), but kept for reference / tests.
-    #[allow(dead_code)]
-    pub fn skip_reward(self) -> u32 {
-        match self {
-            BlindKind::Small => 3,
-            BlindKind::Big => 5,
-            BlindKind::Boss => 0,
         }
     }
 
@@ -121,15 +109,6 @@ impl BlindKind {
             BlindKind::Small => "Small Blind",
             BlindKind::Big => "Big Blind",
             BlindKind::Boss => "Boss Blind",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn description(self) -> &'static str {
-        match self {
-            BlindKind::Small => "×1 gold",
-            BlindKind::Big => "×1.5 gold",
-            BlindKind::Boss => "boss effect · ×2.5 gold",
         }
     }
 

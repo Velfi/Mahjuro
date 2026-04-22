@@ -4,6 +4,7 @@
 
 use crate::audio::SfxId;
 use crate::core::tile::{Suit, Tile};
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::TileMaterial;
@@ -136,19 +137,16 @@ impl TileSelectScene {
     ) -> SceneTransition {
         let settings = crate::persistence::load_settings();
         if self.tutorial_mode {
-            *run = RunState::new_onboarding();
-            run.apply_progression(progress);
-            run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-            run.set_hints_enabled(settings.hints_enabled);
+            GameEngine::start_onboarding_run(run, progress, &settings);
             Some(Scene::TutorialCampaign(
                 super::tutorial_campaign::TutorialCampaignScene::new(),
             ))
         } else {
-            *run = RunState::new_with_material(self.material);
-            run.apply_progression(progress);
-            run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-            run.set_hints_enabled(settings.hints_enabled);
-            Some(Scene::Shop(ShopScene::new(run.run_number, run)))
+            GameEngine::start_run_with_material(run, self.material, progress, &settings);
+            Some(Scene::Shop(ShopScene::new(
+                GameEngine::current_run_number(run),
+                run,
+            )))
         }
     }
 }
@@ -261,13 +259,17 @@ impl SceneBehavior for TileSelectScene {
             Some(ModalAction::SkipTutorial) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.complete_onboarding = true;
-                *ctx.run = RunState::new_with_material(TileMaterial::default());
-                ctx.run.apply_progression(ctx.progress);
                 let settings = crate::persistence::load_settings();
-                ctx.run
-                    .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-                ctx.run.set_hints_enabled(settings.hints_enabled);
-                Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)))
+                GameEngine::start_run_with_material(
+                    ctx.run,
+                    TileMaterial::default(),
+                    ctx.progress,
+                    &settings,
+                );
+                Some(Scene::Shop(ShopScene::new(
+                    GameEngine::current_run_number(ctx.run),
+                    ctx.run,
+                )))
             }
             Some(ModalAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
@@ -425,7 +427,7 @@ impl SceneBehavior for TileSelectScene {
             };
             tiles
                 .into_iter()
-                .zip(slots.into_iter())
+                .zip(slots)
                 .map(|(tile, (sx, sy, sw, sh))| {
                     let cx = sx + sw * 0.5;
                     let cy = sy + sh * 0.5;

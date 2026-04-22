@@ -21,9 +21,13 @@ pub enum TutorialMilestone {
     FirstSequence,
     FirstDiscard,
     FirstFullHand,
+    /// First time a Yakuhai (dragon/wind triplet) yaku fires. Introduced in
+    /// lesson 7, mirrors FirstFullHand.
+    FirstYakuhai,
     FirstShopBuy,
-    /// First time the player presses Trigger to cash in a structure.
-    FirstTrigger,
+    /// First time the player clears a boss blind. Not tied to a specific
+    /// lesson — celebrates the thematic "first boss defeated" moment.
+    FirstBossCleared,
 }
 
 /// First-encounter UI events that trigger a one-time contextual tooltip.
@@ -174,9 +178,7 @@ impl TutorialState {
 
 pub const LESSON_COUNT: usize = 9;
 
-#[allow(dead_code)]
 pub struct LessonDef {
-    pub id: u32,
     /// Italic flavor line shown above the hint.
     pub flavor_text: &'static str,
     /// Primary instructional hint shown at lesson start.
@@ -224,7 +226,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [1] has selection        → press Play to bank
     //   [2] structure has melds  → press Trigger to score
     LessonDef {
-        id: 1,
         flavor_text: "Every journey begins with a matching pair.",
         intro_text: "Select two matching tiles and press Play to bank them, then press Trigger to score. Reach the target to clear the blind!",
         step_prompts: &[
@@ -252,7 +253,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [1] has selection        → press Play to bank
     //   [2] structure has melds  → press Trigger to score
     LessonDef {
-        id: 2,
         flavor_text: "Two is company. Three is power.",
         intro_text: "Three matching tiles form a Triplet \u{2014} worth more than a pair! Bank melds with Play, then Trigger to score.",
         step_prompts: &[
@@ -282,7 +282,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [3] after scoring        → Meld Guide hint
     //   [4] after opening guide  → acknowledgment
     LessonDef {
-        id: 3,
         flavor_text: "The river flows in order.",
         intro_text: "Three consecutive tiles in the same suit form a Sequence. Bank melds with Play, then Trigger to score.",
         step_prompts: &[
@@ -318,7 +317,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [2] fallback: has selection, no discards — press Play to bank
     //   [3] structure has melds — press Trigger to score
     LessonDef {
-        id: 4,
         flavor_text: "Let go of what doesn't serve you.",
         intro_text: "Discard tiles you don\u{2019}t need to draw better ones, then bank melds with Play and Trigger to score.",
         step_prompts: &[
@@ -353,7 +351,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [2] structure has melds       → press Trigger to score
     //   [3] during cascade            → watch the piles and panel
     LessonDef {
-        id: 5,
         flavor_text: "The secret of every master: multiply your fortune.",
         intro_text: "Bank your best melds with Play, then press Trigger. During scoring, watch the chip pile, the mult pile, and the score panel together \u{2014} Chips \u{00d7} Mult!",
         step_prompts: &[
@@ -390,7 +387,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     //   [2] after scoring        → yaku count hint
     //   [3] after Meld Guide     → acknowledgment
     LessonDef {
-        id: 6,
         flavor_text: "A complete hand opens every door.",
         intro_text: "A complete 14-tile hand can be either 4+4+4+4+2 (4 melds + 1 pair) or 2x7 (seven pairs). Bank the 4+4+4+4+2 shape with Play and Trigger to score FullHand \u{2014} a big multiplier bonus!",
         step_prompts: &[
@@ -423,7 +419,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     // ── Lesson 7: Honors & Yakuhai ────────────────────────────────
     //   [0] no selection  [1] has selection → press Play to bank
     LessonDef {
-        id: 7,
         flavor_text: "Wind and dragon bow to no suit.",
         intro_text: "Honor tiles (Winds & Dragons) are like face cards in poker \u{2014} there are fewer of them, but they\u{2019}re worth more. A dragon or wind triplet triggers the Yakuhai yaku!",
         step_prompts: &[
@@ -454,7 +449,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     // ── Lesson 8: The Shop ────────────────────────────────────────
     //   [0] no selection (gameplay)  [1] has selection → press Play to bank
     LessonDef {
-        id: 8,
         flavor_text: "Stock your run, then put it to work.",
         intro_text: "The Shop appears between blinds. Buy relics for passive bonuses, ribbons to level yaku, and talismans to enhance tiles \u{2014} then use your new upgrades to beat this blind.",
         step_prompts: &[
@@ -484,7 +478,6 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
     },
     // ── Lesson 9: Graduation ──────────────────────────────────────
     LessonDef {
-        id: 9,
         flavor_text: "The apprentice becomes the player.",
         intro_text: "You know the basics! From here on, explore yaku patterns, collect relics, and defeat bosses.",
         step_prompts: &[],
@@ -629,14 +622,13 @@ pub fn affinity_tile_indices(
         }
 
         // Check if this tile could form a pair or triplet with selected tiles.
-        if allowed_sets.contains(&SetKind::Pair) || allowed_sets.contains(&SetKind::Triplet) {
-            if sel_tiles
+        if (allowed_sets.contains(&SetKind::Pair) || allowed_sets.contains(&SetKind::Triplet))
+            && sel_tiles
                 .iter()
                 .any(|s| s.suit == tile.suit && s.rank == tile.rank)
-            {
-                affinity.push(i);
-                continue;
-            }
+        {
+            affinity.push(i);
+            continue;
         }
 
         // Check if this tile could extend a sequence with selected tiles.
@@ -663,9 +655,6 @@ mod tests {
     #[test]
     fn lesson_count_matches() {
         assert_eq!(LESSONS.len(), LESSON_COUNT);
-        for (i, lesson) in LESSONS.iter().enumerate() {
-            assert_eq!(lesson.id, (i + 1) as u32);
-        }
     }
 
     #[test]

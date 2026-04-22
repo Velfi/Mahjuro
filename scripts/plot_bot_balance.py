@@ -89,7 +89,7 @@ def plot_summary(runs: list[dict], out_path: Path) -> None:
     labels = [r["label"] for r in runs]
     xs = list(range(len(runs)))
 
-    fig, axes = plt.subplots(3, 2, figsize=(16, 14), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10), constrained_layout=True)
     fig.suptitle("Mahjuro Bot Balance Snapshots", fontsize=18, fontweight="bold")
 
     ax = axes[0][0]
@@ -136,22 +136,6 @@ def plot_summary(runs: list[dict], out_path: Path) -> None:
     ax.set_xticks(xs, labels)
     ax.legend()
 
-    ax = axes[2][0]
-    ax.bar([i - 0.18 for i in xs], [run_value(r, "avg_relics") for r in runs], width=0.36, label="Avg relics", color="#8ab17d")
-    ax.bar([i + 0.18 for i in xs], [run_value(r, "avg_gold_spent") for r in runs], width=0.36, label="Avg gold spent", color="#bc6c25")
-    ax.set_title("Shop Pressure")
-    ax.set_xticks(xs, labels)
-    ax.legend()
-    add_bar_labels(ax)
-
-    ax = axes[2][1]
-    ax.bar([i - 0.18 for i in xs], [run_value(r, "avg_gold_earned") for r in runs], width=0.36, label="Avg gold earned", color="#457b9d")
-    ax.bar([i + 0.18 for i in xs], [run_value(r, "avg_final_gold") for r in runs], width=0.36, label="Avg final gold", color="#a8dadc")
-    ax.set_title("Economy Outcomes")
-    ax.set_xticks(xs, labels)
-    ax.legend()
-    add_bar_labels(ax)
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
@@ -193,6 +177,11 @@ def plot_survival_heatmap(runs: list[dict], out_path: Path) -> None:
 
 
 def plot_snapshot_tradeoffs(runs: list[dict], out_path: Path) -> None:
+    if len(runs) < 3:
+        if out_path.exists():
+            out_path.unlink()
+        return
+
     fig, ax = plt.subplots(figsize=(14, 8), constrained_layout=True)
 
     scores = [run_value(r, "avg_total_score_m") for r in runs]
@@ -268,6 +257,186 @@ def plot_economy(runs: list[dict], out_path: Path) -> None:
     plt.close(fig)
 
 
+DEATH_CAUSE_ORDER = [
+    "target-miss",
+    "no-legal-hand",
+    "only-unplayable",
+    "only-no-score",
+    "stuck-other",
+]
+DEATH_CAUSE_COLORS = {
+    "target-miss": "#457b9d",
+    "no-legal-hand": "#c96f3b",
+    "only-unplayable": "#e27d60",
+    "only-no-score": "#f2c14e",
+    "stuck-other": "#8a8a8a",
+}
+
+
+def plot_death_causes_by_ante(runs: list[dict], out_path: Path) -> None:
+    cause_runs = [r for r in runs if r.get("deaths_by_ante_cause")]
+    if not cause_runs:
+        if out_path.exists():
+            out_path.unlink()
+        return
+
+    antes = sorted(
+        {
+            int(key.split("|", 1)[0])
+            for r in cause_runs
+            for key in r.get("deaths_by_ante_cause", {}).keys()
+        }
+    )
+    if not antes:
+        return
+
+    n_runs = len(cause_runs)
+    group_width = 0.85
+    bar_width = group_width / max(1, n_runs)
+
+    fig, ax = plt.subplots(figsize=(max(12, len(antes) * 2.0), 7), constrained_layout=True)
+
+    for run_idx, run in enumerate(cause_runs):
+        cause_map = run.get("deaths_by_ante_cause", {})
+        totals = {}
+        for key, count in cause_map.items():
+            ante_str, _, cause = key.partition("|")
+            try:
+                ante = int(ante_str)
+            except ValueError:
+                continue
+            totals.setdefault(ante, {})[cause] = totals.get(ante, {}).get(cause, 0) + count
+
+        x_positions = [
+            ante - group_width / 2 + bar_width / 2 + run_idx * bar_width
+            for ante in antes
+        ]
+        bottoms = [0.0] * len(antes)
+        for cause in DEATH_CAUSE_ORDER:
+            heights = [totals.get(ante, {}).get(cause, 0) for ante in antes]
+            if not any(heights):
+                continue
+            label = cause if run_idx == 0 else None
+            ax.bar(
+                x_positions,
+                heights,
+                width=bar_width * 0.95,
+                bottom=bottoms,
+                color=DEATH_CAUSE_COLORS.get(cause, "#bbbbbb"),
+                label=label,
+                edgecolor="white",
+                linewidth=0.5,
+            )
+            bottoms = [b + h for b, h in zip(bottoms, heights)]
+
+        if n_runs > 1:
+            for ante, x, total in zip(antes, x_positions, bottoms):
+                if total > 0:
+                    ax.text(
+                        x,
+                        total,
+                        run["label"].split("\n", 1)[0],
+                        rotation=90,
+                        fontsize=7,
+                        ha="center",
+                        va="bottom",
+                    )
+
+    ax.set_title("Death Causes By Ante")
+    ax.set_xlabel("Ante")
+    ax.set_ylabel("Deaths")
+    ax.set_xticks(antes, [f"Ante {a}" for a in antes])
+    ax.legend(title="Cause", fontsize=9, loc="upper right")
+    ax.grid(alpha=0.2, axis="y")
+
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
+def plot_boss_win_rates(runs: list[dict], out_path: Path) -> None:
+    boss_runs = [r for r in runs if r.get("boss_faced")]
+    if not boss_runs:
+        if out_path.exists():
+            out_path.unlink()
+        return
+
+    all_bosses = sorted({name for r in boss_runs for name in r.get("boss_faced", {})})
+    if not all_bosses:
+        return
+
+    n_runs = len(boss_runs)
+    group_height = 0.8
+    bar_h = group_height / max(1, n_runs)
+
+    fig, ax = plt.subplots(figsize=(12, max(6, len(all_bosses) * 0.5)), constrained_layout=True)
+
+    for run_idx, run in enumerate(boss_runs):
+        faced = run.get("boss_faced", {})
+        beaten = run.get("boss_beaten", {})
+        ys = []
+        widths = []
+        annots = []
+        for boss in all_bosses:
+            f = faced.get(boss, 0)
+            b = beaten.get(boss, 0)
+            rate = (b / f * 100.0) if f else 0.0
+            ys.append(rate)
+            widths.append(f)
+            annots.append((f, b, rate))
+
+        y_positions = [
+            i - group_height / 2 + bar_h / 2 + run_idx * bar_h
+            for i in range(len(all_bosses))
+        ]
+        label = run["label"] if n_runs > 1 else None
+        bars = ax.barh(
+            y_positions,
+            ys,
+            height=bar_h * 0.9,
+            label=label,
+            edgecolor="white",
+            linewidth=0.5,
+        )
+        for bar, (f, b, rate) in zip(bars, annots):
+            if f == 0:
+                continue
+            ax.text(
+                min(rate + 1.0, 101),
+                bar.get_y() + bar.get_height() / 2,
+                f"{rate:.0f}%  ({b}/{f})",
+                va="center",
+                fontsize=8,
+            )
+
+    overall_rate = 0.0
+    if boss_runs:
+        latest = boss_runs[-1]
+        faced_total = sum(latest.get("boss_faced", {}).values())
+        beat_total = sum(latest.get("boss_beaten", {}).values())
+        if faced_total > 0:
+            overall_rate = beat_total / faced_total * 100.0
+            ax.axvline(overall_rate, color="#333", linestyle="--", linewidth=1, alpha=0.5)
+            ax.text(
+                overall_rate + 0.5,
+                -0.5,
+                f"overall {overall_rate:.1f}%",
+                fontsize=8,
+                color="#333",
+            )
+
+    ax.set_title("Boss Win Rate (latest snapshot annotated)")
+    ax.set_xlabel("Win rate %")
+    ax.set_xlim(0, 115)
+    ax.set_yticks(range(len(all_bosses)), all_bosses)
+    ax.invert_yaxis()
+    ax.grid(alpha=0.2, axis="x")
+    if n_runs > 1:
+        ax.legend(fontsize=8, loc="lower right")
+
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
 BLIND_ORDER = {"Small Blind": 0, "Big Blind": 1, "Boss Blind": 2}
 BLIND_SHORT = {"Small Blind": "S", "Big Blind": "B", "Boss Blind": "X"}
 
@@ -324,10 +493,12 @@ def main() -> None:
     docs = ROOT / "docs"
     plot_summary(runs, docs / "bot_balance_summary.png")
     plot_deaths_by_ante(runs, docs / "bot_balance_deaths_by_ante.png")
+    plot_death_causes_by_ante(runs, docs / "bot_balance_death_causes.png")
     plot_economy(runs, docs / "bot_balance_economy.png")
     plot_survival_heatmap(runs, docs / "bot_balance_survival_heatmap.png")
     plot_snapshot_tradeoffs(runs, docs / "bot_balance_snapshot_tradeoffs.png")
     plot_surplus_per_blind(runs, docs / "bot_balance_surplus_per_blind.png")
+    plot_boss_win_rates(runs, docs / "bot_balance_boss_win_rates.png")
 
 
 if __name__ == "__main__":

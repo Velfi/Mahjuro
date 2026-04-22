@@ -1,6 +1,7 @@
 //! Shared pause menu overlay used by gameplay, shop, and blind-selection scenes.
 
 use crate::audio::SfxId;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 use crate::render::theme::{ButtonVariant, color, metrics, typography};
@@ -31,6 +32,17 @@ impl PauseAction {
     }
 }
 
+/// Frame input for `PauseMenu::update`: action queue, newly clicked
+/// button ids, cursor position, scroll delta, and the current input
+/// device (kb/controller/mouse).
+pub struct PauseInput<'a> {
+    pub actions: &'a [UiAction],
+    pub button_clicks: &'a [u32],
+    pub cursor_pos: (f32, f32),
+    pub scroll_lines: f32,
+    pub input_mode: crate::ui::input::InputMode,
+}
+
 /// Result of processing pause menu input for the current frame.
 pub enum PauseUpdate {
     /// Stay paused, no scene transition.
@@ -38,7 +50,7 @@ pub enum PauseUpdate {
     /// Resume the current scene (unpause).
     Resume,
     /// Transition to another scene.
-    Transition(SceneTransition),
+    Transition(Box<SceneTransition>),
     /// Quit the application.
     Quit,
 }
@@ -179,21 +191,25 @@ impl PauseMenu {
     pub fn handle(&mut self, ctx: &mut UpdateCtx<'_>) -> Option<SceneTransition> {
         if self.paused {
             let result = self.update(
-                ctx.actions,
-                ctx.button_clicks,
+                PauseInput {
+                    actions: ctx.actions,
+                    button_clicks: ctx.button_clicks,
+                    cursor_pos: ctx.cursor_pos,
+                    scroll_lines: ctx.scroll_lines,
+                    input_mode: ctx.input_mode,
+                },
                 ctx.progress,
                 ctx.run,
                 ctx.bus,
-                ctx.cursor_pos,
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-                ctx.scroll_lines,
-                ctx.ui_scale,
-                ctx.input_mode,
+                crate::ui::layout::ViewportCtx {
+                    window_w: ctx.layout.window_w,
+                    window_h: ctx.layout.window_h,
+                    ui_scale: ctx.ui_scale,
+                },
             );
             return Some(match result {
                 PauseUpdate::StayPaused | PauseUpdate::Resume => None,
-                PauseUpdate::Transition(t) => t,
+                PauseUpdate::Transition(t) => *t,
                 PauseUpdate::Quit => {
                     *ctx.quit_requested = true;
                     None
@@ -212,21 +228,27 @@ impl PauseMenu {
     }
 
     /// Process actions while paused. Returns what the caller should do.
-    /// `cursor_pos` and `(window_w, window_h)` enable mouse hover-to-focus.
+    /// `input.cursor_pos` and `viewport` enable mouse hover-to-focus.
     pub fn update(
         &mut self,
-        actions: &[UiAction],
-        button_clicks: &[u32],
+        input: PauseInput<'_>,
         progress: &crate::core::progression::PlayerProgress,
         run: &mut RunState,
         bus: &mut EventBus,
-        cursor_pos: (f32, f32),
-        window_w: f32,
-        window_h: f32,
-        scroll_lines: f32,
-        ui_scale: f32,
-        input_mode: crate::ui::input::InputMode,
+        viewport: crate::ui::layout::ViewportCtx,
     ) -> PauseUpdate {
+        let PauseInput {
+            actions,
+            button_clicks,
+            cursor_pos,
+            scroll_lines,
+            input_mode,
+        } = input;
+        let crate::ui::layout::ViewportCtx {
+            window_w,
+            window_h,
+            ui_scale,
+        } = viewport;
         // If the options sub-overlay is open, all input goes to it. When it
         // signals close, drop back to the pause root rather than resuming
         // the underlying scene — the player explicitly hit Pause.
@@ -307,7 +329,7 @@ impl PauseMenu {
             }
             Some(PauseAction::MainMenu) => {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                PauseUpdate::Transition(Some(Scene::StartScreen(StartScreenScene::new())))
+                PauseUpdate::Transition(Box::new(Some(Scene::StartScreen(StartScreenScene::new()))))
             }
             Some(PauseAction::Exit) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -322,25 +344,28 @@ impl PauseMenu {
         run: &mut RunState,
         progress: &crate::core::progression::PlayerProgress,
     ) -> PauseUpdate {
-        *run = RunState::new_demo();
-        run.apply_progression(progress);
         let settings = crate::persistence::load_settings();
-        run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        run.set_hints_enabled(settings.hints_enabled);
-        PauseUpdate::Transition(Some(Scene::Shop(ShopScene::new(run.run_number, run))))
+        GameEngine::reset_to_demo(run, progress, &settings);
+        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(
+            GameEngine::current_run_number(run),
+            run,
+        )))))
     }
 
     /// Append pause-overlay draw elements to the given vectors.
     pub fn draw(
         &self,
-        window_w: f32,
-        window_h: f32,
+        viewport: crate::ui::layout::ViewportCtx,
         scale: f32,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
-        ui_scale: f32,
     ) {
+        let crate::ui::layout::ViewportCtx {
+            window_w,
+            window_h,
+            ui_scale,
+        } = viewport;
         if !self.paused {
             return;
         }

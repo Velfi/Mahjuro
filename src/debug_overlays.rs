@@ -645,10 +645,8 @@ impl SfxTestOverlay {
             for (i, r) in self.row_rects.iter().enumerate() {
                 if mx >= r[0] && mx <= r[0] + r[2] && my >= r[1] && my <= r[1] + r[3] {
                     self.cursor = i;
-                    if clicked {
-                        if let Some(&id) = audio::all_sfx_ids().get(i) {
-                            audio.play_sfx(id);
-                        }
+                    if clicked && let Some(&id) = audio::all_sfx_ids().get(i) {
+                        audio.play_sfx(id);
                     }
                     break;
                 }
@@ -1196,8 +1194,9 @@ impl SmokeDebugOverlay {
         let slider_w = panel_w * 0.32;
         let value_w = panel_w * 0.20;
 
-        for i in 0..SMOKE_SLIDER_ROWS {
-            let (name, min, max, _step) = SMOKE_SLIDER_META[i];
+        for (i, &(name, min, max, _step)) in
+            SMOKE_SLIDER_META.iter().enumerate().take(SMOKE_SLIDER_ROWS)
+        {
             let row_y = cursor_y + i as f32 * (row_h + row_gap);
             let is_focused = self.cursor == i;
 
@@ -1489,8 +1488,9 @@ impl VolumetricDebugOverlay {
         let slider_w = panel_w * 0.32;
         let value_w = panel_w * 0.20;
 
-        for i in 0..VOL_SLIDER_ROWS {
-            let (name, min, max, _step) = VOL_SLIDER_META[i];
+        for (i, &(name, min, max, _step)) in
+            VOL_SLIDER_META.iter().enumerate().take(VOL_SLIDER_ROWS)
+        {
             let row_y = cursor_y + i as f32 * (row_h + row_gap);
             let is_focused = self.cursor == i;
 

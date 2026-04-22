@@ -165,7 +165,6 @@ impl PointLightsBuf {
 /// One material slot of the tile mesh — vertex/index buffers + the primitive's
 /// own albedo texture.  A tile may consist of several of these (e.g. an ivory
 /// face primitive and a bamboo back primitive).
-#[allow(dead_code)]
 pub(crate) struct TilePrimitiveGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -184,18 +183,13 @@ pub struct RelicIcon {
 }
 
 /// Horizontal alignment of text inside its rect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TextAlign {
     Left,
+    #[default]
     Center,
-    #[allow(dead_code)]
-    Right,
-}
 
-impl Default for TextAlign {
-    fn default() -> Self {
-        TextAlign::Center
-    }
+    Right,
 }
 
 /// A rasterized text label to draw over a screen-space rect.
@@ -246,7 +240,6 @@ impl Default for TextLabel {
 /// Storing them per-tile means all 14 `write_buffer` calls target distinct
 /// GPU allocations, so every tile's matrix is visible when the command buffer
 /// executes — no dynamic-offset trickery required.
-#[allow(dead_code)]
 pub(crate) struct HandTileGpu {
     /// Written every frame with view_proj + model + base_color_factor.
     pub uniform_buffer: wgpu::Buffer,
@@ -275,7 +268,6 @@ pub(crate) struct HandTileGpu {
     /// Suit colour for rendering the symbol (RGBA, linear).
     pub suit_color: [f32; 4],
     /// Kept alive so the GPU texture is not freed while bind_group references it.
-    #[allow(dead_code)]
     pub decal_texture: wgpu::Texture,
 }
 
@@ -288,7 +280,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
     pub tile_id: (Suit, u8, Option<TileEnhancement>, bool),
-    #[allow(dead_code)]
+
     pub decal_texture: wgpu::Texture,
 }
 
@@ -445,14 +437,12 @@ pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 32;
 
 /// Pre-loaded relic icon texture + bind group for the image pipeline.
 pub(crate) struct RelicTextureGpu {
-    #[allow(dead_code)]
     pub texture: wgpu::Texture,
     /// Bind group for the 2D image pipeline (collection screen).
     pub bind_group: wgpu::BindGroup,
     /// Texture view for binding into lit-mesh material bind groups (3D boxes).
     pub view: wgpu::TextureView,
     /// Owned linear height/relief when uploaded separately; `None` when `relief_view` aliases shared defaults.
-    #[allow(dead_code)]
     pub relief_texture: Option<wgpu::Texture>,
     /// Linear grayscale relief (`source/*_height.png`); bound at lit-mesh `relief_tex`.
     pub relief_view: wgpu::TextureView,
@@ -476,7 +466,6 @@ pub(crate) struct DecodedRelicImage {
 
 /// Pre-loaded background texture + bind group for the image pipeline.
 pub(crate) struct BackgroundTextureGpu {
-    #[allow(dead_code)]
     pub texture: wgpu::Texture,
     pub bind_group: wgpu::BindGroup,
 }

@@ -55,8 +55,8 @@ pub fn tile_effective_value(
                 out.sources.push(("Jade Talisman", "+20 chips".into()));
             }
             TileEnhancement::Gilded => {
-                out.mult_bonus += 0.4;
-                out.sources.push(("Gilded Talisman", "+0.4 mult".into()));
+                out.sources
+                    .push(("Gilded Talisman", "+$1 when scored in a meld".into()));
             }
             TileEnhancement::Polychrome => {
                 out.mult_bonus += 0.15;

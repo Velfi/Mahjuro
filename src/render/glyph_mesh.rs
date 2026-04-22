@@ -103,7 +103,7 @@ impl ttf_parser::OutlineBuilder for LyonPathBuilder {
 fn load_font_data() -> Option<&'static [u8]> {
     static CACHE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
     CACHE
-        .get_or_init(|| crate::render::decal::load_ui_font_bytes())
+        .get_or_init(crate::render::decal::load_ui_font_bytes)
         .as_deref()
 }
 
@@ -260,11 +260,7 @@ fn extract_boundary_loops(triangles: &[[u32; 3]]) -> Vec<Vec<u32>> {
     while let Some((&start, _)) = boundary.iter().find(|(_, v)| !v.is_empty()) {
         let mut loop_pts = vec![start];
         let mut cur = start;
-        loop {
-            let next = match boundary.get_mut(&cur).and_then(|v| v.pop()) {
-                Some(n) => n,
-                None => break,
-            };
+        while let Some(next) = boundary.get_mut(&cur).and_then(|v| v.pop()) {
             if next == start {
                 break;
             }

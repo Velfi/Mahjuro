@@ -19,9 +19,6 @@ pub enum StructureTriggerKind {
 /// Metadata passed into [`crate::core::relic::ScoreContext`] when scoring from structure.
 #[derive(Clone, Copy, Debug)]
 pub struct StructureTriggerMeta {
-    /// Distinguishes manual vs auto triggers for relic tuning / UI (scoring uses other fields first).
-    #[allow(dead_code)]
-    pub kind: StructureTriggerKind,
     pub meld_count: u32,
     /// If no yaku detected, inject Chicken Hand (base ×1 mult).
     pub inject_chicken_if_no_yaku: bool,

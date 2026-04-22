@@ -10,15 +10,6 @@ use super::{
     tile_by_id, tile_is_debuffed,
 };
 
-pub fn score_sets(
-    tiles: &[Tile],
-    sets: &[DetectedSet],
-    ctx: &ScoreContext<'_>,
-    rules: &[RuleModifier],
-) -> ScoreBreakdown {
-    score_sets_inner(tiles, sets, ctx, rules, None)
-}
-
 pub fn score_sets_with_original(
     tiles: &[Tile],
     sets: &[DetectedSet],
@@ -27,6 +18,16 @@ pub fn score_sets_with_original(
     original_tiles: &[Tile],
 ) -> ScoreBreakdown {
     score_sets_inner(tiles, sets, ctx, rules, Some(original_tiles))
+}
+
+#[cfg(test)]
+pub fn score_sets(
+    tiles: &[Tile],
+    sets: &[DetectedSet],
+    ctx: &ScoreContext<'_>,
+    rules: &[RuleModifier],
+) -> ScoreBreakdown {
+    score_sets_inner(tiles, sets, ctx, rules, None)
 }
 
 fn score_sets_inner(
@@ -261,12 +262,11 @@ fn score_sets_inner(
         let mut retrigger = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
-                if let Some(t) = tile_by_id(tiles, tid) {
-                    if matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
-                        && t.rank <= 4
-                    {
-                        retrigger += effective_point_value(t);
-                    }
+                if let Some(t) = tile_by_id(tiles, tid)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && t.rank <= 4
+                {
+                    retrigger += effective_point_value(t);
                 }
             }
         }
@@ -319,7 +319,7 @@ fn score_sets_inner(
         use crate::core::tile::TileEnhancement;
         let mut jade_chips = 0i32;
         let mut pearl_chips = 0i32;
-        let mut gilded_mult = 0.0f64;
+        let mut gilded_gold = 0i32;
         let mut polychrome_melds = 0i32;
         for s in sets {
             let mut meld_has_polychrome = false;
@@ -340,7 +340,7 @@ fn score_sets_inner(
                     TileEnhancement::Pearl => pearl_chips += 25,
                     TileEnhancement::Gilded => {
                         if !matches!(s.kind, SetKind::Pair) {
-                            gilded_mult += 0.4;
+                            gilded_gold += 1;
                         }
                     }
                     TileEnhancement::Polychrome => meld_has_polychrome = true,
@@ -356,8 +356,8 @@ fn score_sets_inner(
         if pearl_chips > 0 {
             push_chips!("Pearl Talisman", pearl_chips);
         }
-        if gilded_mult > 0.0 {
-            push_mult!("Gilded Talisman", gilded_mult);
+        if gilded_gold > 0 {
+            push_gold!("Gilded Talisman", gilded_gold);
         }
         for _ in 0..polychrome_melds {
             let delta = mult * 0.15;
@@ -471,10 +471,11 @@ fn score_sets_inner(
             .filter(|y| ctx.available_yaku.contains(y))
             .collect()
     };
-    if let Some(st) = &ctx.structure {
-        if st.inject_chicken_if_no_yaku && detected_yaku.is_empty() {
-            detected_yaku.push(YakuKind::ChickenHand);
-        }
+    if let Some(st) = &ctx.structure
+        && st.inject_chicken_if_no_yaku
+        && detected_yaku.is_empty()
+    {
+        detected_yaku.push(YakuKind::ChickenHand);
     }
     let level_of =
         |y: YakuKind| -> u32 { ctx.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
@@ -579,20 +580,20 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::RoundCompass) {
-        if let Some(wind) = ctx.round_wind {
-            for s in sets {
-                if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
-                    continue;
-                }
-                let is_round_wind = s
-                    .tile_ids
-                    .first()
-                    .and_then(|id| tile_by_id(tiles, *id))
-                    .is_some_and(|t| t.suit == Suit::Wind && t.rank == wind);
-                if is_round_wind {
-                    push_mult!("Round Compass", 6.0);
-                }
+    if has(RelicId::RoundCompass)
+        && let Some(wind) = ctx.round_wind
+    {
+        for s in sets {
+            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                continue;
+            }
+            let is_round_wind = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| t.suit == Suit::Wind && t.rank == wind);
+            if is_round_wind {
+                push_mult!("Round Compass", 6.0);
             }
         }
     }
@@ -990,14 +991,4 @@ fn score_sets_inner(
         flower_gold,
         scored_set_kinds: sets.iter().map(|s| s.kind).collect(),
     }
-}
-
-#[allow(dead_code)]
-pub fn score_sets_total(
-    tiles: &[Tile],
-    sets: &[DetectedSet],
-    ctx: &ScoreContext<'_>,
-    rules: &[RuleModifier],
-) -> u64 {
-    score_sets(tiles, sets, ctx, rules).total
 }

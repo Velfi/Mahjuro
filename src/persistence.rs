@@ -283,36 +283,39 @@ fn default_tile_preset() -> TilePreset {
 
 /// Tile material / colour scheme. Controls the procedural surface
 /// appearance in the tile shader — ivory+bamboo, plastic, etc.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TileMaterial {
     /// Traditional ivory face on a bamboo body.
+    #[default]
     Bamboo,
     /// Mint-green plastic with a bright white face (common mass-produced set).
     Plastic,
-}
-
-impl Default for TileMaterial {
-    fn default() -> Self {
-        Self::Bamboo
-    }
+    /// Blonde bekko — honey-amber keratin with dark mahogany mottling.
+    TortoiseShell,
 }
 
 impl TileMaterial {
     pub fn next(self) -> Self {
         match self {
             Self::Bamboo => Self::Plastic,
-            Self::Plastic => Self::Bamboo,
+            Self::Plastic => Self::TortoiseShell,
+            Self::TortoiseShell => Self::Bamboo,
         }
     }
 
     pub fn prev(self) -> Self {
-        self.next() // only two variants
+        match self {
+            Self::Bamboo => Self::TortoiseShell,
+            Self::Plastic => Self::Bamboo,
+            Self::TortoiseShell => Self::Plastic,
+        }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Bamboo => "Bamboo & Ivory",
             Self::Plastic => "Plastic",
+            Self::TortoiseShell => "Tortoise Shell",
         }
     }
 
@@ -320,15 +323,17 @@ impl TileMaterial {
         match self {
             Self::Bamboo => "+1 Hand per round",
             Self::Plastic => "+1 Discard per round",
+            Self::TortoiseShell => "+$10 starting gold",
         }
     }
 
     /// Material ID passed to the tile shader via `base_color_factor.w`.
-    /// 0.0 = bamboo/ivory (default), 1.0 = plastic.
+    /// 0.0 = bamboo/ivory (default), 1.0 = plastic, 2.0 = tortoise shell.
     pub fn shader_id(self) -> f32 {
         match self {
             Self::Bamboo => 0.0,
             Self::Plastic => 1.0,
+            Self::TortoiseShell => 2.0,
         }
     }
 }
@@ -654,10 +659,10 @@ pub fn load_run(index: usize) -> Option<LoadedRun> {
 /// is started). No-op if no save exists.
 pub fn delete_saved_run(index: usize) {
     let path = saved_run_path(index);
-    if path.exists() {
-        if let Err(e) = fs::remove_file(&path) {
-            log::warn!("delete_saved_run: {e}");
-        }
+    if path.exists()
+        && let Err(e) = fs::remove_file(&path)
+    {
+        log::warn!("delete_saved_run: {e}");
     }
 }
 
@@ -688,10 +693,10 @@ pub fn all_profile_summaries() -> Vec<ProfileSummary> {
 /// Delete all data for a profile slot — the progress file and any saved run.
 pub fn delete_profile(index: usize) {
     let path = profile_path(index);
-    if path.exists() {
-        if let Err(e) = fs::remove_file(&path) {
-            log::warn!("delete_profile: {e}");
-        }
+    if path.exists()
+        && let Err(e) = fs::remove_file(&path)
+    {
+        log::warn!("delete_profile: {e}");
     }
     delete_saved_run(index);
 }

@@ -34,6 +34,12 @@ pub struct BotGraphSnapshot {
     pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub cleared_by_slot: std::collections::BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub deaths_by_ante_cause: std::collections::BTreeMap<String, u32>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub boss_faced: std::collections::BTreeMap<String, u32>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub boss_beaten: std::collections::BTreeMap<String, u32>,
 }
 
 fn avg_u64(total: u64, runs: u32) -> f64 {
@@ -116,6 +122,9 @@ pub fn build_bot_graph_snapshot(
         deaths_by_ante: agg.deaths_by_ante.clone(),
         overscore_by_slot: agg.overscore_by_slot.clone(),
         cleared_by_slot: agg.cleared_by_slot.clone(),
+        deaths_by_ante_cause: agg.deaths_by_ante_cause.clone(),
+        boss_faced: agg.boss_faced.clone(),
+        boss_beaten: agg.boss_beaten.clone(),
     }
 }
 
@@ -148,7 +157,7 @@ pub fn upsert_snapshot(path: &Path, snapshot: BotGraphSnapshot) -> anyhow::Resul
 
 pub fn render_bot_graphs(repo_root: &Path) -> anyhow::Result<()> {
     let status = ProcessCommand::new("python3")
-        .arg("tools/plot_bot_balance.py")
+        .arg("scripts/plot_bot_balance.py")
         .current_dir(repo_root)
         .status()?;
     anyhow::ensure!(status.success(), "graph render failed with status {status}");

@@ -307,8 +307,8 @@ pub fn find_terms_in_text(text: &str) -> Vec<TermMatch> {
             if start + flen < n && lower[start + flen].is_alphanumeric() {
                 continue;
             }
-            for i in start..start + flen {
-                used[i] = true;
+            for slot in used.iter_mut().skip(start).take(flen) {
+                *slot = true;
             }
             matches.push(TermMatch {
                 char_start: start,

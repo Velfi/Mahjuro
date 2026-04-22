@@ -13,6 +13,24 @@ use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
 use crate::ui::widget::wrap_text;
 
+/// Assembled render data emitted by `ModalQueue::draw`: instanced quads,
+/// text labels, clickable button rects, and 3D relic meshes.
+pub type ModalDrawOutput = (
+    Vec<GpuInstance>,
+    Vec<TextLabel>,
+    Vec<ButtonDef>,
+    Vec<Object3d>,
+);
+
+/// Mutable buffers that a paginated modal's `draw_paginated` pushes
+/// into: 2D instanced quads, text labels, and the 3D relic objects that
+/// render above each page.
+struct ModalDrawSink<'a> {
+    instances: &'a mut Vec<GpuInstance>,
+    labels: &'a mut Vec<TextLabel>,
+    relic_objects: &'a mut Vec<Object3d>,
+}
+
 /// A single page in a paginated unlock carousel.
 pub struct UnlockPage {
     pub category: String,
@@ -344,24 +362,24 @@ impl ModalQueue {
             .saturating_duration_since(self.last_update)
             .as_secs_f32();
         self.last_update = now;
-        if let Some(modal) = self.queue.first_mut() {
-            if let Some(ref mut fw) = modal.fireworks {
-                fw.update(dt);
-            }
+        if let Some(modal) = self.queue.first_mut()
+            && let Some(ref mut fw) = modal.fireworks
+        {
+            fw.update(dt);
         }
     }
 
     /// Navigate pages on the active modal by `delta` (-1 = left, +1 = right).
     pub fn navigate(&mut self, delta: i32) {
-        if let Some(modal) = self.queue.first_mut() {
-            if modal.has_pages() {
-                let new = (modal.current_page as i32 + delta)
-                    .max(0)
-                    .min(modal.pages.len() as i32 - 1) as usize;
-                if new != modal.current_page {
-                    modal.current_page = new;
-                    modal.shown_at = Instant::now(); // restart fade-in
-                }
+        if let Some(modal) = self.queue.first_mut()
+            && modal.has_pages()
+        {
+            let new = (modal.current_page as i32 + delta)
+                .max(0)
+                .min(modal.pages.len() as i32 - 1) as usize;
+            if new != modal.current_page {
+                modal.current_page = new;
+                modal.shown_at = Instant::now(); // restart fade-in
             }
         }
     }
@@ -369,12 +387,13 @@ impl ModalQueue {
     /// Advance to the next page, or dismiss if on the last page (or no pages).
     /// Returns `true` if there was something to advance/dismiss.
     pub fn advance_page(&mut self) -> bool {
-        if let Some(modal) = self.queue.first_mut() {
-            if modal.has_pages() && modal.current_page + 1 < modal.pages.len() {
-                modal.current_page += 1;
-                modal.shown_at = Instant::now();
-                return true;
-            }
+        if let Some(modal) = self.queue.first_mut()
+            && modal.has_pages()
+            && modal.current_page + 1 < modal.pages.len()
+        {
+            modal.current_page += 1;
+            modal.shown_at = Instant::now();
+            return true;
         }
         self.dismiss()
     }
@@ -396,17 +415,7 @@ impl ModalQueue {
     /// Generate GPU instances, text labels, 3D relic placements, and buttons
     /// for the active modal.
     /// Returns `None` if no modal is active.
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-        ui_scale: f32,
-    ) -> Option<(
-        Vec<GpuInstance>,
-        Vec<TextLabel>,
-        Vec<ButtonDef>,
-        Vec<Object3d>,
-    )> {
+    pub fn draw(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Option<ModalDrawOutput> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
         let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
@@ -428,19 +437,19 @@ impl ModalQueue {
                 modal,
                 alpha,
                 scale,
-                window_w,
-                window_h,
-                &mut instances,
-                &mut labels,
-                &mut relic_objects,
+                (window_w, window_h),
+                ModalDrawSink {
+                    instances: &mut instances,
+                    labels: &mut labels,
+                    relic_objects: &mut relic_objects,
+                },
             );
         } else {
             self.draw_simple(
                 modal,
                 alpha,
                 scale,
-                window_w,
-                window_h,
+                (window_w, window_h),
                 &mut instances,
                 &mut labels,
             );
@@ -468,11 +477,11 @@ impl ModalQueue {
         modal: &Modal,
         alpha: f32,
         scale: f32,
-        window_w: f32,
-        window_h: f32,
+        window: (f32, f32),
         instances: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
     ) {
+        let (window_w, window_h) = window;
         let card_w = (360.0 * scale).min(window_w * 0.8);
         let title_h = (48.0 * scale).max(28.0);
         let dismiss_h = (28.0 * scale).max(18.0);
@@ -560,12 +569,15 @@ impl ModalQueue {
         modal: &Modal,
         alpha: f32,
         scale: f32,
-        window_w: f32,
-        window_h: f32,
-        instances: &mut Vec<GpuInstance>,
-        labels: &mut Vec<TextLabel>,
-        relic_objects: &mut Vec<Object3d>,
+        window: (f32, f32),
+        out: ModalDrawSink<'_>,
     ) {
+        let ModalDrawSink {
+            instances,
+            labels,
+            relic_objects,
+        } = out;
+        let (window_w, window_h) = window;
         let page = &modal.pages[modal.current_page];
         let padding = (20.0 * scale).max(10.0);
         let card_w = (400.0 * scale).min(window_w * 0.85);
@@ -663,9 +675,6 @@ impl ModalQueue {
                     silhouette: false,
                     pick_id: None,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,

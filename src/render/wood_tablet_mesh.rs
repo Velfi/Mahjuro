@@ -7,7 +7,7 @@
 //! separate mesh so each can be sized + lit independently in the slot pool.
 //! Local space spans `-0.5..+0.5` on each axis.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
+use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Width of the chamfered bevel strips on the four edges of the tablet's
@@ -20,7 +20,11 @@ pub fn build_wood_tablet_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
+    push_box(
+        &mut vertices,
+        &mut indices,
+        Aabb::new(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5),
+    );
 
     // Zero out UVs on every face except +Y so the decal (transparent
     // background) only appears on the top face. push_box emits 4 verts

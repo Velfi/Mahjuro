@@ -347,10 +347,10 @@ impl InputState {
         self.pointer_slot = hand_slots.iter().position(|(x, y, w, h)| {
             cursor.0 >= *x && cursor.0 <= *x + *w && cursor.1 >= *y && cursor.1 <= *y + *h
         });
-        if self.mode == InputMode::Cursor {
-            if let Some(i) = self.pointer_slot {
-                self.focus_slot = i;
-            }
+        if self.mode == InputMode::Cursor
+            && let Some(i) = self.pointer_slot
+        {
+            self.focus_slot = i;
         }
     }
 }

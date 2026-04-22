@@ -333,7 +333,6 @@ pub struct RelicDef {
     pub rarity: Rarity,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct RelicVisualDef {
     pub material: RelicRenderMaterial,
@@ -343,7 +342,6 @@ pub struct RelicVisualDef {
 }
 
 impl RelicId {
-    #[allow(dead_code)]
     /// Runtime albedo texture used by the 3D relic meshes.
     ///
     /// **Load order** for the renderer (albedo → mask → height) is documented on
@@ -352,7 +350,6 @@ impl RelicId {
         format!("textures/relics/{}", self.asset_filename())
     }
 
-    #[allow(dead_code)]
     /// Offline-generated transparent object render used as the source of truth
     /// for relic visual development and future mesh/height derivation.
     pub fn source_object_path(self) -> String {
@@ -360,7 +357,6 @@ impl RelicId {
         format!("textures/relics/source/{}_object.png", stem)
     }
 
-    #[allow(dead_code)]
     /// Optional binary or transparent silhouette image used to derive the
     /// runtime relic mesh more deterministically than the shaded object render.
     pub fn source_mask_path(self) -> String {
@@ -368,7 +364,6 @@ impl RelicId {
         format!("textures/relics/source/{}_mask.png", stem)
     }
 
-    #[allow(dead_code)]
     /// Optional offline-generated grayscale relief source for future embossed
     /// or carved detailing on the 3D relic mesh.
     pub fn source_heightmap_path(self) -> String {
@@ -376,7 +371,6 @@ impl RelicId {
         format!("textures/relics/source/{}_height.png", stem)
     }
 
-    #[allow(dead_code)]
     /// Derived runtime silhouette used when the offline workflow emits a
     /// cleaned-up alpha mask alongside the visible relic texture.
     pub fn render_mask_path(self) -> String {

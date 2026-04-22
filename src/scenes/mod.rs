@@ -16,6 +16,7 @@ pub mod splash;
 pub mod start_game_modal;
 pub mod start_screen;
 pub mod tile_literacy;
+pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_overlay;
 pub mod tutorial_recap;
@@ -37,6 +38,7 @@ pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
 pub use start_screen::StartScreenScene;
 pub use tile_literacy::TileLiteracyScene;
+pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
@@ -45,7 +47,6 @@ pub use zodiac_celebration::ZodiacCelebrationScene;
 
 use enum_dispatch::enum_dispatch;
 
-use crate::core::relic::{RelicId, RelicState};
 use crate::game::cascade::CascadeTuning;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
@@ -53,9 +54,8 @@ use crate::game::smoke_tuning::ShopSmokeTuning;
 use crate::persistence::ResumeScene;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::wgpu_renderer::GpuInstance;
 use crate::ui::input::{InputMode, UiAction};
-use crate::ui::layout::{LayoutResult, Rect};
+use crate::ui::layout::LayoutResult;
 
 /// Per-element visibility flags driven by the debug visibility modal.
 /// Plumbed through `DrawCtx` so scenes can skip pushing draw cmds at the
@@ -66,8 +66,6 @@ use crate::ui::layout::{LayoutResult, Rect};
 pub struct DebugVisibility {
     pub hide_candles: bool,
     pub hide_blind_plaque: bool,
-    #[allow(dead_code)]
-    pub hide_scoring_placard: bool,
 }
 
 /// Which background image to display behind the scene.
@@ -192,7 +190,7 @@ pub struct UpdateCtx<'a> {
 /// - `Pop`: the current top is discarded; the scene beneath resumes with
 ///   its state intact.
 pub enum OverlayRequest {
-    Push(Scene),
+    Push(Box<Scene>),
     Pop,
 }
 
@@ -270,81 +268,6 @@ impl ButtonDef {
             action: ButtonAction::Scene(id),
         }
     }
-}
-
-/// Screen rect of relic badge slot `slot_idx` inside the relic strip.
-/// Single source of truth for badge layout — used by `relic_row` and by
-/// scenes that need to hit-test or highlight a specific badge.
-pub fn relic_badge_rect(
-    strip: &Rect,
-    window_w: f32,
-    max_slots: usize,
-    slot_idx: usize,
-    ui_scale: f32,
-) -> (f32, f32, f32, f32) {
-    let scale = window_w / 600.0 * ui_scale;
-    let badge_w = (window_w / max_slots.max(1) as f32).min(160.0 * scale);
-    let total_w = badge_w * max_slots as f32;
-    let start_x = (window_w - total_w) * 0.5;
-    let inset = 2.0 * scale;
-    let bx = start_x + slot_idx as f32 * badge_w;
-    (bx + inset, strip.y, badge_w - inset * 2.0, strip.h)
-}
-
-/// Build glow overlay quads for relics that recently activated during a
-/// scoring cascade. Draws *behind* the relic row's icon so the existing badge
-/// background remains the dominant color, with the glow blooming around it.
-///
-/// `glow_starts` maps each glowing relic id to the `Instant` it last fired.
-/// The glow fades over `lifetime`, after which the entry should be evicted by
-/// the caller. Returns the additive overlay quads.
-///
-/// The gameplay scene uses its own 3D-projected glow path (the relics live
-/// on a brass dish, not in this 2D row), so this helper is here for future
-/// scenes that *do* render relics via `relic_row` (shop, results).
-#[allow(dead_code)]
-pub fn relic_glow_overlays(
-    relics: &RelicState,
-    glow_starts: &std::collections::HashMap<RelicId, std::time::Instant>,
-    strip: &Rect,
-    window_w: f32,
-    now: std::time::Instant,
-    lifetime: std::time::Duration,
-    ui_scale: f32,
-) -> Vec<GpuInstance> {
-    if glow_starts.is_empty() {
-        return Vec::new();
-    }
-    let total_slots = relics.max_slots;
-    if total_slots == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let lifetime_s = lifetime.as_secs_f32().max(0.001);
-    for (slot_idx, id) in relics.active.iter().enumerate() {
-        let Some(start) = glow_starts.get(id) else {
-            continue;
-        };
-        let age = now.saturating_duration_since(*start).as_secs_f32();
-        if age >= lifetime_s {
-            continue;
-        }
-        // Quadratic falloff: bright at start, soft tail.
-        let t = (1.0 - age / lifetime_s).clamp(0.0, 1.0);
-        let alpha = (t * t * 0.85).clamp(0.0, 0.85);
-        let (rx, ry, rw, rh) = relic_badge_rect(strip, window_w, total_slots, slot_idx, ui_scale);
-        // Bloom rect: slightly larger than the badge so the glow appears to
-        // spill outward. Use the gold accent so it reads as "this fired".
-        let pad = (rh * 0.18).max(2.0);
-        out.push(GpuInstance {
-            rect: [rx - pad, ry - pad, rw + pad * 2.0, rh + pad * 2.0],
-            color: crate::render::theme::color::alpha(
-                crate::render::theme::color::CHAMPAGNE,
-                alpha,
-            ),
-        });
-    }
-    out
 }
 
 /// `None` = stay in current scene; `Some(scene)` = transition.
@@ -428,6 +351,7 @@ pub enum Scene {
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TileLiteracy(TileLiteracyScene),
+    TransitionPlayground(TransitionPlaygroundScene),
     YakuJournal(YakuJournalScene),
     ZodiacCelebration(ZodiacCelebrationScene),
 }

@@ -103,19 +103,28 @@ fn add_cylinder_wall(
     }
 }
 
-/// Frustum (truncated cone) wall along Z.
-/// r0/z0 = first ring, r1/z1 = second ring.
-/// `flip` reverses winding and normal sign (for inner wall).
-fn add_frustum_wall(
-    verts: &mut Vec<Vertex3dTex>,
-    idxs: &mut Vec<u32>,
+/// Profile for a frustum (truncated cone) wall along Z: two rings
+/// (`r0, z0`) and (`r1, z1`), `segs` segments around the axis, `flip`
+/// reversing winding and normal sign (for the inner wall).
+struct FrustumWall {
     r0: f32,
     z0: f32,
     r1: f32,
     z1: f32,
     segs: usize,
     flip: bool,
-) {
+}
+
+/// Frustum (truncated cone) wall along Z, described by `wall`.
+fn add_frustum_wall(verts: &mut Vec<Vertex3dTex>, idxs: &mut Vec<u32>, wall: FrustumWall) {
+    let FrustumWall {
+        r0,
+        z0,
+        r1,
+        z1,
+        segs,
+        flip,
+    } = wall;
     let base = verts.len() as u32;
     // Outward normal for a frustum whose apex is at larger-z and rim at smaller-z.
     // The cone opens downward: r increases as z decreases.
@@ -207,23 +216,27 @@ pub fn build_lamp_body_mesh() -> MeshCpu {
     add_frustum_wall(
         &mut verts,
         &mut idxs,
-        SHADE_RIM_R,
-        SHADE_RIM_Z, // r0/z0 = rim (wide, low)
-        SHADE_APEX_R,
-        SHADE_APEX_Z, // r1/z1 = apex (small, high)
-        BODY_SEGS,
-        false,
+        FrustumWall {
+            r0: SHADE_RIM_R,
+            z0: SHADE_RIM_Z,
+            r1: SHADE_APEX_R,
+            z1: SHADE_APEX_Z,
+            segs: BODY_SEGS,
+            flip: false,
+        },
     );
     // ── Shade inner wall (normals inward, lit by bulb) ────────────────────────
     add_frustum_wall(
         &mut verts,
         &mut idxs,
-        SHADE_RIM_R - SHADE_RIM_T,
-        SHADE_RIM_Z,
-        SHADE_APEX_R - SHADE_RIM_T * 0.3,
-        SHADE_APEX_Z,
-        BODY_SEGS,
-        true,
+        FrustumWall {
+            r0: SHADE_RIM_R - SHADE_RIM_T,
+            z0: SHADE_RIM_Z,
+            r1: SHADE_APEX_R - SHADE_RIM_T * 0.3,
+            z1: SHADE_APEX_Z,
+            segs: BODY_SEGS,
+            flip: true,
+        },
     );
     // ── Open-rim annulus at z=SHADE_RIM_Z (the hanging open end) ─────────────
     {

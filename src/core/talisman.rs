@@ -95,7 +95,7 @@ impl TalismanKind {
         match self {
             TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
             TalismanKind::Pearl => "Every tile in hand: +25 flat chips when scored.",
-            TalismanKind::Gilded => "Every tile in hand: +0.4 mult when scored in a meld.",
+            TalismanKind::Gilded => "Every tile in hand: +$1 when scored in a meld.",
             TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.15 mult.",
             TalismanKind::Kiln => "Select tiles, then use to destroy them permanently.",
             TalismanKind::Bamboo => {

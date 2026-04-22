@@ -151,19 +151,14 @@ pub struct ScoringCascade {
     pub earned: u64,
     /// Timing parameters.
     tuning: CascadeTuning,
-    /// Whether tutorial annotation text should be injected into frames.
-    pub tutorial_annotated: bool,
 }
 
 /// What the UI should display for the current cascade frame.
-#[allow(dead_code)]
 pub struct CascadeFrame {
     /// The displayed round score (ticking up).
     pub displayed_score: u64,
     /// Whether the cascade is still running (blocks input).
     pub active: bool,
-    /// Index of the step that just appeared (for pulse animation). None if base or total.
-    pub new_step_index: Option<usize>,
     /// Monotonic reveal slot across base steps first, then regular steps.
     /// Used by gameplay to fire one-shot effects for every visible beat.
     pub reveal_ordinal: Option<usize>,
@@ -181,13 +176,6 @@ pub struct CascadeFrame {
     /// Tile ids associated with the currently displayed step. The gameplay
     /// scene uses these to pulse the contributing tiles in sequence.
     pub highlight_tile_ids: Vec<u32>,
-    /// Tutorial annotation text to display alongside the current phase.
-    /// `None` when not in annotated tutorial mode.
-    pub tutorial_annotation: Option<&'static str>,
-    /// `Some(t)` during the hand-off tween (0..1, linear through the window).
-    /// `None` in every other phase. Drives the chips/×/mult merge and the
-    /// physical fly-up into the score reel.
-    pub handoff_t: Option<f32>,
     /// `Some(t)` during the in-place merge sub-phase of `HandOff`
     /// (0..1, eased). After this reaches 1, the flight sub-phase begins.
     pub handoff_merge_t: Option<f32>,
@@ -213,7 +201,6 @@ impl ScoringCascade {
             score_before,
             earned,
             tuning,
-            tutorial_annotated: false,
         }
     }
 
@@ -327,22 +314,18 @@ impl ScoringCascade {
         // does the reveal work. Only during `HandOff` does the reel actually
         // tick — and it ticks all the way from `score_before` to the new
         // round total in one sweep, synced to the fly-up of the merged label.
-        let (score_target, new_step_index, reveal_ordinal) = match &self.phase {
-            Phase::ShowBaseIntro => (self.score_before, None, None),
+        let (score_target, reveal_ordinal) = match &self.phase {
+            Phase::ShowBaseIntro => (self.score_before, None),
             Phase::ShowBaseStep(i) => {
                 let i = *i;
-                (self.score_before, None, Some(i))
+                (self.score_before, Some(i))
             }
             Phase::ShowStep(i) => {
                 let i = *i;
-                (
-                    self.score_before,
-                    Some(i),
-                    Some(self.breakdown.base_steps.len() + i),
-                )
+                (self.score_before, Some(self.breakdown.base_steps.len() + i))
             }
-            Phase::PreTotalFreeze => (self.score_before, None, None),
-            Phase::ShowTotal => (self.score_before, None, None),
+            Phase::PreTotalFreeze => (self.score_before, None),
+            Phase::ShowTotal => (self.score_before, None),
             Phase::HandOff => {
                 let from = self.score_before;
                 let to = self.score_before + self.earned;
@@ -353,9 +336,9 @@ impl ScoringCascade {
                 // climb as the label physically flies into the reel.
                 let tick = ((handoff_linear - HANDOFF_MERGE_FRAC) / (1.0 - HANDOFF_MERGE_FRAC))
                     .clamp(0.0, 1.0);
-                (lerp_u64(from, to, tick), None, None)
+                (lerp_u64(from, to, tick), None)
             }
-            Phase::Done => (self.score_before + self.earned, None, None),
+            Phase::Done => (self.score_before + self.earned, None),
         };
 
         // ── Two-axis chips/mult readout ────────────────────────────────────
@@ -447,39 +430,8 @@ impl ScoringCascade {
                 }
             };
 
-        // Tutorial annotations: contextual text for each cascade phase.
-        let tutorial_annotation = if self.tutorial_annotated {
-            match &self.phase {
-                Phase::ShowBaseIntro | Phase::ShowBaseStep(_) => {
-                    Some("Base chips from your tiles and melds build the first pile")
-                }
-                Phase::ShowStep(_) => {
-                    if let Some((ref _source, kind)) = latest_step {
-                        match kind {
-                            StepKind::Chips => Some("Bonus chips feed the chip pile on the left"),
-                            StepKind::Mult => {
-                                Some("Multiplier bonuses build the mult pile on the right")
-                            }
-                            StepKind::Final => {
-                                Some("The score panel combines them: Chips \u{00d7} Mult")
-                            }
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
-                }
-                Phase::ShowTotal | Phase::HandOff | Phase::Done => {
-                    Some("Chips \u{00d7} Mult = your final score on the panel")
-                }
-                Phase::PreTotalFreeze => Some("And now the grand total..."),
-            }
-        } else {
-            None
-        };
-
         // ── Hand-off tween bookkeeping ─────────────────────────────────────
-        let (handoff_t, handoff_merge_t, handoff_flight_t) = match &self.phase {
+        let (handoff_merge_t, handoff_flight_t) = match &self.phase {
             Phase::HandOff => {
                 let linear = (elapsed.as_millis() as f32 / HANDOFF_MS as f32).clamp(0.0, 1.0);
                 let merge = (linear / HANDOFF_MERGE_FRAC).clamp(0.0, 1.0);
@@ -492,7 +444,6 @@ impl ScoringCascade {
                 // into the reel.
                 let flight_eased = 1.0 - (1.0 - flight_raw).powi(3);
                 (
-                    Some(linear),
                     Some(merge_eased),
                     if flight_raw > 0.0 {
                         Some(flight_eased)
@@ -501,14 +452,13 @@ impl ScoringCascade {
                     },
                 )
             }
-            _ => (None, None, None),
+            _ => (None, None),
         };
         let handoff_total = self.score_before + self.earned;
 
         CascadeFrame {
             displayed_score: score_target,
             active: self.is_active(),
-            new_step_index,
             reveal_ordinal,
             displayed_chips,
             displayed_mult,
@@ -516,8 +466,6 @@ impl ScoringCascade {
             phase_t,
             pulse_axis,
             highlight_tile_ids,
-            tutorial_annotation,
-            handoff_t,
             handoff_merge_t,
             handoff_flight_t,
             handoff_total,

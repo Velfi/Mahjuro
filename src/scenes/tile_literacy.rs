@@ -21,13 +21,6 @@ pub struct TileLiteracyScene {
 }
 
 impl TileLiteracyScene {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self {
-            tree: TreeState::new(),
-        }
-    }
-
     fn flat_items(&self, w: f32, h: f32) -> [FlatItem<Continue>; 1] {
         [FlatItem::new(FocusId(0), [0.0, 0.0, w, h], Continue)]
     }

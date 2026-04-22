@@ -26,7 +26,7 @@
 //! raycast AABB stays compatible. Scene code supplies non-uniform
 //! extents (X longer than Z) to make the river read as a stream.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 // Flow-axis half-extent (local X). The water reaches nearly to the
@@ -134,12 +134,14 @@ pub fn build_river_mesh() -> MeshCpu {
     push_stone_box(
         &mut vertices,
         &mut indices,
-        -CHAN_X,
-        CHAN_X,
-        FLOOR_Y - 0.04,
-        FLOOR_Y,
-        -CHAN_Z * 0.78,
-        CHAN_Z * 0.78,
+        Aabb::new(
+            -CHAN_X,
+            CHAN_X,
+            FLOOR_Y - 0.04,
+            FLOOR_Y,
+            -CHAN_Z * 0.78,
+            CHAN_Z * 0.78,
+        ),
     );
 
     // Ring of taller rocks framing the spring pool at the -X source.
@@ -161,12 +163,14 @@ pub fn build_river_mesh() -> MeshCpu {
         push_stone_box(
             &mut vertices,
             &mut indices,
-            x + jx - w,
-            x + jx + w,
-            FLOOR_Y,
-            FLOOR_Y + h,
-            cz + jitter_z - d,
-            cz + jitter_z + d,
+            Aabb::new(
+                x + jx - w,
+                x + jx + w,
+                FLOOR_Y,
+                FLOOR_Y + h,
+                cz + jitter_z - d,
+                cz + jitter_z + d,
+            ),
         );
     }
 
@@ -285,20 +289,15 @@ fn scatter_bank_rocks(
         let cx = x + jx;
         let cz_rock = z_edge + sign * d + jz; // rock sits entirely on the bank side
         // Clamp so rocks don't poke past the local-Z footprint.
-        let z0 = (cz_rock - d).max(-CHAN_Z).min(CHAN_Z);
-        let z1 = (cz_rock + d).max(-CHAN_Z).min(CHAN_Z);
+        let z0 = (cz_rock - d).clamp(-CHAN_Z, CHAN_Z);
+        let z1 = (cz_rock + d).clamp(-CHAN_Z, CHAN_Z);
         if (z1 - z0).abs() < 0.002 {
             continue;
         }
         push_stone_box(
             vertices,
             indices,
-            cx - w,
-            cx + w,
-            FLOOR_Y,
-            FLOOR_Y + h,
-            z0.min(z1),
-            z0.max(z1),
+            Aabb::new(cx - w, cx + w, FLOOR_Y, FLOOR_Y + h, z0.min(z1), z0.max(z1)),
         );
     }
 }
@@ -347,20 +346,22 @@ fn scatter_spring_ring(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) 
         // poke outside the mesh bounds.
         let x0 = (rock_cx - w_x).max(-CHAN_X);
         let x1 = (rock_cx + w_x).max(-CHAN_X + 0.002);
-        let z0 = (rock_cz - d_z).max(-CHAN_Z).min(CHAN_Z);
-        let z1 = (rock_cz + d_z).max(-CHAN_Z).min(CHAN_Z);
+        let z0 = (rock_cz - d_z).clamp(-CHAN_Z, CHAN_Z);
+        let z1 = (rock_cz + d_z).clamp(-CHAN_Z, CHAN_Z);
         if (x1 - x0).abs() < 0.003 || (z1 - z0).abs() < 0.003 {
             continue;
         }
         push_stone_box(
             vertices,
             indices,
-            x0.min(x1),
-            x0.max(x1),
-            FLOOR_Y,
-            FLOOR_Y + h,
-            z0.min(z1),
-            z0.max(z1),
+            Aabb::new(
+                x0.min(x1),
+                x0.max(x1),
+                FLOOR_Y,
+                FLOOR_Y + h,
+                z0.min(z1),
+                z0.max(z1),
+            ),
         );
     }
     // A few extra small "splash" rocks just inside the pool lip — the
@@ -379,12 +380,7 @@ fn scatter_spring_ring(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) 
         push_stone_box(
             vertices,
             indices,
-            px - w,
-            px + w,
-            FLOOR_Y,
-            FLOOR_Y + h,
-            pz - d,
-            pz + d,
+            Aabb::new(px - w, px + w, FLOOR_Y, FLOOR_Y + h, pz - d, pz + d),
         );
     }
 }
@@ -409,12 +405,14 @@ fn scatter_outer_rocks(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) 
             push_stone_box(
                 vertices,
                 indices,
-                cx - w,
-                cx + w,
-                FLOOR_Y,
-                FLOOR_Y + h,
-                cz_rock - d,
-                cz_rock + d,
+                Aabb::new(
+                    cx - w,
+                    cx + w,
+                    FLOOR_Y,
+                    FLOOR_Y + h,
+                    cz_rock - d,
+                    cz_rock + d,
+                ),
             );
         }
     }
@@ -424,18 +422,9 @@ fn scatter_outer_rocks(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) 
 /// every vertex's UV.y to `0.0` so the shader treats the fragments as
 /// stone, not water. UV.x encodes a stable per-vertex coordinate used
 /// by the shader's stone speckle noise.
-fn push_stone_box(
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-    x0: f32,
-    x1: f32,
-    y0: f32,
-    y1: f32,
-    z0: f32,
-    z1: f32,
-) {
+fn push_stone_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, aabb: Aabb) {
     let start = vertices.len();
-    push_box(vertices, indices, x0, x1, y0, y1, z0, z1);
+    push_box(vertices, indices, aabb);
     for v in &mut vertices[start..] {
         v.uv[1] = 0.0;
     }

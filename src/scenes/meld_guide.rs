@@ -45,7 +45,6 @@ pub struct MeldGuideScene {
     page: usize,
     /// `true` when entered from gameplay/shop (i.e. there is a suspended scene
     /// to return to). Affects the "Back" button label.
-    #[allow(dead_code)]
     has_suspended: bool,
 }
 
@@ -808,9 +807,12 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
     }
 }
 
+/// `(label, kind, suit, ranks, accent)` descriptor for a single meld row.
+type MeldSpec = (&'static str, SetKind, Suit, &'static [u8], [f32; 4]);
+
 /// Build `TileGroup`s from a compact descriptor list. Assigns sequential tile
 /// ids across all groups so the renderer treats each tile as unique.
-fn meld_groups(specs: &[(&'static str, SetKind, Suit, &[u8], [f32; 4])]) -> Vec<TileGroup> {
+fn meld_groups(specs: &[MeldSpec]) -> Vec<TileGroup> {
     let mut id_counter: u32 = 0;
     specs
         .iter()

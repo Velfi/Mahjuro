@@ -77,7 +77,6 @@ impl YakuKind {
     /// Base chip bonus added when this yaku fires (separate from the mult
     /// axis). Existing yaku stay at 0 chips so prior balance is preserved;
     /// new Patch B yaku contribute on both axes per the plan.
-    #[allow(dead_code)]
     pub fn chip_bonus(self) -> i32 {
         self.base_chip_bonus()
     }
@@ -104,7 +103,6 @@ impl YakuKind {
     /// each Zodiac card use increments it. Used by `score_sets` in Patch B
     /// finishing — for now nothing wires a level above 1, so callers can use
     /// the simpler `mult_bonus()`.
-    #[allow(dead_code)]
     pub fn mult_bonus_at(self, level: u32) -> f64 {
         let base = self.base_mult_bonus();
         if level <= 1 {
@@ -115,7 +113,6 @@ impl YakuKind {
     }
 
     /// Leveled chip bonus: `base + 20 × (level - 1)`.
-    #[allow(dead_code)]
     pub fn chip_bonus_at(self, level: u32) -> i32 {
         let base = self.base_chip_bonus();
         if level <= 1 {
@@ -170,8 +167,6 @@ pub struct YakuPreview {
     pub kind: YakuKind,
     /// True if the current selection (when valid) actually awards this yaku.
     pub active: bool,
-    /// Progress toward qualifying, in `0.0..=1.0`.
-    pub progress: f32,
 }
 
 /// Compute a `YakuPreview` for each yaku in the player's available pool, based
@@ -223,82 +218,7 @@ fn yaku_preview_inner(
         .into_iter()
         .map(|k| {
             let active = active_yaku.contains(&k);
-            let progress = match k {
-                YakuKind::Tanyao => {
-                    if tiles.is_empty() {
-                        0.0
-                    } else {
-                        let n = tiles
-                            .iter()
-                            .filter(|t| {
-                                matches!(t.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
-                                    && t.rank >= 2
-                                    && t.rank <= 8
-                            })
-                            .count();
-                        let total = tiles.len();
-                        n as f32 / total as f32
-                    }
-                }
-                YakuKind::Toitoi => match &sets_opt {
-                    Some(s) => {
-                        let trips = s
-                            .iter()
-                            .filter(|x| matches!(x.kind, SetKind::Triplet | SetKind::Kong))
-                            .count();
-                        let seqs = s.iter().filter(|x| x.kind == SetKind::Sequence).count();
-                        if seqs > 0 {
-                            0.0
-                        } else {
-                            let progress = (trips as f32 / 2.0).min(1.0);
-                            progress
-                        }
-                    }
-                    None => 0.0,
-                },
-                YakuKind::FullHand => {
-                    let n = tiles.len().min(14);
-                    n as f32 / 14.0
-                }
-                YakuKind::Yakuhai => {
-                    let max_honor = tiles
-                        .iter()
-                        .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-                        .fold(
-                            std::collections::HashMap::<(Suit, u8), usize>::new(),
-                            |mut m, t| {
-                                *m.entry((t.suit, t.rank)).or_insert(0) += 1;
-                                m
-                            },
-                        )
-                        .into_values()
-                        .max()
-                        .unwrap_or(0);
-                    (max_honor as f32 / 3.0).min(1.0)
-                }
-                // The remaining new yaku get a simple active/inactive preview.
-                // The richer Codex UI hint pass lives in the next UI patch.
-                YakuKind::Iipeikou
-                | YakuKind::SanshokuDoujun
-                | YakuKind::Ittsu
-                | YakuKind::Honitsu
-                | YakuKind::Chinitsu
-                | YakuKind::Junchan
-                | YakuKind::Honroutou
-                | YakuKind::Chiitoitsu
-                | YakuKind::ChickenHand => {
-                    if active {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            };
-            YakuPreview {
-                kind: k,
-                active,
-                progress: progress.clamp(0.0, 1.0),
-            }
+            YakuPreview { kind: k, active }
         })
         .collect()
 }

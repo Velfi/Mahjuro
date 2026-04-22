@@ -17,6 +17,7 @@ use std::cell::Cell;
 
 use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
+use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
@@ -424,11 +425,16 @@ impl SceneBehavior for PickBlindScene {
 
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         // Pick up a pending zodiac celebration from a ZodiacBlessing tag.
-        if let Some((kind, yaku, new_level)) = ctx.run.pending_zodiac_celebration.take() {
+        if let Some((kind, yaku, new_level)) = GameEngine::take_pending_zodiac_celebration(ctx.run)
+        {
             ctx.bus
                 .push(crate::game::event_bus::GameEvent::ZodiacReveal);
-            *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::ZodiacCelebration(
-                super::ZodiacCelebrationScene::new(kind, yaku.name(), new_level),
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
+                Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
+                    kind,
+                    yaku.name(),
+                    new_level,
+                )),
             )));
             return None;
         }
@@ -437,7 +443,8 @@ impl SceneBehavior for PickBlindScene {
             return t;
         }
 
-        let upcoming = ctx.run.upcoming_blind;
+        let pick = GameEngine::read_pick_blind(ctx.run);
+        let upcoming = pick.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
 
         let layout = PickBlindLayout::build(ctx.layout, upcoming_index(upcoming));
@@ -466,20 +473,16 @@ impl SceneBehavior for PickBlindScene {
 
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip {
-                if let Some(tag) = ctx.run.tag_for_blind(upcoming) {
-                    ctx.run.apply_tag(tag);
-                }
-                ctx.run.skip_to_next_blind();
+                let mut engine = GameEngine::new(ctx.run, ctx.bus);
+                let _ = engine.dispatch(GameCommand::SkipUpcomingBlindWithTag);
                 return Some(Scene::PickBlind(PickBlindScene::new()));
             }
         }
 
         match action {
             Some(BlindAction::SkipBlind) if can_skip => {
-                if let Some(tag) = ctx.run.tag_for_blind(upcoming) {
-                    ctx.run.apply_tag(tag);
-                }
-                ctx.run.skip_to_next_blind();
+                let mut engine = GameEngine::new(ctx.run, ctx.bus);
+                let _ = engine.dispatch(GameCommand::SkipUpcomingBlindWithTag);
                 Some(Scene::PickBlind(PickBlindScene::new()))
             }
             Some(BlindAction::PlayBlind) | Some(BlindAction::SkipBlind) => {
@@ -488,10 +491,10 @@ impl SceneBehavior for PickBlindScene {
                 // fighting one. "Encountered" = selected via PlayBlind, so
                 // skips don't count and unseen bosses stay hidden in the
                 // Collection.
-                if upcoming == BlindKind::Boss {
-                    if let Some(bk) = ctx.run.boss.upcoming {
-                        ctx.bus.push(GameEvent::BossEncountered(bk));
-                    }
+                if upcoming == BlindKind::Boss
+                    && let Some(bk) = pick.boss_kind
+                {
+                    ctx.bus.push(GameEvent::BossEncountered(bk));
                 }
                 Some(Scene::Gameplay(GameplayScene::with_pending_blind(upcoming)))
             }
@@ -504,7 +507,8 @@ impl SceneBehavior for PickBlindScene {
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
 
-        let upcoming = ctx.run.upcoming_blind;
+        let pick = GameEngine::read_pick_blind(ctx.run);
+        let upcoming = pick.upcoming_blind;
         let can_skip = Self::can_skip(upcoming);
         let upcoming_idx = upcoming_index(upcoming);
         let layout = PickBlindLayout::build(ctx.layout, upcoming_idx);
@@ -551,10 +555,8 @@ impl SceneBehavior for PickBlindScene {
             let base_color = match (state, blind) {
                 (ShrineState::Cleared, _) => stone_dark,
                 (ShrineState::Future, _) => stone_mid,
-                (ShrineState::Upcoming, BlindKind::Boss) => ctx
-                    .run
-                    .boss
-                    .upcoming
+                (ShrineState::Upcoming, BlindKind::Boss) => pick
+                    .boss_kind
                     .map(|k| blend_with_stone(k.tier().halo_color(), 0.45))
                     .unwrap_or(stone_light),
                 (ShrineState::Upcoming, _) => stone_light,
@@ -575,9 +577,6 @@ impl SceneBehavior for PickBlindScene {
                 rotation: glam::Mat4::IDENTITY,
                 color: base_color,
                 kind: Object3dKind::Shrine { glow },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -603,9 +602,6 @@ impl SceneBehavior for PickBlindScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -617,7 +613,7 @@ impl SceneBehavior for PickBlindScene {
         // begin). Skip is on the RIGHT and holds a small pile of coins
         // (the tribute reward for walking away). Both reuse the shop's
         // existing dish + coin meshes.
-        let skip_tag = ctx.run.tag_for_blind(upcoming);
+        let skip_tag = pick.skip_tag;
         let (play_px, play_py) = layout.play_dish_anchor_px;
         let play_dext = layout.play_dish_extents;
         frame.object3d(Object3d {
@@ -632,9 +628,6 @@ impl SceneBehavior for PickBlindScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -653,9 +646,6 @@ impl SceneBehavior for PickBlindScene {
                 shadow_caster: true,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: None,
@@ -676,9 +666,6 @@ impl SceneBehavior for PickBlindScene {
                     shadow_caster: true,
                     silhouette: false,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -702,9 +689,6 @@ impl SceneBehavior for PickBlindScene {
                     shadow_caster: true,
                     silhouette: false,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -807,36 +791,30 @@ impl SceneBehavior for PickBlindScene {
             color: [1.00, 0.93, 0.80],
             intensity: 1.45 * focus_boost,
         });
-        if upcoming == BlindKind::Boss {
-            if let Some(kind) = ctx.run.boss.upcoming {
-                let def = kind.def();
-                let description: &str = ctx
-                    .run
-                    .boss
-                    .effect
-                    .as_ref()
-                    .and_then(|e| e.description_override.as_deref())
-                    .unwrap_or(def.description);
-                let (ofuda_w, ofuda_h) =
-                    auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
-                // Mirror the light anchor to the ofuda's drawn position below
-                // (the wider gap keeps the plaque's rotated side from clipping
-                // the paper decal).
-                let ofuda_px =
-                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
-                let ofuda_py = plaque_py + up_ext[2] * 0.15;
-                let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
-                point_lights.push(PointLight {
-                    pos: [
-                        ofuda_px - ofuda_w * 0.06,
-                        ofuda_py + ofuda_h * 0.03,
-                        ofuda_world_y + ofuda_w * 0.32,
-                    ],
-                    radius: ofuda_h * 1.10,
-                    color: [1.00, 0.95, 0.82],
-                    intensity: 1.35 * focus_boost,
-                });
-            }
+        if upcoming == BlindKind::Boss
+            && let (Some(kind), Some(description)) =
+                (pick.boss_kind, pick.boss_description.as_deref())
+        {
+            let def = kind.def();
+            let (ofuda_w, ofuda_h) =
+                auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+            // Mirror the light anchor to the ofuda's drawn position below
+            // (the wider gap keeps the plaque's rotated side from clipping
+            // the paper decal).
+            let ofuda_px =
+                (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
+            let ofuda_py = plaque_py + up_ext[2] * 0.15;
+            let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
+            point_lights.push(PointLight {
+                pos: [
+                    ofuda_px - ofuda_w * 0.06,
+                    ofuda_py + ofuda_h * 0.03,
+                    ofuda_world_y + ofuda_w * 0.32,
+                ],
+                radius: ofuda_h * 1.10,
+                color: [1.00, 0.95, 0.82],
+                intensity: 1.35 * focus_boost,
+            });
         }
 
         // ── Play altar spotlight ─────────────────────────────────────
@@ -892,8 +870,8 @@ impl SceneBehavior for PickBlindScene {
         // Other shrines just show their name.
         let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
         let desc_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
-        let base_target = ctx.run.base_target;
-        let upcoming_run_number = ctx.run.run_number;
+        let base_target = pick.base_target;
+        let upcoming_run_number = pick.run_number;
         for (i, &blind) in blinds.iter().enumerate() {
             // The upcoming shrine's label is replaced by the 3D plaque
             // below; skip it here to avoid redundancy.
@@ -924,16 +902,14 @@ impl SceneBehavior for PickBlindScene {
             // Boss shrine: stack name + description + tier above.
             // Other shrines: just the name.
             let title_text: String = if blind == BlindKind::Boss {
-                ctx.run
-                    .boss
-                    .upcoming
-                    .map(|k| k.def().name.to_string())
+                pick.boss_name
+                    .clone()
                     .unwrap_or_else(|| "Boss Blind".to_string())
             } else {
                 blind.name().to_string()
             };
 
-            let total_stack_h = if blind == BlindKind::Boss && ctx.run.boss.upcoming.is_some() {
+            let total_stack_h = if blind == BlindKind::Boss && pick.boss_kind.is_some() {
                 title_h + desc_h * 2.0 + 4.0
             } else {
                 title_h
@@ -950,33 +926,22 @@ impl SceneBehavior for PickBlindScene {
                 ..Default::default()
             });
 
-            if blind == BlindKind::Boss {
-                if let Some(kind) = ctx.run.boss.upcoming {
-                    let def = kind.def();
-                    // Reactive bosses (Mirror, Tax Collector) override
-                    // the static description with the variant chosen
-                    // at reveal time, so the player sees the actual
-                    // rule before they ever fight it.
-                    let description: &str = ctx
-                        .run
-                        .boss
-                        .effect
-                        .as_ref()
-                        .and_then(|e| e.description_override.as_deref())
-                        .unwrap_or(def.description);
-                    texts.push(TextLabel {
-                        rect: [label_x, title_y + title_h + 2.0, label_w, desc_h],
-                        text: description.to_string(),
-                        color: color::AMBER,
-                        ..Default::default()
-                    });
-                    texts.push(TextLabel {
-                        rect: [label_x, title_y + title_h + desc_h + 4.0, label_w, desc_h],
-                        text: format!("[{}]", def.tier.label()),
-                        color: color::AMBER,
-                        ..Default::default()
-                    });
-                }
+            if blind == BlindKind::Boss
+                && let (Some(description), Some(tier_label)) =
+                    (pick.boss_description.as_deref(), pick.boss_tier_label)
+            {
+                texts.push(TextLabel {
+                    rect: [label_x, title_y + title_h + 2.0, label_w, desc_h],
+                    text: description.to_string(),
+                    color: color::AMBER,
+                    ..Default::default()
+                });
+                texts.push(TextLabel {
+                    rect: [label_x, title_y + title_h + desc_h + 4.0, label_w, desc_h],
+                    text: format!("[{}]", tier_label),
+                    color: color::AMBER,
+                    ..Default::default()
+                });
             }
         }
 
@@ -996,10 +961,8 @@ impl SceneBehavior for PickBlindScene {
             let plaque_px = raw_plaque_px.clamp(plaque_w * 0.5 + 16.0, w - plaque_w * 0.5 - 16.0);
 
             let blind_name = if upcoming == BlindKind::Boss {
-                ctx.run
-                    .boss
-                    .upcoming
-                    .map(|k| k.def().name.to_string())
+                pick.boss_name
+                    .clone()
                     .unwrap_or_else(|| "Boss Blind".to_string())
             } else {
                 upcoming.name().to_string()
@@ -1018,7 +981,7 @@ impl SceneBehavior for PickBlindScene {
                     material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
                         .with_decal(crate::render::primitive::plaque_decal(format!(
                             "ANTE {}/{} · {}\nTarget {}   ·   Reward ${}",
-                            ctx.run.ante,
+                            pick.ante,
                             crate::game::run::FINAL_ANTE,
                             blind_name,
                             target_value,
@@ -1028,9 +991,6 @@ impl SceneBehavior for PickBlindScene {
                     shadow_caster: false,
                     silhouette: false,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
@@ -1038,61 +998,50 @@ impl SceneBehavior for PickBlindScene {
 
             // Boss blinds get an ofuda beside the plaque showing the rule
             // description + tier — the plaque's two lines are already full.
-            if upcoming == BlindKind::Boss {
-                if let Some(kind) = ctx.run.boss.upcoming {
-                    let def = kind.def();
-                    let description: &str = ctx
-                        .run
-                        .boss
-                        .effect
-                        .as_ref()
-                        .and_then(|e| e.description_override.as_deref())
-                        .unwrap_or(def.description);
-                    let (ofuda_w, ofuda_h) =
-                        auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
-                    // Position to the left of the plaque, but keep it tucked
-                    // close enough to share the plaque accent light. The gap
-                    // has to clear the plaque's rotated thickness (extents z =
-                    // 10, tilted ~60°) — a tight 4px gap let the plaque's left
-                    // side face z-fight with the ofuda's front face and punch
-                    // holes through the boss-rule decal.
-                    let ofuda_px = (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0)
-                        .max(ofuda_w * 0.5 + 8.0);
-                    let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 18.0;
-                    // Float the ofuda slightly higher than the plaque's nominal
-                    // lift so its front face clearly sits in front of anything
-                    // behind it (shrine plinths) and doesn't co-planar-fight.
-                    let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
-                    frame.object3d(Object3d {
-                        pos: [ofuda_px, ofuda_py, ofuda_world_y],
-                        extents: [ofuda_w, ofuda_h, 3.0],
-                        rotation: cam_rot,
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::Primitive {
-                            shape: crate::render::primitive::MeshId::Ofuda,
-                            material: crate::render::primitive::MaterialSpec::plain().with_decal(
-                                crate::render::primitive::DecalSpec {
-                                    text: format!("{}\n{}", def.name, description),
-                                    palette: crate::render::primitive::DecalPalette::ParchmentInk,
-                                    layout: crate::render::primitive::DecalLayout::TitleRule {
-                                        title_height_frac: 0.40,
-                                        target_short_edge:
-                                            crate::render::decal::OFUDA_DECAL_LONG_EDGE,
-                                    },
+            if upcoming == BlindKind::Boss
+                && let (Some(kind), Some(description)) =
+                    (pick.boss_kind, pick.boss_description.as_deref())
+            {
+                let def = kind.def();
+                let (ofuda_w, ofuda_h) =
+                    auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+                // Position to the left of the plaque, but keep it tucked
+                // close enough to share the plaque accent light. The gap
+                // has to clear the plaque's rotated thickness (extents z =
+                // 10, tilted ~60°) — a tight 4px gap let the plaque's left
+                // side face z-fight with the ofuda's front face and punch
+                // holes through the boss-rule decal.
+                let ofuda_px =
+                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
+                let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 18.0;
+                // Float the ofuda slightly higher than the plaque's nominal
+                // lift so its front face clearly sits in front of anything
+                // behind it (shrine plinths) and doesn't co-planar-fight.
+                let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
+                frame.object3d(Object3d {
+                    pos: [ofuda_px, ofuda_py, ofuda_world_y],
+                    extents: [ofuda_w, ofuda_h, 3.0],
+                    rotation: cam_rot,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    kind: Object3dKind::Primitive {
+                        shape: crate::render::primitive::MeshId::Ofuda,
+                        material: crate::render::primitive::MaterialSpec::plain().with_decal(
+                            crate::render::primitive::DecalSpec {
+                                text: format!("{}\n{}", def.name, description),
+                                palette: crate::render::primitive::DecalPalette::ParchmentInk,
+                                layout: crate::render::primitive::DecalLayout::TitleRule {
+                                    target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                                 },
-                            ),
-                            pick_id: None,
-                            shadow_caster: false,
-                            silhouette: false,
-                        },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
-                        hover_target: 0.0,
-                        anim_id: 0,
-                        arrange_name: None,
-                    });
-                }
+                            },
+                        ),
+                        pick_id: None,
+                        shadow_caster: false,
+                        silhouette: false,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: None,
+                });
             }
         }
 
@@ -1278,8 +1227,17 @@ impl SceneBehavior for PickBlindScene {
         if self.pause_menu.paused {
             buttons.clear();
         }
-        self.pause_menu
-            .draw(w, h, scale, &mut quads, &mut texts, &mut buttons, ui_scale);
+        self.pause_menu.draw(
+            crate::ui::layout::ViewportCtx {
+                window_w: w,
+                window_h: h,
+                ui_scale,
+            },
+            scale,
+            &mut quads,
+            &mut texts,
+            &mut buttons,
+        );
         if self.pause_menu.paused {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }

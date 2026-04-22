@@ -207,7 +207,6 @@ pub(crate) fn load_metal_heightmap(
 /// One set of three textures per `ZodiacKind` in `ZodiacKind::all()` order.
 pub(crate) struct ZodiacRibbonTextures {
     /// Keeps GPU textures alive so the views remain valid.
-    #[allow(dead_code)]
     pub textures: Vec<wgpu::Texture>,
     pub top_views: Vec<wgpu::TextureView>,
     pub mid_views: Vec<wgpu::TextureView>,
@@ -465,19 +464,36 @@ pub(crate) fn create_depth_copy(
 // Per-tile GPU resource builder (free function avoids double-borrow of `self`)
 // ---------------------------------------------------------------------------
 
+/// GPU + asset context shared by the per-tile builders. Keeps call sites
+/// short and makes it obvious which handles move together.
+#[derive(Copy, Clone)]
+pub(crate) struct TileGpuCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub layout: &'a wgpu::BindGroupLayout,
+    pub shadow_caster_layout: &'a wgpu::BindGroupLayout,
+    pub primitives: &'a [TilePrimitiveGpu],
+    pub sampler: &'a wgpu::Sampler,
+    pub ui_font: Option<&'a fontdue::Font>,
+    pub emoji_font: Option<&'a fontdue::Font>,
+}
+
 pub(crate) fn make_hand_tile_gpu(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    shadow_caster_layout: &wgpu::BindGroupLayout,
-    primitives: &[TilePrimitiveGpu],
-    sampler: &wgpu::Sampler,
+    ctx: &TileGpuCtx<'_>,
     base_color_factor: [f32; 4],
-    ui_font: Option<&fontdue::Font>,
-    emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
     tile_set: Option<&str>,
 ) -> HandTileGpu {
+    let TileGpuCtx {
+        device,
+        queue,
+        layout,
+        shadow_caster_layout,
+        primitives,
+        sampler,
+        ui_font,
+        emoji_font,
+    } = *ctx;
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("hand-tile-cam"),
@@ -606,18 +622,21 @@ pub(crate) fn make_hand_tile_gpu(
 }
 
 pub(crate) fn make_showcase_tile_gpu(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    shadow_caster_layout: &wgpu::BindGroupLayout,
-    primitives: &[TilePrimitiveGpu],
-    sampler: &wgpu::Sampler,
+    ctx: &TileGpuCtx<'_>,
     base_color_factor: [f32; 4],
-    ui_font: Option<&fontdue::Font>,
-    emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
     tile_set: Option<&str>,
 ) -> ShowcaseTileGpu {
+    let TileGpuCtx {
+        device,
+        queue,
+        layout,
+        shadow_caster_layout,
+        primitives,
+        sampler,
+        ui_font,
+        emoji_font,
+    } = *ctx;
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("showcase-tile-cam"),

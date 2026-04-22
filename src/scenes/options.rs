@@ -851,7 +851,7 @@ impl OptionsScene {
             });
             let thumb_h = (indicator_h * (layout.visible_slots as f32 / CONTENT.len() as f32))
                 .max(12.0 * layout.scale);
-            let thumb_y = indicator_y + (indicator_h - thumb_h) * (smooth / max_scroll as f32);
+            let thumb_y = indicator_y + (indicator_h - thumb_h) * (smooth / max_scroll);
             instances.push(GpuInstance {
                 rect: [indicator_x, thumb_y, indicator_w, thumb_h],
                 color: color::GOLD,

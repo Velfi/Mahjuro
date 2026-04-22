@@ -126,7 +126,6 @@ impl TagKind {
     }
 
     /// Approximate gold-equivalent value for bot skip evaluation.
-    #[allow(dead_code)]
     pub fn gold_value(self) -> u32 {
         match self {
             TagKind::GoldIngot => 8,

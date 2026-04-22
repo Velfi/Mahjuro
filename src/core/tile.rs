@@ -31,23 +31,13 @@ pub enum TileEnhancement {
     Jade,
     /// +25 flat chips when this tile is scored, meld or pair.
     Pearl,
-    /// +0.4 mult when this tile is part of a scored meld.
+    /// +$1 when this tile is part of a scored meld.
     Gilded,
     /// ×1.15 mult applied once per meld that contains this tile.
     Polychrome,
 }
 
 impl TileEnhancement {
-    #[allow(dead_code)]
-    pub fn name(self) -> &'static str {
-        match self {
-            TileEnhancement::Jade => "Jade",
-            TileEnhancement::Pearl => "Pearl",
-            TileEnhancement::Gilded => "Gilded",
-            TileEnhancement::Polychrome => "Polychrome",
-        }
-    }
-
     /// Numeric ID passed to the tile_3d shader via `base_color_factor.z`.
     /// 0 = no enhancement (used by `Option::map_or`), 1–4 = Jade/Pearl/Gilded/Polychrome.
     pub fn shader_id(self) -> f32 {
@@ -56,23 +46,6 @@ impl TileEnhancement {
             TileEnhancement::Pearl => 2.0,
             TileEnhancement::Gilded => 3.0,
             TileEnhancement::Polychrome => 4.0,
-        }
-    }
-
-    /// Distinct accent colour used by tile renderers to mark an enhanced tile
-    /// (border / corner gem). Each variant gets a clearly different hue so the
-    /// player can tell at a glance which talisman is on a hand.
-    #[allow(dead_code)]
-    pub fn accent_color(self) -> [f32; 4] {
-        match self {
-            // Jade — vivid imperial green.
-            TileEnhancement::Jade => [0.20, 0.78, 0.45, 1.0],
-            // Pearl — soft cool ivory with a faint blue cast.
-            TileEnhancement::Pearl => [0.88, 0.92, 1.00, 1.0],
-            // Gilded — warm polished gold.
-            TileEnhancement::Gilded => [0.95, 0.78, 0.25, 1.0],
-            // Polychrome — saturated magenta-violet (stand-in for the rainbow).
-            TileEnhancement::Polychrome => [0.85, 0.30, 0.85, 1.0],
         }
     }
 }
@@ -107,13 +80,6 @@ impl Tile {
         }
     }
 
-    /// Same tile face (ignores id).
-    #[allow(dead_code)]
-    pub fn matches_face(&self, other: &Tile) -> bool {
-        self.suit == other.suit && self.rank == other.rank
-    }
-
-    #[allow(dead_code)]
     pub fn is_number_tile(&self) -> bool {
         matches!(self.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
     }

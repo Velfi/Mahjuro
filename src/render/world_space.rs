@@ -32,7 +32,6 @@
 //! the third value is **+Z** lift above the felt.
 
 use glam::Vec3;
-use serde::{Deserialize, Serialize};
 
 /// Maps layout pixel coordinates plus vertical lift into world space (Z-up, standard conventions).
 ///
@@ -61,41 +60,6 @@ pub fn pixel_to_world(window_w: f32, window_h: f32, px: f32, py: f32, lift: f32)
 /// placed at `nx = 0.5` is always centered horizontally regardless of resolution.
 /// Only `lift_mm` is in physical units — a 36 mm prop stays 36 mm tall as the
 /// window scales.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ScreenPos {
-    pub nx: f32,
-    pub ny: f32,
-    /// Physical height above the felt in millimeters.
-    pub lift_mm: f32,
-}
-
-#[allow(dead_code)]
-impl ScreenPos {
-    /// Convert to the `[pixel_x, pixel_y, lift_z]` triple used by
-    /// [`crate::render::draw_cmd`] placement structs.
-    ///
-    /// `lift_mm` is converted to world units via `layout.mm()` so the physical
-    /// scale stays consistent across window sizes.
-    #[inline]
-    pub fn to_pixel_triple(self, layout: &crate::ui::layout::LayoutResult) -> [f32; 3] {
-        [
-            self.nx * layout.window_w,
-            self.ny * layout.window_h,
-            layout.mm(self.lift_mm),
-        ]
-    }
-
-    /// Convert to a [`LayoutAnchorPx`].
-    #[inline]
-    pub fn to_anchor(self, layout: &crate::ui::layout::LayoutResult) -> LayoutAnchorPx {
-        LayoutAnchorPx {
-            px: self.nx * layout.window_w,
-            py: self.ny * layout.window_h,
-            lift_z: layout.mm(self.lift_mm),
-        }
-    }
-}
-
 /// Layout-space anchor (pixels + lift) before packing into [`WorldSurfaceAnchor`](crate::render::draw_cmd::WorldSurfaceAnchor).
 #[derive(Clone, Copy, Debug)]
 pub struct LayoutAnchorPx {
@@ -111,4 +75,16 @@ impl LayoutAnchorPx {
     pub fn to_draw_cmd_triple(self) -> [f32; 3] {
         [self.px, self.py, self.lift_z]
     }
+}
+
+/// Full placement for 3D helpers that position, orient, and size a prop:
+/// the layout-space anchor plus yaw (camera-facing rotation inherited from
+/// the parent face) and a uniform scale multiplier. Shared by score reel,
+/// tooltip panels, and cascade HUD placements so each one doesn't reinvent
+/// its own 5-field param list.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacementAnchor {
+    pub anchor: LayoutAnchorPx,
+    pub rot_y: f32,
+    pub scale: f32,
 }

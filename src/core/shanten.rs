@@ -161,7 +161,7 @@ pub fn has_scoring_partial(tiles: &[Tile]) -> bool {
     let mut nums: Vec<(Suit, u8)> = counts
         .iter()
         .filter(|((s, _), _)| matches!(s, Suit::Characters | Suit::Bamboos | Suit::Circles))
-        .flat_map(|(&k, &c)| std::iter::repeat(k).take(c))
+        .flat_map(|(&k, &c)| std::iter::repeat_n(k, c))
         .collect();
     nums.sort();
     for i in 0..nums.len() {

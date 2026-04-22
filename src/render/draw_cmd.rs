@@ -22,7 +22,7 @@ use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::lit_mesh::MaterialParams;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, RelicIcon, SpotLight, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
 
@@ -158,10 +158,9 @@ pub struct BugOccluder {
 // suppressed via the `allow(dead_code)` until then.
 
 /// Hanging blind/score plaque suspended above the gameplay table.
-#[allow(dead_code)]
 ///
 /// One yaku selector tablet (carved bone, sitting in a row below the hand).
-#[allow(dead_code)]
+
 #[derive(Clone, Debug)]
 pub struct YakuTabletPlacement {
     /// `(pixel_x, pixel_y, lift)` for the tablet's *base center*.
@@ -172,8 +171,6 @@ pub struct YakuTabletPlacement {
     pub rotation_z_deg: f32,
     /// Yaku display name (engraved on the face via decal).
     pub name: String,
-    /// Progress toward this yaku in [0, 1] — drives the inlay glow strip.
-    pub progress: f32,
     /// True when this yaku is the player's currently selected target.
     pub active: bool,
     /// Hover lift envelope in [0, 1] driven by the scene each frame.
@@ -312,7 +309,7 @@ pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam:
 /// Mesh-specific data carried alongside the common [`Object3d`] fields.
 /// Each variant names only the fields that differ from the common set.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+
 pub enum Object3dKind {
     // ── Upright panels ──────────────────────────────────────────────
     // (Plaque is now modeled as `Primitive { shape: BeveledSlab, … }`.)
@@ -324,14 +321,10 @@ pub enum Object3dKind {
         label: String,
         active: bool,
         hover: f32,
-        progress: f32,
     },
     /// Lacquered wood action tablet with press/hover animation envelopes.
     WoodTablet {
         label: String,
-        hover: f32,
-        pressed: f32,
-        disabled: bool,
         /// When `Some`, the tablet's screen-space rect is published to
         /// `aux_dish_rects` and its model matrix to
         /// `last_primitive_pick_models` keyed by this id. Lets scenes
@@ -502,15 +495,6 @@ pub enum Object3dKind {
     /// displacement (i.e. every orb previews the shading model itself, not a
     /// per-asset heightmap).
     MaterialOrb { material: MaterialParams },
-    /// Hexagonal display cabinet — a tall lacquered-wood column with
-    /// overhanging cap and base. Used by the collection scene as the
-    /// rotating tower that holds catalogued artifacts on its 6 faces.
-    /// Mesh is local-Z-up; `Object3d.extents` maps `(width, depth, height)`
-    /// to `(mesh_X, mesh_Y, mesh_Z)`. Each face renders an engraved
-    /// label from `face_labels` (face 0 along world +X, then CCW
-    /// around +Z); the cabinet body draws with both wood and brass-rail
-    /// instances per the renderer's Cabinet dispatch.
-    Cabinet { face_labels: [String; 6] },
     /// Generic shape + material. Replaces the bespoke-per-shape pattern
     /// for simple slabs/cubes/cylinders — `obj.color` is the base tint
     /// (honored consistently across every shape) and the optional decal
@@ -538,7 +522,7 @@ pub enum Object3dKind {
 /// directly — use [`camera_facing_rotation`] when the face should track the
 /// active camera.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+
 pub struct Object3d {
     /// Center position as `(pixel_x, pixel_y, lift)`.
     /// Mapped to world space by [`crate::render::world_space::pixel_to_world`].
@@ -553,14 +537,6 @@ pub struct Object3d {
     pub color: [f32; 4],
     /// Which mesh + material to render, plus mesh-specific payload.
     pub kind: Object3dKind,
-    /// When `true`, this object participates in focus-ring and hover
-    /// hit-testing (rendered rect is exposed via `proj.object3d_rects`).
-    pub focusable: bool,
-    /// When `true`, the scene's ambient lighting and shadow map apply.
-    /// Set `false` for self-illuminated / unshaded objects.
-    pub scene_shaded: bool,
-    /// Optional point light emitted from this object's center this frame.
-    pub own_light: Option<PointLight>,
     /// Target hover intensity in \[0, 1\] for this frame.
     ///
     /// When non-zero or when `anim_id` is set, the renderer maintains a
@@ -594,7 +570,6 @@ pub struct Object3d {
 /// the appropriate pipeline. Contiguous runs of the same variant (e.g.
 /// several `Quad`s in a row) are batched into a single instanced draw, which
 /// is invisible to scenes and preserves ordering exactly.
-#[allow(dead_code)]
 pub enum DrawCmd {
     /// Full-screen background image.
     Background(BackgroundId),
@@ -652,9 +627,6 @@ pub enum DrawCmd {
     Flame(GpuInstance),
     /// Rasterized text label.
     Text(TextLabel),
-    /// Pre-loaded relic icon texture.
-    #[allow(dead_code)]
-    RelicIcon(RelicIcon),
     // ── Skeuomorphic gameplay HUD ──
     /// Batch of wood action tablets (sort suit / sort rank / play).
     /// Floating 3D extruded-glyph score popups. Each placement carries its
@@ -675,10 +647,9 @@ pub enum DrawCmd {
 
 /// Axis along which an [`ArrangeClamp`] constrains a placement.
 #[derive(Copy, Clone, Debug)]
-#[allow(dead_code)]
+
 pub enum ClampAxis {
     Horizontal,
-    Vertical,
 }
 
 /// Scene-provided hint describing the clamp band that constrains a pickable's
@@ -822,10 +793,7 @@ impl UiFrame {
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
     }
-    #[allow(dead_code)]
-    pub fn gradient_quad(&mut self, inst: crate::render::wgpu_renderer::GradientQuadInstance) {
-        self.cmds.push(DrawCmd::GradientQuad(inst));
-    }
+
     pub fn gradient_quads<
         I: IntoIterator<Item = crate::render::wgpu_renderer::GradientQuadInstance>,
     >(
@@ -843,10 +811,6 @@ impl UiFrame {
     }
     pub fn texts<I: IntoIterator<Item = TextLabel>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Text));
-    }
-    #[allow(dead_code)]
-    pub fn relic_icons<I: IntoIterator<Item = RelicIcon>>(&mut self, iter: I) {
-        self.cmds.extend(iter.into_iter().map(DrawCmd::RelicIcon));
     }
 
     pub fn glossary_anchor(&mut self, rect: [f32; 4], term: &'static str) {
@@ -886,7 +850,6 @@ impl UiFrame {
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::FluidSmoke
                 | DrawCmd::Table
-                | DrawCmd::RelicIcon(_)
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::GlossaryAnchor { .. }
                 | DrawCmd::Object3d(_)
