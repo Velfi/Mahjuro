@@ -2,7 +2,7 @@
 
 **A mahjong roguelite where you break the rules, build impossible hands, and chase absurd combos.**
 
-Mahjuro takes the tile-matching beauty of riichi mahjong and reimagines it as a roguelite deckbuilder inspired by Balatro. No mahjong experience required -- the game teaches you as you play, and every run is a new puzzle of pattern recognition, risk management, and combo stacking.
+Mahjuro takes the tile-matching beauty of mahjong and reimagines it as a roguelite deckbuilder inspired by Balatro. No mahjong experience required -- the game teaches you as you play, and every run is a new puzzle of pattern recognition, risk management, and combo stacking.
 
 <!-- If you have screenshots, uncomment and add them here:
 ![Gameplay Screenshot](screenshots/gameplay.png)
