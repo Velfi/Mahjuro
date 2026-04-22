@@ -44,38 +44,27 @@ pub enum MeshId {
 
 /// Layout strategy for decal rasterization.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+
 pub enum DecalLayout {
     /// Auto-fit a single word-wrapped block of text into the decal
     /// texture. `target_short_edge` sets the shorter-axis resolution;
     /// the longer axis is derived from the host object's extents
     /// aspect ratio.
     Fit { target_short_edge: u32 },
-    /// Two-line title over body copy. `title_height_frac` is the
-    /// vertical fraction (0..1) reserved for the title.
-    TitleRule {
-        title_height_frac: f32,
-        target_short_edge: u32,
-    },
-    /// Six adjacent label cells laid out horizontally; `text` is split
-    /// on `\n` into exactly six entries (one per hex face).
-    HexStrip,
+    /// Two-line title over body copy.
+    TitleRule { target_short_edge: u32 },
     /// Caller-specified pixel dimensions. No auto-fit.
     Fixed { width: u32, height: u32 },
 }
 
 /// Preset palette for the three-pass engrave rasterizer.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
+
 pub enum DecalPalette {
     /// Warm gold gilding over dark lacquer (plaques, cabinet faces).
     GoldGilded,
-    /// Dark indigo ink on bone (yaku tablets).
-    BoneInk,
     /// Dark ink on parchment (ofuda).
     ParchmentInk,
-    /// Caller-supplied linear RGBA ink.
-    MutedInk([f32; 4]),
 }
 
 /// Decal rasterization recipe.
@@ -90,19 +79,14 @@ pub struct DecalSpec {
 /// base color — `obj.color` is always the tint — so scenes cannot
 /// accidentally set a tint that the material layer silently ignores.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+
 pub struct MaterialSpec {
     pub kind: MaterialKind,
     pub specular_strength: f32,
     pub specular_power: f32,
-    /// Additive emissive boost applied by the dispatch. 0.0 = off.
-    /// Reserved for later migrations (Shrine/DoraPlinth/ShopLamp
-    /// glow-target blending); phase-1 primitives pass 0.
-    pub emissive: f32,
     pub decal: Option<DecalSpec>,
 }
 
-#[allow(dead_code)]
 impl MaterialSpec {
     /// Upright thin lacquered-wood slab. Uses `LacqueredWoodFlat` so
     /// the vertex-displacing wood shader does not push the face
@@ -112,30 +96,6 @@ impl MaterialSpec {
             kind: MaterialKind::LacqueredWoodFlat,
             specular_strength: 0.55,
             specular_power: 96.0,
-            emissive: 0.0,
-            decal: None,
-        }
-    }
-
-    /// Table-scale lacquered wood with vertex displacement (cabinet
-    /// bodies, thick panels).
-    pub fn lacquered_wood() -> Self {
-        Self {
-            kind: MaterialKind::LacqueredWood,
-            specular_strength: 0.55,
-            specular_power: 96.0,
-            emissive: 0.0,
-            decal: None,
-        }
-    }
-
-    /// Polished brass conductor (shelf rails, display-case trim).
-    pub fn brass() -> Self {
-        Self {
-            kind: MaterialKind::Brass,
-            specular_strength: 0.85,
-            specular_power: 128.0,
-            emissive: 0.0,
             decal: None,
         }
     }
@@ -146,7 +106,6 @@ impl MaterialSpec {
             kind: MaterialKind::Plain,
             specular_strength: 0.25,
             specular_power: 32.0,
-            emissive: 0.0,
             decal: None,
         }
     }
@@ -157,7 +116,6 @@ impl MaterialSpec {
             kind: MaterialKind::Metal,
             specular_strength: 0.9,
             specular_power: 196.0,
-            emissive: 0.0,
             decal: None,
         }
     }
@@ -173,7 +131,6 @@ impl MaterialSpec {
 /// auto-fit layout used by every plaque in the game. Pairs with
 /// [`MaterialSpec::lacquered_wood_flat`] to reproduce the legacy
 /// `Object3dKind::Plaque { text, … }` ergonomics.
-#[allow(dead_code)]
 pub fn plaque_decal(text: impl Into<String>) -> DecalSpec {
     DecalSpec {
         text: text.into(),

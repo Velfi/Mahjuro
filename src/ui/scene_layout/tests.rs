@@ -4,7 +4,16 @@ use super::shop::shop_field_path;
 use super::start_screen::start_screen_field_path;
 use super::tutorial::tutorial_field_path;
 use super::*;
-use crate::ui::placement::{ArrangeTarget, apply_arrange};
+use crate::ui::{
+    placement::{ArrangeDelta, ArrangeTarget, apply_arrange},
+    scene_layout::{
+        collection::{COLLECTION_HIERARCHY, CollectionField},
+        gameplay::{GAMEPLAY_HIERARCHY, GameplayField, sanitize_gameplay_positions},
+        shop::{ShopField, sanitize_shop_positions},
+        start_screen::{START_SCREEN_HIERARCHY, StartScreenField},
+        tutorial::{TUTORIAL_HIERARCHY, TutorialField},
+    },
+};
 
 const EPS: f32 = 1e-5;
 
@@ -47,7 +56,14 @@ fn shop_positions_sparse_json_uses_defaults() {
 fn arrange_counter_via_generic_handler() {
     let mut p = ShopPositions::default();
     let before = p.counter.nx;
-    let ok = apply_arrange(&mut p, "shop.counter", 0.01, 0.0, 0.0, 0.0, 0.0, 0.0);
+    let ok = apply_arrange(
+        &mut p,
+        "shop.counter",
+        ArrangeDelta {
+            dnx: 0.01,
+            ..Default::default()
+        },
+    );
     assert!(ok);
     assert!(approx(p.counter.nx, before + 0.01));
 }
@@ -56,7 +72,14 @@ fn arrange_counter_via_generic_handler() {
 fn arrange_hand_strip_accumulates_rotation() {
     let mut p = GameplayPositions::default();
     let before_rx = p.hand_strip.rx_deg;
-    let ok = apply_arrange(&mut p, "gameplay.hand.strip", 0.0, 0.0, 0.0, 2.5, 0.0, 0.0);
+    let ok = apply_arrange(
+        &mut p,
+        "gameplay.hand.strip",
+        ArrangeDelta {
+            d_rx_deg: 2.5,
+            ..Default::default()
+        },
+    );
     assert!(ok);
     assert!(approx(p.hand_strip.rx_deg, before_rx + 2.5));
 }
@@ -68,12 +91,10 @@ fn arrange_bowl_is_a_regular_placement() {
     let ok = apply_arrange(
         &mut p,
         "gameplay.action_bar.bowl",
-        0.01,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        ArrangeDelta {
+            dnx: 0.01,
+            ..Default::default()
+        },
     );
     assert!(ok);
     assert!(approx(p.bowl.nx, before_nx + 0.01));
@@ -86,7 +107,14 @@ fn arrange_shop_group_moves_every_child_column() {
     let before_packs = p.packs.nx;
     let before_talismans = p.talismans.nx;
     let before_ribbons = p.ribbons.nx;
-    let ok = apply_arrange(&mut p, "shop.for_sale", 0.01, 0.0, 0.0, 0.0, 0.0, 0.0);
+    let ok = apply_arrange(
+        &mut p,
+        "shop.for_sale",
+        ArrangeDelta {
+            dnx: 0.01,
+            ..Default::default()
+        },
+    );
     assert!(ok);
     assert!(approx(p.relics.nx, before_relics + 0.01));
     assert!(approx(p.packs.nx, before_packs + 0.01));
@@ -98,7 +126,14 @@ fn arrange_shop_group_moves_every_child_column() {
 fn arrange_shop_dotted_path_matches_leaf() {
     let mut p = ShopPositions::default();
     let before = p.counter.nx;
-    let ok = apply_arrange(&mut p, "shop.counter", 0.01, 0.0, 0.0, 0.0, 0.0, 0.0);
+    let ok = apply_arrange(
+        &mut p,
+        "shop.counter",
+        ArrangeDelta {
+            dnx: 0.01,
+            ..Default::default()
+        },
+    );
     assert!(ok);
     assert!(approx(p.counter.nx, before + 0.01));
 }
@@ -108,7 +143,14 @@ fn arrange_gameplay_group_moves_hand_area() {
     let mut p = GameplayPositions::default();
     let before_strip_rx = p.hand_strip.rx_deg;
     let before_yaku_rx = p.yaku_tablet.rx_deg;
-    let ok = apply_arrange(&mut p, "gameplay.hand", 0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    let ok = apply_arrange(
+        &mut p,
+        "gameplay.hand",
+        ArrangeDelta {
+            d_rx_deg: 1.0,
+            ..Default::default()
+        },
+    );
     assert!(ok);
     assert!(approx(p.hand_strip.rx_deg, before_strip_rx + 1.0));
     assert!(approx(p.yaku_tablet.rx_deg, before_yaku_rx + 1.0));
@@ -121,12 +163,10 @@ fn arrange_plaque_is_a_regular_placement() {
     let ok = apply_arrange(
         &mut p,
         "gameplay.score_panel.plaque",
-        0.0,
-        0.01,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
+        ArrangeDelta {
+            dny: 0.01,
+            ..Default::default()
+        },
     );
     assert!(ok);
     assert!(approx(p.plaque.ny, before_ny + 0.01));

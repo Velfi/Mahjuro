@@ -36,6 +36,7 @@ pub mod tally_stick_mesh;
 pub mod texture_upload;
 pub mod theme;
 pub mod tile_glb;
+pub mod transition_fx;
 pub mod wgpu_renderer;
 pub mod wood_tablet_mesh;
 pub mod world_space;

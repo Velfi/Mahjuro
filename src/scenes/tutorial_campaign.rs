@@ -8,8 +8,8 @@ use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
-use crate::game::onboarding::OnboardingPhase;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
 };
@@ -616,9 +616,6 @@ impl TutorialCampaignScene {
             kind: Object3dKind::ZodiacRibbon {
                 kind: Some(ZodiacKind::Dragon),
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("tutorial.shop.ribbon"),
@@ -635,9 +632,6 @@ impl TutorialCampaignScene {
             kind: Object3dKind::Talisman {
                 kind: TalismanKind::Jade,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("tutorial.shop.talisman"),
@@ -655,9 +649,6 @@ impl TutorialCampaignScene {
                 kind: TilePackKind::CoinCache,
                 pick_id: None,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("tutorial.shop.pack"),
@@ -864,9 +855,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     None
                 } else {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
-                    if let Some(ref mut onboarding) = ctx.run.onboarding {
-                        onboarding.phase = OnboardingPhase::Shop;
-                    }
+                    GameEngine::set_onboarding_shop_phase(ctx.run);
                     Some(Scene::Shop(ShopScene::new_tutorial(ctx.run)))
                 }
             }
@@ -1053,9 +1042,6 @@ impl SceneBehavior for TutorialCampaignScene {
                     silhouette: false,
                     pick_id: None,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some("tutorial.shop.relic"),
@@ -1103,9 +1089,6 @@ impl SceneBehavior for TutorialCampaignScene {
                     silhouette: false,
                     pick_id: None,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some("tutorial.shop.relic"),
@@ -1128,8 +1111,6 @@ impl SceneBehavior for TutorialCampaignScene {
             let try_it_lift = (28.0 * scale).max(20.0);
             let try_it_world_z_py_nudge = 18.0 * scale;
             let play_focused = self.tree.focused() == Some(TutorialNav::TryPlay.id());
-            let trigger_focused = self.tree.focused() == Some(TutorialNav::TryTrigger.id());
-            let trigger_enabled = self.try_it_phase == 1;
             let play_center_x = layout.play_rect[0] + layout.play_rect[2] * 0.5;
             let play_center_y = layout.play_rect[1] + layout.play_rect[3] * 0.5;
             let trigger_center_x = layout.trigger_rect[0] + layout.trigger_rect[2] * 0.5;
@@ -1161,9 +1142,6 @@ impl SceneBehavior for TutorialCampaignScene {
                     rotation_x_deg: 36.0,
                     rotation_z_deg: (wobble_t * 2.4).sin() * 7.5,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: if play_focused { 1.0 } else { 0.0 },
                 anim_id: 2,
                 arrange_name: Some("tutorial.try_it.mirror"),
@@ -1190,18 +1168,8 @@ impl SceneBehavior for TutorialCampaignScene {
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
                     label: "Trigger".to_string(),
-                    pressed: 0.0,
-                    hover: if trigger_focused && trigger_enabled {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    disabled: !trigger_enabled,
                     pick_id: None,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some("tutorial.try_it.trigger"),
@@ -1386,11 +1354,13 @@ impl SceneBehavior for TutorialCampaignScene {
                 &mut fg_quads,
                 &mut texts,
                 &mut buttons,
-                item.rect,
-                label,
-                variant,
-                state,
-                crate::ui::input::UiAction::Confirm,
+                widget::ButtonSpec {
+                    rect: item.rect,
+                    label,
+                    variant,
+                    state,
+                    action: crate::ui::input::UiAction::Confirm,
+                },
             );
         }
         buttons.clear();

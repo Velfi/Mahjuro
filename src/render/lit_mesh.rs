@@ -10,6 +10,30 @@ use wgpu::util::DeviceExt;
 
 use crate::render::tile_glb::Vertex3dTex;
 
+/// Axis-aligned box extents for the `push_box` family of mesh builders.
+#[derive(Clone, Copy, Debug)]
+pub struct Aabb {
+    pub x0: f32,
+    pub x1: f32,
+    pub y0: f32,
+    pub y1: f32,
+    pub z0: f32,
+    pub z1: f32,
+}
+
+impl Aabb {
+    pub const fn new(x0: f32, x1: f32, y0: f32, y1: f32, z0: f32, z1: f32) -> Self {
+        Self {
+            x0,
+            x1,
+            y0,
+            y1,
+            z0,
+            z1,
+        }
+    }
+}
+
 /// Material variants understood by `lit_mesh.wgsl`.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug)]
@@ -76,11 +100,6 @@ pub enum MaterialKind {
     /// so the ceramic reads as glazed rather than matte plastic.
     /// Composites engraved decals (same `has_decal` path as Plain).
     Porcelain = 16,
-    /// Polished brass — warmer-biased conductor with a broader specular
-    /// lobe than [`MaterialKind::Metal`] so shelf fittings and display
-    /// rails read as museum-grade brass rather than steel. No heightmap;
-    /// the surface is smooth. `base_color` tints the conductor hue.
-    Brass = 17,
 }
 
 /// Compact per-mesh material parameters.
@@ -177,6 +196,18 @@ pub struct ShadowCasterUniform {
     pub model: [f32; 16],
 }
 
+/// GPU + bind-group context needed by `LitMeshInstance::set_decal` to
+/// upload or rebind a per-instance decal texture. Groups the handles
+/// that travel together so the call site stays compact.
+#[derive(Copy, Clone)]
+pub struct DecalUploadCtx<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub layout: &'a wgpu::BindGroupLayout,
+    pub sampler: &'a wgpu::Sampler,
+    pub relief_view: &'a wgpu::TextureView,
+}
+
 /// Per-instance state: a uniform buffer (rewritten each frame) + a bind group
 /// that points at the buffer plus a shared 1×1 white albedo texture/sampler.
 ///
@@ -186,9 +217,9 @@ pub struct ShadowCasterUniform {
 pub struct LitMeshInstance {
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
+
     pub shadow_uniform_buffer: wgpu::Buffer,
-    #[allow(dead_code)]
+
     pub shadow_bind_group: wgpu::BindGroup,
     /// Optional per-instance decal texture (used by yaku/wood tablets to
     /// engrave a label on top of the procedural base material). When set,
@@ -276,15 +307,18 @@ impl LitMeshInstance {
     /// stays alive for as long as the bind group references it.
     pub fn set_decal(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        layout: &wgpu::BindGroupLayout,
-        sampler: &wgpu::Sampler,
-        relief_view: &wgpu::TextureView,
+        ctx: DecalUploadCtx<'_>,
         rgba: &[u8],
         width: u32,
         height: u32,
     ) {
+        let DecalUploadCtx {
+            device,
+            queue,
+            layout,
+            sampler,
+            relief_view,
+        } = ctx;
         // Reuse the existing texture if its dimensions match — only the bytes
         // change. Otherwise (or first time) allocate a fresh texture.
         let needs_alloc = self
@@ -392,7 +426,6 @@ impl LitMeshInstance {
 
     /// Write the per-instance shadow caster uniform with the current
     /// frame's light view-projection and the instance's model matrix.
-    #[allow(dead_code)]
     pub fn write_shadow_uniform(
         &self,
         queue: &wgpu::Queue,
@@ -622,16 +655,15 @@ pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
 /// Shared helper for procedural mesh builders that compose from boxes
 /// (plaque, ofuda, tablets, peg block). The standalone curio
 /// cabinet keeps its own private copy because it predates this helper.
-pub fn push_box(
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-    x0: f32,
-    x1: f32,
-    y0: f32,
-    y1: f32,
-    z0: f32,
-    z1: f32,
-) {
+pub fn push_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, aabb: Aabb) {
+    let Aabb {
+        x0,
+        x1,
+        y0,
+        y1,
+        z0,
+        z1,
+    } = aabb;
     let faces: &[([f32; 3], [[f32; 3]; 4])] = &[
         // +X
         (

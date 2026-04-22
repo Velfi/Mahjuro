@@ -227,10 +227,10 @@ impl WgpuRenderer {
             }
         }
         // Sell tray.
-        if let Some((model, pid)) = self.last_sell_tray_model {
-            if let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0) {
-                consider(ShopHit::Dish(pid), t);
-            }
+        if let Some((model, pid)) = self.last_sell_tray_model
+            && let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0)
+        {
+            consider(ShopHit::Dish(pid), t);
         }
         // Auxiliary dishes (world-space AABB picks).
         for (i, (id, _rect)) in self.proj.aux_dish_rects.iter().enumerate() {
@@ -441,28 +441,28 @@ impl WgpuRenderer {
             }
         }
         // Discard bowl — tighter local AABB from the bowl mesh constants.
-        if let Some(model) = self.last_bowl_model.as_ref() {
-            if let Some(t) = slab_test(
+        if let Some(model) = self.last_bowl_model.as_ref()
+            && let Some(t) = slab_test(
                 *model,
                 BOWL_LOCAL_HALF[0],
                 BOWL_LOCAL_HALF[1],
                 BOWL_LOCAL_HALF[2],
                 BOWL_LOCAL_CENTER_Y,
-            ) {
-                consider(GameplayPick::DiscardBowl, t);
-            }
+            )
+        {
+            consider(GameplayPick::DiscardBowl, t);
         }
         // Bronze mirror — flat disc local AABB from the mirror mesh constants.
-        if let Some(model) = self.last_mirror_model.as_ref() {
-            if let Some(t) = slab_test(
+        if let Some(model) = self.last_mirror_model.as_ref()
+            && let Some(t) = slab_test(
                 *model,
                 MIRROR_LOCAL_HALF[0],
                 MIRROR_LOCAL_HALF[1],
                 MIRROR_LOCAL_HALF[2],
                 MIRROR_LOCAL_CENTER_Y,
-            ) {
-                consider(GameplayPick::BronzeMirror, t);
-            }
+            )
+        {
+            consider(GameplayPick::BronzeMirror, t);
         }
 
         best.map(|(h, _)| h)

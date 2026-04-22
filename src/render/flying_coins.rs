@@ -209,7 +209,7 @@ impl FlyingCoinSystem {
 
         // Remove expired coins.
         self.coins
-            .retain(|c| c.life_remaining.map_or(true, |r| r > 0.0));
+            .retain(|c| c.life_remaining.is_none_or(|r| r > 0.0));
     }
 
     fn spawn_one(&mut self, p: PendingCoin) {
@@ -269,9 +269,6 @@ impl FlyingCoinSystem {
                         shadow_caster: false,
                         silhouette: false,
                     },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
@@ -282,11 +279,5 @@ impl FlyingCoinSystem {
 
     pub fn is_active(&self) -> bool {
         !self.coins.is_empty() || !self.pending.is_empty()
-    }
-
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
-        self.coins.clear();
-        self.pending.clear();
     }
 }

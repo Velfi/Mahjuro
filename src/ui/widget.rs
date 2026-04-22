@@ -113,6 +113,15 @@ fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
     });
 }
 
+/// A button: rect + label + visual style + action fired on click.
+pub struct ButtonSpec<'a> {
+    pub rect: [f32; 4],
+    pub label: &'a str,
+    pub variant: ButtonVariant,
+    pub state: ButtonState,
+    pub action: UiAction,
+}
+
 /// Push a button: background + border + centered text + hit-test rect.
 ///
 /// The action becomes a `ButtonDef::ui` so the click feeds into the existing
@@ -121,12 +130,15 @@ pub fn push_button(
     quads: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,
     buttons: &mut Vec<ButtonDef>,
-    rect: [f32; 4],
-    label: &str,
-    variant: ButtonVariant,
-    state: ButtonState,
-    action: UiAction,
+    spec: ButtonSpec<'_>,
 ) {
+    let ButtonSpec {
+        rect,
+        label,
+        variant,
+        state,
+        action,
+    } = spec;
     push_button_visuals(quads, labels, rect, label, variant, state);
     buttons.push(ButtonDef::ui((rect[0], rect[1], rect[2], rect[3]), action));
 }
@@ -267,28 +279,4 @@ pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
         lines.push(String::new());
     }
     lines
-}
-
-/// Push a small "price tag" pill — used by the shop. Brass background with
-/// champagne numerals; desaturates when `affordable` is false.
-#[allow(dead_code)]
-pub fn push_price_tag(
-    quads: &mut Vec<GpuInstance>,
-    labels: &mut Vec<TextLabel>,
-    rect: [f32; 4],
-    price: u32,
-    affordable: bool,
-) {
-    let (bg, border, text) = if affordable {
-        (color::BRASS, color::GOLD, color::CHAMPAGNE)
-    } else {
-        (color::SLATE, color::ANTIQUE, color::RUBY)
-    };
-    push_panel_colored(quads, rect, bg, border);
-    labels.push(TextLabel {
-        rect,
-        text: format!("${price}"),
-        color: text,
-        ..Default::default()
-    });
 }

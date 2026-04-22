@@ -45,7 +45,7 @@ pub fn finale_failure_feedback(
 ) -> String {
     let gap = target.saturating_sub(round_score.min(u32::MAX as u64) as u32);
     let score_pct = if target > 0 {
-        (round_score.min(u64::MAX) as f64 / target as f64 * 100.0).min(100.0) as u32
+        (round_score as f64 / target as f64 * 100.0).min(100.0) as u32
     } else {
         100
     };

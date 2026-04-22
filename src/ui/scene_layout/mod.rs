@@ -34,29 +34,16 @@ mod shop;
 mod start_screen;
 mod tutorial;
 
-#[allow(unused_imports)]
-pub use collection::{
-    COLLECTION_HIERARCHY, CollectionField, CollectionPositions, load_collection_positions,
-    sanitize_collection_positions, save_collection_positions,
-};
-pub use gameplay::{
-    GAMEPLAY_HIERARCHY, GameplayField, GameplayPositions, load_gameplay_positions,
-    sanitize_gameplay_positions, save_gameplay_positions,
-};
+pub use collection::{CollectionPositions, load_collection_positions, save_collection_positions};
+pub use gameplay::{GameplayPositions, load_gameplay_positions, save_gameplay_positions};
 pub use shop::{
-    CANONICAL_WINDOW_W, HFRAC_TO_MM, SHOP_HIERARCHY, ShopField, ShopPositions, load_shop_positions,
-    sanitize_shop_positions, save_shop_positions,
+    CANONICAL_WINDOW_W, HFRAC_TO_MM, SHOP_HIERARCHY, ShopPositions, load_shop_positions,
+    save_shop_positions,
 };
-#[allow(unused_imports)]
 pub use start_screen::{
-    START_SCREEN_HIERARCHY, StartScreenField, StartScreenPositions, load_start_screen_positions,
-    sanitize_start_screen_positions, save_start_screen_positions,
+    StartScreenPositions, load_start_screen_positions, save_start_screen_positions,
 };
-#[allow(unused_imports)]
-pub use tutorial::{
-    TUTORIAL_HIERARCHY, TutorialField, TutorialPositions, load_tutorial_positions,
-    sanitize_tutorial_positions, save_tutorial_positions,
-};
+pub use tutorial::{TutorialPositions, load_tutorial_positions, save_tutorial_positions};
 
 #[cfg(test)]
 mod tests;

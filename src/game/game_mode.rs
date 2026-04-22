@@ -42,27 +42,6 @@ impl GameMode {
         Self::with_material(TileMaterial::Bamboo)
     }
 
-    /// Tutorial mode for first-time players. Starts with a tiny hand,
-    /// low targets, no yaku, no discards, and no consumables. Lessons
-    /// progressively unlock mechanics via `apply_lesson()`.
-    #[allow(dead_code)]
-    pub fn tutorial() -> Self {
-        Self {
-            starting_gold: 4,
-            starting_plays: 5,
-            starting_discards: 0,
-            hand_size: 8,
-            base_target: 50,
-            target_scaling: 1.0,
-            starting_relics: vec![],
-            starting_rules: vec![RuleModifier::PairDoubleScore],
-            starting_yaku: vec![],
-            consumable_capacity: 0,
-            tile_material: TileMaterial::Bamboo,
-            structure_bank: true,
-        }
-    }
-
     /// Apply a tutorial lesson's overrides to this mode. Called when
     /// advancing to a new lesson mid-run.
     pub fn apply_lesson(&mut self, lesson: &LessonDef) {
@@ -81,12 +60,13 @@ impl GameMode {
     /// Build a game mode for the given tile material. Material-specific
     /// bonuses are baked in here so the rest of the engine is agnostic.
     pub fn with_material(material: TileMaterial) -> Self {
-        let (bonus_plays, bonus_discards): (u32, u32) = match material {
-            TileMaterial::Bamboo => (1, 0),
-            TileMaterial::Plastic => (0, 1),
+        let (bonus_plays, bonus_discards, bonus_gold): (u32, u32, u32) = match material {
+            TileMaterial::Bamboo => (1, 0, 0),
+            TileMaterial::Plastic => (0, 1, 0),
+            TileMaterial::TortoiseShell => (0, 0, 10),
         };
         Self {
-            starting_gold: 8,
+            starting_gold: 8 + bonus_gold,
             starting_plays: 4 + bonus_plays,
             starting_discards: 4 + bonus_discards,
             hand_size: 14,

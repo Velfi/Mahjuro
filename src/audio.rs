@@ -313,14 +313,14 @@ const MAX_CONCURRENT_SFX: usize = 8;
 /// cascade step. Each ratio is a semitone above the previous (2^(n/12)) so
 /// the reveal climbs a chromatic scale across eight steps before wrapping.
 const SCORE_TICK_PITCHES: [f32; 8] = [
-    1.000_000, // root
-    1.059_463, // +1 semitone
-    1.122_462, // +2
-    1.189_207, // +3
-    1.259_921, // +4
-    1.334_840, // +5
-    1.414_214, // +6
-    1.498_307, // +7
+    1.000_000,                // root
+    1.059_463,                // +1 semitone
+    1.122_462,                // +2
+    1.189_207,                // +3
+    1.259_921,                // +4
+    1.334_84,                 // +5
+    std::f32::consts::SQRT_2, // +6 (2^(6/12))
+    1.498_307,                // +7
 ];
 
 pub struct AudioManager {

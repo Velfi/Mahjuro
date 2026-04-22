@@ -6,6 +6,7 @@
 //! gameplay HUD.
 
 use crate::core::rules::BlindKind;
+use crate::game::engine::GameEngine;
 use crate::game::run::RunState;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -67,30 +68,27 @@ impl TutorialOverlay {
         // Fade in over 0.5s.
         self.fade_alpha = (self.fade_alpha + dt * 2.0).min(1.0);
 
-        let tutorial = match &run.tutorial {
-            Some(t) if t.is_active() => t,
-            _ => {
-                self.hint_text.clear();
-                self.flavor_text.clear();
-                self.highlight = None;
-                return;
-            }
+        let Some(lesson) = GameEngine::tutorial_lesson(run) else {
+            self.hint_text.clear();
+            self.flavor_text.clear();
+            self.highlight = None;
+            return;
         };
 
-        let lesson = tutorial.current_lesson_def();
         self.flavor_text = lesson.flavor_text.to_string();
 
         // Derive the step_prompts index and highlight target from current
         // game state. Text is read from the lesson's `step_prompts` array
         // so the overlay never duplicates strings from the definitions.
-        let has_selection = run.selected_count() > 0;
-        let has_discards = run.discards_remaining > 0;
-        let score_progress = run.round_score > 0;
-        let has_structure = !run.structure_sets.is_empty();
+        let overlay = GameEngine::read_tutorial_overlay(run);
+        let has_selection = overlay.selected_count > 0;
+        let has_discards = overlay.discards_remaining > 0;
+        let score_progress = overlay.round_score > 0;
+        let has_structure = overlay.has_structure;
         let prompts = lesson.step_prompts;
 
         // ── Compute step index + highlight per lesson ─────────────────
-        let (step, highlight): (usize, Option<HighlightTarget>) = match tutorial.current_lesson {
+        let (step, highlight): (usize, Option<HighlightTarget>) = match lesson.current_lesson {
             // Lesson 4 (discarding): four states with dedicated highlights.
             //   [0] no score, no selection   → highlight Discard
             //   [1] has selection + discards  → highlight Discard
@@ -134,7 +132,7 @@ impl TutorialOverlay {
                 let action_steps = if prompts.len() >= 3 { 3 } else { prompts.len() };
                 let post_steps = prompts.len().saturating_sub(action_steps);
                 if score_progress && !has_selection && !has_structure && post_steps > 0 {
-                    let step = if tutorial.meld_guide_opened && post_steps > 1 {
+                    let step = if lesson.meld_guide_opened && post_steps > 1 {
                         action_steps + 1
                     } else {
                         action_steps
@@ -159,20 +157,12 @@ impl TutorialOverlay {
 
         // On the very first boss blind (lesson 1), override the flavor text
         // to introduce what a boss is. Later lessons don't repeat this.
-        if run.blind == BlindKind::Boss && tutorial.current_lesson == 1 && !score_progress {
+        if overlay.blind == BlindKind::Boss && lesson.current_lesson == 1 && !score_progress {
             self.flavor_text = "Boss Blind!".to_string();
             self.hint_text =
                 "Bosses have higher targets and special rules. Beat this one to advance!"
                     .to_string();
         }
-    }
-
-    /// Reset state for a new lesson (called when lesson advances).
-    #[allow(dead_code)]
-    pub fn reset_for_lesson(&mut self) {
-        self.dismissed = false;
-        self.pulse_time = 0.0;
-        self.fade_alpha = 0.0;
     }
 
     /// Push draw commands for the tutorial banner into the given vecs.
@@ -267,12 +257,6 @@ impl TutorialOverlay {
             align: TextAlign::Center,
             ..Default::default()
         });
-    }
-
-    /// Whether the overlay is currently showing anything.
-    #[allow(dead_code)]
-    pub fn is_visible(&self) -> bool {
-        !self.hint_text.is_empty() && !self.dismissed
     }
 }
 

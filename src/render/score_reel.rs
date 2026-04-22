@@ -24,6 +24,7 @@
 use std::time::Instant;
 
 use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
+use crate::render::world_space::{LayoutAnchorPx, PlacementAnchor};
 
 // ── Tuning constants ──────────────────────────────────────────────────────
 
@@ -173,11 +174,10 @@ impl ScoreReel {
         // Spin only the columns whose digit changed. Higher-order columns that
         // carry get a small additional delay so the roll cascades right-to-left.
         let mut carry_delay = 0.0_f32;
-        for col in 0..self.columns.len() {
-            let new_d = new_digits[col];
-            if new_d != self.columns[col].current {
+        for (column, &new_d) in self.columns.iter_mut().zip(new_digits.iter()) {
+            if new_d != column.current {
                 let spin_at = now + std::time::Duration::from_secs_f32(carry_delay);
-                self.columns[col].spin_to(new_d, spin_at);
+                column.spin_to(new_d, spin_at);
                 carry_delay += CASCADE_DELAY;
             }
         }
@@ -206,23 +206,41 @@ impl ScoreReel {
 
     /// Build the per-frame `ExtrudedGlyphPlacement` list.
     ///
-    /// `anchor_px`, `anchor_py` — pixel-space center of the reel (matches the
-    /// plaque center so the reel floats in front of it).
-    /// `lift` — world-Z lift (same as plaque lift, bump slightly forward).
-    /// `rot_y` — yaw inherited from the plaque's camera-facing rotation.
+    /// `placement` — pixel-space anchor (matches the plaque center so the
+    /// reel floats in front of it), world-Z lift (same as plaque lift, bump
+    /// slightly forward), yaw inherited from the plaque's camera-facing
+    /// rotation, and uniform scale.
+    /// `target` — optional target score rendered as a "/ N" tail.
     pub fn placements(
         &self,
         now: Instant,
-        anchor_px: f32,
-        anchor_py: f32,
-        lift: f32,
-        rot_y: f32,
+        placement: PlacementAnchor,
         target: Option<u64>,
-        scale: f32,
     ) -> Vec<Object3d> {
+        let PlacementAnchor {
+            anchor:
+                LayoutAnchorPx {
+                    px: anchor_px,
+                    py: anchor_py,
+                    lift_z: lift,
+                },
+            rot_y,
+            scale,
+        } = placement;
         let col_w = COLUMN_WIDTH * scale;
         let slot_h = SLOT_HEIGHT * scale;
         let digit_scale = DIGIT_SCALE * scale;
+        // The glyph's scale differs from the overall reel scale — bake it into
+        // the per-glyph placement so `make_placement` only sees one scale.
+        let digit_placement = PlacementAnchor {
+            anchor: LayoutAnchorPx {
+                px: anchor_px,
+                py: anchor_py,
+                lift_z: lift,
+            },
+            rot_y,
+            scale: digit_scale,
+        };
         let n = self.columns.len();
         // Static "score:" prefix rendered as dimmer glyphs to the left of
         // the digit columns so the reel reads as "score: N / target".
@@ -291,24 +309,18 @@ impl ScoreReel {
                 out.push(make_placement(
                     &prev_label,
                     col_center_x,
-                    anchor_py,
-                    lift,
                     prev_z,
-                    rot_y,
+                    digit_placement,
                     color,
                     emissive,
-                    digit_scale,
                 ));
                 out.push(make_placement(
                     &cur_label,
                     col_center_x,
-                    anchor_py,
-                    lift,
                     cur_z,
-                    rot_y,
+                    digit_placement,
                     color,
                     emissive,
-                    digit_scale,
                 ));
             } else {
                 // Idle: just the current digit, centred.
@@ -316,13 +328,10 @@ impl ScoreReel {
                 out.push(make_placement(
                     &cur_label,
                     col_center_x,
-                    anchor_py,
-                    lift,
                     0.0,
-                    rot_y,
+                    digit_placement,
                     color,
                     emissive,
-                    digit_scale,
                 ));
             }
         }
@@ -335,13 +344,10 @@ impl ScoreReel {
             out.push(make_placement(
                 &ch.to_string(),
                 col_center_x,
-                anchor_py,
-                lift,
                 0.0,
-                rot_y,
+                digit_placement,
                 dim_color,
                 EMISSIVE_IDLE,
-                digit_scale,
             ));
         }
 
@@ -354,13 +360,10 @@ impl ScoreReel {
             out.push(make_placement(
                 &ch.to_string(),
                 col_center_x,
-                anchor_py,
-                lift,
                 0.0,
-                rot_y,
+                digit_placement,
                 dim_color,
                 EMISSIVE_IDLE,
-                digit_scale,
             ));
         }
 
@@ -420,14 +423,21 @@ fn spring_ease(t: f32) -> f32 {
 fn make_placement(
     label: &str,
     col_px: f32,
-    anchor_py: f32,
-    lift: f32,
     z_offset: f32,
-    rot_y: f32,
+    placement: PlacementAnchor,
     color: [f32; 4],
     emissive: f32,
-    digit_scale: f32,
 ) -> Object3d {
+    let PlacementAnchor {
+        anchor:
+            LayoutAnchorPx {
+                py: anchor_py,
+                lift_z: lift,
+                ..
+            },
+        rot_y,
+        scale: digit_scale,
+    } = placement;
     Object3d {
         pos: [col_px, anchor_py, lift + z_offset],
         extents: [1.0, 1.0, 1.0],
@@ -441,9 +451,6 @@ fn make_placement(
             emissive,
             material: GlyphMaterial::Plain,
         },
-        focusable: false,
-        scene_shaded: true,
-        own_light: None,
         hover_target: 0.0,
         anim_id: 0,
         arrange_name: None,

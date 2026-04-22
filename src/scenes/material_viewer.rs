@@ -135,9 +135,6 @@ impl SceneBehavior for MaterialViewerScene {
                 kind: Object3dKind::MaterialOrb {
                     material: entry.material,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,

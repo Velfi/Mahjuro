@@ -13,7 +13,6 @@
 //! The last visible beat is the multiplication itself.
 
 mod pipeline;
-mod preview;
 #[cfg(test)]
 mod tests;
 mod tile_value;
@@ -22,9 +21,9 @@ use crate::core::hand::{DetectedSet, SetKind};
 use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 
-#[allow(unused_imports)]
-pub use pipeline::{score_sets, score_sets_total, score_sets_with_original};
-pub use preview::{ScorePreview, preview_score};
+#[cfg(test)]
+pub use pipeline::score_sets;
+pub use pipeline::score_sets_with_original;
 #[allow(unused_imports)]
 pub use tile_value::{TileEffectiveValue, tile_effective_value};
 
@@ -41,9 +40,9 @@ pub struct ScoreStep {
     pub source: String,
     pub kind: StepKind,
     pub tile_ids: Vec<u32>,
-    #[allow(dead_code)]
+
     pub running_chips: i32,
-    #[allow(dead_code)]
+
     pub running_mult: f64,
     pub running_total: u64,
 }
@@ -55,13 +54,13 @@ pub struct ScoreBreakdown {
     pub base_steps: Vec<ScoreStep>,
     pub steps: Vec<ScoreStep>,
     pub detected_yaku: Vec<YakuKind>,
-    #[allow(dead_code)]
+
     pub final_chips: i32,
-    #[allow(dead_code)]
+
     pub final_mult: f64,
     pub total: u64,
     pub flower_gold: i32,
-    #[allow(dead_code)]
+
     pub scored_set_kinds: Vec<crate::core::hand::SetKind>,
 }
 

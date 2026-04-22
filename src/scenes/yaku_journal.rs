@@ -10,6 +10,7 @@
 
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
+use crate::game::engine::GameEngine;
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
@@ -165,6 +166,7 @@ impl SceneBehavior for YakuJournalScene {
         // ── Grid draw ────────────────────────────────────────────
         let mut placements: Vec<ShowcaseTilePlacement> = Vec::new();
         let mut tile_id: u32 = 0;
+        let yaku_progress = GameEngine::read_yaku_progress(run);
 
         let mut yi = 0usize;
         for (row_i, &row_n) in ROW_COUNTS.iter().enumerate() {
@@ -280,7 +282,7 @@ impl SceneBehavior for YakuJournalScene {
                 // Level caption. Sealed cells get a thin en-dash —
                 // the wax seal already says "locked," so a redundant
                 // "sealed" word just creates visual noise on the row.
-                let lvl = run.yaku_levels.level_of(yk);
+                let lvl = yaku_progress.level_of(yk);
                 let (level_text, level_color) = match state {
                     ProgressionState::Unseen => ("—".into(), color::alpha(color::PARCHMENT, 0.35)),
                     ProgressionState::Leveled => (format!("Lv {lvl}"), color::GOLD),
@@ -361,7 +363,7 @@ impl SceneBehavior for YakuJournalScene {
             &mut placements,
             &mut tile_id,
             sel_yk,
-            run.yaku_levels.level_of(sel_yk),
+            yaku_progress.level_of(sel_yk),
             sel_state,
             plaque_top,
             w,
@@ -496,9 +498,10 @@ fn progression_state(
     progress: &crate::core::progression::PlayerProgress,
     yk: YakuKind,
 ) -> ProgressionState {
-    let lvl = run.yaku_levels.level_of(yk);
+    let yaku_progress = GameEngine::read_yaku_progress(run);
+    let lvl = yaku_progress.level_of(yk);
     let scored_ever = progress.yaku_times_scored.get(&yk).copied().unwrap_or(0);
-    let played_this_run = run.yaku_times_played.get(&yk).copied().unwrap_or(0);
+    let played_this_run = yaku_progress.played_this_run(yk);
     if lvl >= 2 {
         ProgressionState::Leveled
     } else if scored_ever >= 1 || played_this_run >= 1 {

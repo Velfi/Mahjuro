@@ -7,82 +7,6 @@ use serde::{Deserialize, Serialize};
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 
-/// Human-readable summary of detected sets in the hand, e.g. "3m×2  1-3s  East×3".
-/// Returns an empty string if no sets found.
-///
-/// When the selection forms a fully valid decomposition (no leftover tiles), the
-/// description reflects that exact decomposition. Otherwise it falls back to
-/// listing standalone pair/triplet faces (skipping sequences, since unconstrained
-/// sequence search would report overlapping melds).
-#[allow(dead_code)]
-pub fn describe_hand(tiles: &[Tile]) -> String {
-    if let Some(sets) = validate_selection(tiles) {
-        return describe_sets(tiles, &sets);
-    }
-
-    // Fallback: invalid selection — show only pair/triplet/kong faces, which can't overlap.
-    let pairs_trips = find_pairs_and_triplets(tiles);
-    let mut parts: Vec<String> = Vec::new();
-    for s in &pairs_trips {
-        if let Some(&id) = s.tile_ids.first() {
-            if let Some(t) = tiles.iter().find(|t| t.id == id) {
-                let label = t.label();
-                match s.kind {
-                    SetKind::Pair => parts.push(format!("{label}×2")),
-                    SetKind::Triplet => parts.push(format!("{label}×3")),
-                    SetKind::Kong => parts.push(format!("{label}×4")),
-                    SetKind::Sequence => {}
-                }
-            }
-        }
-    }
-    parts.join("  ")
-}
-
-/// Render a known decomposition as "4m×2  1-2-3m  7-8-9m".
-#[allow(dead_code)]
-fn describe_sets(tiles: &[Tile], sets: &[DetectedSet]) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for s in sets {
-        let tile_refs: Vec<&Tile> = s
-            .tile_ids
-            .iter()
-            .filter_map(|id| tiles.iter().find(|t| t.id == *id))
-            .collect();
-        match s.kind {
-            SetKind::Pair => {
-                if let Some(t) = tile_refs.first() {
-                    parts.push(format!("{}×2", t.label()));
-                }
-            }
-            SetKind::Triplet => {
-                if let Some(t) = tile_refs.first() {
-                    parts.push(format!("{}×3", t.label()));
-                }
-            }
-            SetKind::Kong => {
-                if let Some(t) = tile_refs.first() {
-                    parts.push(format!("{}×4", t.label()));
-                }
-            }
-            SetKind::Sequence if tile_refs.len() == 3 => {
-                let suffix = match tile_refs[0].suit {
-                    Suit::Characters => "m",
-                    Suit::Bamboos => "s",
-                    Suit::Circles => "p",
-                    _ => "",
-                };
-                parts.push(format!(
-                    "{}-{}-{}{}",
-                    tile_refs[0].rank, tile_refs[1].rank, tile_refs[2].rank, suffix
-                ));
-            }
-            SetKind::Sequence => {}
-        }
-    }
-    parts.join("  ")
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SetKind {
     Pair,
@@ -100,6 +24,9 @@ pub struct DetectedSet {
     /// Tile ids participating in this set (references into the hand).
     pub tile_ids: Vec<u32>,
 }
+
+/// Canonical key for a decomposition — one `(kind, sorted faces)` per set.
+type DecompositionKey = Vec<(SetKind, Vec<(Suit, u8)>)>;
 
 /// Group tiles by face (suit+rank), keeping one id list per face key.
 /// Flower tiles are excluded — they're wildcards, not a groupable face.
@@ -209,7 +136,6 @@ pub fn suggest_completions(hand: &[Tile], selected_indices: &[usize]) -> Vec<usi
 }
 
 /// Non-overlapping greedy merge is complex; MVP returns all detected patterns (may overlap).
-#[allow(dead_code)]
 pub fn detect_all_sets(tiles: &[Tile]) -> Vec<DetectedSet> {
     let mut v = find_pairs_and_triplets(tiles);
     v.extend(find_sequences(tiles));
@@ -299,10 +225,10 @@ pub fn validate_selection_with_rules(
     // We try this only when the standard backtracker fails so we don't reframe
     // hands that could decompose normally. Flowers can't help with chiitoitsu
     // (pairs only, no wildcard substitution in pairs).
-    if flower_ids.is_empty() {
-        if let Some(pairs) = try_chiitoitsu(&regular) {
-            return Some(pairs);
-        }
+    if flower_ids.is_empty()
+        && let Some(pairs) = try_chiitoitsu(&regular)
+    {
+        return Some(pairs);
     }
     None
 }
@@ -334,12 +260,11 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
     let require_honor = rules.contains(&RuleModifier::RequireHonor);
 
     let mut all: Vec<Vec<DetectedSet>> = Vec::new();
-    let mut seen: std::collections::HashSet<Vec<(SetKind, Vec<(Suit, u8)>)>> =
-        std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<DecompositionKey> = std::collections::HashSet::new();
 
     let tile_lookup = |id: u32| tiles.iter().find(|t| t.id == id).copied();
-    let canonicalize = |sets: &[DetectedSet]| -> Vec<(SetKind, Vec<(Suit, u8)>)> {
-        let mut keyed: Vec<(SetKind, Vec<(Suit, u8)>)> = sets
+    let canonicalize = |sets: &[DetectedSet]| -> DecompositionKey {
+        let mut keyed: DecompositionKey = sets
             .iter()
             .map(|s| {
                 let mut faces: Vec<(Suit, u8)> = s
@@ -398,12 +323,12 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
     }
 
     // Chiitoitsu as an alternative decomposition (not just a fallback).
-    if flower_ids.is_empty() {
-        if let Some(pairs) = try_chiitoitsu(&regular) {
-            let key = canonicalize(&pairs);
-            if seen.insert(key) {
-                all.push(pairs);
-            }
+    if flower_ids.is_empty()
+        && let Some(pairs) = try_chiitoitsu(&regular)
+    {
+        let key = canonicalize(&pairs);
+        if seen.insert(key) {
+            all.push(pairs);
         }
     }
 
@@ -604,69 +529,66 @@ fn collect_sequence_with_flower(
     first: &Tile,
     on_found: &mut dyn FnMut(&[DetectedSet]),
 ) {
-    if first.rank <= 7 {
-        if let Some(mid_offset) = remaining[1..]
+    if first.rank <= 7
+        && let Some(mid_offset) = remaining[1..]
             .iter()
             .position(|t| t.suit == first.suit && t.rank == first.rank + 1)
-        {
-            let mid_idx = mid_offset + 1;
-            let fid = flower_pool.pop().expect("flower pool exhausted");
-            found.push(DetectedSet {
-                kind: SetKind::Sequence,
-                tile_ids: vec![remaining[0].id, remaining[mid_idx].id, fid],
-            });
-            let rest: Vec<Tile> = remaining
-                .iter()
-                .enumerate()
-                .filter_map(|(i, t)| (i != 0 && i != mid_idx).then_some(*t))
-                .collect();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
-            found.pop();
-            flower_pool.push(fid);
-        }
+    {
+        let mid_idx = mid_offset + 1;
+        let fid = flower_pool.pop().expect("flower pool exhausted");
+        found.push(DetectedSet {
+            kind: SetKind::Sequence,
+            tile_ids: vec![remaining[0].id, remaining[mid_idx].id, fid],
+        });
+        let rest: Vec<Tile> = remaining
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| (i != 0 && i != mid_idx).then_some(*t))
+            .collect();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+        flower_pool.push(fid);
     }
-    if first.rank <= 7 {
-        if let Some(hi_offset) = remaining[1..]
+    if first.rank <= 7
+        && let Some(hi_offset) = remaining[1..]
             .iter()
             .position(|t| t.suit == first.suit && t.rank == first.rank + 2)
-        {
-            let hi_idx = hi_offset + 1;
-            let fid = flower_pool.pop().expect("flower pool exhausted");
-            found.push(DetectedSet {
-                kind: SetKind::Sequence,
-                tile_ids: vec![remaining[0].id, fid, remaining[hi_idx].id],
-            });
-            let rest: Vec<Tile> = remaining
-                .iter()
-                .enumerate()
-                .filter_map(|(i, t)| (i != 0 && i != hi_idx).then_some(*t))
-                .collect();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
-            found.pop();
-            flower_pool.push(fid);
-        }
+    {
+        let hi_idx = hi_offset + 1;
+        let fid = flower_pool.pop().expect("flower pool exhausted");
+        found.push(DetectedSet {
+            kind: SetKind::Sequence,
+            tile_ids: vec![remaining[0].id, fid, remaining[hi_idx].id],
+        });
+        let rest: Vec<Tile> = remaining
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| (i != 0 && i != hi_idx).then_some(*t))
+            .collect();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+        flower_pool.push(fid);
     }
     // Flower as low: F, first, first+1 (needs first.rank >= 2 so flower subs for a real rank).
-    if first.rank >= 2 {
-        if let Some(next_offset) = remaining[1..]
+    if first.rank >= 2
+        && let Some(next_offset) = remaining[1..]
             .iter()
             .position(|t| t.suit == first.suit && t.rank == first.rank + 1)
-        {
-            let next_idx = next_offset + 1;
-            let fid = flower_pool.pop().expect("flower pool exhausted");
-            found.push(DetectedSet {
-                kind: SetKind::Sequence,
-                tile_ids: vec![fid, remaining[0].id, remaining[next_idx].id],
-            });
-            let rest: Vec<Tile> = remaining
-                .iter()
-                .enumerate()
-                .filter_map(|(i, t)| (i != 0 && i != next_idx).then_some(*t))
-                .collect();
-            collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
-            found.pop();
-            flower_pool.push(fid);
-        }
+    {
+        let next_idx = next_offset + 1;
+        let fid = flower_pool.pop().expect("flower pool exhausted");
+        found.push(DetectedSet {
+            kind: SetKind::Sequence,
+            tile_ids: vec![fid, remaining[0].id, remaining[next_idx].id],
+        });
+        let rest: Vec<Tile> = remaining
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| (i != 0 && i != next_idx).then_some(*t))
+            .collect();
+        collect_decompositions(&rest, flower_pool, found, allow_wrap, on_found);
+        found.pop();
+        flower_pool.push(fid);
     }
 }
 
@@ -803,10 +725,11 @@ fn backtrack_decompose_flowers(
     }
 
     // Try sequence: first + (rank+1 same suit) + (rank+2 same suit).
-    if first.is_number_tile() && remaining.len() >= 3 {
-        if try_sequence(remaining, flower_pool, found, allow_wrap, first) {
-            return true;
-        }
+    if first.is_number_tile()
+        && remaining.len() >= 3
+        && try_sequence(remaining, flower_pool, found, allow_wrap, first)
+    {
+        return true;
     }
 
     // Try pair: 2 tiles with same suit+rank (no flowers allowed in pairs).
@@ -848,10 +771,11 @@ fn backtrack_decompose_flowers(
         }
 
         // Sequence with flower filling one gap.
-        if first.is_number_tile() && remaining.len() >= 2 {
-            if try_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first) {
-                return true;
-            }
+        if first.is_number_tile()
+            && remaining.len() >= 2
+            && try_sequence_with_flower(remaining, flower_pool, found, allow_wrap, first)
+        {
+            return true;
         }
     }
 
@@ -896,10 +820,8 @@ fn try_sequence(
     }
 
     // Wrapping sequences (8-9-1, 9-1-2).
-    if allow_wrap {
-        if try_wrap_sequence(remaining, flower_pool, found, allow_wrap, first) {
-            return true;
-        }
+    if allow_wrap && try_wrap_sequence(remaining, flower_pool, found, allow_wrap, first) {
+        return true;
     }
     false
 }
@@ -1077,33 +999,6 @@ mod tests {
         ];
         let sets = find_pairs_and_triplets(&hand);
         assert!(sets.iter().any(|s| s.kind == SetKind::Triplet));
-    }
-
-    #[test]
-    fn describe_hand_no_overlapping_sequences() {
-        // Regression: 1m,2m,3m,4m,4m,7m,8m,9m must decompose as
-        // (1-2-3m) + (4m pair) + (7-8-9m) — NOT also reporting a phantom 2-3-4m
-        // sequence by reusing the 2m and 3m.
-        let tiles = vec![
-            t(Suit::Characters, 1, 0),
-            t(Suit::Characters, 2, 1),
-            t(Suit::Characters, 3, 2),
-            t(Suit::Characters, 4, 3),
-            t(Suit::Characters, 4, 4),
-            t(Suit::Characters, 7, 5),
-            t(Suit::Characters, 8, 6),
-            t(Suit::Characters, 9, 7),
-        ];
-        let desc = describe_hand(&tiles);
-        // Must contain the real melds...
-        assert!(desc.contains("4m×2"), "missing pair: {desc}");
-        assert!(desc.contains("1-2-3m"), "missing low run: {desc}");
-        assert!(desc.contains("7-8-9m"), "missing high run: {desc}");
-        // ...and must NOT report the overlapping phantom sequence.
-        assert!(
-            !desc.contains("2-3-4m"),
-            "phantom overlapping sequence in: {desc}"
-        );
     }
 
     #[test]

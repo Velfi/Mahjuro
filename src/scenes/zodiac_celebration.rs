@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::core::zodiac::ZodiacKind;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::table_transform::rot_rz_ry_rx_deg;
@@ -59,7 +60,7 @@ impl SceneBehavior for ZodiacCelebrationScene {
         }
         if self.dismissed {
             ctx.bus.push(GameEvent::ZodiacLevelUp);
-            ctx.run.finished_zodiac_celebration = Some((self.yaku_name, self.new_level));
+            GameEngine::set_finished_zodiac_celebration(ctx.run, self.yaku_name, self.new_level);
             *ctx.overlay_request = Some(super::OverlayRequest::Pop);
         }
         None
@@ -136,9 +137,6 @@ impl SceneBehavior for ZodiacCelebrationScene {
             kind: Object3dKind::ZodiacRibbon {
                 kind: Some(self.kind),
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some(anchor.arrange_name),

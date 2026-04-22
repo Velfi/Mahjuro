@@ -19,8 +19,8 @@ use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
 use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::decal::{
-    CABINET_DECAL_CELL_H, CABINET_DECAL_CELL_W, LabelAlign, load_noto_emoji_font, load_ui_font,
-    rasterize_cabinet_strip_decal, rasterize_label_styled_with_fallback, rasterize_tile_face_decal,
+    LabelAlign, load_noto_emoji_font, load_ui_font, rasterize_label_styled_with_fallback,
+    rasterize_tile_face_decal,
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
@@ -32,6 +32,9 @@ use crate::render::lamp_mesh::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh, build_lamp_body_mesh,
     build_lamp_bulb_mesh,
 };
+use crate::render::lit_mesh::Aabb;
+use crate::render::lit_mesh::MeshCpu;
+use crate::render::lit_mesh::push_box;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
@@ -41,6 +44,7 @@ use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
+use crate::render::primitive::MeshId;
 use crate::render::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_relic_mesh, build_relic_mesh_from_rgba,
     build_round_dish_mesh, build_shop_action_prop_mesh, build_tent_card_mesh,
@@ -107,7 +111,10 @@ struct CameraUniform {
     base_color_factor: [f32; 4],
     /// World-space camera position, used for fresnel/view-dependent effects in tile_3d.wgsl.
     cam_pos: [f32; 3],
-    _pad: f32,
+    /// Per-tile instance seed — any finite float. Read by `tile_3d.wgsl` to
+    /// offset procedural noise so every tile's tortoise-shell pattern (and
+    /// future material variations) is unique. Not all materials sample it.
+    tile_seed: f32,
 }
 
 #[repr(C)]
@@ -115,6 +122,23 @@ struct CameraUniform {
 pub struct GpuInstance {
     pub rect: [f32; 4],
     pub color: [f32; 4],
+}
+
+/// Per-frame settings threaded from the app into `WgpuRenderer::render`:
+/// quality tiers, tile-look choices, animation settle speeds, gamma, and
+/// the shadow/SSR toggles. Grouped so the render entry point takes one
+/// value instead of ten individual params.
+pub struct RenderSettings {
+    pub smoke_quality: crate::persistence::SmokeQuality,
+    pub smoke_amount: crate::persistence::SmokeAmount,
+    pub effects_quality: crate::persistence::EffectsQuality,
+    pub tile_preset: crate::persistence::TilePreset,
+    pub tile_material: crate::persistence::TileMaterial,
+    pub draw_settle_speed: f32,
+    pub sort_settle_speed: f32,
+    pub gamma: f32,
+    pub shadows_enabled: bool,
+    pub ssr_enabled: bool,
 }
 
 /// View uniform consumed by the 3D flame pipeline. Mirrors
@@ -162,30 +186,6 @@ pub const MAX_SPOT_LIGHTS: usize = 8;
 ///
 /// Kept as a free function so call sites inside `draw_frame` can split-borrow
 /// the disjoint renderer fields (the pool vs. device/layouts/views) without
-/// running into `&mut self` conflicts with the frame-scoped `&self.scene_color_view`.
-#[allow(clippy::too_many_arguments)]
-fn ensure_lit_mesh_pool(
-    pool: &mut Vec<LitMeshInstance>,
-    n: usize,
-    device: &wgpu::Device,
-    material_layout: &wgpu::BindGroupLayout,
-    shadow_caster_layout: &wgpu::BindGroupLayout,
-    white_view: &wgpu::TextureView,
-    relief_default_view: &wgpu::TextureView,
-    sampler: &wgpu::Sampler,
-) {
-    while pool.len() < n {
-        pool.push(LitMeshInstance::new(
-            device,
-            material_layout,
-            shadow_caster_layout,
-            white_view,
-            relief_default_view,
-            sampler,
-        ));
-    }
-}
-
 fn tablet_label_hash(label: &str, w: u32, h: u32) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in label.as_bytes() {
@@ -453,14 +453,11 @@ impl PointLightsBuf {
 /// One material slot of the tile mesh — vertex/index buffers + the primitive's
 /// own albedo texture.  A tile may consist of several of these (e.g. an ivory
 /// face primitive and a bamboo back primitive).
-#[allow(dead_code)]
 struct TilePrimitiveGpu {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
-    albedo_texture: wgpu::Texture,
     albedo_view: wgpu::TextureView,
-    base_color_factor: [f32; 4],
 }
 
 /// A relic icon to draw as a textured quad at a screen-space rect.
@@ -472,18 +469,13 @@ pub struct RelicIcon {
 }
 
 /// Horizontal alignment of text inside its rect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TextAlign {
     Left,
+    #[default]
     Center,
-    #[allow(dead_code)]
-    Right,
-}
 
-impl Default for TextAlign {
-    fn default() -> Self {
-        TextAlign::Center
-    }
+    Right,
 }
 
 /// A rasterized text label to draw over a screen-space rect.
@@ -539,21 +531,14 @@ impl Default for TextLabel {
 /// Storing them per-tile means all 14 `write_buffer` calls target distinct
 /// GPU allocations, so every tile's matrix is visible when the command buffer
 /// executes — no dynamic-offset trickery required.
-#[allow(dead_code)]
 struct HandTileGpu {
     /// Written every frame with view_proj + model + base_color_factor.
     uniform_buffer: wgpu::Buffer,
-    /// One bind group per tile-mesh primitive.  Each binds the per-tile uniform
-    /// + per-tile decal + that primitive's own albedo texture.
-    bind_groups: Vec<wgpu::BindGroup>,
     /// Companion uniform buffer for the gold-metal outline shell. Written
     /// every frame the tile is *selected* with an inflated model matrix
     /// (uniform 1.06× scale around the tile center). Always allocated so
     /// the bind group can stay constant for the lifetime of the tile.
     outline_uniform_buffer: wgpu::Buffer,
-    /// Bind groups that point at `outline_uniform_buffer` instead of the
-    /// regular one. Same layout as `bind_groups`.
-    outline_bind_groups: Vec<wgpu::BindGroup>,
     /// Per-tile shadow caster uniform (light_view_proj * model). Written
     /// every frame in lockstep with `uniform_buffer` and consumed by the
     /// shadow pre-pass via `shadow_bind_group`.
@@ -564,15 +549,6 @@ struct HandTileGpu {
     /// decal upload (the enhancement is baked into the texture as a coloured
     /// border + corner gem in `rasterize_tile_face_decal`).
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
-    /// Main label (number or name) for the tile face.
-    symbol: String,
-    /// Emoji suit indicator rendered below the main label.
-    suit_emoji: String,
-    /// Suit colour for rendering the symbol (RGBA, linear).
-    suit_color: [f32; 4],
-    /// Kept alive so the GPU texture is not freed while bind_group references it.
-    #[allow(dead_code)]
-    decal_texture: wgpu::Texture,
 }
 
 /// GPU resources for a showcase tile (pack celebration, hand strip, choose-tiles grid, etc.).
@@ -587,8 +563,6 @@ struct ShowcaseTileGpu {
     shadow_bind_group: wgpu::BindGroup,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
-    #[allow(dead_code)]
-    decal_texture: wgpu::Texture,
 }
 
 const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
@@ -711,11 +685,7 @@ pub struct DebugArrangeOverride {
 /// need to branch.
 enum RenderTarget {
     Surface(wgpu::Surface<'static>),
-    Offscreen {
-        texture: wgpu::Texture,
-        #[allow(dead_code)]
-        view: wgpu::TextureView,
-    },
+    Offscreen { texture: wgpu::Texture },
 }
 
 /// Where the renderer should send frames. Chosen once at construction:
@@ -777,8 +747,6 @@ pub struct WgpuRenderer {
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
-    #[allow(dead_code)]
-    moon_albedo_texture: wgpu::Texture,
     moon_albedo_bind_group: wgpu::BindGroup,
     sunlit_water_pipeline: wgpu::RenderPipeline,
     mountain_haze_pipeline: wgpu::RenderPipeline,
@@ -961,30 +929,13 @@ pub struct WgpuRenderer {
     lit_mesh_blended_pipeline: wgpu::RenderPipeline,
     /// 1×1 white texture used as a placeholder albedo for procedural meshes
     /// that don't sample from a texture.
-    #[allow(dead_code)] // Owns the GPU resource backing `lit_mesh_white_view`.
-    lit_mesh_white_tex: wgpu::Texture,
     lit_mesh_white_view: wgpu::TextureView,
     /// Default `relief_tex` for lit meshes without a per-asset height map.
-    #[allow(dead_code)] // Owns the GPU resource backing `lit_mesh_relief_default_view`.
-    lit_mesh_relief_default_tex: wgpu::Texture,
     lit_mesh_relief_default_view: wgpu::TextureView,
-    /// Linear-format heightmap texture for the shop coin faces. Bound at
-    /// slot 1 of every coin instance — sampled by the metal branch in
-    /// `lit_mesh.wgsl` to perturb the surface normal so the engraved
-    /// Chinese cash-coin face catches the candle highlights. Kept on the
-    /// renderer purely so the GPU resource outlives the bind groups that
-    /// reference it.
-    #[allow(dead_code)]
-    lit_mesh_coin_height_tex: wgpu::Texture,
-    // View is cloned into coin bind groups; field exists so the view outlives them.
-    #[allow(dead_code)]
-    lit_mesh_coin_height_view: wgpu::TextureView,
     /// Per-kind procedural heightmap textures for talisman tablets. Indexed
     /// by `TalismanKind::all()` order (see `talisman_height_paths` in `new`).
     /// The talisman shader branch samples these as a
     /// grayscale heightfield to perturb the surface normal.
-    #[allow(dead_code)] // Backs `talisman_height_views`; kept alive for the views' lifetime.
-    talisman_height_textures: Vec<wgpu::Texture>,
     talisman_height_views: Vec<wgpu::TextureView>,
     /// Which heightmap is currently bound per talisman slot. Used to skip
     /// rebinding when the kind hasn't changed since last frame. Indexed
@@ -1159,16 +1110,12 @@ pub struct WgpuRenderer {
     pub(super) last_aux_dish_aabbs: Vec<(glam::Vec3, glam::Vec3)>,
 
     // ── Skeuomorphic gameplay HUD meshes (phase 1 infrastructure) ──────
-    cabinet_mesh: LitMeshGpu,
-    cabinet_rails_mesh: LitMeshGpu,
     bone_tablet_mesh: LitMeshGpu,
     wood_tablet_mesh: LitMeshGpu,
     bowl_mesh: LitMeshGpu,
     mirror_mesh: LitMeshGpu,
     tally_stick_base_mesh: LitMeshGpu,
     tally_stick_tip_mesh: LitMeshGpu,
-    cabinet_instances: Vec<LitMeshInstance>,
-    cabinet_rails_instances: Vec<LitMeshInstance>,
     yaku_tablet_instances: Vec<LitMeshInstance>,
     wood_tablet_instances: Vec<LitMeshInstance>,
     bowl_instances: Vec<LitMeshInstance>,
@@ -1262,18 +1209,11 @@ pub struct WgpuRenderer {
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
     /// by every 3D shader through `shadow_sample_bind_group`.
-    #[allow(dead_code)] // Owns the GPU resource backing `shadow_map_view`.
-    shadow_map_texture: wgpu::Texture,
     shadow_map_view: wgpu::TextureView,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
     /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
     /// group built against this layout.
     shadow_caster_layout: wgpu::BindGroupLayout,
-    /// Bind-group layout for the frame-shared shadow sampling group
-    /// (group 2 of every 3D scene pipeline).
-    #[allow(dead_code)]
-    // Layout is consumed into bind groups at init; kept for resource lifetime.
-    shadow_sample_layout: wgpu::BindGroupLayout,
     /// Frame-shared uniform: light_view_proj + (enabled, bias, texel size).
     shadow_globals_buffer: wgpu::Buffer,
     /// Frame-shared bind group bound as group 2 on every 3D draw in the
@@ -1396,8 +1336,6 @@ pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 80;
 
 /// Pre-loaded background texture + bind group for the image pipeline.
 struct BackgroundTextureGpu {
-    #[allow(dead_code)]
-    texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -1880,19 +1818,37 @@ fn create_depth_copy(
     (tex, view)
 }
 
+/// GPU + asset handles needed to build a single showcase-tile's per-tile
+/// resources. Grouped so callers can pass one `&ShowcaseTileCtx` instead
+/// of threading 9 separate handles through the call site.
+#[derive(Copy, Clone)]
+struct ShowcaseTileCtx<'a> {
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    layout: &'a wgpu::BindGroupLayout,
+    shadow_caster_layout: &'a wgpu::BindGroupLayout,
+    primitives: &'a [TilePrimitiveGpu],
+    sampler: &'a wgpu::Sampler,
+    ui_font: Option<&'a fontdue::Font>,
+    emoji_font: Option<&'a fontdue::Font>,
+}
+
 fn make_showcase_tile_gpu(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    shadow_caster_layout: &wgpu::BindGroupLayout,
-    primitives: &[TilePrimitiveGpu],
-    sampler: &wgpu::Sampler,
+    ctx: &ShowcaseTileCtx<'_>,
     base_color_factor: [f32; 4],
-    ui_font: Option<&fontdue::Font>,
-    emoji_font: Option<&fontdue::Font>,
     tile: &Tile,
     tile_set: Option<&str>,
 ) -> ShowcaseTileGpu {
+    let ShowcaseTileCtx {
+        device,
+        queue,
+        layout,
+        shadow_caster_layout,
+        primitives,
+        sampler,
+        ui_font,
+        emoji_font,
+    } = *ctx;
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("showcase-tile-cam"),
@@ -1901,7 +1857,7 @@ fn make_showcase_tile_gpu(
             model: identity.to_cols_array(),
             base_color_factor,
             cam_pos: [0.0; 3],
-            _pad: 0.0,
+            tile_seed: 0.0,
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -1912,7 +1868,7 @@ fn make_showcase_tile_gpu(
     // full-resolution decal as the old HandTileGpu path did.
     let rgba =
         rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, true);
-    let (decal_texture, decal_view) = upload_rgba_texture(
+    let (_decal_texture, decal_view) = upload_rgba_texture(
         device,
         queue,
         "showcase-tile-decal",
@@ -1957,7 +1913,7 @@ fn make_showcase_tile_gpu(
             model: identity.to_cols_array(),
             base_color_factor,
             cam_pos: [0.0; 3],
-            _pad: 0.0,
+            tile_seed: 0.0,
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -2014,7 +1970,6 @@ fn make_showcase_tile_gpu(
         shadow_uniform_buffer,
         shadow_bind_group,
         tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
-        decal_texture,
     }
 }
 
@@ -2204,8 +2159,7 @@ impl WgpuRenderer {
                     usage: config.usage,
                     view_formats: &[],
                 });
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                (RenderTarget::Offscreen { texture, view }, config)
+                (RenderTarget::Offscreen { texture }, config)
             }
         };
 
@@ -2461,7 +2415,7 @@ impl WgpuRenderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
             immediate_size: 0,
         });
-        let (moon_albedo_texture, moon_albedo_view) =
+        let (_moon_albedo_texture, moon_albedo_view) =
             crate::render::texture_upload::load_metal_heightmap(
                 &device,
                 &queue,
@@ -2526,7 +2480,7 @@ impl WgpuRenderer {
         // Built up here so the shared sampling layout can be plumbed into
         // both `tile_layout` and `lit_mesh_pl` below as group 2.
         const SHADOW_MAP_SIZE: u32 = 2048;
-        let shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
+        let _shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("shadow-map"),
             size: wgpu::Extent3d {
                 width: SHADOW_MAP_SIZE,
@@ -2541,7 +2495,7 @@ impl WgpuRenderer {
             view_formats: &[],
         });
         let shadow_map_view =
-            shadow_map_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            _shadow_map_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -3216,7 +3170,7 @@ impl WgpuRenderer {
                 module: &tile_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[tile_vertex_layout.clone()],
+                buffers: std::slice::from_ref(&tile_vertex_layout),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &tile_shader,
@@ -4002,7 +3956,7 @@ impl WgpuRenderer {
                         contents: bytemuck::cast_slice(&prim.indices),
                         usage: wgpu::BufferUsages::INDEX,
                     });
-                    let (albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture(&device, &queue, "tile-prim-albedo", rgba, *w, *h)
                         }
@@ -4019,9 +3973,7 @@ impl WgpuRenderer {
                         vertex_buffer: vb,
                         index_buffer: ib,
                         index_count: prim.indices.len() as u32,
-                        albedo_texture,
                         albedo_view,
-                        base_color_factor: prim.base_color_factor,
                     });
                 }
                 out
@@ -4037,7 +3989,7 @@ impl WgpuRenderer {
         // Kick off background relic image loading (non-blocking).
         let relic_load_start = Some(Instant::now());
         let relic_rx = Some(spawn_relic_loader());
-        let (lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
+        let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
             flat_relief_height(&device, &queue);
         let pack_textures_map = load_pack_textures(
             &device,
@@ -4126,31 +4078,25 @@ impl WgpuRenderer {
         };
         let lamp_body_mesh = LitMeshGpu::new(&device, &lamp_body_cpu, "lamp-body");
         let lamp_bulb_mesh = LitMeshGpu::new(&device, &build_lamp_bulb_mesh(), "lamp-bulb");
-        // Skeuomorphic gameplay HUD meshes (phase 1).
-        let cabinet_mesh = LitMeshGpu::new(&device, &build_cabinet_mesh(), "cabinet");
-        let cabinet_rails_mesh =
-            LitMeshGpu::new(&device, &build_cabinet_rails_mesh(), "cabinet-rails");
         // Phase-1 primitive registry: parallel GPU copies of meshes
         // the generic `Object3dKind::Primitive` dispatch can reach by
         // `MeshId`. Legacy named fields above still own their own
         // allocations during the migration window.
-        let mut primitive_meshes: HashMap<
-            crate::render::primitive::MeshId,
-            std::sync::Arc<LitMeshGpu>,
-        > = HashMap::new();
+        let mut primitive_meshes: HashMap<MeshId, std::sync::Arc<LitMeshGpu>> = HashMap::new();
         {
-            use crate::render::primitive::MeshId;
             let unit_cube_cpu = {
                 let mut verts: Vec<crate::render::tile_glb::Vertex3dTex> = Vec::new();
                 let mut idx: Vec<u32> = Vec::new();
-                crate::render::lit_mesh::push_box(
-                    &mut verts, &mut idx, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5,
+                push_box(
+                    &mut verts,
+                    &mut idx,
+                    Aabb::new(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5),
                 );
-                crate::render::lit_mesh::MeshCpu {
+                MeshCpu {
                     vertices: verts,
                     indices: idx,
-                    default_material: crate::render::lit_mesh::MaterialParams {
-                        kind: crate::render::lit_mesh::MaterialKind::Plain,
+                    default_material: MaterialParams {
+                        kind: MaterialKind::Plain,
                         base_color: [1.0, 1.0, 1.0, 1.0],
                         specular_strength: 0.25,
                         specular_power: 32.0,
@@ -4250,7 +4196,7 @@ impl WgpuRenderer {
         let tally_stick_tip_mesh =
             LitMeshGpu::new(&device, &build_tally_stick_tip_mesh(), "tally-stick-tip");
         // Shared 1×1 white texture for procedural meshes that don't sample.
-        let (lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
+        let (_lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
         // Pre-allocate candle slots (gameplay: score pair + two hand-strip
         // pairs + footlight). Each slot owns two instances: wax + wick.
@@ -4325,7 +4271,7 @@ impl WgpuRenderer {
         // the engraved characters and rim catch the candle highlights. Pegs
         // reuse coin geometry but keep the white texture and `Plain` material
         // so they aren't affected.
-        let (lit_mesh_coin_height_tex, lit_mesh_coin_height_view) =
+        let (_lit_mesh_coin_height_tex, lit_mesh_coin_height_view) =
             load_coin_heightmap(&device, &queue);
         // Register the coin heightmap as the per-shape texture override
         // for Cylinder primitives so engraved-coin callers sample it.
@@ -4474,11 +4420,9 @@ impl WgpuRenderer {
                 "talisman-conformity-hm",
             ),
         ];
-        let mut talisman_height_textures: Vec<wgpu::Texture> = Vec::new();
         let mut talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
         for &(path, label) in &talisman_height_paths {
-            let (tex, view) = load_metal_heightmap(&device, &queue, path, label);
-            talisman_height_textures.push(tex);
+            let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
             talisman_height_views.push(view);
         }
         let talisman_slot_kind: Vec<Option<u8>> = vec![None; MAX_TALISMAN_SLOTS];
@@ -4537,8 +4481,6 @@ impl WgpuRenderer {
         // Cabinet instances grow on demand via `ensure_lit_mesh_pool` —
         // collection is the only consumer for now and only ever needs a
         // single instance, so reserving a fixed cap would be silly.
-        let cabinet_instances: Vec<LitMeshInstance> = Vec::new();
-        let cabinet_rails_instances: Vec<LitMeshInstance> = Vec::new();
         let yaku_tablet_instances = make_pool(MAX_YAKU_TABLET_SLOTS);
         let wood_tablet_instances = make_pool(MAX_WOOD_TABLET_SLOTS);
         let bowl_instances = make_pool(MAX_BOWL_SLOTS);
@@ -4599,7 +4541,6 @@ impl WgpuRenderer {
             ember_drift_pipeline,
             golden_dust_pipeline,
             moonlit_water_pipeline,
-            moon_albedo_texture,
             moon_albedo_bind_group,
             sunlit_water_pipeline,
             mountain_haze_pipeline,
@@ -4690,16 +4631,12 @@ impl WgpuRenderer {
             last_ribbon_batch_slot_counts: Vec::new(),
             last_talisman_models: Vec::new(),
             last_aux_dish_aabbs: Vec::new(),
-            cabinet_mesh,
-            cabinet_rails_mesh,
             bone_tablet_mesh,
             wood_tablet_mesh,
             bowl_mesh,
             mirror_mesh,
             tally_stick_base_mesh,
             tally_stick_tip_mesh,
-            cabinet_instances,
-            cabinet_rails_instances,
             yaku_tablet_instances,
             wood_tablet_instances,
             bowl_instances,
@@ -4766,13 +4703,8 @@ impl WgpuRenderer {
             bloom_pong_view,
             lit_mesh_pipeline,
             lit_mesh_blended_pipeline,
-            lit_mesh_white_tex,
             lit_mesh_white_view,
-            lit_mesh_relief_default_tex,
             lit_mesh_relief_default_view,
-            lit_mesh_coin_height_tex,
-            lit_mesh_coin_height_view,
-            talisman_height_textures,
             talisman_height_views,
             talisman_slot_kind,
             candle_wax_mesh,
@@ -4788,10 +4720,8 @@ impl WgpuRenderer {
             candle_instances,
             table_instance,
             relic_instances,
-            shadow_map_texture,
             shadow_map_view,
             shadow_caster_layout,
-            shadow_sample_layout,
             shadow_globals_buffer,
             shadow_sample_bind_group,
             shadow_pipeline,
@@ -4966,7 +4896,7 @@ impl WgpuRenderer {
             match rx.try_recv() {
                 Ok(img) => {
                     let label = format!("bg-{:?}", img.id);
-                    let (tex, view) = upload_rgba_texture(
+                    let (_tex, view) = upload_rgba_texture(
                         &self.device,
                         &self.queue,
                         &label,
@@ -4988,13 +4918,8 @@ impl WgpuRenderer {
                             },
                         ],
                     });
-                    self.background_textures.insert(
-                        img.id,
-                        BackgroundTextureGpu {
-                            texture: tex,
-                            bind_group,
-                        },
-                    );
+                    self.background_textures
+                        .insert(img.id, BackgroundTextureGpu { bind_group });
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -5162,26 +5087,6 @@ impl WgpuRenderer {
             model = Mat4::from_cols(model.x_axis, model.y_axis, model.z_axis, t.extend(1.0));
         }
         model
-    }
-
-    /// Returns the smoothed hover value for `anim_id`, advancing the
-    /// exponential-ease envelope toward `target` by `frame_dt`.
-    ///
-    /// If `anim_id == 0`, returns `target` directly (no per-frame state).
-    /// Rate ≈ 14 → ~70 ms time constant, matching the rest of the HUD.
-    ///
-    /// Note: cannot be called inside `draw_frame` because that function holds
-    /// an `&self.scene_color_view` borrow for its entire scope. In those call
-    /// sites, inline the body as `self.obj3d_hover_state.entry(id).or_insert(0.0)`.
-    #[allow(dead_code)]
-    fn ease_hover(&mut self, anim_id: u64, target: f32) -> f32 {
-        if anim_id == 0 {
-            return target;
-        }
-        let k = 1.0 - (-14.0 * self.frame_dt).exp();
-        let entry = self.obj3d_hover_state.entry(anim_id).or_insert(0.0);
-        *entry += (target - *entry) * k;
-        *entry
     }
 
     /// Like [`Self::pick_debug_object`] but also returns the world-space model
@@ -5449,17 +5354,20 @@ impl WgpuRenderer {
     pub fn render(
         &mut self,
         frame: &UiFrame,
-        smoke_quality: crate::persistence::SmokeQuality,
-        smoke_amount: crate::persistence::SmokeAmount,
-        effects_quality: crate::persistence::EffectsQuality,
-        tile_preset: crate::persistence::TilePreset,
-        tile_material: crate::persistence::TileMaterial,
-        draw_settle_speed: f32,
-        sort_settle_speed: f32,
-        gamma: f32,
-        shadows_enabled: bool,
-        ssr_enabled: bool,
+        settings: RenderSettings,
     ) -> anyhow::Result<()> {
+        let RenderSettings {
+            smoke_quality,
+            smoke_amount,
+            effects_quality,
+            tile_preset,
+            tile_material,
+            draw_settle_speed,
+            sort_settle_speed,
+            gamma,
+            shadows_enabled,
+            ssr_enabled,
+        } = settings;
         // Encode the tile material choice into base_color_factor.w so the
         // tile_3d shader can branch on it (0 = bamboo, 1 = plastic, …).
         self.tile_base_color_factor[3] = tile_material.shader_id();
@@ -5913,18 +5821,18 @@ impl WgpuRenderer {
                     if let Some(prev) = self.prev_tile_world.get(&uid).copied() {
                         let delta = world - prev;
                         let speed = delta.length();
-                        if speed > 0.5 {
-                            if let Some(ref mut fluid) = self.fluid {
-                                let inv_dt = 1.0 / dt.max(1.0 / 120.0);
-                                fluid.inject_impulse(
-                                    world,
-                                    delta * inv_dt * 0.45,
-                                    tile_short_px * 0.55,
-                                    speed * 0.04,
-                                    0.0,
-                                    0.0,
-                                );
-                            }
+                        if speed > 0.5
+                            && let Some(ref mut fluid) = self.fluid
+                        {
+                            let inv_dt = 1.0 / dt.max(1.0 / 120.0);
+                            fluid.inject_impulse(
+                                world,
+                                delta * inv_dt * 0.45,
+                                tile_short_px * 0.55,
+                                speed * 0.04,
+                                0.0,
+                                0.0,
+                            );
                         }
                     }
                     self.prev_tile_world.insert(uid, world);
@@ -6073,6 +5981,9 @@ impl WgpuRenderer {
                     // model matrix into the outline shell uniform so the
                     // outline pipeline draws a slightly larger version of
                     // the same mesh around the tile silhouette.
+                    // Slot index drives per-tile procedural variation (e.g.
+                    // tortoise shell mottling) in tile_3d.wgsl.
+                    let tile_seed = i as f32;
                     if is_selected {
                         // ~5–6% larger; tuned so the rim is visible without
                         // overlapping neighbouring tiles.
@@ -6087,7 +5998,7 @@ impl WgpuRenderer {
                                 model: outline_model.to_cols_array(),
                                 base_color_factor: bcf,
                                 cam_pos: cam_pos.to_array(),
-                                _pad: 0.0,
+                                tile_seed,
                             }),
                         );
                     }
@@ -6105,7 +6016,7 @@ impl WgpuRenderer {
                             model: model.to_cols_array(),
                             base_color_factor: bcf,
                             cam_pos: cam_pos.to_array(),
-                            _pad: 0.0,
+                            tile_seed,
                         }),
                     );
                 }
@@ -6229,7 +6140,7 @@ impl WgpuRenderer {
         struct TextDraw {
             inst_buf: wgpu::Buffer,
             bind_group: wgpu::BindGroup,
-            #[allow(dead_code)]
+
             _tex: wgpu::Texture,
         }
         let make_text_draw = |device: &wgpu::Device,
@@ -6243,8 +6154,8 @@ impl WgpuRenderer {
             // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
             // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
             // when layout math produces a negative rect width.
-            let tw = (lbl.rect[2].max(1.0).min(16384.0) as u32).max(1);
-            let th = (lbl.rect[3].max(1.0).min(16384.0) as u32).max(1);
+            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
             let align = match lbl.align {
                 TextAlign::Left => LabelAlign::Left,
                 TextAlign::Center => LabelAlign::Center,
@@ -6256,9 +6167,11 @@ impl WgpuRenderer {
                 &lbl.text,
                 tw,
                 th,
-                lbl.font_px,
-                align,
-                lbl.scroll_offset,
+                crate::render::decal::LabelStyle {
+                    font_px: lbl.font_px,
+                    align,
+                    scroll_offset: lbl.scroll_offset,
+                },
             );
             let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -6323,11 +6236,6 @@ impl WgpuRenderer {
         // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
         // ── ordered op list, batching contiguous Quad runs into a single ──
         // ── instanced draw. ────────────────────────────────────────────────
-        struct ImageDraw {
-            inst_buf: wgpu::Buffer,
-            bind_group: wgpu::BindGroup,
-        }
-
         enum RenderOp {
             Background(BackgroundId),
             Starfield,
@@ -6342,7 +6250,6 @@ impl WgpuRenderer {
             GradientQuadBatch { buf_idx: usize, count: u32 },
             FlameBatch { buf_idx: usize, count: u32 },
             TextDraw(usize),
-            RelicIconDraw(usize),
             FluidSmoke,
             // Skeuomorphic gameplay HUD (phase 1).
             ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
@@ -6357,8 +6264,6 @@ impl WgpuRenderer {
         // collision or missing dispatch arm.
         #[derive(Clone, Copy, PartialEq, Eq)]
         enum DrawKind {
-            Cabinet,
-            CabinetRails,
             YakuTablet,
             WoodTablet,
             Relic,
@@ -6391,7 +6296,6 @@ impl WgpuRenderer {
         let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
-        let mut image_draws: Vec<ImageDraw> = Vec::new();
         // Skeuomorphic gameplay HUD cmd buffers (phase 1).
         // Dead empty vecs — kept so existing shadow/draw loops that still iterate
         // these compile; scenes no longer push to these variants.
@@ -6584,28 +6488,6 @@ impl WgpuRenderer {
                     ops.push(RenderOp::Object3dBatch { start: 0, end: 0 });
                     i += 1;
                 }
-                DrawCmd::RelicIcon(icon) => {
-                    if self.relic_textures.contains_key(&icon.relic_id) {
-                        let inst = GpuInstance {
-                            rect: icon.rect,
-                            color: [1.0, 1.0, 1.0, 1.0],
-                        };
-                        let inst_buf =
-                            self.device
-                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: Some("relic-icon-inst"),
-                                    contents: bytemuck::cast_slice(&[inst]),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
-                        let idx = image_draws.len();
-                        image_draws.push(ImageDraw {
-                            inst_buf,
-                            bind_group: self.relic_textures[&icon.relic_id].bind_group.clone(),
-                        });
-                        ops.push(RenderOp::RelicIconDraw(idx));
-                    }
-                    i += 1;
-                }
             }
         }
 
@@ -6614,53 +6496,53 @@ impl WgpuRenderer {
         // axis) projected from the world-space tip of each debug-axes bar.
         // These get rasterized into ordinary text draws so they ride along
         // in the same render pass as the bars themselves.
-        if frame.debug_axes {
-            if let Some(ref font) = self.ui_font {
-                let length = h * 0.35;
-                let label_size = (h * 0.04).max(18.0);
-                let label_w = label_size * 3.5;
-                let label_h = label_size * 1.5;
-                let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
-                    (
-                        look_target + glam::Vec3::X * length,
-                        "+X",
-                        [1.0, 0.25, 0.25, 1.0],
-                    ),
-                    (
-                        look_target + glam::Vec3::Y * length,
-                        "+Y",
-                        [0.25, 1.0, 0.25, 1.0],
-                    ),
-                    (
-                        look_target + glam::Vec3::Z * length,
-                        "+Z",
-                        [0.45, 0.65, 1.0, 1.0],
-                    ),
-                ];
-                for (tip_world, text, color) in labels.iter() {
-                    let (sx, sy) = project_to_screen(*tip_world);
-                    let lbl = TextLabel {
-                        rect: [sx - label_w * 0.5, sy - label_h * 0.5, label_w, label_h],
-                        text: (*text).to_string(),
-                        color: *color,
-                        font_px: Some(label_size),
-                        align: TextAlign::Center,
-                        no_glossary: true,
-                        ..Default::default()
-                    };
-                    let td = make_text_draw(
-                        &self.device,
-                        &self.queue,
-                        &self.text_bind_group_layout,
-                        &self.tile_sampler,
-                        &lbl,
-                        font,
-                        None,
-                    );
-                    let idx = text_draws.len();
-                    text_draws.push(td);
-                    ops.push(RenderOp::TextDraw(idx));
-                }
+        if frame.debug_axes
+            && let Some(ref font) = self.ui_font
+        {
+            let length = h * 0.35;
+            let label_size = (h * 0.04).max(18.0);
+            let label_w = label_size * 3.5;
+            let label_h = label_size * 1.5;
+            let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
+                (
+                    look_target + glam::Vec3::X * length,
+                    "+X",
+                    [1.0, 0.25, 0.25, 1.0],
+                ),
+                (
+                    look_target + glam::Vec3::Y * length,
+                    "+Y",
+                    [0.25, 1.0, 0.25, 1.0],
+                ),
+                (
+                    look_target + glam::Vec3::Z * length,
+                    "+Z",
+                    [0.45, 0.65, 1.0, 1.0],
+                ),
+            ];
+            for (tip_world, text, color) in labels.iter() {
+                let (sx, sy) = project_to_screen(*tip_world);
+                let lbl = TextLabel {
+                    rect: [sx - label_w * 0.5, sy - label_h * 0.5, label_w, label_h],
+                    text: (*text).to_string(),
+                    color: *color,
+                    font_px: Some(label_size),
+                    align: TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                };
+                let td = make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    &lbl,
+                    font,
+                    None,
+                );
+                let idx = text_draws.len();
+                text_draws.push(td);
+                ops.push(RenderOp::TextDraw(idx));
             }
         }
 
@@ -6956,11 +6838,13 @@ impl WgpuRenderer {
                         self.emoji_font.as_ref(),
                     );
                     inst.set_decal(
-                        &self.device,
-                        &self.queue,
-                        &self.lit_mesh_material_layout,
-                        &self.tile_sampler,
-                        &self.lit_mesh_relief_default_view,
+                        crate::render::lit_mesh::DecalUploadCtx {
+                            device: &self.device,
+                            queue: &self.queue,
+                            layout: &self.lit_mesh_material_layout,
+                            sampler: &self.tile_sampler,
+                            relief_view: &self.lit_mesh_relief_default_view,
+                        },
                         &rgba,
                         256,
                         96,
@@ -6994,8 +6878,6 @@ impl WgpuRenderer {
                 look.z.atan2(look.y.abs()).to_degrees() + 180.0
             };
 
-            let mut obj3d_cabinet_slot: usize = 0;
-            let mut obj3d_cabinet_rails_slot: usize = 0;
             let mut obj3d_primitive_slot: HashMap<crate::render::primitive::MeshId, usize> =
                 HashMap::new();
             let mut obj3d_yaku_slot: usize = 0;
@@ -7032,87 +6914,6 @@ impl WgpuRenderer {
                     );
 
                     match &obj.kind {
-                        Object3dKind::Cabinet { face_labels } => {
-                            // One Cabinet object emits TWO GPU draws: the
-                            // wood body (LacqueredWoodFlat, with engraved
-                            // face-label decals) and the brass corner
-                            // rails (Metal, no decal). Same model matrix —
-                            // the rails mesh shares the cabinet's local
-                            // -0.5..+0.5 frame so per-instance scale
-                            // sizes them in lockstep with the body.
-                            let body_slot = obj3d_cabinet_slot;
-                            obj3d_cabinet_slot += 1;
-                            ensure_lit_mesh_pool(
-                                &mut self.cabinet_instances,
-                                body_slot + 1,
-                                &self.device,
-                                &self.lit_mesh_material_layout,
-                                &self.shadow_caster_layout,
-                                &self.lit_mesh_white_view,
-                                &self.lit_mesh_relief_default_view,
-                                &self.tile_sampler,
-                            );
-                            // Hash the labels so we only re-rasterise
-                            // when the scene changes them (today they
-                            // never change, but rasterising every frame
-                            // would be wasteful regardless).
-                            let mut hash: u64 = 0xcbf29ce484222325;
-                            for s in face_labels.iter() {
-                                for b in s.as_bytes() {
-                                    hash ^= *b as u64;
-                                    hash = hash.wrapping_mul(0x100000001b3);
-                                }
-                                hash ^= 0xff;
-                                hash = hash.wrapping_mul(0x100000001b3);
-                            }
-                            let inst = &mut self.cabinet_instances[body_slot];
-                            if inst.decal_texture.is_none() || inst.decal_label_hash != hash {
-                                let labels: [&str; 6] =
-                                    std::array::from_fn(|i| face_labels[i].as_str());
-                                let rgba =
-                                    rasterize_cabinet_strip_decal(labels, self.ui_font.as_ref());
-                                inst.set_decal(
-                                    &self.device,
-                                    &self.queue,
-                                    &self.lit_mesh_material_layout,
-                                    &self.tile_sampler,
-                                    &self.lit_mesh_relief_default_view,
-                                    &rgba,
-                                    CABINET_DECAL_CELL_W * 6,
-                                    CABINET_DECAL_CELL_H,
-                                );
-                                inst.decal_label_hash = hash;
-                            }
-                            self.cabinet_instances[body_slot].write_uniform_with_decal(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                self.cabinet_mesh.default_material,
-                                true,
-                            );
-                            object3d_draw_list.push((DrawKind::Cabinet, body_slot));
-
-                            let rails_slot = obj3d_cabinet_rails_slot;
-                            obj3d_cabinet_rails_slot += 1;
-                            ensure_lit_mesh_pool(
-                                &mut self.cabinet_rails_instances,
-                                rails_slot + 1,
-                                &self.device,
-                                &self.lit_mesh_material_layout,
-                                &self.shadow_caster_layout,
-                                &self.lit_mesh_white_view,
-                                &self.lit_mesh_relief_default_view,
-                                &self.tile_sampler,
-                            );
-                            self.cabinet_rails_instances[rails_slot].write_uniform_with_decal(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                self.cabinet_rails_mesh.default_material,
-                                false,
-                            );
-                            object3d_draw_list.push((DrawKind::CabinetRails, rails_slot));
-                        }
                         Object3dKind::Primitive {
                             shape,
                             material,
@@ -7142,10 +6943,7 @@ impl WgpuRenderer {
                                     &self.lit_mesh_relief_default_view,
                                 ),
                             };
-                            let pool = self
-                                .primitive_instances
-                                .entry(*shape)
-                                .or_insert_with(Vec::new);
+                            let pool = self.primitive_instances.entry(*shape).or_default();
                             while pool.len() < slot_i + 1 {
                                 pool.push(LitMeshInstance::new(
                                     &self.device,
@@ -7180,11 +6978,13 @@ impl WgpuRenderer {
                                         self.emoji_font.as_ref(),
                                     );
                                     inst.set_decal(
-                                        &self.device,
-                                        &self.queue,
-                                        &self.lit_mesh_material_layout,
-                                        &self.tile_sampler,
-                                        &self.lit_mesh_relief_default_view,
+                                        crate::render::lit_mesh::DecalUploadCtx {
+                                            device: &self.device,
+                                            queue: &self.queue,
+                                            layout: &self.lit_mesh_material_layout,
+                                            sampler: &self.tile_sampler,
+                                            relief_view: &self.lit_mesh_relief_default_view,
+                                        },
                                         &rgba,
                                         dw,
                                         dh,
@@ -7342,7 +7142,7 @@ impl WgpuRenderer {
                                 let rails_pool = self
                                     .primitive_instances
                                     .entry(MeshId::CabinetRails)
-                                    .or_insert_with(Vec::new);
+                                    .or_default();
                                 while rails_pool.len() < rails_slot + 1 {
                                     rails_pool.push(LitMeshInstance::new(
                                         &self.device,
@@ -7372,7 +7172,6 @@ impl WgpuRenderer {
                             label,
                             active,
                             hover,
-                            ..
                         } => {
                             let slot_i = obj3d_yaku_slot;
                             obj3d_yaku_slot += 1;
@@ -7403,11 +7202,13 @@ impl WgpuRenderer {
                                     self.emoji_font.as_ref(),
                                 );
                                 inst.set_decal(
-                                    &self.device,
-                                    &self.queue,
-                                    &self.lit_mesh_material_layout,
-                                    &self.tile_sampler,
-                                    &self.lit_mesh_relief_default_view,
+                                    crate::render::lit_mesh::DecalUploadCtx {
+                                        device: &self.device,
+                                        queue: &self.queue,
+                                        layout: &self.lit_mesh_material_layout,
+                                        sampler: &self.tile_sampler,
+                                        relief_view: &self.lit_mesh_relief_default_view,
+                                    },
                                     &rgba,
                                     256,
                                     96,
@@ -7429,7 +7230,7 @@ impl WgpuRenderer {
                             ));
                             object3d_draw_list.push((DrawKind::YakuTablet, slot_i));
                         }
-                        Object3dKind::WoodTablet { label, pick_id, .. } => {
+                        Object3dKind::WoodTablet { label, pick_id } => {
                             let slot_i = obj3d_wood_slot;
                             obj3d_wood_slot += 1;
                             if slot_i >= MAX_WOOD_TABLET_SLOTS {
@@ -7459,11 +7260,13 @@ impl WgpuRenderer {
                                     self.ui_font.as_ref(),
                                 );
                                 inst.set_decal(
-                                    &self.device,
-                                    &self.queue,
-                                    &self.lit_mesh_material_layout,
-                                    &self.tile_sampler,
-                                    &self.lit_mesh_relief_default_view,
+                                    crate::render::lit_mesh::DecalUploadCtx {
+                                        device: &self.device,
+                                        queue: &self.queue,
+                                        layout: &self.lit_mesh_material_layout,
+                                        sampler: &self.tile_sampler,
+                                        relief_view: &self.lit_mesh_relief_default_view,
+                                    },
                                     &rgba,
                                     512,
                                     192,
@@ -8139,11 +7942,13 @@ impl WgpuRenderer {
                                         [0.62, 0.18, 0.14, 1.0],
                                     );
                                     self.sell_card_instance.set_decal(
-                                        &self.device,
-                                        &self.queue,
-                                        &self.lit_mesh_material_layout,
-                                        &self.tile_sampler,
-                                        &self.lit_mesh_relief_default_view,
+                                        crate::render::lit_mesh::DecalUploadCtx {
+                                            device: &self.device,
+                                            queue: &self.queue,
+                                            layout: &self.lit_mesh_material_layout,
+                                            sampler: &self.tile_sampler,
+                                            relief_view: &self.lit_mesh_relief_default_view,
+                                        },
                                         &rgba,
                                         256,
                                         128,
@@ -8748,13 +8553,14 @@ impl WgpuRenderer {
                 // Patch the placeholder RenderOp that was pushed during the cmd walk.
                 // Find the correct Object3dBatch op by scanning from op_batch_idx.
                 while op_batch_idx < ops.len() {
-                    if let RenderOp::Object3dBatch { start, end } = &mut ops[op_batch_idx] {
-                        if *start == 0 && *end == 0 {
-                            *start = batch_start;
-                            *end = batch_end;
-                            op_batch_idx += 1;
-                            break;
-                        }
+                    if let RenderOp::Object3dBatch { start, end } = &mut ops[op_batch_idx]
+                        && *start == 0
+                        && *end == 0
+                    {
+                        *start = batch_start;
+                        *end = batch_end;
+                        op_batch_idx += 1;
+                        break;
                     }
                     op_batch_idx += 1;
                 }
@@ -8902,20 +8708,6 @@ impl WgpuRenderer {
                             },
                             GpuInstance {
                                 rect: [hi_px - hi_thick * 0.5, 0.0, hi_thick, h],
-                                color: hi_color,
-                            },
-                        ]
-                    }
-                    ClampAxis::Vertical => {
-                        let lo_px = clamp.lo_frac * h;
-                        let hi_px = clamp.hi_frac * h;
-                        [
-                            GpuInstance {
-                                rect: [0.0, lo_px - lo_thick * 0.5, w, lo_thick],
-                                color: lo_color,
-                            },
-                            GpuInstance {
-                                rect: [0.0, hi_px - hi_thick * 0.5, w, hi_thick],
                                 color: hi_color,
                             },
                         ]
@@ -9454,14 +9246,10 @@ impl WgpuRenderer {
                                 o.rotation * orient,
                                 glam::Vec3::from(o.extents),
                             );
-                            if let Some(pool) = self.primitive_instances.get_mut(shape) {
-                                if let Some(inst) = pool.get_mut(slot_i) {
-                                    inst.write_shadow_uniform(
-                                        &self.queue,
-                                        light_view_proj_arr,
-                                        model,
-                                    );
-                                }
+                            if let Some(pool) = self.primitive_instances.get_mut(shape)
+                                && let Some(inst) = pool.get_mut(slot_i)
+                            {
+                                inst.write_shadow_uniform(&self.queue, light_view_proj_arr, model);
                             }
                         }
                         // CabinetColumn pairs with a CabinetRails
@@ -9512,16 +9300,19 @@ impl WgpuRenderer {
                     .next()
                     .map(|p| &p.tile);
                 if let Some(tile) = placeholder_tile {
+                    let ctx = ShowcaseTileCtx {
+                        device: &self.device,
+                        queue: &self.queue,
+                        layout: &self.tile_material_layout,
+                        shadow_caster_layout: &self.shadow_caster_layout,
+                        primitives: &self.tile_primitives,
+                        sampler: &self.tile_sampler,
+                        ui_font: self.ui_font.as_ref(),
+                        emoji_font: self.emoji_font.as_ref(),
+                    };
                     let stg = make_showcase_tile_gpu(
-                        &self.device,
-                        &self.queue,
-                        &self.tile_material_layout,
-                        &self.shadow_caster_layout,
-                        &self.tile_primitives,
-                        &self.tile_sampler,
+                        &ctx,
                         self.tile_base_color_factor,
-                        self.ui_font.as_ref(),
-                        self.emoji_font.as_ref(),
                         tile,
                         self.tile_set.as_deref(),
                     );
@@ -9596,16 +9387,19 @@ impl WgpuRenderer {
                     );
                     // Re-rasterise decal if the tile identity changed.
                     if self.showcase_tiles[slot_cursor].tile_id != wanted_id {
+                        let ctx = ShowcaseTileCtx {
+                            device: &self.device,
+                            queue: &self.queue,
+                            layout: &self.tile_material_layout,
+                            shadow_caster_layout: &self.shadow_caster_layout,
+                            primitives: &self.tile_primitives,
+                            sampler: &self.tile_sampler,
+                            ui_font: self.ui_font.as_ref(),
+                            emoji_font: self.emoji_font.as_ref(),
+                        };
                         self.showcase_tiles[slot_cursor] = make_showcase_tile_gpu(
-                            &self.device,
-                            &self.queue,
-                            &self.tile_material_layout,
-                            &self.shadow_caster_layout,
-                            &self.tile_primitives,
-                            &self.tile_sampler,
+                            &ctx,
                             self.tile_base_color_factor,
-                            self.ui_font.as_ref(),
-                            self.emoji_font.as_ref(),
                             &p.tile,
                             self.tile_set.as_deref(),
                         );
@@ -9651,18 +9445,18 @@ impl WgpuRenderer {
                         if let Some(prev) = self.prev_tile_world.get(&uid).copied() {
                             let delta = center - prev;
                             let speed = delta.length();
-                            if speed > 0.5 {
-                                if let Some(ref mut fluid) = self.fluid {
-                                    let inv_dt = 1.0 / dt.max(1.0 / 120.0);
-                                    fluid.inject_impulse(
-                                        center,
-                                        delta * inv_dt * 0.45,
-                                        tile_short_px * 0.55,
-                                        speed * 0.04,
-                                        0.0,
-                                        0.0,
-                                    );
-                                }
+                            if speed > 0.5
+                                && let Some(ref mut fluid) = self.fluid
+                            {
+                                let inv_dt = 1.0 / dt.max(1.0 / 120.0);
+                                fluid.inject_impulse(
+                                    center,
+                                    delta * inv_dt * 0.45,
+                                    tile_short_px * 0.55,
+                                    speed * 0.04,
+                                    0.0,
+                                    0.0,
+                                );
                             }
                         }
                         self.prev_tile_world.insert(uid, center);
@@ -9727,6 +9521,11 @@ impl WgpuRenderer {
                         0.0
                     };
                     sc_bcf[2] = p.tile.enhancement.map_or(0.0, |e| e.shader_id());
+                    // Per-tile procedural variation in tile_3d.wgsl (e.g.
+                    // tortoise shell mottling) is seeded from the tile's
+                    // unique run-scoped id so a given tile keeps the same
+                    // pattern across draws, shuffles, and reorders.
+                    let tile_seed = p.tile.id as f32;
                     self.queue.write_buffer(
                         &stg.uniform_buffer,
                         0,
@@ -9735,7 +9534,7 @@ impl WgpuRenderer {
                             model: model.to_cols_array(),
                             base_color_factor: sc_bcf,
                             cam_pos: cam_pos.to_array(),
-                            _pad: 0.0,
+                            tile_seed,
                         }),
                     );
                     // Outline shell: write inflated model matrix when requested.
@@ -9751,7 +9550,7 @@ impl WgpuRenderer {
                                 model: outline_model.to_cols_array(),
                                 base_color_factor: sc_bcf,
                                 cam_pos: cam_pos.to_array(),
-                                _pad: 0.0,
+                                tile_seed,
                             }),
                         );
                     }
@@ -9775,11 +9574,11 @@ impl WgpuRenderer {
             if !hand_strip_centers.is_empty() || {
                 // Fallback: compute from batch placements when the override is
                 // not yet active (first click selection).
-                let any_hand = showcase_tile_batches
+
+                showcase_tile_batches
                     .iter()
                     .flat_map(|b| b.iter())
-                    .any(|p| p.pick_id.is_some());
-                any_hand
+                    .any(|p| p.pick_id.is_some())
             } {
                 // Use the centers we collected (post-override) if available,
                 // otherwise derive directly from placements.
@@ -10428,16 +10227,15 @@ impl WgpuRenderer {
                                 .nth(slot_i);
                             if let (Some(lbl), Some(inst)) =
                                 (label, self.extruded_glyph_instances.get(slot_i))
+                                && let Some(mesh) = self.extruded_glyph_meshes.get(lbl)
                             {
-                                if let Some(mesh) = self.extruded_glyph_meshes.get(lbl) {
-                                    pass.set_bind_group(0, &inst.bind_group, &[]);
-                                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        mesh.index_buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                                }
+                                pass.set_bind_group(0, &inst.bind_group, &[]);
+                                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                                pass.set_index_buffer(
+                                    mesh.index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                             }
                             continue;
                         }
@@ -10460,13 +10258,6 @@ impl WgpuRenderer {
                             continue;
                         }
                         let (mesh, inst_opt): (&LitMeshGpu, Option<&LitMeshInstance>) = match kind {
-                            DrawKind::Cabinet => {
-                                (&self.cabinet_mesh, self.cabinet_instances.get(slot_i))
-                            }
-                            DrawKind::CabinetRails => (
-                                &self.cabinet_rails_mesh,
-                                self.cabinet_rails_instances.get(slot_i),
-                            ),
                             DrawKind::YakuTablet => (
                                 &self.bone_tablet_mesh,
                                 self.yaku_tablet_instances.get(slot_i),
@@ -10596,25 +10387,24 @@ impl WgpuRenderer {
                             pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                             pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
                             pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                            let mut start_slot = 0usize;
-                            for prev in 0..*batch_idx {
-                                start_slot += showcase_tile_batches[prev].len();
-                            }
+                            let start_slot: usize = showcase_tile_batches
+                                .iter()
+                                .take(*batch_idx)
+                                .map(|b| b.len())
+                                .sum();
 
                             // Glow halos for selected hand tiles (additive, drawn before mesh).
                             let has_glow = batch.iter().any(|p| p.glow);
-                            if has_glow {
-                                if let Some(ref tgb) = tile_glow_buffer {
-                                    pass.set_pipeline(&self.tile_glow_pipeline);
-                                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                                    pass.set_vertex_buffer(1, tgb.slice(..));
-                                    pass.set_index_buffer(
-                                        self.index_buffer.slice(..),
-                                        wgpu::IndexFormat::Uint16,
-                                    );
-                                    pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
-                                }
+                            if has_glow && let Some(ref tgb) = tile_glow_buffer {
+                                pass.set_pipeline(&self.tile_glow_pipeline);
+                                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                                pass.set_vertex_buffer(1, tgb.slice(..));
+                                pass.set_index_buffer(
+                                    self.index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint16,
+                                );
+                                pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
                             }
 
                             // Pass A: gold outline shells for tiles with outline=true.
@@ -10674,14 +10464,14 @@ impl WgpuRenderer {
                     }
                 }
                 RenderOp::FluidSmoke => {
-                    if smoke_quality != crate::persistence::SmokeQuality::Off {
-                        if let Some(ref fluid) = self.fluid {
-                            // Composite the offscreen smoke target onto the
-                            // swap chain. The actual raymarch ran earlier in
-                            // its own offscreen pass; this is just a
-                            // bilinear sample + premultiplied blend.
-                            fluid.draw_composite(pass);
-                        }
+                    if smoke_quality != crate::persistence::SmokeQuality::Off
+                        && let Some(ref fluid) = self.fluid
+                    {
+                        // Composite the offscreen smoke target onto the
+                        // swap chain. The actual raymarch ran earlier in
+                        // its own offscreen pass; this is just a
+                        // bilinear sample + premultiplied blend.
+                        fluid.draw_composite(pass);
                     }
                 }
                 RenderOp::QuadBatch { buf_idx, count } => {
@@ -10730,16 +10520,6 @@ impl WgpuRenderer {
                     pass.set_bind_group(1, &td.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, td.inst_buf.slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
-                }
-                RenderOp::RelicIconDraw(idx) => {
-                    let image = &image_draws[*idx];
-                    pass.set_pipeline(&self.image_pipeline);
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &image.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, image.inst_buf.slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
@@ -10926,25 +10706,24 @@ impl WgpuRenderer {
             // Placed here (before smoke-offscreen) so multiple subsequent
             // render passes flush the end-of-pass timestamp on Metal.
             #[cfg(debug_assertions)]
-            if self.gpu_profiler.is_sampling() {
-                if smoke_quality != crate::persistence::SmokeQuality::Off {
-                    if let Some(ref fluid) = self.fluid {
-                        fluid.set_render_mode_encoder(&mut encoder, true);
-                        // Smoke-only timing: no flame AABB needed
-                        // because the shader skips flames in this mode.
-                        let scissor = fluid.screen_aabb_rect(view_proj, None);
-                        let smoke_only_ts = self
-                            .gpu_profiler
-                            .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOnly);
-                        fluid.render_offscreen(
-                            &mut encoder,
-                            &self.globals_bind_group,
-                            scissor,
-                            smoke_only_ts,
-                        );
-                        fluid.set_render_mode_encoder(&mut encoder, false);
-                    }
-                }
+            if self.gpu_profiler.is_sampling()
+                && smoke_quality != crate::persistence::SmokeQuality::Off
+                && let Some(ref fluid) = self.fluid
+            {
+                fluid.set_render_mode_encoder(&mut encoder, true);
+                // Smoke-only timing: no flame AABB needed
+                // because the shader skips flames in this mode.
+                let scissor = fluid.screen_aabb_rect(view_proj, None);
+                let smoke_only_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOnly);
+                fluid.render_offscreen(
+                    &mut encoder,
+                    &self.globals_bind_group,
+                    scissor,
+                    smoke_only_ts,
+                );
+                fluid.set_render_mode_encoder(&mut encoder, false);
             }
 
             // ── Offscreen smoke raymarch pass ──────────────────────────
@@ -10958,40 +10737,40 @@ impl WgpuRenderer {
             // Skipped entirely when smoke is disabled — the post-smoke
             // pass below still runs so any UI/text ops queued after the
             // FluidSmoke marker draw correctly.
-            if smoke_quality != crate::persistence::SmokeQuality::Off {
-                if let Some(ref fluid) = self.fluid {
-                    // Flame AABB: the raymarch runs its per-candle SDF
-                    // sub-march inside the same pass, so we have to
-                    // include the flame bounding spheres in the scissor
-                    // or flames disappear when the smoke field is empty.
-                    let flame_aabb = compute_flame_world_aabb(
-                        &frame.point_lights[..frame
-                            .candle_light_count
-                            .min(frame.point_lights.len() as u32)
-                            as usize],
-                        frame.flame_height_world,
-                        self.size.width.max(1) as f32,
-                        self.size.height.max(1) as f32,
+            if smoke_quality != crate::persistence::SmokeQuality::Off
+                && let Some(ref fluid) = self.fluid
+            {
+                // Flame AABB: the raymarch runs its per-candle SDF
+                // sub-march inside the same pass, so we have to
+                // include the flame bounding spheres in the scissor
+                // or flames disappear when the smoke field is empty.
+                let flame_aabb = compute_flame_world_aabb(
+                    &frame.point_lights[..frame
+                        .candle_light_count
+                        .min(frame.point_lights.len() as u32)
+                        as usize],
+                    frame.flame_height_world,
+                    self.size.width.max(1) as f32,
+                    self.size.height.max(1) as f32,
+                );
+                let scissor = fluid.screen_aabb_rect(view_proj, flame_aabb);
+                let smoke_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOffscreen);
+                // `None` means both smoke and flames contribute
+                // nothing — clear the offscreen target and skip the
+                // raymarch. The composite still runs (sampling a
+                // transparent texture) so queued ops after the
+                // FluidSmoke marker draw correctly.
+                if scissor.is_some() {
+                    fluid.render_offscreen(
+                        &mut encoder,
+                        &self.globals_bind_group,
+                        scissor,
+                        smoke_ts,
                     );
-                    let scissor = fluid.screen_aabb_rect(view_proj, flame_aabb);
-                    let smoke_ts = self
-                        .gpu_profiler
-                        .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOffscreen);
-                    // `None` means both smoke and flames contribute
-                    // nothing — clear the offscreen target and skip the
-                    // raymarch. The composite still runs (sampling a
-                    // transparent texture) so queued ops after the
-                    // FluidSmoke marker draw correctly.
-                    if scissor.is_some() {
-                        fluid.render_offscreen(
-                            &mut encoder,
-                            &self.globals_bind_group,
-                            scissor,
-                            smoke_ts,
-                        );
-                    } else {
-                        fluid.clear_offscreen(&mut encoder, smoke_ts);
-                    }
+                } else {
+                    fluid.clear_offscreen(&mut encoder, smoke_ts);
                 }
             }
 
@@ -11282,10 +11061,10 @@ impl WgpuRenderer {
         // just rendered into (and the composite just read) becomes
         // next frame's history input. Skipped when smoke is Off so we
         // don't mark undefined texture contents as valid history.
-        if smoke_quality != crate::persistence::SmokeQuality::Off {
-            if let Some(fluid) = self.fluid.as_mut() {
-                fluid.advance_taa_frame();
-            }
+        if smoke_quality != crate::persistence::SmokeQuality::Off
+            && let Some(fluid) = self.fluid.as_mut()
+        {
+            fluid.advance_taa_frame();
         }
 
         // GPU profiler: resolve query set + stage readback before submit,
@@ -11426,10 +11205,10 @@ impl WgpuRenderer {
 
         let img = image::RgbaImage::from_raw(staging.width, staging.height, pixels)
             .ok_or_else(|| anyhow::anyhow!("RgbaImage::from_raw failed"))?;
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         img.save(path)?;
         Ok(())

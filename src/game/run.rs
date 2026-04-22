@@ -8,7 +8,7 @@ use crate::core::boss::{self, BossKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{
-    DetectedSet, SetKind, detect_all_sets, enumerate_decompositions, validate_selection_with_rules,
+    DetectedSet, SetKind, enumerate_decompositions, validate_selection_with_rules,
 };
 use crate::core::hand_intent::{
     DecompositionBias, decomposition_affinity, infer_decomposition_bias,
@@ -21,7 +21,7 @@ use crate::core::structure::{
 use crate::audio::SfxId;
 use crate::core::relic::{RelicId, RelicState, ScoreContext};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown, ScorePreview, preview_score, score_sets_with_original};
+use crate::core::scoring::{ScoreBreakdown, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
@@ -31,7 +31,7 @@ use crate::game::tutorial::TutorialState;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
 /// boss-specific logic has a single owner.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct BossState {
     /// Bosses still available for this run, drawn without replacement.
     pub pool_remaining: Vec<BossKind>,
@@ -49,21 +49,8 @@ pub struct BossState {
     pub tax_collector_cost: u32,
 }
 
-impl Default for BossState {
-    fn default() -> Self {
-        Self {
-            pool_remaining: Vec::new(),
-            upcoming: None,
-            effect: None,
-            bonus_hand_size: 0,
-            gold_cost_per_play: 0,
-            tax_collector_cost: 0,
-        }
-    }
-}
-
 /// Result of consuming a slot from the shared consumable inventory.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsumableUseResult {
     Zodiac {
         yaku: crate::core::yaku::YakuKind,
@@ -175,34 +162,86 @@ fn enumerate_regular_subsets(
         out,
     );
 
-    if remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                flowers,
-                current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 2,
-                out,
-            );
-        }
+    if remaining.len() >= 2
+        && same_face(first.tile, remaining[1].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
+    {
+        enumerate_regular_subsets(
+            &remaining[2..],
+            flowers,
+            current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
+            allow_wrap,
+            no_sequences,
+            require_honor,
+            must_play_five,
+            current_tile_count + 2,
+            out,
+        );
     }
 
     if remaining.len() >= 3
         && same_face(first.tile, remaining[1].tile)
         && same_face(first.tile, remaining[2].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]))
     {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]) {
+        enumerate_regular_subsets(
+            &remaining[3..],
+            flowers,
+            current_mask
+                | (1 << first.hand_index)
+                | (1 << remaining[1].hand_index)
+                | (1 << remaining[2].hand_index),
+            allow_wrap,
+            no_sequences,
+            require_honor,
+            must_play_five,
+            current_tile_count + 3,
+            out,
+        );
+    }
+
+    if remaining.len() >= 4
+        && same_face(first.tile, remaining[1].tile)
+        && same_face(first.tile, remaining[2].tile)
+        && same_face(first.tile, remaining[3].tile)
+        && (!require_honor
+            || tiles_have_honor(&[
+                first.tile,
+                remaining[1].tile,
+                remaining[2].tile,
+                remaining[3].tile,
+            ]))
+    {
+        enumerate_regular_subsets(
+            &remaining[4..],
+            flowers,
+            current_mask
+                | (1 << first.hand_index)
+                | (1 << remaining[1].hand_index)
+                | (1 << remaining[2].hand_index)
+                | (1 << remaining[3].hand_index),
+            allow_wrap,
+            no_sequences,
+            require_honor,
+            must_play_five,
+            current_tile_count + 4,
+            out,
+        );
+    }
+
+    if !flowers.is_empty()
+        && remaining.len() >= 2
+        && same_face(first.tile, remaining[1].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
+    {
+        for (flower_idx, flower) in flowers.iter().copied().enumerate() {
             enumerate_regular_subsets(
-                &remaining[3..],
-                flowers,
+                &remaining[2..],
+                &remove_flower(flowers, flower_idx),
                 current_mask
                     | (1 << first.hand_index)
                     | (1 << remaining[1].hand_index)
-                    | (1 << remaining[2].hand_index),
+                    | (1 << flower.hand_index),
                 allow_wrap,
                 no_sequences,
                 require_honor,
@@ -210,58 +249,6 @@ fn enumerate_regular_subsets(
                 current_tile_count + 3,
                 out,
             );
-        }
-    }
-
-    if remaining.len() >= 4
-        && same_face(first.tile, remaining[1].tile)
-        && same_face(first.tile, remaining[2].tile)
-        && same_face(first.tile, remaining[3].tile)
-    {
-        if !require_honor
-            || tiles_have_honor(&[
-                first.tile,
-                remaining[1].tile,
-                remaining[2].tile,
-                remaining[3].tile,
-            ])
-        {
-            enumerate_regular_subsets(
-                &remaining[4..],
-                flowers,
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << remaining[2].hand_index)
-                    | (1 << remaining[3].hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 4,
-                out,
-            );
-        }
-    }
-
-    if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-                enumerate_regular_subsets(
-                    &remaining[2..],
-                    &remove_flower(flowers, flower_idx),
-                    current_mask
-                        | (1 << first.hand_index)
-                        | (1 << remaining[1].hand_index)
-                        | (1 << flower.hand_index),
-                    allow_wrap,
-                    no_sequences,
-                    require_honor,
-                    must_play_five,
-                    current_tile_count + 3,
-                    out,
-                );
-            }
         }
     }
 
@@ -971,17 +958,6 @@ impl RunState {
         self.honors_scored_this_round = false;
     }
 
-    /// Start a tutorial run for first-time players. Uses a stripped-down
-    /// game mode and enables the tutorial state machine.
-    #[allow(dead_code)]
-    pub fn new_tutorial() -> Self {
-        let mut state = Self::new(GameMode::tutorial());
-        state.tutorial = Some(TutorialState::new(1));
-        // Seed the initial hand for lesson 1 (pairs).
-        state.seed_tutorial_hand();
-        state
-    }
-
     /// Advance the tutorial to the next lesson. Adjusts hand size, target,
     /// discards, and available yaku per the lesson definition. Returns the
     /// new lesson number, or `None` if the tutorial finished.
@@ -1071,11 +1047,11 @@ impl RunState {
     /// Check if a set of detected meld kinds is valid for the current
     /// tutorial lesson. Returns `Ok(())` or an error message.
     pub fn tutorial_validate_sets(&self, set_kinds: &[SetKind]) -> Result<(), &'static str> {
-        if let Some(ref tutorial) = self.tutorial {
-            if tutorial.is_active() {
-                let lesson = tutorial.current_lesson_def();
-                return crate::game::tutorial::validate_sets_for_lesson(set_kinds, lesson);
-            }
+        if let Some(ref tutorial) = self.tutorial
+            && tutorial.is_active()
+        {
+            let lesson = tutorial.current_lesson_def();
+            return crate::game::tutorial::validate_sets_for_lesson(set_kinds, lesson);
         }
         Ok(())
     }
@@ -1249,10 +1225,11 @@ impl RunState {
     ) -> Option<ConsumableUseResult> {
         use crate::core::consumable::Consumable;
         let pending = self.consumables.items.get(index).copied()?;
-        if let Consumable::Talisman(t) = pending {
-            if t.acts_on_selection() && !self.selected.iter().any(|&s| s) {
-                return None;
-            }
+        if let Consumable::Talisman(t) = pending
+            && t.acts_on_selection()
+            && !self.selected.iter().any(|&s| s)
+        {
+            return None;
         }
         let item = self.consumables.take(index)?;
         match item {
@@ -1426,7 +1403,7 @@ impl RunState {
         self.selected = vec![false; self.hand.len()];
         self.restamp_hand_enhancements();
         if destroyed > 0 {
-            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed { count: destroyed });
+            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed);
         }
         destroyed
     }
@@ -1444,13 +1421,6 @@ impl RunState {
                 tile.enhancement = Some(enh);
             }
         }
-    }
-
-    /// Try to add a Zodiac card to the inventory; returns `true` on success.
-    #[allow(dead_code)]
-    pub fn grant_zodiac(&mut self, z: crate::core::zodiac::ZodiacKind) -> bool {
-        self.consumables
-            .try_push(crate::core::consumable::Consumable::Zodiac(z))
     }
 
     /// Recompute consumable inventory capacity from
@@ -1488,10 +1458,10 @@ impl RunState {
         // so blind 5 = 1000, blind 16 = 3200.
         let mut target = self.base_target.saturating_mul(self.run_number);
         // Tutorial adaptive difficulty: lower the target after repeated failures.
-        if let Some(ref tut) = self.tutorial {
-            if tut.is_active() {
-                target = (target as f32 * tut.retry_target_factor()) as u32;
-            }
+        if let Some(ref tut) = self.tutorial
+            && tut.is_active()
+        {
+            target = (target as f32 * tut.retry_target_factor()) as u32;
         }
         self.target_score = target;
         // Boss dispatch — push rule modifiers and run the on_apply hook so
@@ -1640,10 +1610,9 @@ impl RunState {
                 bus.push(GameEvent::InvalidAction);
                 return 0;
             }
-            for s in &sets {
-                self.structure_sets.push(s.clone());
-            }
-            self.structure_tiles.extend(scoring_tiles.iter().copied());
+            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+            core.commit_sets_to_structure(&sets, &scoring_tiles);
+            core.write_back(self);
             bus.push(GameEvent::StructureCommitted);
         } else {
             let _ = self.apply_scored_melds(
@@ -1653,9 +1622,10 @@ impl RunState {
                 None,
                 bus,
             );
+            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+            core.consume_play();
+            core.write_back(self);
         }
-
-        self.plays_remaining = self.plays_remaining.saturating_sub(1);
 
         if self.relics.has(RelicId::MeltingIce) {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
@@ -1709,16 +1679,10 @@ impl RunState {
             self.scored_last_turn = false;
         }
 
-        let indices: Vec<usize> = self
-            .selected
-            .iter()
-            .enumerate()
-            .filter(|&(_, &s)| s)
-            .map(|(i, _)| i)
-            .rev()
-            .collect();
-        for &i in &indices {
-            self.hand.remove(i);
+        {
+            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+            let _ = core.take_selected_tiles();
+            core.write_back(self);
         }
 
         let effective = boss::effective_hand_size(self);
@@ -1729,12 +1693,17 @@ impl RunState {
         } else {
             effective
         };
-        let mut restocked = false;
-        while self.hand.len() < draw_target {
+        let mut drawn: Vec<Tile> = Vec::new();
+        while self.hand.len() + drawn.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };
-            self.hand.push(t);
-            bus.push(GameEvent::TileDrawn(t));
-            restocked = true;
+            bus.push(GameEvent::TileDrawn);
+            drawn.push(t);
+        }
+        let restocked = !drawn.is_empty();
+        {
+            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+            core.push_drawn_tiles(&drawn);
+            core.write_back(self);
         }
         if restocked {
             self.times_restocked = self.times_restocked.saturating_add(1);
@@ -1742,18 +1711,21 @@ impl RunState {
 
         self.hand.sort();
         self.set_magnet_draw_fourths(bus);
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
+        {
+            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+            core.finalize_hand_after_draw();
+            core.write_back(self);
+        }
         self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
 
-        if self.blind == BlindKind::Boss {
-            if let Some(eff) = self.boss.effect.take() {
-                if let Some(hook) = eff.on_play {
-                    hook(self);
-                }
-                self.boss.effect = Some(eff);
+        if self.blind == BlindKind::Boss
+            && let Some(eff) = self.boss.effect.take()
+        {
+            if let Some(hook) = eff.on_play {
+                hook(self);
             }
+            self.boss.effect = Some(eff);
         }
 
         self.try_autotrigger_structure_full(bus);
@@ -1842,11 +1814,11 @@ impl RunState {
             } else {
                 1
             };
-            if rng.random_ratio(prob, 4) {
-                if let Some(&y) = breakdown.detected_yaku.choose(&mut rng) {
-                    let _new_level = self.yaku_levels.level_up(y);
-                    self.relic_activations.push(RelicId::StarTile);
-                }
+            if rng.random_ratio(prob, 4)
+                && let Some(&y) = breakdown.detected_yaku.choose(&mut rng)
+            {
+                let _new_level = self.yaku_levels.level_up(y);
+                self.relic_activations.push(RelicId::StarTile);
             }
         }
         if breakdown.flower_gold > 0 {
@@ -1930,13 +1902,13 @@ impl RunState {
             *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
         }
         for ((suit, rank), count) in counts {
-            if count == 3 {
-                if let Some(matching) = self.wall.draw_matching(suit, rank) {
-                    self.hand.push(matching);
-                    self.selected.push(false);
-                    bus.push(GameEvent::TileDrawn(matching));
-                    self.relic_activations.push(RelicId::SetMagnet);
-                }
+            if count == 3
+                && let Some(matching) = self.wall.draw_matching(suit, rank)
+            {
+                self.hand.push(matching);
+                self.selected.push(false);
+                bus.push(GameEvent::TileDrawn);
+                self.relic_activations.push(RelicId::SetMagnet);
             }
         }
     }
@@ -1964,7 +1936,6 @@ impl RunState {
         let original_for_wildcard = scoring_tiles.clone();
 
         let meta = StructureTriggerMeta {
-            kind,
             meld_count: sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         };
@@ -2011,7 +1982,7 @@ impl RunState {
     }
 
     fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
-        bus.push(GameEvent::ScoreUpdated(self.round_score));
+        bus.push(GameEvent::ScoreUpdated);
         if self.round_score >= self.target_score as u64 {
             let base_reward = self.blind.clear_reward();
             let unused_play_bonus = self.plays_remaining;
@@ -2104,16 +2075,13 @@ impl RunState {
                     total: gold_earned,
                 },
             });
-            if self.blind == BlindKind::Boss {
-                if let Some(bk) = self.boss.upcoming {
-                    bus.push(GameEvent::BossDefeated(bk));
-                }
+            if self.blind == BlindKind::Boss
+                && let Some(bk) = self.boss.upcoming
+            {
+                bus.push(GameEvent::BossDefeated(bk));
             }
         } else if let Some(reason) = self.round_failure_reason() {
-            bus.push(GameEvent::GameOver {
-                final_score: self.round_score,
-                reason,
-            });
+            bus.push(GameEvent::GameOver { reason });
         }
     }
 
@@ -2158,7 +2126,6 @@ impl RunState {
         let original_for_wildcard = scoring_tiles.clone();
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let meta = StructureTriggerMeta {
-            kind: StructureTriggerKind::Manual,
             meld_count: sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         };
@@ -2205,32 +2172,6 @@ impl RunState {
         let earned = self.trigger_structure(StructureTriggerKind::Manual, bus);
         self.emit_round_resolution_events(bus);
         earned
-    }
-
-    /// Mystery-preserving score preview for the current selection.
-    /// Returns `None` if the selection is empty or doesn't decompose into melds.
-    /// Honors wildcard relics so the preview matches what an actual play would score.
-    #[allow(dead_code)]
-    pub fn preview_selection(&self) -> Option<ScorePreview> {
-        if self.selected_count() == 0 {
-            return None;
-        }
-        let selected_tiles: Vec<Tile> = self
-            .hand
-            .iter()
-            .zip(self.selected.iter())
-            .filter(|&(_, &sel)| sel)
-            .map(|(t, _)| *t)
-            .collect();
-        let (sets, scoring_tiles) = self.try_validate_with_wildcards(&selected_tiles)?;
-        let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
-        Some(preview_score(
-            &scoring_tiles,
-            &sets,
-            &self.available_yaku,
-            &scoring_tile_debuffs,
-            Some(&selected_tiles),
-        ))
     }
 
     /// Check if the current selection forms a valid playable hand.
@@ -2428,10 +2369,11 @@ impl RunState {
         }
 
         // JokerTile: try substituting one tile with each possible face.
-        if self.relics.has(RelicId::JokerTile) && !self.joker_used {
-            if let Some(result) = try_joker_substitution(tiles, &validation_rules) {
-                return Some(result);
-            }
+        if self.relics.has(RelicId::JokerTile)
+            && !self.joker_used
+            && let Some(result) = try_joker_substitution(tiles, &validation_rules)
+        {
+            return Some(result);
         }
 
         // Disgust: relabel West tiles as East so EW / EWW / EWWW validate as
@@ -2446,10 +2388,10 @@ impl RunState {
         }
 
         // WildWinds: try substituting wind tiles.
-        if self.relics.has(RelicId::WildWinds) {
-            if let Some(result) = try_wind_substitution(tiles, &validation_rules) {
-                return Some(result);
-            }
+        if self.relics.has(RelicId::WildWinds)
+            && let Some(result) = try_wind_substitution(tiles, &validation_rules)
+        {
+            return Some(result);
         }
 
         None
@@ -2488,58 +2430,59 @@ impl RunState {
     /// Returns the number of tiles removed, or 0 if nothing was selected or no
     /// discards remain.
     pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {
-        // Tutorial: block discards until the lesson enables them.
+        use crate::game::engine_state::GameplayCoreState;
+
         if !self.tutorial_discard_allowed() {
             return 0;
         }
-        if self.discards_remaining == 0 {
-            return 0;
-        }
-        let count = self.selected_count();
-        if count == 0 {
-            return 0;
-        }
 
-        // Remove selected tiles in reverse order to keep indices valid.
-        let indices: Vec<usize> = self
+        // Snapshot selected indices and honor count *before* removal so the
+        // engine-owned mutation can return tiles without losing slot info.
+        let selected_indices: Vec<usize> = self
             .selected
             .iter()
             .enumerate()
             .filter(|(_, s)| **s)
             .map(|(i, _)| i)
-            .rev()
             .collect();
-        // No Honor But Wealth: +$1 per honor tile discarded. Count before
-        // removal so the tile suits are still readable.
-        if self.relics.has(RelicId::NoHonorButWealth) {
-            let honors = indices
+        if selected_indices.is_empty() || self.discards_remaining == 0 {
+            return 0;
+        }
+        let honor_gold = if self.relics.has(RelicId::NoHonorButWealth) {
+            selected_indices
                 .iter()
                 .filter_map(|&i| self.hand.get(i))
                 .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-                .count() as i32;
-            if honors > 0 {
-                self.gold = self.gold.saturating_add(honors);
-                self.relic_activations.push(RelicId::NoHonorButWealth);
-            }
+                .count() as i32
+        } else {
+            0
+        };
+
+        let mut core = GameplayCoreState::from_run(self);
+        let removed = core.discard_selected();
+        core.write_back(self);
+        let count = removed.len();
+        if count == 0 {
+            return 0;
         }
-        for &i in &indices {
-            self.hand.remove(i);
-            bus.push(GameEvent::TileDiscarded { slot_index: i });
+
+        if honor_gold > 0 {
+            self.gold = self.gold.saturating_add(honor_gold);
+            self.relic_activations.push(RelicId::NoHonorButWealth);
         }
-        self.discards_remaining -= 1;
+        for _ in &selected_indices {
+            bus.push(GameEvent::TileDiscarded);
+        }
         self.tiles_discarded = self.tiles_discarded.saturating_add(count as u32);
-        self.selected = vec![false; self.hand.len()];
 
-        // Tutorial milestone: celebrate the first discard.
-        if let Some(ref mut tut) = self.tutorial {
-            if tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstDiscard) {
-                bus.push(GameEvent::TutorialMilestone(
-                    crate::game::tutorial::TutorialMilestone::FirstDiscard,
-                ));
-            }
+        if let Some(ref mut tut) = self.tutorial
+            && tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstDiscard)
+        {
+            bus.push(GameEvent::TutorialMilestone(
+                crate::game::tutorial::TutorialMilestone::FirstDiscard,
+            ));
         }
 
-        // Silk Thread: -0.3 mult (stored as -3 in ×10 units) per discard.
         if self.relics.has(RelicId::SilkThread) {
             self.relic_activations.push(RelicId::SilkThread);
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
@@ -2557,67 +2500,52 @@ impl RunState {
     /// the selection vector to match the new hand size. Honors boss-induced
     /// hand-size shrinks (e.g. The Whisper).
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
+        use crate::game::engine_state::GameplayCoreState;
+
         let target = boss::effective_hand_size(self);
-        let mut restocked = false;
         let lotus = self.relics.has(RelicId::LotusBloom);
-        while self.hand.len() < target {
+        let mut drawn: Vec<Tile> = Vec::new();
+        while self.hand.len() + drawn.len() < target {
             let Some(t) = self.wall.draw() else { break };
             if lotus && t.suit == Suit::Flower {
                 *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += 1;
                 self.relic_activations.push(RelicId::LotusBloom);
             }
-            self.hand.push(t);
-            bus.push(GameEvent::TileDrawn(t));
-            restocked = true;
+            bus.push(GameEvent::TileDrawn);
+            drawn.push(t);
         }
+
+        let mut core = GameplayCoreState::from_run(self);
+        core.push_drawn_tiles(&drawn);
+        core.write_back(self);
+        let mut restocked = !drawn.is_empty();
+
         // Shanten Shove: if the refilled hand holds at least one partial
         // (a set one tile away from being playable), draw 1 bonus tile.
         if self.relics.has(crate::core::relic::RelicId::ShantenShove)
             && crate::core::shanten::has_scoring_partial(&self.hand)
+            && let Some(t) = self.wall.draw()
         {
-            if let Some(t) = self.wall.draw() {
-                self.hand.push(t);
-                bus.push(GameEvent::TileDrawn(t));
-                self.relic_activations
-                    .push(crate::core::relic::RelicId::ShantenShove);
-                restocked = true;
-            }
+            let mut core = GameplayCoreState::from_run(self);
+            core.push_drawn_tiles(&[t]);
+            core.write_back(self);
+            bus.push(GameEvent::TileDrawn);
+            self.relic_activations
+                .push(crate::core::relic::RelicId::ShantenShove);
+            restocked = true;
         }
         if restocked {
             self.times_restocked = self.times_restocked.saturating_add(1);
         }
         self.set_magnet_draw_fourths(bus);
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
-        // Re-seed guaranteed melds so the tutorial lesson stays solvable
-        // after replacement tiles are drawn from the wall.
+
+        let mut core = GameplayCoreState::from_run(self);
+        core.finalize_hand_after_draw();
+        core.write_back(self);
+
         self.seed_tutorial_hand();
-        // Re-apply persistent enhancements to any newly-drawn tiles.
         self.restamp_hand_enhancements();
         self.emit_round_resolution_events(bus);
-    }
-
-    /// Sort hand by suit then rank (Characters → Bamboos → Circles → Wind → Dragon).
-    pub fn sort_hand_by_suit(&mut self) {
-        self.hand.sort_by(crate::core::tile::cmp_sort_order);
-        self.selected = vec![false; self.hand.len()];
-    }
-
-    /// Sort hand by rank then suit (all 1s, all 2s, … then honors).
-    pub fn sort_hand_by_rank(&mut self) {
-        self.hand.sort_by(|a, b| {
-            a.rank
-                .cmp(&b.rank)
-                .then(a.suit.cmp(&b.suit))
-                .then(a.id.cmp(&b.id))
-        });
-        self.selected = vec![false; self.hand.len()];
-    }
-
-    /// Evaluate meld patterns for UI hints.
-    #[allow(dead_code)]
-    pub fn hint_sets(&self) -> usize {
-        detect_all_sets(&self.hand).len()
     }
 
     /// Add the chosen relic, scale up the base target, and reset for the next round.
@@ -2627,7 +2555,7 @@ impl RunState {
     /// Small/Big/Boss multipliers in `apply_blind` derive each blind's actual target.
     /// We only grow `base_target` when the player defeats the Boss and rolls into the
     /// next ante; within an ante, the base stays put.
-    pub fn advance_round(&mut self, _bus: &mut EventBus) {
+    pub fn advance_round(&mut self, bus: &mut EventBus) {
         // Fortune's Favor halves destruction chances (doubles survival).
         let fortunes = self.relics.has(RelicId::FortunesFavor);
         // Paper Lantern: 1-in-5 chance to burn up at round end. When it
@@ -2637,15 +2565,14 @@ impl RunState {
             use rand::RngExt;
             let mut rng = rand::rng();
             let denom = if fortunes { 10 } else { 5 };
-            if rng.random_ratio(1, denom) {
-                if let Some(pos) = self
+            if rng.random_ratio(1, denom)
+                && let Some(pos) = self
                     .relics
                     .active
                     .iter()
                     .position(|&r| r == RelicId::PaperLantern)
-                {
-                    self.relics.active[pos] = RelicId::IronLantern;
-                }
+            {
+                self.relics.active[pos] = RelicId::IronLantern;
             }
         }
         // Iron Lantern: 1-in-1000 chance to shatter at round end.
@@ -2697,6 +2624,13 @@ impl RunState {
             self.ante += 1;
             if self.relics.has(RelicId::BeggarsCup) {
                 *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
+            }
+            if let Some(ref mut tut) = self.tutorial
+                && tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstBossCleared)
+            {
+                bus.push(GameEvent::TutorialMilestone(
+                    crate::game::tutorial::TutorialMilestone::FirstBossCleared,
+                ));
             }
         }
         // Heirloom: +1 mult per blind *played* (skips don't count — this
@@ -3176,11 +3110,11 @@ mod tests {
         // Should have TileDiscarded events + TileDrawn events for the redraws.
         let discards: Vec<_> = events
             .iter()
-            .filter(|e| matches!(e, GameEvent::TileDiscarded { .. }))
+            .filter(|e| matches!(e, GameEvent::TileDiscarded))
             .collect();
         let draws: Vec<_> = events
             .iter()
-            .filter(|e| matches!(e, GameEvent::TileDrawn(_)))
+            .filter(|e| matches!(e, GameEvent::TileDrawn))
             .collect();
         assert_eq!(discards.len(), 2);
         assert_eq!(draws.len(), 2); // drew 2 to replace the 2 discarded
@@ -3649,7 +3583,6 @@ mod tests {
             bus.queue.last(),
             Some(GameEvent::GameOver {
                 reason: GameOverReason::NoActionsRemaining,
-                ..
             })
         ));
     }
@@ -3684,7 +3617,6 @@ mod tests {
             bus.queue.last(),
             Some(GameEvent::GameOver {
                 reason: GameOverReason::OutOfPlays,
-                ..
             })
         ));
     }

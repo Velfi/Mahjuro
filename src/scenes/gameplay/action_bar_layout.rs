@@ -53,19 +53,32 @@ pub struct ActionBarLayout {
     pub action_hud_table_lift: f32,
 }
 
+/// Structure-strip metrics used when `has_structure` is true — only read
+/// by `compute_action_bar` in that case, so grouping them makes the
+/// "structure is off" call site short.
+pub struct StructureStrip {
+    pub has_structure: bool,
+    pub strip_top: f32,
+    pub tag_h: f32,
+    pub meld_h: f32,
+}
+
 /// `hand_slots` as `(x, y, w, h)` per slot (same as [`LayoutResult::hand_slots`] flattened in gameplay).
-/// `structure_*` only used when `has_structure` (cash-in beside mat).
+/// `structure` only used when its `has_structure` flag is true (cash-in beside mat).
 /// `layout_scale` must match the value used for yaku/structure stacking above the hand.
 pub fn compute_action_bar(
     layout: &LayoutResult,
     hand_slots: &[(f32, f32, f32, f32)],
     layout_scale: f32,
     ui_scale: f32,
-    has_structure: bool,
-    structure_strip_top: f32,
-    structure_tag_h: f32,
-    structure_meld_h: f32,
+    structure: StructureStrip,
 ) -> ActionBarLayout {
+    let StructureStrip {
+        has_structure,
+        strip_top: structure_strip_top,
+        tag_h: structure_tag_h,
+        meld_h: structure_meld_h,
+    } = structure;
     let scale = (layout.window_w.min(layout.window_h)) / 600.0 * ui_scale;
     let btn_w = (120.0 * layout_scale).max(60.0);
     let btn_h = (32.0 * layout_scale).max(20.0);

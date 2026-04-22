@@ -19,9 +19,20 @@ pub struct Rect {
     pub h: f32,
 }
 
+/// Window + UI scale context: the three values widget helpers need to lay
+/// out a frame (window dimensions + the player's UI-scale preference).
+/// Passing one `ViewportCtx` keeps call sites compact and makes it obvious
+/// which floats move together.
+#[derive(Clone, Copy, Debug)]
+pub struct ViewportCtx {
+    pub window_w: f32,
+    pub window_h: f32,
+    pub ui_scale: f32,
+}
+
 /// Solved UI layout for one frame.
 #[derive(Debug)]
-#[allow(dead_code)]
+
 pub struct LayoutResult {
     pub window_w: f32,
     pub window_h: f32,
@@ -61,15 +72,6 @@ impl LayoutResult {
             .map(|r| r.w)
             .unwrap_or(self.window_w * HAND_SLOT_W_RATIO);
         (tile_w / TILE_WIDTH_MM) * n
-    }
-
-    /// Convert a length in **meters** to renderer world units. Just
-    /// `self.mm(n * 1000.0)`; provided as a convenience so the call site
-    /// reads naturally for objects measured in meters (candles, table
-    /// dimensions, …).
-    #[allow(dead_code)]
-    pub fn m(&self, n: f32) -> f32 {
-        self.mm(n * 1000.0)
     }
 }
 
@@ -139,17 +141,17 @@ impl UiLayout {
                 score_w | EQ(REQUIRED) | win_w,
                 mod_left | EQ(REQUIRED) | 0.0,
                 mod_w | EQ(REQUIRED) | win_w,
-                mod_top | EQ(REQUIRED) | score_top + score_h,
-                hand_left | EQ(REQUIRED) | win_w * HAND_X_PAD_RATIO,
-                hand_w | EQ(REQUIRED) | win_w * (1.0 - 2.0 * HAND_X_PAD_RATIO),
-                hand_top | EQ(REQUIRED) | mod_top + mod_h,
-                hand_h | EQ(REQUIRED) | win_h - hand_top,
+                mod_top | EQ(REQUIRED) | (score_top + score_h),
+                hand_left | EQ(REQUIRED) | (win_w * HAND_X_PAD_RATIO),
+                hand_w | EQ(REQUIRED) | (win_w * (1.0 - 2.0 * HAND_X_PAD_RATIO)),
+                hand_top | EQ(REQUIRED) | (mod_top + mod_h),
+                hand_h | EQ(REQUIRED) | (win_h - hand_top),
             ])
             .expect("layout constraints");
 
         let hs = HAND_SIZE as f64;
         solver
-            .add_constraints(&[slot_w * hs | EQ(REQUIRED) | hand_w])
+            .add_constraints(&[(slot_w * hs) | EQ(REQUIRED) | hand_w])
             .expect("slot width");
 
         solver.add_edit_variable(win_w, STRONG).expect("edit win_w");

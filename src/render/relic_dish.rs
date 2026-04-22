@@ -6,7 +6,7 @@
 //! is a unit cube spanning -0.5..+0.5 on each axis so a per-instance scale can
 //! turn it into rectangular prisms of varying sizes.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 use lyon_path::Path;
@@ -216,7 +216,11 @@ pub fn build_shop_action_prop_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    push_box(&mut vertices, &mut indices, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5);
+    push_box(
+        &mut vertices,
+        &mut indices,
+        Aabb::new(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5),
+    );
 
     // push_box emits 6 faces × 4 verts in order: +X(0-3), -X(4-7), +Y(8-11),
     // -Y(12-15), +Z(16-19), -Z(20-23).  Zero UVs on every face except +Y.
@@ -1206,11 +1210,7 @@ fn trace_silhouette_contours(solid: &[bool], w: i32, h: i32) -> Vec<Vec<(f32, f3
     while let Some((&start, _)) = adj.iter().find(|(_, v)| !v.is_empty()) {
         let mut loop_pts: Vec<Key> = vec![start];
         let mut cur = start;
-        loop {
-            let next = match adj.get_mut(&cur).and_then(|v| v.pop()) {
-                Some(n) => n,
-                None => break,
-            };
+        while let Some(next) = adj.get_mut(&cur).and_then(|v| v.pop()) {
             if next == start {
                 break;
             }
@@ -1337,7 +1337,7 @@ fn group_contours_into_polygons(loops: Vec<Vec<(f32, f32)>>) -> Vec<SilhouettePo
             let obb = bbox(&o.outer);
             if obb.0 <= hbb.0 && obb.1 <= hbb.1 && obb.2 >= hbb.2 && obb.3 >= hbb.3 {
                 let area = (obb.2 - obb.0) * (obb.3 - obb.1);
-                if best.map_or(true, |(_, a)| area < a) {
+                if best.is_none_or(|(_, a)| area < a) {
                     best = Some((i, area));
                 }
             }

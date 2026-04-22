@@ -56,6 +56,19 @@ pub struct Placement {
     pub rz_deg: f32,
 }
 
+/// Accumulated arrange-mode delta applied to a `Placement` per axis.
+/// `dnx` / `dny` are normalized fractions (pixel delta ÷ window size);
+/// the rotation and lift deltas are absolute in their respective units.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ArrangeDelta {
+    pub dnx: f32,
+    pub dny: f32,
+    pub d_lift_mm: f32,
+    pub d_rx_deg: f32,
+    pub d_ry_deg: f32,
+    pub d_rz_deg: f32,
+}
+
 impl Placement {
     /// Construct a placement at the given screen fraction and lift, with
     /// zero rotation.
@@ -83,20 +96,16 @@ impl Placement {
     }
 
     /// Apply an accumulated arrange-mode delta to this placement.
-    ///
-    /// `dnx` / `dny` are normalized fractions (pixel delta ÷ window size).
-    /// `d_lift_mm` / `d_rx_deg` / `d_ry_deg` / `d_rz_deg` are absolute in
-    /// their respective units.
     #[inline]
-    pub fn apply_delta(
-        &mut self,
-        dnx: f32,
-        dny: f32,
-        d_lift_mm: f32,
-        d_rx_deg: f32,
-        d_ry_deg: f32,
-        d_rz_deg: f32,
-    ) {
+    pub fn apply_delta(&mut self, delta: ArrangeDelta) {
+        let ArrangeDelta {
+            dnx,
+            dny,
+            d_lift_mm,
+            d_rx_deg,
+            d_ry_deg,
+            d_rz_deg,
+        } = delta;
         self.nx += dnx;
         self.ny += dny;
         self.lift_mm += d_lift_mm;
@@ -192,18 +201,18 @@ impl ArrangePreview {
     /// staged deltas folded in. Otherwise return `base` unchanged.
     pub fn applied_to(&self, hierarchy: &'static [Node], leaf: &str, base: Placement) -> Placement {
         let affected = expand_name(hierarchy, &self.name);
-        if !affected.iter().any(|n| *n == leaf) {
+        if !affected.contains(&leaf) {
             return base;
         }
         let mut p = base;
-        p.apply_delta(
-            self.dnx,
-            self.dny,
-            self.d_lift_mm,
-            self.d_rx_deg,
-            self.d_ry_deg,
-            self.d_rz_deg,
-        );
+        p.apply_delta(ArrangeDelta {
+            dnx: self.dnx,
+            dny: self.dny,
+            d_lift_mm: self.d_lift_mm,
+            d_rx_deg: self.d_rx_deg,
+            d_ry_deg: self.d_ry_deg,
+            d_rz_deg: self.d_rz_deg,
+        });
         p
     }
 }
@@ -279,10 +288,10 @@ pub fn expand_name(hierarchy: &'static [Node], name: &str) -> Vec<&'static str> 
                 collect_leaves(n, found);
                 return true;
             }
-            if let Node::Group { children, .. } = n {
-                if walk(children, target, found) {
-                    return true;
-                }
+            if let Node::Group { children, .. } = n
+                && walk(children, target, found)
+            {
+                return true;
             }
         }
         false
@@ -314,18 +323,13 @@ pub fn expand_name(hierarchy: &'static [Node], name: &str) -> Vec<&'static str> 
 pub fn apply_arrange<T: ArrangeTarget + ?Sized>(
     target: &mut T,
     name: &str,
-    dnx: f32,
-    dny: f32,
-    d_lift_mm: f32,
-    d_rx_deg: f32,
-    d_ry_deg: f32,
-    d_rz_deg: f32,
+    delta: ArrangeDelta,
 ) -> bool {
     let members = expand_name(target.hierarchy(), name);
     let mut any = false;
     for m in members {
         if let Some(p) = target.placement_mut(m) {
-            p.apply_delta(dnx, dny, d_lift_mm, d_rx_deg, d_ry_deg, d_rz_deg);
+            p.apply_delta(delta);
             any = true;
         }
     }
@@ -335,10 +339,7 @@ pub fn apply_arrange<T: ArrangeTarget + ?Sized>(
 /// Reset the placements under `name` (leaf or group) to the values from a
 /// freshly-constructed `T::default()`. Returns `true` if at least one
 /// placement was updated.
-pub fn reset_arrange<T: ArrangeTarget + Default + ?Sized>(target: &mut T, name: &str) -> bool
-where
-    T: Sized,
-{
+pub fn reset_arrange<T: ArrangeTarget + Default>(target: &mut T, name: &str) -> bool {
     let members = expand_name(target.hierarchy(), name);
     let mut defaults = T::default();
     let mut any = false;
@@ -380,7 +381,14 @@ mod tests {
     #[test]
     fn placement_apply_delta_sums_all_axes() {
         let mut p = Placement::at(0.5, 0.5, 10.0);
-        p.apply_delta(0.01, 0.02, 3.0, 1.0, 2.0, 4.0);
+        p.apply_delta(ArrangeDelta {
+            dnx: 0.01,
+            dny: 0.02,
+            d_lift_mm: 3.0,
+            d_rx_deg: 1.0,
+            d_ry_deg: 2.0,
+            d_rz_deg: 4.0,
+        });
         assert!(approx(p.nx, 0.51));
         assert!(approx(p.ny, 0.52));
         assert!(approx(p.lift_mm, 13.0));
@@ -457,7 +465,16 @@ mod tests {
             a: Placement::default(),
             b: Placement::default(),
         };
-        let ok = apply_arrange(&mut s, "all", 0.01, 0.02, 1.0, 0.0, 0.0, 0.0);
+        let ok = apply_arrange(
+            &mut s,
+            "all",
+            ArrangeDelta {
+                dnx: 0.01,
+                dny: 0.02,
+                d_lift_mm: 1.0,
+                ..Default::default()
+            },
+        );
         assert!(ok);
         assert!(approx(s.a.nx, 0.01));
         assert!(approx(s.b.nx, 0.01));
@@ -470,7 +487,15 @@ mod tests {
             a: Placement::default(),
             b: Placement::default(),
         };
-        let ok = apply_arrange(&mut s, "zzz", 0.1, 0.1, 0.0, 0.0, 0.0, 0.0);
+        let ok = apply_arrange(
+            &mut s,
+            "zzz",
+            ArrangeDelta {
+                dnx: 0.1,
+                dny: 0.1,
+                ..Default::default()
+            },
+        );
         assert!(!ok);
     }
 

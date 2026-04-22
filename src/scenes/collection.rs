@@ -244,10 +244,6 @@ impl CollectionScene {
         next
     }
 
-    /// Advance the cabinet yaw toward the active tab's target. Called
-    /// from `draw_frame` (via `&self.yaw`). Uses an exponential ease so
-    /// the rotation snaps quickly at first, then settles smoothly.
-
     /// Whether the scene needs continuous redraws to animate 3D content.
     /// During the rebuild the whole scene is 3D, so this is always true.
     pub fn has_3d_tab(&self) -> bool {
@@ -394,7 +390,7 @@ impl CollectionScene {
         // the middle-ish cell (col 2, row 0) so the initial view is
         // already centred on a boss rather than parked on the left
         // edge.
-        let default_focus = (total_cells.min(2)) as i32;
+        let default_focus = total_cells.min(2);
         let focus_flat = self
             .focused_row
             .map(|i| i as i32)
@@ -504,9 +500,6 @@ impl CollectionScene {
                 shadow_caster: false,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("collection.cabinet_backing"),
@@ -620,9 +613,6 @@ impl CollectionScene {
                                 silhouette,
                                 pick_id: Some(boss_i as u32),
                             },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: None,
                             hover_target: if is_focus { 1.0 } else { 0.0 },
                             anim_id: boss_i as u64,
                             arrange_name: None,
@@ -641,9 +631,6 @@ impl CollectionScene {
                             rotation: rot_rx_ry_rz_deg(-90.0, 14.0, 0.0),
                             color: bright,
                             kind: Object3dKind::Talisman { kind: *tk },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: None,
                             hover_target: if is_focus { 1.0 } else { 0.0 },
                             anim_id: boss_i as u64,
                             arrange_name: None,
@@ -659,9 +646,6 @@ impl CollectionScene {
                             rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
                             color: [1.0, 1.0, 1.0, 1.0],
                             kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: None,
                             hover_target: if is_focus { 1.0 } else { 0.0 },
                             anim_id: boss_i as u64,
                             arrange_name: None,
@@ -692,9 +676,6 @@ impl CollectionScene {
                                 shadow_caster: false,
                                 silhouette: false,
                             },
-                            focusable: false,
-                            scene_shaded: true,
-                            own_light: None,
                             hover_target: if is_focus { 1.0 } else { 0.0 },
                             anim_id: boss_i as u64,
                             arrange_name: None,
@@ -787,9 +768,6 @@ impl CollectionScene {
                             silhouette,
                             pick_id: None,
                         },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
@@ -805,9 +783,6 @@ impl CollectionScene {
                         rotation: rot_rx_ry_rz_deg(-90.0, 14.0, 0.0),
                         color: closeup_bright,
                         kind: Object3dKind::Talisman { kind: *tk },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
@@ -821,9 +796,6 @@ impl CollectionScene {
                         rotation: closeup_anchor.rotation,
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
@@ -874,9 +846,6 @@ impl CollectionScene {
                             shadow_caster: false,
                             silhouette: closeup_silhouette,
                         },
-                        focusable: false,
-                        scene_shaded: true,
-                        own_light: None,
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
@@ -923,9 +892,6 @@ impl CollectionScene {
                         shadow_caster: false,
                         silhouette: false,
                     },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 1.0,
                     anim_id: 0xC0DE,
                     arrange_name: Some(anchor.arrange_name),
@@ -962,9 +928,6 @@ impl CollectionScene {
                         shadow_caster: false,
                         silhouette: false,
                     },
-                    focusable: false,
-                    scene_shaded: true,
-                    own_light: None,
                     hover_target: 1.0,
                     anim_id: 0xC0DF,
                     arrange_name: Some("collection.stats_plaque"),
@@ -1043,13 +1006,6 @@ impl CollectionScene {
         frame
     }
 }
-
-/// Scale a linear-RGBA color by a brightness factor in [0,1]. Alpha is
-/// preserved so the corridor's fade-to-black doesn't fade to transparent.
-
-/// Raise a color toward white so saturated-but-dark boss accents (deep
-/// purple, blood red) still read against a shadowed wall. `floor` is the
-/// minimum channel value; bright accents are unchanged.
 
 impl SceneBehavior for CollectionScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
@@ -1189,14 +1145,13 @@ impl SceneBehavior for CollectionScene {
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_col = (col + 1).min(cols - 1);
-                    if next_col != col {
-                        if let Some(i) = global_idx(row, next_col) {
-                            if Some(i) != self.focused_row {
-                                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                                self.focused_row = Some(i);
-                                scroll_row_into_view(self, i / cols);
-                            }
-                        }
+                    if next_col != col
+                        && let Some(i) = global_idx(row, next_col)
+                        && Some(i) != self.focused_row
+                    {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        self.focused_row = Some(i);
+                        scroll_row_into_view(self, i / cols);
                     }
                 }
                 UiAction::FocusPrev => {
@@ -1204,12 +1159,12 @@ impl SceneBehavior for CollectionScene {
                         continue;
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
-                    if col > 0 {
-                        if let Some(i) = global_idx(row, col - 1) {
-                            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                            self.focused_row = Some(i);
-                            scroll_row_into_view(self, i / cols);
-                        }
+                    if col > 0
+                        && let Some(i) = global_idx(row, col - 1)
+                    {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        self.focused_row = Some(i);
+                        scroll_row_into_view(self, i / cols);
                     }
                 }
                 UiAction::FocusUp => {
@@ -1217,12 +1172,12 @@ impl SceneBehavior for CollectionScene {
                         continue;
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
-                    if row > 0 {
-                        if let Some(i) = global_idx(row - 1, col) {
-                            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                            self.focused_row = Some(i);
-                            scroll_row_into_view(self, i / cols);
-                        }
+                    if row > 0
+                        && let Some(i) = global_idx(row - 1, col)
+                    {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        self.focused_row = Some(i);
+                        scroll_row_into_view(self, i / cols);
                     }
                 }
                 UiAction::FocusDown => {
@@ -1231,14 +1186,13 @@ impl SceneBehavior for CollectionScene {
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_row = (row + 1).min(total_rows - 1);
-                    if next_row != row {
-                        if let Some(i) = global_idx(next_row, col) {
-                            if Some(i) != self.focused_row {
-                                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                                self.focused_row = Some(i);
-                                scroll_row_into_view(self, i / cols);
-                            }
-                        }
+                    if next_row != row
+                        && let Some(i) = global_idx(next_row, col)
+                        && Some(i) != self.focused_row
+                    {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        self.focused_row = Some(i);
+                        scroll_row_into_view(self, i / cols);
                     }
                 }
                 UiAction::Confirm => {
@@ -1410,12 +1364,11 @@ fn push_relic_stinger_for(
         return;
     }
     let arts = tab_artifacts(tab, progress);
-    if let Some(art) = arts.get(idx) {
-        if art.unlocked {
-            if let ArtifactKind::Relic(rid) = art.kind {
-                bus.push(GameEvent::PlayRelicStinger(rid));
-            }
-        }
+    if let Some(art) = arts.get(idx)
+        && art.unlocked
+        && let ArtifactKind::Relic(rid) = art.kind
+    {
+        bus.push(GameEvent::PlayRelicStinger(rid));
     }
 }
 
@@ -1638,7 +1591,7 @@ fn total_rows_for(count: usize) -> u32 {
     if count == 0 {
         0
     } else {
-        ((count as u32) + GRID_COLS - 1) / GRID_COLS
+        (count as u32).div_ceil(GRID_COLS)
     }
 }
 

@@ -87,12 +87,20 @@ pub enum DebugAction {
     /// Push the material viewer pushdown scene onto the overlay stack.
     /// Shows one preview orb per `MaterialKind` for visual inspection.
     OpenMaterialViewer,
+    /// Push the transition playground scene onto the overlay stack.
+    OpenTransitionPlayground,
+    /// Open a simple in-app About modal. Used on macOS to avoid the native
+    /// About panel's icon conversion path in `muda`.
+    OpenAbout,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
 pub struct DebugMenuBar {
-    #[allow(dead_code)]
-    menu: Menu,
+    // Must be retained for the lifetime of the installed native menubar.
+    // On macOS, AppKit can invoke menu item actions long after
+    // `init_for_nsapp()`, so dropping the Rust-side menu object leaves the
+    // native callbacks dangling.
+    _retained_menu: Menu,
     mappings: Vec<(MenuId, DebugAction)>,
 }
 
@@ -101,15 +109,26 @@ impl DebugMenuBar {
     /// after the window is created (Windows needs the HWND).
     pub fn new(window: &Window) -> Self {
         let menu = Menu::new();
+        let mut mappings = Vec::new();
 
         // --- App submenu (macOS convention: first submenu is the app menu) ---
         let app_menu = Submenu::new("Mahjuro", true);
+        #[cfg(target_os = "macos")]
+        {
+            let about = MenuItem::new("About Mahjuro", true, None);
+            mappings.push((about.id().clone(), DebugAction::OpenAbout));
+            let _ = app_menu.append(&about);
+            let _ = app_menu.append(&PredefinedMenuItem::separator());
+            let _ = app_menu.append(&PredefinedMenuItem::hide(None));
+            let _ = app_menu.append(&PredefinedMenuItem::hide_others(None));
+            let _ = app_menu.append(&PredefinedMenuItem::show_all(None));
+            let _ = app_menu.append(&PredefinedMenuItem::separator());
+            let _ = app_menu.append(&PredefinedMenuItem::quit(None));
+        }
         let _ = menu.append(&app_menu);
 
         // --- Debug submenu ---
         let debug_menu = Submenu::new("Debug", true);
-
-        let mut mappings = Vec::new();
 
         // ── Overlays submenu ─────────────────────────────────────────────────
         // Toggles and modal panels that live on top of the gameplay view.
@@ -194,6 +213,13 @@ impl DebugMenuBar {
             DebugAction::OpenMaterialViewer,
         ));
         let _ = jumps_sub.append(&material_viewer_item);
+
+        let transition_playground_item = MenuItem::new("Transition Playground...", true, None);
+        mappings.push((
+            transition_playground_item.id().clone(),
+            DebugAction::OpenTransitionPlayground,
+        ));
+        let _ = jumps_sub.append(&transition_playground_item);
 
         let test_overlay_item = MenuItem::new("Test Overlay", true, None);
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
@@ -321,7 +347,10 @@ impl DebugMenuBar {
 
         install_menu(&menu, window);
 
-        Self { menu, mappings }
+        Self {
+            _retained_menu: menu,
+            mappings,
+        }
     }
 
     /// Poll for pending debug actions (non-blocking). Call once per frame.

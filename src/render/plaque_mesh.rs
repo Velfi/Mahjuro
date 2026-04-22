@@ -8,7 +8,7 @@
 //! Local space spans `-0.5..+0.5` on each axis so a per-instance scale matrix
 //! sizes it via the `PlaquePlacement.extents`.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
+use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box, push_quad};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Width of the chamfered bevel strips on the four long edges of the slab
@@ -31,12 +31,7 @@ pub fn build_plaque_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-        -HALF_Z,
-        HALF_Z,
+        Aabb::new(-0.5, 0.5, -0.5, 0.5, -HALF_Z, HALF_Z),
     );
 
     // The slab face we want the engraved-text decal to appear on is +Z
@@ -115,29 +110,33 @@ pub fn build_plaque_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.5 + 0.06,
-        -0.5 + 0.06 + NUB_W,
-        0.5,
-        0.5 + NUB_H,
-        -HALF_Z * 0.5,
-        HALF_Z * 0.5,
+        Aabb::new(
+            -0.5 + 0.06,
+            -0.5 + 0.06 + NUB_W,
+            0.5,
+            0.5 + NUB_H,
+            -HALF_Z * 0.5,
+            HALF_Z * 0.5,
+        ),
     );
     // Right chain nub.
     push_box(
         &mut vertices,
         &mut indices,
-        0.5 - 0.06 - NUB_W,
-        0.5 - 0.06,
-        0.5,
-        0.5 + NUB_H,
-        -HALF_Z * 0.5,
-        HALF_Z * 0.5,
+        Aabb::new(
+            0.5 - 0.06 - NUB_W,
+            0.5 - 0.06,
+            0.5,
+            0.5 + NUB_H,
+            -HALF_Z * 0.5,
+            HALF_Z * 0.5,
+        ),
     );
     // Bevel and chain-nub vertices all sample the transparent (0,0) corner so
     // the engraved decal doesn't bleed onto them. The wood material is
     // procedural and unaffected.
-    for i in 24..vertices.len() {
-        vertices[i].uv = [0.0, 0.0];
+    for v in vertices.iter_mut().skip(24) {
+        v.uv = [0.0, 0.0];
     }
 
     MeshCpu {

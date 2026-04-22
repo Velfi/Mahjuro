@@ -58,6 +58,11 @@ use crate::ui::widget;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FocusId(pub u32);
 
+/// Custom-decoration callback type for `Tree::draw`. Given the rect, node id,
+/// and current focus state, the callback pushes its own quads/labels onto
+/// the `TreeFrame`.
+pub type RenderCustomFn<'a> = dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState) + 'a;
+
 // ─── Tree shape ─────────────────────────────────────────────────────────────
 
 /// A complete UI tree for a scene. Cheap to construct each frame.
@@ -939,38 +944,37 @@ impl TreeState {
         }
 
         // ── Auto-scroll to keep focused item visible ────────────────
-        if overflow > 0.0 {
-            if let Some(fid) = self.focused {
-                if let Some(l) = self.layout.iter().find(|l| l.id == fid) {
-                    // l.rect[1] is already shifted by scroll_offset_px.
-                    // We want the focused item to be within the original
-                    // anchor region. Recover the anchor top from the tree.
-                    let anchor_top = self
-                        .layout
-                        .first()
-                        .map(|first| {
-                            // The first item's unscrolled y minus half the centering gap
-                            // is roughly anchor_top; but simpler: use the tree anchor.
-                            first.rect[1] + self.scroll_offset_px
-                                - ((self.anchor_height - self.content_height) * 0.5).max(0.0)
-                        })
-                        .unwrap_or(0.0);
-                    let anchor_bottom = anchor_top + self.anchor_height;
-                    let item_top = l.rect[1];
-                    let item_bottom = item_top + l.rect[3];
+        if overflow > 0.0
+            && let Some(fid) = self.focused
+            && let Some(l) = self.layout.iter().find(|l| l.id == fid)
+        {
+            // l.rect[1] is already shifted by scroll_offset_px.
+            // We want the focused item to be within the original
+            // anchor region. Recover the anchor top from the tree.
+            let anchor_top = self
+                .layout
+                .first()
+                .map(|first| {
+                    // The first item's unscrolled y minus half the centering gap
+                    // is roughly anchor_top; but simpler: use the tree anchor.
+                    first.rect[1] + self.scroll_offset_px
+                        - ((self.anchor_height - self.content_height) * 0.5).max(0.0)
+                })
+                .unwrap_or(0.0);
+            let anchor_bottom = anchor_top + self.anchor_height;
+            let item_top = l.rect[1];
+            let item_bottom = item_top + l.rect[3];
 
-                    if item_top < anchor_top {
-                        // Item above viewport — scroll up.
-                        let delta = anchor_top - item_top;
-                        let t = (self.scroll.target() - delta).max(0.0);
-                        self.scroll.set_target(t);
-                    } else if item_bottom > anchor_bottom {
-                        // Item below viewport — scroll down.
-                        let delta = item_bottom - anchor_bottom;
-                        let t = (self.scroll.target() + delta).min(overflow);
-                        self.scroll.set_target(t);
-                    }
-                }
+            if item_top < anchor_top {
+                // Item above viewport — scroll up.
+                let delta = anchor_top - item_top;
+                let t = (self.scroll.target() - delta).max(0.0);
+                self.scroll.set_target(t);
+            } else if item_bottom > anchor_bottom {
+                // Item below viewport — scroll down.
+                let delta = item_bottom - anchor_bottom;
+                let t = (self.scroll.target() + delta).min(overflow);
+                self.scroll.set_target(t);
             }
         }
 
@@ -1019,7 +1023,7 @@ impl TreeState {
     }
 }
 
-fn find_item<'a, A: Copy>(node: &'a Node<A>, id: FocusId) -> Option<&'a Item<A>> {
+fn find_item<A: Copy>(node: &Node<A>, id: FocusId) -> Option<&Item<A>> {
     match node {
         Node::Item(item) if item.id == id => Some(item),
         Node::Item(_) | Node::Decoration(_) => None,
@@ -1075,7 +1079,7 @@ impl TreeState {
         &self,
         tree: &Tree<A>,
         frame: &mut TreeFrame<'_>,
-        render_custom: &dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState),
+        render_custom: &RenderCustomFn<'_>,
     ) {
         // Re-walk the tree using the cached layout. We rebuild the rects in
         // the same order as `update()` did, then draw each node.
@@ -1097,62 +1101,60 @@ impl TreeState {
         // The cache from update() and the cache we just built must match.
         // (They will, because the tree shape is identical.)
         let mut idx = 0;
-        draw_node(
-            &tree.root,
-            self.focused,
-            frame,
+        let mut ctx = DrawNodeCtx {
+            focused: self.focused,
             render_custom,
-            &layout_scratch,
-            &mut idx,
-            self.last_window,
-            self.last_ui_scale,
-        );
+            layout: &layout_scratch,
+            idx: &mut idx,
+            window: self.last_window,
+            ui_scale: self.last_ui_scale,
+        };
+        draw_node(&tree.root, frame, &mut ctx);
     }
+}
+
+/// Per-traversal context for `draw_node`: the focused id, the laid-out
+/// rects array + cursor, and the window size + ui scale. Grouped so the
+/// recursion only threads one borrow.
+struct DrawNodeCtx<'a, 'b> {
+    focused: Option<FocusId>,
+    render_custom: &'a RenderCustomFn<'a>,
+    layout: &'a [LaidOut],
+    idx: &'b mut usize,
+    window: (f32, f32),
+    ui_scale: f32,
 }
 
 fn draw_node<A: Copy>(
     node: &Node<A>,
-    focused: Option<FocusId>,
     frame: &mut TreeFrame<'_>,
-    render_custom: &dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState),
-    layout: &[LaidOut],
-    idx: &mut usize,
-    window: (f32, f32),
-    ui_scale: f32,
+    ctx: &mut DrawNodeCtx<'_, '_>,
 ) {
     match node {
         Node::Column { children, .. }
         | Node::Row { children, .. }
         | Node::Grid { children, .. } => {
             for c in children {
-                draw_node(
-                    c,
-                    focused,
-                    frame,
-                    render_custom,
-                    layout,
-                    idx,
-                    window,
-                    ui_scale,
-                );
+                draw_node(c, frame, ctx);
             }
         }
         Node::Item(item) => {
             // The next entry in `layout` corresponds to this item.
-            let rect = layout
-                .get(*idx)
+            let rect = ctx
+                .layout
+                .get(*ctx.idx)
                 .map(|l| l.rect)
                 .unwrap_or([0.0, 0.0, 0.0, 0.0]);
-            *idx += 1;
-            let is_focused = focused == Some(item.id);
+            *ctx.idx += 1;
+            let is_focused = ctx.focused == Some(item.id);
             draw_item(
                 item,
                 rect,
                 is_focused,
                 frame,
-                render_custom,
-                window,
-                ui_scale,
+                ctx.render_custom,
+                ctx.window,
+                ctx.ui_scale,
             );
         }
         Node::Decoration(d) => {
@@ -1174,7 +1176,7 @@ fn draw_node<A: Copy>(
             // at a y-position chosen by where we are in the column. For the
             // first migration scenes (start_screen), decorations are always
             // a Title at the top — so we use a window-relative top position.
-            draw_decoration_top(d, frame, window, ui_scale);
+            draw_decoration_top(d, frame, ctx.window, ctx.ui_scale);
         }
     }
 }
@@ -1225,7 +1227,7 @@ fn draw_item<A: Copy>(
     rect: [f32; 4],
     focused: bool,
     frame: &mut TreeFrame<'_>,
-    render_custom: &dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState),
+    render_custom: &RenderCustomFn<'_>,
     window: (f32, f32),
     ui_scale: f32,
 ) {
@@ -1255,11 +1257,13 @@ fn draw_item<A: Copy>(
                 frame.instances,
                 frame.labels,
                 frame.buttons,
-                rect,
-                label,
-                *variant,
-                state,
-                UiAction::Confirm, // not used — we override below
+                widget::ButtonSpec {
+                    rect,
+                    label,
+                    variant: *variant,
+                    state,
+                    action: UiAction::Confirm, // not used — we override below
+                },
             );
             // Override the just-pushed button so its action is the stable id.
             // push_button already pushed a ButtonDef::ui(...) — pop it and
@@ -1286,11 +1290,13 @@ fn draw_item<A: Copy>(
                 frame.instances,
                 frame.labels,
                 frame.buttons,
-                rect,
-                &display,
-                variant,
-                state,
-                UiAction::Confirm,
+                widget::ButtonSpec {
+                    rect,
+                    label: &display,
+                    variant,
+                    state,
+                    action: UiAction::Confirm,
+                },
             );
             frame.buttons.pop();
             frame.buttons.push(ButtonDef::scene(
@@ -1322,11 +1328,13 @@ fn draw_item<A: Copy>(
                 frame.instances,
                 frame.labels,
                 frame.buttons,
-                rect,
-                &display,
-                ButtonVariant::Default,
-                state,
-                UiAction::Confirm,
+                widget::ButtonSpec {
+                    rect,
+                    label: &display,
+                    variant: ButtonVariant::Default,
+                    state,
+                    action: UiAction::Confirm,
+                },
             );
             frame.buttons.pop();
             frame.buttons.push(ButtonDef::scene(
@@ -1344,11 +1352,13 @@ fn draw_item<A: Copy>(
                 frame.instances,
                 frame.labels,
                 frame.buttons,
-                rect,
-                label,
-                variant,
-                state,
-                UiAction::Confirm,
+                widget::ButtonSpec {
+                    rect,
+                    label,
+                    variant,
+                    state,
+                    action: UiAction::Confirm,
+                },
             );
             frame.buttons.pop();
             frame.buttons.push(ButtonDef::scene(

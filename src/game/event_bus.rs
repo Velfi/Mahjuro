@@ -1,7 +1,6 @@
 //! Simple event queue for UI and core.
 
 use crate::audio::SfxId;
-use crate::core::tile::Tile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GameOverReason {
@@ -31,13 +30,11 @@ pub struct RoundPayout {
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
+
 pub enum GameEvent {
-    TileDrawn(Tile),
-    TileDiscarded {
-        slot_index: usize,
-    },
-    ScoreUpdated(u64),
+    TileDrawn,
+    TileDiscarded,
+    ScoreUpdated,
     /// A scoring cascade just revealed step `index` of the breakdown.
     /// Fires once per step, on the frame the reveal edge is crossed.
     ScoreStepRevealed {
@@ -54,15 +51,11 @@ pub enum GameEvent {
         reached_target: bool,
         payout: RoundPayout,
     },
-    RunComplete,
     GameOver {
-        final_score: u64,
         reason: GameOverReason,
     },
     /// Tiles permanently destroyed via the Kiln talisman.
-    TilesDestroyed {
-        count: usize,
-    },
+    TilesDestroyed,
     /// A tile pack was purchased in the shop.
     PackBought,
     /// The pack opening celebration started (foil tearing).

@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
 use crate::game::run::RunState;
 use crate::persistence;
@@ -32,6 +33,7 @@ struct RunSummary {
 
 impl RunSummary {
     fn from_run(run: &RunState) -> Self {
+        let gameplay = GameEngine::read(run);
         let best_structure = if run.best_structure_score > 0 {
             format!("{} ({})", run.best_structure_name, run.best_structure_score)
         } else {
@@ -51,7 +53,11 @@ impl RunSummary {
             tiles_discarded: run.tiles_discarded,
             times_restocked: run.times_restocked,
             ante: run.ante,
-            round: format!("{} ({})", run.run_number, run.blind.name()),
+            round: format!(
+                "{} ({})",
+                GameEngine::current_run_number(run),
+                gameplay.blind_label
+            ),
         }
     }
 }
@@ -73,9 +79,10 @@ const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 
 impl GameOverScene {
     pub fn new(run: &RunState, reason: GameOverReason) -> Self {
+        let gameplay = GameEngine::read(run);
         Self {
-            final_score: run.round_score,
-            target_score: run.target_score,
+            final_score: gameplay.round_score,
+            target_score: gameplay.target_score,
             won: false,
             loss_reason: Some(reason),
             summary: RunSummary::from_run(run),
@@ -90,9 +97,10 @@ impl GameOverScene {
 
     /// Construct a victory screen shown after defeating the final-ante Boss.
     pub fn victory(run: &RunState) -> Self {
+        let gameplay = GameEngine::read(run);
         Self {
-            final_score: run.round_score,
-            target_score: run.target_score,
+            final_score: gameplay.round_score,
+            target_score: gameplay.target_score,
             won: true,
             loss_reason: None,
             summary: RunSummary::from_run(run),
@@ -157,7 +165,7 @@ impl SceneBehavior for GameOverScene {
             && self.opened_at.elapsed().as_secs_f32() >= OUTCOME_SFX_DELAY_SECS
         {
             let sfx = if self.won {
-                if self.final_score % 2 == 0 {
+                if self.final_score.is_multiple_of(2) {
                     SfxId::Victory
                 } else {
                     SfxId::Victory2
@@ -186,12 +194,8 @@ impl SceneBehavior for GameOverScene {
         }
         if action.is_some() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-            *ctx.run = RunState::new_demo();
-            ctx.run.apply_progression(ctx.progress);
             let settings = persistence::load_settings();
-            ctx.run
-                .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-            ctx.run.set_hints_enabled(settings.hints_enabled);
+            GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
             return Some(Scene::StartScreen(StartScreenScene::new()));
         }
         None

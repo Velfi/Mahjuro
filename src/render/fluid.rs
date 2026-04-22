@@ -6,15 +6,15 @@
 //! It's been replaced by a simpler pipeline:
 //!
 //!   1. advect      — each voxel backtraces along `drift + curl_noise`,
-//!                    bilinear-samples the previous density, applies
-//!                    dissipation. See `shaders/fluid3_advect.wgsl`.
+//!      bilinear-samples the previous density, applies
+//!      dissipation. See `shaders/fluid3_advect.wgsl`.
 //!   2. inject      — gaussian splat of impulse points into the density
-//!                    field. See `shaders/fluid3_inject.wgsl`.
+//!      field. See `shaders/fluid3_inject.wgsl`.
 //!   3. lightbake   — per-voxel candle lighting, writes `lit_density`.
-//!                    See `shaders/fluid3_lightbake.wgsl` (unchanged).
+//!      See `shaders/fluid3_lightbake.wgsl` (unchanged).
 //!   4. raymarch    — fullscreen volumetric composite pass, reads the
-//!                    pre-lit density. See `shaders/fluid3_volume.wgsl`
-//!                    and `shaders/fluid3_composite.wgsl` (unchanged).
+//!      pre-lit density. See `shaders/fluid3_volume.wgsl`
+//!      and `shaders/fluid3_composite.wgsl` (unchanged).
 //!
 //! The 3D density texture is `Rgba16Float`: `w` = density, `xyz` = a decaying
 //! velocity stash that the inject pass writes and the advect pass reads back
@@ -274,15 +274,12 @@ pub struct FluidSim {
     // Ping-pong density textures. `w` = density, `xyz` = decaying velocity
     // stash written by the inject pass and read by the advect pass next
     // frame so tile drags and scripted wind gusts still nudge smoke.
-    #[allow(dead_code)]
     vd: [wgpu::Texture; 2],
     vd_view: [wgpu::TextureView; 2],
 
     /// Pre-lit smoke field. After the inject pass, the lightbake walks every
     /// voxel and writes `(rgb = lit smoke colour, a = density)` here. The
     /// volumetric raymarch samples this directly.
-    #[allow(dead_code)]
-    lit_density: wgpu::Texture,
     lit_density_view: wgpu::TextureView,
 
     linear_sampler: wgpu::Sampler,
@@ -927,7 +924,6 @@ impl FluidSim {
         Self {
             vd,
             vd_view,
-            lit_density,
             lit_density_view,
             linear_sampler,
             fluid_uniforms_buf,
@@ -1671,10 +1667,13 @@ impl FluidSim {
             timestamp_writes,
             multiview_mask: None,
         });
-        if let Some((x, y, w, h)) = scissor {
-            if w > 0 && h > 0 && x + w <= self.offscreen_w && y + h <= self.offscreen_h {
-                pass.set_scissor_rect(x, y, w, h);
-            }
+        if let Some((x, y, w, h)) = scissor
+            && w > 0
+            && h > 0
+            && x + w <= self.offscreen_w
+            && y + h <= self.offscreen_h
+        {
+            pass.set_scissor_rect(x, y, w, h);
         }
         pass.set_pipeline(&self.render_pipeline);
         pass.set_bind_group(0, globals_bind_group, &[]);

@@ -148,7 +148,7 @@ impl Wall {
     }
 
     /// Create a wall from tiles without shuffling (for deterministic tests).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn from_unshuffled(tiles: Vec<Tile>) -> Self {
         let dora_indicators = tiles
             .last()

@@ -33,7 +33,7 @@ const PASS_LABELS: [&str; NUM_PASSES] = [
 ];
 
 /// Per-pass timestamp slot indices into the shared query set.
-#[allow(dead_code)]
+
 #[derive(Copy, Clone)]
 pub enum PassSlot {
     Shadow = 0,
@@ -160,7 +160,6 @@ impl GpuProfiler {
         log::info!("[GpuProfiler] starting capture over {frames} frames");
     }
 
-    #[allow(dead_code)]
     pub fn is_sampling(&self) -> bool {
         self.sampling
     }
@@ -181,33 +180,6 @@ impl GpuProfiler {
             beginning_of_pass_write_index: Some(begin),
             end_of_pass_write_index: Some(begin + 1),
         })
-    }
-
-    /// Write a standalone timestamp into the command encoder for the given
-    /// pass slot. Use this instead of `pass_writes` when render-pass-level
-    /// `timestamp_writes` don't produce reliable end-of-pass values (e.g.
-    /// the last pass in an encoder on Metal).
-    ///
-    /// Requires `Features::TIMESTAMP_QUERY_INSIDE_ENCODERS` — not available
-    /// on all Metal adapters. Currently unused; kept behind `#[allow(dead_code)]`
-    /// for future use.
-    #[allow(dead_code)]
-    pub fn write_timestamp(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        slot: PassSlot,
-        is_end: bool,
-    ) {
-        if !self.sampling {
-            return;
-        }
-        let Some(qs) = self.query_set.as_ref() else {
-            return;
-        };
-        let idx = slot as usize;
-        self.last_frame_passes[idx].set(true);
-        let query_idx = (idx * 2) as u32 + u32::from(is_end);
-        encoder.write_timestamp(qs, query_idx);
     }
 
     /// Called once per frame after all passes have been encoded but before

@@ -21,7 +21,7 @@ use crate::core::hand::{SetKind, detect_all_sets, validate_selection_with_rules}
 use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_shop_price};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
-use crate::core::structure::{StructureTriggerKind, StructureTriggerMeta};
+use crate::core::structure::StructureTriggerMeta;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
@@ -34,11 +34,9 @@ use crate::game::run::{FINAL_ANTE, RunState};
 mod reporting;
 mod stats;
 
-#[allow(unused_imports)]
 pub use reporting::{
-    BotConfig, BotRunOptions, BotStrategy, StrategyDef, StrategyFile, play_run_with,
-    run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep, run_sweep,
-    run_with,
+    BotConfig, BotRunOptions, BotStrategy, StrategyFile, run_forced_relic_sweep, run_headless,
+    run_headless_aggregate, run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats};
@@ -283,7 +281,6 @@ fn ctx_for_merged_commit<'a>(
     let plays_rem_after = run.plays_remaining.saturating_sub(1);
     let plays_used_after = run.plays_max.saturating_sub(plays_rem_after);
     let meta = StructureTriggerMeta {
-        kind: StructureTriggerKind::Manual,
         meld_count: merged_sets.len() as u32,
         inject_chicken_if_no_yaku: true,
     };
@@ -331,7 +328,7 @@ fn best_play_in_hand(
     }
 
     let n = hand.len();
-    if n < 2 || n > 20 {
+    if !(2..=20).contains(&n) {
         return None;
     }
     let relics = relics_override.unwrap_or(&run.relics);
@@ -339,9 +336,9 @@ fn best_play_in_hand(
     for mask in enumerate_candidate_play_masks(hand, rules) {
         let count = mask.count_ones() as usize;
         let mut tiles: Vec<Tile> = Vec::with_capacity(count);
-        for i in 0..n {
+        for (i, &tile) in hand.iter().enumerate().take(n) {
             if mask & (1 << i) != 0 {
-                tiles.push(hand[i]);
+                tiles.push(tile);
             }
         }
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
@@ -370,7 +367,7 @@ fn best_play_in_hand(
             yaku_levels_override,
         );
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
-        if breakdown.total <= 0 {
+        if breakdown.total == 0 {
             continue;
         }
         let rank = PlayRank {
@@ -410,40 +407,45 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
     regular.sort_by_key(|it| it.tile);
     flowers.sort_by_key(|it| it.tile);
 
-    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
-    let no_sequences = rules.contains(&RuleModifier::NoSequences);
-    let require_honor = rules.contains(&RuleModifier::RequireHonor);
-    let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
+    let subset_rules = SubsetRules {
+        allow_wrap: rules.contains(&RuleModifier::SequenceWrap),
+        no_sequences: rules.contains(&RuleModifier::NoSequences),
+        require_honor: rules.contains(&RuleModifier::RequireHonor),
+        must_play_five: rules.contains(&RuleModifier::MustPlayFive),
+    };
 
     let mut masks = std::collections::HashSet::new();
-    enumerate_regular_subsets(
-        &regular,
-        &flowers,
-        0,
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
-        0,
-        &mut masks,
-    );
+    enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
     let mut out: Vec<u32> = masks.into_iter().collect();
     out.sort_unstable();
     out
 }
 
-#[allow(clippy::too_many_arguments)]
-fn enumerate_regular_subsets(
-    remaining: &[IndexedTile],
-    flowers: &[IndexedTile],
-    current_mask: u32,
+/// Active rule modifiers for `enumerate_regular_subsets`: captures the
+/// boolean flags that shape which plays are legal so the recursion doesn't
+/// thread them as separate params.
+#[derive(Clone, Copy)]
+struct SubsetRules {
     allow_wrap: bool,
     no_sequences: bool,
     require_honor: bool,
     must_play_five: bool,
+}
+
+fn enumerate_regular_subsets(
+    remaining: &[IndexedTile],
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    rules: SubsetRules,
     current_tile_count: usize,
     out: &mut std::collections::HashSet<u32>,
 ) {
+    let SubsetRules {
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+    } = rules;
     if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
         return;
     }
@@ -466,101 +468,86 @@ fn enumerate_regular_subsets(
         &remaining[1..],
         flowers,
         current_mask,
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
+        rules,
         current_tile_count,
         out,
     );
 
-    if remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                flowers,
-                current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 2,
-                out,
-            );
-        }
+    if remaining.len() >= 2
+        && same_face(first.tile, remaining[1].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
+    {
+        enumerate_regular_subsets(
+            &remaining[2..],
+            flowers,
+            current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
+            rules,
+            current_tile_count + 2,
+            out,
+        );
     }
 
     if remaining.len() >= 3
         && same_face(first.tile, remaining[1].tile)
         && same_face(first.tile, remaining[2].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]))
     {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]) {
-            enumerate_regular_subsets(
-                &remaining[3..],
-                flowers,
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << remaining[2].hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 3,
-                out,
-            );
-        }
+        enumerate_regular_subsets(
+            &remaining[3..],
+            flowers,
+            current_mask
+                | (1 << first.hand_index)
+                | (1 << remaining[1].hand_index)
+                | (1 << remaining[2].hand_index),
+            rules,
+            current_tile_count + 3,
+            out,
+        );
     }
 
     if remaining.len() >= 4
         && same_face(first.tile, remaining[1].tile)
         && same_face(first.tile, remaining[2].tile)
         && same_face(first.tile, remaining[3].tile)
-    {
-        if !require_honor
+        && (!require_honor
             || tiles_have_honor(&[
                 first.tile,
                 remaining[1].tile,
                 remaining[2].tile,
                 remaining[3].tile,
-            ])
-        {
+            ]))
+    {
+        enumerate_regular_subsets(
+            &remaining[4..],
+            flowers,
+            current_mask
+                | (1 << first.hand_index)
+                | (1 << remaining[1].hand_index)
+                | (1 << remaining[2].hand_index)
+                | (1 << remaining[3].hand_index),
+            rules,
+            current_tile_count + 4,
+            out,
+        );
+    }
+
+    if !flowers.is_empty()
+        && remaining.len() >= 2
+        && same_face(first.tile, remaining[1].tile)
+        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
+    {
+        for (flower_idx, flower) in flowers.iter().copied().enumerate() {
             enumerate_regular_subsets(
-                &remaining[4..],
-                flowers,
+                &remaining[2..],
+                &remove_flower(flowers, flower_idx),
                 current_mask
                     | (1 << first.hand_index)
                     | (1 << remaining[1].hand_index)
-                    | (1 << remaining[2].hand_index)
-                    | (1 << remaining[3].hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
-                current_tile_count + 4,
+                    | (1 << flower.hand_index),
+                rules,
+                current_tile_count + 3,
                 out,
             );
-        }
-    }
-
-    if !flowers.is_empty() && remaining.len() >= 2 && same_face(first.tile, remaining[1].tile) {
-        if !require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]) {
-            for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-                enumerate_regular_subsets(
-                    &remaining[2..],
-                    &remove_flower(flowers, flower_idx),
-                    current_mask
-                        | (1 << first.hand_index)
-                        | (1 << remaining[1].hand_index)
-                        | (1 << flower.hand_index),
-                    allow_wrap,
-                    no_sequences,
-                    require_honor,
-                    must_play_five,
-                    current_tile_count + 3,
-                    out,
-                );
-            }
         }
     }
 
@@ -579,10 +566,7 @@ fn enumerate_regular_subsets(
                         &rest,
                         &remove_flower(flowers, flower_idx),
                         next_mask | (1 << flower.hand_index),
-                        allow_wrap,
-                        no_sequences,
-                        require_honor,
-                        must_play_five,
+                        rules,
                         current_tile_count + 3,
                         out,
                     );
@@ -592,10 +576,7 @@ fn enumerate_regular_subsets(
                     &rest,
                     flowers,
                     next_mask,
-                    allow_wrap,
-                    no_sequences,
-                    require_honor,
-                    must_play_five,
+                    rules,
                     current_tile_count + 3,
                     out,
                 );
@@ -903,7 +884,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
         };
         if run.uses_structure_bank()
             && trigger_preview > 0
-            && (best_score <= 0 || trigger_preview >= best_score)
+            && (best_score == 0 || trigger_preview >= best_score)
         {
             let earned = run.trigger_structure_manual(&mut bus);
             if earned > 0 {
@@ -942,26 +923,26 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                     best_after = Some((hyp, cand));
                 }
             }
-            if let Some((after_score, indices)) = best_after {
-                if after_score >= best_score + margin {
-                    bot_log!(
-                        log,
-                        "      action: strategic discard {} -> projected {} (best {} + margin {})",
-                        fmt_indices(&indices),
-                        after_score,
-                        best_score,
-                        margin
-                    );
-                    run.clear_selection();
-                    for i in &indices {
-                        run.toggle_select(*i);
-                    }
-                    run.discard_selected(&mut bus);
-                    stats.discards_used += 1;
-                    stats.strategic_discards += 1;
-                    for _ in bus.drain() {}
-                    did_discard = true;
+            if let Some((after_score, indices)) = best_after
+                && after_score >= best_score + margin
+            {
+                bot_log!(
+                    log,
+                    "      action: strategic discard {} -> projected {} (best {} + margin {})",
+                    fmt_indices(&indices),
+                    after_score,
+                    best_score,
+                    margin
+                );
+                run.clear_selection();
+                for i in &indices {
+                    run.toggle_select(*i);
                 }
+                run.discard_selected(&mut bus);
+                stats.discards_used += 1;
+                stats.strategic_discards += 1;
+                for _ in bus.drain() {}
+                did_discard = true;
             }
         }
         if did_discard {
@@ -1109,7 +1090,7 @@ mod tests {
                 &tiles,
             )
             .total;
-            if total <= 0 {
+            if total == 0 {
                 continue;
             }
             let rank = PlayRank {
@@ -1940,11 +1921,11 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
         }
     }
 
-    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().iter().copied().collect();
+    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
     zodiac_pool.shuffle(&mut rng);
-    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().iter().copied().collect();
+    let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().to_vec();
     talisman_pool.shuffle(&mut rng);
-    let mut pack_pool: Vec<TilePackKind> = TilePackKind::all().iter().copied().collect();
+    let mut pack_pool: Vec<TilePackKind> = TilePackKind::all().to_vec();
     pack_pool.shuffle(&mut rng);
 
     let mut shop: Vec<ShopOffer> = pool
@@ -2178,9 +2159,7 @@ fn play_run_with_options(
     bot_log!(
         log,
         "== bot run{} start: ante {} | blind {} | target {} | gold {} ==",
-        run_number
-            .map(|n| format!(" #{n}"))
-            .unwrap_or_else(String::new),
+        run_number.map(|n| format!(" #{n}")).unwrap_or_default(),
         run.ante,
         blind_log_label(&run, run.upcoming_blind),
         run.target_score,
@@ -2233,11 +2212,24 @@ fn play_run_with_options(
 
         stats.total_target_score += run.target_score as u64;
         run.apply_blind(blind);
+        let boss_for_this_blind = if matches!(blind, BlindKind::Boss) {
+            current_boss_name(&run).map(|name| name.to_string())
+        } else {
+            None
+        };
+        if let Some(boss_name) = &boss_for_this_blind {
+            stats.boss_faced.insert(boss_name.clone(), 1);
+        }
         let cleared = play_blind(&mut run, &mut stats, log);
-        stats.total_score += run.round_score as u64;
+        stats.total_score += run.round_score;
         stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
         stats.died_on_ante = run.ante;
         stats.died_on_blind = blind;
+        if let Some(boss_name) = &boss_for_this_blind
+            && cleared
+        {
+            stats.boss_beaten.insert(boss_name.clone(), 1);
+        }
         if !cleared {
             stats.final_gold = run.gold;
             bot_log!(

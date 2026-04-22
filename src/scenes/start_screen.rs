@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use crate::audio::SfxId;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
@@ -115,12 +116,10 @@ impl StartScreenScene {
         match resume_scene {
             ResumeScene::Gameplay => Scene::Gameplay(GameplayScene::new()),
             ResumeScene::Shop => {
-                if run.onboarding.as_ref().is_some_and(|o| {
-                    matches!(o.phase, crate::game::onboarding::OnboardingPhase::Shop)
-                }) {
+                if GameEngine::resumes_to_tutorial_shop(run) {
                     Scene::Shop(ShopScene::new_tutorial(run))
                 } else {
-                    Scene::Shop(ShopScene::new(run.run_number, run))
+                    Scene::Shop(ShopScene::new(GameEngine::current_run_number(run), run))
                 }
             }
             ResumeScene::PickBlind => Scene::PickBlind(super::pick_blind::PickBlindScene::new()),
@@ -136,7 +135,7 @@ impl SceneBehavior for StartScreenScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
 
-        let in_progress = ctx.run.is_in_progress();
+        let in_progress = GameEngine::run_in_progress(ctx.run);
         let items = menu_items(in_progress);
 
         // Ensure we have a valid focus.
@@ -148,12 +147,11 @@ impl SceneBehavior for StartScreenScene {
         let focus_rects = self.last_focus_rects.borrow().clone();
 
         // ── Mouse hover via 3D picking ──────────────────────────────────
-        if ctx.input_mode == crate::ui::input::InputMode::Cursor {
-            if let Some(GameplayPick::WoodTablet(idx)) = ctx.picked_gameplay_object {
-                if let Some(&item) = items.get(idx) {
-                    self.focus = Some(item);
-                }
-            }
+        if ctx.input_mode == crate::ui::input::InputMode::Cursor
+            && let Some(GameplayPick::WoodTablet(idx)) = ctx.picked_gameplay_object
+            && let Some(&item) = items.get(idx)
+        {
+            self.focus = Some(item);
         }
 
         // ── Keyboard / gamepad navigation ───────────────────────────────
@@ -164,24 +162,20 @@ impl SceneBehavior for StartScreenScene {
                     if let Some(cur) = self
                         .focus
                         .and_then(|f| focus_rects.iter().find(|(t, _)| *t == f).map(|(_, r)| *r))
-                    {
-                        if let Some(next) =
+                        && let Some(next) =
                             focus_nav::pick_neighbor(cur, FocusDir::Up, &focus_rects)
-                        {
-                            self.focus = Some(next);
-                        }
+                    {
+                        self.focus = Some(next);
                     }
                 }
                 UiAction::FocusDown | UiAction::FocusNext => {
                     if let Some(cur) = self
                         .focus
                         .and_then(|f| focus_rects.iter().find(|(t, _)| *t == f).map(|(_, r)| *r))
-                    {
-                        if let Some(next) =
+                        && let Some(next) =
                             focus_nav::pick_neighbor(cur, FocusDir::Down, &focus_rects)
-                        {
-                            self.focus = Some(next);
-                        }
+                    {
+                        self.focus = Some(next);
                     }
                 }
                 UiAction::Confirm => activated = true,
@@ -194,13 +188,12 @@ impl SceneBehavior for StartScreenScene {
         }
 
         // ── Mouse click on a wood tablet ────────────────────────────────
-        if !ctx.button_clicks.is_empty() {
-            if let Some(GameplayPick::WoodTablet(idx)) = ctx.picked_gameplay_object {
-                if let Some(&item) = items.get(idx) {
-                    self.focus = Some(item);
-                    activated = true;
-                }
-            }
+        if !ctx.button_clicks.is_empty()
+            && let Some(GameplayPick::WoodTablet(idx)) = ctx.picked_gameplay_object
+            && let Some(&item) = items.get(idx)
+        {
+            self.focus = Some(item);
+            activated = true;
         }
 
         // ── Animate hover envelopes ─────────────────────────────────────
@@ -233,14 +226,17 @@ impl SceneBehavior for StartScreenScene {
                         return Some(Scene::TileSelect(TileSelectScene::new()));
                     }
                     // Only one material available — skip tile select.
-                    *ctx.run = RunState::new_with_material(TileMaterial::default());
-                    ctx.run.apply_progression(ctx.progress);
                     let settings = persistence::load_settings();
-                    ctx.run.set_auto_cash_in_on_full_structure(
-                        settings.auto_cash_in_on_full_structure,
+                    GameEngine::start_run_with_material(
+                        ctx.run,
+                        TileMaterial::default(),
+                        ctx.progress,
+                        &settings,
                     );
-                    ctx.run.set_hints_enabled(settings.hints_enabled);
-                    return Some(Scene::Shop(ShopScene::new(ctx.run.run_number, ctx.run)));
+                    return Some(Scene::Shop(ShopScene::new(
+                        GameEngine::current_run_number(ctx.run),
+                        ctx.run,
+                    )));
                 }
                 Some(MenuFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
                 Some(MenuFocus::MeldGuide) => {
@@ -313,18 +309,8 @@ impl SceneBehavior for StartScreenScene {
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
                     label: label_for(item, in_progress).to_string(),
-                    hover: if i < self.hover_anims.len() {
-                        self.hover_anims[i]
-                    } else {
-                        0.0
-                    },
-                    pressed: 0.0,
-                    disabled: false,
                     pick_id: None,
                 },
-                focusable: true,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some("start_screen.menu_tablets"),
@@ -371,9 +357,6 @@ impl SceneBehavior for StartScreenScene {
                     scale,
                     height_scale,
                 },
-                focusable: false,
-                scene_shaded: true,
-                own_light: None,
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: Some(name),
@@ -446,9 +429,6 @@ impl SceneBehavior for StartScreenScene {
                 shadow_caster: false,
                 silhouette: false,
             },
-            focusable: false,
-            scene_shaded: true,
-            own_light: None,
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("start_screen.title_plaque"),
@@ -465,12 +445,11 @@ impl SceneBehavior for StartScreenScene {
 
         // ── Focus ring (2D overlay on the focused tablet's projected rect)
         let mut quads: Vec<GpuInstance> = Vec::new();
-        if let Some(focus) = self.focus {
-            if let Some(idx) = items.iter().position(|&item| item == focus) {
-                if let Some(&rect) = ctx.proj.wood_tablet_rects.get(idx) {
-                    focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
-                }
-            }
+        if let Some(focus) = self.focus
+            && let Some(idx) = items.iter().position(|&item| item == focus)
+            && let Some(&rect) = ctx.proj.wood_tablet_rects.get(idx)
+        {
+            focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
         }
 
         // ── Navigation hint text ────────────────────────────────────────
@@ -484,11 +463,10 @@ impl SceneBehavior for StartScreenScene {
         }];
 
         // ── Catch-all click target (full-screen invisible button) ───────
-        let mut buttons = Vec::new();
-        buttons.push(super::ButtonDef {
+        let buttons = vec![super::ButtonDef {
             rect: (0.0, 0.0, w, h),
             action: super::ButtonAction::Scene(0),
-        });
+        }];
 
         // ── Assemble the frame ──────────────────────────────────────────
         let mut frame = UiFrame::new();

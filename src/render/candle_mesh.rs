@@ -123,8 +123,8 @@ fn build_revolved_mesh(profile: &[ProfilePoint], drip_amplitude: f32) -> MeshCpu
     // Use the second profile row (pi=1, full base radius) for the cap edge so
     // the cap is flush with the cylindrical base.
     for ri in 0..n_radial {
-        let a = (1 * row_stride + ri) as u32;
-        let b = (1 * row_stride + ri + 1) as u32;
+        let a = (row_stride + ri) as u32;
+        let b = (row_stride + ri + 1) as u32;
         indices.push(center_idx);
         indices.push(b);
         indices.push(a);

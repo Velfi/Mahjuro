@@ -46,6 +46,17 @@ impl TooltipEntry {
     }
 }
 
+/// Potential hover sources the tooltip engine scans each frame: text
+/// labels (to detect glossary term hits), button and relic-icon rects
+/// (for element-level tooltips), and explicit glossary anchors attached
+/// to scene-specific rects.
+pub struct TooltipSources<'a> {
+    pub base_labels: &'a [TextLabel],
+    pub button_rects: &'a [(f32, f32, f32, f32)],
+    pub relic_icons: &'a [RelicIcon],
+    pub glossary_anchors: &'a [([f32; 4], &'static str)],
+}
+
 /// Manages the tooltip chain and produces render data each frame.
 pub struct TooltipState {
     chain: Vec<TooltipEntry>,
@@ -75,15 +86,21 @@ impl TooltipState {
         &mut self,
         frame: &mut UiFrame,
         cursor: (f32, f32),
-        base_labels: &[TextLabel],
-        button_rects: &[(f32, f32, f32, f32)],
-        relic_icons: &[RelicIcon],
-        glossary_anchors: &[([f32; 4], &'static str)],
-        window_w: f32,
-        window_h: f32,
-        ui_scale: f32,
+        sources: TooltipSources<'_>,
+        viewport: crate::ui::layout::ViewportCtx,
         owns_fortunes_favor: bool,
     ) {
+        let TooltipSources {
+            base_labels,
+            button_rects,
+            relic_icons,
+            glossary_anchors,
+        } = sources;
+        let crate::ui::layout::ViewportCtx {
+            window_w,
+            window_h,
+            ui_scale,
+        } = viewport;
         let font = match load_ui_font() {
             Some(f) => f,
             None => {
@@ -156,13 +173,15 @@ impl TooltipState {
                 let exclude: Vec<&str> = self.chain.iter().map(|e| e.title).collect();
                 let entry = build_tooltip(
                     &font,
-                    title,
-                    description,
+                    TooltipContent {
+                        title,
+                        description,
+                        exclude: &exclude,
+                    },
                     anchor_rect,
                     scale,
                     window_w,
                     window_h,
-                    &exclude,
                 );
                 self.chain.push(entry);
             }
@@ -306,7 +325,7 @@ fn regions_for_labels(
         }
 
         for m in &matches {
-            if exclude.iter().any(|&e| e == m.entry.term) {
+            if exclude.contains(&m.entry.term) {
                 continue;
             }
             if m.char_end >= cum.len() {
@@ -365,16 +384,28 @@ fn wrap_text(font: &fontdue::Font, text: &str, font_px: f32, max_w: f32) -> Vec<
 
 // ── Tooltip construction ─────────────────────────────────────────────────
 
-fn build_tooltip(
-    font: &fontdue::Font,
+/// Content of a glossary-style tooltip: title + body, plus any nested
+/// glossary terms to exclude from re-matching (to stop cycles and to
+/// keep a term from linking to itself).
+struct TooltipContent<'a> {
     title: &'static str,
     description: &'static str,
+    exclude: &'a [&'a str],
+}
+
+fn build_tooltip(
+    font: &fontdue::Font,
+    content: TooltipContent<'_>,
     anchor: [f32; 4],
     scale: f32,
     win_w: f32,
     win_h: f32,
-    exclude: &[&str],
 ) -> TooltipEntry {
+    let TooltipContent {
+        title,
+        description,
+        exclude,
+    } = content;
     let padding = (10.0 * scale).max(8.0);
     let tooltip_w = (280.0 * scale).max(200.0);
     let line_h = (22.0 * scale).max(20.0);

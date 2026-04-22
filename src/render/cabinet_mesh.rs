@@ -295,13 +295,15 @@ pub fn build_cabinet_rails_mesh() -> MeshCpu {
         push_rotated_box(
             &mut vertices,
             &mut indices,
-            cx,
-            cy,
-            theta,
-            RAIL_HALF,
-            RAIL_HALF,
-            body_z0,
-            body_z1,
+            RotatedBox {
+                cx,
+                cy,
+                theta,
+                hx: RAIL_HALF,
+                hy: RAIL_HALF,
+                z0: body_z0,
+                z1: body_z1,
+            },
         );
     }
 
@@ -319,14 +321,11 @@ pub fn build_cabinet_rails_mesh() -> MeshCpu {
     }
 }
 
-/// Push a Z-aligned rectangular prism centered at `(cx, cy)` in XY,
+/// Geometry for a Z-aligned rectangular prism centered at `(cx, cy)`,
 /// rotated by `theta` about world Z, with half-extents `(hx, hy)` in
-/// the prism's local frame and Z spanning `z0..z1`. Used by the rails
-/// builder so each rail's outward face has the correct world-XY
-/// orientation.
-fn push_rotated_box(
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
+/// local frame and Z spanning `z0..z1`.
+#[derive(Clone, Copy)]
+struct RotatedBox {
     cx: f32,
     cy: f32,
     theta: f32,
@@ -334,7 +333,21 @@ fn push_rotated_box(
     hy: f32,
     z0: f32,
     z1: f32,
-) {
+}
+
+/// Push a Z-aligned rectangular prism described by `rbox`. Used by the
+/// rails builder so each rail's outward face has the correct world-XY
+/// orientation.
+fn push_rotated_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, rbox: RotatedBox) {
+    let RotatedBox {
+        cx,
+        cy,
+        theta,
+        hx,
+        hy,
+        z0,
+        z1,
+    } = rbox;
     let cos_t = theta.cos();
     let sin_t = theta.sin();
     // Helper: take a local-frame (lx, ly) and project to world XY.

@@ -204,18 +204,18 @@ pub fn rasterize_tile_face_decal(
     let mut rgba = vec![0u8; (width * height * 4) as usize];
 
     // If a tileset is configured, try to load the PNG decal for this tile.
-    if let Some(set_name) = tile_set {
-        if blit_set_decal(&mut rgba, width, height, tile, set_name) {
-            // Talisman accent border drawn *after* the set decal so it
-            // composites on top and stays visible.
-            if let Some(enh) = tile.enhancement {
-                draw_enhancement_border(&mut rgba, width, height, enh);
-            }
-            if tile.debuffed_visual {
-                draw_debuff_marker(&mut rgba, width, height);
-            }
-            return finish_tile_decal_rgba(rgba, width, height, flip_decal_h);
+    if let Some(set_name) = tile_set
+        && blit_set_decal(&mut rgba, width, height, tile, set_name)
+    {
+        // Talisman accent border drawn *after* the set decal so it
+        // composites on top and stays visible.
+        if let Some(enh) = tile.enhancement {
+            draw_enhancement_border(&mut rgba, width, height, enh);
         }
+        if tile.debuffed_visual {
+            draw_debuff_marker(&mut rgba, width, height);
+        }
+        return finish_tile_decal_rgba(rgba, width, height, flip_decal_h);
     }
 
     // Talisman accent border. Drawn first so the symbol/emoji blits sit on
@@ -245,7 +245,20 @@ pub fn rasterize_tile_face_decal(
         let top_h = (height as f32 * 0.60) as u32;
         let band_top = (height as f32 * 0.02) as u32;
         let band = rasterize_label(font, &label, width, top_h);
-        blit_tinted(&band, width, top_h, &mut rgba, width, 0, band_top, color);
+        blit_tinted(
+            TintedSrc {
+                pixels: &band,
+                width,
+                height: top_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width,
+                x: 0,
+                y: band_top,
+            },
+            color,
+        );
     }
 
     // Bottom half: suit-coloured emoji.
@@ -253,7 +266,20 @@ pub fn rasterize_tile_face_decal(
         let bot_h = (height as f32 * 0.50) as u32;
         let band_top = (height as f32 * 0.50) as u32;
         let band = rasterize_label(font, emoji, width, bot_h);
-        blit_tinted(&band, width, bot_h, &mut rgba, width, 0, band_top, color);
+        blit_tinted(
+            TintedSrc {
+                pixels: &band,
+                width,
+                height: bot_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width,
+                x: 0,
+                y: band_top,
+            },
+            color,
+        );
     }
 
     if tile.debuffed_visual {
@@ -394,13 +420,24 @@ fn blit_flower_fallback(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
     // Use a simple centered label if we can find the embedded UI font.
     if let Some(font_data) = crate::asset_path::get("NotoSansSC-Regular.ttf")
         .or_else(|| crate::asset_path::get("font.ttf"))
-    {
-        if let Ok(font) =
+        && let Ok(font) =
             fontdue::Font::from_bytes(font_data.data.as_ref(), fontdue::FontSettings::default())
-        {
-            let band = rasterize_label(&font, label, dst_w, dst_h);
-            blit_tinted(&band, dst_w, dst_h, dst, dst_w, 0, 0, color);
-        }
+    {
+        let band = rasterize_label(&font, label, dst_w, dst_h);
+        blit_tinted(
+            TintedSrc {
+                pixels: &band,
+                width: dst_w,
+                height: dst_h,
+            },
+            TintedDst {
+                pixels: dst,
+                width: dst_w,
+                x: 0,
+                y: 0,
+            },
+            color,
+        );
     }
 }
 
@@ -438,26 +475,45 @@ pub fn rasterize_tablet_label_decal(
         text,
         inner_w,
         inner_h,
-        None,
-        LabelAlign::Center,
-        0.0,
+        LabelStyle {
+            font_px: None,
+            align: LabelAlign::Center,
+            scroll_offset: 0.0,
+        },
     );
 
     // Soft carved-shadow pass: a slightly darker tint, offset 1px down/right,
     // so the engraving keeps shape under directional lighting.
     let shadow = [ink[0] * 0.25, ink[1] * 0.22, ink[2] * 0.20, ink[3] * 0.85];
     blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        width,
-        pad_x + 1,
-        pad_y + 1,
+        TintedSrc {
+            pixels: &band,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width,
+            x: pad_x + 1,
+            y: pad_y + 1,
+        },
         shadow,
     );
     // Main ink pass.
-    blit_tinted(&band, inner_w, inner_h, &mut rgba, width, pad_x, pad_y, ink);
+    blit_tinted(
+        TintedSrc {
+            pixels: &band,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width,
+            x: pad_x,
+            y: pad_y,
+        },
+        ink,
+    );
     rgba
 }
 
@@ -499,28 +555,47 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 
     // Drop shadow (offset down-right so the recess reads from above).
     blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        width,
-        pad_x + 2,
-        pad_y + 2,
+        TintedSrc {
+            pixels: &band,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width,
+            x: pad_x + 2,
+            y: pad_y + 2,
+        },
         gold_shadow,
     );
     // Gold body.
     blit_tinted(
-        &band, inner_w, inner_h, &mut rgba, width, pad_x, pad_y, gold_base,
+        TintedSrc {
+            pixels: &band,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width,
+            x: pad_x,
+            y: pad_y,
+        },
+        gold_base,
     );
     // Bright highlight offset up-left so the leaf catches the light.
     blit_tinted(
-        &band,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        width,
-        pad_x.saturating_sub(1),
-        pad_y.saturating_sub(1),
+        TintedSrc {
+            pixels: &band,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width,
+            x: pad_x.saturating_sub(1),
+            y: pad_y.saturating_sub(1),
+        },
         gold_highlight,
     );
     rgba
@@ -597,26 +672,45 @@ pub fn rasterize_plaque_decal(
     let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92]; // burnt umber recess
 
     blit_tinted(
-        &block,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x + 3,
-        pad_y + 3,
+        TintedSrc {
+            pixels: &block,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width: w,
+            x: pad_x + 3,
+            y: pad_y + 3,
+        },
         gold_shadow,
     );
     blit_tinted(
-        &block, inner_w, inner_h, &mut rgba, w, pad_x, pad_y, gold_base,
+        TintedSrc {
+            pixels: &block,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width: w,
+            x: pad_x,
+            y: pad_y,
+        },
+        gold_base,
     );
     blit_tinted(
-        &block,
-        inner_w,
-        inner_h,
-        &mut rgba,
-        w,
-        pad_x.saturating_sub(1),
-        pad_y.saturating_sub(1),
+        TintedSrc {
+            pixels: &block,
+            width: inner_w,
+            height: inner_h,
+        },
+        TintedDst {
+            pixels: &mut rgba,
+            width: w,
+            x: pad_x.saturating_sub(1),
+            y: pad_y.saturating_sub(1),
+        },
         gold_highlight,
     );
     rgba
@@ -727,109 +821,6 @@ fn advance_width(
 /// isn't ~landscape — see the call site in `wgpu_renderer.rs`.
 pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
 
-/// Per-cell dimensions of the cabinet's 6-label decal strip. Each cell
-/// is a vertically-tall rectangle (matches the cabinet face aspect: tall
-/// hex faces). The strip is `CABINET_DECAL_CELL_W * 6` wide × `_H` tall.
-pub const CABINET_DECAL_CELL_W: u32 = 256;
-pub const CABINET_DECAL_CELL_H: u32 = 768;
-
-/// Rasterise a horizontal 6-cell decal strip with one tab name per cell.
-///
-/// Each cell renders the corresponding `labels[i]` in gilded letters
-/// against a transparent background, so the lit-mesh material's wood
-/// shows through the cell's empty regions and only the engraved glyphs
-/// tint the wood. The cabinet mesh's side-face UVs are laid out so face
-/// `i` samples `[i/6, (i+1)/6]` × `[0, 1]` of this strip.
-///
-/// UV `[0, 0]` (the top-left corner) is left transparent so cap, base,
-/// and groove geometry — which all sample that corner — render as plain
-/// wood with no decal contribution.
-pub fn rasterize_cabinet_strip_decal(
-    labels: [&str; 6],
-    ui_font: Option<&fontdue::Font>,
-) -> Vec<u8> {
-    let cell_w = CABINET_DECAL_CELL_W;
-    let cell_h = CABINET_DECAL_CELL_H;
-    let strip_w = cell_w * 6;
-    let mut rgba = vec![0u8; (strip_w * cell_h * 4) as usize];
-    let Some(font) = ui_font else {
-        return rgba;
-    };
-
-    // Per-cell rasterisation. Use the same gilded three-pass treatment
-    // (umber drop, gold body, champagne highlight) as the plaque decal
-    // so the engraving reads consistently with other catalogued labels.
-    // Glyphs are oriented so the text reads upright when the cabinet
-    // is standing on the table — the strip's V axis runs from cabinet
-    // top (V=0) down to cabinet bottom (V=1).
-    let pad_x = (cell_w as f32 * 0.10) as u32;
-    let pad_y = (cell_h as f32 * 0.06) as u32;
-    let inner_w = cell_w.saturating_sub(pad_x * 2).max(1);
-    let inner_h = cell_h.saturating_sub(pad_y * 2).max(1);
-
-    let gold_base = [0.92_f32, 0.74, 0.28, 1.0];
-    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0];
-    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92];
-
-    for (cell_idx, label) in labels.iter().enumerate() {
-        if label.trim().is_empty() {
-            continue;
-        }
-        // Pick the largest font size whose single-line render fits the
-        // cell's inner area. Tab names are short so we can be aggressive.
-        let (chosen_px, chosen_lines) =
-            fit_plaque_text(font, None, label, inner_w as f32, inner_h as f32);
-        let line_refs: Vec<&str> = chosen_lines.iter().map(|s| s.as_str()).collect();
-        let block = rasterize_block(
-            font,
-            None,
-            &line_refs,
-            inner_w,
-            inner_h,
-            Some(chosen_px),
-            LabelAlign::Center,
-        );
-
-        let cell_x_origin = cell_idx as u32 * cell_w + pad_x;
-        let cell_y_origin = pad_y;
-
-        // Three passes: umber shadow offset down-right, gold body,
-        // champagne highlight offset up-left.
-        blit_tinted(
-            &block,
-            inner_w,
-            inner_h,
-            &mut rgba,
-            strip_w,
-            cell_x_origin + 3,
-            cell_y_origin + 3,
-            gold_shadow,
-        );
-        blit_tinted(
-            &block,
-            inner_w,
-            inner_h,
-            &mut rgba,
-            strip_w,
-            cell_x_origin,
-            cell_y_origin,
-            gold_base,
-        );
-        blit_tinted(
-            &block,
-            inner_w,
-            inner_h,
-            &mut rgba,
-            strip_w,
-            cell_x_origin.saturating_sub(1),
-            cell_y_origin.saturating_sub(1),
-            gold_highlight,
-        );
-    }
-
-    rgba
-}
-
 /// Measure how tall a plaque needs to be to fit `text` at `font_px`, wrapping
 /// at `inner_w` pixels. Returns `(line_count, line_height_px)` — multiply and
 /// add the scene's chosen vertical padding to get the full plaque pixel height.
@@ -888,8 +879,34 @@ pub fn rasterize_ofuda_decal(
     let shadow = [0.55_f32, 0.30, 0.10, 0.55];
 
     let stamp = |band: &[u8], band_h: u32, y_off: u32, rgba: &mut Vec<u8>| {
-        blit_tinted(band, inner_w, band_h, rgba, w, pad_x + 2, y_off + 2, shadow);
-        blit_tinted(band, inner_w, band_h, rgba, w, pad_x, y_off, ink);
+        blit_tinted(
+            TintedSrc {
+                pixels: band,
+                width: inner_w,
+                height: band_h,
+            },
+            TintedDst {
+                pixels: rgba,
+                width: w,
+                x: pad_x + 2,
+                y: y_off + 2,
+            },
+            shadow,
+        );
+        blit_tinted(
+            TintedSrc {
+                pixels: band,
+                width: inner_w,
+                height: band_h,
+            },
+            TintedDst {
+                pixels: rgba,
+                width: w,
+                x: pad_x,
+                y: y_off,
+            },
+            ink,
+        );
     };
 
     if rule.is_empty() {
@@ -1305,19 +1322,34 @@ fn hsv_to_rgb_u8(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     )
 }
 
+/// RGBA source buffer + dimensions for `blit_tinted`.
+struct TintedSrc<'a> {
+    pixels: &'a [u8],
+    width: u32,
+    height: u32,
+}
+
+/// RGBA destination buffer + row width + top-left blit offset.
+struct TintedDst<'a> {
+    pixels: &'a mut [u8],
+    width: u32,
+    x: u32,
+    y: u32,
+}
+
 /// Blit a single-channel-in-alpha RGBA source onto an RGBA destination at
-/// `(dst_x, dst_y)`, replacing every pixel's RGB with `tint` weighted by source
+/// `(dst.x, dst.y)`, replacing every pixel's RGB with `tint` weighted by source
 /// alpha. Used to recolour `rasterize_label`'s white-on-transparent output.
-fn blit_tinted(
-    src: &[u8],
-    sw: u32,
-    sh: u32,
-    dst: &mut [u8],
-    dw: u32,
-    dst_x: u32,
-    dst_y: u32,
-    tint: [f32; 4],
-) {
+fn blit_tinted(src: TintedSrc<'_>, dst: TintedDst<'_>, tint: [f32; 4]) {
+    let TintedSrc {
+        pixels: src,
+        width: sw,
+        height: sh,
+    } = src;
+    let dw = dst.width;
+    let dst_x = dst.x;
+    let dst_y = dst.y;
+    let dst = &mut *dst.pixels;
     let r = (tint[0] * 255.0) as u8;
     let g = (tint[1] * 255.0) as u8;
     let b = (tint[2] * 255.0) as u8;
@@ -1432,7 +1464,26 @@ pub fn rasterize_label_styled(
     font_px: Option<f32>,
     align: LabelAlign,
 ) -> Vec<u8> {
-    rasterize_label_styled_with_fallback(font, None, text, width, height, font_px, align, 0.0)
+    rasterize_label_styled_with_fallback(
+        font,
+        None,
+        text,
+        width,
+        height,
+        LabelStyle {
+            font_px,
+            align,
+            scroll_offset: 0.0,
+        },
+    )
+}
+
+/// Layout options for `rasterize_label_styled_with_fallback`: explicit font
+/// size (or auto-fit when `None`), alignment, and horizontal scroll offset.
+pub struct LabelStyle {
+    pub font_px: Option<f32>,
+    pub align: LabelAlign,
+    pub scroll_offset: f32,
 }
 
 /// Like [`rasterize_label_styled`] but with an optional emoji fallback font.
@@ -1443,10 +1494,13 @@ pub fn rasterize_label_styled_with_fallback(
     text: &str,
     width: u32,
     height: u32,
-    font_px: Option<f32>,
-    align: LabelAlign,
-    scroll_offset: f32,
+    style: LabelStyle,
 ) -> Vec<u8> {
+    let LabelStyle {
+        font_px,
+        align,
+        scroll_offset,
+    } = style;
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
     if lines.len() > 1 {
@@ -1616,11 +1670,13 @@ fn blit_line(
             let glyph_left = (cx + g.metrics.xmin as f32) as i32;
             let glyph_top = (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
             blit_glyph(
-                &g.bitmap,
-                g.metrics.width,
-                g.metrics.height,
-                glyph_left,
-                glyph_top,
+                GlyphSrc {
+                    bitmap: &g.bitmap,
+                    gw: g.metrics.width,
+                    gh: g.metrics.height,
+                    left: glyph_left,
+                    top: glyph_top,
+                },
                 rgba,
                 width,
                 height,
@@ -1644,11 +1700,13 @@ fn blit_line_refs(
             let glyph_left = (cx + g.metrics.xmin as f32) as i32;
             let glyph_top = (baseline_y - (g.metrics.ymin as f32 + g.metrics.height as f32)) as i32;
             blit_glyph(
-                g.bitmap,
-                g.metrics.width,
-                g.metrics.height,
-                glyph_left,
-                glyph_top,
+                GlyphSrc {
+                    bitmap: g.bitmap,
+                    gw: g.metrics.width,
+                    gh: g.metrics.height,
+                    left: glyph_left,
+                    top: glyph_top,
+                },
                 rgba,
                 width,
                 height,
@@ -1658,16 +1716,23 @@ fn blit_line_refs(
     }
 }
 
-fn blit_glyph(
-    bitmap: &[u8],
+/// Source glyph for `blit_glyph`: coverage bitmap plus its pixel extent.
+struct GlyphSrc<'a> {
+    bitmap: &'a [u8],
     gw: usize,
     gh: usize,
-    glyph_left: i32,
-    glyph_top: i32,
-    rgba: &mut [u8],
-    width: u32,
-    height: u32,
-) {
+    left: i32,
+    top: i32,
+}
+
+fn blit_glyph(src: GlyphSrc<'_>, rgba: &mut [u8], width: u32, height: u32) {
+    let GlyphSrc {
+        bitmap,
+        gw,
+        gh,
+        left: glyph_left,
+        top: glyph_top,
+    } = src;
     for row in 0..gh as i32 {
         for col in 0..gw as i32 {
             let px = glyph_left + col;
@@ -1809,15 +1874,6 @@ pub fn rasterize_decal(
             let _ = emoji_font;
             rasterize_ofuda_decal(title, rule, ui_font, width, height)
         }
-        DecalLayout::HexStrip => {
-            // Six cells split on '\n'; pad with empty strings to reach 6.
-            let mut parts: Vec<&str> = spec.text.split('\n').collect();
-            while parts.len() < 6 {
-                parts.push("");
-            }
-            let labels: [&str; 6] = [parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]];
-            rasterize_cabinet_strip_decal(labels, ui_font)
-        }
         DecalLayout::Fixed {
             width: fw,
             height: fh,
@@ -1833,9 +1889,7 @@ pub fn rasterize_decal(
             } else {
                 let ink = match spec.palette {
                     DecalPalette::GoldGilded => unreachable!(),
-                    DecalPalette::BoneInk => [0.42, 0.32, 0.18, 1.0],
                     DecalPalette::ParchmentInk => [0.18, 0.12, 0.08, 1.0],
-                    DecalPalette::MutedInk(rgba) => rgba,
                 };
                 rasterize_tablet_label_decal(&spec.text, ui_font, emoji_font, *fw, *fh, ink)
             }
@@ -1859,16 +1913,13 @@ pub fn decal_dimensions(
             let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
             (w, h)
         }
-        DecalLayout::TitleRule {
-            target_short_edge, ..
-        } => {
+        DecalLayout::TitleRule { target_short_edge } => {
             // Ofuda is authored landscape; short edge is height.
             let h = *target_short_edge;
             let face_aspect = (extents[0] / extents[1].max(1.0)).clamp(0.5, 12.0);
             let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
             (w, h)
         }
-        DecalLayout::HexStrip => (CABINET_DECAL_CELL_W * 6, CABINET_DECAL_CELL_H),
         DecalLayout::Fixed { width, height } => (*width, *height),
     }
 }

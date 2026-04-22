@@ -1,8 +1,8 @@
 //! End-of-tutorial summary shown after the onboarding finale.
 
 use crate::audio::SfxId;
+use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
-use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
@@ -83,19 +83,15 @@ impl SceneBehavior for TutorialSummaryScene {
         match action {
             Some(SummaryAction::MeldGuide) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                *ctx.overlay_request = Some(super::OverlayRequest::Push(Scene::MeldGuide(
-                    MeldGuideScene::new(true),
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
+                    Scene::MeldGuide(MeldGuideScene::new(true)),
                 )));
                 None
             }
             Some(SummaryAction::Continue) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                *ctx.run = RunState::new_demo();
-                ctx.run.apply_progression(ctx.progress);
                 let settings = persistence::load_settings();
-                ctx.run
-                    .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-                ctx.run.set_hints_enabled(settings.hints_enabled);
+                GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
                 Some(Scene::StartScreen(StartScreenScene::new()))
             }
             None => None,
@@ -248,11 +244,13 @@ impl SceneBehavior for TutorialSummaryScene {
                 &mut btn_quads,
                 &mut texts,
                 &mut junk_buttons,
-                item.rect,
-                label,
-                variant,
-                ButtonState::Rest,
-                UiAction::Confirm,
+                crate::ui::widget::ButtonSpec {
+                    rect: item.rect,
+                    label,
+                    variant,
+                    state: ButtonState::Rest,
+                    action: UiAction::Confirm,
+                },
             );
         }
         frame.quads(btn_quads);

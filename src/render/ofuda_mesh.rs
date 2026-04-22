@@ -8,7 +8,7 @@
 //! Local space spans `-0.5..+0.5` on each axis so a per-instance scale matrix
 //! sizes it via the `OfudaPlacement.extents`.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Half-thickness of the paper slab.
@@ -27,12 +27,7 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -0.5,
-        0.5,
-        -0.5,
-        0.5,
-        -HALF_Z,
-        HALF_Z,
+        Aabb::new(-0.5, 0.5, -0.5, 0.5, -HALF_Z, HALF_Z),
     );
 
     // The slab face we want the title/rule decal to appear on is +Z (the
@@ -54,11 +49,11 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     // tex.a)`, so alpha=0 leaves the paper albedo untouched. Mapping the
     // back face to the decal (even mirrored) bled through as reversed text
     // whenever camera pitch let the -Z face win the depth test.
-    for i in 0..16 {
-        vertices[i].uv = [0.0, 0.0];
+    for v in vertices.iter_mut().take(16) {
+        v.uv = [0.0, 0.0];
     }
-    for i in 20..24 {
-        vertices[i].uv = [0.0, 0.0];
+    for v in vertices.iter_mut().take(24).skip(20) {
+        v.uv = [0.0, 0.0];
     }
 
     // Brass eyelet centered at the top edge.
@@ -66,17 +61,19 @@ pub fn build_ofuda_mesh() -> MeshCpu {
     push_box(
         &mut vertices,
         &mut indices,
-        -EYELET_W * 0.5,
-        EYELET_W * 0.5,
-        0.5,
-        0.5 + EYELET_H,
-        -HALF_Z * 1.5,
-        HALF_Z * 1.5,
+        Aabb::new(
+            -EYELET_W * 0.5,
+            EYELET_W * 0.5,
+            0.5,
+            0.5 + EYELET_H,
+            -HALF_Z * 1.5,
+            HALF_Z * 1.5,
+        ),
     );
     // Eyelet samples the transparent corner so the title/rule decal stays
     // pinned to the paper face only.
-    for i in eyelet_base..vertices.len() {
-        vertices[i].uv = [0.0, 0.0];
+    for v in vertices.iter_mut().skip(eyelet_base) {
+        v.uv = [0.0, 0.0];
     }
 
     MeshCpu {

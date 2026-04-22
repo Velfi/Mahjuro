@@ -1,6 +1,23 @@
 use super::*;
 use crate::bot::reporting::human_readable_score;
 
+/// Categorize why a non-victory run ended, for balance-plot bucketing.
+/// Returns one of: "no-legal-hand", "only-unplayable", "only-no-score",
+/// "stuck-other", or "target-miss" (scoring failure without systemic block).
+fn classify_run_death_cause(s: &RunStats) -> &'static str {
+    if s.bot_issue_no_valid_hand > 0 {
+        "no-legal-hand"
+    } else if s.bot_issue_only_valid_unplayable > 0 {
+        "only-unplayable"
+    } else if s.bot_issue_only_valid_no_score > 0 {
+        "only-no-score"
+    } else if s.bot_issue_other_stuck > 0 {
+        "stuck-other"
+    } else {
+        "target-miss"
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStats {
     pub blinds_cleared: u32,
@@ -41,6 +58,8 @@ pub struct RunStats {
     pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
     pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
     pub cleared_by_slot: std::collections::BTreeMap<String, u32>,
+    pub boss_faced: std::collections::BTreeMap<String, u8>,
+    pub boss_beaten: std::collections::BTreeMap<String, u8>,
 }
 
 impl Default for RunStats {
@@ -84,6 +103,8 @@ impl Default for RunStats {
             bot_issues_by_boss: std::collections::BTreeMap::new(),
             overscore_by_slot: std::collections::BTreeMap::new(),
             cleared_by_slot: std::collections::BTreeMap::new(),
+            boss_faced: std::collections::BTreeMap::new(),
+            boss_beaten: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -131,6 +152,9 @@ pub struct AggregateStats {
     pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
     pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
     pub cleared_by_slot: std::collections::BTreeMap<String, u64>,
+    pub boss_faced: std::collections::BTreeMap<String, u32>,
+    pub boss_beaten: std::collections::BTreeMap<String, u32>,
+    pub deaths_by_ante_cause: std::collections::BTreeMap<String, u32>,
 }
 
 impl AggregateStats {
@@ -206,77 +230,16 @@ impl AggregateStats {
         for (slot, count) in &s.cleared_by_slot {
             *self.cleared_by_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn merge_in(&mut self, other: AggregateStats) {
-        self.runs += other.runs;
-        self.blinds_cleared_total += other.blinds_cleared_total;
-        self.antes_cleared_total += other.antes_cleared_total;
-        self.victories += other.victories;
-        self.max_ante_reached = self.max_ante_reached.max(other.max_ante_reached);
-        self.total_score += other.total_score;
-        self.total_plays += other.total_plays;
-        self.total_discards += other.total_discards;
-        self.total_strategic_discards += other.total_strategic_discards;
-        self.total_blinds_skipped += other.total_blinds_skipped;
-        self.total_relics_bought += other.total_relics_bought;
-        self.total_gold_spent += other.total_gold_spent;
-        self.total_final_gold += other.total_final_gold;
-        self.total_gold_from_clears += other.total_gold_from_clears;
-        self.total_gold_from_clear_base += other.total_gold_from_clear_base;
-        self.total_gold_from_unused_plays += other.total_gold_from_unused_plays;
-        self.total_gold_from_interest += other.total_gold_from_interest;
-        self.total_gold_from_clear_relics += other.total_gold_from_clear_relics;
-        self.total_gold_from_skip_tags += other.total_gold_from_skip_tags;
-        self.total_skip_tag_gold_value += other.total_skip_tag_gold_value;
-        self.total_target_score += other.total_target_score;
-        self.total_overscore += other.total_overscore;
-        self.peak_blind_score = self.peak_blind_score.max(other.peak_blind_score);
-        self.total_bot_issue_no_valid_hand += other.total_bot_issue_no_valid_hand;
-        self.total_bot_issue_only_valid_unplayable += other.total_bot_issue_only_valid_unplayable;
-        self.total_bot_issue_only_valid_no_score += other.total_bot_issue_only_valid_no_score;
-        self.total_bot_issue_other_stuck += other.total_bot_issue_other_stuck;
-        self.total_bot_issue_lost_with_available_lines +=
-            other.total_bot_issue_lost_with_available_lines;
-        for (reason, count) in other.bot_issues_by_reason {
-            *self.bot_issues_by_reason.entry(reason).or_insert(0) += count;
+        for boss in s.boss_faced.keys() {
+            *self.boss_faced.entry(boss.clone()).or_insert(0) += 1;
         }
-        for (ante, count) in other.deaths_by_ante {
-            *self.deaths_by_ante.entry(ante).or_insert(0) += count;
+        for boss in s.boss_beaten.keys() {
+            *self.boss_beaten.entry(boss.clone()).or_insert(0) += 1;
         }
-        for (blind, count) in other.deaths_by_blind {
-            *self.deaths_by_blind.entry(blind).or_insert(0) += count;
-        }
-        for (tag, count) in other.skipped_tags {
-            *self.skipped_tags.entry(tag).or_insert(0) += count;
-        }
-        for (name, count) in other.relics_picked {
-            *self.relics_picked.entry(name).or_insert(0) += count;
-        }
-        for (name, count) in other.relics_picked_victories {
-            *self.relics_picked_victories.entry(name).or_insert(0) += count;
-        }
-        for (name, count) in other.talismans_picked {
-            *self.talismans_picked.entry(name).or_insert(0) += count;
-        }
-        for (name, count) in other.zodiacs_picked {
-            *self.zodiacs_picked.entry(name).or_insert(0) += count;
-        }
-        for (name, count) in other.packs_picked {
-            *self.packs_picked.entry(name).or_insert(0) += count;
-        }
-        for (blind, count) in other.bot_issues_by_blind {
-            *self.bot_issues_by_blind.entry(blind).or_insert(0) += count;
-        }
-        for (boss, count) in other.bot_issues_by_boss {
-            *self.bot_issues_by_boss.entry(boss).or_insert(0) += count;
-        }
-        for (slot, overscore) in other.overscore_by_slot {
-            *self.overscore_by_slot.entry(slot).or_insert(0) += overscore;
-        }
-        for (slot, count) in other.cleared_by_slot {
-            *self.cleared_by_slot.entry(slot).or_insert(0) += count;
+        if !s.victory {
+            let cause = classify_run_death_cause(s);
+            let key = format!("{}|{}", s.died_on_ante, cause);
+            *self.deaths_by_ante_cause.entry(key).or_insert(0) += 1;
         }
     }
 

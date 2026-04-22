@@ -16,8 +16,6 @@ pub struct Vertex3dTex {
 pub struct LoadedPrimitive {
     pub vertices: Vec<Vertex3dTex>,
     pub indices: Vec<u32>,
-    /// glTF `baseColorFactor` (linear).
-    pub base_color_factor: [f32; 4],
     /// Decoded RGBA8, row-major.
     pub albedo_rgba: Option<(Vec<u8>, u32, u32)>,
 }
@@ -195,18 +193,17 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
             .material()
             .pbr_metallic_roughness()
             .base_color_texture()
+            && let Some(xform) = tex_info.texture_transform()
         {
-            if let Some(xform) = tex_info.texture_transform() {
-                let [ox, oy] = xform.offset();
-                let [sx, sy] = xform.scale();
-                let r = xform.rotation();
-                let (sin_r, cos_r) = r.sin_cos();
-                for uv in &mut uvs {
-                    let u = uv[0];
-                    let v = uv[1];
-                    uv[0] = u * sx * cos_r - v * sy * sin_r + ox;
-                    uv[1] = u * sx * sin_r + v * sy * cos_r + oy;
-                }
+            let [ox, oy] = xform.offset();
+            let [sx, sy] = xform.scale();
+            let r = xform.rotation();
+            let (sin_r, cos_r) = r.sin_cos();
+            for uv in &mut uvs {
+                let u = uv[0];
+                let v = uv[1];
+                uv[0] = u * sx * cos_r - v * sy * sin_r + ox;
+                uv[1] = u * sx * sin_r + v * sy * cos_r + oy;
             }
         }
 
@@ -234,7 +231,6 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
         };
 
         let pbr = primitive.material().pbr_metallic_roughness();
-        let base_color_factor = pbr.base_color_factor();
 
         let albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
             let img_index = tex_info.texture().source().index();
@@ -251,7 +247,6 @@ pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
         primitives.push(LoadedPrimitive {
             vertices,
             indices,
-            base_color_factor,
             albedo_rgba,
         });
     }

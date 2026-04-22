@@ -44,6 +44,7 @@ use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
 use scenes::shop::{SHOP_DRAG_DROP_ID, ShopScene};
 use scenes::splash::SplashScene;
+use scenes::transition_playground::TransitionPlaygroundScene;
 use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::tutorial_summary::TutorialSummaryScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
@@ -60,7 +61,7 @@ use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use main_arrange::{
-    apply_arrange_to_layout, arrange_hierarchy_flat, collect_committed_rotations,
+    ArrangeInput, apply_arrange_to_layout, arrange_hierarchy_flat, collect_committed_rotations,
     reset_arrange_to_default, sample_arrange_placement,
 };
 use main_bot_graph::{
@@ -198,6 +199,9 @@ enum TransitionKind {
     Quick,
     /// Dramatic shooting-star cascade (~1.7 s total before extra score steps).
     ShootingStarCascade,
+    /// Alternating columns of tile-like panels interlock over the screen,
+    /// pause briefly while the scene swaps, then rush back off.
+    TileTeeth,
 }
 
 struct App {
@@ -244,8 +248,6 @@ struct App {
     pending_post_game_over_modals: Vec<Modal>,
     gfx: RenderSettings,
     debug: DebugState,
-    #[allow(dead_code)]
-    prev_cursor: (f32, f32),
     tooltips: TooltipState,
     cascade_tuning: CascadeTuning,
     shop_smoke_tuning: ShopSmokeTuning,
@@ -318,6 +320,7 @@ impl App {
     ///   - If it's app-owned: add it to this OR-chain.
     ///   - If it's scene-owned: report it from the scene's
     ///     `has_blocking_overlay()` method.
+    ///
     /// No per-call-site changes are needed — the gates pick it up
     /// automatically.
     fn modal_overlay_active(&self) -> bool {
@@ -427,7 +430,6 @@ impl App {
                 ui_scale: settings.ui_scale,
             },
             debug: DebugState::new(),
-            prev_cursor: (0.0, 0.0),
             tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
             shop_smoke_tuning: persistence::load_tuning_override::<ShopSmokeTuning>(
@@ -576,17 +578,16 @@ impl App {
                 self.run.advance_round(&mut self.bus);
 
                 // First-encounter tooltip: gold payout.
-                if let Some(ref mut tut) = self.run.tutorial {
-                    if tut.is_active()
-                        && payout.total > 0
-                        && tut.encounter(crate::game::tutorial::FirstEncounter::GoldPayout)
-                    {
-                        self.modals.push(Modal::new(
-                            crate::game::tutorial::FirstEncounter::GoldPayout.title(),
-                            crate::game::tutorial::FirstEncounter::GoldPayout.message(),
-                            ModalTheme::Success,
-                        ));
-                    }
+                if let Some(ref mut tut) = self.run.tutorial
+                    && tut.is_active()
+                    && payout.total > 0
+                    && tut.encounter(crate::game::tutorial::FirstEncounter::GoldPayout)
+                {
+                    self.modals.push(Modal::new(
+                        crate::game::tutorial::FirstEncounter::GoldPayout.title(),
+                        crate::game::tutorial::FirstEncounter::GoldPayout.message(),
+                        ModalTheme::Success,
+                    ));
                 }
 
                 // After Lesson 5 (Chips x Mult), grant a free relic to
@@ -666,7 +667,7 @@ impl App {
                 });
                 self.transition_alpha = 1.0;
             }
-            GameEvent::GameOver { reason, .. } => {
+            GameEvent::GameOver { reason } => {
                 if self.run.onboarding_active() {
                     let round_score = self.run.round_score;
                     let target_score = self.run.target_score;
@@ -731,10 +732,10 @@ impl App {
 
                 // Mark tutorial as completed if the player reached graduation
                 // (or finished the tutorial run regardless of outcome).
-                if let Some(ref tutorial) = self.run.tutorial {
-                    if tutorial.finished || tutorial.current_lesson >= 8 {
-                        self.progress.tutorial_completed = true;
-                    }
+                if let Some(ref tutorial) = self.run.tutorial
+                    && (tutorial.finished || tutorial.current_lesson >= 8)
+                {
+                    self.progress.tutorial_completed = true;
                 }
                 self.progress.runs_completed += 1;
                 self.progress.record_score(self.run.round_score);
@@ -855,7 +856,6 @@ impl App {
             debug_visibility: scenes::DebugVisibility {
                 hide_candles: self.debug.hide_candles,
                 hide_blind_plaque: self.debug.hide_blind_plaque,
-                hide_scoring_placard: self.debug.hide_scoring_placard,
             },
             ui_scale: self.gfx.ui_scale,
             modal_active,
@@ -950,20 +950,6 @@ impl App {
                 }
             })
             .collect();
-        let scene_relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = frame.cmds
-            [..scene_cmds_end]
-            .iter()
-            .filter_map(|c| {
-                if let crate::render::draw_cmd::DrawCmd::RelicIcon(i) = c {
-                    Some(crate::render::wgpu_renderer::RelicIcon {
-                        rect: i.rect,
-                        relic_id: i.relic_id,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
         let scene_glossary_anchors: Vec<([f32; 4], &'static str)> = frame.cmds[..scene_cmds_end]
             .iter()
             .filter_map(|c| {
@@ -985,14 +971,26 @@ impl App {
         frame.apply_alpha(alpha);
 
         // Overlay the shooting-star cascade effect during dramatic transitions.
-        if self.transition_kind == TransitionKind::ShootingStarCascade
-            && self.transition_timer > 0.0
-        {
-            frame.transition_progress = self.transition_timer;
-            frame.shooting_star_cascade();
+        let size = win.inner_size();
+
+        if self.transition_timer > 0.0 {
+            match self.transition_kind {
+                TransitionKind::ShootingStarCascade => {
+                    frame.transition_progress = self.transition_timer;
+                    frame.shooting_star_cascade();
+                }
+                TransitionKind::TileTeeth => {
+                    crate::render::transition_fx::push_overlay_transition(
+                        &mut frame,
+                        crate::render::transition_fx::OverlayTransitionKind::TileTeeth,
+                        self.transition_timer,
+                        (size.width as f32, size.height as f32),
+                    );
+                }
+                TransitionKind::Quick => {}
+            }
         }
 
-        let size = win.inner_size();
         self.modals.update();
         if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_objects)) = self
             .modals
@@ -1096,13 +1094,17 @@ impl App {
             self.tooltips.update_and_draw_into(
                 &mut frame,
                 cursor,
-                &scene_text_labels,
-                &btn_rects,
-                &scene_relic_icons,
-                &scene_glossary_anchors,
-                ww,
-                wh,
-                self.gfx.ui_scale,
+                crate::ui::tooltip::TooltipSources {
+                    base_labels: &scene_text_labels,
+                    button_rects: &btn_rects,
+                    relic_icons: &[],
+                    glossary_anchors: &scene_glossary_anchors,
+                },
+                crate::ui::layout::ViewportCtx {
+                    window_w: ww,
+                    window_h: wh,
+                    ui_scale: self.gfx.ui_scale,
+                },
                 owns_fortunes_favor,
             );
         } else {
@@ -1218,13 +1220,9 @@ impl App {
         let any_hide = self.debug.hide_tiles || self.debug.hide_inventory;
         if any_hide {
             let hide_tiles = self.debug.hide_tiles;
-            let hide_inv = self.debug.hide_inventory;
             frame.cmds.retain(|c| {
                 use crate::render::draw_cmd::DrawCmd;
                 if hide_tiles && matches!(c, DrawCmd::ShowcaseTileBatch(_)) {
-                    return false;
-                }
-                if hide_inv && matches!(c, DrawCmd::RelicIcon(_)) {
                     return false;
                 }
                 true
@@ -1297,16 +1295,18 @@ impl App {
 
         if let Err(e) = renderer.render(
             &frame,
-            self.gfx.smoke_quality,
-            self.gfx.smoke_amount,
-            self.gfx.effects_quality,
-            self.gfx.tile_preset,
-            active_material,
-            draw_settle_speed,
-            sort_settle_speed,
-            self.gfx.gamma,
-            self.gfx.shadows_enabled,
-            self.gfx.ssr_enabled,
+            crate::render::wgpu_renderer::RenderSettings {
+                smoke_quality: self.gfx.smoke_quality,
+                smoke_amount: self.gfx.smoke_amount,
+                effects_quality: self.gfx.effects_quality,
+                tile_preset: self.gfx.tile_preset,
+                tile_material: active_material,
+                draw_settle_speed,
+                sort_settle_speed,
+                gamma: self.gfx.gamma,
+                shadows_enabled: self.gfx.shadows_enabled,
+                ssr_enabled: self.gfx.ssr_enabled,
+            },
         ) {
             log::error!("render: {e:?}");
         }
@@ -1504,6 +1504,7 @@ impl App {
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TileLiteracy(_) => "TileLiteracy",
+                        Scene::TransitionPlayground(_) => "TransitionPlayground",
                         Scene::YakuJournal(_) => "YakuJournal",
                         Scene::ZodiacCelebration(_) => "ZodiacCelebration",
                     };
@@ -1538,6 +1539,21 @@ impl App {
                 self.overlay_stack
                     .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
                 log::info!("[Debug] Opened material viewer");
+            }
+            DebugAction::OpenTransitionPlayground => {
+                self.overlay_stack.push(Scene::TransitionPlayground(
+                    TransitionPlaygroundScene::new(true),
+                ));
+                log::info!("[Debug] Opened transition playground");
+            }
+            DebugAction::OpenAbout => {
+                let body = format!(
+                    "Mahjuro v{}\nA candlelit mahjong roguelike prototype.\n\nLocal icon asset: icon.png",
+                    env!("CARGO_PKG_VERSION")
+                );
+                self.modals
+                    .push(Modal::new("About Mahjuro", body, ModalTheme::Info));
+                log::info!("[Debug] Opened About modal");
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
@@ -1608,6 +1624,8 @@ impl ApplicationHandler for App {
 
         let t0 = Instant::now();
         self.input = Some(InputState::new().expect("input"));
+        // Keep the debug menu wrapper alive for the full app lifetime.
+        // Dropping it invalidates the installed native menubar on macOS.
         self.debug.menu = Some(DebugMenuBar::new(&window));
         log::info!("input + debug menu init in {:?}", t0.elapsed());
 
@@ -1666,13 +1684,13 @@ impl ApplicationHandler for App {
                 let mut yaku_stinger_index: u32 = 0;
                 for ev in self.bus.drain() {
                     match ev {
-                        GameEvent::TileDrawn(_) => {
+                        GameEvent::TileDrawn => {
                             self.audio.play_sfx(audio::SfxId::TilePlace);
                         }
-                        GameEvent::TileDiscarded { .. } => {
+                        GameEvent::TileDiscarded => {
                             self.audio.play_sfx(audio::SfxId::TileDiscard);
                         }
-                        GameEvent::ScoreUpdated(_) => {
+                        GameEvent::ScoreUpdated => {
                             self.audio.play_sfx(audio::SfxId::ScoreReveal);
                         }
                         GameEvent::ScoreStepRevealed { index } => {
@@ -1727,7 +1745,7 @@ impl ApplicationHandler for App {
                         GameEvent::StructureCommitted => {
                             self.audio.play_sfx(audio::SfxId::StructureCommit);
                         }
-                        GameEvent::TilesDestroyed { .. } => {
+                        GameEvent::TilesDestroyed => {
                             self.audio.play_sfx(audio::SfxId::TilesDestroyed);
                         }
                         GameEvent::InvalidAction => {
@@ -1758,13 +1776,17 @@ impl ApplicationHandler for App {
                                     "First Full Hand!",
                                     "4 melds + 1 pair \u{2014} the ultimate yaku. Huge multiplier!",
                                 ),
+                                TutorialMilestone::FirstYakuhai => (
+                                    "First Yakuhai!",
+                                    "A wind or dragon triplet fired a yaku bonus \u{2014} honor tiles reward bigger mult than suit melds.",
+                                ),
                                 TutorialMilestone::FirstShopBuy => (
                                     "First Relic!",
                                     "Relics power up your scoring for the rest of the run.",
                                 ),
-                                TutorialMilestone::FirstTrigger => (
-                                    "First Trigger!",
-                                    "Structure cashed in \u{2014} watch the chip and mult piles build, then bank more melds to multiply your score!",
+                                TutorialMilestone::FirstBossCleared => (
+                                    "Boss Defeated!",
+                                    "You cleared your first boss blind. Antes rise from here \u{2014} each one introduces tougher bosses and bigger targets.",
                                 ),
                             };
                             let win_size = self
@@ -1835,7 +1857,6 @@ impl ApplicationHandler for App {
                                 .schedule_sfx(audio::SfxId::for_yaku(yk), now + offset);
                             yaku_stinger_index += 1;
                         }
-                        other => log::info!("event: {other:?}"),
                     }
                 }
 
@@ -1937,10 +1958,8 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                if hide_cursor {
-                    if let Some(w) = self.window.as_ref() {
-                        w.set_cursor_visible(false);
-                    }
+                if hide_cursor && let Some(w) = self.window.as_ref() {
+                    w.set_cursor_visible(false);
                 }
 
                 // 3b. If the tuning overlay is open, intercept input.
@@ -2164,7 +2183,7 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .map(|i| i.last_cursor)
                     .unwrap_or((0.0, 0.0));
-                let loading_done = self.renderer.as_ref().map_or(true, |r| !r.is_loading());
+                let loading_done = self.renderer.as_ref().is_none_or(|r| !r.is_loading());
                 let picked_shop_object = self
                     .renderer
                     .as_ref()
@@ -2228,7 +2247,7 @@ impl ApplicationHandler for App {
                 // Push/Pop operate on the overlay stack; they never fade.
                 match overlay_request {
                     Some(scenes::OverlayRequest::Push(s)) => {
-                        self.overlay_stack.push(s);
+                        self.overlay_stack.push(*s);
                     }
                     Some(scenes::OverlayRequest::Pop) => {
                         let _ = self.overlay_stack.pop();
@@ -2245,6 +2264,11 @@ impl ApplicationHandler for App {
                             | (Scene::TileSelect(_), Scene::Shop(_))
                             | (Scene::TileSelect(_), Scene::TutorialCampaign(_))
                     );
+                    let use_tile_teeth = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::StartScreen(_), Scene::Collection(_))
+                            | (Scene::Collection(_), Scene::StartScreen(_))
+                    );
                     // Restart from the pause menu is the only path from
                     // Gameplay straight back to Shop; give it a deliberate
                     // fade-to-black instead of the snappy default.
@@ -2256,6 +2280,9 @@ impl ApplicationHandler for App {
                         self.transition_kind = TransitionKind::ShootingStarCascade;
                         self.transition_speed = 0.012;
                         self.audio.play_sfx(audio::SfxId::StarShimmer);
+                    } else if use_tile_teeth {
+                        self.transition_kind = TransitionKind::TileTeeth;
+                        self.transition_speed = 0.035;
                     } else if slow_fade {
                         self.transition_kind = TransitionKind::Quick;
                         self.transition_speed = 0.025;
@@ -2355,10 +2382,8 @@ impl ApplicationHandler for App {
                         Scene::Gameplay(g) => !g.is_animating(),
                         _ => true,
                     };
-                    if cascade_done {
-                        if let Some(ev) = self.deferred_round_end.take() {
-                            self.handle_round_end_event(ev);
-                        }
+                    if cascade_done && let Some(ev) = self.deferred_round_end.take() {
+                        self.handle_round_end_event(ev);
                     }
                 }
 
@@ -2414,10 +2439,8 @@ impl ApplicationHandler for App {
                             if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                                 self.resume_scene = scene;
                             }
-                            if clear_smoke {
-                                if let Some(r) = self.renderer.as_mut() {
-                                    r.clear_smoke();
-                                }
+                            if clear_smoke && let Some(r) = self.renderer.as_mut() {
+                                r.clear_smoke();
                             }
                             if let Some(input) = self.input.as_mut() {
                                 input.focus_slot = 0;
@@ -2458,13 +2481,13 @@ impl ApplicationHandler for App {
                 // the PNG synchronously during that draw (between submit
                 // and present). After it returns, the file is on disk.
                 let mut should_capture_this_frame = false;
-                if let Some(shot) = self.headless_screenshot.as_ref() {
-                    if shot.frames_remaining == 0 {
-                        should_capture_this_frame = true;
-                        let path = shot.output.clone();
-                        if let Some(r) = self.renderer.as_ref() {
-                            r.queue_screenshot(path);
-                        }
+                if let Some(shot) = self.headless_screenshot.as_ref()
+                    && shot.frames_remaining == 0
+                {
+                    should_capture_this_frame = true;
+                    let path = shot.output.clone();
+                    if let Some(r) = self.renderer.as_ref() {
+                        r.queue_screenshot(path);
                     }
                 }
 
@@ -2708,43 +2731,43 @@ impl ApplicationHandler for App {
                         // Shop drag-to-sell: if a drag started on an owned item and the
                         // cursor moved far enough and is now over the sell tray, inject
                         // a drop event so the shop can complete the sale.
-                        if let Some((_, start)) = self.shop_drag_start.take() {
-                            if matches!(&self.scene, Scene::Shop(_)) {
-                                let dx = cursor.0 - start.0;
-                                let dy = cursor.1 - start.1;
-                                let dist = (dx * dx + dy * dy).sqrt();
-                                if dist > 10.0 {
-                                    if let Some(renderer) = self.renderer.as_ref() {
-                                        const SELL_TRAY_PICK: u32 = 8; // PICK_SELL_TRAY
-                                        let over_sell_tray = matches!(
-                                            renderer.pick_shop_object(cursor.0, cursor.1),
-                                            Some(ShopHit::Dish(id)) if id == SELL_TRAY_PICK
-                                        );
-                                        if over_sell_tray {
-                                            self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
-                                        }
-                                    }
+                        if let Some((_, start)) = self.shop_drag_start.take()
+                            && matches!(&self.scene, Scene::Shop(_))
+                        {
+                            let dx = cursor.0 - start.0;
+                            let dy = cursor.1 - start.1;
+                            let dist = (dx * dx + dy * dy).sqrt();
+                            if dist > 10.0
+                                && let Some(renderer) = self.renderer.as_ref()
+                            {
+                                const SELL_TRAY_PICK: u32 = 8; // PICK_SELL_TRAY
+                                let over_sell_tray = matches!(
+                                    renderer.pick_shop_object(cursor.0, cursor.1),
+                                    Some(ShopHit::Dish(id)) if id == SELL_TRAY_PICK
+                                );
+                                if over_sell_tray {
+                                    self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
                                 }
                             }
                         }
                         // End drag — swap relics if dropped on a different slot.
                         // Require minimum drag distance to avoid accidental swaps.
                         let dropped_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
-                        if let Some(input) = self.input.as_mut() {
-                            if let Some(drag) = input.drag.take() {
-                                let dx = cursor.0 - drag.start_pos.0;
-                                let dy = cursor.1 - drag.start_pos.1;
-                                let dist = (dx * dx + dy * dy).sqrt();
-                                if dist > 10.0 {
-                                    match drag.subject {
-                                        ui::input::DragSubject::Relic => {
-                                            if let Some(target_slot) = dropped_relic_slot {
-                                                if target_slot != drag.from_slot {
-                                                    self.run
-                                                        .relics
-                                                        .swap_relics(drag.from_slot, target_slot);
-                                                }
-                                            }
+                        if let Some(input) = self.input.as_mut()
+                            && let Some(drag) = input.drag.take()
+                        {
+                            let dx = cursor.0 - drag.start_pos.0;
+                            let dy = cursor.1 - drag.start_pos.1;
+                            let dist = (dx * dx + dy * dy).sqrt();
+                            if dist > 10.0 {
+                                match drag.subject {
+                                    ui::input::DragSubject::Relic => {
+                                        if let Some(target_slot) = dropped_relic_slot
+                                            && target_slot != drag.from_slot
+                                        {
+                                            self.run
+                                                .relics
+                                                .swap_relics(drag.from_slot, target_slot);
                                         }
                                     }
                                 }
@@ -2826,15 +2849,15 @@ impl ApplicationHandler for App {
                 } else if event.state == ElementState::Pressed {
                     // Arrange mode: Escape while waiting for a click exits the
                     // mode entirely.
-                    if matches!(self.debug.arrange_mode, Some(None)) {
-                        if event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
-                            self.debug.arrange_mode = None;
-                            log::info!("[Arrange] Mode exited");
-                            if let Some(w) = self.window.as_ref() {
-                                w.request_redraw();
-                            }
-                            return;
+                    if matches!(self.debug.arrange_mode, Some(None))
+                        && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                    {
+                        self.debug.arrange_mode = None;
+                        log::info!("[Arrange] Mode exited");
+                        if let Some(w) = self.window.as_ref() {
+                            w.request_redraw();
                         }
+                        return;
                     }
 
                     // Arrange mode: Tab / Shift+Tab cycles through the active
@@ -3021,12 +3044,14 @@ impl ApplicationHandler for App {
                                     // Apply deltas to the scene's positions struct and save to JSON.
                                     apply_arrange_to_layout(
                                         &state.object_name,
-                                        state.delta_px,
-                                        state.delta_py,
-                                        state.delta_lift,
-                                        state.delta_rz_deg,
-                                        state.delta_rx_deg,
-                                        state.delta_ry_deg,
+                                        ArrangeInput {
+                                            delta_px: state.delta_px,
+                                            delta_py: state.delta_py,
+                                            delta_lift: state.delta_lift,
+                                            delta_rx_deg: state.delta_rx_deg,
+                                            delta_ry_deg: state.delta_ry_deg,
+                                            delta_rz_deg: state.delta_rz_deg,
+                                        },
                                         ww,
                                         wh,
                                         &mut self.scene,
@@ -3142,25 +3167,24 @@ impl ApplicationHandler for App {
                     // material viewer pushdown scene. Mirrors the Debug menu
                     // entry so Linux (where muda has no non-GTK menu) and any
                     // other OS the menu doesn't reach still has access.
-                    if let PhysicalKey::Code(code) = event.physical_key {
-                        if code == KeyCode::KeyM
-                            && self.modifiers.shift_key()
-                            && (self.modifiers.control_key() || self.modifiers.super_key())
+                    if let PhysicalKey::Code(code) = event.physical_key
+                        && code == KeyCode::KeyM
+                        && self.modifiers.shift_key()
+                        && (self.modifiers.control_key() || self.modifiers.super_key())
+                    {
+                        if !self
+                            .overlay_stack
+                            .iter()
+                            .any(|s| matches!(s, Scene::MaterialViewer(_)))
                         {
-                            if !self
-                                .overlay_stack
-                                .iter()
-                                .any(|s| matches!(s, Scene::MaterialViewer(_)))
-                            {
-                                self.overlay_stack
-                                    .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
-                                log::info!("[Debug] Opened material viewer (keyboard shortcut)");
-                                if let Some(w) = self.window.as_ref() {
-                                    w.request_redraw();
-                                }
+                            self.overlay_stack
+                                .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
+                            log::info!("[Debug] Opened material viewer (keyboard shortcut)");
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
                             }
-                            return;
                         }
+                        return;
                     }
 
                     let mut v = Vec::new();
@@ -3171,10 +3195,8 @@ impl ApplicationHandler for App {
                         false
                     };
                     self.mouse_actions.extend(v);
-                    if mode_changed {
-                        if let Some(w) = self.window.as_ref() {
-                            w.set_cursor_visible(false);
-                        }
+                    if mode_changed && let Some(w) = self.window.as_ref() {
+                        w.set_cursor_visible(false);
                     }
                     if let Some(w) = self.window.as_ref() {
                         w.request_redraw();
@@ -3224,10 +3246,8 @@ impl ApplicationHandler for App {
             || splash_active
             || start_screen_active
             || !self.overlay_stack.is_empty();
-        if needs_redraw {
-            if let Some(w) = self.window.as_ref() {
-                w.request_redraw();
-            }
+        if needs_redraw && let Some(w) = self.window.as_ref() {
+            w.request_redraw();
         }
     }
 }
@@ -3408,7 +3428,6 @@ impl HeadlessApp {
             debug_visibility: scenes::DebugVisibility {
                 hide_candles: false,
                 hide_blind_plaque: false,
-                hide_scoring_placard: false,
             },
             ui_scale: self.gfx.ui_scale,
             modal_active: false,
@@ -3445,16 +3464,18 @@ impl HeadlessApp {
 
         if let Err(e) = self.renderer.render(
             &frame,
-            self.gfx.smoke_quality,
-            self.gfx.smoke_amount,
-            self.gfx.effects_quality,
-            self.gfx.tile_preset,
-            active_material,
-            8.0,
-            10.0,
-            self.gfx.gamma,
-            self.gfx.shadows_enabled,
-            self.gfx.ssr_enabled,
+            crate::render::wgpu_renderer::RenderSettings {
+                smoke_quality: self.gfx.smoke_quality,
+                smoke_amount: self.gfx.smoke_amount,
+                effects_quality: self.gfx.effects_quality,
+                tile_preset: self.gfx.tile_preset,
+                tile_material: active_material,
+                draw_settle_speed: 8.0,
+                sort_settle_speed: 10.0,
+                gamma: self.gfx.gamma,
+                shadows_enabled: self.gfx.shadows_enabled,
+                ssr_enabled: self.gfx.ssr_enabled,
+            },
         ) {
             log::error!("headless render: {e:?}");
         }
@@ -3591,10 +3612,15 @@ fn main() -> anyhow::Result<()> {
                 "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
                 "shop" => (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true),
                 "start_screen" => (Scene::StartScreen(scenes::StartScreenScene::new()), false),
+                "transition_playground" => (
+                    Scene::TransitionPlayground(scenes::TransitionPlaygroundScene::new(false)),
+                    false,
+                ),
                 other => {
                     anyhow::bail!(
                         "unsupported --scene '{other}' (supported: collection, \
-                        yaku_journal, gameplay, pick_blind, shop, start_screen)"
+                        yaku_journal, gameplay, pick_blind, shop, start_screen, \
+                        transition_playground)"
                     )
                 }
             };

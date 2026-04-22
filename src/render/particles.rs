@@ -26,7 +26,6 @@ impl ParticleSystem {
     }
 
     /// Emit a soft puff of small particles. Used for ambient feedback.
-    #[allow(dead_code)]
     pub fn emit(&mut self, x: f32, y: f32, count: usize, color: [f32; 4], lifetime: f32) {
         let mut rng = rand::rng();
         for _ in 0..count {
