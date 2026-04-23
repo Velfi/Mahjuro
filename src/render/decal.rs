@@ -9,6 +9,8 @@
 //! Mahjong block (e.g. Noto Emoji) at `assets/font.ttf` in the project root.
 
 use crate::core::tile::{Suit, Tile, TileEnhancement};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -131,32 +133,155 @@ fn tile_set_filename(tile: &Tile) -> Option<String> {
     }
 }
 
-/// Try to load and alpha-blend a tileset PNG decal onto `dst`.
-///
-/// Returns `true` if the asset was found and blitted, `false` otherwise so the
-/// caller can fall back to font rasterization.
+/// Cached, decoded atlas for a tileset: the full RGBA8 image plus a lookup
+/// from tile code ("B1", "EWind", …) to its (x, y) origin in atlas pixels.
+struct Atlas {
+    rgba: image::RgbaImage,
+    tile_w: u32,
+    tile_h: u32,
+    columns: u32,
+    origins: HashMap<String, (u32, u32)>,
+}
+
+fn atlas_cache() -> &'static Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Minimal parser for the fixed-schema atlas.toml our packer emits.
+/// Recognises: `image = "..."`, `tile_width = N`, `tile_height = N`,
+/// `columns = N`, and a `layout = [ "CODE", "CODE", … ]` block that may span
+/// multiple lines. Values outside this schema are ignored.
+fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
+    let mut tile_w: Option<u32> = None;
+    let mut tile_h: Option<u32> = None;
+    let mut columns: Option<u32> = None;
+    let mut layout: Vec<String> = Vec::new();
+
+    let mut in_layout = false;
+    for raw in src.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if in_layout {
+            for tok in line.split(',') {
+                let t = tok.trim().trim_matches(|c: char| c == ',' || c.is_whitespace());
+                if t == "]" || t.is_empty() {
+                    continue;
+                }
+                let t = t.trim_end_matches(']');
+                let code = t.trim_matches('"');
+                if !code.is_empty() {
+                    layout.push(code.to_string());
+                }
+            }
+            if line.contains(']') {
+                in_layout = false;
+            }
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim();
+            let val = v.trim();
+            match key {
+                "tile_width" => tile_w = val.parse().ok(),
+                "tile_height" => tile_h = val.parse().ok(),
+                "columns" => columns = val.parse().ok(),
+                "layout" => {
+                    // may be all on one line or continue over subsequent lines
+                    in_layout = true;
+                    // parse any codes on this same line after '['
+                    if let Some(rest) = val.strip_prefix('[') {
+                        for tok in rest.split(',') {
+                            let t = tok.trim().trim_end_matches(']');
+                            let code = t.trim_matches('"');
+                            if !code.is_empty() {
+                                layout.push(code.to_string());
+                            }
+                        }
+                        if rest.contains(']') {
+                            in_layout = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Some((tile_w?, tile_h?, columns?, layout))
+}
+
+/// Load+decode an atlas for `tile_set`, caching the result. Returns `None` if
+/// the set has no atlas.toml, the atlas PNG is missing, or either fails to
+/// parse. Subsequent calls for the same set are O(1).
+fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
+    let mut cache = atlas_cache().lock().ok()?;
+    if let Some(slot) = cache.get(tile_set) {
+        return slot.clone();
+    }
+    let result = decode_atlas(tile_set).map(std::sync::Arc::new);
+    if result.is_none() {
+        log::warn!("tileset '{tile_set}' has no loadable atlas (expected sets/{tile_set}/atlas.toml + atlas.png)");
+    }
+    cache.insert(tile_set.to_string(), result.clone());
+    result
+}
+
+fn decode_atlas(tile_set: &str) -> Option<Atlas> {
+    let toml_path = format!("sets/{tile_set}/atlas.toml");
+    let toml_file = crate::asset_path::get(&toml_path)?;
+    let toml_src = std::str::from_utf8(toml_file.data.as_ref()).ok()?;
+    let (tile_w, tile_h, columns, layout) = parse_atlas_toml(toml_src)?;
+    if tile_w == 0 || tile_h == 0 || columns == 0 {
+        return None;
+    }
+
+    let png_path = format!("sets/{tile_set}/atlas.png");
+    let png_file = crate::asset_path::get(&png_path)?;
+    let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_ref()))
+        .with_guessed_format()
+        .ok()?;
+    let img = decoder.decode().ok()?.to_rgba8();
+
+    let mut origins = HashMap::with_capacity(layout.len());
+    for (i, code) in layout.into_iter().enumerate() {
+        let col = (i as u32) % columns;
+        let row = (i as u32) / columns;
+        origins.insert(code, (col * tile_w, row * tile_h));
+    }
+    Some(Atlas {
+        rgba: img,
+        tile_w,
+        tile_h,
+        columns,
+        origins,
+    })
+}
+
+/// Try to blit a tile from the tileset's atlas onto `dst`, resizing to
+/// `dst_w × dst_h`. Returns `true` on success, `false` if the set has no atlas
+/// or this tile code isn't in the layout (caller falls back to font rasterization).
 fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set: &str) -> bool {
-    let Some(stem) = tile_set_filename(tile) else {
+    let Some(code) = tile_set_filename(tile) else {
         return false;
     };
-    let path = format!("sets/{tile_set}/{stem}.png");
-    let Some(file) = crate::asset_path::get(&path) else {
-        log::debug!("tileset decal not found: {path}; falling back to font rasterization");
+    let Some(atlas) = load_atlas(tile_set) else {
         return false;
     };
+    let Some(&(ox, oy)) = atlas.origins.get(&code) else {
+        log::debug!("tile code '{code}' missing from atlas '{tile_set}'");
+        return false;
+    };
+    let _ = atlas.columns; // kept in the struct for debugging / future packing
 
-    let Ok(decoder) =
-        image::ImageReader::new(std::io::Cursor::new(file.data.as_ref())).with_guessed_format()
-    else {
-        return false;
-    };
-    let Ok(img) = decoder.decode() else {
-        return false;
-    };
-    let img = img.resize_exact(dst_w, dst_h, image::imageops::FilterType::Lanczos3);
-    let img = img.to_rgba8();
+    // Crop the tile from the atlas, then resize to the target decal dimensions.
+    let sub = image::imageops::crop_imm(&atlas.rgba, ox, oy, atlas.tile_w, atlas.tile_h)
+        .to_image();
+    let sub = image::imageops::resize(&sub, dst_w, dst_h, image::imageops::FilterType::Lanczos3);
 
-    for (i, src_px) in img.pixels().enumerate() {
+    for (i, src_px) in sub.pixels().enumerate() {
         let di = i * 4;
         if di + 3 >= dst.len() {
             break;
@@ -186,8 +311,9 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
 /// after the shader stretches the texture across the face.
 ///
 /// When `tile_set` is `Some("original")` (or another set name), the function
-/// loads a pre-made PNG from `assets/sets/<name>/` instead of rasterizing
-/// glyphs. Falls back to font rasterization if the asset is missing.
+/// crops the tile from that set's `assets/sets/<name>/atlas.png` (using the
+/// `atlas.toml` layout) instead of rasterizing glyphs. Falls back to font
+/// rasterization if the atlas is missing or doesn't list this tile code.
 ///
 /// `flip_decal_h`: set `true` for **hand** tiles (table rack). The mesh → world
 /// pose makes the procedural UV map read backwards unless the atlas is mirrored

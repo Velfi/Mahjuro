@@ -134,6 +134,8 @@ pub struct RenderSettings {
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
+    /// Subdirectory of `assets/sets/` whose PNGs should be used for tile faces.
+    pub tileset_name: String,
     pub draw_settle_speed: f32,
     pub sort_settle_speed: f32,
     pub gamma: f32,
@@ -4611,7 +4613,8 @@ impl WgpuRenderer {
             tile_sampler,
             tile_primitives,
             tile_base_color_factor,
-            tile_set: Some("original".to_string()),
+            // Populated on first render() from RenderSettings.tileset_name.
+            tile_set: None,
             hand_tiles: Vec::new(),
             showcase_tiles: Vec::new(),
             tile_face_overlays: HashMap::new(),
@@ -5403,6 +5406,7 @@ impl WgpuRenderer {
             effects_quality,
             tile_preset,
             tile_material,
+            tileset_name,
             draw_settle_speed,
             sort_settle_speed,
             gamma,
@@ -5412,6 +5416,16 @@ impl WgpuRenderer {
         // Encode the tile material choice into base_color_factor.w so the
         // tile_3d shader can branch on it (0 = bamboo, 1 = plastic, …).
         self.tile_base_color_factor[3] = tile_material.shader_id();
+
+        // Swap tilesets: if the user picked a different set in Options, update
+        // the active name and blow the per-tile decal caches so the next frame
+        // re-rasterizes against the new set's PNGs.
+        if self.tile_set.as_deref() != Some(tileset_name.as_str()) {
+            self.tile_set = Some(tileset_name.clone());
+            self.tile_face_overlays.clear();
+            self.hand_tiles.clear();
+            self.showcase_tiles.clear();
+        }
 
         // Hand tile fields removed — hand tiles now rendered via ShowcaseTileBatch.
         let hand_slots: &[(f32, f32, f32, f32)] = &[];

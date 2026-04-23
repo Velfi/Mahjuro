@@ -344,6 +344,10 @@ fn default_tile_material() -> TileMaterial {
     TileMaterial::Bamboo
 }
 
+fn default_tileset_name() -> String {
+    "original".to_string()
+}
+
 /// Persistent settings (which profile is active, audio prefs, etc.).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -367,6 +371,8 @@ pub struct AppSettings {
     pub tile_preset: TilePreset,
     #[serde(default = "default_tile_material")]
     pub tile_material: TileMaterial,
+    #[serde(default = "default_tileset_name")]
+    pub tileset_name: String,
     #[serde(default = "default_gamma")]
     pub gamma: f32,
     #[serde(default = "default_true")]
@@ -419,6 +425,7 @@ impl Default for AppSettings {
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
+            tileset_name: default_tileset_name(),
             gamma: 1.0,
             shadows_enabled: true,
             ssr_enabled: true,

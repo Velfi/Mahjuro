@@ -24,3 +24,23 @@ pub fn log_all_assets() {
         log::info!("  {name}");
     }
 }
+
+/// Enumerate tileset directory names under `assets/sets/` that ship a usable
+/// atlas (both `atlas.toml` and `atlas.png` present). Returns a sorted list
+/// with `"original"` pinned first so it remains the default pick.
+pub fn list_tilesets() -> Vec<String> {
+    let mut names: Vec<String> = <Assets as Embed>::iter()
+        .filter_map(|path| {
+            let rest = path.strip_prefix("sets/")?;
+            let (name, file) = rest.split_once('/')?;
+            (file == "atlas.toml").then(|| name.to_string())
+        })
+        .filter(|name| get(&format!("sets/{name}/atlas.png")).is_some())
+        .collect();
+    names.sort();
+    names.dedup();
+    if let Some(pos) = names.iter().position(|n| n == "original") {
+        names.swap(0, pos);
+    }
+    names
+}

@@ -60,38 +60,59 @@ DEFAULT_NAME = "mirror_heightmap"
 PROMPT = (
     "A flat, top-down grayscale HEIGHTMAP texture of an authentic ancient "
     "Chinese cast-bronze mirror (銅鏡, tóngjìng) in the Han / Tang dynasty "
-    "four-spirit (四神鏡, sìshén-jìng) tradition. "
-    "Composition, working from the center outward: "
-    "(1) a small round central boss / knob in the exact middle (the cord "
-    "loop on a real mirror), pure white. "
+    "four-spirit (四神鏡, sìshén-jìng) tradition. This is a DISPLACEMENT "
+    "MAP for 3D rendering, not a picture — tonal value is read as literal "
+    "surface height, so the tonal range must be wide and the regions must "
+    "be crisp. Think of it as a deeply-cast bronze relief, not a shallow "
+    "rubbing: the raised elements sit boldly proud of the field, not just "
+    "a hair above it.\n"
+    "Composition, working from the center outward:\n"
+    "(1) a tall round central boss / knob in the exact middle (the cord "
+    "loop on a real mirror), the HIGHEST point on the whole mirror — pure "
+    "white (#ffffff) with a thin sharp dark recess ring around its base.\n"
     "(2) a square frame around the central boss, with the so-called TLV "
     "pattern — short T, L, and V shaped marks placed at the cardinal and "
-    "ordinal positions around the square — all raised in pure white. "
-    "(3) the four directional guardian spirits cast in low relief, each "
+    "ordinal positions around the square — all crisply raised in pure "
+    "white, each mark cleanly separated from the field.\n"
+    "(3) the four directional guardian spirits cast in bold relief, each "
     "in their own quadrant around the square: Azure Dragon (long sinuous "
     "dragon, east), White Tiger (crouching tiger, west), Vermilion Bird "
     "(long-tailed phoenix-like bird, south), and Black Tortoise-Snake "
-    "(turtle entwined with a snake, north). All four creatures pure white "
-    "low-relief silhouettes, facing inward toward the center, evenly "
-    "spaced. "
-    "(4) a thin ring of stylized cloud scrolls between the guardians and "
-    "the rim, raised in white. "
-    "(5) a plain raised outer rim band, pure white. "
-    "Tonal key (strict, flat regions, no gradients, no shading, no texture):\n"
-    "  - Pure white: the central boss, the TLV marks, the four guardian "
-    "creature silhouettes, the cloud-scroll ring, and the outer rim band.\n"
-    "  - Mid-gray (#808080): the flat mirror field between those elements.\n"
-    "  - Pure black: only the area outside the round mirror silhouette.\n"
-    "Render as a stone rubbing (拓本, taku-hon): flat orthographic tonal "
-    "heightfield where lighter = higher and darker = lower. The whole image "
-    "is the rubbing — no surrounding page, mount, caption, border, or "
-    "annotation exists outside the mirror silhouette. The only imagery is "
-    "the five pictorial elements listed above; the relief is purely "
+    "(turtle entwined with a snake, north). All four creatures in near-"
+    "pure-white (#f0–#ff) with strong silhouettes and subtle internal "
+    "tonal variation (slightly lower gray inside body/limb divisions so "
+    "musculature, feathers, scales are legible as height variation, not "
+    "flat cutouts). Each creature is surrounded by a thin dark recess "
+    "moat (#3a3a3a) that separates it from the field — the casting groove "
+    "around the figure — so they read as sculpted, not stickered on.\n"
+    "(4) a ring of vigorous stylized cloud scrolls (雲氣紋) between the "
+    "guardians and the rim, raised bright white, with small dark recess "
+    "gaps between each scroll for definition.\n"
+    "(5) a plain raised outer rim band in pure white, bounded on its "
+    "inner edge by a thin dark recess groove that separates rim from "
+    "cloud-scroll ring.\n"
+    "Tonal key (STRICT — treat as discrete height plateaus, not gradients):\n"
+    "  - #ffffff pure white: central boss, TLV marks, outer rim band, "
+    "cloud-scroll ring highs, guardian silhouette peaks.\n"
+    "  - #e0–#f0 near-white: secondary highs inside the guardian figures.\n"
+    "  - #808080 flat mid-gray: the mirror field between elements — "
+    "must be a clean uniform plateau with no blotches, no vignetting, "
+    "no texture noise, no gradient.\n"
+    "  - #3a3a3a dark gray: the thin recess grooves that outline every "
+    "raised element (boss base, guardian moats, rim inner edge, cloud "
+    "scroll gaps) — these recesses are what give the casting its depth.\n"
+    "  - #000000 pure black: only the circular area outside the round "
+    "mirror silhouette.\n"
+    "Render as a flat orthographic tonal heightfield where lighter = "
+    "higher and darker = lower. No shading, no cast shadows, no specular, "
+    "no perspective, no paper texture, no rubbing grain. The whole image "
+    "is the heightmap — no surrounding page, mount, caption, border, or "
+    "annotation exists outside the mirror silhouette. The only imagery "
+    "is the five pictorial elements listed above; the relief is purely "
     "pictorial with no inscribed writing of any kind on the face. "
-    "Slight age-worn surface variation in the field is fine, but the four "
-    "guardians and the TLV marks must remain crisp and legible. "
-    "Square 1:1 framing, mirror centered and nearly filling the frame with "
-    "a small uniform margin."
+    "Guardians and TLV marks are crisp and legible. Square 1:1 framing, "
+    "mirror centered and nearly filling the frame with a small uniform "
+    "margin."
 )
 
 
@@ -121,13 +142,24 @@ def fetch_image_bytes(client: OpenAI, prompt: str, model: str, size: str) -> byt
     return r.content
 
 
-def postprocess_heightmap(raw_bytes: bytes, out_size: int) -> Image.Image:
+def postprocess_heightmap(
+    raw_bytes: bytes,
+    out_size: int,
+    exaggerate: float = 1.6,
+) -> Image.Image:
     """Normalize the model's output into a clean heightmap.
 
     Steps: convert to grayscale, auto-stretch contrast so the darkest pixel
-    is 0 and the brightest is 255, square-crop to the centered subject, and
+    is 0 and the brightest is 255, square-crop to the centered subject,
+    apply an S-curve that pushes values away from mid-gray (so raised
+    elements read as higher and recessed grooves read as deeper), and
     resize to the requested output resolution. The resulting image can be
     sampled directly as a displacement / parallax texture.
+
+    `exaggerate` is the S-curve exponent applied to each pixel's signed
+    distance from 128: 1.0 is the identity, >1 pushes values outward. 1.6
+    roughly doubles the displacement amplitude of subjects vs. the field
+    while leaving the field itself at ~128.
     """
     from io import BytesIO
 
@@ -145,10 +177,32 @@ def postprocess_heightmap(raw_bytes: bytes, out_size: int) -> Image.Image:
     # noise pixels that would otherwise pin the auto-level.
     img = ImageOps.autocontrast(img, cutoff=1)
 
+    if exaggerate != 1.0:
+        img = _exaggerate_relief(img, exponent=exaggerate)
+
     if img.size != (out_size, out_size):
         img = img.resize((out_size, out_size), Image.LANCZOS)
 
     return img
+
+
+def _exaggerate_relief(img: Image.Image, exponent: float) -> Image.Image:
+    """Push each pixel further from mid-gray via `sign(d) * |d|**(1/exponent)`
+    on the normalized signed distance `d = (v - 128) / 127`. Keeps 0, 128,
+    and 255 fixed; expands values in between so the subject-vs-field
+    contrast is larger but pure white and pure black still clip to the
+    endpoints.
+    """
+    inv_exp = 1.0 / max(exponent, 1e-3)
+    lut = []
+    for v in range(256):
+        d = (v - 128) / 127.0
+        d = max(-1.0, min(1.0, d))
+        sign = 1.0 if d >= 0.0 else -1.0
+        pushed = sign * (abs(d) ** inv_exp)
+        out = 128.0 + pushed * 127.0
+        lut.append(max(0, min(255, int(round(out)))))
+    return img.point(lut)
 
 
 def main() -> None:
@@ -200,6 +254,16 @@ def main() -> None:
         action="store_true",
         help="Overwrite the output file if it already exists.",
     )
+    parser.add_argument(
+        "--exaggerate",
+        type=float,
+        default=1.6,
+        help=(
+            "S-curve exponent applied around mid-gray to exaggerate the "
+            "relief amplitude. 1.0 disables the push; 1.6 (default) ~doubles "
+            "subject-vs-field contrast; 2.0+ is very bold."
+        ),
+    )
     args = parser.parse_args()
 
     prompt = build_prompt()
@@ -232,7 +296,7 @@ def main() -> None:
         raw_path.write_bytes(raw_bytes)
         print(f"  raw model output → {raw_path}")
 
-    heightmap = postprocess_heightmap(raw_bytes, args.out_size)
+    heightmap = postprocess_heightmap(raw_bytes, args.out_size, exaggerate=args.exaggerate)
     heightmap.save(out_path, "PNG", optimize=True)
     print(f"  cleaned heightmap → {out_path}  ({args.out_size}x{args.out_size}, L)")
 
