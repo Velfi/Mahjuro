@@ -798,12 +798,14 @@ impl SceneBehavior for PickBlindScene {
             let def = kind.def();
             let (ofuda_w, ofuda_h) =
                 auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+            let ofuda_gap = (plaque_w * 0.06).clamp(56.0, 84.0);
             // Mirror the light anchor to the ofuda's drawn position below
             // (the wider gap keeps the plaque's rotated side from clipping
             // the paper decal).
             let ofuda_px =
-                (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
-            let ofuda_py = plaque_py + up_ext[2] * 0.15;
+                (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap)
+                    .max(ofuda_w * 0.5 + 8.0);
+            let ofuda_py = plaque_py + up_ext[2] * 0.15 + 24.0;
             let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
             point_lights.push(PointLight {
                 pos: [
@@ -1015,15 +1017,19 @@ impl SceneBehavior for PickBlindScene {
                 let def = kind.def();
                 let (ofuda_w, ofuda_h) =
                     auto_size_shrine_ofuda(plaque_w, plaque_h, def.name, description);
+                let ofuda_gap = (plaque_w * 0.06).clamp(56.0, 84.0);
                 // Position to the left of the plaque, but keep it tucked
                 // close enough to share the plaque accent light. The gap
-                // has to clear the plaque's rotated thickness (extents z =
-                // 10, tilted ~60°) — a tight 4px gap let the plaque's left
-                // side face z-fight with the ofuda's front face and punch
-                // holes through the boss-rule decal.
+                // has to clear the plaque side in perspective. The lit-mesh
+                // pipeline renders both front and back faces, so if these
+                // props sit nearly on the same depth band the plaque edge can
+                // win a few samples and visibly punch through the paper.
                 let ofuda_px =
-                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - 40.0).max(ofuda_w * 0.5 + 8.0);
-                let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 18.0;
+                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap)
+                        .max(ofuda_w * 0.5 + 8.0);
+                // Pull the paper a touch toward the camera as a depth bias
+                // so it no longer shares the plaque face's sample range.
+                let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 24.0;
                 // Float the ofuda slightly higher than the plaque's nominal
                 // lift so its front face clearly sits in front of anything
                 // behind it (shrine plinths) and doesn't co-planar-fight.
