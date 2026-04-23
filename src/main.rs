@@ -199,9 +199,11 @@ enum TransitionKind {
     Quick,
     /// Dramatic shooting-star cascade (~1.7 s total before extra score steps).
     ShootingStarCascade,
-    /// Alternating columns of tile-like panels interlock over the screen,
-    /// pause briefly while the scene swaps, then rush back off.
-    TileTeeth,
+    ForestOfTiles,
+    GalaxyOfTiles,
+    Maelstrom,
+    TileWaterfall,
+    ShufflingFan,
 }
 
 struct App {
@@ -647,6 +649,12 @@ impl App {
                     self.progress.runs_completed += 1;
                     self.progress.record_score(self.run.round_score);
                     let _ = self.progress.check_level_up();
+                    // Stake ladder: crediting a full victory on this
+                    // (material, stake) pair unlocks the next tier for that
+                    // material. Idempotent — repeat wins are no-ops.
+                    let _ = self
+                        .progress
+                        .record_stake_victory(self.run.mode.tile_material, self.run.mode.stake);
                     self.progress
                         .run_history
                         .push(crate::core::progression::RunRecord::from_run(
@@ -979,10 +987,42 @@ impl App {
                     frame.transition_progress = self.transition_timer;
                     frame.shooting_star_cascade();
                 }
-                TransitionKind::TileTeeth => {
+                TransitionKind::ForestOfTiles => {
                     crate::render::transition_fx::push_overlay_transition(
                         &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::TileTeeth,
+                        crate::render::transition_fx::OverlayTransitionKind::ForestOfTiles,
+                        self.transition_timer,
+                        (size.width as f32, size.height as f32),
+                    );
+                }
+                TransitionKind::GalaxyOfTiles => {
+                    crate::render::transition_fx::push_overlay_transition(
+                        &mut frame,
+                        crate::render::transition_fx::OverlayTransitionKind::GalaxyOfTiles,
+                        self.transition_timer,
+                        (size.width as f32, size.height as f32),
+                    );
+                }
+                TransitionKind::Maelstrom => {
+                    crate::render::transition_fx::push_overlay_transition(
+                        &mut frame,
+                        crate::render::transition_fx::OverlayTransitionKind::Maelstrom,
+                        self.transition_timer,
+                        (size.width as f32, size.height as f32),
+                    );
+                }
+                TransitionKind::TileWaterfall => {
+                    crate::render::transition_fx::push_overlay_transition(
+                        &mut frame,
+                        crate::render::transition_fx::OverlayTransitionKind::TileWaterfall,
+                        self.transition_timer,
+                        (size.width as f32, size.height as f32),
+                    );
+                }
+                TransitionKind::ShufflingFan => {
+                    crate::render::transition_fx::push_overlay_transition(
+                        &mut frame,
+                        crate::render::transition_fx::OverlayTransitionKind::ShufflingFan,
                         self.transition_timer,
                         (size.width as f32, size.height as f32),
                     );
@@ -2269,6 +2309,26 @@ impl ApplicationHandler for App {
                         (Scene::StartScreen(_), Scene::Collection(_))
                             | (Scene::Collection(_), Scene::StartScreen(_))
                     );
+                    let use_galaxy = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::Collection(_), Scene::YakuJournal(_))
+                            | (Scene::YakuJournal(_), Scene::Collection(_))
+                    );
+                    let use_maelstrom = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::StartScreen(_), Scene::Options(_))
+                            | (Scene::Options(_), Scene::StartScreen(_))
+                    );
+                    let use_waterfall = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::StartScreen(_), Scene::TileLiteracy(_))
+                            | (Scene::TileLiteracy(_), Scene::StartScreen(_))
+                    );
+                    let use_shuffling_fan = matches!(
+                        (&self.scene, &next_scene),
+                        (Scene::StartScreen(_), Scene::ProfileSelect(_))
+                            | (Scene::ProfileSelect(_), Scene::StartScreen(_))
+                    );
                     // Restart from the pause menu is the only path from
                     // Gameplay straight back to Shop; give it a deliberate
                     // fade-to-black instead of the snappy default.
@@ -2281,7 +2341,19 @@ impl ApplicationHandler for App {
                         self.transition_speed = 0.012;
                         self.audio.play_sfx(audio::SfxId::StarShimmer);
                     } else if use_tile_teeth {
-                        self.transition_kind = TransitionKind::TileTeeth;
+                        self.transition_kind = TransitionKind::ForestOfTiles;
+                        self.transition_speed = 0.035;
+                    } else if use_galaxy {
+                        self.transition_kind = TransitionKind::GalaxyOfTiles;
+                        self.transition_speed = 0.032;
+                    } else if use_maelstrom {
+                        self.transition_kind = TransitionKind::Maelstrom;
+                        self.transition_speed = 0.032;
+                    } else if use_waterfall {
+                        self.transition_kind = TransitionKind::TileWaterfall;
+                        self.transition_speed = 0.034;
+                    } else if use_shuffling_fan {
+                        self.transition_kind = TransitionKind::ShufflingFan;
                         self.transition_speed = 0.035;
                     } else if slow_fade {
                         self.transition_kind = TransitionKind::Quick;
@@ -3612,6 +3684,7 @@ fn main() -> anyhow::Result<()> {
                 "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
                 "shop" => (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true),
                 "start_screen" => (Scene::StartScreen(scenes::StartScreenScene::new()), false),
+                "tile_select" => (Scene::TileSelect(scenes::TileSelectScene::new()), false),
                 "transition_playground" => (
                     Scene::TransitionPlayground(scenes::TransitionPlaygroundScene::new(false)),
                     false,
@@ -3620,7 +3693,7 @@ fn main() -> anyhow::Result<()> {
                     anyhow::bail!(
                         "unsupported --scene '{other}' (supported: collection, \
                         yaku_journal, gameplay, pick_blind, shop, start_screen, \
-                        transition_playground)"
+                        tile_select, transition_playground)"
                     )
                 }
             };

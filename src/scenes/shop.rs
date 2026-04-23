@@ -21,7 +21,7 @@ use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::{
-    GameEngine, ShopCommand, ShopCommandData, ShopReadModel, consumable_sell_price,
+    GameEngine, ShopCommand, ShopCommandData, ShopReadModel, consumable_sell_price_for_mode,
 };
 use crate::render::decal::{load_ui_font, measure_plaque_wrap};
 use crate::render::draw_cmd::{
@@ -383,6 +383,10 @@ fn apply_shop_action(
     run: &mut crate::game::run::RunState,
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopActionResult {
+    // Capture the shop's price multiplier off the mode before wrapping the
+    // run in a GameEngine — the engine borrows mutably so we can't read
+    // `run.mode` while a `ShopCommand` dispatches.
+    let mode_snapshot = run.mode.clone();
     let mut engine = GameEngine::new(run, bus);
     match action {
         ShopAction::BuyCard(idx) => {
@@ -412,7 +416,7 @@ fn apply_shop_action(
             if idx < zodiac_items.len() {
                 let item = &zodiac_items[idx];
                 if !item.sold {
-                    let price = item.price();
+                    let price = item.price(&mode_snapshot);
                     if let Consumable::Zodiac(z) = item.consumable {
                         let outcome =
                             engine.dispatch_shop(ShopCommand::BuyZodiac { zodiac: z, price });
@@ -439,7 +443,7 @@ fn apply_shop_action(
             if idx < talisman_items.len() {
                 let item = &talisman_items[idx];
                 if !item.sold {
-                    let price = item.price();
+                    let price = item.price(&mode_snapshot);
                     if let Consumable::Talisman(kind) = item.consumable {
                         let outcome =
                             engine.dispatch_shop(ShopCommand::BuyTalisman { kind, price });
@@ -474,7 +478,7 @@ fn apply_shop_action(
             {
                 let outcome = engine.dispatch_shop(ShopCommand::BuyPack {
                     kind: pack.kind,
-                    price: pack.kind.shop_price(),
+                    price: mode_snapshot.scale_shop_price(pack.kind.shop_price()),
                 });
                 if outcome.rejection.is_none() {
                     pack.sold = true;
@@ -579,11 +583,12 @@ struct ConsumableShopItem {
 }
 
 impl ConsumableShopItem {
-    fn price(&self) -> u32 {
-        match self.consumable {
+    fn price(&self, mode: &crate::game::game_mode::GameMode) -> u32 {
+        let base = match self.consumable {
             Consumable::Zodiac(_) => ZodiacKind::shop_price(),
             Consumable::Talisman(t) => t.shop_price(),
-        }
+        };
+        mode.scale_shop_price(base)
     }
     fn name(&self) -> String {
         self.consumable.name()
@@ -838,8 +843,6 @@ const SHOP_REROLL_ID: u32 = 0x9400;
 const SHOP_SELL_RELIC_BASE: u32 = 0x9500;
 /// Floating sell button for hovered owned consumables.
 const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
-/// Base gold cost for the first shop reroll.
-const REROLL_BASE_COST: u32 = 5;
 /// How long a relic glow + wiggle lasts after activation.
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// How much the reroll cost increases per use within a single shop visit.
@@ -901,6 +904,8 @@ fn generate_shop_stock(
     relics: &RelicState,
     available_relics: &[RelicId],
     extra_relics: usize,
+    paper_lantern_extinct: bool,
+    mode: &crate::game::game_mode::GameMode,
 ) -> (
     Vec<ShopItem>,
     Vec<ConsumableShopItem>,
@@ -952,11 +957,25 @@ fn generate_shop_stock(
     let defs = all_relic_defs();
     // Some relics are never offered in the shop — they only appear via
     // special means (transformation, duplication, etc.).
-    let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
+    // Paper ↔ Iron Lantern follow a Gros Michel / Cavendish pool swap:
+    // Paper is in the pool until it burns, then extinct run-wide and Iron
+    // takes its place.
     let mut relic_pool: Vec<&_> = defs
         .iter()
         .filter(|d| {
-            available_relics.contains(&d.id) && !relics.owns(d.id) && !shop_excluded.contains(&d.id)
+            if !available_relics.contains(&d.id) || relics.owns(d.id) {
+                return false;
+            }
+            if d.id == RelicId::PhantomRelic {
+                return false;
+            }
+            if d.id == RelicId::PaperLantern && paper_lantern_extinct {
+                return false;
+            }
+            if d.id == RelicId::IronLantern && !paper_lantern_extinct {
+                return false;
+            }
+            true
         })
         .collect();
     relic_pool.shuffle(&mut rng);
@@ -968,7 +987,7 @@ fn generate_shop_stock(
             name: d.name,
             description: d.description,
             rarity: d.rarity,
-            price: relic_shop_price(d.id, relics),
+            price: mode.scale_shop_price(relic_shop_price(d.id, relics)),
             sold: false,
         })
         .collect();
@@ -1008,7 +1027,9 @@ fn generate_shop_stock(
     (items, zodiac_items, talisman_items, pack_items)
 }
 
-fn tutorial_shop_stock() -> (
+fn tutorial_shop_stock(
+    mode: &crate::game::game_mode::GameMode,
+) -> (
     Vec<ShopItem>,
     Vec<ConsumableShopItem>,
     Vec<ConsumableShopItem>,
@@ -1025,7 +1046,7 @@ fn tutorial_shop_stock() -> (
             name: pair_power.name,
             description: pair_power.description,
             rarity: pair_power.rarity,
-            price: relic_shop_price(pair_power.id, &RelicState::default()),
+            price: mode.scale_shop_price(relic_shop_price(pair_power.id, &RelicState::default())),
             sold: false,
         }],
         vec![ConsumableShopItem {
@@ -1076,10 +1097,17 @@ impl ShopScene {
     ) -> Self {
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
+        let stake = run.mode.stake;
         let (mut items, zodiac_items, talisman_items, pack_items) = if mode == ShopMode::Tutorial {
-            tutorial_shop_stock()
+            tutorial_shop_stock(&run.mode)
         } else {
-            generate_shop_stock(&shop.relic_state, &shop.available_relics, extra_relics)
+            generate_shop_stock(
+                &shop.relic_state,
+                &shop.available_relics,
+                extra_relics,
+                shop.paper_lantern_extinct,
+                &run.mode,
+            )
         };
 
         // PatronGift: zero out one random relic's price.
@@ -1093,12 +1121,14 @@ impl ShopScene {
         }
 
         let consumed_tags = GameEngine::consume_shop_tags(run);
+        // Reroll base cost is driven by the run's stake; tutorial and
+        // free-reroll tags still override it.
         let reroll_cost = if mode == ShopMode::Tutorial {
             u32::MAX
         } else if consumed_tags.free_reroll {
             0
         } else {
-            REROLL_BASE_COST
+            stake.reroll_base_cost()
         };
 
         Self {
@@ -1235,8 +1265,13 @@ impl ShopScene {
         }
         self.reroll_cost += REROLL_COST_INCREMENT;
         let shop = GameEngine::read_shop(run);
-        let (items, zodiac_items, talisman_items, pack_items) =
-            generate_shop_stock(&shop.relic_state, &shop.available_relics, 0);
+        let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
+            &shop.relic_state,
+            &shop.available_relics,
+            0,
+            shop.paper_lantern_extinct,
+            &run.mode,
+        );
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -1247,8 +1282,13 @@ impl ShopScene {
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
     pub fn debug_reroll(&mut self, run: &crate::game::run::RunState) {
         let shop = GameEngine::read_shop(run);
-        let (items, zodiac_items, talisman_items, pack_items) =
-            generate_shop_stock(&shop.relic_state, &shop.available_relics, 0);
+        let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
+            &shop.relic_state,
+            &shop.available_relics,
+            0,
+            shop.paper_lantern_extinct,
+            &run.mode,
+        );
         self.items = items;
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
@@ -3077,7 +3117,7 @@ impl SceneBehavior for ShopScene {
                 }
                 ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
                     let item = &self.zodiac_items[i];
-                    let price = item.price();
+                    let price = item.price(&ctx.run.mode);
                     let can_afford = shop.gold >= price as i32 && !item.sold;
                     let cta = if item.sold {
                         "SOLD".to_string()
@@ -3116,7 +3156,7 @@ impl SceneBehavior for ShopScene {
                 }
                 ShopHit::Talisman(i) if i < n_for_sale_talismans => {
                     let item = &self.talisman_items[i];
-                    let price = item.price();
+                    let price = item.price(&ctx.run.mode);
                     let can_afford =
                         shop.gold >= price as i32 && !shop.consumables_full && !item.sold;
                     let cta = if item.sold {
@@ -3151,7 +3191,7 @@ impl SceneBehavior for ShopScene {
                         (
                             item.name(),
                             item.description(),
-                            format!("Sell {}g", consumable_sell_price(c)),
+                            format!("Sell {}g", consumable_sell_price_for_mode(c, &ctx.run.mode)),
                             color::CHAMPAGNE,
                         )
                     } else {
@@ -4281,6 +4321,7 @@ impl SceneBehavior for ShopScene {
 mod tests {
     use super::*;
     use crate::game::game_mode::GameMode;
+    use crate::persistence::TileMaterial;
 
     #[test]
     fn patron_gift_shop_always_contains_a_free_relic() {
@@ -4309,10 +4350,32 @@ mod tests {
     fn shop_only_rolls_unlocked_relics() {
         let relics = RelicState::default();
         let available_relics = vec![RelicId::PairPower];
+        let mode = GameMode::standard();
 
-        let (items, _, _, _) = generate_shop_stock(&relics, &available_relics, 1);
+        let (items, _, _, _) = generate_shop_stock(&relics, &available_relics, 1, false, &mode);
 
         assert!(!items.is_empty());
         assert!(items.iter().all(|item| item.relic == RelicId::PairPower));
+    }
+
+    #[test]
+    fn stake_scales_shop_prices() {
+        use crate::core::stake::Stake;
+        let relics = RelicState::default();
+        let available = vec![RelicId::PairPower];
+        let spring = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Spring);
+        let winter = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
+
+        let (spring_items, _, _, _) = generate_shop_stock(&relics, &available, 1, false, &spring);
+        let (winter_items, _, _, _) = generate_shop_stock(&relics, &available, 1, false, &winter);
+
+        let spring_price = spring_items[0].price;
+        let winter_price = winter_items[0].price;
+        assert!(
+            winter_price > spring_price,
+            "Winter {} should exceed Spring {}",
+            winter_price,
+            spring_price,
+        );
     }
 }

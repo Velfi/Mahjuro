@@ -408,6 +408,7 @@ pub struct TreeState {
 struct LaidOut {
     id: FocusId,
     rect: [f32; 4],
+    enabled: bool,
 }
 
 impl Default for TreeState {
@@ -470,6 +471,7 @@ impl TreeState {
             self.layout.push(LaidOut {
                 id: it.id,
                 rect: it.rect,
+                enabled: true,
             });
         }
 
@@ -823,7 +825,11 @@ fn layout_node<A: Copy>(
             }
         }
         Node::Item(item) => {
-            out.push(LaidOut { id: item.id, rect });
+            out.push(LaidOut {
+                id: item.id,
+                rect,
+                enabled: item.enabled,
+            });
         }
         Node::Decoration(_) => {
             // Decorations don't go in the focus cache.
@@ -858,10 +864,15 @@ fn child_height<A: Copy>(
             Size::Auto => natural_item_height(scale),
         },
         Node::Decoration(d) => natural_decoration_height(d, window_h, scale, ui_scale),
-        // Containers default to the natural height of their children. We don't
-        // recursively measure here because the parent already gave us a rect
-        // (anchor or grid cell). Use a sentinel = 0; the parent decides.
-        Node::Column { .. } | Node::Row { .. } | Node::Grid { .. } => 0.0,
+        // A Row nested inside a Column needs to report a real height so the
+        // Column's vertical layout reserves space for it; we use the tallest
+        // child's natural height. Column/Grid still defer to the parent rect
+        // (anchor or grid cell).
+        Node::Row { children, .. } => children
+            .iter()
+            .map(|c| child_height(c, container_w, window_h, scale, ui_scale))
+            .fold(0.0f32, f32::max),
+        Node::Column { .. } | Node::Grid { .. } => 0.0,
     }
 }
 
@@ -907,20 +918,33 @@ impl TreeState {
             self.scroll.jump(0.0);
         }
 
-        // Resolve focused id against the latest layout. If it disappeared,
-        // fall back to the first item.
+        // Resolve focused id against the latest layout. If it disappeared
+        // or now points at a disabled item, fall back to the first enabled
+        // item (or first item as a last resort).
+        let first_enabled = || {
+            self.layout
+                .iter()
+                .find(|l| l.enabled)
+                .or_else(|| self.layout.first())
+                .map(|l| l.id)
+        };
         if let Some(id) = self.focused {
-            if !self.layout.iter().any(|l| l.id == id) {
-                self.focused = self.layout.first().map(|l| l.id);
+            match self.layout.iter().find(|l| l.id == id) {
+                Some(slot) if slot.enabled => {}
+                _ => self.focused = first_enabled(),
             }
         } else {
-            self.focused = self.layout.first().map(|l| l.id);
+            self.focused = first_enabled();
         }
 
-        // Mouse hover-follow: if cursor is over an item, focus it (only in cursor mode).
+        // Mouse hover-follow: if cursor is over an enabled item, focus it
+        // (only in cursor mode; disabled items shouldn't steal focus).
         if input.input_mode == crate::ui::input::InputMode::Cursor {
             let (cx, cy) = input.cursor_pos;
             for l in &self.layout {
+                if !l.enabled {
+                    continue;
+                }
                 let [x, y, w, h] = l.rect;
                 if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
                     self.set_focus_changed(Some(l.id));
@@ -1006,8 +1030,17 @@ impl TreeState {
             .and_then(|id| self.layout.iter().position(|l| l.id == id))
             .unwrap_or(0);
         let n = self.layout.len() as i32;
-        let next = ((cur as i32 + delta).rem_euclid(n)) as usize;
-        self.set_focus_changed(Some(self.layout[next].id));
+        // Step `delta` at a time, skipping disabled items. Bail after a full
+        // revolution so an all-disabled layout doesn't loop forever.
+        let mut idx = cur as i32;
+        for _ in 0..n {
+            idx = (idx + delta).rem_euclid(n);
+            let slot = &self.layout[idx as usize];
+            if slot.enabled {
+                self.set_focus_changed(Some(slot.id));
+                return;
+            }
+        }
     }
 
     fn activate_id<A: Copy>(&mut self, tree: &Tree<A>, id: FocusId) -> Option<A> {
@@ -1125,11 +1158,7 @@ struct DrawNodeCtx<'a, 'b> {
     ui_scale: f32,
 }
 
-fn draw_node<A: Copy>(
-    node: &Node<A>,
-    frame: &mut TreeFrame<'_>,
-    ctx: &mut DrawNodeCtx<'_, '_>,
-) {
+fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawNodeCtx<'_, '_>) {
     match node {
         Node::Column { children, .. }
         | Node::Row { children, .. }

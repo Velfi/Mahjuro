@@ -13,6 +13,11 @@ pub struct BotConfig {
     pub pack_weight: Option<f32>,
     pub skip_threshold_multiplier: Option<f32>,
     pub forced_relic: Option<RelicId>,
+    /// Difficulty stake used when building `GameMode`. `None` means Spring;
+    /// `Some(Stake)` applies that tier's target / shop / boss deltas. Exposed
+    /// on the CLI via `--stake` so balance snapshots can be stratified by
+    /// difficulty.
+    pub stake: Option<crate::core::stake::Stake>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -89,7 +94,13 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
 
 impl BotConfig {
     pub fn into_mode(self) -> GameMode {
-        let mut mode = GameMode::standard();
+        // Start from the stake-aware preset so base_target / price_multiplier /
+        // starting_rules reflect the chosen difficulty; the CLI overrides
+        // below then apply *on top* of that (handy for A/B'ing individual
+        // knobs at a given stake).
+        let stake = self.stake.unwrap_or_default();
+        let mut mode =
+            GameMode::with_material_and_stake(crate::persistence::TileMaterial::default(), stake);
         if let Some(v) = self.base_target {
             mode.base_target = v;
         }
@@ -326,6 +337,7 @@ impl StrategyDef {
             talisman_weight: self.talisman_weight,
             pack_weight: self.pack_weight,
             skip_threshold_multiplier: self.skip_threshold_multiplier,
+            stake: None,
         }
     }
 }

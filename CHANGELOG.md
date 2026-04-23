@@ -51,7 +51,7 @@ commit history.
 ### Removed
 - Collection no longer has Rules or Zodiacs tabs. Zodiac info now lives on the Yaku tab since the two are one-to-one.
 - Right-clicking a relic or consumable during gameplay no longer sells it — selling now lives exclusively in the shop.
-- **Zodiac Pouch** has been removed. Lunar Almanac (+1 slot) is now the only way to expand your zodiac inventory.
+- **Zodiac Pouch** has been removed. Zodiac inventory is now fixed at 2 slots.
 
 ## 0.3.2 — 2026-04-16
 

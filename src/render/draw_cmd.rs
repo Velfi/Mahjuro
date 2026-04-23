@@ -840,7 +840,8 @@ impl UiFrame {
         self.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
     }
     pub fn tile_face_quads<I: IntoIterator<Item = TileFaceQuad>>(&mut self, iter: I) {
-        self.cmds.extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
     }
 
     /// Apply a global alpha multiplier to every queued cmd's color.

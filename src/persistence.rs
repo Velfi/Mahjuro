@@ -283,7 +283,9 @@ fn default_tile_preset() -> TilePreset {
 
 /// Tile material / colour scheme. Controls the procedural surface
 /// appearance in the tile shader — ivory+bamboo, plastic, etc.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum TileMaterial {
     /// Traditional ivory face on a bamboo body.
     #[default]
@@ -529,7 +531,13 @@ pub fn load_profile(index: usize) -> PlayerProgress {
         Ok(s) => s,
         Err(_) => return PlayerProgress::new(),
     };
-    serde_json::from_str(&data).unwrap_or_else(|_| PlayerProgress::new())
+    let mut progress: PlayerProgress =
+        serde_json::from_str(&data).unwrap_or_else(|_| PlayerProgress::new());
+    // Stakes landed after some profiles already had victories on disk. Re-derive
+    // `unlocked_stakes` from history every load so older saves see the right
+    // ladder without requiring a manual migration — the backfill is idempotent.
+    progress.backfill_stakes_from_history();
+    progress
 }
 
 pub fn save_profile(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {

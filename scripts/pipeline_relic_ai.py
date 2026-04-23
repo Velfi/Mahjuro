@@ -70,8 +70,8 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-1",
-        help="Image model for generate_relic_art.py (default: gpt-image-1).",
+        default="gpt-image-2",
+        help="Image model for generate_relic_art.py (default: gpt-image-2).",
     )
     parser.add_argument(
         "--delay",

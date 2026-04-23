@@ -105,7 +105,7 @@ def generate_decal(client: OpenAI, kind: str) -> Image.Image:
 
     print(f"  [{kind}] requesting image from OpenAI...")
     response = client.images.generate(
-        model="gpt-image-1",
+        model="gpt-image-2",
         prompt=prompt,
         n=1,
         size="1024x1024",

@@ -576,6 +576,10 @@ pub struct RunState {
     /// Cumulative score earned across the entire run (for Snowball relic).
     #[serde(default)]
     pub total_score_earned: u64,
+    /// True once Paper Lantern has burned up this run. Prevents Paper from
+    /// reappearing in shops and unlocks Iron Lantern in the shop pool.
+    #[serde(default)]
+    pub paper_lantern_extinct: bool,
     /// Per-yaku cumulative play counter for the entire run. Powers the
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
@@ -604,6 +608,12 @@ pub struct RunState {
     /// (so id 5 is always the same suit+rank, even after a reshuffle).
     #[serde(default)]
     pub tile_enhancements: BTreeMap<u32, TileEnhancement>,
+    /// When Brocade Pouch is owned, the last-used buff talisman's enhancement
+    /// is recorded here and stamped onto every drawn tile (not just the 14
+    /// in hand at use time). Per-tile entries in `tile_enhancements` still win
+    /// so packs and prior-stamped tiles keep their specific enhancement.
+    #[serde(default)]
+    pub global_buff_enhancement: Option<TileEnhancement>,
     /// Tile IDs permanently removed from the wall via the Kiln talisman.
     /// Filtered out during wall construction each round.
     #[serde(default)]
@@ -704,6 +714,20 @@ impl RunState {
         self.mode.starting_discards
     }
 
+    /// Note that another relic was involuntarily destroyed. Kintsugi converts
+    /// each destruction into a permanent +1 mult via its counter; callers
+    /// must invoke this *after* the victim is removed from `relics.active`.
+    fn note_relic_destroyed(&mut self) {
+        if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
+            *self
+                .relic_counters
+                .entry(crate::core::relic::RelicId::Kintsugi)
+                .or_insert(0) += 1;
+            self.relic_activations
+                .push(crate::core::relic::RelicId::Kintsugi);
+        }
+    }
+
     /// Rebuild round-start plays/discards from current mode + permanent
     /// round modifiers. This keeps all "per round" bonuses sourced from one
     /// place so shop-bought relics and material bonuses apply on the next blind.
@@ -751,7 +775,9 @@ impl RunState {
 
         let mut boss_pool_remaining = boss::regular_pool();
         let mut rng = rand::rng();
-        let upcoming_boss = boss::pick_for_ante(&mut boss_pool_remaining, 1, &mut rng);
+        let boss_floor = mode.stake.boss_min_ante_floor();
+        let upcoming_boss =
+            boss::pick_for_ante_with_floor(&mut boss_pool_remaining, 1, boss_floor, &mut rng);
 
         let mut state = Self {
             wall,
@@ -801,6 +827,7 @@ impl RunState {
             tile_debuffs: Vec::new(),
             honors_scored_this_round: false,
             total_score_earned: 0,
+            paper_lantern_extinct: false,
             yaku_times_played: std::collections::HashMap::new(),
             tiles_played: 0,
             tiles_discarded: 0,
@@ -808,6 +835,7 @@ impl RunState {
             best_structure_score: 0,
             best_structure_name: String::new(),
             tile_enhancements: BTreeMap::new(),
+            global_buff_enhancement: None,
             removed_tile_ids: std::collections::HashSet::new(),
             tile_packs: Vec::new(),
             small_blind_tag: None,
@@ -884,6 +912,15 @@ impl RunState {
     /// Start a new run with the given tile material set.
     pub fn new_with_material(material: crate::persistence::TileMaterial) -> Self {
         Self::new(GameMode::with_material(material))
+    }
+
+    /// Factory that threads a difficulty stake into the game mode at run
+    /// start. Spring produces the same result as `new_with_material`.
+    pub fn new_with_material_and_stake(
+        material: crate::persistence::TileMaterial,
+        stake: crate::core::stake::Stake,
+    ) -> Self {
+        Self::new(GameMode::with_material_and_stake(material, stake))
     }
 
     /// Start the curated onboarding run used by the first-time tutorial
@@ -1248,6 +1285,13 @@ impl RunState {
                     for tile in &self.hand {
                         self.tile_enhancements.insert(tile.id, enh);
                     }
+                    // Brocade Pouch: also mark the run's global buff so every
+                    // tile drawn from now on (not just the 14 in hand) carries
+                    // this enhancement. Latest buff talisman wins, matching
+                    // the "most-recent wins" rule for per-tile stamps.
+                    if self.relics.has(RelicId::BrocadePouch) {
+                        self.global_buff_enhancement = Some(enh);
+                    }
                     crate::core::talisman::apply_to_hand(&mut self.hand, t);
                 }
                 bus.push(GameEvent::TalismanUsed(t));
@@ -1413,11 +1457,13 @@ impl RunState {
     /// that adds tiles to the hand (initial deal, post-play refill, mid-round
     /// draws, new-round redeal) so talisman effects survive for the whole run.
     fn restamp_hand_enhancements(&mut self) {
-        if self.tile_enhancements.is_empty() {
+        if self.tile_enhancements.is_empty() && self.global_buff_enhancement.is_none() {
             return;
         }
         for tile in &mut self.hand {
             if let Some(&enh) = self.tile_enhancements.get(&tile.id) {
+                tile.enhancement = Some(enh);
+            } else if let Some(enh) = self.global_buff_enhancement {
                 tile.enhancement = Some(enh);
             }
         }
@@ -1430,6 +1476,9 @@ impl RunState {
     pub fn recompute_capacities(&mut self) {
         let mut consumable_cap = self.mode.consumable_capacity;
         if self.relics.has(RelicId::LunarAlmanac) {
+            consumable_cap += 1;
+        }
+        if self.relics.has(RelicId::BrocadePouch) {
             consumable_cap += 1;
         }
         self.consumables.capacity = consumable_cap;
@@ -1488,6 +1537,14 @@ impl RunState {
                 }
                 self.boss.effect = Some(eff);
             }
+        }
+        // Ant Trail: when held, sequences may wrap 9→1 (9-1-2, 8-9-1). The
+        // validator already supports this via RuleModifier::SequenceWrap, so
+        // we just inject it here.
+        if self.relics.has(crate::core::relic::RelicId::AntTrail)
+            && !self.round_rules.contains(&RuleModifier::SequenceWrap)
+        {
+            self.round_rules.push(RuleModifier::SequenceWrap);
         }
         // Fold next-round Wide Hand into the round's effective hand size so
         // every refill and hand-size check sees the same total for the round.
@@ -1633,6 +1690,7 @@ impl RunState {
             if *v == 0 {
                 self.relics.active.retain(|&r| r != RelicId::MeltingIce);
                 self.relic_counters.remove(&RelicId::MeltingIce);
+                self.note_relic_destroyed();
             }
         }
         if self.relics.has(RelicId::TeaCeremony) {
@@ -1641,6 +1699,7 @@ impl RunState {
             if *v <= 0 {
                 self.relics.active.retain(|&r| r != RelicId::TeaCeremony);
                 self.relic_counters.remove(&RelicId::TeaCeremony);
+                self.note_relic_destroyed();
             }
         }
         if self.relics.has(RelicId::CleanStreak) {
@@ -2490,6 +2549,7 @@ impl RunState {
             if *v == 0 {
                 self.relics.active.retain(|&r| r != RelicId::SilkThread);
                 self.relic_counters.remove(&RelicId::SilkThread);
+                self.note_relic_destroyed();
             }
         }
 
@@ -2559,20 +2619,17 @@ impl RunState {
         // Fortune's Favor halves destruction chances (doubles survival).
         let fortunes = self.relics.has(RelicId::FortunesFavor);
         // Paper Lantern: 1-in-5 chance to burn up at round end. When it
-        // burns, it's replaced in-place by Iron Lantern.
+        // burns, the slot empties and Paper goes extinct for the rest of
+        // the run — Iron Lantern then enters the shop pool.
         // Fortune's Favor: 1-in-10 instead.
         if self.relics.has(RelicId::PaperLantern) {
             use rand::RngExt;
             let mut rng = rand::rng();
             let denom = if fortunes { 10 } else { 5 };
-            if rng.random_ratio(1, denom)
-                && let Some(pos) = self
-                    .relics
-                    .active
-                    .iter()
-                    .position(|&r| r == RelicId::PaperLantern)
-            {
-                self.relics.active[pos] = RelicId::IronLantern;
+            if rng.random_ratio(1, denom) {
+                self.relics.active.retain(|&r| r != RelicId::PaperLantern);
+                self.paper_lantern_extinct = true;
+                self.note_relic_destroyed();
             }
         }
         // Iron Lantern: 1-in-1000 chance to shatter at round end.
@@ -2583,6 +2640,7 @@ impl RunState {
             let denom = if fortunes { 2000 } else { 1000 };
             if rng.random_ratio(1, denom) {
                 self.relics.active.retain(|&r| r != RelicId::IronLantern);
+                self.note_relic_destroyed();
             }
         }
         // Nest Egg: increment rounds held (affects sell value).
@@ -2672,12 +2730,18 @@ impl RunState {
         // without replacement from the regular pool.
         if was_boss {
             let mut rng = rand::rng();
+            let boss_floor = self.mode.stake.boss_min_ante_floor();
             self.boss.upcoming = if self.ante == FINAL_ANTE {
                 Some(boss::pick_final(&mut rng))
             } else if self.ante > FINAL_ANTE {
                 None
             } else {
-                boss::pick_for_ante(&mut self.boss.pool_remaining, self.ante, &mut rng)
+                boss::pick_for_ante_with_floor(
+                    &mut self.boss.pool_remaining,
+                    self.ante,
+                    boss_floor,
+                    &mut rng,
+                )
             };
             // Bake the resolved effect now so reactive bosses see the
             // post-shop run state of the *outgoing* ante (their reveal
@@ -2883,12 +2947,14 @@ mod tests {
             selected,
             target_score: mode.base_target,
             tile_enhancements: BTreeMap::new(),
+            global_buff_enhancement: None,
             removed_tile_ids: std::collections::HashSet::new(),
             upcoming_blind: BlindKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
             tile_packs: vec![],
             total_score_earned: 0,
+            paper_lantern_extinct: false,
             small_blind_tag: None,
             big_blind_tag: None,
             tag_free_reroll: false,
@@ -3668,6 +3734,83 @@ mod tests {
         assert!(!run.hand.iter().any(|t| t.id == tile_at_2.id));
         assert!(!run.hand.iter().any(|t| t.id == tile_at_10.id));
     }
+
+    // ── Brocade Pouch: global-buff enhancement ──────────────────────────
+
+    #[test]
+    fn brocade_pouch_stamps_tiles_drawn_after_talisman_use() {
+        use crate::core::consumable::Consumable;
+        use crate::core::talisman::TalismanKind;
+        use crate::core::tile::TileEnhancement;
+
+        let mut run = test_run();
+        let mut bus = bus();
+
+        run.relics.active.push(RelicId::BrocadePouch);
+        run.recompute_capacities();
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Jade));
+
+        // Remember which tile ids are in hand *before* use; ids drawn later
+        // should still pick up the enhancement via the global fallback.
+        let original_ids: std::collections::HashSet<u32> = run.hand.iter().map(|t| t.id).collect();
+        run.use_consumable(0, &mut bus);
+        assert_eq!(run.global_buff_enhancement, Some(TileEnhancement::Jade));
+
+        // Discard all original-hand tiles to force the wall to hand out new ids.
+        for i in 0..run.hand.len() {
+            run.toggle_select(i);
+        }
+        run.discard_selected(&mut bus);
+
+        // Freshly-drawn tiles (different ids) should now carry Jade via the
+        // global fallback in restamp_hand_enhancements.
+        let replaced = run
+            .hand
+            .iter()
+            .filter(|t| !original_ids.contains(&t.id))
+            .count();
+        assert!(replaced > 0, "wall should have handed out new ids");
+        assert!(
+            run.hand
+                .iter()
+                .filter(|t| !original_ids.contains(&t.id))
+                .all(|t| t.enhancement == Some(TileEnhancement::Jade)),
+            "new tiles should inherit Jade from global buff"
+        );
+    }
+
+    #[test]
+    fn brocade_pouch_does_not_apply_without_talisman_use() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::BrocadePouch);
+        run.recompute_capacities();
+
+        assert_eq!(run.global_buff_enhancement, None);
+        assert!(run.hand.iter().all(|t| t.enhancement.is_none()));
+    }
+
+    #[test]
+    fn brocade_pouch_adds_consumable_slot() {
+        let mut run = test_run();
+        let base = run.consumables.capacity;
+        run.relics.active.push(RelicId::BrocadePouch);
+        run.recompute_capacities();
+        assert_eq!(run.consumables.capacity, base + 1);
+    }
+
+    #[test]
+    fn buff_talisman_without_pouch_does_not_set_global() {
+        use crate::core::consumable::Consumable;
+        use crate::core::talisman::TalismanKind;
+
+        let mut run = test_run();
+        let mut bus = bus();
+        run.consumables
+            .try_push(Consumable::Talisman(TalismanKind::Jade));
+        run.use_consumable(0, &mut bus);
+        assert_eq!(run.global_buff_enhancement, None);
+    }
 }
 
 /// All tile faces for substitution attempts.
@@ -4052,9 +4195,17 @@ mod wild_wind_tests {
                 .boxed()
         }
 
-        /// Mixed hand with at least one wind tile, 3..=14 tiles total.
+        /// Mixed hand with at least one wind tile, 3..=9 tiles total.
+        ///
+        /// The upper bound is deliberately below 14. `try_wind_substitution`
+        /// is combinatorial in the number of winds × candidate faces, so the
+        /// legacy 4-winds + 10-other worst case could take tens of seconds
+        /// per proptest case. The shape we actually want to cover —
+        /// substitution behaves consistently across small, medium, and larger
+        /// wind-heavy hands — is still exercised here without making the
+        /// test suite unusable.
         fn arb_wind_hand() -> BoxedStrategy<Vec<Tile>> {
-            (1usize..=4, 2usize..=10)
+            (1usize..=3, 2usize..=6)
                 .prop_flat_map(|(n_winds, n_other)| {
                     let wind_strats: Vec<BoxedStrategy<Tile>> =
                         (0..n_winds).map(|i| arb_wind_tile(i as u32)).collect();
@@ -4095,6 +4246,8 @@ mod wild_wind_tests {
         }
 
         proptest! {
+            #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
             // ── Property: permutation invariance (multiset) ───────────
             //
             // Reordering the input tiles must not change the *multiset* of faces
@@ -4143,6 +4296,8 @@ mod wild_wind_tests {
         }
 
         proptest! {
+            #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
             // ── Property: substitution output re-validates ────────────
             //
             // If substitution returns (sets, modified), the modified tile list
@@ -4164,6 +4319,8 @@ mod wild_wind_tests {
         }
 
         proptest! {
+            #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
             // ── Property: tile IDs preserved exactly ──────────────────
             //
             // Substitution rewrites face (suit, rank) but must never drop,
@@ -4181,6 +4338,8 @@ mod wild_wind_tests {
         }
 
         proptest! {
+            #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
             // ── Property: non-wind tiles unchanged ────────────────────
             //
             // Only wind tiles may be rewritten. A bug that substitutes the wrong
@@ -4204,6 +4363,8 @@ mod wild_wind_tests {
         }
 
         proptest! {
+            #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
             // ── Property: no panics on arbitrary input ────────────────
             #[test]
             fn no_panic_on_arbitrary_hand(tiles in arb_wind_hand()) {

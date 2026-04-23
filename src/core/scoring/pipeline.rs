@@ -649,7 +649,7 @@ fn score_sets_inner(
     }
 
     for _ in 0..count(RelicId::PaperLantern) {
-        push_mult!("Paper Lantern", 6.0);
+        push_mult!("Paper Lantern", 4.0);
     }
 
     if has(RelicId::MultiplierMaster) {
@@ -686,7 +686,7 @@ fn score_sets_inner(
     }
 
     if has(RelicId::Snowball) {
-        let bonus = ctx.total_score as f64 / 1000.0;
+        let bonus = ctx.total_score as f64 / 5000.0;
         if bonus > 0.0 {
             push_mult!("Snowball", bonus);
         }
@@ -745,6 +745,17 @@ fn score_sets_inner(
             .unwrap_or(0);
         if sold > 0 {
             push_mult!("Bonfire", 0.4 * sold as f64);
+        }
+    }
+
+    if has(RelicId::Kintsugi) {
+        let broken = ctx
+            .relic_counters
+            .get(&RelicId::Kintsugi)
+            .copied()
+            .unwrap_or(0);
+        if broken > 0 {
+            push_mult!("Kintsugi", broken as f64);
         }
     }
 

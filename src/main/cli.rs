@@ -49,6 +49,11 @@ pub struct BotCli {
     pub discards: Option<u32>,
     #[arg(long)]
     pub gold: Option<u32>,
+    /// Difficulty stake: spring (baseline), summer, autumn, or winter. Omit
+    /// for Spring. Stratifies balance snapshots so each tier's target /
+    /// shop / boss deltas can be evaluated independently.
+    #[arg(long)]
+    pub stake: Option<crate::core::stake::Stake>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub bot_log: bool,
     #[arg(long)]
@@ -98,6 +103,9 @@ pub struct BotGraphCli {
     pub discards: Option<u32>,
     #[arg(long)]
     pub gold: Option<u32>,
+    /// Difficulty stake for the balance snapshot.
+    #[arg(long)]
+    pub stake: Option<crate::core::stake::Stake>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub bot_log: bool,
 }
@@ -110,6 +118,7 @@ impl BotCli {
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_gold: self.gold,
+            stake: self.stake,
             ..Default::default()
         }
     }
@@ -123,6 +132,7 @@ impl BotGraphCli {
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_gold: self.gold,
+            stake: self.stake,
             ..Default::default()
         }
     }

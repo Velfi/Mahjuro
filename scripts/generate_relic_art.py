@@ -23,31 +23,34 @@ direction: enamel-pin badges (readable silhouette, metal rims, enamel fills).
 
 The game’s load order and fallbacks live in `src/render/relic_pipeline.rs`.
 
-Backgrounds on generated `*_object.png` are stripped in-place via `rembg`
-(u2net) so the saved PNG has a clean transparent alpha. Disable with
-`--skip-bg-removal`; rerun only the clean pass on existing files with
-`--reclean-bg`.
+The pipeline is non-destructive: each file on disk is a single-write
+artifact. Objects ship with the seamless-paper backdrop the model rendered.
+Runtime alpha cutting is done by the Rust loader, which composites the mask
+onto the object's alpha channel at decode time. Re-running `--artifact mask`
+with `--force` regenerates the mask from the height map without ever
+touching the object.
 
 Usage:
-    pip install openai requests rembg pillow onnxruntime
+    pip install openai requests pillow
     export OPENAI_API_KEY="sk-..."
     python scripts/generate_relic_art.py                       # all missing source assets
     python scripts/generate_relic_art.py --artifact object     # only object renders
     python scripts/generate_relic_art.py --artifact height     # only relief/height sources
-    python scripts/generate_relic_art.py --artifact mask       # only rewrite masks from existing objects
+    python scripts/generate_relic_art.py --artifact mask       # only rewrite masks from existing heights
     python scripts/generate_relic_art.py --artifact both --name overflow
     python scripts/generate_relic_art.py --force               # regenerate all
     python scripts/generate_relic_art.py --relic 17            # one relic by index
     python scripts/generate_relic_art.py --name kan_drum       # one relic by slug
     python scripts/generate_relic_art.py --list                # list all relics
     python scripts/generate_relic_art.py --dry-run             # print prompts only
-    python scripts/generate_relic_art.py --reclean-bg          # strip bg + rewrite masks on existing objects
 """
 
 import argparse
 import base64
 import os
+import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -66,17 +69,147 @@ OUTPUT_DIR = (
     / "source"
 )
 
-# Shared style prefix injected into every prompt. Tuned for isolated enamel-pin
-# style relic renders that can be reviewed directly and fed into silhouette /
-# relief derivation. Background handling is set per-artifact in the builder
-# functions (transparent for object, black for height) — intentionally omitted here.
-STYLE_PREFIX = (
-    "A single isolated collectible enamel pin relic designed for a game asset "
-    "pipeline. Front-facing near-orthographic presentation, centered "
-    "composition, full object visible. Polished hard-enamel lapel pin look: "
-    "crisp metal outlines, distinct flat color cells, strong silhouette "
-    "readability, minimal perspective distortion."
+# Shared style description injected into every prompt. Tuned for isolated
+# cloisonné-enamel-pin relic renders that can be reviewed directly and fed
+# into silhouette / relief derivation.
+#
+# The core describes construction, material, and lighting in metal-agnostic
+# terms. A per-rarity METAL_PROFILE is appended so Common/Uncommon/Rare/
+# Legendary pins read as Iron/Copper/Silver/Gold — matching the canonical
+# mapping in src/core/relic.rs (see material_for_rarity).
+STYLE_CORE = (
+    "A single isolated collectible cloisonné enamel pin relic rendered as a "
+    "hero badge for a game asset pipeline. Front-facing near-orthographic "
+    "presentation, pin plane parallel to the camera, centered inside a "
+    "rounded-square bezel with a raised polished outer frame and a stepped "
+    "inner lip.\n\n"
+    "Construction: every color region is a champlevé cell recessed slightly "
+    "below raised cloisonné wires. The wires have visible cross-section, "
+    "catch a crisp specular highlight along their top edge, and cast a "
+    "hairline shadow down into the enamel below. Enamel fills sit at a "
+    "consistent recessed depth across the whole pin.\n\n"
+    "Material: vitreous glass enamel with faint subsurface depth — light "
+    "enters each fill, bounces off the polished metal substrate beneath, and "
+    "returns slightly desaturated toward the center of the cell, giving a "
+    "jewel-like inner glow. Strong silhouette readability at game-camera "
+    "scale; proportions stay clean under the near-orthographic camera."
 )
+
+
+# Per-rarity metal profile. Keys match src/core/relic.rs Rarity variants.
+# The bezel, cloisonné wires, and any negative-space substrate all read as
+# this metal; only the enamel fills vary per badge.
+METAL_PROFILES = {
+    "Common": (
+        "Metal tier (Common — Iron): the wire inlay and bezel read as "
+        "blackened wrought iron with a subtle hammered texture along the "
+        "outer frame. Highlights are cool steely white; negative-space "
+        "substrate shows as dark gunmetal with a soft brushed grain. Wire "
+        "tops catch a narrow hard specular line."
+    ),
+    "Uncommon": (
+        "Metal tier (Uncommon — Copper): the wire inlay and bezel read as "
+        "polished rose copper with a warm amber patina settling into "
+        "recesses. Highlights are warm peach-white; negative-space substrate "
+        "shows as burnished copper with a soft radial brush. Wire tops hold "
+        "a long warm specular roll."
+    ),
+    "Rare": (
+        "Metal tier (Rare — Silver): the wire inlay and bezel read as "
+        "polished sterling silver with a cool white sheen. Highlights are "
+        "bright cool-white; negative-space substrate shows as brushed silver "
+        "with a faint radial burnish. Wire tops catch a crisp cool specular, "
+        "and enamel cells pick up a subtle cool reflection near the wire "
+        "edges."
+    ),
+    "Legendary": (
+        "Metal tier (Legendary — Gold): the wire inlay and bezel read as "
+        "polished jeweler's gold with a warm buttery tone. Highlights are "
+        "warm ivory-gold; negative-space substrate shows as brushed gold "
+        "with a soft radial burnish warming from the center outward. Wire "
+        "tops hold a long luminous specular, and enamel cells carry a faint "
+        "gold reflection along their inner edges."
+    ),
+}
+
+
+def style_prefix(rarity: str) -> str:
+    """Compose the full style description for a given rarity tier."""
+    profile = METAL_PROFILES.get(rarity)
+    if profile is None:
+        raise SystemExit(
+            f"Unknown rarity '{rarity}'. Expected one of: "
+            f"{', '.join(METAL_PROFILES)}."
+        )
+    return f"{STYLE_CORE}\n\n{profile}"
+
+
+RELIC_RS_PATH = (
+    Path(__file__).resolve().parent.parent / "src" / "core" / "relic.rs"
+)
+
+
+def load_slug_to_rarity() -> dict:
+    """Parse src/core/relic.rs for the authoritative slug → rarity mapping.
+
+    Joins two match tables from the Rust source:
+      - `asset_filename` arms: `RelicId::TripletBoost => "triplet_boost.png"`
+      - `all_relic_defs` entries: `id: RelicId::TripletBoost, ... rarity: Rarity::Common`
+
+    Returns `{ "triplet_boost": "Common", ... }`. Fails loud if relic.rs is
+    missing or a RelicId appears in one table but not the other — drift between
+    the script and the game must be surfaced, not silently defaulted.
+    """
+    if not RELIC_RS_PATH.exists():
+        raise SystemExit(
+            f"Cannot read rarity map: {RELIC_RS_PATH} does not exist."
+        )
+    text = RELIC_RS_PATH.read_text()
+
+    id_to_slug = {
+        m.group(1): m.group(2)
+        for m in re.finditer(
+            r'RelicId::(\w+)\s*=>\s*"([a-z0-9_]+)\.png"', text
+        )
+    }
+
+    id_to_rarity = {}
+    for m in re.finditer(
+        r"id:\s*RelicId::(\w+)\s*,[^}]*?rarity:\s*Rarity::(\w+)",
+        text,
+        flags=re.DOTALL,
+    ):
+        id_to_rarity[m.group(1)] = m.group(2)
+
+    if not id_to_slug or not id_to_rarity:
+        raise SystemExit(
+            "Failed to parse relic.rs — asset_filename arms or "
+            "all_relic_defs entries did not match expected shape."
+        )
+
+    slug_to_rarity = {}
+    for relic_id, slug in id_to_slug.items():
+        rarity = id_to_rarity.get(relic_id)
+        if rarity is None:
+            # RelicId has an asset filename but no RelicDef — harmless (the
+            # script only generates for slugs in RELICS), so skip silently.
+            continue
+        slug_to_rarity[slug] = rarity
+    return slug_to_rarity
+
+
+SLUG_TO_RARITY = load_slug_to_rarity()
+
+
+def rarity_for(slug: str) -> str:
+    """Look up the rarity tier for a relic slug, failing loud on drift."""
+    rarity = SLUG_TO_RARITY.get(slug)
+    if rarity is None:
+        raise SystemExit(
+            f"Relic slug '{slug}' has no rarity entry in relic.rs. "
+            "Add a RelicDef or remove it from the RELICS list."
+        )
+    return rarity
 
 
 # Each tuple: (filename_slug, display_name, visual_description, palette_hint)
@@ -766,39 +899,83 @@ RELICS = [
         "and a luggage tag beside it. Travelogue motif packed into a single crest.",
         "Warm brass compass, cream paper map, muted teal tag, soft tan luggage tones.",
     ),
+    (
+        "kintsugi",
+        "Kintsugi",
+        "A cracked ceramic tea bowl whose fracture lines have been mended with "
+        "rivers of molten gold, the seams glowing faintly as if still warm. "
+        "The bowl sits upright on a dark wooden stand, each gold vein tracing "
+        "the break pattern in crisp lacquered relief. Repaired, not hidden.",
+        "Pale celadon ceramic, bright molten gold veins, warm amber highlights, deep mahogany stand.",
+    ),
+    (
+        "ant_trail",
+        "Ant Trail",
+        "A circular procession of tiny ants marching head-to-tail around the "
+        "edge of a single mahjong tile, wrapping continuously so the line has "
+        "no visible start or end. The tile face shows a low numeric mark; the "
+        "trail reads as an unbroken loop from 9 back to 1.",
+        "Ivory tile face, deep ink numeral, glossy black ant silhouettes, muted bamboo green underlayer.",
+    ),
+    (
+        "brocade_pouch",
+        "Brocade Pouch",
+        "A small silk drawstring pouch with rich brocade patterning — "
+        "embroidered clouds and knotwork in gold thread on deep indigo fabric, "
+        "the cord loosely cinched with a jade bead dangling. A few faint "
+        "glimmers of colored light leak from the mouth, hinting at charmed "
+        "tokens inside. Resting on dark wood.",
+        "Deep indigo silk, antique gold embroidery, pale jade bead, warm amber highlights.",
+    ),
 ]
 
 
-def build_object_prompt(name: str, visual: str, palette: str) -> str:
-    """Prompt for the transparent color render (`*_object.png` — albedo fallback for the loader)."""
-    return (
-        f"{STYLE_PREFIX}\n\n"
-        f"Asset type: enamel pin relic color render (RGBA, transparent background).\n"
+def build_object_prompt(
+    name: str,
+    visual: str,
+    palette: str,
+    rarity: str,
+    *,
+    from_reference: bool = False,
+) -> str:
+    """Prompt for the transparent color render (`*_object.png` — albedo fallback for the loader).
+
+    When `from_reference=True`, assumes the call is an image edit against a
+    grayscale relief guide and appends instructions to honor that guide's
+    silhouette and divider structure. Text-prompted runs omit those lines so
+    the model isn't told to match a reference that doesn't exist.
+    """
+    base = (
+        f"{style_prefix(rarity)}\n\n"
+        f"Asset type: cloisonné enamel pin relic color render, product-shot framing.\n"
         f"Relic name: '{name}'.\n"
         f"Subject: use only the central subject from this description; ignore any environment, scene, or setting words: {visual}\n"
-        f"Color palette: {palette}\n"
-        "Style/medium: polished stylized enamel pin render, readable at game-camera scale.\n"
-        "Composition/framing: centered square, badge fills most of the frame with a small uniform margin, front-facing, minimal tilt.\n"
-        "Lighting/mood: neutral studio key plus soft rim light, faint contact shadow only.\n"
-        "Materials: hard enamel color fills separated by raised polished metal borders; the outer rim is thick and legible.\n"
-        "Background: fully transparent alpha outside the badge silhouette. The pin is a single continuous solid object — every region inside the outer silhouette is opaque enamel or metal, never a cutout or window.\n"
-        "Relief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add only color and material on top. Any gray region INSIDE the silhouette is a recessed enamel fill (paint it as solid opaque enamel), not a hole. Only the pure-black area OUTSIDE the silhouette becomes transparent.\n"
-        "Keep proportions, parts, and framing of the relief guide intact."
+        f"Enamel palette (colors apply to the recessed champlevé cells only; the wires and negative-space substrate follow the metal tier above): {palette}\n"
+        "Composition/framing: centered square, badge fills most of the frame with a small uniform margin, pin plane parallel to the camera.\n"
+        "Lighting/mood: neutral studio key plus a soft warm rim, gentle radial burnish on the substrate.\n"
+        "Materials: vitreous glass enamel fills recessed below raised cloisonné wires in the metal tier above; the outer bezel reads as a thick legible frame in that same metal.\n"
+        "Background: a perfectly flat, uniform, pure black archival backdrop — the solid matte black of a museum archival photography plate, with no gradient, no vignette, no texture, and no shadow cast onto the surface. Every region inside the outer silhouette resolves as solid opaque material — either enamel fill or metal wire."
     )
+    if from_reference:
+        base += (
+            "\nRelief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add color and material on top. Any gray region INSIDE the silhouette resolves as a solid opaque enamel fill. Transparency applies only to the area outside the outer silhouette.\n"
+            "Keep the proportions, parts, and framing of the relief guide intact."
+        )
+    return base
 
 
 def build_height_prompt(name: str, visual: str) -> str:
-    """Prompt for `*_height.png` — matches object silhouette; bound as linear GPU relief."""
+    """Prompt for `*_height.png` — matches input silhouette; bound as linear GPU relief."""
     return (
-        f"Grayscale relief guide for the enamel pin relic '{name}'.\n"
-        f"Subject: use only the central subject from this description; ignore any environment, scene, or setting words: {visual}\n"
+        f"Grayscale relief guide for the cloisonné enamel pin relic '{name}'.\n"
+        f"Subject: {visual}\n"
         "Output: centered square, pure black background, front-facing near-orthographic enamel pin silhouette with clean internal partitions.\n"
-        "Tonal key (strict, flat regions with hard edges — no gradients, no texture, no noise within a region):\n"
-        "  - White: highest polished metal rim or raised divider.\n"
-        "  - Mid-gray: recessed enamel fill surface inside the silhouette.\n"
-        "  - Black: only the area OUTSIDE the outer silhouette.\n"
-        "Every area inside the outer silhouette must be gray or white — never black — so the later color pass treats it as a solid opaque enamel fill, not a cutout.\n"
-        "Monochrome only, no color, no text, no border, no frame."
+        "Tonal key (each region is a single flat tone with a hard edge to its neighbor):\n"
+        "  - White: highest raised metal — outer bezel rim and cloisonné wire dividers.\n"
+        "  - Mid-grays: recessed champlevé enamel fill surface inside the silhouette.\n"
+        "  - Black: the area outside the outer silhouette.\n"
+        "Every area inside the outer silhouette resolves to gray or white, so the later color pass treats it as a solid opaque enamel fill.\n"
+        "A clean monochrome grayscale relief, matching the input in proportion."
     )
 
 
@@ -831,6 +1008,73 @@ def remove_background(path: Path) -> None:
 MASK_ALPHA_THRESHOLD = 16
 
 
+# Height-map luminance thresholds for alpha derivation. The height prompt asks
+# for pure black (0) outside the silhouette and gray/white (>= mid) inside, so
+# the alpha rule is: below `_LO` → transparent, at/above `_HI` → opaque, and a
+# short anti-aliased ramp between. Keeping the ramp short (vs. remapping the
+# whole 0..255 range) is critical: mid-gray enamel fills must stay fully
+# opaque, not half-transparent.
+HEIGHT_ALPHA_LO = 8
+HEIGHT_ALPHA_HI = 24
+
+
+def clean_object_background(object_path: Path, height_path: Path) -> None:
+    """Strip the object render's background using the most reliable method available.
+
+    Preference ladder:
+      1. Derive alpha from the height map's silhouette (deterministic, free,
+         already aligned — the object was generated from the height guide).
+      2. Fall back to rembg (u2net) if the height map is missing or mismatched.
+
+    rembg is fragile on dark-on-dark subjects (e.g. iron pins on dark vignettes
+    where salient-object matting reads the bezel as background and shreds it).
+    The height-derived path sidesteps that failure entirely.
+    """
+    if alpha_from_height(object_path, height_path):
+        print(f"  Alpha from height map: {object_path.name}")
+        return
+    remove_background(object_path)
+    print(f"  Cleaned bg (rembg fallback): {object_path.name}")
+
+
+def alpha_from_height(object_path: Path, height_path: Path) -> bool:
+    """Use the height map's silhouette as the alpha channel for the object render.
+
+    gpt-image-2 refuses transparent backgrounds, and u2net's salient-object
+    matter fails on dark-on-dark subjects (e.g. iron-tier pins rendered against
+    a dark vignette). The height map already encodes the silhouette we want:
+    pure black outside, gray/white inside. Threshold the height map and use it
+    as alpha on the object render — no ML, deterministic, already aligned
+    because the object was generated from the height reference.
+
+    Returns False if either input is missing or shapes don't match after
+    resizing; in that case the caller should fall back to rembg.
+    """
+    from PIL import Image
+
+    if not object_path.exists() or not height_path.exists():
+        return False
+    with Image.open(object_path) as im:
+        rgba = im.convert("RGBA")
+    with Image.open(height_path) as hm:
+        height = hm.convert("L")
+    if height.size != rgba.size:
+        height = height.resize(rgba.size, Image.LANCZOS)
+    # Short ramp at the silhouette edge: transparent below LO, opaque at/above
+    # HI, linear in between. Preserves an anti-aliased halo without eating the
+    # opacity of interior enamel fills (which sit at mid-gray luminance).
+    ramp = max(1, HEIGHT_ALPHA_HI - HEIGHT_ALPHA_LO)
+    alpha = height.point(
+        lambda v: 0 if v < HEIGHT_ALPHA_LO
+        else 255 if v >= HEIGHT_ALPHA_HI
+        else int((v - HEIGHT_ALPHA_LO) * 255 / ramp),
+        mode="L",
+    )
+    r, g, b, _ = rgba.split()
+    Image.merge("RGBA", (r, g, b, alpha)).save(object_path, format="PNG")
+    return True
+
+
 def flatten_height_to_black_bg(path: Path) -> None:
     """Composite `path` over pure black and save as grayscale L-mode PNG.
 
@@ -846,6 +1090,28 @@ def flatten_height_to_black_bg(path: Path) -> None:
     black = Image.new("RGB", rgba.size, (0, 0, 0))
     black.paste(rgba, mask=rgba.split()[-1])
     black.convert("L").save(path, format="PNG")
+
+
+def write_mask_from_height(height_path: Path, mask_path: Path) -> bool:
+    """Write `mask_path` as a binary L-mode silhouette of the height map.
+
+    The height map is the canonical source of silhouette truth under the
+    object-first pipeline: the object's alpha is itself derived from the
+    height's luminance (via `alpha_from_height`), so deriving the mask from
+    the height map directly skips a redundant threshold pass and guarantees
+    the mask and object alpha agree pixel-for-pixel.
+
+    Returns False if the height map does not exist.
+    """
+    from PIL import Image
+
+    if not height_path.exists():
+        return False
+    with Image.open(height_path) as im:
+        height = im.convert("L")
+    mask = height.point(lambda v: 255 if v >= HEIGHT_ALPHA_LO else 0, mode="L")
+    mask.save(mask_path, format="PNG")
+    return True
 
 
 def write_mask_from_object(object_path: Path, mask_path: Path) -> bool:
@@ -902,6 +1168,60 @@ def save_response_image(data, output_path: Path) -> None:
     print(f"  Saved: {output_path}")
 
 
+# OpenAI's DALL-E 2 edits endpoint used the convention alpha=0 (transparent)
+# → editable, alpha=255 (opaque) → preserved. gpt-image-2's documentation
+# describes masks as "guidance... the model may not follow the exact shape
+# with complete precision" but does not explicitly state which alpha value
+# marks editable regions. Exposed as a module constant so this can be flipped
+# from the CLI / env if the DALL-E 2 convention turns out to be wrong for
+# gpt-image-2.
+EDIT_MASK_TRANSPARENT_IS_EDITABLE = True
+
+
+def build_edit_mask(reference_path: Path, mask_out: Path) -> bool:
+    """Build an RGBA mask that asks the model to preserve the reference's silhouette.
+
+    The mask marks the reference's silhouette as the editable region (so the
+    model can repaint interior detail) and the surround as the preserved
+    region (so the outer shape stays put). The alpha values used are driven
+    by `EDIT_MASK_TRANSPARENT_IS_EDITABLE` since gpt-image-2's exact mask
+    semantics are not documented.
+
+    Requires the reference to already have a cutout alpha (i.e. the surround
+    is transparent). Returns False if the reference is fully opaque — with no
+    silhouette to lock onto there's nothing this mask can usefully convey.
+    """
+    from PIL import Image
+
+    if not reference_path.exists():
+        return False
+    with Image.open(reference_path) as im:
+        ref = im.convert("RGBA")
+    alpha = ref.split()[-1]
+    lo, hi = alpha.getextrema()
+    if lo == 255 and hi == 255:
+        # Reference has no transparent surround — no silhouette to lock.
+        return False
+
+    if EDIT_MASK_TRANSPARENT_IS_EDITABLE:
+        # Silhouette → transparent (editable), surround → opaque (preserved).
+        mask_alpha = alpha.point(
+            lambda a: 0 if a >= MASK_ALPHA_THRESHOLD else 255, mode="L"
+        )
+    else:
+        # Silhouette → opaque (editable), surround → transparent (preserved).
+        mask_alpha = alpha.point(
+            lambda a: 255 if a >= MASK_ALPHA_THRESHOLD else 0, mode="L"
+        )
+
+    # Fill RGB with mid-gray; edits API ignores RGB under an alpha mask but
+    # some servers reject pure-black RGB.
+    gray = Image.new("RGB", ref.size, (128, 128, 128))
+    gray.putalpha(mask_alpha)
+    gray.save(mask_out, format="PNG")
+    return True
+
+
 def generate_from_reference(
     client: OpenAI,
     prompt: str,
@@ -909,16 +1229,50 @@ def generate_from_reference(
     model: str,
     reference_path: Path,
     input_fidelity: str,
+    try_lock_silhouette: bool = False,
 ) -> None:
-    """Use an existing source image as the structural reference for a new output."""
-    with reference_path.open("rb") as image_file:
-        response = client.images.edit(
-            model=model,
-            image=image_file,
-            prompt=prompt,
-            input_fidelity=input_fidelity,
-        )
-    save_response_image(response.data[0], output_path)
+    """Use an existing source image as the structural reference for a new output.
+
+    When `try_lock_silhouette=True`, attempt to derive a mask from the
+    reference's alpha and pass it to the edits endpoint. If the reference
+    has no usable alpha (e.g. it hasn't been background-removed yet), the
+    call silently proceeds without a mask — the name makes that fallback
+    explicit. The mask is written to a process-local temp file and cleaned
+    up even if the edit call raises.
+    """
+    # `input_fidelity` is a gpt-image-1-only knob; gpt-image-2 rejects it with
+    # `invalid_input_fidelity_model`. Pass it only for models that accept it.
+    edit_kwargs = {"model": model, "prompt": prompt}
+    if model == "gpt-image-1":
+        edit_kwargs["input_fidelity"] = input_fidelity
+
+    mask_path: Path | None = None
+    if try_lock_silhouette:
+        fd, mask_str = tempfile.mkstemp(prefix="editmask_", suffix=".png")
+        os.close(fd)
+        candidate = Path(mask_str)
+        if build_edit_mask(reference_path, candidate):
+            mask_path = candidate
+        else:
+            candidate.unlink(missing_ok=True)
+            print(
+                f"  (silhouette lock requested but {reference_path.name} has "
+                "no usable alpha; falling back to unmasked edit)"
+            )
+
+    try:
+        with reference_path.open("rb") as image_file:
+            if mask_path is not None:
+                with mask_path.open("rb") as mask_file:
+                    response = client.images.edit(
+                        image=image_file, mask=mask_file, **edit_kwargs
+                    )
+            else:
+                response = client.images.edit(image=image_file, **edit_kwargs)
+        save_response_image(response.data[0], output_path)
+    finally:
+        if mask_path is not None:
+            mask_path.unlink(missing_ok=True)
 
 
 def artifact_targets(base_dir: Path, slug: str, artifact: str) -> list[tuple[str, Path]]:
@@ -928,9 +1282,12 @@ def artifact_targets(base_dir: Path, slug: str, artifact: str) -> list[tuple[str
         return [("height", base_dir / f"{slug}_height.png")]
     if artifact == "mask":
         return [("mask", base_dir / f"{slug}_mask.png")]
+    # Object-first ordering: the object render is the authoritative pass
+    # (text-prompted, most context), and the height pass edits it into a
+    # relief guide with the object's silhouette as a hard constraint.
     return [
-        ("height", base_dir / f"{slug}_height.png"),
         ("object", base_dir / f"{slug}_object.png"),
+        ("height", base_dir / f"{slug}_height.png"),
     ]
 
 
@@ -980,8 +1337,8 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-1",
-        help="Image model to use (default: gpt-image-1).",
+        default="gpt-image-2",
+        help="Image model to use (default: gpt-image-2).",
     )
     parser.add_argument(
         "--size",
@@ -1004,52 +1361,45 @@ def main() -> None:
     parser.add_argument(
         "--height-mode",
         choices=("reference", "generate"),
-        default="generate",
+        default="reference",
         help=(
-            "How to make *_height.png assets: generate from text only "
-            "(default) or use an existing object render as an image edit reference."
+            "How to make *_height.png assets: edit the object render into a "
+            "relief guide using the object's silhouette as a mask (default — "
+            "locks height silhouette to the object) or generate from text only."
         ),
     )
     parser.add_argument(
         "--height-input-fidelity",
         choices=("low", "high"),
         default="high",
-        help="Input fidelity for reference-based height generation (default: high).",
+        help="Input fidelity for reference-based height generation (default: high, gpt-image-1 only).",
     )
     parser.add_argument(
         "--object-mode",
         choices=("reference", "generate"),
-        default="reference",
+        default="generate",
         help=(
-            "How to make *_object.png assets: use the generated height guide as "
-            "an image edit reference (default) or generate from text only."
+            "How to make *_object.png assets: generate from text (default — "
+            "object is the authoritative pass) or edit a pre-existing height "
+            "guide into color."
         ),
     )
     parser.add_argument(
         "--object-input-fidelity",
         choices=("low", "high"),
         default="high",
-        help="Input fidelity for reference-based object generation (default: high).",
-    )
-    parser.add_argument(
-        "--skip-bg-removal",
-        action="store_true",
-        help="Do not run rembg on generated *_object.png files.",
-    )
-    parser.add_argument(
-        "--reclean-bg",
-        action="store_true",
         help=(
-            "Skip generation; just run rembg on existing *_object.png for the "
-            "selected relics. Useful for cleaning old assets."
+            "Input fidelity for reference-based object generation "
+            "(default: high, gpt-image-1 only, only used with --object-mode=reference)."
         ),
     )
     args = parser.parse_args()
 
     if args.list:
         for i, (slug, name, _, _) in enumerate(RELICS, 1):
+            rarity = SLUG_TO_RARITY.get(slug, "?")
             print(
-                f"  {i:2d}. {name:<22s}  "
+                f"  {i:2d}. {name:<22s}  [{rarity:<9s}]  "
                 f"source/{slug}_object.png, source/{slug}_height.png, source/{slug}_mask.png"
             )
         print(
@@ -1081,51 +1431,27 @@ def main() -> None:
     else:
         targets = list(enumerate(RELICS))
 
-    if args.reclean_bg:
-        cleaned = 0
-        missing = 0
-        for idx, (slug, name, _, _) in targets:
-            path = out_dir / f"{slug}_object.png"
-            if not path.exists():
-                print(f"[{idx + 1}] {name}: no {path.name} — skipping")
-                missing += 1
-                continue
-            print(f"[{idx + 1}] {name}: cleaning {path.name}")
-            remove_background(path)
-            cleaned += 1
-            if not args.skip_mask:
-                mask_path = out_dir / f"{slug}_mask.png"
-                if write_mask_from_object(path, mask_path):
-                    print(f"  Wrote mask: {mask_path.name}")
-                else:
-                    print(f"  Skipped mask: {path.name} is fully opaque")
-        print(f"\nDone. cleaned={cleaned} missing={missing} → {out_dir}")
-        return
-
     if args.artifact == "mask":
         wrote = 0
         missing = 0
         for idx, (slug, name, _, _) in targets:
             obj = out_dir / f"{slug}_object.png"
+            height_path = out_dir / f"{slug}_height.png"
             mask_path = out_dir / f"{slug}_mask.png"
             if mask_path.exists() and not args.force:
                 print(
                     f"[{idx + 1}] {name}: mask exists — use --force to regenerate"
                 )
                 continue
-            if not obj.exists():
-                print(f"[{idx + 1}] {name}: no {obj.name} — skipping")
-                missing += 1
-                continue
-            if not write_mask_from_object(obj, mask_path):
+            if write_mask_from_height(height_path, mask_path) or write_mask_from_object(obj, mask_path):
+                print(f"[{idx + 1}] {name}: wrote {mask_path.name}")
+                wrote += 1
+            else:
                 print(
-                    f"[{idx + 1}] {name}: {obj.name} is fully opaque "
-                    "(run --reclean-bg first) — skipping"
+                    f"[{idx + 1}] {name}: no height map and {obj.name} is "
+                    "missing or fully opaque — skipping"
                 )
                 missing += 1
-                continue
-            print(f"[{idx + 1}] {name}: wrote {mask_path.name}")
-            wrote += 1
         print(f"\nDone. wrote={wrote} missing={missing} → {out_dir}")
         return
 
@@ -1142,13 +1468,26 @@ def main() -> None:
     failed = 0
 
     for idx, (slug, name, visual, palette) in targets:
-        print(f"\n[{idx + 1}/{len(RELICS)}] {name}")
+        rarity = rarity_for(slug)
+        print(f"\n[{idx + 1}/{len(RELICS)}] {name} [{rarity}]")
 
         object_output_path = out_dir / f"{slug}_object.png"
         height_output_path = out_dir / f"{slug}_height.png"
+
+        # Mask derivation at the end of the iteration is gated on a
+        # successful height pass — without a height map there's no silhouette
+        # source. Starts from disk state so single-artifact runs (e.g.
+        # --artifact object after a prior --artifact height) still finalize
+        # the mask.
+        height_ready = height_output_path.exists()
+
         for artifact_name, output_path in artifact_targets(out_dir, slug, args.artifact):
+            object_ref_prompt = build_object_prompt(
+                name, visual, palette, rarity,
+                from_reference=(args.object_mode == "reference"),
+            )
             prompt = (
-                build_object_prompt(name, visual, palette)
+                object_ref_prompt
                 if artifact_name == "object"
                 else build_height_prompt(name, visual)
             )
@@ -1163,6 +1502,8 @@ def main() -> None:
                     "— use --force to regenerate"
                 )
                 skipped += 1
+                if artifact_name == "height":
+                    height_ready = True
                 continue
 
             try:
@@ -1174,19 +1515,17 @@ def main() -> None:
                         )
                         generate_image(
                             client,
-                            build_object_prompt(name, visual, palette),
+                            build_object_prompt(name, visual, palette, rarity),
                             object_output_path,
                             args.model,
                             args.size,
                         )
                         generated += 1
-                        if not args.skip_bg_removal:
-                            remove_background(object_output_path)
-                            print(f"  Cleaned bg: {object_output_path.name}")
-                        if not args.skip_mask:
-                            mask_path = out_dir / f"{slug}_mask.png"
-                            if write_mask_from_object(object_output_path, mask_path):
-                                print(f"  Wrote mask: {mask_path.name}")
+                    # The object ships with a full-alpha seamless backdrop
+                    # (non-destructive pipeline), so there's no alpha-based
+                    # silhouette the edit API could lock to. The height
+                    # prompt's "pure black outside" tonal directive is what
+                    # enforces silhouette alignment here.
                     generate_from_reference(
                         client,
                         prompt,
@@ -1195,31 +1534,24 @@ def main() -> None:
                         object_output_path,
                         args.height_input_fidelity,
                     )
+                    flatten_height_to_black_bg(output_path)
+                    print(f"  Black bg: {output_path.name}")
                 elif artifact_name == "object" and args.object_mode == "reference":
                     if not height_output_path.exists():
                         print(
                             "  Object needs a height reference first; generating height pass."
                         )
-                        if args.height_mode == "reference" and object_output_path.exists():
-                            generate_from_reference(
-                                client,
-                                build_height_prompt(name, visual),
-                                height_output_path,
-                                args.model,
-                                object_output_path,
-                                args.height_input_fidelity,
-                            )
-                        else:
-                            generate_image(
-                                client,
-                                build_height_prompt(name, visual),
-                                height_output_path,
-                                args.model,
-                                args.size,
-                            )
+                        generate_image(
+                            client,
+                            build_height_prompt(name, visual),
+                            height_output_path,
+                            args.model,
+                            args.size,
+                        )
                         flatten_height_to_black_bg(height_output_path)
                         print(f"  Black bg: {height_output_path.name}")
                         generated += 1
+                        height_ready = True
                     generate_from_reference(
                         client,
                         prompt,
@@ -1230,21 +1562,26 @@ def main() -> None:
                     )
                 else:
                     generate_image(client, prompt, output_path, args.model, args.size)
+                    if artifact_name == "height":
+                        flatten_height_to_black_bg(output_path)
+                        print(f"  Black bg: {output_path.name}")
                 generated += 1
-                if artifact_name == "object" and not args.skip_bg_removal:
-                    remove_background(output_path)
-                    print(f"  Cleaned bg: {output_path.name}")
-                if artifact_name == "object" and not args.skip_mask:
-                    mask_path = out_dir / f"{slug}_mask.png"
-                    if write_mask_from_object(output_path, mask_path):
-                        print(f"  Wrote mask: {mask_path.name}")
                 if artifact_name == "height":
-                    flatten_height_to_black_bg(output_path)
-                    print(f"  Black bg: {output_path.name}")
+                    height_ready = True
             except Exception as e:
                 print(f"  Error generating {name} [{artifact_name}]: {e}")
                 failed += 1
                 continue
+
+        # Write the mask once from the height map. The object file is left
+        # exactly as the model returned it (seamless-paper backdrop, full
+        # alpha). The Rust loader cuts the object's alpha against this mask
+        # at load time so re-running the pipeline is never destructive to
+        # raw artifacts on disk.
+        if not args.skip_mask and height_ready:
+            mask_path = out_dir / f"{slug}_mask.png"
+            if write_mask_from_height(height_output_path, mask_path):
+                print(f"  Wrote mask: {mask_path.name}")
 
         if len(targets) > 1:
             time.sleep(args.delay)

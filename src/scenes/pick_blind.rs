@@ -979,14 +979,24 @@ impl SceneBehavior for PickBlindScene {
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::BeveledSlab,
                     material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                        .with_decal(crate::render::primitive::plaque_decal(format!(
-                            "ANTE {}/{} · {}\nTarget {}   ·   Reward ${}",
-                            pick.ante,
-                            crate::game::run::FINAL_ANTE,
-                            blind_name,
-                            target_value,
-                            upcoming.clear_reward(),
-                        ))),
+                        .with_decal(crate::render::primitive::plaque_decal({
+                            // Stake badge: Spring is the baseline — no badge
+                            // so the plaque stays clean for new players.
+                            // Higher stakes print a trailing tag.
+                            let stake_tag = match ctx.run.mode.stake {
+                                crate::core::stake::Stake::Spring => String::new(),
+                                other => format!("   ·   {}", other.label()),
+                            };
+                            format!(
+                                "ANTE {}/{} · {}{}\nTarget {}   ·   Reward ${}",
+                                pick.ante,
+                                crate::game::run::FINAL_ANTE,
+                                blind_name,
+                                stake_tag,
+                                target_value,
+                                upcoming.clear_reward(),
+                            )
+                        })),
                     pick_id: None,
                     shadow_caster: false,
                     silhouette: false,

@@ -99,7 +99,7 @@ Relics come in Common / Uncommon / Rare tiers that gate shop availability and pr
 
 ### **H. Consumables & Slots**
 
-Talismans and zodiacs share a **base inventory of 2 slots**, expandable via Lunar Almanac (+1, with duplication). Both are purchased from the shop and applied manually.
+Talismans and zodiacs share a **fixed inventory of 2 slots**. Both are purchased from the shop and applied manually.
 
 ---
 
