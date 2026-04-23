@@ -25,41 +25,26 @@ fn flat_relief_rgba() -> (Vec<u8>, u32, u32) {
 /// [`crate::render::relic_dish::build_relic_mesh_from_rgba`].
 const MASK_SILHOUETTE_THRESHOLD: u8 = 115; // ≈ 0.45 * 255
 
-/// Cut `img`'s alpha channel against a silhouette mask. Mask reading accepts
-/// both conventions produced by the asset pipeline: alpha-cutout masks
-/// (transparent surround, opaque silhouette) and RGB-luma masks (fully opaque
-/// alpha, silhouette encoded as white-on-black). Pixels outside the mask's
-/// silhouette are set to alpha=0; pixels inside keep the object's original
-/// alpha. The mask is nearest-neighbour sampled so dimension mismatches are
-/// handled without introducing a PIL/image dependency on resampling.
+/// Cut `img`'s alpha channel against a silhouette mask. The silhouette is
+/// always encoded in the mask's luma (white = inside, black = outside); the
+/// alpha channel, if any, is ignored. Pixels outside the silhouette are set
+/// to alpha=0; pixels inside keep the object's original alpha. The mask is
+/// nearest-neighbour sampled so dimension mismatches are handled without
+/// introducing a PIL/image dependency on resampling.
 fn apply_mask_alpha(img: &mut image::RgbaImage, mask: &image::RgbaImage) {
     let (iw, ih) = img.dimensions();
     let (mw, mh) = mask.dimensions();
     if mw == 0 || mh == 0 {
         return;
     }
-    // Detect mask convention once per call. If the mask has any transparent
-    // pixels, trust its alpha channel; otherwise derive silhouette from luma.
-    let mut alpha_has_variance = false;
-    for p in mask.pixels() {
-        if p[3] < 250 {
-            alpha_has_variance = true;
-            break;
-        }
-    }
     for y in 0..ih {
         for x in 0..iw {
             let mx = ((x as u64) * (mw as u64) / (iw as u64)) as u32;
             let my = ((y as u64) * (mh as u64) / (ih as u64)) as u32;
             let mp = mask.get_pixel(mx.min(mw - 1), my.min(mh - 1));
-            let inside = if alpha_has_variance {
-                mp[3] >= MASK_SILHOUETTE_THRESHOLD
-            } else {
-                // rec.709 luminance on RGB, integer-math.
-                let luma = (54 * mp[0] as u32 + 183 * mp[1] as u32 + 19 * mp[2] as u32) / 256;
-                luma as u8 >= MASK_SILHOUETTE_THRESHOLD
-            };
-            if !inside {
+            // rec.709 luminance on RGB, integer-math.
+            let luma = (54 * mp[0] as u32 + 183 * mp[1] as u32 + 19 * mp[2] as u32) / 256;
+            if (luma as u8) < MASK_SILHOUETTE_THRESHOLD {
                 let px = img.get_pixel_mut(x, y);
                 px[3] = 0;
             }

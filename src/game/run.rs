@@ -547,7 +547,7 @@ pub struct RunState {
     /// Per-yaku level (default 1). Incremented by Zodiac card use.
     pub yaku_levels: crate::core::zodiac::YakuLevels,
     /// Player's shared consumable inventory — holds both Zodiacs and Talismans
-    /// in the same capped slot list. Capacity expands via the Lunar Almanac relic.
+    /// in the same capped slot list. Capacity expands via the Brocade Pouch relic.
     pub consumables: crate::core::consumable::ConsumableInventory,
     /// Game mode preset used for this run (drives advance_round resets).
     pub mode: GameMode,
@@ -1475,9 +1475,6 @@ impl RunState {
     /// capacity comes from `GameMode::consumable_capacity` (default 2).
     pub fn recompute_capacities(&mut self) {
         let mut consumable_cap = self.mode.consumable_capacity;
-        if self.relics.has(RelicId::LunarAlmanac) {
-            consumable_cap += 1;
-        }
         if self.relics.has(RelicId::BrocadePouch) {
             consumable_cap += 1;
         }

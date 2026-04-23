@@ -39,7 +39,7 @@ pub struct ConsumableInventory {
 impl Default for ConsumableInventory {
     fn default() -> Self {
         // 2 base slots — matches `GameMode::standard().consumable_capacity`.
-        // Pouch / Almanac relics push this up via `recompute_capacities`.
+        // Brocade Pouch pushes this up via `recompute_capacities`.
         Self {
             items: Vec::new(),
             capacity: 2,

@@ -49,8 +49,6 @@ pub enum RelicId {
     FuritenWard,
     /// Round Wind triplets/kongs grant +6 mult instead of the base +3.
     RoundCompass,
-    /// +1 zodiac inventory slot; every 3rd Zodiac you use is duplicated.
-    LunarAlmanac,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
     /// Kongs grant +120 chips and +2 mult each. (The original "counts as
@@ -251,7 +249,6 @@ impl RelicId {
             RelicId::RiverEraser => "river_eraser.png",
             RelicId::FuritenWard => "furiten_ward.png",
             RelicId::RoundCompass => "round_compass.png",
-            RelicId::LunarAlmanac => "lunar_almanac.png",
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
             RelicId::CodexCompass => "codex_compass.png",
@@ -707,12 +704,6 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             name: "Round Compass",
             description: "Round Wind triplets/kongs: +6 mult",
             rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::LunarAlmanac,
-            name: "Lunar Almanac",
-            description: "+1 Zodiac slot; every 3rd Zodiac use is duplicated",
-            rarity: Rarity::Rare,
         },
         RelicDef {
             id: RelicId::EightTreasures,

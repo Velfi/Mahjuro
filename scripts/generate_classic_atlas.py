@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 TILE_W = 256
 TILE_H = 384
-COLUMNS = 8
+COLUMNS = 9
 
 IVORY = (245, 238, 220, 255)
 INK_BLACK = (30, 28, 24, 255)
@@ -30,11 +30,11 @@ INK_BLUE = (35, 70, 140, 255)
 PIP_WHITE = (248, 244, 230, 255)
 
 LAYOUT = [
-    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
-    "B9", "C1", "C2", "C3", "C4", "C5", "C6", "C7",
-    "C8", "C9", "D1", "D2", "D3", "D4", "D5", "D6",
-    "D7", "D8", "D9", "EWind", "SWind", "WWind", "NWind", "DRed",
-    "DGreen", "DWhite", "Flower1", "Flower2", "Flower3", "Flower4",
+    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9",
+    "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9",
+    "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
+    "EWind", "SWind", "WWind", "NWind", "DRed", "DGreen", "DWhite", "", "",
+    "Flower1", "Flower2", "Flower3", "Flower4",
 ]
 
 CHAR_NUMERALS = {
@@ -837,6 +837,8 @@ def build_atlas(tiles: dict[str, Image.Image]) -> Image.Image:
     rows = math.ceil(len(LAYOUT) / COLUMNS)
     atlas = Image.new("RGBA", (COLUMNS * TILE_W, rows * TILE_H), (0, 0, 0, 0))
     for i, code in enumerate(LAYOUT):
+        if not code:
+            continue
         col = i % COLUMNS
         row = i // COLUMNS
         atlas.paste(tiles[code], (col * TILE_W, row * TILE_H))
@@ -888,6 +890,8 @@ def main() -> None:
 
     tiles: dict[str, Image.Image] = {}
     for code in LAYOUT:
+        if not code:
+            continue
         tiles[code] = render_tile(code, fonts)
 
     atlas = build_atlas(tiles)
