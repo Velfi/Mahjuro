@@ -7,6 +7,32 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.4.1 — 2026-04-22
+
+### Added
+- New Ant Trail relic: sequences may wrap around the ends, letting hands like 9-1-2 or 8-9-1 count as valid runs.
+- New Brocade Pouch relic: buff talismans (Jade, Pearl, Gilded, Polychrome) mark every tile you draw for the rest of the run, not just the 14 in hand when you use them. Also grants +1 consumable slot.
+- New Kintsugi relic: each time another relic is destroyed, gain a permanent +1 mult. Kintsugi rewards fragile builds.
+- Stakes — four difficulty tiers (Spring, Summer, Autumn, Winter) with progressively higher target scores, shop prices, reroll costs, and earlier boss appearances. Winter also disables the sequence scoring bonus. Each tile material has its own unlock ladder: clear a stake on any deck to unlock the next stake for that deck. The start-game modal picks the stake, the blind plaque shows which stake you're playing, and the Collection footer lists the highest stake cleared per material.
+- New Tortoise Shell tile material: honey-amber blonde bekko with dark mahogany mottling, a warm backlit rim at grazing angles, and unique blotch patterns per tile. Grants +$10 starting gold.
+- Tutorial now celebrates your first Yakuhai (dragon/wind triplet bonus) and your first boss defeat with fireworks, matching the existing first-pair/triplet/sequence celebrations.
+- Victory and defeat screens now play a short stinger about a second after they appear, on top of the existing transition sound.
+
+### Changed
+- Gilded Talisman now awards $1 per tile scored in a meld instead of +0.4 mult. Pairs still don't trigger it.
+- Completion hints (the green spotlight and glow on tiles that would complete a meld) are now off by default. Enable them in Options → Controls → Hints.
+- Relics have refreshed assets
+- Buying a relic in the shop or selecting one in the collection now plays that relic's stinger.
+- The Yaku Journal on the shop counter is now a wood tablet labeled "Journal," matching the journal button in the gameplay action bar. Clicking or selecting it still opens the journal.
+- The startup splash is now a plain black screen with a simple "loading..." indicator.
+- Stacked yaku stingers now roll out one after another on a hand commit instead of stacking on the same beat, so each yaku in a multi-yaku hand is audible.
+- Tutorial no longer fires a separate fireworks modal for your first Trigger on top of the first-pair celebration — a single fireworks modal plays for the meld instead of two back-to-back.
+- Yaku journal redesigned: sealed yaku now sit on warm lacquer cards with a stacked wax seal, the plaque's header leads with the yaku name and a brass level pill, stat totals read as a single right-aligned strip, and the control hint lives on a brass footer along the plaque's bottom edge.
+- Yaku stay discovered across runs — once a yaku has scored in any round, its card in the journal unlocks forever instead of relocking when the run ends.
+
+### Fixed
+- Wild Winds no longer scores the same hand differently between runs. Wind tile substitutions now pick a stable face assignment, so identical plays produce identical scores.
+
 ## 0.4.0 — 2026-04-20
 
 ### Added
