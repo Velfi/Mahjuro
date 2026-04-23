@@ -1,10 +1,13 @@
 //! Relic PNG decode for the runtime renderer (embedded assets → [`DecodedRelicImage`]).
 //!
 //! File naming lives on [`RelicId`](crate::core::relic::RelicId):
-//! - **Albedo (color):** `textures/relics/<slug>.png`, else `textures/relics/source/<slug>_object.png`
-//! - **Mesh silhouette (optional):** `source/<slug>_mask.png`, else `<slug>_mask.png` next to albedo  
-//!   Used only for extruded cap geometry; if missing, the albedo image is used (alpha / luma in
-//!   [`crate::render::relic_dish::build_relic_mesh_from_rgba`]).
+//! - **Albedo (color):** `textures/relics/<slug>.png`, else `textures/relics/source/<slug>_object.png`.
+//!   Source object PNGs ship with a seamless backdrop (the offline pipeline is
+//!   non-destructive — see `scripts/generate_relic_art.py`). This loader cuts
+//!   their alpha against the mask silhouette at decode time.
+//! - **Mesh silhouette:** `source/<slug>_mask.png`, else `<slug>_mask.png` next to albedo.
+//!   Used both for extruded cap geometry and for cutting the albedo's alpha.
+//!   If missing, the albedo's own alpha channel is used as-is.
 //! - **Relief (linear height):** `source/<slug>_height.png`, or a 1×1 mid-gray placeholder
 
 use std::sync::mpsc;
@@ -17,6 +20,53 @@ fn flat_relief_rgba() -> (Vec<u8>, u32, u32) {
     (vec![128, 128, 128, 255], 1, 1)
 }
 
+/// Threshold below which a mask pixel's luminance/alpha reads as "outside the
+/// silhouette." Matches the convention used for mesh extraction in
+/// [`crate::render::relic_dish::build_relic_mesh_from_rgba`].
+const MASK_SILHOUETTE_THRESHOLD: u8 = 115; // ≈ 0.45 * 255
+
+/// Cut `img`'s alpha channel against a silhouette mask. Mask reading accepts
+/// both conventions produced by the asset pipeline: alpha-cutout masks
+/// (transparent surround, opaque silhouette) and RGB-luma masks (fully opaque
+/// alpha, silhouette encoded as white-on-black). Pixels outside the mask's
+/// silhouette are set to alpha=0; pixels inside keep the object's original
+/// alpha. The mask is nearest-neighbour sampled so dimension mismatches are
+/// handled without introducing a PIL/image dependency on resampling.
+fn apply_mask_alpha(img: &mut image::RgbaImage, mask: &image::RgbaImage) {
+    let (iw, ih) = img.dimensions();
+    let (mw, mh) = mask.dimensions();
+    if mw == 0 || mh == 0 {
+        return;
+    }
+    // Detect mask convention once per call. If the mask has any transparent
+    // pixels, trust its alpha channel; otherwise derive silhouette from luma.
+    let mut alpha_has_variance = false;
+    for p in mask.pixels() {
+        if p[3] < 250 {
+            alpha_has_variance = true;
+            break;
+        }
+    }
+    for y in 0..ih {
+        for x in 0..iw {
+            let mx = ((x as u64) * (mw as u64) / (iw as u64)) as u32;
+            let my = ((y as u64) * (mh as u64) / (ih as u64)) as u32;
+            let mp = mask.get_pixel(mx.min(mw - 1), my.min(mh - 1));
+            let inside = if alpha_has_variance {
+                mp[3] >= MASK_SILHOUETTE_THRESHOLD
+            } else {
+                // rec.709 luminance on RGB, integer-math.
+                let luma = (54 * mp[0] as u32 + 183 * mp[1] as u32 + 19 * mp[2] as u32) / 256;
+                luma as u8 >= MASK_SILHOUETTE_THRESHOLD
+            };
+            if !inside {
+                let px = img.get_pixel_mut(x, y);
+                px[3] = 0;
+            }
+        }
+    }
+}
+
 /// Decode one relic from embedded assets. Returns `None` if neither albedo path exists.
 pub(crate) fn decode_relic_assets(id: RelicId, name: &'static str) -> Option<DecodedRelicImage> {
     let primary = id.render_texture_path();
@@ -24,7 +74,7 @@ pub(crate) fn decode_relic_assets(id: RelicId, name: &'static str) -> Option<Dec
         .map(|f| f.data.to_vec())
         .or_else(|| crate::asset_path::get(&id.source_object_path()).map(|f| f.data.to_vec()))?;
 
-    let img = match image::load_from_memory(&bytes) {
+    let mut img = match image::load_from_memory(&bytes) {
         Ok(i) => i.into_rgba8(),
         Err(e) => {
             log::warn!("failed to decode relic art for {:?}: {e}", id);
@@ -38,8 +88,13 @@ pub(crate) fn decode_relic_assets(id: RelicId, name: &'static str) -> Option<Dec
         .map(|f| f.data.to_vec());
     let (mesh_rgba, mesh_width, mesh_height) = match mesh_bytes {
         Some(mesh_bytes) => match image::load_from_memory(&mesh_bytes) {
-            Ok(img) => {
-                let rgba = img.into_rgba8();
+            Ok(decoded) => {
+                let rgba = decoded.into_rgba8();
+                // Cut the object's alpha against the mask silhouette. The
+                // offline pipeline is non-destructive — object PNGs on disk
+                // keep their seamless-paper backdrop — so the runtime must
+                // derive the final alpha here from the (authoritative) mask.
+                apply_mask_alpha(&mut img, &rgba);
                 let (mw, mh) = rgba.dimensions();
                 (Some(rgba.into_raw()), mw, mh)
             }

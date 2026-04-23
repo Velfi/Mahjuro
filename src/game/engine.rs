@@ -329,6 +329,7 @@ pub struct ShopReadModel {
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
     pub full_hand_level: u32,
+    pub paper_lantern_extinct: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -400,6 +401,19 @@ impl<'a> GameEngine<'a> {
         settings: &AppSettings,
     ) {
         *run = RunState::new_with_material(material);
+        Self::apply_progression_and_settings(run, progress, settings);
+    }
+
+    /// Stake-aware variant used by the tile-select modal's stake picker.
+    /// Spring behaves identically to `start_run_with_material`.
+    pub fn start_run_with_material_and_stake(
+        run: &mut RunState,
+        material: TileMaterial,
+        stake: crate::core::stake::Stake,
+        progress: &PlayerProgress,
+        settings: &AppSettings,
+    ) {
+        *run = RunState::new_with_material_and_stake(material, stake);
         Self::apply_progression_and_settings(run, progress, settings);
     }
 
@@ -540,6 +554,7 @@ impl<'a> GameEngine<'a> {
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
             full_hand_level: run.yaku_levels.level_of(YakuKind::FullHand),
+            paper_lantern_extinct: run.paper_lantern_extinct,
         }
     }
 
@@ -1163,6 +1178,17 @@ impl<'a> GameEngine<'a> {
                         .entry(RelicId::RitualBlade)
                         .or_insert(0) += victim_value * 2 * 10;
                     self.run.relic_activations.push(RelicId::RitualBlade);
+                    // Kintsugi counts the victim (involuntary destruction).
+                    // The blade itself was sold, not destroyed, so don't
+                    // credit it.
+                    if self.run.relics.has(RelicId::Kintsugi) {
+                        *self
+                            .run
+                            .relic_counters
+                            .entry(RelicId::Kintsugi)
+                            .or_insert(0) += 1;
+                        self.run.relic_activations.push(RelicId::Kintsugi);
+                    }
                     return self.finish_shop_outcome(
                         command,
                         before,
@@ -1252,7 +1278,7 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 let consumable = self.run.consumables.items[index];
-                let refund = consumable_sell_price(consumable);
+                let refund = consumable_sell_price_for_mode(consumable, &self.run.mode);
                 self.run.consumables.items.remove(index);
                 self.run.gold = self.run.gold.saturating_add(refund as i32);
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
@@ -1501,12 +1527,19 @@ impl<'a> GameEngine<'a> {
     }
 }
 
-pub(crate) fn consumable_sell_price(c: Consumable) -> u32 {
-    let buy = match c {
+/// Stake-aware consumable sell price — half the stake-scaled buy price, floor 1.
+/// This is the only sell-price path; there is no "raw" variant because every
+/// purchase is made at the stake-scaled price.
+pub(crate) fn consumable_sell_price_for_mode(
+    c: Consumable,
+    mode: &crate::game::game_mode::GameMode,
+) -> u32 {
+    let base = match c {
         Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
         Consumable::Talisman(t) => t.shop_price(),
     };
-    (buy / 2).max(1)
+    let paid = mode.scale_shop_price(base);
+    (paid / 2).max(1)
 }
 
 #[cfg(test)]

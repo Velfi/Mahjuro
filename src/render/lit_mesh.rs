@@ -305,13 +305,7 @@ impl LitMeshInstance {
     /// engrave per-instance labels on bone/wood tablets without changing the
     /// pipeline layout. The instance keeps ownership of the texture so it
     /// stays alive for as long as the bind group references it.
-    pub fn set_decal(
-        &mut self,
-        ctx: DecalUploadCtx<'_>,
-        rgba: &[u8],
-        width: u32,
-        height: u32,
-    ) {
+    pub fn set_decal(&mut self, ctx: DecalUploadCtx<'_>, rgba: &[u8], width: u32, height: u32) {
         let DecalUploadCtx {
             device,
             queue,

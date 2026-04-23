@@ -265,7 +265,7 @@ fn relic_description(
     }
     match id {
         RelicId::StarTile => "1-in-2 chance to level up a scored yaku",
-        RelicId::PaperLantern => "+6 mult; 1-in-10 chance to burn at round end",
+        RelicId::PaperLantern => "+4 mult; 1-in-10 chance to burn at round end (extinct run-wide)",
         RelicId::IronLantern => "×2 mult; 1-in-2000 chance to break at round end",
         _ => default,
     }

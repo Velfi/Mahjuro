@@ -210,6 +210,16 @@ pub enum RelicId {
     Heirloom,
     /// +3 mult per distinct suit among scored tiles (Flower counts).
     Tourist,
+    /// Each time another relic is destroyed, gain a permanent +1 mult.
+    /// Kintsugi itself is never destroyed by any effect. Counter lives in
+    /// `relic_counters[Kintsugi]`.
+    Kintsugi,
+    /// Sequences may wrap 9→1 freely (9-1-2, 8-9-1 are valid sequences).
+    AntTrail,
+    /// Buff talismans (Jade/Pearl/Gilded/Polychrome) apply their enhancement
+    /// to every tile drawn for the rest of the run, not just the 14 currently
+    /// in hand. Also grants +1 consumable inventory slot.
+    BrocadePouch,
 }
 
 impl RelicId {
@@ -305,6 +315,9 @@ impl RelicId {
             RelicId::Cosmopolitan => "cosmopolitan.png",
             RelicId::Heirloom => "heirloom.png",
             RelicId::Tourist => "tourist.png",
+            RelicId::Kintsugi => "kintsugi.png",
+            RelicId::AntTrail => "ant_trail.png",
+            RelicId::BrocadePouch => "brocade_pouch.png",
         }
     }
 }
@@ -534,8 +547,12 @@ pub fn relic_description_live(
             )
         }
         RelicId::Snowball => {
-            let bonus = total_score as f64 / 1000.0;
+            let bonus = total_score as f64 / 5000.0;
             format!("{base} [current +{bonus:.1} mult]")
+        }
+        RelicId::Kintsugi => {
+            let broken = counters.get(&RelicId::Kintsugi).copied().unwrap_or(0);
+            format!("{base} [+{broken} mult]")
         }
         _ => base.to_string(),
     }
@@ -843,7 +860,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
         RelicDef {
             id: RelicId::PaperLantern,
             name: "Paper Lantern",
-            description: "+6 mult; 1-in-5 chance to burn at round end",
+            description: "+4 mult; 1-in-5 chance to burn at round end (extinct run-wide)",
             rarity: Rarity::Uncommon,
         },
         RelicDef {
@@ -1089,6 +1106,24 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
             id: RelicId::Tourist,
             name: "Tourist",
             description: "+3 mult per distinct suit among scored tiles",
+            rarity: Rarity::Uncommon,
+        },
+        RelicDef {
+            id: RelicId::Kintsugi,
+            name: "Kintsugi",
+            description: "+1 mult permanently each time another relic is destroyed",
+            rarity: Rarity::Legendary,
+        },
+        RelicDef {
+            id: RelicId::AntTrail,
+            name: "Ant Trail",
+            description: "Sequences may wrap 9-1-2",
+            rarity: Rarity::Rare,
+        },
+        RelicDef {
+            id: RelicId::BrocadePouch,
+            name: "Brocade Pouch",
+            description: "Buff talismans mark every drawn tile for the rest of the run. +1 consumable slot",
             rarity: Rarity::Uncommon,
         },
     ]

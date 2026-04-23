@@ -24,6 +24,7 @@ pub mod plaque_mesh;
 pub mod primitive;
 pub mod relic_dish;
 pub mod relic_pipeline;
+pub mod reliquary_tray_mesh;
 pub mod ribbon_mesh;
 pub mod river_mesh;
 pub mod score_popups;

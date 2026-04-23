@@ -1337,6 +1337,21 @@ impl SceneBehavior for CollectionScene {
             ..Default::default()
         });
 
+        // Stake ladder readout: highest stake cleared per tile material.
+        // Uses the same caption size as the hint line and sits just above
+        // it. Materials the player has never cleared even Spring on are
+        // omitted — the line is decorative, not a checklist.
+        let ladder_line = stake_ladder_summary(ctx.progress);
+        if !ladder_line.is_empty() {
+            let ladder_y = hint_y - hint_h - h * 0.006;
+            text_labels.push(TextLabel {
+                rect: [0.0, ladder_y, w, hint_h],
+                text: ladder_line.into(),
+                color: [0.82, 0.72, 0.46, 0.90],
+                ..Default::default()
+            });
+        }
+
         // Gather active-tab artifacts once — feeds the grid layout, the
         // pedestal featured item, and the description plaque.
         let all_artifacts = tab_artifacts(self.active_tab, ctx.progress);
@@ -1345,6 +1360,31 @@ impl SceneBehavior for CollectionScene {
         // cabinet grid with a tinted-accent nameplate per entry and a
         // description card floating in front of the focused cell.
         self.build_corridor_frame(frame, quads, text_labels, &all_artifacts, ctx)
+    }
+}
+
+// ── Stake ladder readout ────────────────────────────────────────────
+
+/// Format a single-line "highest stake cleared per material" summary for
+/// the footer of the Collection scene. Materials with no cleared stakes
+/// are omitted so the line stays compact on fresh profiles.
+fn stake_ladder_summary(progress: &crate::core::progression::PlayerProgress) -> String {
+    let materials = [
+        crate::persistence::TileMaterial::Bamboo,
+        crate::persistence::TileMaterial::Plastic,
+        crate::persistence::TileMaterial::TortoiseShell,
+    ];
+    let mut parts: Vec<String> = Vec::new();
+    for m in materials {
+        let cleared = progress.stakes_cleared_for(m);
+        if let Some(highest) = cleared.iter().max() {
+            parts.push(format!("{}: {}", m.label(), highest.label()));
+        }
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("Stakes cleared — {}", parts.join("   ·   "))
     }
 }
 

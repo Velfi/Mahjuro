@@ -211,7 +211,7 @@ def main() -> None:
     parser.add_argument("--list", action="store_true", help="List slugs and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print prompts only.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing.")
-    parser.add_argument("--model", type=str, default="gpt-image-1")
+    parser.add_argument("--model", type=str, default="gpt-image-2")
     parser.add_argument("--size", type=str, default="1024x1536")
     parser.add_argument(
         "--preview", action="store_true",

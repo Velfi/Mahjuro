@@ -1995,14 +1995,8 @@ fn make_tile_face_overlay_gpu(
     const DECAL_H: u32 = 256;
     let rgba =
         rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, false);
-    let (texture, view) = upload_rgba_texture(
-        device,
-        queue,
-        "tile-face-overlay",
-        &rgba,
-        DECAL_W,
-        DECAL_H,
-    );
+    let (texture, view) =
+        upload_rgba_texture(device, queue, "tile-face-overlay", &rgba, DECAL_W, DECAL_H);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("tile-face-overlay-bg"),
         layout,
@@ -5402,11 +5396,7 @@ impl WgpuRenderer {
     /// `frame.cmds` is walked in order — earlier cmds render under later ones.
     /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
     /// draw, which is invisible to scenes and preserves ordering.
-    pub fn render(
-        &mut self,
-        frame: &UiFrame,
-        settings: RenderSettings,
-    ) -> anyhow::Result<()> {
+    pub fn render(&mut self, frame: &UiFrame, settings: RenderSettings) -> anyhow::Result<()> {
         let RenderSettings {
             smoke_quality,
             smoke_amount,

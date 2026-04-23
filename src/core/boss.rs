@@ -875,9 +875,22 @@ pub fn regular_pool() -> Vec<BossKind> {
 /// boss in the remaining pool qualifies (player got unlucky on draws), we
 /// widen by ignoring `min_ante` rather than crashing — soft bosses on a late
 /// ante are still better than no boss at all.
+#[allow(dead_code)]
 pub fn pick_for_ante(
     pool: &mut Vec<BossKind>,
     ante: u32,
+    rng: &mut impl rand::Rng,
+) -> Option<BossKind> {
+    pick_for_ante_with_floor(pool, ante, 0, rng)
+}
+
+/// Stake-aware variant — `min_ante_floor` is subtracted from each boss's
+/// `min_ante` (saturating) so higher stakes can see harder bosses earlier.
+/// The `pick_for_ante` wrapper passes floor 0 for the Spring default.
+pub fn pick_for_ante_with_floor(
+    pool: &mut Vec<BossKind>,
+    ante: u32,
+    min_ante_floor: u32,
     rng: &mut impl rand::Rng,
 ) -> Option<BossKind> {
     if pool.is_empty() {
@@ -886,7 +899,7 @@ pub fn pick_for_ante(
     let mut eligible: Vec<usize> = pool
         .iter()
         .enumerate()
-        .filter(|(_, k)| k.def().min_ante <= ante)
+        .filter(|(_, k)| k.def().min_ante.saturating_sub(min_ante_floor) <= ante)
         .map(|(i, _)| i)
         .collect();
     if eligible.is_empty() {

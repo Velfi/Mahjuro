@@ -1731,7 +1731,15 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     // single best-play delta as a conservative estimate — it's the score
     // lift the bot would see on its next commit, which competes directly
     // against relics/zodiacs that permanently affect all future rounds.
-    (delta_sum / sample_count) as i32
+    let raw = (delta_sum / sample_count) as i32;
+    // Brocade Pouch promotes buff talismans from one-shot to run-long: the
+    // enhancement stamps every drawn tile for the rest of the run, so value
+    // compounds across antes the same way a relic does.
+    if run.relics.has(RelicId::BrocadePouch) {
+        scale_long_term_value_for_ante(raw, run.ante)
+    } else {
+        raw
+    }
 }
 
 /// Estimate the value of buying a booster pack. Pack tiles permanently
@@ -1872,13 +1880,23 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
     run.tag_rich_stock = false;
 
     let defs = all_relic_defs();
-    let shop_excluded = [RelicId::IronLantern, RelicId::PhantomRelic];
+    let extinct = run.paper_lantern_extinct;
     let mut pool: Vec<RelicId> = defs
         .iter()
         .filter(|d| {
-            run.available_relics.contains(&d.id)
-                && !run.relics.owns(d.id)
-                && !shop_excluded.contains(&d.id)
+            if !run.available_relics.contains(&d.id) || run.relics.owns(d.id) {
+                return false;
+            }
+            if d.id == RelicId::PhantomRelic {
+                return false;
+            }
+            if d.id == RelicId::PaperLantern && extinct {
+                return false;
+            }
+            if d.id == RelicId::IronLantern && !extinct {
+                return false;
+            }
+            true
         })
         .map(|d| d.id)
         .collect();
@@ -1977,12 +1995,12 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                     if free_relic {
                         0
                     } else {
-                        relic_shop_price(id, &run.relics)
+                        run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                     }
                 }
-                ShopOffer::Zodiac(_) => ZodiacKind::shop_price(),
-                ShopOffer::Talisman(kind) => kind.shop_price(),
-                ShopOffer::Pack(kind) => kind.shop_price(),
+                ShopOffer::Zodiac(_) => run.mode.scale_shop_price(ZodiacKind::shop_price()),
+                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(kind.shop_price()),
+                ShopOffer::Pack(kind) => run.mode.scale_shop_price(kind.shop_price()),
             };
             if price as i32 > run.gold {
                 continue;
@@ -2029,7 +2047,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 let price = if free_relic {
                     0
                 } else {
-                    relic_shop_price(id, &run.relics)
+                    run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
                 free_relic = false;
                 run.gold -= price as i32;
@@ -2050,7 +2068,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 );
             }
             ShopOffer::Zodiac(zodiac) => {
-                let price = ZodiacKind::shop_price();
+                let price = run.mode.scale_shop_price(ZodiacKind::shop_price());
                 run.gold -= price as i32;
                 let new_level = run.yaku_levels.level_up(zodiac.yaku());
                 stats.gold_spent += price;
@@ -2066,7 +2084,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 );
             }
             ShopOffer::Talisman(kind) => {
-                let price = kind.shop_price();
+                let price = run.mode.scale_shop_price(kind.shop_price());
                 run.gold -= price as i32;
                 run.consumables.items.push(Consumable::Talisman(kind));
                 stats.gold_spent += price;
@@ -2081,7 +2099,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 );
             }
             ShopOffer::Pack(kind) => {
-                let price = kind.shop_price();
+                let price = run.mode.scale_shop_price(kind.shop_price());
                 run.gold -= price as i32;
                 // Mirror the real shop: pre-stamp any enhancement from the
                 // pack kind onto the tiles' IDs, then append the pack. The

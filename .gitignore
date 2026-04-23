@@ -5,3 +5,4 @@ mahjuro_settings.json
 /.claude
 .DS_Store
 /.pycache
+/__pycache__

@@ -49,6 +49,11 @@ enum TransitionStyle {
     SlideUp,
     ZoomFade,
     TileTeeth,
+    ForestOfTiles,
+    GalaxyOfTiles,
+    Maelstrom,
+    TileWaterfall,
+    ShufflingFan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,12 +85,17 @@ impl TransitionAction {
 }
 
 impl TransitionStyle {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 10] = [
         Self::Crossfade,
         Self::SlideLeft,
         Self::SlideUp,
         Self::ZoomFade,
         Self::TileTeeth,
+        Self::ForestOfTiles,
+        Self::GalaxyOfTiles,
+        Self::Maelstrom,
+        Self::TileWaterfall,
+        Self::ShufflingFan,
     ];
 
     fn label(self) -> &'static str {
@@ -95,6 +105,11 @@ impl TransitionStyle {
             Self::SlideUp => "Slide Up",
             Self::ZoomFade => "Zoom Fade",
             Self::TileTeeth => "Tile Teeth",
+            Self::ForestOfTiles => "Forest of Tiles",
+            Self::GalaxyOfTiles => "Galaxy of Tiles",
+            Self::Maelstrom => "Maelstrom",
+            Self::TileWaterfall => "Tile Waterfall",
+            Self::ShufflingFan => "Shuffling Fan",
         }
     }
 
@@ -365,6 +380,30 @@ impl TransitionPlaygroundScene {
                     },
                 ),
             ],
+            TransitionStyle::ForestOfTiles
+            | TransitionStyle::GalaxyOfTiles
+            | TransitionStyle::Maelstrom
+            | TransitionStyle::TileWaterfall
+            | TransitionStyle::ShufflingFan => [
+                (
+                    DemoSceneKind::A,
+                    Pose {
+                        dx: 0.0,
+                        dy: 0.0,
+                        scale: 1.0,
+                        alpha: 1.0 - t,
+                    },
+                ),
+                (
+                    DemoSceneKind::B,
+                    Pose {
+                        dx: 0.0,
+                        dy: 0.0,
+                        scale: 1.0,
+                        alpha: t,
+                    },
+                ),
+            ],
         }
     }
 }
@@ -462,13 +501,19 @@ impl SceneBehavior for TransitionPlaygroundScene {
                 );
             }
         }
-        if self.style == TransitionStyle::TileTeeth {
-            push_overlay_transition(
-                &mut frame,
-                OverlayTransitionKind::TileTeeth,
-                self.progress,
-                (w, layout.viewport[3]),
-            );
+        if let Some(kind) = match self.style {
+            TransitionStyle::TileTeeth => Some(OverlayTransitionKind::TileTeeth),
+            TransitionStyle::ForestOfTiles => Some(OverlayTransitionKind::ForestOfTiles),
+            TransitionStyle::GalaxyOfTiles => Some(OverlayTransitionKind::GalaxyOfTiles),
+            TransitionStyle::Maelstrom => Some(OverlayTransitionKind::Maelstrom),
+            TransitionStyle::TileWaterfall => Some(OverlayTransitionKind::TileWaterfall),
+            TransitionStyle::ShufflingFan => Some(OverlayTransitionKind::ShufflingFan),
+            TransitionStyle::Crossfade
+            | TransitionStyle::SlideLeft
+            | TransitionStyle::SlideUp
+            | TransitionStyle::ZoomFade => None,
+        } {
+            push_overlay_transition(&mut frame, kind, self.progress, (w, layout.viewport[3]));
         }
 
         draw_top_banner(

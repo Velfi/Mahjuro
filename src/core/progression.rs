@@ -1,6 +1,6 @@
 //! Meta progression and unlocks.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ use crate::core::boss::BossKind;
 use crate::core::consumable::Consumable;
 use crate::core::relic::RelicId;
 use crate::core::rules::{BlindKind, RuleModifier};
+use crate::core::stake::Stake;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::game::event_bus::GameOverReason;
@@ -69,6 +70,16 @@ pub struct PlayerProgress {
     /// computed from this on demand.
     #[serde(default)]
     pub run_history: Vec<RunRecord>,
+    /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
+    /// for every material (never written to this map); higher stakes require
+    /// a full victory on the previous tier *with that material*. So beating
+    /// Summer on Bamboo unlocks Autumn for Bamboo only.
+    ///
+    /// Backfill logic in `backfill_stakes_from_history` re-derives entries
+    /// from `run_history` on load, so older profiles start with the right
+    /// unlocks for any victories already in the log.
+    #[serde(default)]
+    pub unlocked_stakes: BTreeMap<TileMaterial, BTreeSet<Stake>>,
 }
 
 /// Terminal outcome of a single run.
@@ -126,6 +137,11 @@ pub struct RunRecord {
     pub relics_owned: Vec<RelicId>,
     pub consumables_owned: Vec<Consumable>,
     pub tile_material: TileMaterial,
+    /// Stake the run was played on. Older records (pre-stake feature) default
+    /// to `Spring` via `#[serde(default)]`, which is the right assumption —
+    /// those runs had no higher tiers available.
+    #[serde(default)]
+    pub stake: Stake,
     /// Whether this run was a tutorial run. Tutorials reach the
     /// defeat/victory screen too, but analytics usually wants to filter
     /// them out.
@@ -151,6 +167,74 @@ impl PlayerProgress {
             yaku_times_scored: HashMap::new(),
             relic_times_activated: HashMap::new(),
             run_history: Vec::new(),
+            unlocked_stakes: BTreeMap::new(),
+        }
+    }
+
+    /// Stakes cleared (with a full victory) on the given tile material.
+    /// `Spring` is always considered available but is NOT returned here — this
+    /// reflects the *earned* ladder, not the *playable* ladder. Callers who
+    /// need "is this stake playable?" should use [`stake_unlocked_for`].
+    pub fn stakes_cleared_for(&self, material: TileMaterial) -> &BTreeSet<Stake> {
+        static EMPTY: BTreeSet<Stake> = BTreeSet::new();
+        self.unlocked_stakes.get(&material).unwrap_or(&EMPTY)
+    }
+
+    /// Is `stake` playable on `material`? Spring is always available; each
+    /// higher stake requires the previous one to have been cleared on this
+    /// material (full victory, not just reaching ante 8).
+    pub fn stake_unlocked_for(&self, material: TileMaterial, stake: Stake) -> bool {
+        match stake {
+            Stake::Spring => true,
+            _ => {
+                let cleared = self.stakes_cleared_for(material);
+                // Every stake lower than `stake` must appear in `cleared`.
+                Stake::ALL
+                    .iter()
+                    .take_while(|&&s| s < stake)
+                    .skip(1) // skip Spring; it's implicit
+                    .all(|s| cleared.contains(s))
+                    && {
+                        // And the immediately-previous stake, explicitly.
+                        stake
+                            .previous()
+                            .map(|p| cleared.contains(&p))
+                            .unwrap_or(true)
+                    }
+            }
+        }
+    }
+
+    /// Record a full victory at `stake` on `material` — the gate that unlocks
+    /// the next stake for that material. Idempotent; returns `Some(next)` if
+    /// a new tier was just freed up, `None` otherwise (already unlocked, or
+    /// Winter has no successor).
+    pub fn record_stake_victory(&mut self, material: TileMaterial, stake: Stake) -> Option<Stake> {
+        let entry = self.unlocked_stakes.entry(material).or_default();
+        let newly_inserted = entry.insert(stake);
+        // The unlocked ladder advances by one on a successful win of `stake`,
+        // so the *next* stake becomes playable. We report it when the victory
+        // was new; repeat wins don't re-surface the notification.
+        match (newly_inserted, stake.next()) {
+            (true, Some(next)) => Some(next),
+            _ => None,
+        }
+    }
+
+    /// Backfill `unlocked_stakes` from `run_history`. Called once on profile
+    /// load so older saves that pre-date the Stakes feature surface the right
+    /// ladder: every Victory in history populates its (material, stake) pair.
+    ///
+    /// Non-victory runs are ignored, and Spring victories are still recorded
+    /// so downstream "highest stake cleared" readouts can display Spring.
+    pub fn backfill_stakes_from_history(&mut self) {
+        for record in &self.run_history {
+            if matches!(record.outcome, RunOutcome::Victory) {
+                self.unlocked_stakes
+                    .entry(record.tile_material)
+                    .or_default()
+                    .insert(record.stake);
+            }
         }
     }
 
@@ -287,6 +371,7 @@ impl RunRecord {
             relics_owned: run.relics.active.clone(),
             consumables_owned: run.consumables.items.clone(),
             tile_material: run.mode.tile_material,
+            stake: run.mode.stake,
             tutorial_run: run.tutorial.is_some(),
         }
     }
@@ -497,5 +582,87 @@ mod tests {
         assert!(!p.dora_enabled());
         p.runs_completed = 6;
         assert!(p.dora_enabled());
+    }
+
+    #[test]
+    fn spring_always_playable() {
+        let p = PlayerProgress::new();
+        for m in [
+            TileMaterial::Bamboo,
+            TileMaterial::Plastic,
+            TileMaterial::TortoiseShell,
+        ] {
+            assert!(p.stake_unlocked_for(m, Stake::Spring));
+        }
+    }
+
+    #[test]
+    fn stake_ladder_is_per_material() {
+        let mut p = PlayerProgress::new();
+        // Clear Spring on Bamboo → Summer unlocks on Bamboo only.
+        let next = p.record_stake_victory(TileMaterial::Bamboo, Stake::Spring);
+        assert_eq!(next, Some(Stake::Summer));
+        assert!(p.stake_unlocked_for(TileMaterial::Bamboo, Stake::Summer));
+        assert!(!p.stake_unlocked_for(TileMaterial::Plastic, Stake::Summer));
+    }
+
+    #[test]
+    fn record_victory_is_idempotent() {
+        let mut p = PlayerProgress::new();
+        let first = p.record_stake_victory(TileMaterial::Bamboo, Stake::Spring);
+        let second = p.record_stake_victory(TileMaterial::Bamboo, Stake::Spring);
+        assert_eq!(first, Some(Stake::Summer));
+        assert_eq!(second, None, "second win shouldn't reannounce");
+    }
+
+    #[test]
+    fn winter_requires_full_chain() {
+        let mut p = PlayerProgress::new();
+        p.record_stake_victory(TileMaterial::Bamboo, Stake::Spring);
+        assert!(!p.stake_unlocked_for(TileMaterial::Bamboo, Stake::Winter));
+        p.record_stake_victory(TileMaterial::Bamboo, Stake::Summer);
+        p.record_stake_victory(TileMaterial::Bamboo, Stake::Autumn);
+        assert!(p.stake_unlocked_for(TileMaterial::Bamboo, Stake::Winter));
+    }
+
+    #[test]
+    fn backfill_rebuilds_unlocks_from_history() {
+        let mut p = PlayerProgress::new();
+        // Synthesize a RunRecord as if an old profile had a Summer win on
+        // Bamboo but no `unlocked_stakes` map on disk.
+        p.run_history.push(RunRecord {
+            timestamp_unix: 0,
+            run_number: 1,
+            outcome: RunOutcome::Victory,
+            final_ante: 8,
+            final_blind: BlindKind::Boss,
+            final_boss: None,
+            round_score: 1000,
+            target_score: 500,
+            total_score_earned: 5000,
+            final_gold: 0,
+            plays_remaining: 0,
+            discards_remaining: 0,
+            plays_max: 4,
+            discards_max: 4,
+            tiles_played: 50,
+            tiles_discarded: 10,
+            times_restocked: 0,
+            best_structure_score: 400,
+            best_structure_name: "Pair".to_string(),
+            yaku_times_played: HashMap::new(),
+            relics_owned: vec![],
+            consumables_owned: vec![],
+            tile_material: TileMaterial::Bamboo,
+            stake: Stake::Summer,
+            tutorial_run: false,
+        });
+        assert!(p.unlocked_stakes.is_empty());
+        p.backfill_stakes_from_history();
+        assert!(
+            p.stakes_cleared_for(TileMaterial::Bamboo)
+                .contains(&Stake::Summer)
+        );
+        assert!(p.stake_unlocked_for(TileMaterial::Bamboo, Stake::Autumn));
     }
 }
