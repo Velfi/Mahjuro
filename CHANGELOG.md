@@ -7,6 +7,20 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.4.2 — 2026-04-23
+
+### Added
+- New **American Spring** tile set — a bright, airy alternate styling for the mahjong tiles.
+
+### Changed
+- The Blight boss's reveal tooltip now reads "X tiles are debuffed" instead of restating what "debuffed" means — the tutorial and debuff legend already cover that.
+
+### Fixed
+- Releasing the gamepad A or B button no longer fires a spurious Cancel. Previously, letting go of B (or A with swap-AB) emitted a Cancel action on release, which could back out of menus unintentionally. Only the confirm-side button's release now emits anything, and only as the ConfirmRelease paired with its press.
+
+### Removed
+- **Lunar Almanac** has been removed. Consumable slot expansion now lives solely on the Brocade Pouch.
+
 ## 0.4.1 — 2026-04-22
 
 ### Added
