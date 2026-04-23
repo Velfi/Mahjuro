@@ -193,21 +193,21 @@ impl InputState {
                 } else {
                     UiAction::Confirm
                 }),
-                ButtonReleased(Button::South, _) => actions.push(if self.swap_ab {
-                    UiAction::Cancel
-                } else {
-                    UiAction::ConfirmRelease
-                }),
+                ButtonReleased(Button::South, _) => {
+                    if !self.swap_ab {
+                        actions.push(UiAction::ConfirmRelease);
+                    }
+                }
                 ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
                     UiAction::Confirm
                 } else {
                     UiAction::Cancel
                 }),
-                ButtonReleased(Button::East, _) => actions.push(if self.swap_ab {
-                    UiAction::ConfirmRelease
-                } else {
-                    UiAction::Cancel
-                }),
+                ButtonReleased(Button::East, _) => {
+                    if self.swap_ab {
+                        actions.push(UiAction::ConfirmRelease);
+                    }
+                }
                 ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::TriggerStructure),
                 ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::TriggerStructure),
                 ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),

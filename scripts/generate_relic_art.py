@@ -405,14 +405,6 @@ RELICS = [
         "Polished brass housing, cream compass card, warm teak wood.",
     ),
     (
-        "lunar_almanac",
-        "Lunar Almanac",
-        "A thick leather-bound nautical almanac lying open on a chart table, "
-        "its pages showing printed lunar phase tables and tide charts. A "
-        "brass divider compass rests across the gutter.",
-        "Dark leather cover, cream pages, brass dividers, amber lamplight.",
-    ),
-    (
         "eight_treasures",
         "Eight Treasures",
         "An ornate reliquary chest — dark wood with gold filigree — cracked "

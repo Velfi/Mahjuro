@@ -17,14 +17,18 @@ from pathlib import Path
 
 from PIL import Image
 
-COLUMNS = 8
+COLUMNS = 9
 
+# Layout organised so each row is a coherent group — one whole suit per row
+# keeps the atlas readable as a sprite sheet and lets image-gen prompts talk
+# about "row of bamboos" without crossing suit boundaries.
+# Honors row has 2 padding slots so flowers start fresh on row 5.
 LAYOUT = [
-    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8",
-    "B9", "C1", "C2", "C3", "C4", "C5", "C6", "C7",
-    "C8", "C9", "D1", "D2", "D3", "D4", "D5", "D6",
-    "D7", "D8", "D9", "EWind", "SWind", "WWind", "NWind", "DRed",
-    "DGreen", "DWhite", "Flower1", "Flower2", "Flower3", "Flower4",
+    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9",
+    "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9",
+    "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
+    "EWind", "SWind", "WWind", "NWind", "DRed", "DGreen", "DWhite", "", "",
+    "Flower1", "Flower2", "Flower3", "Flower4",
 ]
 
 
@@ -32,6 +36,8 @@ def pack(set_dir: Path) -> None:
     tiles: dict[str, Image.Image] = {}
     tile_w = tile_h = None
     for code in LAYOUT:
+        if not code:
+            continue  # empty layout slot: no source PNG expected
         path = set_dir / f"{code}.png"
         if not path.exists():
             raise FileNotFoundError(f"missing tile: {path}")
@@ -48,6 +54,8 @@ def pack(set_dir: Path) -> None:
     rows = (len(LAYOUT) + COLUMNS - 1) // COLUMNS
     atlas = Image.new("RGBA", (COLUMNS * tile_w, rows * tile_h), (0, 0, 0, 0))
     for i, code in enumerate(LAYOUT):
+        if not code:
+            continue
         col = i % COLUMNS
         row = i // COLUMNS
         atlas.paste(tiles[code], (col * tile_w, row * tile_h))

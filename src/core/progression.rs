@@ -490,7 +490,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
             relics: vec![
                 // RiichiStick / RiverEraser / FuritenWard disabled — see
                 // core::relic::all_relic_defs and PATCH_D / PATCH_E docs.
-                RelicId::LunarAlmanac,
                 RelicId::SecondWind,
                 RelicId::GoldFurnace,
                 RelicId::ClosedGate,

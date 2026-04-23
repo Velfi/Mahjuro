@@ -153,6 +153,23 @@ fn atlas_cache() -> &'static Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>
 /// Recognises: `image = "..."`, `tile_width = N`, `tile_height = N`,
 /// `columns = N`, and a `layout = [ "CODE", "CODE", … ]` block that may span
 /// multiple lines. Values outside this schema are ignored.
+/// Extract quoted tokens from one line of a layout block.
+///
+/// A quoted empty string (`""`) represents an intentional empty layout slot —
+/// the cell exists in the grid but has no tile content. These must be
+/// preserved in the output vector so subsequent tile codes land at the
+/// correct row/col index. Bare commas, brackets, and whitespace are skipped;
+/// unquoted tokens are ignored.
+fn push_layout_tokens(line: &str, out: &mut Vec<String>) {
+    let mut rest = line;
+    while let Some(start) = rest.find('"') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find('"') else { break };
+        out.push(rest[..end].to_string());
+        rest = &rest[end + 1..];
+    }
+}
+
 fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
     let mut tile_w: Option<u32> = None;
     let mut tile_h: Option<u32> = None;
@@ -166,17 +183,7 @@ fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
             continue;
         }
         if in_layout {
-            for tok in line.split(',') {
-                let t = tok.trim().trim_matches(|c: char| c == ',' || c.is_whitespace());
-                if t == "]" || t.is_empty() {
-                    continue;
-                }
-                let t = t.trim_end_matches(']');
-                let code = t.trim_matches('"');
-                if !code.is_empty() {
-                    layout.push(code.to_string());
-                }
-            }
+            push_layout_tokens(line, &mut layout);
             if line.contains(']') {
                 in_layout = false;
             }
@@ -190,17 +197,10 @@ fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
                 "tile_height" => tile_h = val.parse().ok(),
                 "columns" => columns = val.parse().ok(),
                 "layout" => {
-                    // may be all on one line or continue over subsequent lines
                     in_layout = true;
-                    // parse any codes on this same line after '['
+                    // codes may sit on this same line after '['
                     if let Some(rest) = val.strip_prefix('[') {
-                        for tok in rest.split(',') {
-                            let t = tok.trim().trim_end_matches(']');
-                            let code = t.trim_matches('"');
-                            if !code.is_empty() {
-                                layout.push(code.to_string());
-                            }
-                        }
+                        push_layout_tokens(rest, &mut layout);
                         if rest.contains(']') {
                             in_layout = false;
                         }
@@ -247,6 +247,11 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
 
     let mut origins = HashMap::with_capacity(layout.len());
     for (i, code) in layout.into_iter().enumerate() {
+        // Empty layout slots exist as row-padding ("" entries in atlas.toml).
+        // They consume a grid cell but never get looked up, so skip indexing.
+        if code.is_empty() {
+            continue;
+        }
         let col = (i as u32) % columns;
         let row = (i as u32) / columns;
         origins.insert(code, (col * tile_w, row * tile_h));
@@ -2047,5 +2052,47 @@ pub fn decal_dimensions(
             (w, h)
         }
         DecalLayout::Fixed { width, height } => (*width, *height),
+    }
+}
+
+#[cfg(test)]
+mod atlas_parser_tests {
+    use super::parse_atlas_toml;
+
+    #[test]
+    fn preserves_empty_layout_slots_so_indices_align() {
+        // Two empty slots after DWhite push the flowers onto the next row.
+        // If the parser dropped them, Flower1 would sit at index 7 instead
+        // of 9, and the atlas crop would pull the wrong cell.
+        let src = r#"
+image = "atlas.png"
+tile_width = 256
+tile_height = 384
+columns = 9
+
+layout = [
+    "EWind","SWind","WWind","NWind","DRed","DGreen","DWhite","","",
+    "Flower1","Flower2",
+]
+"#;
+        let (tw, th, cols, layout) = parse_atlas_toml(src).unwrap();
+        assert_eq!((tw, th, cols), (256, 384, 9));
+        assert_eq!(layout.len(), 11);
+        assert_eq!(layout[6], "DWhite");
+        assert_eq!(layout[7], "");
+        assert_eq!(layout[8], "");
+        assert_eq!(layout[9], "Flower1");
+        assert_eq!(layout[10], "Flower2");
+    }
+
+    #[test]
+    fn handles_single_line_layout() {
+        let src = r#"tile_width = 10
+tile_height = 20
+columns = 3
+layout = ["A","B","","C"]
+"#;
+        let (_, _, _, layout) = parse_atlas_toml(src).unwrap();
+        assert_eq!(layout, vec!["A", "B", "", "C"]);
     }
 }

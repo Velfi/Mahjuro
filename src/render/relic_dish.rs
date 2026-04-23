@@ -906,29 +906,16 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
     let w = width as usize;
     let h = height as usize;
     let px = w * h;
-    let mut a_min = 255u8;
-    let mut a_max = 0u8;
-    for i in 0..px {
-        let a = rgba[i * 4 + 3];
-        a_min = a_min.min(a);
-        a_max = a_max.max(a);
-    }
-    // Opaque-alpha mask images (no transparency in A): carve from brightness.
-    let use_luma = a_max.saturating_sub(a_min) <= 4 && a_min >= 240;
 
+    // Silhouette is always encoded in luma; the alpha channel is ignored.
     let mut solid = vec![false; px];
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) * 4;
-            let is_solid = if use_luma {
-                let r = rgba[idx] as f32;
-                let g = rgba[idx + 1] as f32;
-                let b = rgba[idx + 2] as f32;
-                (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 >= 0.45
-            } else {
-                rgba[idx + 3] >= 24
-            };
-            solid[y * w + x] = is_solid;
+            let r = rgba[idx] as f32;
+            let g = rgba[idx + 1] as f32;
+            let b = rgba[idx + 2] as f32;
+            solid[y * w + x] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 >= 0.45;
         }
     }
 
@@ -1430,6 +1417,15 @@ mod silhouette_tests {
             "beggars_cup",
             "blue_serpent",
             "eight_treasures",
+            "glass_cannon",
+            "cosmopolitan",
+            "empty_frame",
+            "garden_keeper",
+            "gold_idol",
+            "green_luck",
+            "honor_fury",
+            "iron_lantern",
+            "multiplier_master",
         ] {
             let p = asset_dir.join(format!("{name}_mask.png"));
             if !p.exists() {
@@ -1461,6 +1457,9 @@ mod silhouette_tests {
         for y in 3..13 {
             for x in 3..13 {
                 let i = (y * 16 + x) * 4;
+                rgba[i] = 255;
+                rgba[i + 1] = 255;
+                rgba[i + 2] = 255;
                 rgba[i + 3] = 255;
             }
         }

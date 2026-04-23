@@ -360,10 +360,7 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
         relic_debuffs: vec![],
         on_apply: None,
         on_play: None,
-        description_override: Some(format!(
-            "{} tiles are debuffed: they still form hands, but their tile scoring is 0",
-            chosen.label()
-        )),
+        description_override: Some(format!("{} tiles are debuffed", chosen.label())),
     }
 }
 
