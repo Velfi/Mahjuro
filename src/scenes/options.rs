@@ -73,7 +73,7 @@ enum Row {
     SmokeAmount,
     Effects,
     Tile,
-    TileMaterial,
+    Tileset,
     UiScale,
     Shadows,
     Ssr,
@@ -111,7 +111,7 @@ const ROWS: &[Row] = &[
     Row::SmokeAmount,
     Row::Effects,
     Row::Tile,
-    Row::TileMaterial,
+    Row::Tileset,
     Row::UiScale,
     Row::Shadows,
     Row::Ssr,
@@ -141,7 +141,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::SmokeAmount),
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
-    ContentSlot::Row(Row::TileMaterial),
+    ContentSlot::Row(Row::Tileset),
     ContentSlot::Row(Row::UiScale),
     ContentSlot::Header(Section::Rendering),
     ContentSlot::Row(Row::Shadows),
@@ -294,7 +294,8 @@ pub struct OptionsScene {
     pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
-    pub tile_material: crate::persistence::TileMaterial,
+    pub tileset_name: String,
+    pub available_tilesets: Vec<String>,
     pub gamma: f32,
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
@@ -308,6 +309,17 @@ pub struct OptionsScene {
 impl OptionsScene {
     pub fn new() -> Self {
         let settings = crate::persistence::load_settings();
+        let mut available_tilesets = crate::asset_path::list_tilesets();
+        if available_tilesets.is_empty() {
+            available_tilesets.push("original".to_string());
+        }
+        // Guarantee the persisted choice is still valid; fall back to the first
+        // available set if the folder was removed.
+        let tileset_name = if available_tilesets.contains(&settings.tileset_name) {
+            settings.tileset_name.clone()
+        } else {
+            available_tilesets[0].clone()
+        };
         Self {
             focused: Row::Master,
             back_focused: false,
@@ -323,7 +335,8 @@ impl OptionsScene {
             smoke_amount: settings.smoke_amount,
             effects_quality: settings.effects_quality,
             tile_preset: settings.tile_preset,
-            tile_material: settings.tile_material,
+            tileset_name,
+            available_tilesets,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
@@ -333,6 +346,20 @@ impl OptionsScene {
             hints_enabled: settings.hints_enabled,
             ui_scale: settings.ui_scale,
         }
+    }
+
+    fn cycle_tileset(&mut self, delta: isize) {
+        if self.available_tilesets.is_empty() {
+            return;
+        }
+        let len = self.available_tilesets.len() as isize;
+        let cur = self
+            .available_tilesets
+            .iter()
+            .position(|n| n == &self.tileset_name)
+            .unwrap_or(0) as isize;
+        let next = ((cur + delta).rem_euclid(len)) as usize;
+        self.tileset_name = self.available_tilesets[next].clone();
     }
 
     fn save_settings(&self) {
@@ -345,7 +372,7 @@ impl OptionsScene {
         settings.smoke_amount = self.smoke_amount;
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
-        settings.tile_material = self.tile_material;
+        settings.tileset_name = self.tileset_name.clone();
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
         settings.ssr_enabled = self.ssr_enabled;
@@ -456,7 +483,7 @@ impl OptionsScene {
             Row::SmokeAmount => self.smoke_amount = self.smoke_amount.next(),
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
-            Row::TileMaterial => self.tile_material = self.tile_material.next(),
+            Row::Tileset => self.cycle_tileset(1),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
@@ -483,7 +510,7 @@ impl OptionsScene {
             Row::SmokeAmount => self.smoke_amount = self.smoke_amount.prev(),
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
-            Row::TileMaterial => self.tile_material = self.tile_material.prev(),
+            Row::Tileset => self.cycle_tileset(-1),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
@@ -533,8 +560,8 @@ impl OptionsScene {
                 self.tile_preset = self.tile_preset.next();
                 self.save_settings();
             }
-            Row::TileMaterial => {
-                self.tile_material = self.tile_material.next();
+            Row::Tileset => {
+                self.cycle_tileset(1);
                 self.save_settings();
             }
             Row::Shadows => {
@@ -1019,9 +1046,7 @@ impl OptionsScene {
                         format!("Effects: {}", self.effects_quality.label())
                     }
                     Row::Tile => format!("Tile Style: {}", self.tile_preset.label()),
-                    Row::TileMaterial => {
-                        format!("Tile Material: {}", self.tile_material.label())
-                    }
+                    Row::Tileset => format!("Tile Set: {}", self.tileset_name),
                     Row::Shadows => format!(
                         "Shadows: {}",
                         if self.shadows_enabled { "ON" } else { "OFF" }

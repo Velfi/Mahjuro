@@ -81,6 +81,7 @@ struct RenderSettings {
     effects_quality: crate::persistence::EffectsQuality,
     tile_preset: crate::persistence::TilePreset,
     tile_material: crate::persistence::TileMaterial,
+    tileset_name: String,
     gamma: f32,
     shadows_enabled: bool,
     ssr_enabled: bool,
@@ -425,6 +426,7 @@ impl App {
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
+                tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
@@ -1341,6 +1343,7 @@ impl App {
                 effects_quality: self.gfx.effects_quality,
                 tile_preset: self.gfx.tile_preset,
                 tile_material: active_material,
+                tileset_name: self.gfx.tileset_name.clone(),
                 draw_settle_speed,
                 sort_settle_speed,
                 gamma: self.gfx.gamma,
@@ -2395,7 +2398,7 @@ impl ApplicationHandler for App {
                     self.gfx.smoke_amount = opts.smoke_amount;
                     self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
-                    self.gfx.tile_material = opts.tile_material;
+                    self.gfx.tileset_name = opts.tileset_name.clone();
                     self.gfx.gamma = opts.gamma;
                     self.gfx.shadows_enabled = opts.shadows_enabled;
                     self.gfx.ssr_enabled = opts.ssr_enabled;
@@ -3426,6 +3429,7 @@ impl HeadlessApp {
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
+                tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
@@ -3542,6 +3546,7 @@ impl HeadlessApp {
                 effects_quality: self.gfx.effects_quality,
                 tile_preset: self.gfx.tile_preset,
                 tile_material: active_material,
+                tileset_name: self.gfx.tileset_name.clone(),
                 draw_settle_speed: 8.0,
                 sort_settle_speed: 10.0,
                 gamma: self.gfx.gamma,
