@@ -7,6 +7,15 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.4.3 — 2026-04-27
+
+### Changed
+- Polychrome Talisman now applies ×1.2 mult per meld (up from ×1.15) and costs 12 gold (down from 16). It was priced the highest of any talisman but practically weakest — the per-meld multiplier scales with the rest of your mult stack, which starts small and only pays off on wide multi-meld plays, so the old sticker price rarely justified the buy.
+
+### Fixed
+- Boss-rule ofuda cards in blind selection no longer flicker or get holes punched through them when they hang beside the boss plaque.
+- Mirror Tile now correctly doubles Dora Crown, Tenpai Talisman, and Garden Keeper. Previously these three relics quietly did nothing when copied — their bonuses appeared in the score breakdown as part of the base line they modified, so Mirror Tile had nothing distinct to duplicate.
+
 ## 0.4.2 — 2026-04-23
 
 ### Added
