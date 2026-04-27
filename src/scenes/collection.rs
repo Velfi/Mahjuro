@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
-use crate::core::boss::{ALL_BOSSES, FINAL_BOSSES};
+use crate::core::boss::{all_bosses, final_bosses};
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
@@ -1436,9 +1436,9 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
                 accent: color::CHAMPAGNE,
             })
             .collect(),
-        Tab::Bosses => ALL_BOSSES
+        Tab::Bosses => all_bosses()
             .iter()
-            .chain(FINAL_BOSSES.iter())
+            .chain(final_bosses().iter())
             .filter(|def| progress.boss_times_encountered.contains_key(&def.kind))
             .map(|def| Artifact {
                 name: def.name.to_string(),
@@ -1502,9 +1502,9 @@ fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
 }
 
 fn boss_by_name(name: &str) -> Option<&'static str> {
-    ALL_BOSSES
+    all_bosses()
         .iter()
-        .chain(FINAL_BOSSES.iter())
+        .chain(final_bosses().iter())
         .find(|def| def.name == name)
         .map(|def| def.description)
 }
@@ -1538,9 +1538,9 @@ fn stats_for(art: &Artifact, progress: &crate::core::progression::PlayerProgress
         ArtifactKind::PlaqueOnly => {
             // Bosses route here. Look up the kind by name since the
             // Artifact doesn't carry it for plaque-only entries.
-            if let Some(def) = ALL_BOSSES
+            if let Some(def) = all_bosses()
                 .iter()
-                .chain(FINAL_BOSSES.iter())
+                .chain(final_bosses().iter())
                 .find(|d| d.name == art.name)
             {
                 if let Some(n) = progress.boss_times_encountered.get(&def.kind).copied() {

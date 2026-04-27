@@ -3,7 +3,7 @@ use crate::scenes::{GameplayScene, OverlayRequest, ZodiacCelebrationScene};
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
-fn generate_shop_stock(
+pub(super) fn generate_shop_stock(
     relics: &RelicState,
     available_relics: &[RelicId],
     extra_relics: usize,
@@ -343,13 +343,9 @@ impl ShopScene {
                 new_level,
             } => {
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
-                *overlay_request = Some(OverlayRequest::Push(Box::new(
-                    Scene::ZodiacCelebration(ZodiacCelebrationScene::new(
-                        zodiac_kind,
-                        yaku_name,
-                        new_level,
-                    )),
-                )));
+                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::ZodiacCelebration(
+                    ZodiacCelebrationScene::new(zodiac_kind, yaku_name, new_level),
+                ))));
             }
         }
     }

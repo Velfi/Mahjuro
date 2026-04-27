@@ -8,8 +8,8 @@
 
 mod actions;
 mod draw;
-mod shared;
 mod layout;
+mod shared;
 mod update;
 
 use self::layout::*;
@@ -234,7 +234,8 @@ mod tests {
         let available_relics = vec![RelicId::PairPower];
         let mode = GameMode::standard();
 
-        let (items, _, _, _) = generate_shop_stock(&relics, &available_relics, 1, false, &mode);
+        let (items, _, _, _) =
+            actions::generate_shop_stock(&relics, &available_relics, 1, false, &mode);
 
         assert!(!items.is_empty());
         assert!(items.iter().all(|item| item.relic == RelicId::PairPower));
@@ -248,8 +249,10 @@ mod tests {
         let spring = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Spring);
         let winter = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
 
-        let (spring_items, _, _, _) = generate_shop_stock(&relics, &available, 1, false, &spring);
-        let (winter_items, _, _, _) = generate_shop_stock(&relics, &available, 1, false, &winter);
+        let (spring_items, _, _, _) =
+            actions::generate_shop_stock(&relics, &available, 1, false, &spring);
+        let (winter_items, _, _, _) =
+            actions::generate_shop_stock(&relics, &available, 1, false, &winter);
 
         let spring_price = spring_items[0].price;
         let winter_price = winter_items[0].price;

@@ -15,7 +15,7 @@
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use winit::window::Window;
 
-use crate::core::boss::{ALL_BOSSES, BossKind, FINAL_BOSSES};
+use crate::core::boss::{BossKind, all_bosses, final_bosses};
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
@@ -312,7 +312,7 @@ impl DebugMenuBar {
         // testing reactive bosses (Mirror, Tax Collector) against specific
         // run states without rerolling antes until the right boss appears.
         let boss_sub = Submenu::new("Set Current Boss", true);
-        for def in ALL_BOSSES.iter().chain(FINAL_BOSSES.iter()) {
+        for def in all_bosses().iter().chain(final_bosses().iter()) {
             let item = MenuItem::new(format!("{} [{}]", def.name, def.tier.label()), true, None);
             mappings.push((item.id().clone(), DebugAction::SetBoss(def.kind)));
             let _ = boss_sub.append(&item);

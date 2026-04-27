@@ -160,6 +160,7 @@ impl GpuProfiler {
         log::info!("[GpuProfiler] starting capture over {frames} frames");
     }
 
+    #[cfg(debug_assertions)]
     pub fn is_sampling(&self) -> bool {
         self.sampling
     }

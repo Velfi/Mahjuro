@@ -803,8 +803,7 @@ impl SceneBehavior for PickBlindScene {
             // (the wider gap keeps the plaque's rotated side from clipping
             // the paper decal).
             let ofuda_px =
-                (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap)
-                    .max(ofuda_w * 0.5 + 8.0);
+                (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap).max(ofuda_w * 0.5 + 8.0);
             let ofuda_py = plaque_py + up_ext[2] * 0.15 + 24.0;
             let ofuda_world_y = plaque_world_y * 0.86 + 6.0;
             point_lights.push(PointLight {
@@ -1024,9 +1023,8 @@ impl SceneBehavior for PickBlindScene {
                 // pipeline renders both front and back faces, so if these
                 // props sit nearly on the same depth band the plaque edge can
                 // win a few samples and visibly punch through the paper.
-                let ofuda_px =
-                    (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap)
-                        .max(ofuda_w * 0.5 + 8.0);
+                let ofuda_px = (plaque_px - plaque_w * 0.5 - ofuda_w * 0.5 - ofuda_gap)
+                    .max(ofuda_w * 0.5 + 8.0);
                 // Pull the paper a touch toward the camera as a depth bias
                 // so it no longer shares the plaque face's sample range.
                 let ofuda_py = plaque_py + shrine_ext[2] * 0.15 + 24.0;

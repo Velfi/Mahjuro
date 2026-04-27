@@ -1,11 +1,57 @@
 //! Yaku (hand pattern) detection and bonus scoring.
+//!
+//! Per-yaku metadata (display name, base mult bonus, base chip bonus) lives
+//! in `assets/data/yaku.json`. Behaviour — detection predicates, leveling
+//! formulas, scoring integration — stays in Rust.
+
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::hand::{DetectedSet, SetKind, validate_selection};
 use crate::core::tile::{Suit, Tile};
 
+#[derive(Deserialize)]
+struct YakuDefRaw {
+    id: YakuKind,
+    name: String,
+    mult_bonus: f64,
+    chip_bonus: i32,
+}
+
+struct YakuDef {
+    name: &'static str,
+    mult_bonus: f64,
+    chip_bonus: i32,
+}
+
+fn yaku_def(id: YakuKind) -> &'static YakuDef {
+    static DEFS: OnceLock<std::collections::HashMap<YakuKind, YakuDef>> = OnceLock::new();
+    let map = DEFS.get_or_init(|| {
+        const PATH: &str = "data/yaku.json";
+        let bytes = crate::asset_path::get(PATH)
+            .unwrap_or_else(|| panic!("yaku data file missing: assets/{PATH}"));
+        let raw: Vec<YakuDefRaw> = serde_json::from_slice(&bytes.data)
+            .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+        raw.into_iter()
+            .map(|r| {
+                (
+                    r.id,
+                    YakuDef {
+                        name: Box::leak(r.name.into_boxed_str()),
+                        mult_bonus: r.mult_bonus,
+                        chip_bonus: r.chip_bonus,
+                    },
+                )
+            })
+            .collect()
+    });
+    map.get(&id)
+        .unwrap_or_else(|| panic!("yaku def missing for {id:?}"))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum YakuKind {
     /// All tiles are 2–8 of a number suit (no terminals or honors). Tied to
     /// the Monkey zodiac.
@@ -57,21 +103,7 @@ impl YakuKind {
     }
 
     fn base_mult_bonus(self) -> f64 {
-        match self {
-            YakuKind::Tanyao => 2.0,
-            YakuKind::Toitoi => 4.0,
-            YakuKind::FullHand => 5.0,
-            YakuKind::Yakuhai => 3.0,
-            YakuKind::Iipeikou => 3.0,
-            YakuKind::SanshokuDoujun => 4.0,
-            YakuKind::Ittsu => 4.0,
-            YakuKind::Honitsu => 4.0,
-            YakuKind::Chinitsu => 6.0,
-            YakuKind::Junchan => 4.0,
-            YakuKind::Honroutou => 4.0,
-            YakuKind::Chiitoitsu => 4.0,
-            YakuKind::ChickenHand => 0.0,
-        }
+        yaku_def(self).mult_bonus
     }
 
     /// Base chip bonus added when this yaku fires (separate from the mult
@@ -82,21 +114,7 @@ impl YakuKind {
     }
 
     fn base_chip_bonus(self) -> i32 {
-        match self {
-            YakuKind::Tanyao => 30,
-            YakuKind::Toitoi => 50,
-            YakuKind::FullHand => 60,
-            YakuKind::Yakuhai => 40,
-            YakuKind::Iipeikou => 40,
-            YakuKind::SanshokuDoujun => 50,
-            YakuKind::Ittsu => 50,
-            YakuKind::Honitsu => 50,
-            YakuKind::Chinitsu => 80,
-            YakuKind::Junchan => 50,
-            YakuKind::Honroutou => 40,
-            YakuKind::Chiitoitsu => 50,
-            YakuKind::ChickenHand => 0,
-        }
+        yaku_def(self).chip_bonus
     }
 
     /// Leveled mult bonus: `base + 0.5 × (level - 1)`. `level` is 1 by default;
@@ -123,21 +141,7 @@ impl YakuKind {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            YakuKind::Tanyao => "Tanyao",
-            YakuKind::Toitoi => "Toitoi",
-            YakuKind::FullHand => "Full Hand",
-            YakuKind::Yakuhai => "Yakuhai",
-            YakuKind::Iipeikou => "Iipeikou",
-            YakuKind::SanshokuDoujun => "Sanshoku",
-            YakuKind::Ittsu => "Ittsu",
-            YakuKind::Honitsu => "Honitsu",
-            YakuKind::Chinitsu => "Chinitsu",
-            YakuKind::Junchan => "Junchan",
-            YakuKind::Honroutou => "Honroutou",
-            YakuKind::Chiitoitsu => "Chiitoitsu",
-            YakuKind::ChickenHand => "Chicken Hand",
-        }
+        yaku_def(self).name
     }
 
     /// All 13 yaku, in display order.
@@ -348,8 +352,9 @@ fn is_chiitoitsu(sets: &[DetectedSet]) -> bool {
         if let Some(_first) = s.tile_ids.first() {
             // Caller doesn't pass tiles, so we approximate uniqueness by
             // checking the count of distinct tile_ids vs total. The fast path
-            // is to assume hand.rs's chiitoitsu builder already enforces it,
-            // which it does — see `try_chiitoitsu` in hand.rs.
+            // is to assume `crate::core::hand`'s chiitoitsu builder already
+            // enforces it, which it does — see `try_chiitoitsu` in
+            // `core/hand/decomposition.rs`.
             faces.push((Suit::Wind, 0)); // placeholder; uniqueness enforced upstream
         }
     }
@@ -1000,5 +1005,26 @@ mod tests {
         assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 6.0);
         assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 50);
         assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 130);
+    }
+
+    /// Force a panic on data drift. Touching every variant via the metadata
+    /// accessors triggers the OnceLock load; if `assets/data/yaku.json` is
+    /// missing an id (or has duplicates that overwrite earlier entries),
+    /// `yaku_def` panics here. The match is exhaustive so adding a new
+    /// variant won't compile until it's classified, and `YakuKind::all()`
+    /// must include every classified variant — covered by the count check.
+    #[test]
+    fn every_yaku_variant_has_a_data_entry() {
+        for &kind in YakuKind::all() {
+            // Calling these forces the table lookup; missing entries panic.
+            let _ = kind.name();
+            let _ = kind.mult_bonus();
+            let _ = kind.chip_bonus();
+        }
+        assert_eq!(
+            YakuKind::all().len(),
+            13,
+            "YakuKind::all() must list every variant — update if you added one"
+        );
     }
 }

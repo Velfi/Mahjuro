@@ -33,7 +33,7 @@ pub enum TileEnhancement {
     Pearl,
     /// +$1 when this tile is part of a scored meld.
     Gilded,
-    /// ×1.15 mult applied once per meld that contains this tile.
+    /// ×1.2 mult applied once per meld that contains this tile.
     Polychrome,
 }
 

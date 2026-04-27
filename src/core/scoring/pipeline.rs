@@ -228,8 +228,15 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::TilePolisher) && ctx.tile_polisher_bonus > 0 {
-        push_chips!("Tile Polisher", ctx.tile_polisher_bonus);
+    if has(RelicId::TilePolisher) {
+        let bonus = ctx
+            .relic_counters
+            .get(&RelicId::TilePolisher)
+            .copied()
+            .unwrap_or(0);
+        if bonus > 0 {
+            push_chips!("Tile Polisher", bonus);
+        }
     }
 
     if has(RelicId::LastBreath) && ctx.is_final_play {
@@ -300,8 +307,15 @@ fn score_sets_inner(
         push_chips!("Ghost Hand", 2 * ctx.unscored_hand_tiles as i32);
     }
 
-    if has(RelicId::RiverRunner) && ctx.river_runner_bonus > 0 {
-        push_chips!("River Runner", ctx.river_runner_bonus);
+    if has(RelicId::RiverRunner) {
+        let bonus = ctx
+            .relic_counters
+            .get(&RelicId::RiverRunner)
+            .copied()
+            .unwrap_or(0);
+        if bonus > 0 {
+            push_chips!("River Runner", bonus);
+        }
     }
 
     if has(RelicId::MeltingIce) {
@@ -360,14 +374,14 @@ fn score_sets_inner(
             push_gold!("Gilded Talisman", gilded_gold);
         }
         for _ in 0..polychrome_melds {
-            let delta = mult * 0.15;
+            let delta = mult * 0.2;
             push_mult!("Polychrome Talisman", delta);
         }
     }
 
     {
         let meld_count = sets.len() as i32;
-        let triggers = if has(RelicId::GardenKeeper) { 2 } else { 1 };
+        let garden_keeper_passes = count(RelicId::GardenKeeper);
         let hanami = has(RelicId::Hanami);
         for s in sets {
             for &tid in &s.tile_ids {
@@ -377,15 +391,20 @@ fn score_sets_inner(
                 if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tile_debuffs) {
                     continue;
                 }
-                for trig in 0..triggers {
-                    let suffix = if trig == 1 { " (Garden Keeper)" } else { "" };
-                    match t.rank {
-                        1 => push_chips!(format!("Plum Blossom{suffix}"), 40),
-                        2 => push_mult!(format!("Orchid{suffix}"), 1.5),
-                        3 => push_chips!(format!("Chrysanthemum{suffix}"), 15 * meld_count),
-                        4 => push_gold!(format!("Bamboo{suffix}"), 4),
-                        _ => {}
-                    }
+                macro_rules! score_flower {
+                    ($suffix:expr) => {
+                        match t.rank {
+                            1 => push_chips!(format!("Plum Blossom{}", $suffix), 40),
+                            2 => push_mult!(format!("Orchid{}", $suffix), 1.5),
+                            3 => push_chips!(format!("Chrysanthemum{}", $suffix), 15 * meld_count),
+                            4 => push_gold!(format!("Bamboo{}", $suffix), 4),
+                            _ => {}
+                        }
+                    };
+                }
+                score_flower!("");
+                for _ in 0..garden_keeper_passes {
+                    score_flower!(" (Garden Keeper)");
                 }
                 if hanami {
                     push_gold!("Hanami", 3);
@@ -443,8 +462,7 @@ fn score_sets_inner(
             .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
             .count() as i32;
         if dora_count > 0 {
-            let per_dora = if has(RelicId::DoraCrown) { 35 } else { 25 };
-            let delta = per_dora * dora_count;
+            let delta = 25 * dora_count;
             chips += delta;
             steps.push(ScoreStep {
                 source: format!("Dora ×{dora_count}"),
@@ -459,6 +477,9 @@ fn score_sets_inner(
                 running_mult: mult,
                 running_total: combine(chips, mult),
             });
+            for _ in 0..count(RelicId::DoraCrown) {
+                push_chips!(format!("Dora Crown ×{dora_count}"), 10 * dora_count);
+            }
         }
     }
 
@@ -503,11 +524,11 @@ fn score_sets_inner(
     let scored_full_hand = detected_yaku.contains(&YakuKind::FullHand);
     if scored_full_hand && ctx.first_full_hand_of_round {
         let scale = (4i32 - ctx.plays_used as i32).max(1);
-        let mut bonus = 50 * scale;
-        if has(RelicId::TenpaiTalisman) {
-            bonus *= 2;
-        }
+        let bonus = 50 * scale;
         push_chips!("Tenpai Bonus", bonus);
+        for _ in 0..count(RelicId::TenpaiTalisman) {
+            push_chips!("Tenpai Talisman", bonus);
+        }
     }
 
     if has(RelicId::RedDragonRage) {

@@ -34,7 +34,7 @@ impl ShopScene {
 
         let (plaque_top_text, plaque_bot_text) = shop_plaque_lines(self, &shop);
 
-        // ── Kiosk counter slab (thin wide dish — reads as a face-up surface) ─
+        // ── Kiosk counter slab + trim ─────────────────────────────────
         // center_pos is (pixel_x, pixel_y, lift_z); extents are (width_x, rim_z, depth_y).
         frame.object3d(Object3d {
             pos: [
@@ -44,10 +44,10 @@ impl ShopScene {
             ],
             extents: layout.counter_extents,
             rotation: glam::Mat4::IDENTITY,
-            color: [1.0, 1.0, 1.0, 1.0],
+            color: [0.34, 0.18, 0.10, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::DiscSquare,
-                material: crate::render::primitive::MaterialSpec::plain(),
+                material: crate::render::primitive::MaterialSpec::lacquered_wood_flat(),
                 pick_id: None,
                 shadow_caster: true,
                 silhouette: false,
@@ -56,6 +56,100 @@ impl ShopScene {
             anim_id: 0,
             arrange_name: None,
         });
+        {
+            use crate::render::primitive::{MaterialSpec, MeshId};
+
+            let counter_px = layout.counter_pixel_x;
+            let counter_py = layout.counter_world_y + h * 0.5;
+            let counter_w = layout.counter_extents[0];
+            let counter_h = layout.counter_extents[1];
+            let counter_d = layout.counter_extents[2];
+            let rail_h = layout.mm(1.8);
+            let rail_d = layout.mm(2.4);
+            let rail_z = counter_h + layout.mm(0.4);
+            let front_py = counter_py + counter_d * 0.48;
+            let brass = [0.95, 0.67, 0.24, 1.0];
+            let dark_lacquer = [0.17, 0.07, 0.04, 1.0];
+            let seam_color = [0.07, 0.035, 0.025, 1.0];
+
+            let mut counter_trim: Vec<Object3d> = Vec::new();
+            let mut push_cube = |pos: [f32; 3],
+                                 extents: [f32; 3],
+                                 color: [f32; 4],
+                                 material: MaterialSpec,
+                                 name: Option<&'static str>| {
+                counter_trim.push(Object3d {
+                    pos,
+                    extents,
+                    rotation: glam::Mat4::IDENTITY,
+                    color,
+                    kind: Object3dKind::Primitive {
+                        shape: MeshId::Cube,
+                        material,
+                        pick_id: None,
+                        shadow_caster: true,
+                        silhouette: false,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: name,
+                });
+            };
+
+            // A low brass bead along the front makes the slab feel crafted
+            // without rising into the hover-plaque reading lane.
+            push_cube(
+                [counter_px, front_py, rail_z],
+                [counter_w * 0.88, rail_d, rail_h],
+                brass,
+                MaterialSpec::metal(),
+                Some("shop.counter.front_rail"),
+            );
+
+            // Top inlay seams loosely divide the four shop columns without
+            // becoming real UI boundaries.
+            for seam_x in [-0.25_f32, 0.0, 0.25] {
+                push_cube(
+                    [
+                        counter_px + seam_x * counter_w,
+                        counter_py,
+                        counter_h + layout.mm(0.7),
+                    ],
+                    [layout.mm(1.4), counter_d * 0.68, layout.mm(1.0)],
+                    seam_color,
+                    MaterialSpec::plain(),
+                    Some("shop.counter.top_inlay"),
+                );
+            }
+
+            // Recessed front apron panels catch the low shop light and add
+            // parallax when the camera pans or the player hovers objects.
+            let panel_count = 5;
+            let panel_w = counter_w * 0.15;
+            let panel_gap = counter_w * 0.018;
+            let total_panel_w = panel_count as f32 * panel_w + (panel_count - 1) as f32 * panel_gap;
+            for i in 0..panel_count {
+                let x = counter_px - total_panel_w * 0.5
+                    + panel_w * 0.5
+                    + i as f32 * (panel_w + panel_gap);
+                push_cube(
+                    [x, front_py + rail_d * 0.9, counter_h * 0.42],
+                    [panel_w, layout.mm(2.0), counter_h * 0.46],
+                    dark_lacquer,
+                    MaterialSpec::lacquered_wood_flat(),
+                    Some("shop.counter.front_panel"),
+                );
+                push_cube(
+                    [x, front_py + rail_d * 1.4, counter_h * 0.70],
+                    [panel_w * 0.86, layout.mm(1.2), layout.mm(1.2)],
+                    brass,
+                    MaterialSpec::metal(),
+                    Some("shop.counter.panel_pin"),
+                );
+            }
+
+            frame.object3d_batch(counter_trim);
+        }
 
         // ── Foreground dishes (relic + talisman + ribbon trays + gold) ─
         frame.object3d(Object3d {

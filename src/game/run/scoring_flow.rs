@@ -220,10 +220,8 @@ impl RunState {
             gold: self.gold,
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
-            tile_polisher_bonus: self.tile_polisher_bonus,
             relic_counters: self.relic_counters.clone(),
             unscored_hand_tiles: self.hand.len(),
-            river_runner_bonus: self.river_runner_bonus,
             structure: structure_meta,
         };
         let breakdown = score_sets_with_original(
@@ -243,13 +241,19 @@ impl RunState {
 
         if self.relics.has(RelicId::TilePolisher) {
             let tile_count: i32 = sets.iter().map(|s| s.tile_ids.len() as i32).sum();
-            self.tile_polisher_bonus += 3 * tile_count;
+            *self
+                .relic_counters
+                .entry(RelicId::TilePolisher)
+                .or_insert(0) += 3 * tile_count;
             self.relic_activations.push(RelicId::TilePolisher);
         }
         if self.relics.has(RelicId::RiverRunner) {
             let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
             if seq_count > 0 {
-                self.river_runner_bonus += 20 * seq_count;
+                *self
+                    .relic_counters
+                    .entry(RelicId::RiverRunner)
+                    .or_insert(0) += 20 * seq_count;
                 self.relic_activations.push(RelicId::RiverRunner);
             }
         }
@@ -375,7 +379,7 @@ impl RunState {
         earned
     }
 
-    fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
+    pub(super) fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
         if !self.auto_cash_in_on_full_structure {
             return;
         }
@@ -561,10 +565,8 @@ impl RunState {
             gold: self.gold,
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
-            tile_polisher_bonus: self.tile_polisher_bonus,
             relic_counters: self.relic_counters.clone(),
             unscored_hand_tiles: self.hand.len(),
-            river_runner_bonus: self.river_runner_bonus,
             structure: Some(meta),
         };
         Some(score_sets_with_original(
@@ -655,10 +657,8 @@ impl RunState {
             gold: self.gold,
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
-            tile_polisher_bonus: self.tile_polisher_bonus,
             relic_counters: self.relic_counters.clone(),
             unscored_hand_tiles: self.hand.len(),
-            river_runner_bonus: self.river_runner_bonus,
             structure: None,
         };
         let mut best = default_sets;
