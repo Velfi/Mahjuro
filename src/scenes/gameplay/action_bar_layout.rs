@@ -53,6 +53,18 @@ pub struct ActionBarLayout {
     pub action_hud_table_lift: f32,
 }
 
+/// Shared layout for the gameplay HUD stack above/below the hand rack:
+/// structure showcase, yaku tablets, and bottom action objects.
+#[derive(Clone, Copy, Debug)]
+pub struct GameplayHudLayout {
+    pub yaku_panel_h: f32,
+    pub structure_tag_h: f32,
+    pub structure_meld_h: f32,
+    pub structure_strip_top: f32,
+    pub yaku_row_y: f32,
+    pub action_bar: ActionBarLayout,
+}
+
 /// Structure-strip metrics used when `has_structure` is true — only read
 /// by `compute_action_bar` in that case, so grouping them makes the
 /// "structure is off" call site short.
@@ -179,5 +191,94 @@ pub fn compute_action_bar(
         play_btn_rect,
         trigger_btn_rect,
         action_hud_table_lift,
+    }
+}
+
+/// Computes the full gameplay HUD stack from the hand rack upward, then
+/// delegates bottom-row geometry to [`compute_action_bar`]. This keeps
+/// yaku tablet placement, structure showcase placement, popup anchors, and
+/// focus/click rects on the same geometry.
+pub fn compute_gameplay_hud_layout(
+    layout: &LayoutResult,
+    hand_slots: &[(f32, f32, f32, f32)],
+    ui_scale: f32,
+    has_structure: bool,
+    showcase_present: bool,
+) -> GameplayHudLayout {
+    let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+    let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(layout.window_h * 0.10);
+    let yaku_panel_gap = 8.0 * layout_scale;
+    let structure_tag_h = if showcase_present {
+        (17.0 * layout_scale).max(14.0)
+    } else {
+        0.0
+    };
+    let structure_meld_h = if showcase_present {
+        (46.0 * layout_scale).max(38.0)
+    } else {
+        0.0
+    };
+    let structure_pad = if showcase_present {
+        (5.0 * layout_scale).max(3.0)
+    } else {
+        0.0
+    };
+    let structure_block_h = if showcase_present {
+        structure_tag_h + structure_meld_h + structure_pad
+    } else {
+        0.0
+    };
+
+    // HUD panels use HAND_HUD_STACK_Y_FRAC so they clear the physical rack,
+    // whose mesh anchor sits lower on the table.
+    let (_, slot_y, _, slot_h) = hand_slots.first().copied().unwrap_or((
+        0.0,
+        layout.hand_strip.y,
+        100.0,
+        layout.hand_strip.h,
+    ));
+    let tile_center_y = slot_y + slot_h * crate::ui::layout::HAND_HUD_STACK_Y_FRAC;
+    let clear_above_tiles = (34.0 * layout_scale).max(26.0);
+    let band_top_above_tiles = (tile_center_y - clear_above_tiles).max(4.0);
+    let min_yaku_y = layout.modifier_strip.y + layout.modifier_strip.h + (4.0 * layout_scale);
+
+    let mut yaku_row_y = band_top_above_tiles - yaku_panel_h;
+    let mut structure_strip_top = if showcase_present {
+        yaku_row_y - yaku_panel_gap - structure_block_h
+    } else {
+        band_top_above_tiles
+    };
+    if yaku_row_y < min_yaku_y {
+        yaku_row_y = min_yaku_y;
+        if showcase_present {
+            structure_strip_top = yaku_row_y - yaku_panel_gap - structure_block_h;
+        }
+    }
+    if showcase_present && structure_strip_top < min_yaku_y {
+        let deficit = min_yaku_y - structure_strip_top;
+        structure_strip_top += deficit;
+        yaku_row_y += deficit;
+    }
+
+    let action_bar = compute_action_bar(
+        layout,
+        hand_slots,
+        layout_scale,
+        ui_scale,
+        StructureStrip {
+            has_structure,
+            strip_top: structure_strip_top,
+            tag_h: structure_tag_h,
+            meld_h: structure_meld_h,
+        },
+    );
+
+    GameplayHudLayout {
+        yaku_panel_h,
+        structure_tag_h,
+        structure_meld_h,
+        structure_strip_top,
+        yaku_row_y,
+        action_bar,
     }
 }

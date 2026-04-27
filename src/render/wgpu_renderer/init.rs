@@ -210,7 +210,9 @@ impl WgpuRenderer {
 
         let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("text-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/text_quad.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/text_quad.wgsl").into(),
+            ),
         });
 
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1267,7 +1269,9 @@ impl WgpuRenderer {
         // ---- Tile glow pipeline (selected tile additive halo) ----
         let tile_glow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-glow-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/tile_glow.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/tile_glow.wgsl").into(),
+            ),
         });
         let tile_glow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tile-glow-pipeline"),
@@ -1644,7 +1648,9 @@ impl WgpuRenderer {
         // ---- Image pipeline (full-colour textured quads for relic icons, etc.) ----
         let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("image-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/image_quad.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/image_quad.wgsl").into(),
+            ),
         });
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("image-pipeline"),
@@ -1762,7 +1768,9 @@ impl WgpuRenderer {
         });
         let bloom_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bloom-blur-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/bloom_blur.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/bloom_blur.wgsl").into(),
+            ),
         });
         let bloom_extract_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -2610,7 +2618,6 @@ impl WgpuRenderer {
             tile_anim_x: Vec::new(),
             tile_uids: Vec::new(),
             departing_tiles: Vec::new(),
-            prev_hand_slots: Vec::new(),
             proj: ProjectionCache::default(),
             last_pick_models: Vec::new(),
             last_pick_camera: None,

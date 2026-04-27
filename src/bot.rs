@@ -303,10 +303,8 @@ fn ctx_for_merged_commit<'a>(
         gold: run.gold,
         total_score: run.total_score_earned,
         is_final_play: plays_rem_after == 0,
-        tile_polisher_bonus: run.tile_polisher_bonus,
         relic_counters: run.relic_counters.clone(),
         unscored_hand_tiles: run.hand.len().saturating_sub(merged_tiles.len()),
-        river_runner_bonus: run.river_runner_bonus,
         structure: Some(meta),
     }
 }
@@ -1736,10 +1734,20 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     // enhancement stamps every drawn tile for the rest of the run, so value
     // compounds across antes the same way a relic does.
     if run.relics.has(RelicId::BrocadePouch) {
-        scale_long_term_value_for_ante(raw, run.ante)
-    } else {
-        raw
+        return scale_long_term_value_for_ante(raw, run.ante);
     }
+    // Polychrome is uniquely multiplicative (×1.2 mult per meld, scales with
+    // the rest of the mult stack) rather than additive-per-tile like Jade/
+    // Pearl/Gilded. A single best-play delta dramatically understates it:
+    // the same stamped hand typically supports 2–3 plays in a round before
+    // draw-attrition thins out the stamped tiles, and the ×1.2 compounds
+    // against mult that grows through the round (Snowball, Momentum,
+    // sequence bonuses, etc.). Boost the raw delta to reflect that
+    // per-round payoff.
+    if matches!(talisman, TalismanKind::Polychrome) {
+        return raw.saturating_mul(2);
+    }
+    raw
 }
 
 /// Estimate the value of buying a booster pack. Pack tiles permanently

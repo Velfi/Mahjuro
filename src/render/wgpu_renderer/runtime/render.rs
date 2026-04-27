@@ -1,0 +1,1464 @@
+use super::*;
+
+impl WgpuRenderer {
+    pub fn render(&mut self, frame: &UiFrame, settings: RenderSettings) -> anyhow::Result<()> {
+        let RenderSettings {
+            smoke_quality,
+            smoke_amount,
+            effects_quality,
+            tile_preset,
+            tile_material,
+            tileset_name,
+            draw_settle_speed,
+            sort_settle_speed,
+            gamma,
+            shadows_enabled,
+            ssr_enabled,
+        } = settings;
+        self.apply_render_settings(tile_material, &tileset_name);
+
+        // Upload any relic/background textures that finished decoding.
+        self.poll_relic_textures();
+        self.poll_background_textures();
+
+        // Acquire the per-frame texture to draw into. In the interactive
+        // path this is a swapchain image; in headless screenshot mode it's
+        // a plain render-attachment texture owned by `self.target`. Either
+        // way we end up with a `&wgpu::Texture` (for the screenshot copy)
+        // and a `TextureView` (for the render passes).
+        let surface_frame: Option<wgpu::SurfaceTexture> = match self.acquire_render_frame()? {
+            RenderFrame::Draw(frame) => frame,
+            RenderFrame::Skip => return Ok(()),
+        };
+        let frame_texture: wgpu::Texture = match (&surface_frame, &self.target) {
+            (Some(sf), _) => sf.texture.clone(),
+            (None, RenderTarget::Offscreen { texture, .. }) => texture.clone(),
+            (None, RenderTarget::Surface(_)) => {
+                unreachable!("Surface target always produces a surface_frame or early-returns")
+            }
+        };
+        let view = frame_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bloom_active = Self::bloom_is_active(frame);
+
+        // Lerp per-tile slide animations toward 0 (ease-out) and advance
+        // short-lived departing-tile clocks.
+        let dt = self.advance_frame_timers(draw_settle_speed, sort_settle_speed);
+
+        self.upload_frame_uniforms(frame, effects_quality, gamma);
+
+        // Build 2D backdrop quads (selection borders, hint pulses) and text
+        // labels (just the focused arrow — the symbol+emoji live in the 3D
+        // tile decal now).  Per-tile model matrices for the 3D mesh draw are
+        // also written here.
+        let mut tile_quads: Vec<GpuInstance> = Vec::new();
+        let mut tile_labels: Vec<TextLabel> = Vec::new();
+        let mut emoji_labels: Vec<TextLabel> = Vec::new();
+        let mut tile_3d_rects: Vec<(usize, [f32; 4])> = Vec::new();
+        // Per-tile world-space model matrices, snapshotted for next frame's
+        // cursor pick (`pick_hand_tile`).
+        let mut tile_pick_models: Vec<(usize, Mat4)> = Vec::new();
+        // Additive glow halos for selected tiles, drawn behind the 3D
+        // tile mesh as part of the Tiles3d render op.
+        let mut tile_glows: Vec<GpuInstance> = Vec::new();
+        // Additive glow halos for relics activated by the scoring cascade.
+        // Populated below from the relic projection loop (we need each
+        // relic's projected screen rect to size the halo). Drawn through
+        // `tile_glow_pipeline` immediately after the 3D relic boxes so the
+        // warm light blooms out around the box silhouette.
+        let mut relic_glows: Vec<GpuInstance> = Vec::new();
+
+        // ── Person-at-the-table camera ──────────────────────────────────
+        // Z-up world, standard right-hand conventions: +X right, +Y into the
+        // table (away from player), +Z up from the felt. Table is z = 0 (XY).
+        // Camera sits at large -Y (behind the player), elevated in +Z, looking
+        // toward +Y. See [`crate::render::world_space::pixel_to_world`] for the
+        // pixel → world mapping:
+        //
+        //   world_x =  pixel_x - w * 0.5       (screen-right → +X)
+        //   world_y =  h * 0.5 - pixel_y       (screen-bottom → -Y, toward player)
+        //   world_z =  lift above the felt
+        //
+        // The 2D UI overlays (score panel, buttons, text) keep using the
+        // pixel-orthographic quad pipeline and float over the 3D scene as
+        // a HUD.
+        let camera = CameraFrame::build(frame, self.size);
+        self.upload_camera_uniforms(&camera, ssr_enabled);
+        let look_target = camera.look_target;
+        let view_proj = camera.view_proj;
+        let view_proj_arr = camera.view_proj_arr;
+        let w = camera.w;
+        let h = camera.h;
+        let project_to_screen = |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
+
+        // ── Debug axes overlay ──────────────────────────────────────────
+        self.write_debug_axes_uniforms(frame, &camera);
+
+        // ── Flame emitters (world-space) ─────────────────────────────
+        let flame_emitters = build_flame_emitters(frame, w, h);
+
+        let tile_basis = tile_mesh_local_to_world();
+        // Hand tiles render via ShowcaseTileBatch (further below); tile hints
+        // come through as real green PointLights from gameplay scene.
+
+        // Render departing tiles (two-phase: arc into river, then drift).
+        for dep in &self.departing_tiles {
+            let t = dep.elapsed.max(0.0);
+            let w = dep.start_rect[2];
+            let h = dep.start_rect[3];
+            let start_cx = dep.start_rect[0] + w * 0.5;
+            let start_cy = dep.start_rect[1] + h * 0.5;
+
+            // Phase split: Arcing → Drifting at t = arc_dur.
+            let (cx, cy, alpha, scale) = if t < dep.arc_dur {
+                // Phase 1 — quadratic Bezier from the hand slot, over an
+                // apex above the midpoint, into the river center. The
+                // apex sits 110px above the higher of the two endpoints
+                // so the tile reads as being *thrown* upward before
+                // arcing down into the water rather than sliding in a
+                // straight line.
+                let u = (t / dep.arc_dur).clamp(0.0, 1.0);
+                let mid_x = (start_cx + dep.river_target.0) * 0.5;
+                let mid_y = start_cy.min(dep.river_target.1) - 110.0;
+                let one_u = 1.0 - u;
+                let bx =
+                    one_u * one_u * start_cx + 2.0 * one_u * u * mid_x + u * u * dep.river_target.0;
+                let by =
+                    one_u * one_u * start_cy + 2.0 * one_u * u * mid_y + u * u * dep.river_target.1;
+                // Slight shrink during the arc — the tile reads as
+                // moving away from the camera as it falls into the
+                // recessed water surface.
+                let s = 1.0 - 0.18 * u;
+                (bx, by, 1.0, s)
+            } else {
+                // Phase 2 — drift downstream and fade. Position
+                // continues from the splash point along `drift_dir` at
+                // `drift_speed`. Alpha eases from 1 → 0 over the drift
+                // duration; scale shrinks further so the tile reads as
+                // sinking into the water.
+                let dt2 = t - dep.arc_dur;
+                let u2 = (dt2 / dep.drift_dur).clamp(0.0, 1.0);
+                let dx = dep.drift_dir.0 * dep.drift_speed * dt2;
+                let dy = dep.drift_dir.1 * dep.drift_speed * dt2;
+                let bx = dep.river_target.0 + dx;
+                let by = dep.river_target.1 + dy;
+                let a = 1.0 - u2;
+                let s = 0.82 - 0.40 * u2;
+                (bx, by, a, s)
+            };
+
+            let sw = w * scale;
+            let sh = h * scale;
+            let sx = cx - sw * 0.5;
+            let sy = cy - sh * 0.5;
+
+            // Tile background.
+            tile_quads.push(GpuInstance {
+                rect: [sx, sy, sw, sh],
+                color: [0.0, 0.0, 0.0, alpha],
+            });
+
+            // Main label.
+            let inset_x = sw * 0.10;
+            let top_h = sh * 0.50;
+            tile_labels.push(TextLabel {
+                rect: [sx + inset_x, sy + sh * 0.05, sw - inset_x * 2.0, top_h],
+                text: dep.symbol.clone(),
+                color: [
+                    dep.suit_color[0],
+                    dep.suit_color[1],
+                    dep.suit_color[2],
+                    alpha,
+                ],
+                ..Default::default()
+            });
+
+            // Suit emoji.
+            let bot_h = sh * 0.40;
+            emoji_labels.push(TextLabel {
+                rect: [sx + inset_x, sy + sh * 0.55, sw - inset_x * 2.0, bot_h],
+                text: dep.suit_emoji.clone(),
+                color: [
+                    dep.suit_color[0],
+                    dep.suit_color[1],
+                    dep.suit_color[2],
+                    alpha,
+                ],
+                ..Default::default()
+            });
+        }
+
+        // Tile glow instance buffer (additive halo behind selected tiles).
+        let tile_glow_buffer = if tile_glows.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tile-glow-instances"),
+                        contents: bytemuck::cast_slice(&tile_glows),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+
+        // ── Pre-rasterize text labels → GPU textures + bind groups ──────
+        let make_text_draw = |device: &wgpu::Device,
+                              queue: &wgpu::Queue,
+                              text_bgl: &wgpu::BindGroupLayout,
+                              sampler: &wgpu::Sampler,
+                              lbl: &TextLabel,
+                              font: &fontdue::Font,
+                              emoji_fallback: Option<&fontdue::Font>|
+         -> TextDraw {
+            // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
+            // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
+            // when layout math produces a negative rect width.
+            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+            let align = match lbl.align {
+                TextAlign::Left => LabelAlign::Left,
+                TextAlign::Center => LabelAlign::Center,
+                TextAlign::Right => LabelAlign::Right,
+            };
+            let rgba = rasterize_label_styled_with_fallback(
+                font,
+                emoji_fallback,
+                &lbl.text,
+                tw,
+                th,
+                crate::render::decal::LabelStyle {
+                    font_px: lbl.font_px,
+                    align,
+                    scroll_offset: lbl.scroll_offset,
+                },
+            );
+            let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("text-lbl-bg"),
+                layout: text_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+            let inst = GpuInstance {
+                rect: lbl.rect,
+                color: lbl.color,
+            };
+            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("text-inst"),
+                contents: bytemuck::cast_slice(&[inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            TextDraw {
+                inst_buf,
+                bind_group,
+                _tex: tex,
+            }
+        };
+
+        // ── Hand tile face/emoji label GPU draws (consumed by HandTileFaces) ──
+        let mut hand_face_draws: Vec<TextDraw> = Vec::new();
+        if let Some(ref font) = self.ui_font {
+            for lbl in &tile_labels {
+                hand_face_draws.push(make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    lbl,
+                    font,
+                    None,
+                ));
+            }
+        }
+        if let Some(ref font) = self.emoji_font {
+            for lbl in &emoji_labels {
+                hand_face_draws.push(make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    lbl,
+                    font,
+                    None,
+                ));
+            }
+        }
+
+        // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
+        // ── ordered op list, batching contiguous Quad runs into a single ──
+        // ── instanced draw. ────────────────────────────────────────────────
+        let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut text_draws: Vec<TextDraw> = Vec::new();
+        let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
+        let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        // Skeuomorphic gameplay HUD cmd buffers (phase 1).
+        // Dead empty vecs — kept so existing shadow/draw loops that still iterate
+        // these compile; scenes no longer push to these variants.
+        let shrine_batches: Vec<&[ShrinePlacement]> = Vec::new();
+        let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
+        let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
+        let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
+        let mut object3d_cmds: Vec<&[crate::render::draw_cmd::Object3d]> = Vec::new();
+        // Flat draw list built during the Object3d pre-pass: (DrawKind, slot_i).
+        let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
+        let mut ops: Vec<RenderOp> = Vec::new();
+
+        let mut i = 0;
+        while i < frame.cmds.len() {
+            match &frame.cmds[i] {
+                DrawCmd::Background(id) => {
+                    ops.push(RenderOp::Background(*id));
+                    i += 1;
+                }
+                DrawCmd::Starfield => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::Starfield);
+                    }
+                    i += 1;
+                }
+                DrawCmd::EmberDrift => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::EmberDrift);
+                    }
+                    i += 1;
+                }
+                DrawCmd::GoldenDust => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::GoldenDust);
+                    }
+                    i += 1;
+                }
+                DrawCmd::MoonlitWater => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::MoonlitWater);
+                    }
+                    i += 1;
+                }
+                DrawCmd::SunlitWater => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
+                        ops.push(RenderOp::SunlitWater);
+                    }
+                    i += 1;
+                }
+                DrawCmd::MountainHaze => {
+                    ops.push(RenderOp::MountainHaze);
+                    i += 1;
+                }
+                DrawCmd::ShootingStarCascade => {
+                    if effects_quality >= crate::persistence::EffectsQuality::Low {
+                        ops.push(RenderOp::ShootingStarCascade);
+                    }
+                    i += 1;
+                }
+                DrawCmd::Table => {
+                    ops.push(RenderOp::Table);
+                    i += 1;
+                }
+                DrawCmd::FluidSmoke => {
+                    ops.push(RenderOp::FluidSmoke);
+                    i += 1;
+                }
+                DrawCmd::Quad(_) => {
+                    // Collect contiguous run of Quad cmds into a single batch.
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::Quad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quad-batch"),
+                            contents: bytemuck::cast_slice(&batch),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = quad_buffers.len();
+                    quad_buffers.push(buf);
+                    ops.push(RenderOp::QuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::GradientQuad(_) => {
+                    let mut batch: Vec<GradientQuadInstance> = Vec::new();
+                    while let Some(DrawCmd::GradientQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("gradient-quad-batch"),
+                            contents: bytemuck::cast_slice(&batch),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = gradient_quad_buffers.len();
+                    gradient_quad_buffers.push(buf);
+                    ops.push(RenderOp::GradientQuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::Flame(_) => {
+                    // Drain the contiguous run of Flame cmds. Per-flame
+                    // brightness + phase were already harvested into
+                    // `flame_emitters` above, so here we just advance `i`
+                    // and emit a single `FlameBatch` op that the dispatch
+                    // side will expand into particle-system state.
+                    while let Some(DrawCmd::Flame(_)) = frame.cmds.get(i) {
+                        i += 1;
+                    }
+                    // Step the particle system once per frame and upload
+                    // the live particles into a fresh instance buffer.
+                    // Smoke-on paths skip the actual draw (see the
+                    // `FlameBatch` branch below), but we still step so
+                    // smoke → no-smoke toggles mid-game don't suddenly
+                    // drop an empty pool into view.
+                    self.flame_particles.step(&flame_emitters, self.frame_dt);
+                    let count = self
+                        .flame_particles
+                        .fill_gpu_instances(&flame_emitters, &mut self.flame_particle_staging);
+                    if count == 0 {
+                        // Nothing to draw yet (first frame, or all
+                        // particles expired during a pause). Still push
+                        // the op so the downstream code has a consistent
+                        // shape; the dispatch side handles count=0.
+                        ops.push(RenderOp::FlameBatch {
+                            buf_idx: usize::MAX,
+                            count: 0,
+                        });
+                    } else {
+                        let buf =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("flame-particles"),
+                                    contents: bytemuck::cast_slice(
+                                        &self.flame_particle_staging[..count],
+                                    ),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                        let buf_idx = flame_buffers.len();
+                        flame_buffers.push(buf);
+                        ops.push(RenderOp::FlameBatch {
+                            buf_idx,
+                            count: count as u32,
+                        });
+                    }
+                }
+                DrawCmd::Text(lbl) => {
+                    if let Some(ref font) = self.ui_font {
+                        let td = make_text_draw(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            lbl,
+                            font,
+                            self.emoji_font.as_ref(),
+                        );
+                        let idx = text_draws.len();
+                        text_draws.push(td);
+                        ops.push(RenderOp::TextDraw(idx));
+                    }
+                    i += 1;
+                }
+                DrawCmd::TileFaceQuad(face) => {
+                    let key = (
+                        face.tile.suit,
+                        face.tile.rank,
+                        face.tile.enhancement,
+                        face.tile.debuffed_visual,
+                    );
+                    if !self.tile_face_overlays.contains_key(&key) {
+                        let overlay = make_tile_face_overlay_gpu(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            self.ui_font.as_ref(),
+                            self.emoji_font.as_ref(),
+                            &face.tile,
+                            self.tile_set.as_deref(),
+                        );
+                        self.tile_face_overlays.insert(key, overlay);
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("tile-face-quad"),
+                            contents: bytemuck::cast_slice(&[face.inst]),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let idx = tile_face_quads.len();
+                    tile_face_quads.push(*face);
+                    tile_face_inst_buffers.push(buf);
+                    ops.push(RenderOp::TileFaceQuad(idx));
+                    i += 1;
+                }
+                DrawCmd::ShowcaseTileBatch(placements) => {
+                    let idx = showcase_tile_batches.len();
+                    showcase_tile_batches.push(placements.as_slice());
+                    ops.push(RenderOp::ShowcaseTileBatch(idx));
+                    i += 1;
+                }
+                DrawCmd::GlossaryAnchor { .. } => {
+                    // Pure metadata for the tooltip overlay; no draw work.
+                    i += 1;
+                }
+                DrawCmd::Object3d(obj) => {
+                    object3d_cmds.push(std::slice::from_ref(obj));
+                    // start/end will be filled in during the pre-pass; push placeholder
+                    ops.push(RenderOp::Object3dBatch { start: 0, end: 0 });
+                    i += 1;
+                }
+                DrawCmd::Object3dBatch(objs) => {
+                    object3d_cmds.push(objs.as_slice());
+                    ops.push(RenderOp::Object3dBatch { start: 0, end: 0 });
+                    i += 1;
+                }
+            }
+        }
+
+        // ── Debug axes overlay labels ───────────────────────────────────
+        // After walking the scene's cmds, append three text labels (one per
+        // axis) projected from the world-space tip of each debug-axes bar.
+        // These get rasterized into ordinary text draws so they ride along
+        // in the same render pass as the bars themselves.
+        if frame.debug_axes
+            && let Some(ref font) = self.ui_font
+        {
+            let length = h * 0.35;
+            let label_size = (h * 0.04).max(18.0);
+            let label_w = label_size * 3.5;
+            let label_h = label_size * 1.5;
+            let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
+                (
+                    look_target + glam::Vec3::X * length,
+                    "+X",
+                    [1.0, 0.25, 0.25, 1.0],
+                ),
+                (
+                    look_target + glam::Vec3::Y * length,
+                    "+Y",
+                    [0.25, 1.0, 0.25, 1.0],
+                ),
+                (
+                    look_target + glam::Vec3::Z * length,
+                    "+Z",
+                    [0.45, 0.65, 1.0, 1.0],
+                ),
+            ];
+            for (tip_world, text, color) in labels.iter() {
+                let (sx, sy) = project_to_screen(*tip_world);
+                let lbl = TextLabel {
+                    rect: [sx - label_w * 0.5, sy - label_h * 0.5, label_w, label_h],
+                    text: (*text).to_string(),
+                    color: *color,
+                    font_px: Some(label_size),
+                    align: TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                };
+                let td = make_text_draw(
+                    &self.device,
+                    &self.queue,
+                    &self.text_bind_group_layout,
+                    &self.tile_sampler,
+                    &lbl,
+                    font,
+                    None,
+                );
+                let idx = text_draws.len();
+                text_draws.push(td);
+                ops.push(RenderOp::TextDraw(idx));
+            }
+        }
+
+        // ── Update procedural lit-mesh uniforms (table + candles) ───────
+        // Written before the render pass begins, since the pass borrows
+        // `self` immutably.
+        let needs_table = ops.iter().any(|o| matches!(o, RenderOp::Table));
+        if needs_table {
+            // Horizontal table: mesh is local XY with +Z normal; Y-up mesh
+            // chain uses Rx(-90°) so the felt normal is +Y in that basis, then
+            // [`translate_rot_scale`] maps to world +Z. Wood grain is
+            // evaluated in world XY in the shader.
+            let table_extent = h * 30.0;
+            let table_w = table_extent;
+            let table_d = table_extent;
+            let model = translate_rot_scale(
+                glam::Vec3::ZERO,
+                table_mesh_lay_flat(),
+                glam::Vec3::new(table_w, table_d, 1.0),
+            );
+            self.table_instance.write_uniform(
+                &self.queue,
+                view_proj_arr,
+                model,
+                self.table_mesh.default_material,
+            );
+        }
+        // Reset the debug pickable catch-all for this frame; each draw
+        // loop below appends entries it wants to expose to
+        // `pick_debug_object`.
+        self.last_debug_pickables.clear();
+        self.last_debug_trimesh_pickables.clear();
+
+        // Candles migrated to Object3dKind::Candle.
+
+        // ── Relic placeholders (migrated to Object3dKind::Relic) ──────
+        self.last_relic_models.clear();
+        self.last_pickable_relic_models.clear();
+        let mut relic_slot_cursor: usize = 0;
+        let _ = &mut relic_slot_cursor;
+
+        // ── Pack placeholders (same mesh + pipeline as relics) ──────────
+        self.proj.pack_rects.clear();
+        // Pack placements migrated to Object3dKind::Pack.
+        // ── Shrines (pick-blind scene). Each placement gets its own slot. ─
+        // The shrine mesh is built in normalized -0.5..+0.5 local space, so
+        // a per-instance scale by `extents` sizes Small/Big/Boss
+        // independently. `world_pos` is the *base center*, so we lift the
+        // model up by half the height to put the plinth on the ground.
+        self.proj.shrine_rects.clear();
+        {
+            let mut shrine_cursor: usize = 0;
+            for batch in &shrine_batches {
+                for s in batch.iter() {
+                    if shrine_cursor >= MAX_SHRINE_SLOTS {
+                        break;
+                    }
+                    let slot_i = shrine_cursor;
+                    shrine_cursor += 1;
+                    let center = pixel_to_world(
+                        w,
+                        h,
+                        s.world_pos[0],
+                        s.world_pos[1],
+                        s.world_pos[2] + s.extents[1] * 0.5,
+                    );
+                    let model = translate_rot_scale(
+                        center,
+                        Mat4::IDENTITY,
+                        glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
+                    );
+                    // Project the shrine's 8 AABB corners to screen and
+                    // take the bounding rect — gives the scene a 2D rect
+                    // it can anchor labels to without re-projecting the
+                    // perspective transform itself.
+                    let hx = s.extents[0] * 0.5;
+                    let hy = s.extents[1] * 0.5;
+                    let hz = s.extents[2] * 0.5;
+                    let mut mn_x = f32::INFINITY;
+                    let mut mn_y = f32::INFINITY;
+                    let mut mx_x = f32::NEG_INFINITY;
+                    let mut mx_y = f32::NEG_INFINITY;
+                    for cx in [-hx, hx] {
+                        for cy in [-hy, hy] {
+                            for cz in [-hz, hz] {
+                                let world = center + glam::Vec3::new(cx, cy, cz);
+                                let (px, py) = project_to_screen(world);
+                                mn_x = mn_x.min(px);
+                                mn_y = mn_y.min(py);
+                                mx_x = mx_x.max(px);
+                                mx_y = mx_y.max(py);
+                            }
+                        }
+                    }
+                    self.proj
+                        .shrine_rects
+                        .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
+                    // Glow gently brightens the shrine's tint so the
+                    // upcoming shrine reads as the active choice at
+                    // rest, but most of the warmth still comes from
+                    // the warm spotlight tinting the stone — the
+                    // shrine itself shouldn't self-illuminate.
+                    let g = s.glow.clamp(0.0, 1.0);
+                    let base_color = if g > 0.0 {
+                        let target = [1.10, 1.05, 0.95, s.color[3]];
+                        [
+                            s.color[0] + (target[0] - s.color[0]) * g,
+                            s.color[1] + (target[1] - s.color[1]) * g,
+                            s.color[2] + (target[2] - s.color[2]) * g,
+                            s.color[3],
+                        ]
+                    } else {
+                        s.color
+                    };
+                    // Rough stone material: very low specular strength
+                    // and a low specular power so any highlight that
+                    // does catch is wide and soft (like weathered
+                    // rock, not polished marble). Identical params for
+                    // every shrine so cleared/future ones can't catch
+                    // sharp glints from ambient fills.
+                    let material = MaterialParams {
+                        kind: MaterialKind::Plain,
+                        base_color,
+                        specular_strength: 0.06,
+                        specular_power: 8.0,
+                    };
+                    self.shrine_instances[slot_i].write_uniform(
+                        &self.queue,
+                        view_proj_arr,
+                        model,
+                        material,
+                    );
+                }
+            }
+        }
+
+        // Auxiliary dishes migrated to Object3dKind::Dish.
+
+        // ── Ribbon batches (shop scene) ────────────────────────────────
+        // Each textured ribbon uses up to 3 draw slots (top cap, tileable
+        // middle, bottom cap) so its length is independent of texture aspect.
+        // Untextured (plain) ribbons still use a single slot.
+        self.last_ribbon_models.clear();
+        self.last_ribbon_batch_slot_counts.clear();
+        // Zodiac ribbons migrated to Object3dKind::ZodiacRibbon.
+
+        // ── Talisman batches (shop scene) ──────────────────────────────
+        self.last_talisman_models.clear();
+        // Talismans migrated to Object3dKind::Talisman.
+
+        // Coins migrated to Object3dKind::Coin.
+
+        // ── Reset per-frame singletons owned by Object3d handlers ──────
+        self.last_sell_tray_model = None;
+        self.last_sell_card_model = None;
+
+        self.write_gameplay_hud_uniforms(&camera, &yaku_tablet_batches);
+
+
+        // Wood tablets migrated to Object3dKind::WoodTablet.
+
+        self.run_object3d_placement(
+            &camera,
+            &object3d_cmds,
+            &wall_stack_cmds,
+            &mut object3d_draw_list,
+            &mut ops,
+            &mut relic_glows,
+        );
+
+        // ── Arrange-mode bounding box overlay ──────────────────────────────
+        self.push_arrange_bbox_overlay(frame, &camera, &mut quad_buffers, &mut ops);
+
+        // Relic activation halo buffer — built from `relic_glows` populated
+        // during the relic projection loop above. Drawn through the same
+        // additive `tile_glow_pipeline` as the selected-tile halos, right
+        // after the 3D relic boxes so the bloom blossoms around them.
+        let relic_glow_buffer = if relic_glows.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("relic-glow-instances"),
+                        contents: bytemuck::cast_slice(&relic_glows),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+
+        // ── Volumetric smoke setup (camera, bounds, cursor) ─────────────
+        // Done before the encoder is created so the per-tile impulses
+        // queued during the tile-loop above are still pending.
+        self.upload_fluid_frame(frame, &camera, dt, smoke_quality, smoke_amount);
+
+        // Garbage-collect stale per-tile world cache entries — drop any uid
+        // that wasn't seen in `tile_uids` this frame so the HashMap doesn't
+        // grow unbounded across runs.
+        if !self.prev_tile_world.is_empty() {
+            let live: std::collections::HashSet<u32> = self.tile_uids.iter().copied().collect();
+            self.prev_tile_world.retain(|k, _| live.contains(k));
+        }
+
+        // ── Shadow map setup ────────────────────────────────────────────
+        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled);
+        let light_view_proj_arr = shadow_frame.light_view_proj_arr;
+
+        self.write_per_instance_shadow_casters(
+            frame,
+            &camera,
+            light_view_proj_arr,
+            &tile_pick_models,
+            &shrine_batches,
+        );
+
+
+        self.run_showcase_tiles_placement(
+            &camera,
+            tile_basis,
+            tile_preset,
+            dt,
+            light_view_proj_arr,
+            &showcase_tile_batches,
+            &mut tile_3d_rects,
+            &mut tile_pick_models,
+            &mut tile_glows,
+        );
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
+
+        // Run fluid simulation compute passes (before render pass).
+        //
+        // Use the real inter-frame `dt` captured at the top of `render()`.
+        // The previous `self.last_frame.elapsed()` here was a bug: by this
+        // point we've already reassigned `self.last_frame = now`, so the
+        // elapsed value is just the time spent on render work earlier in
+        // this same function — typically 5–15 ms regardless of FPS. That
+        // made the sim advance only ~0.5–0.9 seconds of simulated time per
+        // wall second, so the post-deal wind sweep (1.4s wall) only got
+        // ~0.7s of advection and intermittently failed to push the opening
+        // smoke curtain off-grid before the overlay finished fading.
+        // `dt` is already capped at 50 ms above, which is plenty of
+        // headroom for the semi-Lagrangian step to stay stable.
+        if let Some(ref mut fluid) = self.fluid {
+            let step_dt = dt.max(1.0 / 120.0);
+            fluid.step(&mut encoder, &self.queue, step_dt, smoke_quality);
+        }
+
+        self.render_shadow_pre_pass(
+            &mut encoder,
+            frame,
+            shadows_enabled,
+            &showcase_tile_batches,
+            &shrine_batches,
+            &tile_3d_rects,
+        );
+
+
+        // Pre-create background image instance buffer (must outlive render pass).
+        let bg_inst = GpuInstance {
+            rect: [
+                0.0,
+                0.0,
+                self.size.width.max(1) as f32,
+                self.size.height.max(1) as f32,
+            ],
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        let bg_inst_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("bg-inst"),
+                contents: bytemuck::cast_slice(&[bg_inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        // Find the FluidSmoke marker so we can split the render pass: the
+        // smoke fragment shader samples the depth buffer, which can't alias
+        // the live depth attachment, so we end pass A right before the
+        // smoke draw, copy depth → depth_copy, then start pass B (loading
+        // color & depth) with the smoke as its first draw.
+        let split_idx = ops.iter().position(|o| matches!(o, RenderOp::FluidSmoke));
+        let split_end = split_idx.unwrap_or(ops.len());
+
+        let process_ctx = ProcessOpCtx {
+            frame,
+            bg_inst_buf: &bg_inst_buf,
+            quad_buffers: &quad_buffers,
+            gradient_quad_buffers: &gradient_quad_buffers,
+            flame_buffers: &flame_buffers,
+            text_draws: &text_draws,
+            tile_face_inst_buffers: &tile_face_inst_buffers,
+            tile_face_quads: &tile_face_quads,
+            object3d_draw_list: &object3d_draw_list,
+            showcase_tile_batches: &showcase_tile_batches,
+            tile_glows: &tile_glows,
+            tile_glow_buffer: tile_glow_buffer.as_ref(),
+            relic_glows: &relic_glows,
+            relic_glow_buffer: relic_glow_buffer.as_ref(),
+            smoke_quality,
+        };
+
+        // ── Pre-pass: shooting-star cascade into half-res offscreen ─────
+        // The cascade shader is extremely heavy per-pixel, so it renders at
+        // quarter-area (half dims) and is additively composited up to the
+        // main scene target inside `Pass A`. Skip the pass entirely when no
+        // cascade op is queued so the clear isn't paid for on every frame.
+        let cascade_active = ops
+            .iter()
+            .any(|o| matches!(o, RenderOp::ShootingStarCascade));
+        if cascade_active {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("cascade-offscreen-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.cascade_offscreen_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.shooting_star_cascade_pipeline);
+            pass.set_bind_group(0, &self.globals_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // ── Pass A: clear + draw everything that lives behind the smoke ──
+        {
+            let main_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("main-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: main_ts,
+                multiview_mask: None,
+            });
+            for op in &ops[..split_end] {
+                // 2D HUD text labels are drawn into the swapchain in a
+                // separate overlay pass after the SSR snapshot, so they
+                // don't end up in `scene_prev_texture` and get reflected by
+                // the lacquered table. See the overlay pass below the
+                // end-of-frame copies.
+                //
+                // `Plaque` ops are also held back: the score plaque now
+                // carries an engraved decal texture (the score header
+                // text) baked onto its +Z face, and if it were drawn here
+                // the lacquered-table SSR would reflect that engraved
+                // text into the table — recreating the exact ghost-text
+                // artefact the overlay pass was originally introduced to
+                // avoid. We snapshot `scene_prev` + `ssr_prev_depth`
+                // immediately after this loop and *then* draw the plaques
+                // in a sibling pass that loads the swapchain.
+                if matches!(op, RenderOp::TextDraw(_)) {
+                    continue;
+                }
+                self.process_op(&mut pass, op, &process_ctx);
+            }
+
+            // Debug world-axes overlay: draw three colored bars after the
+            // normal pass-A 3D ops so they sit on top of the table. Uses
+            // the shared `relic_box_mesh` unit cube; per-instance uniforms
+            // were written above.
+            if frame.debug_axes {
+                pass.set_pipeline(&self.lit_mesh_pipeline);
+                pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(
+                    self.relic_box_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                for inst in self.debug_axes_instances.iter() {
+                    pass.set_bind_group(0, &inst.bind_group, &[]);
+                    pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                }
+            }
+        }
+
+        // ── SSR snapshot ────────────────────────────────────────────────
+        // Capture the swapchain colour and depth buffers BEFORE the
+        // hanging plaques are drawn. The lacquered-table SSR samples
+        // these textures next frame, so plaques (and the engraved score
+        // text decal on their +Z face) never end up in the table's
+        // reflection. The smoke pass below still gets a fresh, full
+        // (with-plaques) depth via its own `depth_copy_texture` copy.
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.scene_color_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.scene_prev_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: self.size.width.max(1),
+                height: self.size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.ssr_prev_depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::Extent3d {
+                width: self.size.width.max(1),
+                height: self.size.height.max(1),
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // ── Pass B: only created when there's a FluidSmoke marker. The
+        // ── live depth buffer is copied into a sibling texture so the
+        // ── smoke fragment shader can sample it without aliasing the
+        // ── still-bound depth attachment.
+        if let Some(split) = split_idx {
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.depth_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::DepthOnly,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.depth_copy_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::DepthOnly,
+                },
+                wgpu::Extent3d {
+                    width: self.size.width.max(1),
+                    height: self.size.height.max(1),
+                    depth_or_array_layers: 1,
+                },
+            );
+
+            // ── Smoke-only timing pass (debug profiling only) ────────
+            // When a GPU profile session is active, render smoke with
+            // flames disabled into the offscreen target first. The real
+            // smoke-offscreen pass below overwrites the target with the
+            // correct smoke+flames result, so this has no visual effect.
+            // Placed here (before smoke-offscreen) so multiple subsequent
+            // render passes flush the end-of-pass timestamp on Metal.
+            #[cfg(debug_assertions)]
+            if self.gpu_profiler.is_sampling()
+                && smoke_quality != crate::persistence::SmokeQuality::Off
+                && let Some(ref fluid) = self.fluid
+            {
+                fluid.set_render_mode_encoder(&mut encoder, true);
+                // Smoke-only timing: no flame AABB needed
+                // because the shader skips flames in this mode.
+                let scissor = fluid.screen_aabb_rect(view_proj, None);
+                let smoke_only_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOnly);
+                fluid.render_offscreen(
+                    &mut encoder,
+                    &self.globals_bind_group,
+                    scissor,
+                    smoke_only_ts,
+                );
+                fluid.set_render_mode_encoder(&mut encoder, false);
+            }
+
+            // ── Offscreen smoke raymarch pass ──────────────────────────
+            // Run the volumetric ray-march into the (reduced-resolution)
+            // smoke target BEFORE the swap-chain pass-B begins. The depth
+            // copy above means the shader can sample scene depth without
+            // aliasing the live depth attachment, and rendering offscreen
+            // means the next pass-B can simply sample + bilinear-upsample
+            // the result instead of paying for full-screen ray-marching.
+            //
+            // Skipped entirely when smoke is disabled — the post-smoke
+            // pass below still runs so any UI/text ops queued after the
+            // FluidSmoke marker draw correctly.
+            if smoke_quality != crate::persistence::SmokeQuality::Off
+                && let Some(ref fluid) = self.fluid
+            {
+                // Flame AABB: the raymarch runs its per-candle SDF
+                // sub-march inside the same pass, so we have to
+                // include the flame bounding spheres in the scissor
+                // or flames disappear when the smoke field is empty.
+                let flame_aabb = compute_flame_world_aabb(
+                    &frame.point_lights[..frame
+                        .candle_light_count
+                        .min(frame.point_lights.len() as u32)
+                        as usize],
+                    frame.flame_height_world,
+                    self.size.width.max(1) as f32,
+                    self.size.height.max(1) as f32,
+                );
+                let scissor = fluid.screen_aabb_rect(view_proj, flame_aabb);
+                let smoke_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOffscreen);
+                // `None` means both smoke and flames contribute
+                // nothing — clear the offscreen target and skip the
+                // raymarch. The composite still runs (sampling a
+                // transparent texture) so queued ops after the
+                // FluidSmoke marker draw correctly.
+                if scissor.is_some() {
+                    fluid.render_offscreen(
+                        &mut encoder,
+                        &self.globals_bind_group,
+                        scissor,
+                        smoke_ts,
+                    );
+                } else {
+                    fluid.clear_offscreen(&mut encoder, smoke_ts);
+                }
+            }
+
+            let post_smoke_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::PostSmoke);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("post-smoke-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: post_smoke_ts,
+                multiview_mask: None,
+            });
+            for op in &ops[split..] {
+                if matches!(op, RenderOp::TextDraw(_)) {
+                    continue;
+                }
+                self.process_op(&mut pass, op, &process_ctx);
+            }
+        }
+
+        let bloom_w = (self.size.width.max(1) / 2).max(1);
+        let bloom_h = (self.size.height.max(1) / 2).max(1);
+        let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
+        let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
+        let make_bloom_bg =
+            |label: &'static str, params: BloomParams, texture_view: &wgpu::TextureView| {
+                let buffer = self
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::bytes_of(&params),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(label),
+                    layout: &self.bloom_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(texture_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                        },
+                    ],
+                });
+                (buffer, bind_group)
+            };
+        let extract_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [0.0; 4],
+        };
+        let blur_h_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [1.0, 0.0, 0.0, 0.0],
+        };
+        let blur_v_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [0.0, 1.0, 0.0, 0.0],
+        };
+        let fisheye_strength = frame.fisheye_strength.max(0.0);
+        // Vignette tracks fisheye so the warp's corner squish fades into
+        // darkness (hiding the clamp seam) and reinforces the "looking
+        // down a long cabinet" feel without swamping the image when
+        // fisheye is off.
+        let vignette_strength = (fisheye_strength * 1.4).min(0.85);
+        let composite_params = BloomParams {
+            data0: [
+                bloom_threshold,
+                bloom_strength,
+                1.0 / bloom_w as f32,
+                1.0 / bloom_h as f32,
+            ],
+            data1: [fisheye_strength, vignette_strength, 0.0, 0.0],
+        };
+        let (_extract_params_buf, bloom_scene_bg) = make_bloom_bg(
+            "bloom-scene-pass-bg",
+            extract_params,
+            &self.scene_color_view,
+        );
+        let (_blur_h_params_buf, bloom_ping_bg) =
+            make_bloom_bg("bloom-ping-pass-bg", blur_h_params, &self.bloom_ping_view);
+        let (_blur_v_params_buf, bloom_pong_bg) =
+            make_bloom_bg("bloom-pong-pass-bg", blur_v_params, &self.bloom_pong_view);
+        let composite_params_buf =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("bloom-composite-params"),
+                    contents: bytemuck::bytes_of(&composite_params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        let bloom_composite_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom-composite-pass-bg"),
+            layout: &self.bloom_composite_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: composite_params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+
+        if bloom_active {
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-extract-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_ping_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_extract_pipeline);
+                pass.set_bind_group(0, &bloom_scene_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-blur-h-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_pong_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_blur_pipeline);
+                pass.set_bind_group(0, &bloom_ping_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bloom-blur-v-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.bloom_ping_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.bloom_blur_pipeline);
+                pass.set_bind_group(0, &bloom_pong_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-composite-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.bloom_composite_pipeline);
+            pass.set_bind_group(0, &bloom_composite_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // (The SSR colour + depth snapshots that used to live here have
+        // moved up to between pass A and the new plaque pass — see the
+        // "SSR snapshot" block above. The smoke pass already maintains
+        // its own `depth_copy_texture` copy, so nothing else needs the
+        // end-of-frame depth dump.)
+
+        // ── Overlay pass: 2D HUD text labels ────────────────────────────
+        // Drawn AFTER the end-of-frame swapchain → scene_prev snapshot so
+        // the text doesn't end up in next frame's SSR reflection sample.
+        // The lacquered table reflects whatever's in scene_prev, and a
+        // text label rasterised onto the plaque's screen rect would
+        // otherwise appear as a phantom duplicate in the table reflection
+        // immediately below the plaque (text doesn't write depth, so the
+        // SSR ray hits the plaque's depth and samples the colour buffer
+        // there — which has the text on top). Loading the swapchain (no
+        // clear) lets us composite text on top of the just-finished scene.
+        if ops.iter().any(|o| matches!(o, RenderOp::TextDraw(_))) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("text-overlay-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            for op in &ops {
+                if matches!(op, RenderOp::TextDraw(_)) {
+                    self.process_op(&mut pass, op, &process_ctx);
+                }
+            }
+        }
+
+        // Flip the smoke TAA ping-pong for next frame — the slot we
+        // just rendered into (and the composite just read) becomes
+        // next frame's history input. Skipped when smoke is Off so we
+        // don't mark undefined texture contents as valid history.
+        if smoke_quality != crate::persistence::SmokeQuality::Off
+            && let Some(fluid) = self.fluid.as_mut()
+        {
+            fluid.advance_taa_frame();
+        }
+
+        // GPU profiler: resolve query set + stage readback before submit,
+        // then block on map after submit so the readback is frame-accurate.
+        // Both calls are no-ops when no profiling session is active.
+        self.gpu_profiler.before_submit(&mut encoder);
+
+        // Headless screenshot capture: if a path is queued, copy the
+        // surface texture into a staging buffer in the same submission.
+        // After submit + poll(Wait), map and PNG-encode synchronously.
+        // The surface texture is still owned by us until present(), so
+        // this is safe. Tied into the same encoder so no extra submit.
+        let screenshot_path = self.pending_screenshot.take();
+        let screenshot_staging = if let Some(ref path) = screenshot_path {
+            log::info!("screenshot: encoding capture for {}", path.display());
+            Some(self.encode_screenshot_copy(&mut encoder, &frame_texture, path))
+        } else {
+            None
+        };
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        if let (Some(path), Some(staging)) = (screenshot_path, screenshot_staging) {
+            match self.finalize_screenshot(staging, &path) {
+                Ok(()) => log::info!("screenshot: wrote {}", path.display()),
+                Err(e) => log::error!("screenshot finalize failed: {e:?}"),
+            }
+        }
+
+        if let Some(sf) = surface_frame {
+            sf.present();
+        }
+        self.gpu_profiler.after_submit(&self.device);
+        Ok(())
+    }
+}

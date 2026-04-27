@@ -1,6 +1,13 @@
 //! Relic definitions and runtime application hooks.
+//!
+//! Display metadata (name, description, rarity) lives in
+//! `assets/data/relics.json` so balance edits don't require recompiling
+//! the core crate. In debug builds rust-embed reads the file from disk on
+//! every game start; in release builds it is baked into the binary.
+//! Behaviour (scoring hooks, prices, visuals) stays in Rust.
 
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +107,7 @@ pub enum RelicId {
     /// each contribute their chip value a second time).
     LastBreath,
     /// Every scored tile permanently gains +3 chips for the rest of the
-    /// run. Tracked in `RunState::tile_polisher_bonus`.
+    /// run. Accumulated in `relic_counters[TilePolisher]`.
     TilePolisher,
     /// +6 mult, but 1-in-5 chance to be destroyed at end of each round.
     /// When destroyed, replaced by Iron Lantern.
@@ -319,7 +326,8 @@ impl RelicId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Rarity {
     Common,
     Uncommon,
@@ -341,6 +349,14 @@ pub struct RelicDef {
     pub name: &'static str,
     pub description: &'static str,
     pub rarity: Rarity,
+}
+
+#[derive(Deserialize)]
+struct RelicDefRaw {
+    id: RelicId,
+    name: String,
+    description: String,
+    rarity: Rarity,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -556,568 +572,24 @@ pub fn relic_description_live(
 }
 
 pub fn all_relic_defs() -> &'static [RelicDef] {
-    &[
-        // ── Retuned keepers ─────────────────────────────────────────────
-        RelicDef {
-            id: RelicId::TripletBoost,
-            name: "Triplet Boost",
-            description: "Triplets/Kongs: +40 chips and +0.2 mult",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::SequenceSurge,
-            name: "Sequence Surge",
-            description: "Sequences +25 chips and +0.5 mult",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::PairPower,
-            name: "Pair Power",
-            description: "Pairs +30 chips and +1 mult",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::HonorFury,
-            name: "Honor Fury",
-            description: "+28 chips per honor tile in sets",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::RedDragonRage,
-            name: "Red Dragon Rage",
-            description: "Any dragon triplet/kong: +5 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::GreenLuck,
-            name: "Green Luck",
-            description: "+4 gold at round end if no honors scored",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::WhiteSilence,
-            name: "White Silence",
-            description: "White dragon pair: +4 mult, draws a Zodiac",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::JokerTile,
-            name: "Joker Tile",
-            description: "Once per round: one tile acts as wild",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::Overflow,
-            name: "Overflow",
-            description: "Wall contains 6 copies per tile instead of 4",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::QuickDraw,
-            name: "Quick Draw",
-            description: "Draw +1 tile after your first play each round",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::ChainReaction,
-            name: "Chain Reaction",
-            description: "+4 mult if you scored a yaku last turn",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::MultiplierMaster,
-            name: "Multiplier Master",
-            description: "+0.5 mult per relic owned",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::SetMagnet,
-            name: "Set Magnet",
-            description: "Drawing a 3rd copy of a tile pulls the 4th from the wall",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::WildWinds,
-            name: "Wild Winds",
-            description: "Wind tiles can substitute in sequences",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::DragonEcho,
-            name: "Dragon Echo",
-            description: "Dragon triplets/kongs copy every other set's base chips",
-            rarity: Rarity::Legendary,
-        },
-        // ── New Patch C relics ──────────────────────────────────────────
-        RelicDef {
-            id: RelicId::ShantenShove,
-            name: "Shanten Shove",
-            description: "After refill, if a pair/triplet/sequence partial is in hand, draw 1 extra tile",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::KanDrum,
-            name: "Kan Drum",
-            description: "Kongs grant +1 play this round and +4 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::DoraCrown,
-            name: "Dora Crown",
-            description: "+1 dora indicator; dora chips become +35",
-            rarity: Rarity::Rare,
-        },
-        // RiichiStick — disabled until Patch E (riichi declaration system).
-        // See PATCH_E_RIICHI.md. Re-enable by uncommenting once `RunState`
-        // gains `riichi_declared`, the failure-floor branch lands, and the
-        // gameplay scene grows a declaration button.
-        // RelicDef {
-        //     id: RelicId::RiichiStick,
-        //     name: "Riichi Stick",
-        //     description: "First riichi each round is free; failed riichi floors at 80%",
-        //     rarity: Rarity::Rare,
-        // },
-        RelicDef {
-            id: RelicId::TenpaiTalisman,
-            name: "Tenpai Talisman",
-            description: "Tenpai Bonus is doubled",
-            rarity: Rarity::Rare,
-        },
-        // RiverEraser & FuritenWard — disabled until Patch D (river system).
-        // See PATCH_D_RIVER.md. Re-enable by uncommenting once `RunState`
-        // gains a `river: Vec<Tile>`, the discard hook populates it, and the
-        // furiten taint rule lands in `score_sets`.
-        // RelicDef {
-        //     id: RelicId::RiverEraser,
-        //     name: "River Eraser",
-        //     description: "Once per round: clear 3 tiles from your river",
-        //     rarity: Rarity::Uncommon,
-        // },
-        // RelicDef {
-        //     id: RelicId::FuritenWard,
-        //     name: "Furiten Ward",
-        //     description: "Your river only retains the last 6 tiles",
-        //     rarity: Rarity::Uncommon,
-        // },
-        RelicDef {
-            id: RelicId::RoundCompass,
-            name: "Round Compass",
-            description: "Round Wind triplets/kongs: +6 mult",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::EightTreasures,
-            name: "Eight Treasures",
-            description: "Scoring a Full Hand grants a random Zodiac",
-            rarity: Rarity::Legendary,
-        },
-        RelicDef {
-            id: RelicId::KongsBlessing,
-            name: "Kong's Blessing",
-            description: "Kongs: +120 chips and +2 mult",
-            rarity: Rarity::Legendary,
-        },
-        // ── Flower-synergy relics ──────────────────────────────────────
-        RelicDef {
-            id: RelicId::GardenKeeper,
-            name: "Garden Keeper",
-            description: "Flower effects fire twice",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Ikebana,
-            name: "Ikebana",
-            description: "Scoring 2+ flowers in one hand: +6 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::Hanami,
-            name: "Hanami",
-            description: "+$3 gold each time a flower is scored",
-            rarity: Rarity::Common,
-        },
-        // ── 15 new relics ──────────────────────────────────────────────
-        RelicDef {
-            id: RelicId::JadeSerpent,
-            name: "Jade Serpent",
-            description: "Bamboo tiles in scored sets: +8 chips each",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::RedSerpent,
-            name: "Red Serpent",
-            description: "Characters tiles in scored sets: +8 chips each",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::BlueSerpent,
-            name: "Blue Serpent",
-            description: "Dots tiles in scored sets: +8 chips each",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::LowTide,
-            name: "Low Tide",
-            description: "Tiles ranked 1-3 in scored sets: +6 chips each",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::MerchantsEye,
-            name: "Merchant's Eye",
-            description: "Relics cost 25% less in the shop",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::EdgeRunner,
-            name: "Edge Runner",
-            description: "Terminal tiles (1s and 9s) in scored sets: +12 chips each",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::LuckySeven,
-            name: "Lucky Seven",
-            description: "Rank-7 tiles in scored sets: +1.5 mult each",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Momentum,
-            name: "Momentum",
-            description: "+0.5 mult per play already used this round",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Minimalist,
-            name: "Minimalist",
-            description: "Playing a single pair: +4 mult",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::TurtleShell,
-            name: "Turtle Shell",
-            description: "+50 chips if your mult is below 3",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::ClosedGate,
-            name: "Closed Gate",
-            description: "All scored tiles are terminals or honors: +4 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::GoldFurnace,
-            name: "Gold Furnace",
-            description: "+1 mult per 5 gold held",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::Snowball,
-            name: "Snowball",
-            description: "+0.1 mult per 100 total score this run",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::SecondWind,
-            name: "Second Wind",
-            description: "+1 play per round",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::GlassCannon,
-            name: "Glass Cannon",
-            description: "×2 final mult, but 1 fewer play per round",
-            rarity: Rarity::Legendary,
-        },
-        // CodexCompass stays disabled because its old loadout-swap mechanic
-        // no longer exists and it has no replacement scoring effect yet.
-        // RelicDef {
-        //     id: RelicId::CodexCompass,
-        //     name: "Codex Compass",
-        //     description: "Reserved relic slot",
-        //     rarity: Rarity::Uncommon,
-        // },
-        // ── Balatro-inspired relics (Patch F) ──────────────────────────
-        RelicDef {
-            id: RelicId::LastBreath,
-            name: "Last Breath",
-            description: "On your final play, retrigger all scored tiles",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::TilePolisher,
-            name: "Tile Polisher",
-            description: "Every scored tile permanently gains +3 chips this run",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::PaperLantern,
-            name: "Paper Lantern",
-            description: "+4 mult; 1-in-5 chance to burn at round end (extinct run-wide)",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::IronLantern,
-            name: "Iron Lantern",
-            description: "×2 mult; 1-in-1000 chance to break at round end",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::MirrorTile,
-            name: "Mirror Tile",
-            description: "Copies the effect of the next relic in your inventory",
-            rarity: Rarity::Legendary,
-        },
-        RelicDef {
-            id: RelicId::WayOfPurity,
-            name: "Way of Purity",
-            description: "All scored tiles are one suit: ×2.5 mult",
-            rarity: Rarity::Rare,
-        },
-        // ── Patch G: 25 Balatro-inspired relics ────────────────────────
-        // Retrigger
-        RelicDef {
-            id: RelicId::LeadingTile,
-            name: "Leading Tile",
-            description: "Retrigger the first tile in each scored set",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::LowEcho,
-            name: "Low Echo",
-            description: "Retrigger tiles ranked 1-4 in scored sets",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::TeaCeremony,
-            name: "Tea Ceremony",
-            description: "Retrigger all tiles for 3 plays, then destroyed",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::GhostHand,
-            name: "Ghost Hand",
-            description: "Unscored hand tiles each grant +2 chips",
-            rarity: Rarity::Uncommon,
-        },
-        // Scaling
-        RelicDef {
-            id: RelicId::CleanStreak,
-            name: "Clean Streak",
-            description: "+0.5 mult per consecutive play without honors",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Obsession,
-            name: "Obsession",
-            description: "+0.3 mult per round without your top yaku",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::Bonfire,
-            name: "Bonfire",
-            description: "+0.4 mult per relic sold this run",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::RiverRunner,
-            name: "River Runner",
-            description: "+20 chips permanently each time you score a sequence",
-            rarity: Rarity::Rare,
-        },
-        // Fragile
-        RelicDef {
-            id: RelicId::MeltingIce,
-            name: "Melting Ice",
-            description: "+80 chips, loses 8 per play (destroyed at 0)",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::SilkThread,
-            name: "Silk Thread",
-            description: "+4 mult, loses 0.3 per discard (destroyed at 0)",
-            rarity: Rarity::Uncommon,
-        },
-        // Copy / Meta
-        RelicDef {
-            id: RelicId::ShadowHand,
-            name: "Shadow Hand",
-            description: "Copies the effect of your first relic",
-            rarity: Rarity::Legendary,
-        },
-        RelicDef {
-            id: RelicId::EmptyFrame,
-            name: "Empty Frame",
-            description: "+1.5 mult per empty relic slot",
-            rarity: Rarity::Uncommon,
-        },
-        // Economy
-        RelicDef {
-            id: RelicId::GoldIdol,
-            name: "Gold Idol",
-            description: "+3 gold at round end",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::JadeAbacus,
-            name: "Jade Abacus",
-            description: "+1 interest per 4 gold held (max +4)",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::NestEgg,
-            name: "Nest Egg",
-            description: "Gains +2 sell value each round; sell when ripe",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::Patience,
-            name: "Patience",
-            description: "+2 gold per unused discard at round end",
-            rarity: Rarity::Common,
-        },
-        // Conditional ×mult
-        RelicDef {
-            id: RelicId::WayOfPairs,
-            name: "Way of Pairs",
-            description: "All pairs scored: ×2 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::WayOfTriplets,
-            name: "Way of Triplets",
-            description: "All triplets/kongs scored: ×2.5 mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::WayOfSequences,
-            name: "Way of Sequences",
-            description: "All sequences scored: ×2 mult",
-            rarity: Rarity::Rare,
-        },
-        // Probability / Chaos
-        RelicDef {
-            id: RelicId::FortunesFavor,
-            name: "Fortune's Favor",
-            description: "Doubles all relic trigger probabilities",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::CrackedTile,
-            name: "Cracked Tile",
-            description: "+0 to +8 mult (random per play)",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::StarTile,
-            name: "Star Tile",
-            description: "1-in-4 chance to level up a scored yaku",
-            rarity: Rarity::Uncommon,
-        },
-        // Sell-to-activate
-        RelicDef {
-            id: RelicId::SmokeBomb,
-            name: "Smoke Bomb",
-            description: "Sell to skip the current boss blind",
-            rarity: Rarity::Rare,
-        },
-        // PhantomRelic not in shop — appears via special means only.
-        RelicDef {
-            id: RelicId::PhantomRelic,
-            name: "Phantom Relic",
-            description: "After 3 rounds, sell to duplicate a random relic",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::RitualBlade,
-            name: "Ritual Blade",
-            description: "Destroy the next relic for permanent mult",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::Disgust,
-            name: "Disgust",
-            description: "East + 1/2/3 West tiles count as pair/triplet/kong",
-            rarity: Rarity::Rare,
-        },
-        // ── Patch H: economy & scaling relics ──────────────────────────
-        RelicDef {
-            id: RelicId::CurioCabinet,
-            name: "Curio Cabinet",
-            description: "+mult equal to the summed sell value of your other relics",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::LotusBloom,
-            name: "Lotus Bloom",
-            description: "+0.5 mult permanently per flower drawn or scored",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::WallWeaver,
-            name: "Wall Weaver",
-            description: "+0.2 mult per tile in the wall beyond 140",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::KongCollector,
-            name: "Kong Collector",
-            description: "+$5 per kong scored this round, paid at round end",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::NoHonorButWealth,
-            name: "No Honor But Wealth",
-            description: "+$1 each time an honor tile is discarded",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::Sweepstakes,
-            name: "Sweepstakes",
-            description: "Round start: 25% +$2, 25% +$4, 50% nothing",
-            rarity: Rarity::Common,
-        },
-        RelicDef {
-            id: RelicId::BeggarsCup,
-            name: "Beggar's Cup",
-            description: "+$1 at round end, +$1 more per boss defeated",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Cosmopolitan,
-            name: "Cosmopolitan",
-            description: "+$1 at round end per unique yaku scored this round",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Heirloom,
-            name: "Heirloom",
-            description: "+1 mult per blind played (skips don't count)",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Tourist,
-            name: "Tourist",
-            description: "+3 mult per distinct suit among scored tiles",
-            rarity: Rarity::Uncommon,
-        },
-        RelicDef {
-            id: RelicId::Kintsugi,
-            name: "Kintsugi",
-            description: "+1 mult permanently each time another relic is destroyed",
-            rarity: Rarity::Legendary,
-        },
-        RelicDef {
-            id: RelicId::AntTrail,
-            name: "Ant Trail",
-            description: "Sequences may wrap 9-1-2",
-            rarity: Rarity::Rare,
-        },
-        RelicDef {
-            id: RelicId::BrocadePouch,
-            name: "Brocade Pouch",
-            description: "Buff talismans mark every drawn tile for the rest of the run. +1 consumable slot",
-            rarity: Rarity::Uncommon,
-        },
-    ]
+    static DEFS: OnceLock<Vec<RelicDef>> = OnceLock::new();
+    DEFS.get_or_init(load_relic_defs).as_slice()
+}
+
+fn load_relic_defs() -> Vec<RelicDef> {
+    const PATH: &str = "data/relics.json";
+    let bytes = crate::asset_path::get(PATH)
+        .unwrap_or_else(|| panic!("relic data file missing: assets/{PATH}"));
+    let raw: Vec<RelicDefRaw> = serde_json::from_slice(&bytes.data)
+        .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+    raw.into_iter()
+        .map(|r| RelicDef {
+            id: r.id,
+            name: Box::leak(r.name.into_boxed_str()),
+            description: Box::leak(r.description.into_boxed_str()),
+            rarity: r.rarity,
+        })
+        .collect()
 }
 
 /// Active relics during a run (by id).
@@ -1239,16 +711,12 @@ pub struct ScoreContext<'a> {
     /// True when this is the player's last remaining play this round
     /// (plays_remaining == 1 at scoring time). Powers Last Breath.
     pub is_final_play: bool,
-    /// Permanent per-tile chip bonus accumulated by the Tile Polisher
-    /// relic over the course of the run.
-    pub tile_polisher_bonus: i32,
-    /// Per-relic mutable counters (clean_streak, melting_ice chips, etc.).
+    /// Per-relic mutable counters (clean_streak, melting_ice chips,
+    /// tile_polisher accumulated bonus, river_runner accumulated bonus, etc.).
     /// Keyed by RelicId, value meaning varies by relic.
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     /// Number of hand tiles NOT in the scored sets (for Ghost Hand).
     pub unscored_hand_tiles: usize,
-    /// River Runner accumulated permanent chip bonus.
-    pub river_runner_bonus: i32,
     /// When set, this score is from **structure trigger** (not a direct hand play).
     ///
     /// **Structure migration:** relics that used to fire on every "scoring play" may need a
@@ -1289,5 +757,248 @@ mod tests {
             relic_shop_price(RelicId::TripletBoost, &relics),
             (base * 3 / 4).max(1)
         );
+    }
+
+    /// `assets/data/relics.json` must have exactly one entry per active
+    /// `RelicId` variant. The match below uses an exhaustive pattern so the
+    /// compiler forces a decision when a new variant is added: include it
+    /// in `EXPECTED_PRESENT` (most relics) or `EXPECTED_ABSENT` (the four
+    /// disabled-pending-future-patch ids). Drift between the enum and the
+    /// data file will then either fail to compile or fail this test.
+    #[test]
+    fn every_relic_variant_has_one_data_entry_or_is_explicitly_disabled() {
+        use super::all_relic_defs;
+        use std::collections::BTreeSet;
+
+        // Sample one of every variant so the exhaustiveness check below
+        // covers the whole enum. New variants must be classified here.
+        fn classify(id: RelicId) -> Classification {
+            use Classification::*;
+            match id {
+                RelicId::RiichiStick
+                | RelicId::RiverEraser
+                | RelicId::FuritenWard
+                | RelicId::CodexCompass => Absent,
+
+                RelicId::TripletBoost
+                | RelicId::SequenceSurge
+                | RelicId::PairPower
+                | RelicId::HonorFury
+                | RelicId::RedDragonRage
+                | RelicId::GreenLuck
+                | RelicId::WhiteSilence
+                | RelicId::JokerTile
+                | RelicId::Overflow
+                | RelicId::QuickDraw
+                | RelicId::ChainReaction
+                | RelicId::MultiplierMaster
+                | RelicId::SetMagnet
+                | RelicId::WildWinds
+                | RelicId::DragonEcho
+                | RelicId::ShantenShove
+                | RelicId::KanDrum
+                | RelicId::DoraCrown
+                | RelicId::TenpaiTalisman
+                | RelicId::RoundCompass
+                | RelicId::EightTreasures
+                | RelicId::KongsBlessing
+                | RelicId::GardenKeeper
+                | RelicId::Ikebana
+                | RelicId::Hanami
+                | RelicId::JadeSerpent
+                | RelicId::RedSerpent
+                | RelicId::BlueSerpent
+                | RelicId::LowTide
+                | RelicId::MerchantsEye
+                | RelicId::EdgeRunner
+                | RelicId::LuckySeven
+                | RelicId::Momentum
+                | RelicId::Minimalist
+                | RelicId::TurtleShell
+                | RelicId::ClosedGate
+                | RelicId::GoldFurnace
+                | RelicId::Snowball
+                | RelicId::SecondWind
+                | RelicId::GlassCannon
+                | RelicId::LastBreath
+                | RelicId::TilePolisher
+                | RelicId::PaperLantern
+                | RelicId::IronLantern
+                | RelicId::MirrorTile
+                | RelicId::WayOfPurity
+                | RelicId::LeadingTile
+                | RelicId::LowEcho
+                | RelicId::TeaCeremony
+                | RelicId::GhostHand
+                | RelicId::CleanStreak
+                | RelicId::Obsession
+                | RelicId::Bonfire
+                | RelicId::RiverRunner
+                | RelicId::MeltingIce
+                | RelicId::SilkThread
+                | RelicId::ShadowHand
+                | RelicId::EmptyFrame
+                | RelicId::GoldIdol
+                | RelicId::JadeAbacus
+                | RelicId::NestEgg
+                | RelicId::Patience
+                | RelicId::WayOfPairs
+                | RelicId::WayOfTriplets
+                | RelicId::WayOfSequences
+                | RelicId::FortunesFavor
+                | RelicId::CrackedTile
+                | RelicId::StarTile
+                | RelicId::SmokeBomb
+                | RelicId::PhantomRelic
+                | RelicId::RitualBlade
+                | RelicId::Disgust
+                | RelicId::CurioCabinet
+                | RelicId::LotusBloom
+                | RelicId::WallWeaver
+                | RelicId::KongCollector
+                | RelicId::NoHonorButWealth
+                | RelicId::Sweepstakes
+                | RelicId::BeggarsCup
+                | RelicId::Cosmopolitan
+                | RelicId::Heirloom
+                | RelicId::Tourist
+                | RelicId::Kintsugi
+                | RelicId::AntTrail
+                | RelicId::BrocadePouch => Present,
+            }
+        }
+
+        enum Classification {
+            Present,
+            Absent,
+        }
+
+        // Enumeration of every variant. Adding a new variant without
+        // updating this list keeps `classify` failing to compile (any
+        // missing arm is a compile error), so the safety chain is:
+        // enum -> classify exhaustive match -> ALL list -> data file.
+        // If you add a new RelicId, append it here AND give it a
+        // classify arm; one of the two will yell at you if you don't.
+        const ALL: &[RelicId] = &[
+            RelicId::TripletBoost,
+            RelicId::SequenceSurge,
+            RelicId::PairPower,
+            RelicId::HonorFury,
+            RelicId::RedDragonRage,
+            RelicId::GreenLuck,
+            RelicId::WhiteSilence,
+            RelicId::JokerTile,
+            RelicId::Overflow,
+            RelicId::QuickDraw,
+            RelicId::ChainReaction,
+            RelicId::MultiplierMaster,
+            RelicId::SetMagnet,
+            RelicId::WildWinds,
+            RelicId::DragonEcho,
+            RelicId::ShantenShove,
+            RelicId::KanDrum,
+            RelicId::DoraCrown,
+            RelicId::RiichiStick,
+            RelicId::TenpaiTalisman,
+            RelicId::RiverEraser,
+            RelicId::FuritenWard,
+            RelicId::RoundCompass,
+            RelicId::EightTreasures,
+            RelicId::KongsBlessing,
+            RelicId::CodexCompass,
+            RelicId::GardenKeeper,
+            RelicId::Ikebana,
+            RelicId::Hanami,
+            RelicId::JadeSerpent,
+            RelicId::RedSerpent,
+            RelicId::BlueSerpent,
+            RelicId::LowTide,
+            RelicId::MerchantsEye,
+            RelicId::EdgeRunner,
+            RelicId::LuckySeven,
+            RelicId::Momentum,
+            RelicId::Minimalist,
+            RelicId::TurtleShell,
+            RelicId::ClosedGate,
+            RelicId::GoldFurnace,
+            RelicId::Snowball,
+            RelicId::SecondWind,
+            RelicId::GlassCannon,
+            RelicId::LastBreath,
+            RelicId::TilePolisher,
+            RelicId::PaperLantern,
+            RelicId::IronLantern,
+            RelicId::MirrorTile,
+            RelicId::WayOfPurity,
+            RelicId::LeadingTile,
+            RelicId::LowEcho,
+            RelicId::TeaCeremony,
+            RelicId::GhostHand,
+            RelicId::CleanStreak,
+            RelicId::Obsession,
+            RelicId::Bonfire,
+            RelicId::RiverRunner,
+            RelicId::MeltingIce,
+            RelicId::SilkThread,
+            RelicId::ShadowHand,
+            RelicId::EmptyFrame,
+            RelicId::GoldIdol,
+            RelicId::JadeAbacus,
+            RelicId::NestEgg,
+            RelicId::Patience,
+            RelicId::WayOfPairs,
+            RelicId::WayOfTriplets,
+            RelicId::WayOfSequences,
+            RelicId::FortunesFavor,
+            RelicId::CrackedTile,
+            RelicId::StarTile,
+            RelicId::SmokeBomb,
+            RelicId::PhantomRelic,
+            RelicId::RitualBlade,
+            RelicId::Disgust,
+            RelicId::CurioCabinet,
+            RelicId::LotusBloom,
+            RelicId::WallWeaver,
+            RelicId::KongCollector,
+            RelicId::NoHonorButWealth,
+            RelicId::Sweepstakes,
+            RelicId::BeggarsCup,
+            RelicId::Cosmopolitan,
+            RelicId::Heirloom,
+            RelicId::Tourist,
+            RelicId::Kintsugi,
+            RelicId::AntTrail,
+            RelicId::BrocadePouch,
+        ];
+
+        let in_data: BTreeSet<RelicId> = all_relic_defs().iter().map(|d| d.id).collect();
+        assert_eq!(
+            in_data.len(),
+            all_relic_defs().len(),
+            "duplicate ids in assets/data/relics.json"
+        );
+
+        for &id in ALL {
+            match classify(id) {
+                Classification::Present => assert!(
+                    in_data.contains(&id),
+                    "{id:?} is classified Present but missing from assets/data/relics.json"
+                ),
+                Classification::Absent => assert!(
+                    !in_data.contains(&id),
+                    "{id:?} is classified Absent but appears in assets/data/relics.json"
+                ),
+            }
+        }
+
+        // Catch entries in the data file that aren't in ALL (e.g. typo'd
+        // ids that snuck past serde because they happen to deserialize).
+        let all_set: BTreeSet<RelicId> = ALL.iter().copied().collect();
+        for id in &in_data {
+            assert!(
+                all_set.contains(id),
+                "{id:?} is in relics.json but missing from the test's ALL list"
+            );
+        }
     }
 }

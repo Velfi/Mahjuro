@@ -668,11 +668,6 @@ pub struct RunState {
     /// underlying scene (shop) to spawn a score popup + particle burst.
     #[serde(skip)]
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
-    /// Permanent per-tile chip bonus accumulated by the Tile Polisher
-    /// relic. Each scored tile adds +3 to this counter for the rest of
-    /// the run. Applied in Phase 2 of scoring.
-    #[serde(default)]
-    pub tile_polisher_bonus: i32,
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   CleanStreak  → consecutive plays without honor tiles
@@ -684,12 +679,10 @@ pub struct RunState {
     ///   TeaCeremony  → plays remaining before destruction
     ///   PhantomRelic → rounds held
     ///   RitualBlade  → permanent mult bonus ×10
+    ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
+    ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
     #[serde(default)]
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
-    /// Permanent chip bonus from River Runner relic. Each scored sequence
-    /// adds +20 chips permanently.
-    #[serde(default)]
-    pub river_runner_bonus: i32,
     /// Tutorial state. `None` for normal (non-tutorial) runs. Present
     /// during the player's very first run to gate mechanics by lesson.
     #[serde(default)]
@@ -856,9 +849,7 @@ impl RunState {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
-            tile_polisher_bonus: 0,
             relic_counters: std::collections::BTreeMap::new(),
-            river_runner_bonus: 0,
             tutorial: None,
             onboarding: None,
             relic_activations: Vec::new(),
@@ -964,7 +955,6 @@ impl RunState {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -1054,9 +1044,7 @@ mod tests {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
-            tile_polisher_bonus: 0,
             relic_counters: BTreeMap::new(),
-            river_runner_bonus: 0,
             tutorial: None,
             onboarding: None,
             relic_activations: Vec::new(),
@@ -1478,10 +1466,8 @@ mod tests {
             gold: run.gold,
             total_score: run.total_score_earned,
             is_final_play: run.plays_remaining == 0,
-            tile_polisher_bonus: run.tile_polisher_bonus,
             relic_counters: run.relic_counters.clone(),
             unscored_hand_tiles: run.hand.len(),
-            river_runner_bonus: run.river_runner_bonus,
             structure: None,
         };
 

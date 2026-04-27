@@ -96,7 +96,7 @@ impl TalismanKind {
             TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
             TalismanKind::Pearl => "Every tile in hand: +25 flat chips when scored.",
             TalismanKind::Gilded => "Every tile in hand: +$1 when scored in a meld.",
-            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.15 mult.",
+            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
             TalismanKind::Kiln => "Select tiles, then use to destroy them permanently.",
             TalismanKind::Bamboo => {
                 "Select tiles, then use: numbered tiles become bamboo; honors unchanged."
@@ -169,7 +169,7 @@ impl TalismanKind {
             TalismanKind::Jade => 10,
             TalismanKind::Pearl => 12,
             TalismanKind::Gilded => 14,
-            TalismanKind::Polychrome => 16,
+            TalismanKind::Polychrome => 12,
         }
     }
 }

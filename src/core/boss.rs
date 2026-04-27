@@ -1,10 +1,12 @@
 //! Boss blinds — Balatro-style themed encounters with distinct effects.
 //!
-//! Each boss is a `BossKind` variant with a static `BossDef` containing its
-//! name, description, `min_ante` (the earliest ante on which it may appear),
-//! and a `BossEffect` describing how to apply it. Final-tier bosses are kept
-//! in a separate pool — they only appear on `FINAL_ANTE` and are never drawn
-//! by the regular roller.
+//! Each boss is a `BossKind` variant with a `BossDef` describing how to
+//! apply it. Presentation (name, description, tier, min_ante) lives in
+//! `assets/data/bosses.json` and is loaded once at startup; behaviour
+//! (rule_pushes, debuffs, on_apply / on_play / on_reveal hooks) stays in
+//! Rust where it can use function pointers freely. Final-tier bosses are
+//! kept in a separate pool — they only appear on `FINAL_ANTE` and are
+//! never drawn by the regular roller.
 //!
 //! Effects dispatch through three hooks:
 //! * `rule_pushes` — `RuleModifier`s injected into `round_rules`, picked up by
@@ -15,9 +17,11 @@
 //! * `on_play` — called from `score_selected_tiles` after a successful play,
 //!   for per-play taxers (gold cost, wall burn).
 //!
-//! Adding a new boss is purely a matter of appending to `ALL_BOSSES` (or
-//! `FINAL_BOSSES`) and supplying the right hook closures — no other file
-//! needs to know the boss exists.
+//! Adding a new boss is purely a matter of appending to `bosses.json`
+//! (presentation), adding a `BossKind` variant, and supplying the right
+//! hook in `boss_behavior` — no other file needs to know the boss exists.
+
+use std::sync::OnceLock;
 
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -28,6 +32,7 @@ use crate::core::rules::RuleModifier;
 use crate::game::run::RunState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BossKind {
     // ── Soft / early bosses ──────────────────────────────────────────────
     Drought,
@@ -62,7 +67,8 @@ pub enum BossKind {
     Dragon,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BossTier {
     Soft,
     Medium,
@@ -146,9 +152,9 @@ impl ResolvedBossEffect {
 
 impl BossKind {
     pub fn def(self) -> &'static BossDef {
-        ALL_BOSSES
+        all_bosses()
             .iter()
-            .chain(FINAL_BOSSES.iter())
+            .chain(final_bosses().iter())
             .find(|d| d.kind == self)
             .expect("every BossKind must have a definition")
     }
@@ -502,367 +508,134 @@ pub fn effective_hand_size(run: &RunState) -> usize {
     adjusted.max(8) as usize
 }
 
-// ── Static catalog ───────────────────────────────────────────────────────
+// ── Boss catalog ─────────────────────────────────────────────────────────
+//
+// Presentation (name, description, tier, min_ante) is loaded from
+// `assets/data/bosses.json`. Behaviour (rule_pushes, debuffs, hooks)
+// stays here and is keyed off `BossKind` in `boss_behavior`. The two
+// halves are zipped together at first access in `all_bosses` /
+// `final_bosses`.
 
-pub static ALL_BOSSES: &[BossDef] = &[
-    BossDef {
-        kind: BossKind::Drought,
-        name: "The Drought",
-        description: "Start with half discards",
-        tier: BossTier::Soft,
-        min_ante: 1,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: Some(drought_apply),
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Whisper,
-        name: "The Whisper",
-        description: "Hand size −1",
-        tier: BossTier::Soft,
-        min_ante: 1,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: Some(whisper_apply),
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Tribute,
-        name: "The Tribute",
-        description: "Pay 1 gold each play",
-        tier: BossTier::Soft,
-        min_ante: 1,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: Some(tribute_apply),
-            on_play: Some(tribute_play),
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Gate,
-        name: "The Ink Gate",
-        description: "Characters are debuffed",
-        tier: BossTier::Soft,
-        min_ante: 2,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Characters)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Grove,
-        name: "The Jade Grove",
-        description: "Bamboos are debuffed",
-        tier: BossTier::Soft,
-        min_ante: 2,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Bamboos)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Coin,
-        name: "The Copper Wheel",
-        description: "Circles are debuffed",
-        tier: BossTier::Soft,
-        min_ante: 2,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Circles)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Bloom,
-        name: "The Bloom Rot",
-        description: "Flowers are debuffed",
-        tier: BossTier::Soft,
-        min_ante: 2,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Suit(crate::core::tile::Suit::Flower)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Hermit,
-        name: "The Hermit",
-        description: "Pairs score 0",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[RuleModifier::PairsScoreZero],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Forest,
-        name: "The Forest",
-        description: "Sequences score half base chips",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[RuleModifier::SequencesHalved],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Bureaucrat,
-        name: "The Bureaucrat",
-        description: "Must play exactly 5 tiles",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[RuleModifier::MustPlayFive],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Drunkard,
-        name: "The Drunkard",
-        description: "Rank-5 tiles are debuffed",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::MiddleTiles)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Ash,
-        name: "The Ash",
-        description: "Simple tiles are debuffed",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Simples)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Furnace,
-        name: "The Furnace",
-        description: "Terminals are debuffed",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Terminals)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Relic,
-        name: "The Iconoclast",
-        description: "Honor tiles are debuffed",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[TileDebuff::Class(TileDebuffClass::Honors)],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Blight,
-        name: "The Blight",
-        description: "Your most common opening-hand family is debuffed",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: Some(blight_reveal),
-    },
-    BossDef {
-        kind: BossKind::Hex,
-        name: "The Hex",
-        description: "Disables one owned relic for the round",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: Some(hex_reveal),
-    },
-    BossDef {
-        kind: BossKind::Famine,
-        name: "The Famine",
-        description: "Target doubled",
-        tier: BossTier::Hard,
-        min_ante: 4,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: Some(famine_apply),
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Tempest,
-        name: "The Tempest",
-        description: "Wall burns 1 tile after each play",
-        tier: BossTier::Hard,
-        min_ante: 4,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: Some(tempest_play),
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Censor,
-        name: "The Censor",
-        description: "Repeated yaku score at half",
-        tier: BossTier::Hard,
-        min_ante: 4,
-        effect: BossEffect {
-            rule_pushes: &[RuleModifier::CensorRepeats],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: None,
-    },
-    BossDef {
-        kind: BossKind::Mirror,
-        name: "The Mirror",
-        description: "Silences your strongest scoring axis",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        // The static effect is a no-op fallback. `on_reveal` always replaces
-        // it with a `ResolvedBossEffect` that pushes the chosen RuleModifier
-        // and sets a description telling the player exactly which axis was
-        // silenced — locked in at ante reveal so it can't move mid-fight.
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: Some(mirror_reveal),
-    },
-    BossDef {
-        kind: BossKind::Counterweight,
-        name: "The Counterweight",
-        description: "Debuffs the tile family your relics support most",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: Some(counterweight_reveal),
-    },
-    BossDef {
-        kind: BossKind::TaxCollector,
-        name: "The Tax Collector",
-        description: "Per-play gold cost scales to your hoard",
-        tier: BossTier::Medium,
-        min_ante: 3,
-        // Static fallback again — `on_reveal` computes the actual per-play
-        // cost from `run.gold` at reveal time and stashes it on
-        // `RunState::tax_collector_cost` for `tax_collector_apply` to read.
-        effect: BossEffect {
-            rule_pushes: &[],
-            tile_debuffs: &[],
-            relic_debuffs: &[],
-            on_apply: None,
-            on_play: None,
-        },
-        on_reveal: Some(tax_collector_reveal),
-    },
-];
+#[derive(Deserialize)]
+struct BossPresentationRaw {
+    id: BossKind,
+    name: String,
+    description: String,
+    tier: BossTier,
+    min_ante: u32,
+}
 
-pub static FINAL_BOSSES: &[BossDef] = &[BossDef {
-    kind: BossKind::Dragon,
-    name: "The Dragon",
-    description: "Structures without an honor score zero",
-    tier: BossTier::Final,
-    min_ante: 7,
-    effect: BossEffect {
-        rule_pushes: &[],
-        tile_debuffs: &[],
-        relic_debuffs: &[],
+struct BossBehavior {
+    rule_pushes: &'static [RuleModifier],
+    tile_debuffs: &'static [TileDebuff],
+    relic_debuffs: &'static [RelicId],
+    on_apply: Option<fn(&mut RunState)>,
+    on_play: Option<fn(&mut RunState)>,
+    on_reveal: Option<fn(&mut RunState) -> ResolvedBossEffect>,
+}
+
+const NO_RULES: &[RuleModifier] = &[];
+const NO_TILE_DEBUFFS: &[TileDebuff] = &[];
+const NO_RELIC_DEBUFFS: &[RelicId] = &[];
+
+fn boss_behavior(kind: BossKind) -> BossBehavior {
+    use crate::core::tile::Suit;
+    use BossKind as B;
+    let mut b = BossBehavior {
+        rule_pushes: NO_RULES,
+        tile_debuffs: NO_TILE_DEBUFFS,
+        relic_debuffs: NO_RELIC_DEBUFFS,
         on_apply: None,
         on_play: None,
-    },
-    on_reveal: None,
-}];
+        on_reveal: None,
+    };
+    match kind {
+        B::Drought => b.on_apply = Some(drought_apply),
+        B::Whisper => b.on_apply = Some(whisper_apply),
+        B::Tribute => {
+            b.on_apply = Some(tribute_apply);
+            b.on_play = Some(tribute_play);
+        }
+        B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Characters)],
+        B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Bamboos)],
+        B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Circles)],
+        B::Bloom => b.tile_debuffs = &[TileDebuff::Suit(Suit::Flower)],
+        B::Hermit => b.rule_pushes = &[RuleModifier::PairsScoreZero],
+        B::Forest => b.rule_pushes = &[RuleModifier::SequencesHalved],
+        B::Bureaucrat => b.rule_pushes = &[RuleModifier::MustPlayFive],
+        B::Drunkard => b.tile_debuffs = &[TileDebuff::Class(TileDebuffClass::MiddleTiles)],
+        B::Ash => b.tile_debuffs = &[TileDebuff::Class(TileDebuffClass::Simples)],
+        B::Furnace => b.tile_debuffs = &[TileDebuff::Class(TileDebuffClass::Terminals)],
+        B::Relic => b.tile_debuffs = &[TileDebuff::Class(TileDebuffClass::Honors)],
+        B::Blight => b.on_reveal = Some(blight_reveal),
+        B::Hex => b.on_reveal = Some(hex_reveal),
+        B::Famine => b.on_apply = Some(famine_apply),
+        B::Tempest => b.on_play = Some(tempest_play),
+        B::Censor => b.rule_pushes = &[RuleModifier::CensorRepeats],
+        B::Mirror => b.on_reveal = Some(mirror_reveal),
+        B::Counterweight => b.on_reveal = Some(counterweight_reveal),
+        B::TaxCollector => b.on_reveal = Some(tax_collector_reveal),
+        B::Dragon => {} // pure presentation; no scoring effect yet
+    }
+    b
+}
+
+fn load_boss_defs() -> Vec<BossDef> {
+    const PATH: &str = "data/bosses.json";
+    let bytes = crate::asset_path::get(PATH)
+        .unwrap_or_else(|| panic!("boss data file missing: assets/{PATH}"));
+    let raw: Vec<BossPresentationRaw> = serde_json::from_slice(&bytes.data)
+        .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+    raw.into_iter()
+        .map(|r| {
+            let beh = boss_behavior(r.id);
+            BossDef {
+                kind: r.id,
+                name: Box::leak(r.name.into_boxed_str()),
+                description: Box::leak(r.description.into_boxed_str()),
+                tier: r.tier,
+                min_ante: r.min_ante,
+                effect: BossEffect {
+                    rule_pushes: beh.rule_pushes,
+                    tile_debuffs: beh.tile_debuffs,
+                    relic_debuffs: beh.relic_debuffs,
+                    on_apply: beh.on_apply,
+                    on_play: beh.on_play,
+                },
+                on_reveal: beh.on_reveal,
+            }
+        })
+        .collect()
+}
+
+/// Non-final bosses (everything in the regular ante pool).
+pub fn all_bosses() -> &'static [BossDef] {
+    static DEFS: OnceLock<Vec<BossDef>> = OnceLock::new();
+    DEFS.get_or_init(|| {
+        load_boss_defs()
+            .into_iter()
+            .filter(|d| d.tier != BossTier::Final)
+            .collect()
+    })
+    .as_slice()
+}
+
+/// Final-tier bosses. Reserved for `FINAL_ANTE` and never drawn into the
+/// regular pool.
+pub fn final_bosses() -> &'static [BossDef] {
+    static DEFS: OnceLock<Vec<BossDef>> = OnceLock::new();
+    DEFS.get_or_init(|| {
+        load_boss_defs()
+            .into_iter()
+            .filter(|d| d.tier == BossTier::Final)
+            .collect()
+    })
+    .as_slice()
+}
 
 /// All non-final bosses, used to seed the per-run pool.
 pub fn regular_pool() -> Vec<BossKind> {
-    ALL_BOSSES.iter().map(|d| d.kind).collect()
+    all_bosses().iter().map(|d| d.kind).collect()
 }
 
 /// Pick a random boss for `ante` from `pool`, removing it. Returns the
@@ -907,11 +680,12 @@ pub fn pick_for_ante_with_floor(
 }
 
 /// Pick a final boss for the final ante. Currently unconditional uniform
-/// pick from `FINAL_BOSSES` — separated from the main pool so soft bosses
-/// can never appear on the climactic fight.
+/// pick from `final_bosses()` — separated from the main pool so soft
+/// bosses can never appear on the climactic fight.
 pub fn pick_final(rng: &mut impl rand::Rng) -> BossKind {
-    let idx = rng.random_range(0..FINAL_BOSSES.len());
-    FINAL_BOSSES[idx].kind
+    let pool = final_bosses();
+    let idx = rng.random_range(0..pool.len());
+    pool[idx].kind
 }
 
 #[cfg(test)]
@@ -977,6 +751,78 @@ mod tests {
         assert_eq!(
             effect.description_override.as_deref(),
             Some("Countered your relic loadout: Bamboos tiles are debuffed")
+        );
+    }
+
+    /// Every BossKind variant must appear in `assets/data/bosses.json` and
+    /// have a `boss_behavior` arm. The classify match below is exhaustive,
+    /// so a new variant won't compile until it's listed here; a missing
+    /// JSON entry trips `def()`.
+    #[test]
+    fn every_boss_variant_has_one_data_entry() {
+        const ALL: &[BossKind] = &[
+            BossKind::Drought,
+            BossKind::Whisper,
+            BossKind::Tribute,
+            BossKind::Gate,
+            BossKind::Grove,
+            BossKind::Coin,
+            BossKind::Bloom,
+            BossKind::Hermit,
+            BossKind::Forest,
+            BossKind::Bureaucrat,
+            BossKind::Drunkard,
+            BossKind::Ash,
+            BossKind::Furnace,
+            BossKind::Relic,
+            BossKind::Blight,
+            BossKind::Hex,
+            BossKind::Famine,
+            BossKind::Tempest,
+            BossKind::Censor,
+            BossKind::Mirror,
+            BossKind::Counterweight,
+            BossKind::TaxCollector,
+            BossKind::Dragon,
+        ];
+        // Force-compile-error if a new variant is added without classifying it.
+        for &kind in ALL {
+            #[allow(unused)]
+            let _exhaust_check = match kind {
+                BossKind::Drought
+                | BossKind::Whisper
+                | BossKind::Tribute
+                | BossKind::Gate
+                | BossKind::Grove
+                | BossKind::Coin
+                | BossKind::Bloom
+                | BossKind::Hermit
+                | BossKind::Forest
+                | BossKind::Bureaucrat
+                | BossKind::Drunkard
+                | BossKind::Ash
+                | BossKind::Furnace
+                | BossKind::Relic
+                | BossKind::Blight
+                | BossKind::Hex
+                | BossKind::Famine
+                | BossKind::Tempest
+                | BossKind::Censor
+                | BossKind::Mirror
+                | BossKind::Counterweight
+                | BossKind::TaxCollector
+                | BossKind::Dragon => (),
+            };
+            // Both presentation lookup and behaviour lookup must succeed.
+            let _ = kind.def();
+            let _ = boss_behavior(kind);
+        }
+        let count = all_bosses().len() + final_bosses().len();
+        assert_eq!(
+            count,
+            ALL.len(),
+            "bosses.json count ({count}) does not match BossKind variant count ({})",
+            ALL.len()
         );
     }
 }

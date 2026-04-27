@@ -1,9 +1,9 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
-#[path = "wgpu_renderer/resources.rs"]
-mod resources;
 #[path = "wgpu_renderer/init.rs"]
 mod init;
+#[path = "wgpu_renderer/resources.rs"]
+mod resources;
 #[path = "wgpu_renderer/runtime.rs"]
 mod runtime;
 #[path = "wgpu_renderer/showcase.rs"]
@@ -71,8 +71,7 @@ use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
     mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad, rot_rz_rx_deg,
-    rot_x_rad, rotation_around_point_x_rad, score_popup_glyph_rot_rad, table_mesh_lay_flat,
-    tile_mesh_local_to_world, translate_rot_scale,
+    score_popup_glyph_rot_rad, table_mesh_lay_flat, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
@@ -545,6 +544,7 @@ impl Default for TextLabel {
 /// Storing them per-tile means all 14 `write_buffer` calls target distinct
 /// GPU allocations, so every tile's matrix is visible when the command buffer
 /// executes — no dynamic-offset trickery required.
+#[allow(dead_code)]
 struct HandTileGpu {
     /// Written every frame with view_proj + model + base_color_factor.
     uniform_buffer: wgpu::Buffer,
@@ -559,9 +559,6 @@ struct HandTileGpu {
     shadow_uniform_buffer: wgpu::Buffer,
     shadow_bind_group: wgpu::BindGroup,
     /// Cached to skip re-rasterisation when the tile hasn't changed.
-    /// Includes the talisman enhancement so stamping a tile triggers a fresh
-    /// decal upload (the enhancement is baked into the texture as a coloured
-    /// border + corner gem in `rasterize_tile_face_decal`).
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
@@ -845,8 +842,6 @@ pub struct WgpuRenderer {
     tile_uids: Vec<u32>,
     /// Tiles currently animating away (discard/score). Each entry: (HandTileGpu data, slot rect, velocity, elapsed time).
     departing_tiles: Vec<DepartingTile>,
-    /// Hand slots from the previous frame, used for departure animation positioning.
-    prev_hand_slots: Vec<(f32, f32, f32, f32)>,
     /// All per-frame projected screen-space rects for 3D elements.
     pub proj: ProjectionCache,
     /// Per-hand-tile world-space model matrices captured at the end of the
@@ -1360,8 +1355,6 @@ pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 80;
 /// resources. Grouped so callers can pass one `&ShowcaseTileCtx` instead
 /// of threading 9 separate handles through the call site.
 impl WgpuRenderer {
-
-
     /// Queue a screenshot of the next presented frame. The renderer copies
     /// the surface texture into a staging buffer between `submit` and
     /// `present`, then maps + PNG-encodes it synchronously. Intended for
@@ -1376,7 +1369,6 @@ impl WgpuRenderer {
     /// keeps requesting redraws (instead of exiting early) when the
     /// swapchain returns Outdated/Lost on the warmup frames and the
     /// draw early-returns before the screenshot block.
-
 
     /// Begin a GPU pass timing capture for the next `frames` frames. The
     /// debug menu binds this to the "Profile GPU…" entry. Results are
@@ -1732,8 +1724,6 @@ impl WgpuRenderer {
             .map(|(_, m, _)| m.transform_point3(glam::Vec3::ZERO))
     }
 
-
-
     /// Clear the volumetric smoke field and reset per-tile velocity tracking
     /// so the next scene starts with a clean atmosphere.
     pub fn clear_smoke(&mut self) {
@@ -1750,7 +1740,6 @@ impl WgpuRenderer {
     /// `frame.cmds` is walked in order — earlier cmds render under later ones.
     /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
     /// draw, which is invisible to scenes and preserves ordering.
-
 
     /// Encode a copy of the swapchain texture into a freshly-allocated
     /// staging buffer using the active encoder. Returns the buffer + the

@@ -20,10 +20,8 @@ fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
         gold: 0,
         total_score: 0,
         is_final_play: false,
-        tile_polisher_bonus: 0,
         relic_counters: std::collections::BTreeMap::new(),
         unscored_hand_tiles: 0,
-        river_runner_bonus: 0,
         structure: None,
     }
 }
@@ -483,4 +481,133 @@ fn explosive_flush_full_hand_demonstration() {
     assert_eq!(breakdown.base_chips, 226);
     assert_eq!(breakdown.final_mult, 16.0);
     assert_eq!(breakdown.total, 6656);
+}
+
+fn dora_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
+    let mut total = 0;
+    let mut prev = breakdown.base_chips;
+    for s in &breakdown.steps {
+        let delta = s.running_chips - prev;
+        if s.source.starts_with("Dora") {
+            total += delta;
+        }
+        prev = s.running_chips;
+    }
+    total
+}
+
+#[test]
+fn dora_crown_alone_adds_ten_per_dora() {
+    let hand = vec![
+        Tile::new(Suit::Characters, 5, 0),
+        Tile::new(Suit::Characters, 5, 1),
+        Tile::new(Suit::Characters, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::DoraCrown]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.dora_faces = vec![(Suit::Characters, 5)];
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    // 3 dora * (25 base + 10 crown bonus) = 105
+    assert_eq!(dora_chips_delta(&breakdown), 105);
+}
+
+#[test]
+fn mirror_tile_doubles_dora_crown_bonus() {
+    let hand = vec![
+        Tile::new(Suit::Characters, 5, 0),
+        Tile::new(Suit::Characters, 5, 1),
+        Tile::new(Suit::Characters, 5, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::MirrorTile, RelicId::DoraCrown]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.dora_faces = vec![(Suit::Characters, 5)];
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    // 3 dora * 25 base + (3 dora * 10 crown bonus) * 2 (mirror) = 75 + 60 = 135
+    assert_eq!(dora_chips_delta(&breakdown), 135);
+}
+
+fn tenpai_bonus_delta(breakdown: &ScoreBreakdown) -> i32 {
+    let mut total = 0;
+    let mut prev = breakdown.base_chips;
+    for s in &breakdown.steps {
+        let delta = s.running_chips - prev;
+        if s.source.starts_with("Tenpai") {
+            total += delta;
+        }
+        prev = s.running_chips;
+    }
+    total
+}
+
+#[test]
+fn mirror_tile_doubles_tenpai_talisman_bonus() {
+    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::yaku::YakuKind;
+    // Build a 14-tile hand that scores FullHand so the Tenpai Bonus path fires.
+    let hand = vec![
+        Tile::new(Suit::Bamboos, 1, 0),
+        Tile::new(Suit::Bamboos, 2, 1),
+        Tile::new(Suit::Bamboos, 3, 2),
+        Tile::new(Suit::Bamboos, 4, 3),
+        Tile::new(Suit::Bamboos, 5, 4),
+        Tile::new(Suit::Bamboos, 6, 5),
+        Tile::new(Suit::Bamboos, 7, 6),
+        Tile::new(Suit::Bamboos, 8, 7),
+        Tile::new(Suit::Bamboos, 9, 8),
+        Tile::new(Suit::Bamboos, 5, 9),
+        Tile::new(Suit::Bamboos, 5, 10),
+        Tile::new(Suit::Bamboos, 5, 11),
+        Tile::new(Suit::Bamboos, 7, 12),
+        Tile::new(Suit::Bamboos, 7, 13),
+    ];
+    let sets = vec![
+        DetectedSet { kind: SetKind::Sequence, tile_ids: vec![0, 1, 2] },
+        DetectedSet { kind: SetKind::Sequence, tile_ids: vec![3, 4, 5] },
+        DetectedSet { kind: SetKind::Sequence, tile_ids: vec![6, 7, 8] },
+        DetectedSet { kind: SetKind::Triplet, tile_ids: vec![9, 10, 11] },
+        DetectedSet { kind: SetKind::Pair, tile_ids: vec![12, 13] },
+    ];
+    let r = relics(vec![RelicId::MirrorTile, RelicId::TenpaiTalisman]);
+    let mut ctx = ctx_with(&r, false);
+    ctx.first_full_hand_of_round = true;
+    ctx.plays_used = 0; // scale = max(4 - 0, 1) = 4, base = 50 * 4 = 200
+    ctx.available_yaku = vec![YakuKind::FullHand];
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    // base 200 + talisman 200 + mirrored talisman 200 = 600
+    assert_eq!(tenpai_bonus_delta(&breakdown), 600);
+}
+
+fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
+    let mut total = 0;
+    let mut prev = breakdown.base_chips;
+    for s in &breakdown.steps {
+        let delta = s.running_chips - prev;
+        if s.source.contains("Plum") || s.source.contains("Chrysanthemum") {
+            total += delta;
+        }
+        prev = s.running_chips;
+    }
+    total
+}
+
+#[test]
+fn mirror_tile_doubles_garden_keeper_extra_pass() {
+    use crate::core::hand::{DetectedSet, SetKind};
+    // One pair to satisfy minimum scoring + a flower tile.
+    let hand = vec![
+        Tile::new(Suit::Bamboos, 5, 0),
+        Tile::new(Suit::Bamboos, 5, 1),
+        Tile::new(Suit::Flower, 1, 2), // Plum Blossom: 40 chips
+    ];
+    let sets = vec![
+        DetectedSet { kind: SetKind::Pair, tile_ids: vec![0, 1] },
+        DetectedSet { kind: SetKind::Pair, tile_ids: vec![2] }, // single flower as pseudo-set
+    ];
+    // Base GardenKeeper: triggers = 2 -> 80 chips of plum.
+    // After refactor with Mirror: base pass 40 + GardenKeeper second pass 40 + Mirror duplicates GardenKeeper's second pass 40 = 120.
+    let r = relics(vec![RelicId::MirrorTile, RelicId::GardenKeeper]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(flower_chips_delta(&breakdown), 120);
 }

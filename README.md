@@ -138,7 +138,8 @@ assets/       Tile models, textures, fonts, audio, backgrounds
 
 | Document          | Description                             |
 | ----------------- | --------------------------------------- |
-| `GAME_DESIGN.md`  | Full feature spec and design philosophy |
-| `ARCHITECTURE.md` | System design and module structure      |
-| `PROGRESSION.md`  | Unlock trees and meta-progression       |
-| `BOT.md`          | Headless AI player guide and tuning     |
+| `GAME_DESIGN.md`        | Full feature spec and design philosophy |
+| `ARCHITECTURE.md`       | System design and module structure      |
+| `PROGRESSION.md`        | Unlock trees and meta-progression       |
+| `BOT.md`                | Headless AI player guide and tuning     |
+| `docs/steam-uploads.md` | Publishing builds to Steam              |

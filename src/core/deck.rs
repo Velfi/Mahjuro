@@ -169,7 +169,7 @@ impl Wall {
 
     /// Build a wall with tile-pack extras injected, then filter removed IDs.
     /// Pack tiles get pre-stamped enhancements from `enhancements` (e.g.
-    /// Polychrome pack tiles carry their ×1.15 mult enhancement).
+    /// Polychrome pack tiles carry their ×1.2 mult enhancement).
     /// When `overflow` is true, 2 extra copies per tile face are added with
     /// IDs starting at [`OVERFLOW_TILE_ID_BASE`] so they can be stripped
     /// mid-round if the relic is lost.

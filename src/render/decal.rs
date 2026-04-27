@@ -144,8 +144,7 @@ struct Atlas {
 }
 
 fn atlas_cache() -> &'static Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -223,7 +222,9 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
     }
     let result = decode_atlas(tile_set).map(std::sync::Arc::new);
     if result.is_none() {
-        log::warn!("tileset '{tile_set}' has no loadable atlas (expected sets/{tile_set}/atlas.toml + atlas.png)");
+        log::warn!(
+            "tileset '{tile_set}' has no loadable atlas (expected sets/{tile_set}/atlas.toml + atlas.png)"
+        );
     }
     cache.insert(tile_set.to_string(), result.clone());
     result
@@ -282,8 +283,7 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
     let _ = atlas.columns; // kept in the struct for debugging / future packing
 
     // Crop the tile from the atlas, then resize to the target decal dimensions.
-    let sub = image::imageops::crop_imm(&atlas.rgba, ox, oy, atlas.tile_w, atlas.tile_h)
-        .to_image();
+    let sub = image::imageops::crop_imm(&atlas.rgba, ox, oy, atlas.tile_w, atlas.tile_h).to_image();
     let sub = image::imageops::resize(&sub, dst_w, dst_h, image::imageops::FilterType::Lanczos3);
 
     for (i, src_px) in sub.pixels().enumerate() {

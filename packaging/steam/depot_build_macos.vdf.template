@@ -1,0 +1,11 @@
+"DepotBuild"
+{
+	"DepotID" "__DEPOT_MACOS__"
+
+	"FileMapping"
+	{
+		"LocalPath" "macos/*"
+		"DepotPath" "."
+		"Recursive" "1"
+	}
+}

@@ -59,9 +59,9 @@ pub fn tile_effective_value(
                     .push(("Gilded Talisman", "+$1 when scored in a meld".into()));
             }
             TileEnhancement::Polychrome => {
-                out.mult_bonus += 0.15;
+                out.mult_bonus += 0.2;
                 out.sources
-                    .push(("Polychrome Talisman", "+0.15 mult / meld".into()));
+                    .push(("Polychrome Talisman", "\u{00d7}1.2 mult / meld".into()));
             }
         }
     }

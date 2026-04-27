@@ -113,9 +113,9 @@ impl ShopScene {
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                    Scene::MeldGuide(MeldGuideScene::new(true)),
-                )));
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
+                    MeldGuideScene::new(true),
+                ))));
                 return None;
             }
             return t;
