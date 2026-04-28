@@ -119,6 +119,8 @@ impl ApplicationHandler for App {
                             // beat lands with weight.
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                             self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
+                            self.steam
+                                .unlock_achievement(crate::steam::Achievement::FirstHand);
                         }
                         GameEvent::GoldChanged { .. } => {
                             self.audio.play_sfx(audio::SfxId::CoinDrop);
@@ -237,11 +239,26 @@ impl ApplicationHandler for App {
                             self.audio.play_sfx(audio::SfxId::BossEncountered);
                             *self.progress.boss_times_encountered.entry(bk).or_insert(0) += 1;
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
+                            // "All bosses seen" — the regular (non-final)
+                            // pool is the breadth-of-content signal we want.
+                            // Beating Dragon is implied by `FirstRunCompleted`,
+                            // so we don't gate this on it.
+                            let pool = crate::core::boss::regular_pool();
+                            if pool
+                                .iter()
+                                .all(|kind| self.progress.boss_times_encountered.contains_key(kind))
+                            {
+                                self.steam.unlock_achievement(
+                                    crate::steam::Achievement::AllBossesSeen,
+                                );
+                            }
                         }
                         GameEvent::BossDefeated(bk) => {
                             self.audio.play_sfx(audio::SfxId::BossDefeated);
                             *self.progress.boss_times_defeated.entry(bk).or_insert(0) += 1;
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
+                            self.steam
+                                .unlock_achievement(crate::steam::Achievement::FirstBossDefeated);
                         }
                         GameEvent::TalismanPurchased(tk) => {
                             self.audio.play_sfx(audio::SfxId::TalismanPurchased);
@@ -271,8 +288,20 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // 1a. Poll background update pipeline.
-                if let Some(result) = self.update_checker.poll() {
+                // 1a. Poll background update pipeline. Skipped on macOS when
+                // Sparkle is driving updates — Sparkle owns the entire UX
+                // (appcast polling, prompts, download, atomic bundle swap)
+                // because Gatekeeper blocks any in-process self-replace inside
+                // `/Applications/Mahjuro.app`. On dev `cargo run` builds the
+                // framework isn't embedded, `self.sparkle` is `None`, and the
+                // legacy in-game path takes over.
+                #[cfg(target_os = "macos")]
+                let skip_legacy_update_poll = self.sparkle.is_some();
+                #[cfg(not(target_os = "macos"))]
+                let skip_legacy_update_poll = false;
+                if !skip_legacy_update_poll
+                    && let Some(result) = self.update_checker.poll()
+                {
                     let modal = match result {
                         update_check::UpdateResult::UpdateAvailable { new_version } => {
                             let current = env!("CARGO_PKG_VERSION");
@@ -1658,6 +1687,11 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Drain Steam callbacks once per loop iteration so achievement
+        // toasts, overlay activation, and any future async results land
+        // promptly. No-op when Steam is disabled.
+        self.steam.run_callbacks();
+
         if self.quit_requested {
             let _ = persistence::save_profile(self.active_profile, &self.progress);
             let _ = persistence::save_settings(&persistence::load_settings());

@@ -28,9 +28,12 @@ mod main_event_loop;
 mod main_headless;
 #[path = "main/render_settings.rs"]
 mod main_render_settings;
+#[cfg(target_os = "macos")]
+mod macos_updater;
 mod persistence;
 mod render;
 mod scenes;
+mod steam;
 mod ui;
 mod update_check;
 
@@ -153,6 +156,12 @@ struct App {
     /// screen. Confirming the modal triggers the install; cancelling
     /// clears this.
     pending_update_prompt: Option<String>,
+    /// macOS-only: Sparkle's updater controller. Holds the framework alive
+    /// for the lifetime of the app and keeps Sparkle's background scheduler
+    /// running. `None` on dev builds where `Sparkle.framework` isn't
+    /// embedded yet — the legacy `update_checker` then takes over.
+    #[cfg(target_os = "macos")]
+    sparkle: Option<macos_updater::SparkleUpdater>,
     modifiers: ModifiersState,
     /// Shop drag-to-sell: the 3D hit that started a mouse-drag over an owned
     /// shop item, plus the cursor position at drag start.  Set on mouse-down;
@@ -163,6 +172,12 @@ struct App {
     /// window, jump to the requested scene, render `warmup_frames`, write a
     /// PNG, exit. Set by the `screenshot` CLI subcommand.
     headless_screenshot: Option<HeadlessScreenshot>,
+    /// Steamworks integration. Either `Connected` (initialized successfully
+    /// and the user is signed into Steam) or `Disabled` (init failed,
+    /// Steam isn't running, or `--no-steam` was passed). Every method on
+    /// `SteamClient` is safe to call in either state — `Disabled` is a
+    /// logged no-op — so no `Option` wrapping is needed at call sites.
+    steam: steam::SteamClient,
 }
 
 /// Configuration for one-shot screenshot capture (see `Command::Screenshot`).
@@ -253,7 +268,7 @@ impl App {
             })
     }
 
-    fn new() -> Self {
+    fn new(steam: steam::SteamClient) -> Self {
         let t0 = Instant::now();
         let settings = persistence::load_settings();
         let active_profile = settings.active_profile;
@@ -336,9 +351,12 @@ impl App {
             ),
             update_checker: update_check::UpdateChecker::spawn(),
             pending_update_prompt: None,
+            #[cfg(target_os = "macos")]
+            sparkle: macos_updater::SparkleUpdater::start(),
             modifiers: ModifiersState::default(),
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
             headless_screenshot: None,
+            steam,
         }
     }
 
@@ -444,12 +462,27 @@ fn main() -> anyhow::Result<()> {
 
     asset_path::log_all_assets();
 
+    let no_steam = cli.no_steam;
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<()> {
+            // Steam init runs before the window so the SDK can hook the
+            // rendering surface as it's created. `--no-steam` short-circuits
+            // this for dev runs where you don't want the overlay attaching
+            // or Steam claiming the foreground process slot. Init failures
+            // (Steam not running, no license, etc.) are logged and we fall
+            // back to `Disabled` — the game then runs normally without
+            // achievements/overlay.
+            let steam = if no_steam {
+                log::info!("--no-steam: skipping Steamworks init");
+                steam::SteamClient::disabled()
+            } else {
+                steam::SteamClient::init()
+            };
+
             let event_loop = EventLoop::new()?;
             event_loop.set_control_flow(ControlFlow::Poll);
 
-            let mut app = App::new();
+            let mut app = App::new(steam);
             event_loop.run_app(&mut app)?;
             Ok(())
         }));

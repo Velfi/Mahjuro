@@ -19,11 +19,18 @@ impl App {
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
+                    self.steam
+                        .unlock_achievement(crate::steam::Achievement::TutorialComplete);
                     self.pending_scene =
                         Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
                     self.transition_alpha = 1.0;
                     return;
                 }
+                // First non-tutorial round cleared. Fires every round, but
+                // Steam's set-achievement is idempotent so the toast only
+                // shows the first time.
+                self.steam
+                    .unlock_achievement(crate::steam::Achievement::FirstBlindCleared);
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run.gold = self.run.gold.saturating_add(payout.total as i32);
@@ -112,12 +119,23 @@ impl App {
                     self.progress.runs_completed += 1;
                     self.progress.record_score(self.run.round_score);
                     let _ = self.progress.check_level_up();
+                    self.steam
+                        .unlock_achievement(crate::steam::Achievement::FirstRunCompleted);
+                    if self.progress.runs_completed >= 10 {
+                        self.steam
+                            .unlock_achievement(crate::steam::Achievement::TenRunsPlayed);
+                    }
                     // Stake ladder: crediting a full victory on this
                     // (material, stake) pair unlocks the next tier for that
-                    // material. Idempotent — repeat wins are no-ops.
-                    let _ = self
+                    // material. Idempotent — repeat wins are no-ops. Returns
+                    // `Some(stake)` exactly when a new tier unlocked.
+                    let newly_unlocked_stake = self
                         .progress
                         .record_stake_victory(self.run.mode.tile_material, self.run.mode.stake);
+                    if let Some(crate::core::stake::Stake::Summer) = newly_unlocked_stake {
+                        self.steam
+                            .unlock_achievement(crate::steam::Achievement::Stake2Unlocked);
+                    }
                     self.progress
                         .run_history
                         .push(crate::core::progression::RunRecord::from_run(

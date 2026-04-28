@@ -74,6 +74,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/mahjuro"
 chmod +x "$APP/Contents/MacOS/mahjuro"
 
+# Steamworks redistributable. The dylib's install_name is
+# `@loader_path/libsteam_api.dylib`, so it must live next to the binary
+# inside Contents/MacOS/. The redistributable already ships as a fat
+# arm64+x86_64 dylib, so one copy works for both archs and the universal
+# build. STEAM_SDK_LOCATION must be set in the build environment.
+: "${STEAM_SDK_LOCATION:?STEAM_SDK_LOCATION not set; cannot bundle Steamworks dylib}"
+cp "${STEAM_SDK_LOCATION}/redistributable_bin/osx/libsteam_api.dylib" \
+    "$APP/Contents/MacOS/libsteam_api.dylib"
+
 sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
 ICONSET="AppIcon.iconset"
