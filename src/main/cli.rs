@@ -3,6 +3,13 @@ use super::*;
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Cli {
+    /// Skip Steamworks SDK initialization. Use for local dev runs when
+    /// you don't want the overlay attaching or Steam taking over the
+    /// foreground app role. Headless subcommands (bot, screenshot,
+    /// sweeps) always behave as if `--no-steam` were set regardless of
+    /// this flag.
+    #[arg(long, global = true, action = ArgAction::SetTrue)]
+    pub no_steam: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }

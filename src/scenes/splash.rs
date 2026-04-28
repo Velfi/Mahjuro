@@ -58,14 +58,16 @@ impl SceneBehavior for SplashScene {
             color: [0.0, 0.0, 0.0, 1.0],
         });
 
-        let label_h = (32.0 * scale).max(18.0);
-        let label_y = (h - label_h) * 0.5;
-        frame.text(TextLabel {
-            rect: [0.0, label_y, w, label_h],
-            text: "loading...".into(),
-            color: color::MIST,
-            ..Default::default()
-        });
+        if !ctx.modal_active {
+            let label_h = (32.0 * scale).max(18.0);
+            let label_y = (h - label_h) * 0.5;
+            frame.text(TextLabel {
+                rect: [0.0, label_y, w, label_h],
+                text: "loading...".into(),
+                color: color::MIST,
+                ..Default::default()
+            });
+        }
 
         frame.window_title = "Mahjuro".into();
         frame

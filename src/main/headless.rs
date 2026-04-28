@@ -27,6 +27,62 @@ fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
     anyhow::bail!("unknown --boss '{slug}'");
 }
 
+/// Replace `run`'s freshly-dealt hand with a curated 14-tile winning hand
+/// designed for a juicy Steam-store hero shot: Red Dragon triplet, White
+/// Dragon triplet, two number sequences, East Wind pair. Decomposes as
+/// 4 sets + pair (yakuman-adjacent: Big Two Dragons + Yakuhai), and
+/// pairs naturally with `RedDragonRage` / `WhiteSilence` relics.
+///
+/// Marks every tile as selected so the next `UiAction::ScoreHand` plays
+/// the full hand. Also stocks `relics.active` with four visually
+/// distinctive relics (dragon trio + GoldFurnace) so the relic strip
+/// reads at thumbnail size.
+fn setup_hero_state(run: &mut RunState) {
+    use crate::core::relic::RelicId;
+    use crate::core::tile::{Suit, Tile};
+    run.hand = vec![
+        Tile::new(Suit::Dragon, 1, 100), // Red Dragon
+        Tile::new(Suit::Dragon, 1, 101),
+        Tile::new(Suit::Dragon, 1, 102),
+        Tile::new(Suit::Dragon, 3, 103), // White Dragon
+        Tile::new(Suit::Dragon, 3, 104),
+        Tile::new(Suit::Dragon, 3, 105),
+        Tile::new(Suit::Bamboos, 5, 106),
+        Tile::new(Suit::Bamboos, 6, 107),
+        Tile::new(Suit::Bamboos, 7, 108),
+        Tile::new(Suit::Circles, 1, 109),
+        Tile::new(Suit::Circles, 2, 110),
+        Tile::new(Suit::Circles, 3, 111),
+        Tile::new(Suit::Wind, 1, 112), // East
+        Tile::new(Suit::Wind, 1, 113),
+    ];
+    run.hand.sort();
+    run.selected = vec![true; run.hand.len()];
+
+    run.relics.active.clear();
+    for r in [
+        RelicId::RedDragonRage,
+        RelicId::WhiteSilence,
+        RelicId::GreenLuck,
+        RelicId::GoldFurnace,
+    ] {
+        if !run.relics.is_full() {
+            run.relics.active.push(r);
+        }
+    }
+}
+
+/// Populate a richer `run` state for the shop screenshot: bump gold,
+/// pretend ante 3 (so the round-3 stock variety kicks in), and set the
+/// `rich_stock` tag to add extra relic offerings. The tag is consumed
+/// inside `ShopScene::new`, leaving the run otherwise untouched.
+fn setup_shop_state(run: &mut RunState) {
+    run.gold = 42;
+    run.run_number = 3;
+    run.ante = 3;
+    run.tag_rich_stock = true;
+}
+
 /// Force the given run into the Boss blind with `kind` as the upcoming
 /// boss, and resolve the boss effect so gameplay-side rendering picks up
 /// the rule override. Used by the `screenshot` CLI to preview boss cards
@@ -47,12 +103,25 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     if let Some(kind) = boss_override {
         force_boss_blind(&mut run, kind);
     }
+    let mut hero_play = false;
+    let mut unlock_yaku = false;
     let (scene, game_in_progress) = match s.scene.as_str() {
         "collection" => (Scene::Collection(scenes::CollectionScene::new()), false),
-        "yaku_journal" => (Scene::YakuJournal(scenes::YakuJournalScene::new()), false),
+        "yaku_journal" => {
+            unlock_yaku = true;
+            (Scene::YakuJournal(scenes::YakuJournalScene::new()), false)
+        }
         "gameplay" => (Scene::Gameplay(GameplayScene::new()), true),
+        "gameplay_hero" => {
+            setup_hero_state(&mut run);
+            hero_play = true;
+            (Scene::Gameplay(GameplayScene::new()), true)
+        }
         "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
-        "shop" => (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true),
+        "shop" => {
+            setup_shop_state(&mut run);
+            (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true)
+        }
         "start_screen" => (Scene::StartScreen(scenes::StartScreenScene::new()), false),
         "tile_select" => (Scene::TileSelect(scenes::TileSelectScene::new()), false),
         "transition_playground" => (
@@ -62,12 +131,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: collection, \
-                yaku_journal, gameplay, pick_blind, shop, start_screen, \
-                tile_select, transition_playground)"
+                yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
+                start_screen, tile_select, transition_playground)"
             )
         }
     };
-    let app = HeadlessApp::with_run(
+    let mut app = HeadlessApp::with_run(
         scene,
         run,
         s.width.max(1),
@@ -75,6 +144,15 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         game_in_progress,
         s.fresh_progress,
     )?;
+    if hero_play {
+        // Fire ScoreHand on tick 2 (after one warmup tick lets layouts/loads
+        // settle), then warmup_frames ride out the cascade so the captured
+        // frame lands mid-animation.
+        app.queue_action_on_tick(2, UiAction::ScoreHand);
+    }
+    if unlock_yaku {
+        app.unlock_all_yaku_for_screenshot();
+    }
     app.run_screenshot(s.output.clone(), s.warmup_frames)
 }
 
@@ -103,6 +181,12 @@ struct HeadlessApp {
     width: u32,
     height: u32,
     game_in_progress: bool,
+    /// Tick counter used by `queued_actions` to fire scripted UiActions on
+    /// specific ticks (e.g. ScoreHand on tick 2 for the gameplay_hero shot).
+    tick_count: u32,
+    /// (tick_index, action) pairs to inject into `UpdateCtx::actions` on the
+    /// matching tick. Pre-populated by the dispatcher; consumed in `tick()`.
+    queued_actions: Vec<(u32, UiAction)>,
 }
 
 impl HeadlessApp {
@@ -156,7 +240,32 @@ impl HeadlessApp {
             width,
             height,
             game_in_progress,
+            tick_count: 0,
+            queued_actions: Vec::new(),
         })
+    }
+
+    fn queue_action_on_tick(&mut self, tick: u32, action: UiAction) {
+        self.queued_actions.push((tick, action));
+    }
+
+    /// Mark every yaku as scored at least once and level a few up to 2,
+    /// so the journal scene renders revealed tile patterns + gold glows
+    /// instead of sealed "?" placeholders. Used only by the screenshot
+    /// path; never persisted to disk.
+    fn unlock_all_yaku_for_screenshot(&mut self) {
+        use crate::core::yaku::YakuKind;
+        for yk in YakuKind::all() {
+            *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 1;
+        }
+        for yk in [
+            YakuKind::Yakuhai,
+            YakuKind::Toitoi,
+            YakuKind::Honitsu,
+            YakuKind::FullHand,
+        ] {
+            self.run.yaku_levels.levels.insert(yk, 3);
+        }
     }
 
     fn tick(&mut self) {
@@ -171,8 +280,15 @@ impl HeadlessApp {
         let mut delete_profile: Option<usize> = None;
         let mut complete_onboarding = false;
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
+        let actions_this_tick: Vec<UiAction> = self
+            .queued_actions
+            .iter()
+            .filter(|(t, _)| *t == self.tick_count)
+            .map(|(_, a)| *a)
+            .collect();
+        self.tick_count += 1;
         let update_ctx = UpdateCtx {
-            actions: &[],
+            actions: &actions_this_tick,
             button_clicks: &[],
             progress: &self.progress,
             run: &mut self.run,

@@ -232,6 +232,22 @@ jobs:
           iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
           rm -rf "$ICONSET"
 
+      - name: Embed Sparkle.framework (macOS)
+        if: matrix.name == 'macOS'
+        env:
+          SPARKLE_VERSION: "2.9.1"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "Sparkle-${SPARKLE_VERSION}.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir sparkle-dist
+          tar -xf "Sparkle-${SPARKLE_VERSION}.tar.xz" -C sparkle-dist
+          mkdir -p Mahjuro.app/Contents/Frameworks
+          cp -R sparkle-dist/Sparkle.framework Mahjuro.app/Contents/Frameworks/
+          # Stash the CLI tools where the appcast step below expects them.
+          mkdir -p sparkle-bin
+          cp sparkle-dist/bin/sign_update sparkle-bin/
+
       - name: Sign .app bundle (macOS)
         if: matrix.name == 'macOS'
         run: |
@@ -290,6 +306,52 @@ jobs:
             --issuer "$APPLE_API_ISSUER" \
             --wait
           xcrun stapler staple "$DMG"
+
+      - name: Generate Sparkle appcast (macOS)
+        if: matrix.name == 'macOS'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="${{ steps.artifact.outputs.filename }}"
+          # `sign_update` consumes the EdDSA private key on stdin (`--ed-key-file -`)
+          # and prints `sparkle:edSignature="..." length="..."` to stdout.
+          SIG_LINE=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            ./sparkle-bin/sign_update --ed-key-file - "$DMG")
+          DMG_SIZE=$(stat -f%z "$DMG")
+          PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+          DMG_URL="https://github.com/Velfi/Mahjuro/releases/download/${RELEASE_TAG}/${DMG}"
+          # Minimum macOS 10.13 mirrors LSMinimumSystemVersion in Info.plist.
+          cat > appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Mahjuro</title>
+              <link>${DMG_URL}</link>
+              <description>Mahjuro updates feed.</description>
+              <language>en</language>
+              <item>
+                <title>Version ${VERSION}</title>
+                <pubDate>${PUB_DATE}</pubDate>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+                <enclosure url="${DMG_URL}" type="application/octet-stream" length="${DMG_SIZE}" ${SIG_LINE} />
+              </item>
+            </channel>
+          </rss>
+          EOF
+          # Strip the 10-space indent applied by the YAML run block.
+          sed -i '' 's/^          //' appcast.xml
+          echo "appcast.xml written:"
+          cat appcast.xml
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.name == 'macOS'
+        with:
+          name: appcast.xml
+          path: appcast.xml
 
       # ──────────────────────────── Windows: NSIS .exe ────────────────────────────
       - name: Sign binary (Windows)
