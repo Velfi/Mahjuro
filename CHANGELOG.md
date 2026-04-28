@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.4.4 — 2026-04-27
+
+### Changed
+- macOS auto-update now uses Sparkle, the standard macOS update framework. Previously, updates failed on macOS because Gatekeeper blocks any app from rewriting its own bundle in `/Applications`. Sparkle handles the download and bundle swap externally, so updates install cleanly without manual drag-replace. Linux and Windows continue to use the in-game updater.
+
 ## 0.4.3 — 2026-04-27
 
 ### Changed
