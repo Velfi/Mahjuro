@@ -11,15 +11,16 @@
 //! synchronous and frame-accurate at the cost of throughput — fine for a
 //! one-shot debug capture.
 //!
-//! Pass slots:
-//!   0/1  shadow pre-pass
-//!   2/3  main pass (Pass A)
-//!   4/5  post-smoke pass (Pass B, optional)
+//! Pass slots (each pair = begin/end timestamps):
+//!   shadow, main (single Pass A),
+//!   smoke-offscreen, post-smoke, smoke-only,
+//!   main-table, main-scene — last two are used only when Pass A is split
+//!   during a GPU profile session (table timed separately from the rest).
 
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
-const NUM_PASSES: usize = 5;
+const NUM_PASSES: usize = 7;
 const NUM_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
 const TIMESTAMP_BYTES: u64 = 8;
 const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
@@ -30,6 +31,8 @@ const PASS_LABELS: [&str; NUM_PASSES] = [
     "smoke-offscreen",
     "post-smoke",
     "smoke-only",
+    "main-table",
+    "main-scene",
 ];
 
 /// Per-pass timestamp slot indices into the shared query set.
@@ -42,6 +45,11 @@ pub enum PassSlot {
     PostSmoke = 3,
     /// Smoke-only (no flames) timing pass, used to derive flame cost.
     SmokeOnly = 4,
+    /// Pass A — table mesh (+ felt shells). Mutually exclusive timestamp with
+    /// [`PassSlot::Main`] when the renderer splits Pass A for GPU profiling.
+    MainTable = 5,
+    /// Pass A — everything in Pass A except the table draw.
+    MainScene = 6,
 }
 
 pub struct GpuProfiler {

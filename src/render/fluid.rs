@@ -1558,7 +1558,7 @@ impl FluidSim {
             SmokeQuality::Off => (8.0, 0.0, 0.0),
             SmokeQuality::Low => (40.0, 1.20, 0.10),
             SmokeQuality::Medium => (56.0, 1.30, 0.11),
-            SmokeQuality::High => (80.0, 1.45, 0.12),
+            SmokeQuality::High => (64.0, 1.45, 0.12),
             SmokeQuality::Ultra => (112.0, 1.60, 0.14),
         };
         let max_alpha = if matches!(quality, SmokeQuality::Off) {

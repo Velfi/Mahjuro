@@ -6,14 +6,53 @@ pub(super) enum RenderFrame {
 }
 
 impl WgpuRenderer {
+    fn ensure_showcase_decal_atlas(&mut self, tileset_name: &str) {
+        if self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
+            && self.showcase_decal_atlas.is_some()
+        {
+            return;
+        }
+        let atlas = crate::render::showcase_decal_atlas::build_showcase_decal_atlas_texture(
+            &self.device,
+            &self.queue,
+            self.ui_font.as_ref(),
+            self.emoji_font.as_ref(),
+            Some(tileset_name),
+        );
+        self.showcase_decal_atlas = Some(atlas);
+        self.showcase_decal_atlas_tileset = Some(tileset_name.to_string());
+    }
+
     pub(super) fn apply_render_settings(
         &mut self,
         tile_material: crate::persistence::TileMaterial,
+        surface_kind: crate::persistence::SurfaceKind,
+        effects_quality: crate::persistence::EffectsQuality,
         tileset_name: &str,
     ) {
+        self.ensure_showcase_decal_atlas(tileset_name);
         // Encode the tile material choice into base_color_factor.w so the
         // tile_3d shader can branch on it (0 = bamboo, 1 = plastic, ...).
         self.tile_base_color_factor[3] = tile_material.shader_id();
+
+        // Pick which procedural surface the table mesh routes through. The
+        // shader branch is selected by `material_params.x` (the kind), so
+        // swapping the params is enough — no pipeline / mesh rebuild.
+        self.table_material = match surface_kind {
+            crate::persistence::SurfaceKind::Walnut => {
+                crate::render::lit_mesh::MaterialParams::lacquered_wood()
+            }
+            crate::persistence::SurfaceKind::GreenFelt => {
+                crate::render::lit_mesh::MaterialParams::felt_green()
+            }
+        };
+
+        // Cap shell-fluff draws by the effects-quality knob. Shells are
+        // the dominant felt-mode perf cost — each one is a full-screen-
+        // fragment-bound extra draw of the table mesh, so this is the
+        // single most important felt knob.
+        self.active_felt_shell_count = effects_quality.felt_shell_count().min(10);
+        self.felt_shader_lod = effects_quality.felt_shader_lod();
 
         // Swap tilesets: if the user picked a different set in Options, update
         // the active name and blow the per-tile decal caches so the next frame

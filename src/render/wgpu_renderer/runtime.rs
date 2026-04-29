@@ -23,10 +23,10 @@ mod object3d_ribbon;
 #[path = "runtime/passes/process_op.rs"]
 mod passes_process_op;
 use passes_process_op::ProcessOpCtx;
-#[path = "runtime/passes/shadow.rs"]
-mod passes_shadow;
 #[path = "runtime/op_list.rs"]
 mod op_list;
+#[path = "runtime/passes/shadow.rs"]
+mod passes_shadow;
 use op_list::{DrawKind, RenderOp, TextDraw};
 #[path = "runtime/frame.rs"]
 mod frame;

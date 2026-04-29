@@ -140,11 +140,11 @@ Per blind, in `play_run`:
 
 ## Limitations
 
-- **Wall-mutating relics are under-valued.** `Overflow`, `SetMagnet`, `QuickDraw`,
+- **Wall-mutating relics are under-valued.** `StrengthInNumbers`, `SetMagnet`, `QuickDraw`,
   `WildWinds`, `JokerTile` change the hand or wall in ways the marginal-value
   estimator can't see. Rarity tie-break partially compensates.
 - **No relic synergies.** The bot picks each relic in isolation; it doesn't
-  notice that `TripletBoost + PairPower + WhiteSilence` compound.
+  notice that `TripletBoost + PairPower + WhiteDragonsHush` compound.
 - **No pre-play sorting / hand restructuring.** Some game modes might allow
   the player to swap tiles or restructure — bot ignores this.
 - **Bot uses `GameMode::standard()` as a base.** Other game modes need

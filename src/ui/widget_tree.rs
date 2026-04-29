@@ -13,7 +13,8 @@
 //!
 //! `A` is a scene-defined `Copy` enum (e.g. `enum MainAction { Play, Quit, … }`).
 //! Each interactive item carries an `A` value the tree returns when the item
-//! activates. The scene's `update()` then matches on `Option<A>` exhaustively.
+//! activates (keyboard/gamepad confirm or mouse click). The scene's `update()`
+//! then matches on `Option<A>` exhaustively.
 //! No `u32` const indices, no shared `UiAction::Confirm` disambiguation by
 //! cursor position.
 //!
@@ -48,6 +49,7 @@ use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
 use crate::ui::widget;
+use std::borrow::Cow;
 
 // ─── Identifiers ────────────────────────────────────────────────────────────
 
@@ -130,6 +132,8 @@ pub struct Item<A: Copy> {
     pub id: FocusId,
     pub size: Size,
     pub enabled: bool,
+    /// Cursor-hover tooltip text; [`None`] means no tooltip for this focusable.
+    pub tooltip: Option<Cow<'static, str>>,
     pub kind: ItemKind<A>,
 }
 
@@ -224,6 +228,7 @@ pub fn button<A: Copy>(label: &str, action: A, variant: ButtonVariant) -> Node<A
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Button {
             label: label.into(),
             variant,
@@ -237,6 +242,50 @@ pub fn button_id<A: Copy>(id: FocusId, label: &str, action: A, variant: ButtonVa
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
+        kind: ItemKind::Button {
+            label: label.into(),
+            variant,
+            on_activate: action,
+        },
+    })
+}
+
+/// Like [`button_id`], but registers a cursor-hover tooltip (e.g. extra
+/// context when the visible label is short or iconic).
+pub fn button_id_tooltip<A: Copy>(
+    id: FocusId,
+    label: &str,
+    action: A,
+    variant: ButtonVariant,
+    tooltip: impl Into<Cow<'static, str>>,
+) -> Node<A> {
+    Node::Item(Item {
+        id,
+        size: Size::Auto,
+        enabled: true,
+        tooltip: Some(tooltip.into()),
+        kind: ItemKind::Button {
+            label: label.into(),
+            variant,
+            on_activate: action,
+        },
+    })
+}
+
+/// Like [`button`], but with a cursor-hover tooltip.
+pub fn button_tooltip<A: Copy>(
+    label: &str,
+    action: A,
+    variant: ButtonVariant,
+    tooltip: impl Into<Cow<'static, str>>,
+) -> Node<A> {
+    let id = FocusId(action_id(action));
+    Node::Item(Item {
+        id,
+        size: Size::Auto,
+        enabled: true,
+        tooltip: Some(tooltip.into()),
         kind: ItemKind::Button {
             label: label.into(),
             variant,
@@ -257,6 +306,7 @@ pub fn slider<A: Copy>(
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Slider {
             label: label.into(),
             value,
@@ -272,6 +322,7 @@ pub fn toggle<A: Copy>(id: FocusId, label: &str, value: bool, on_toggle: A) -> N
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Toggle {
             label: label.into(),
             value,
@@ -292,6 +343,7 @@ pub fn cycle<A: Copy>(
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Cycle {
             label: label.into(),
             options,
@@ -307,6 +359,7 @@ pub fn tab<A: Copy>(id: FocusId, label: &str, active: bool, on_select: A) -> Nod
         id,
         size: Size::Auto,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Tab {
             label: label.into(),
             active,
@@ -320,6 +373,7 @@ pub fn custom<A: Copy>(id: FocusId, size: Size, kind_tag: u32, on_activate: A) -
         id,
         size,
         enabled: true,
+        tooltip: None,
         kind: ItemKind::Custom {
             kind_tag,
             on_activate,
@@ -533,25 +587,41 @@ impl TreeState {
         buttons: &mut Vec<ButtonDef>,
     ) {
         for it in items {
-            buttons.push(ButtonDef::scene(
+            let mut def = ButtonDef::scene(
                 (it.rect[0], it.rect[1], it.rect[2], it.rect[3]),
                 it.id.0,
-            ));
+            );
+            if let Some(ref t) = it.tooltip {
+                def = def.with_hover_label(t.clone());
+            }
+            buttons.push(def);
         }
     }
 }
 
 /// One entry in a [`TreeState::update_flat`] call.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct FlatItem<A: Copy> {
     pub id: FocusId,
     pub rect: [f32; 4],
     pub action: A,
+    /// Cursor-hover tooltip; [`None`] = none.
+    pub tooltip: Option<Cow<'static, str>>,
 }
 
 impl<A: Copy> FlatItem<A> {
     pub fn new(id: FocusId, rect: [f32; 4], action: A) -> Self {
-        Self { id, rect, action }
+        Self {
+            id,
+            rect,
+            action,
+            tooltip: None,
+        }
+    }
+
+    pub fn with_tooltip(mut self, text: impl Into<Cow<'static, str>>) -> Self {
+        self.tooltip = Some(text.into());
+        self
     }
 }
 
@@ -1251,6 +1321,19 @@ fn draw_decoration_top(
     }
 }
 
+fn push_scene_button_for_item(
+    frame: &mut TreeFrame<'_>,
+    rect: [f32; 4],
+    item_id: FocusId,
+    tooltip: &Option<Cow<'static, str>>,
+) {
+    let mut def = ButtonDef::scene((rect[0], rect[1], rect[2], rect[3]), item_id.0);
+    if let Some(t) = tooltip.as_ref() {
+        def = def.with_hover_label(t.clone());
+    }
+    frame.buttons.push(def);
+}
+
 fn draw_item<A: Copy>(
     item: &Item<A>,
     rect: [f32; 4],
@@ -1299,10 +1382,7 @@ fn draw_item<A: Copy>(
             // replace with a ButtonDef::scene so the main loop routes the
             // click back as a button_clicks id.
             frame.buttons.pop();
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
         ItemKind::Toggle { label, value, .. } => {
             let display = if *value {
@@ -1328,10 +1408,7 @@ fn draw_item<A: Copy>(
                 },
             );
             frame.buttons.pop();
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
         ItemKind::Slider {
             label,
@@ -1340,10 +1417,7 @@ fn draw_item<A: Copy>(
             ..
         } => {
             draw_slider_row(frame, rect, label, *value, *range, state);
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
         ItemKind::Cycle {
             label,
@@ -1366,10 +1440,7 @@ fn draw_item<A: Copy>(
                 },
             );
             frame.buttons.pop();
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
         ItemKind::Tab { label, active, .. } => {
             let variant = if *active {
@@ -1390,17 +1461,11 @@ fn draw_item<A: Copy>(
                 },
             );
             frame.buttons.pop();
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
         ItemKind::Custom { kind_tag, .. } => {
             render_custom(frame, rect, *kind_tag, focus_state);
-            frame.buttons.push(ButtonDef::scene(
-                (rect[0], rect[1], rect[2], rect[3]),
-                item.id.0,
-            ));
+            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
         }
     }
     let _ = (metrics::BUTTON_GAP, color::PARCHMENT, theme::button_colors); // silence dead-import warnings if any
@@ -1453,4 +1518,107 @@ fn draw_slider_row(
         color: colors.text,
         ..Default::default()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::input::{InputMode, UiAction};
+
+    #[test]
+    fn pick_blind_focus_next_moves_focus() {
+        // Replicates pick_blind: two FlatItems (Play=id 1, Skip=id 2), focus
+        // initially on Play. Pressing FocusNext should move focus to Skip.
+        let mut tree = TreeState::new();
+        tree.set_focus(FocusId(1));
+
+        let items = vec![
+            FlatItem::new(FocusId(1), [100.0, 100.0, 200.0, 100.0], "play"),
+            FlatItem::new(FocusId(2), [400.0, 100.0, 200.0, 100.0], "skip"),
+        ];
+
+        let actions = [UiAction::FocusNext];
+        let action = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &actions,
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (1280.0, 720.0),
+                ui_scale: 1.0,
+                input_mode: InputMode::Controller,
+                scroll_lines: 0.0,
+            },
+        );
+        assert_eq!(action, None, "focus move alone shouldn't return action");
+        assert_eq!(
+            tree.focused(),
+            Some(FocusId(2)),
+            "focus should move to Skip"
+        );
+    }
+
+    #[test]
+    fn pick_blind_cursor_mode_does_not_clobber_focus_when_cursor_off_rects() {
+        // In cursor mode, hover-follow only fires when cursor is inside a rect.
+        // If cursor is at (0,0) and rects are far away, focus should not change.
+        let mut tree = TreeState::new();
+        tree.set_focus(FocusId(1));
+
+        let items = vec![
+            FlatItem::new(FocusId(1), [100.0, 100.0, 200.0, 100.0], "play"),
+            FlatItem::new(FocusId(2), [400.0, 100.0, 200.0, 100.0], "skip"),
+        ];
+
+        let actions = [UiAction::FocusNext];
+        let _ = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &actions,
+                button_clicks: &[],
+                cursor_pos: (0.0, 0.0),
+                window: (1280.0, 720.0),
+                ui_scale: 1.0,
+                input_mode: InputMode::Cursor,
+                scroll_lines: 0.0,
+            },
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(FocusId(2)),
+            "FocusNext should still move focus in cursor mode"
+        );
+    }
+
+    #[test]
+    fn pick_blind_cursor_over_rect_overrides_focus_move() {
+        // Under cursor mode, hover-follow runs BEFORE the action loop. If
+        // cursor is over Play and we also press FocusNext, what happens?
+        // Order: layout -> hover-follow (sets focus to Play) -> click route
+        // -> action loop (move_focus(1) → Skip). So action wins.
+        let mut tree = TreeState::new();
+        tree.set_focus(FocusId(2));
+
+        let items = vec![
+            FlatItem::new(FocusId(1), [100.0, 100.0, 200.0, 100.0], "play"),
+            FlatItem::new(FocusId(2), [400.0, 100.0, 200.0, 100.0], "skip"),
+        ];
+
+        let actions = [UiAction::FocusNext];
+        let _ = tree.update_flat(
+            &items,
+            TreeInput {
+                actions: &actions,
+                // Cursor inside Play rect.
+                cursor_pos: (150.0, 150.0),
+                button_clicks: &[],
+                window: (1280.0, 720.0),
+                ui_scale: 1.0,
+                input_mode: InputMode::Cursor,
+                scroll_lines: 0.0,
+            },
+        );
+        // Hover sets focus → Play; then FocusNext moves to Skip.
+        assert_eq!(tree.focused(), Some(FocusId(2)));
+    }
 }

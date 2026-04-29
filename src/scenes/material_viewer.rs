@@ -261,5 +261,16 @@ fn material_entries() -> Vec<MaterialEntry> {
             label: "Porcelain",
             material: mk(Porcelain, [0.95, 0.94, 0.92], 0.7, 128.0),
         },
+        // Crazing reads off `base_color.r` (1.0 → pristine, lower → more
+        // crackle + tea-stain). These three surface the spectrum so the
+        // tuning is visible while iterating on the porcelain branch.
+        MaterialEntry {
+            label: "Porcelain (Aged)",
+            material: mk(Porcelain, [0.85, 0.81, 0.74], 0.7, 128.0),
+        },
+        MaterialEntry {
+            label: "Porcelain (Antique)",
+            material: mk(Porcelain, [0.55, 0.52, 0.46], 0.7, 128.0),
+        },
     ]
 }

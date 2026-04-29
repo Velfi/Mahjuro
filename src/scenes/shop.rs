@@ -3,8 +3,8 @@
 //! Renders as a night **mountain path kiosk**: a wide counter with four
 //! back-row stalls (relics, tile pack, talismans, ribbons), owned inventory
 //! in three bottom trays, and top chrome (path sign, lamp, leave). Hovering
-//! an object turns on a point-light spotlight; tooltips and a central
-//! selected-item panel show name + Buy/Sell CTA.
+//! an object turns on a point-light spotlight; a 2D panel shows name,
+//! price, and description.
 
 mod actions;
 mod draw;
@@ -32,7 +32,6 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::{
     GameEngine, ShopCommand, ShopCommandData, ShopReadModel, consumable_sell_price_for_mode,
 };
-use crate::render::decal::{load_ui_font, measure_plaque_wrap};
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame, camera_facing_rotation,
 };
@@ -42,10 +41,13 @@ use crate::render::score_popups::ScorePopupSystem;
 use crate::render::table_transform::{rot_rx_rz_deg, rot_ry_rx_deg, rot_rz_ry_rx_deg, rot_z_rad};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
-use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor, push_focus_ring};
+use crate::ui::focus_nav::{
+    FocusDir, clamp_rect_to_viewport, focus_target_at_cursor, pick_neighbor, push_focus_ring,
+};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget::{self, TextStyle};
 
+use super::journal_transition::{JournalDirection, JournalTransition};
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
@@ -83,11 +85,46 @@ pub struct ShopScene {
     /// Monotonic accumulated time in seconds — drives idle coin/bar
     /// animation in `draw_frame` without calling `Instant::now()`.
     age_secs: f32,
+    /// Eased 0..1 while the leave bell is hovered or focus-selected — drives a
+    /// subtle wobble on the bell mesh in `draw_frame`.
+    leave_bell_hover_anim: f32,
+    /// Cover-open animation amount for the Yaku Journal book on the
+    /// counter, 0.0 (closed) to 1.0 (fully open). Tweens toward
+    /// `journal_open_target` each frame in `update()`. Threaded into
+    /// `Object3dKind::Book::open_amount` in `draw_frame()`.
+    journal_open_amount: f32,
+    /// Target value for `journal_open_amount` when idle (usually 0 —
+    /// cover does not open on hover; click drives [`JournalTransition`]).
+    journal_open_target: f32,
+    /// When `Some`, `update()` skips the tween entirely and pins both
+    /// `journal_open_amount` and `journal_open_target` to the locked
+    /// value. Used by the screenshot CLI's `--journal-open` flag to
+    /// capture deterministic mid-tween states.
+    journal_open_lock: Option<f32>,
+    /// Active journal-opening transition. When `Some`, the player has
+    /// clicked the journal and we're playing the cover-open + zoom
+    /// animation before pushing `YakuJournalScene`. The contained
+    /// `JournalTransition` carries the start time and progress.
+    journal_transition: Option<JournalTransition>,
+    /// When `Some`, the transition is frozen at this `[0, 1]` progress
+    /// fraction — `update_impl` re-anchors `journal_transition.start`
+    /// each tick so `elapsed()` reports the corresponding time, and
+    /// skips the scene push when `done()` would otherwise fire. Used
+    /// by the `--journal-transition` screenshot flag to capture
+    /// deterministic mid-zoom states.
+    journal_transition_locked_at: Option<f32>,
+    /// Set to `true` when the forward transition completes and we
+    /// push `YakuJournalScene`. Stays `true` while the journal is on
+    /// top of the scene stack (during which `update_impl` doesn't
+    /// run). On the first `update_impl` after the journal pops, we
+    /// notice this flag and start the reverse animation, then clear
+    /// it.
+    journal_was_open: bool,
     /// Per-bug orbit phase angles (radians). `BUG_COUNT` entries, each
     /// advances at a different speed each frame.
     bug_phases: [f32; BUG_COUNT],
     /// Per-relic glow start times. Populated when `relic_activations` is
-    /// drained from the run state (e.g. Bonfire on relic sell, RitualBlade
+    /// drained from the run state (e.g. Bonfire on relic sell, HungryGhost
     /// on destroy). Drives glow + wiggle on owned relics in the shop.
     relic_glow_starts: std::collections::HashMap<RelicId, Instant>,
     /// Normalized screen-relative positions for the shop scene.
@@ -102,11 +139,6 @@ pub struct ShopScene {
     /// over an owned item; cleared when the button is released. If released
     /// over the sell tray, the item is sold.
     mouse_drag: Option<ShopDragSource>,
-    /// Per-`ShopHit` world-space overrides for the hover title/description
-    /// plaque anchor. When a key is present, the scene uses the stored
-    /// `(px, py, wz)` instead of the default layout-derived anchor for that
-    /// item, letting authors hand-place plaques per object.
-    pub hover_anchor_overrides: std::collections::HashMap<ShopHit, [f32; 3]>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -153,7 +185,7 @@ const PICK_COIN_DISH: u32 = 2;
 /// can offer the journal without renderer changes — the silhouette is
 /// dish-shaped until proper book art lands, but the click target is
 /// what matters here.
-const PICK_JOURNAL_BOOK: u32 = 3;
+const PICK_JOURNAL_BOOK: u32 = super::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
 /// Base pick id for the for-sale tile packs on the shop shelf.
 /// Two packs are offered, using ids `PICK_TILE_PACK_BASE` and
 /// `PICK_TILE_PACK_BASE + 1`. Id `6` is reserved for `PICK_LEAVE_PROP`,
@@ -180,6 +212,76 @@ const SHOP_RELIC_LEAN_COUNTER: f32 = 158.0;
 /// Inventory row is closer to the camera (world_y ≈ -0.34h); relic-to-camera
 /// vector ≈ [0, -0.74, 0.67] → `arccos(-0.74) ≈ 138°` for direct face-on.
 const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
+
+impl ShopScene {
+    /// Set focus from a stable slug — used by the screenshot CLI's
+    /// `--shop-focus` flag so headless captures can preview hover-only
+    /// chrome (focus rings, plaques, spotlights).
+    ///
+    /// Slugs: `journal`, `bell`, `abacus`, `sell-tray`, `relic:N`,
+    /// `ribbon:N`, `talisman:N`, `pack:N`. Returns an error string for
+    /// unknown slugs or out-of-range indices, so the CLI can bail
+    /// rather than rendering with wrong focus.
+    pub fn set_focus_for_screenshot(&mut self, slug: &str) -> Result<(), String> {
+        let parse_idx = |kind: &str, rest: &str| -> Result<usize, String> {
+            rest.parse::<usize>().map_err(|_| {
+                format!("--shop-focus '{kind}:{rest}' — index must be a non-negative integer")
+            })
+        };
+        let focus = if let Some(rest) = slug.strip_prefix("relic:") {
+            ShopFocus::Relic(parse_idx("relic", rest)?)
+        } else if let Some(rest) = slug.strip_prefix("ribbon:") {
+            ShopFocus::Ribbon(parse_idx("ribbon", rest)?)
+        } else if let Some(rest) = slug.strip_prefix("talisman:") {
+            ShopFocus::Talisman(parse_idx("talisman", rest)?)
+        } else if let Some(rest) = slug.strip_prefix("pack:") {
+            ShopFocus::Pack(PICK_TILE_PACK_BASE + parse_idx("pack", rest)? as u32)
+        } else {
+            match slug {
+                "journal" => ShopFocus::Dish(PICK_JOURNAL_BOOK),
+                "bell" | "leave" | "next-round" => ShopFocus::NextRound,
+                "abacus" | "reroll" => ShopFocus::Reroll,
+                "sell-tray" | "sell" => ShopFocus::SellTray,
+                other => {
+                    return Err(format!(
+                        "--shop-focus '{other}' — supported: journal, bell, abacus, sell-tray, relic:N, ribbon:N, talisman:N, pack:N"
+                    ));
+                }
+            }
+        };
+        self.focus = Some(focus);
+        Ok(())
+    }
+
+    /// Pin the journal cover-open amount and bypass the focus-driven
+    /// tween. Used by the screenshot CLI's `--journal-open` flag to
+    /// capture deterministic mid-tween states.
+    pub fn set_journal_open_for_screenshot(&mut self, amount: f32) {
+        let a = amount.clamp(0.0, 1.0);
+        self.journal_open_amount = a;
+        self.journal_open_target = a;
+        self.journal_open_lock = Some(a);
+    }
+
+    /// Pin the click-to-open journal transition at a fixed `[0, 1]`
+    /// progress fraction (where 1.0 corresponds to
+    /// `JournalTransition::TOTAL_DUR`). Used by the screenshot CLI's
+    /// `--journal-transition` flag to capture deterministic mid-zoom
+    /// states. Implemented by synthesising a `JournalTransition` whose
+    /// `start` is offset into the past so `elapsed()` returns the
+    /// requested time.
+    pub fn set_journal_transition_for_screenshot(&mut self, progress: f32) {
+        let p = progress.clamp(0.0, 0.999); // never exactly done — would push the scene
+        self.journal_transition_locked_at = Some(p);
+        // Build a transition whose initial elapsed matches the locked
+        // progress; update_impl re-anchors `start` each tick so
+        // wall-clock can't drift it.
+        self.journal_transition = Some(JournalTransition {
+            start: std::time::Instant::now(),
+            dir: JournalDirection::Opening,
+        });
+    }
+}
 
 impl SceneBehavior for ShopScene {
     fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {

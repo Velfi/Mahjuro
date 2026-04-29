@@ -1,6 +1,152 @@
 use super::*;
 
 impl WgpuRenderer {
+    /// Reconfigure the swapchain and tonemap output pipeline when HDR is toggled
+    /// in Options, without restarting the app.
+    pub fn set_hdr_enabled(&mut self, hdr_enabled: bool) {
+        let new_format = if hdr_enabled && self.swapchain_hdr_available {
+            wgpu::TextureFormat::Rgba16Float
+        } else {
+            self.swapchain_sdr_format
+        };
+        if new_format == self.config.format {
+            return;
+        }
+        log::info!(
+            "swapchain format {:?} → {:?} (HDR {})",
+            self.config.format,
+            new_format,
+            if hdr_enabled { "on" } else { "off" }
+        );
+        self.config.format = new_format;
+        if let RenderTarget::Surface(surface) = &self.target {
+            surface.configure(&self.device, &self.config);
+        }
+        self.tonemap_pipeline =
+            self.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("tonemap-pipeline"),
+                    layout: Some(&self.tonemap_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &self.tonemap_shader_module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &self.tonemap_shader_module,
+                        entry_point: Some("fs_main"),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: new_format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview_mask: None,
+                    cache: None,
+                });
+
+        // `text_pipeline` / `image_pipeline` target the swapchain format at init.
+        // Recreate them here so HUD text and tile-face decals stay compatible
+        // after toggling HDR (e.g. `Rgba16Float` ↔ `Bgra8UnormSrgb`).
+        let vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x2,
+            }],
+        };
+        let instance_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<GpuInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 16,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        };
+        let depth_ui = wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+        self.text_pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("text-pipeline"),
+                layout: Some(&self.text_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.text_shader_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[vertex_layout.clone(), instance_layout.clone()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.text_shader_module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: new_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        self.image_pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("image-pipeline"),
+                layout: Some(&self.text_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.image_shader_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[vertex_layout, instance_layout],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.image_shader_module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: new_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+    }
+
     pub fn screenshot_pending(&self) -> bool {
         let p = self.pending_screenshot.take();
         let pending = p.is_some();
@@ -45,7 +191,7 @@ impl WgpuRenderer {
         self.scene_prev_texture.destroy();
         let (spt, spv) = create_scene_prev(
             &self.device,
-            self.config.format,
+            SCENE_HDR_FORMAT,
             new_size.width,
             new_size.height,
         );
@@ -54,16 +200,41 @@ impl WgpuRenderer {
         self.scene_color_texture.destroy();
         let (sct, scv) = create_scene_color(
             &self.device,
-            self.config.format,
+            SCENE_HDR_FORMAT,
             new_size.width,
             new_size.height,
         );
         self.scene_color_texture = sct;
         self.scene_color_view = scv;
+        self.post_bloom_texture.destroy();
+        let (pbt, pbv) = create_scene_color(
+            &self.device,
+            SCENE_HDR_FORMAT,
+            new_size.width,
+            new_size.height,
+        );
+        self.post_bloom_texture = pbt;
+        self.post_bloom_view = pbv;
+        self.journal_scene_texture.destroy();
+        let (jst, jsv) = create_journal_scene(
+            &self.device,
+            SCENE_HDR_FORMAT,
+            new_size.width,
+            new_size.height,
+        );
+        self.journal_scene_texture = jst;
+        self.journal_scene_view = jsv;
+        // Bump the journal-scene view generation so any cached bind
+        // group bound against the now-destroyed previous view forces
+        // itself to rebind before the next draw. The book body's slot-3
+        // binding points at this view; without the bump, the first draw
+        // after resize faults with "Texture with 'journal-scene-target'
+        // label has been destroyed."
+        self.journal_scene_view_generation = self.journal_scene_view_generation.wrapping_add(1);
         self.cascade_offscreen_texture.destroy();
         let (cot, cov) = create_cascade_offscreen(
             &self.device,
-            self.config.format,
+            SCENE_HDR_FORMAT,
             new_size.width,
             new_size.height,
         );
@@ -90,7 +261,7 @@ impl WgpuRenderer {
         let bloom_h = (new_size.height.max(1) / 2).max(1);
         let (bpt, bpv) = create_post_texture(
             &self.device,
-            self.config.format,
+            SCENE_HDR_FORMAT,
             bloom_w,
             bloom_h,
             "bloom-ping",
@@ -99,7 +270,7 @@ impl WgpuRenderer {
         self.bloom_ping_view = bpv;
         let (bot, bov) = create_post_texture(
             &self.device,
-            self.config.format,
+            SCENE_HDR_FORMAT,
             bloom_w,
             bloom_h,
             "bloom-pong",

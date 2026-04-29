@@ -14,14 +14,17 @@ impl WgpuRenderer {
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
         ops: &mut Vec<RenderOp>,
         relic_glows: &mut Vec<GpuInstance>,
+        relic_debuff_markers: &mut Vec<GpuInstance>,
     ) {
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
-        let project_to_screen = |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
-        let project_unit_cube_rect = |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
+        let project_to_screen =
+            |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
+        let project_unit_cube_rect =
+            |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
             camera.project_aabb_rect(model, half, center_y)
         };
@@ -40,6 +43,7 @@ impl WgpuRenderer {
                 HashMap::new();
             let mut obj3d_yaku_slot: usize = 0;
             let mut obj3d_wood_slot: usize = 0;
+            let mut obj3d_book_slot: usize = 0;
             let mut obj3d_relic_slot: usize = 0;
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
@@ -224,10 +228,159 @@ impl WgpuRenderer {
                             }
                             object3d_draw_list.push((DrawKind::WoodTablet, slot_i));
                         }
+                        Object3dKind::Book {
+                            spine_label,
+                            pick_id,
+                            open_amount,
+                        } => {
+                            let slot_i = obj3d_book_slot;
+                            obj3d_book_slot += 1;
+                            if slot_i >= MAX_BOOK_SLOTS {
+                                continue;
+                            }
+                            let book_name = obj
+                                .arrange_name
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "shop.props.book".to_string());
+                            let base_model = self.apply_arrange_override(&book_name, model);
+
+                            // ── Body instance (back cover, page block,
+                            // page-content surface, spine, ribbons). The
+                            // page-content surface samples the journal
+                            // page target via the leather shader's
+                            // `uv.x > 3.5` sentinel, so we bind that
+                            // texture at slot 3 (`relief_tex`). The
+                            // body has no calligraphy decal — that
+                            // moved to the cover instance.
+                            let body_inst = &mut self.book_instances[slot_i];
+                            // First-time-only allocation of a 1×1 white
+                            // decal stub so the bind group has a valid
+                            // slot-1 binding even though the body
+                            // doesn't sample a decal. Re-runs whenever
+                            // `journal_scene_view_generation` advances
+                            // (resize destroys the previous view, and
+                            // `set_decal` rebuilds the bind group with
+                            // the fresh view at slot 3).
+                            let current_gen = self.journal_scene_view_generation;
+                            let needs_rebind = body_inst.decal_texture.is_none()
+                                || body_inst.relief_view_generation != current_gen;
+                            if needs_rebind {
+                                body_inst.set_decal(
+                                    crate::render::lit_mesh::DecalUploadCtx {
+                                        device: &self.device,
+                                        queue: &self.queue,
+                                        layout: &self.lit_mesh_material_layout,
+                                        sampler: &self.tile_sampler,
+                                        relief_view: &self.journal_scene_view,
+                                    },
+                                    &[0xff, 0xff, 0xff, 0x00],
+                                    1,
+                                    1,
+                                );
+                                body_inst.decal_label_hash = 0;
+                                body_inst.relief_view_generation = current_gen;
+                            }
+                            // Override the body's base_color.a with
+                            // `open_amount` so the leather shader's
+                            // page-content branch can discard page
+                            // fragments while the cover still
+                            // occludes them. Other body faces
+                            // (back cover, page block, spine) ignore
+                            // alpha and render normally.
+                            let mut body_material = self.book_mesh.default_material;
+                            body_material.base_color[3] = *open_amount;
+                            body_inst.write_uniform_with_decal(
+                                &self.queue,
+                                view_proj_arr,
+                                base_model,
+                                body_material,
+                                false,
+                            );
+                            self.last_debug_pickables.push((
+                                book_name.clone(),
+                                base_model,
+                                glam::Vec3::splat(0.5),
+                                0.0,
+                            ));
+                            if let Some(pid) = pick_id {
+                                self.proj
+                                    .aux_dish_rects
+                                    .push((Some(*pid), project_unit_cube_rect(base_model)));
+                                self.last_primitive_pick_models.insert(*pid, base_model);
+                            }
+                            object3d_draw_list.push((DrawKind::Book, slot_i));
+
+                            // ── Cover instance: rotate the front cover
+                            // around the local spine axis (X = -0.5).
+                            // open_amount = 0 keeps the cover flush over
+                            // the page surface; open_amount = 1 swings
+                            // it ~170° to expose the page.
+                            let cover_inst = &mut self.book_cover_instances[slot_i];
+                            let label_hash = tablet_label_hash(spine_label, 512, 192);
+                            if cover_inst.decal_texture.is_none()
+                                || cover_inst.decal_label_hash != label_hash
+                            {
+                                let rgba = crate::render::decal::rasterize_wood_tablet_decal(
+                                    spine_label,
+                                    self.ui_font.as_ref(),
+                                );
+                                cover_inst.set_decal(
+                                    crate::render::lit_mesh::DecalUploadCtx {
+                                        device: &self.device,
+                                        queue: &self.queue,
+                                        layout: &self.lit_mesh_material_layout,
+                                        sampler: &self.tile_sampler,
+                                        relief_view: &self.lit_mesh_relief_default_view,
+                                    },
+                                    &rgba,
+                                    512,
+                                    192,
+                                );
+                                cover_inst.decal_label_hash = label_hash;
+                            }
+                            // Hinge: rotate around the local Z axis
+                            // (the spine runs Z-axially) by
+                            // +open_amount * 170° so the fore-edge of
+                            // the cover lifts away from the page
+                            // surface and the cover lays open on the
+                            // camera-right side.
+                            //
+                            // The rotation is around the local axis at
+                            // X = -0.5, Y = 0 (mid-cover). To rotate
+                            // around a non-origin axis we translate
+                            // vertices so the axis goes through origin,
+                            // rotate, then translate back. As an
+                            // affine transform: T(+spine) * R * T(-spine).
+                            let spine_x = crate::render::book_mesh::SPINE_X;
+                            let cover_y_mid = 0.5
+                                * (crate::render::book_mesh::FRONT_COVER_Y_LO
+                                    + crate::render::book_mesh::FRONT_COVER_Y_HI);
+                            let theta = open_amount * 170.0_f32.to_radians();
+                            let hinge = glam::Mat4::from_translation(glam::Vec3::new(
+                                spine_x,
+                                cover_y_mid,
+                                0.0,
+                            )) * glam::Mat4::from_rotation_z(theta)
+                                * glam::Mat4::from_translation(glam::Vec3::new(
+                                    -spine_x,
+                                    -cover_y_mid,
+                                    0.0,
+                                ));
+                            let cover_model = base_model * hinge;
+                            cover_inst.write_uniform_with_decal(
+                                &self.queue,
+                                view_proj_arr,
+                                cover_model,
+                                self.book_cover_mesh.default_material,
+                                true,
+                            );
+                            object3d_draw_list.push((DrawKind::BookCover, slot_i));
+                        }
                         Object3dKind::Relic {
                             relic_id,
                             glow,
                             silhouette,
+                            debuffed,
                             pick_id,
                         } => {
                             if obj3d_relic_slot >= MAX_RELIC_SLOTS {
@@ -377,6 +530,16 @@ impl WgpuRenderer {
                                     color: [1.00, 0.82, 0.36, 1.20 * g],
                                 });
                             }
+                            if *debuffed && !*silhouette {
+                                let [rx, ry, rw, rh] = projected_rect;
+                                let side = (rw.min(rh) * 0.42).max(14.0).min(rw.min(rh) * 0.92);
+                                let cx = rx + rw * 0.5;
+                                let cy = ry + rh * 0.48;
+                                relic_debuff_markers.push(GpuInstance {
+                                    rect: [cx - side * 0.5, cy - side * 0.5, side, side],
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                });
+                            }
                             object3d_draw_list.push((DrawKind::Relic, slot_i));
                         }
                         Object3dKind::Pack { kind, pick_id } => {
@@ -388,9 +551,27 @@ impl WgpuRenderer {
                             let _ = slot_i;
                             let pack_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.packs");
                             let model = self.apply_arrange_override(pack_arr_name, model);
+                            // Hover glow: hover_target ramps 0..1 as the
+                            // player focuses/cursor-hovers the pack. Lift
+                            // the foil tint toward a warm bloom and push
+                            // an additive halo (parallel to relic
+                            // activation glow) so the wrapper visibly
+                            // rewards looking at it.
+                            let hover_g = obj.hover_target.clamp(0.0, 1.0);
+                            let base_color = if hover_g > 0.0 {
+                                let target = [1.35, 1.18, 0.78, obj.color[3]];
+                                [
+                                    obj.color[0] + (target[0] - obj.color[0]) * hover_g * 0.55,
+                                    obj.color[1] + (target[1] - obj.color[1]) * hover_g * 0.55,
+                                    obj.color[2] + (target[2] - obj.color[2]) * hover_g * 0.55,
+                                    obj.color[3],
+                                ]
+                            } else {
+                                obj.color
+                            };
                             let material = MaterialParams {
                                 kind: MaterialKind::Foil,
-                                base_color: obj.color,
+                                base_color,
                                 specular_strength: 0.70,
                                 specular_power: 48.0,
                             };
@@ -447,15 +628,44 @@ impl WgpuRenderer {
                             // Project the 8 unit-cube corners via the model matrix to get
                             // the screen-space bounding rect. This feeds focus-nav and
                             // controller selection via aux_dish_rects (appended below).
-                            self.proj
-                                .pack_rects
-                                .push((project_unit_cube_rect(model), *pick_id));
+                            let projected_rect = project_unit_cube_rect(model);
+                            self.proj.pack_rects.push((projected_rect, *pick_id));
                             self.last_debug_pickables.push((
                                 pack_arr_name.to_string(),
                                 model,
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
+                            if hover_g > 0.0 {
+                                // Hover halo: an additive bloom inflated
+                                // past the projected rect so the falloff
+                                // spills out around the wrapper —
+                                // matches the activation halo on
+                                // Object3dKind::Relic above. Slightly
+                                // tighter pad than relics because packs
+                                // are smaller and a wider spill reads as
+                                // an unfocused glow. Halo color blends
+                                // the per-kind seal color into a warm
+                                // gold so the rim picks up the wax tone
+                                // without losing the candlelit feel.
+                                let [rx, ry, rw, rh] = projected_rect;
+                                let pad_x = rw * 0.55;
+                                let pad_y = rh * 0.65;
+                                let seal = kind.seal_color();
+                                let mix_t = 0.35;
+                                let halo_r = 1.00 + (seal[0] - 1.00) * mix_t;
+                                let halo_g = 0.86 + (seal[1] - 0.86) * mix_t;
+                                let halo_b = 0.46 + (seal[2] - 0.46) * mix_t;
+                                relic_glows.push(GpuInstance {
+                                    rect: [
+                                        rx - pad_x,
+                                        ry - pad_y,
+                                        rw + pad_x * 2.0,
+                                        rh + pad_y * 2.0,
+                                    ],
+                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g],
+                                });
+                            }
                             object3d_draw_list.push((DrawKind::Pack, slot_i));
                         }
                         Object3dKind::Talisman { kind } => {
@@ -1049,14 +1259,16 @@ impl WgpuRenderer {
                             if obj3d_glyph_slot >= MAX_EXTRUDED_GLYPH_SLOTS {
                                 continue;
                             }
-                            if !self.extruded_glyph_meshes.contains_key(label) {
+                            if !self.extruded_glyph_meshes.contains_key(label.as_ref()) {
                                 if let Some(cpu) = self.glyph_cpu_cache.mesh_for(label) {
                                     let gpu = LitMeshGpu::new(
                                         &self.device,
                                         cpu,
                                         &format!("glyph-{}", label),
                                     );
-                                    self.extruded_glyph_meshes.insert(label.clone(), gpu);
+                                    // One-time alloc when a new glyph string is first seen;
+                                    // subsequent frames hit the cache and skip this branch.
+                                    self.extruded_glyph_meshes.insert(label.to_string(), gpu);
                                 } else {
                                     continue;
                                 }

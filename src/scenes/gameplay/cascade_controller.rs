@@ -193,14 +193,9 @@ pub(super) fn tick_active_cascade(
                         dest_xy.1,
                         step.source,
                     );
-                    scene.score_popups.spawn(
-                        label,
-                        source_xy,
-                        dest_xy,
-                        dest_lift,
-                        step.kind,
-                        magnitude,
-                    );
+                    scene
+                        .score_popups
+                        .spawn(label, source_xy, dest_xy, dest_lift, step.kind, magnitude);
                     let gameplay = GameEngine::read(ctx.run);
                     if step.tile_ids.iter().any(|&tid| {
                         ctx.run

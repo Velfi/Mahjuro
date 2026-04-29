@@ -201,7 +201,7 @@ impl ArrangePreview {
     /// staged deltas folded in. Otherwise return `base` unchanged.
     pub fn applied_to(&self, hierarchy: &'static [Node], leaf: &str, base: Placement) -> Placement {
         let affected = expand_name(hierarchy, &self.name);
-        if !affected.contains(&leaf) {
+        if !affected.iter().any(|&n| n == leaf) {
             return base;
         }
         let mut p = base;

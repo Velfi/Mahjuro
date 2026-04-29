@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
@@ -194,9 +196,14 @@ pub(super) fn build_cascade_hud_placements(
     let times_x = pad_px;
     let mult_x = pad_px + spread;
 
-    let chips_label = format!("{}", hud.chips);
-    let mult_label = format!("{:.1}x", hud.mult);
-    let total_label = format!("= {}", hud.total);
+    // Each frame these three strings are pushed into ExtrudedGlyph labels;
+    // the renderer caches the per-string mesh keyed by the &str content, so
+    // identical labels across frames hit the cache. Building Arc<str> here
+    // means `make_extruded_glyph` doesn't need to re-allocate, and the
+    // single Arc lives in the Object3d for one frame.
+    let chips_label: Arc<str> = Arc::from(format!("{}", hud.chips));
+    let mult_label: Arc<str> = Arc::from(format!("{:.1}x", hud.mult));
+    let total_label: Arc<str> = Arc::from(format!("= {}", hud.total));
 
     // Merge-sub-phase collapse: the three labels slide toward the pad
     // center as `merge_t` climbs from 0 → 1, while the `= TOTAL` label
@@ -256,7 +263,7 @@ pub(super) fn build_cascade_hud_placements(
             GlyphMaterial::Polychrome,
         ));
         out.push(make_extruded_glyph(
-            "x".to_string(),
+            Arc::from("x"),
             [times_x, pad_py, pad_lift],
             glyph_scale * 0.85,
             with_alpha(FINAL_COLOR, trio_alpha),
@@ -292,7 +299,7 @@ pub(super) fn build_cascade_hud_placements(
 }
 
 fn make_extruded_glyph(
-    label: String,
+    label: Arc<str>,
     pos: [f32; 3],
     scale: f32,
     color: [f32; 4],

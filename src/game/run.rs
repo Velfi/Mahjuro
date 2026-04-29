@@ -72,6 +72,8 @@ pub enum ConsumableUseResult {
 pub const HAND_SIZE: usize = 14;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
 pub const FINAL_ANTE: u32 = 7;
+/// Max number of QuickDraw bonus draws per round.
+pub const QUICKDRAW_USES_PER_ROUND: u8 = 3;
 
 fn default_auto_cash_in_on_full_structure() -> bool {
     true
@@ -545,8 +547,11 @@ pub struct RunState {
     pub available_relics: Vec<RelicId>,
     /// Whether the player scored on their last play (for ChainReaction relic).
     pub scored_last_turn: bool,
-    /// Whether QuickDraw extra tile was used this round.
-    pub quickdraw_used: bool,
+    /// Remaining QuickDraw extra-tile draws this round. Set to 3 at round
+    /// start; each play that draws decrements it. Once at zero, QuickDraw is
+    /// inert until the next round.
+    #[serde(default)]
+    pub quickdraw_uses_remaining: u8,
     /// Whether JokerTile was used this round.
     pub joker_used: bool,
     /// Whether the player has scored a FullHand yaku this round. The Tenpai
@@ -585,7 +590,7 @@ pub struct RunState {
     #[serde(default)]
     pub total_score_earned: u64,
     /// True once Paper Lantern has burned up this run. Prevents Paper from
-    /// reappearing in shops and unlocks Iron Lantern in the shop pool.
+    /// reappearing in shops and unlocks Silver Filigree Lantern in the shop pool.
     #[serde(default)]
     pub paper_lantern_extinct: bool,
     /// Per-yaku cumulative play counter for the entire run. Powers the
@@ -670,7 +675,7 @@ pub struct RunState {
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
-    ///   CleanStreak  → consecutive plays without honor tiles
+    ///   Humility     → consecutive plays without honor tiles
     ///   Obsession    → rounds without most-used yaku
     ///   Bonfire      → relics sold this run
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
@@ -678,7 +683,7 @@ pub struct RunState {
     ///   NestEgg      → rounds held (sell value grows)
     ///   TeaCeremony  → plays remaining before destruction
     ///   PhantomRelic → rounds held
-    ///   RitualBlade  → permanent mult bonus ×10
+    ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
     ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
     #[serde(default)]
@@ -715,9 +720,19 @@ impl RunState {
         self.mode.starting_discards
     }
 
-    /// Note that another relic was involuntarily destroyed. Kintsugi converts
-    /// each destruction into a permanent +1 mult via its counter; callers
-    /// must invoke this *after* the victim is removed from `relics.active`.
+    /// Canonical *relic destroyed* trigger.
+    ///
+    /// The "destroyed" keyword is the
+    /// player-facing name for permanent removal of a relic from a run; this
+    /// function is the single code-side anchor the keyword refers to. Every
+    /// path that destroys a relic should call this *after* removing the
+    /// victim from `relics.active`. Kintsugi converts each invocation into
+    /// a permanent +1 mult via its counter — adding a new destruction site
+    /// without going through here will silently break that synergy.
+    ///
+    /// Transformations (Silk Thread \u{2192} Silk Moth, Melting Ice \u{2192}
+    /// Taotie) deliberately do *not* call this — they're not destruction;
+    /// the relic stays in its slot and Kintsugi must not fire.
     fn note_relic_destroyed(&mut self) {
         if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
             *self
@@ -805,7 +820,7 @@ impl RunState {
             available_rules: mode.starting_rules.clone(),
             available_relics: default_available_relics(),
             scored_last_turn: false,
-            quickdraw_used: false,
+            quickdraw_uses_remaining: 0,
             joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
@@ -1017,7 +1032,7 @@ mod tests {
             best_structure_name: String::new(),
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
-            quickdraw_used: false,
+            quickdraw_uses_remaining: 0,
             relics: RelicState::default(),
             round_rules: vec![],
             round_score: 0,

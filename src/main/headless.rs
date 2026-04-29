@@ -31,11 +31,11 @@ fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
 /// designed for a juicy Steam-store hero shot: Red Dragon triplet, White
 /// Dragon triplet, two number sequences, East Wind pair. Decomposes as
 /// 4 sets + pair (yakuman-adjacent: Big Two Dragons + Yakuhai), and
-/// pairs naturally with `RedDragonRage` / `WhiteSilence` relics.
+/// pairs naturally with `RedDragonRage` / `WhiteDragonsHush` relics.
 ///
 /// Marks every tile as selected so the next `UiAction::ScoreHand` plays
 /// the full hand. Also stocks `relics.active` with four visually
-/// distinctive relics (dragon trio + GoldFurnace) so the relic strip
+/// distinctive relics (dragon trio + GoldenEngine) so the relic strip
 /// reads at thumbnail size.
 fn setup_hero_state(run: &mut RunState) {
     use crate::core::relic::RelicId;
@@ -62,9 +62,9 @@ fn setup_hero_state(run: &mut RunState) {
     run.relics.active.clear();
     for r in [
         RelicId::RedDragonRage,
-        RelicId::WhiteSilence,
+        RelicId::WhiteDragonsHush,
         RelicId::GreenLuck,
-        RelicId::GoldFurnace,
+        RelicId::GoldenEngine,
     ] {
         if !run.relics.is_full() {
             run.relics.active.push(r);
@@ -98,6 +98,15 @@ fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
 
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {
     asset_path::log_all_assets();
+    if s.shop_focus.is_some() && s.scene != "shop" {
+        anyhow::bail!("--shop-focus is only valid with --scene shop");
+    }
+    if s.journal_open.is_some() && s.scene != "shop" {
+        anyhow::bail!("--journal-open is only valid with --scene shop");
+    }
+    if s.journal_transition.is_some() && s.scene != "shop" {
+        anyhow::bail!("--journal-transition is only valid with --scene shop");
+    }
     let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
     let mut run = RunState::new_demo();
     if let Some(kind) = boss_override {
@@ -105,8 +114,13 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     }
     let mut hero_play = false;
     let mut unlock_yaku = false;
+    let mut unlock_collection = false;
+    let mut force_relic_modal = false;
     let (scene, game_in_progress) = match s.scene.as_str() {
-        "collection" => (Scene::Collection(scenes::CollectionScene::new()), false),
+        "collection" => {
+            unlock_collection = true;
+            (Scene::Collection(scenes::CollectionScene::new()), false)
+        }
         "yaku_journal" => {
             unlock_yaku = true;
             (Scene::YakuJournal(scenes::YakuJournalScene::new()), false)
@@ -120,7 +134,18 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
         "shop" => {
             setup_shop_state(&mut run);
-            (Scene::Shop(ShopScene::new(run.run_number, &mut run)), true)
+            let mut shop = ShopScene::new(run.run_number, &mut run);
+            if let Some(focus_slug) = s.shop_focus.as_deref() {
+                shop.set_focus_for_screenshot(focus_slug)
+                    .map_err(anyhow::Error::msg)?;
+            }
+            if let Some(amt) = s.journal_open {
+                shop.set_journal_open_for_screenshot(amt);
+            }
+            if let Some(prog) = s.journal_transition {
+                shop.set_journal_transition_for_screenshot(prog);
+            }
+            (Scene::Shop(shop), true)
         }
         "start_screen" => (Scene::StartScreen(scenes::StartScreenScene::new()), false),
         "tile_select" => (Scene::TileSelect(scenes::TileSelectScene::new()), false),
@@ -128,11 +153,25 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             Scene::TransitionPlayground(scenes::TransitionPlaygroundScene::new(false)),
             false,
         ),
+        "material_viewer" => (
+            Scene::MaterialViewer(scenes::MaterialViewerScene::new(false)),
+            false,
+        ),
+        // Layered the relic-unlock modal on top of a start-screen
+        // backdrop so we can iterate on the modal's hero staging
+        // without driving a live game state. Uses the existing
+        // start-screen scene as a quiet substrate (starfield + title);
+        // the modal stages itself entirely on top.
+        "relic_unlock" => {
+            force_relic_modal = true;
+            (Scene::StartScreen(scenes::StartScreenScene::new()), false)
+        }
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: collection, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
-                start_screen, tile_select, transition_playground)"
+                start_screen, tile_select, transition_playground, \
+                material_viewer, relic_unlock)"
             )
         }
     };
@@ -144,6 +183,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         game_in_progress,
         s.fresh_progress,
     )?;
+    if s.shop_focus.is_some() {
+        // Cursor-mode update reassigns focus from the cursor pick
+        // every tick; switch to controller mode so the focus we set
+        // pre-warmup persists.
+        app.input_mode_override = Some(crate::ui::input::InputMode::Controller);
+    }
     if hero_play {
         // Fire ScoreHand on tick 2 (after one warmup tick lets layouts/loads
         // settle), then warmup_frames ride out the cascade so the captured
@@ -152,6 +197,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     }
     if unlock_yaku {
         app.unlock_all_yaku_for_screenshot();
+    }
+    if unlock_collection {
+        app.unlock_all_for_collection_screenshot();
+    }
+    if force_relic_modal {
+        app.force_relic_unlock_modal();
     }
     app.run_screenshot(s.output.clone(), s.warmup_frames)
 }
@@ -187,6 +238,21 @@ struct HeadlessApp {
     /// (tick_index, action) pairs to inject into `UpdateCtx::actions` on the
     /// matching tick. Pre-populated by the dispatcher; consumed in `tick()`.
     queued_actions: Vec<(u32, UiAction)>,
+    /// When set, an overlay modal queue is ticked & staged on every
+    /// frame using the same staging the live `App::draw` does. Lets
+    /// `--scene relic_unlock` capture the redesigned celebration modal
+    /// over a quiet backdrop without spinning up a full level-up flow.
+    modal_overlay: Option<crate::ui::modal::ModalQueue>,
+    /// Override the input mode passed to `UpdateCtx`. Default is
+    /// `Cursor`, which is what the live game uses when the mouse is
+    /// active. Set to `Controller` for screenshot paths that pre-set
+    /// scene focus (e.g. `--shop-focus`) — in cursor mode the shop's
+    /// `update_impl` reassigns focus from the cursor pick every tick,
+    /// wiping any focus we set up before warmup. Controller mode keeps
+    /// our pre-set focus stable across ticks so the focused state's
+    /// dependent animations (e.g. journal-cover open tween) actually
+    /// progress during warmup.
+    input_mode_override: Option<crate::ui::input::InputMode>,
 }
 
 impl HeadlessApp {
@@ -224,6 +290,7 @@ impl HeadlessApp {
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
+                surface_kind: settings.surface_kind,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
                 shadows_enabled: settings.shadows_enabled,
@@ -242,7 +309,66 @@ impl HeadlessApp {
             game_in_progress,
             tick_count: 0,
             queued_actions: Vec::new(),
+            modal_overlay: None,
+            input_mode_override: None,
         })
+    }
+
+    /// Build a paginated relic-unlock modal and queue it as the overlay
+    /// for every subsequent `tick()`. Used by `--scene relic_unlock` to
+    /// capture the celebration modal in isolation.
+    fn force_relic_unlock_modal(&mut self) {
+        use crate::core::relic::all_relic_defs;
+        use crate::ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
+
+        // Pick a relic with a textured face that reads at thumbnail
+        // size. Kong Collector matches the source screenshot; if it
+        // ever leaves the catalog the chosen relic falls back to the
+        // first defined entry so the screenshot harness keeps working.
+        let defs = all_relic_defs();
+        let chosen = defs
+            .iter()
+            .find(|d| d.name == "Kong Collector")
+            .or_else(|| defs.first())
+            .expect("at least one relic must be defined");
+        let accent = match chosen.rarity {
+            crate::core::relic::Rarity::Common => render::theme::color::rarity(0),
+            crate::core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
+            crate::core::relic::Rarity::Rare => render::theme::color::rarity(2),
+            crate::core::relic::Rarity::Legendary => render::theme::color::rarity(3),
+        };
+        let page = UnlockPage {
+            category: "New Relic".into(),
+            name: chosen.name.into(),
+            description: chosen.description.into(),
+            relic_id: Some(chosen.id),
+            accent_color: accent,
+        };
+        // Drive the indicator to "6 / 14" so the page-of-N footer
+        // matches the reference screenshot for visual comparison.
+        let mut pages = Vec::with_capacity(14);
+        for i in 0..14 {
+            if i == 5 {
+                pages.push(page.clone());
+            } else {
+                pages.push(UnlockPage {
+                    category: "Placeholder".into(),
+                    name: "—".into(),
+                    description: String::new(),
+                    relic_id: Some(chosen.id),
+                    accent_color: accent,
+                });
+            }
+        }
+        let mut modal = Modal::new("Relic Unlocked", "", ModalTheme::Success).with_pages(pages);
+        modal.current_page = 5;
+        // Lantern motes drifting from the lower band.
+        let w = self.width as f32;
+        let h = self.height as f32;
+        let modal = modal.with_fireworks(w * 0.5, h * 0.92, w * 0.85, 24);
+        let mut queue = ModalQueue::default();
+        queue.push(modal);
+        self.modal_overlay = Some(queue);
     }
 
     fn queue_action_on_tick(&mut self, tick: u32, action: UiAction) {
@@ -265,6 +391,35 @@ impl HeadlessApp {
             YakuKind::FullHand,
         ] {
             self.run.yaku_levels.levels.insert(yk, 3);
+        }
+    }
+
+    /// Set the in-memory `PlayerProgress` to a level-7, fully-explored
+    /// state so the Collection grid shows real relic/yaku/boss/talisman
+    /// art instead of locked placeholder dots. Only mutates the headless
+    /// runner's progress; never persisted.
+    fn unlock_all_for_collection_screenshot(&mut self) {
+        use crate::core::boss::all_bosses;
+        use crate::core::talisman::TalismanKind;
+        use crate::core::yaku::YakuKind;
+        self.progress.runs_completed = 25;
+        self.progress.has_won = true;
+        for yk in YakuKind::all() {
+            *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 1;
+        }
+        for def in all_bosses() {
+            *self
+                .progress
+                .boss_times_encountered
+                .entry(def.kind)
+                .or_insert(0) += 1;
+        }
+        for tk in TalismanKind::all() {
+            *self
+                .progress
+                .talisman_times_purchased
+                .entry(*tk)
+                .or_insert(0) += 1;
         }
     }
 
@@ -306,7 +461,7 @@ impl HeadlessApp {
             picked_shop_object: None,
             picked_gameplay_object: None,
             picked_collection_object: None,
-            input_mode: InputMode::Cursor,
+            input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
             picked_hand_tile: None,
             scroll_lines: 0.0,
             ui_scale: self.gfx.ui_scale,
@@ -337,7 +492,75 @@ impl HeadlessApp {
             arrange_preview: None,
             shop_smoke_tuning: &self.shop_smoke_tuning,
         };
-        let frame: UiFrame = self.scene.draw_frame(ctx);
+        let mut frame: UiFrame = self.scene.draw_frame(ctx);
+
+        // ── Modal overlay (relic_unlock screenshot path) ────────────
+        // Mirrors the modal-staging block in `App::draw` (src/main/
+        // draw.rs:476-545): tick the queue, draw it, then strip scene
+        // 3D ops + override the camera/lights so the relic mesh owns
+        // the depth buffer for its own pass. Kept in sync with the
+        // live path so screenshots match what players actually see.
+        if let Some(ref mut queue) = self.modal_overlay {
+            queue.update();
+            if let Some((
+                modal_insts,
+                modal_labels,
+                modal_buttons,
+                modal_relic_objects,
+                modal_gradient_quads,
+            )) = queue.draw(self.width as f32, self.height as f32, self.gfx.ui_scale)
+            {
+                let _ = modal_buttons; // headless ignores click routing
+                frame.quads(modal_insts);
+                frame.texts(modal_labels);
+                if !modal_gradient_quads.is_empty() {
+                    frame.gradient_quads(modal_gradient_quads);
+                }
+                if !modal_relic_objects.is_empty() {
+                    use crate::render::draw_cmd::{CameraParams, DrawCmd};
+                    frame.cmds.retain(|cmd| {
+                        !matches!(
+                            cmd,
+                            DrawCmd::Object3d(_)
+                                | DrawCmd::Object3dBatch(_)
+                                | DrawCmd::ShowcaseTileBatch(_)
+                                | DrawCmd::TileFaceQuad(_)
+                                | DrawCmd::Table
+                        )
+                    });
+                    let w = self.width as f32;
+                    let h = self.height as f32;
+                    frame.camera_override = Some(CameraParams {
+                        eye: [0.0, -h * 3.0, 0.0],
+                        target: [0.0, 0.0, 0.0],
+                        up: [0.0, 0.0, 1.0],
+                        fovy_deg: 20.0,
+                    });
+                    use crate::render::wgpu_renderer::PointLight;
+                    frame.point_lights = vec![
+                        PointLight {
+                            pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
+                            radius: h * 1.6,
+                            color: [1.00, 0.94, 0.82],
+                            intensity: 2.0,
+                        },
+                        PointLight {
+                            pos: [w * 0.5 - w * 0.22, h * 0.5 + h * 0.35, h * 0.30],
+                            radius: h * 1.3,
+                            color: [0.78, 0.86, 1.00],
+                            intensity: 0.9,
+                        },
+                        PointLight {
+                            pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
+                            radius: h * 1.0,
+                            color: [1.00, 0.78, 0.42],
+                            intensity: 1.0,
+                        },
+                    ];
+                    frame.object3d_batch(modal_relic_objects);
+                }
+            }
+        }
 
         let active_scene_key: Option<&'static str> = match &self.scene {
             Scene::Shop(_) => Some("shop"),
@@ -352,12 +575,15 @@ impl HeadlessApp {
             .set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
         self.renderer
             .set_dust_strength(self.volumetric_tuning.dust_strength);
+        let haze_horizon_y = frame
+            .gameplay_fog_wall_horizon_y
+            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
         self.renderer.set_haze_tuning(
             self.volumetric_tuning.haze_density,
             self.volumetric_tuning.haze_color_r,
             self.volumetric_tuning.haze_color_g,
             self.volumetric_tuning.haze_color_b,
-            self.volumetric_tuning.haze_horizon_y,
+            haze_horizon_y,
             self.volumetric_tuning.haze_drift_speed,
         );
 
@@ -373,6 +599,7 @@ impl HeadlessApp {
                 effects_quality: self.gfx.effects_quality,
                 tile_preset: self.gfx.tile_preset,
                 tile_material: active_material,
+                surface_kind: self.gfx.surface_kind,
                 tileset_name: self.gfx.tileset_name.clone(),
                 draw_settle_speed: 8.0,
                 sort_settle_speed: 10.0,
@@ -388,9 +615,26 @@ impl HeadlessApp {
     /// Render `warmup_frames + 1` frames, queue a screenshot on the last
     /// frame, and return. The PNG is written synchronously during the
     /// final `render()` call (see `WgpuRenderer::render` end-of-frame).
+    ///
+    /// If asset loading is still in flight after the requested warmup,
+    /// keeps ticking (with a small sleep) until the renderer reports
+    /// `!is_loading()`. This matters for screenshots that depend on
+    /// late-arriving relic textures — the relic-loader thread decodes
+    /// images at ~16ms each, slower than CPU-bound warmup ticks, so a
+    /// fixed warmup count can race the loader. Cap at 600 extra ticks
+    /// (~10s) so a stuck loader doesn't hang the headless harness.
     fn run_screenshot(mut self, output: PathBuf, warmup_frames: u32) -> anyhow::Result<()> {
         for _ in 0..warmup_frames {
             self.tick();
+        }
+        let mut extra = 0u32;
+        while self.renderer.is_loading() && extra < 600 {
+            self.tick();
+            std::thread::sleep(std::time::Duration::from_millis(16));
+            extra += 1;
+        }
+        if extra > 0 {
+            log::info!("screenshot: waited {extra} extra ticks for asset loading");
         }
         self.renderer.queue_screenshot(output.clone());
         self.tick();

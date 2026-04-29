@@ -187,7 +187,14 @@ fn score_sets_inner(
     let has_blue_serpent = has(RelicId::BlueSerpent);
     let has_edge_runner = has(RelicId::EdgeRunner);
     let has_low_tide = has(RelicId::LowTide);
-    if has_jade_serpent || has_red_serpent || has_blue_serpent || has_edge_runner || has_low_tide {
+    let has_high_tide = has(RelicId::HighTide);
+    if has_jade_serpent
+        || has_red_serpent
+        || has_blue_serpent
+        || has_edge_runner
+        || has_low_tide
+        || has_high_tide
+    {
         for s in sets {
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -217,6 +224,12 @@ fn score_sets_inner(
                 {
                     push_chips!("Low Tide", 6);
                 }
+                if has_high_tide
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && t.rank >= 7
+                {
+                    push_chips!("High Tide", 6);
+                }
             }
         }
     }
@@ -239,7 +252,7 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::LastBreath) && ctx.is_final_play {
+    if has(RelicId::LastBreath) && ctx.is_final_play && ctx.structure.is_some() {
         let mut retrigger_chips = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -253,19 +266,26 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::LeadingTile) {
+    if has(RelicId::Geese) {
         let mut retrigger = 0i32;
-        for s in sets {
-            if let Some(t) = s.tile_ids.first().and_then(|id| tile_by_id(tiles, *id)) {
-                retrigger += effective_point_value(t);
+        let mut remaining = 5;
+        'outer: for s in sets {
+            for &tid in &s.tile_ids {
+                if remaining == 0 {
+                    break 'outer;
+                }
+                if let Some(t) = tile_by_id(tiles, tid) {
+                    retrigger += effective_point_value(t);
+                    remaining -= 1;
+                }
             }
         }
         if retrigger > 0 {
-            push_chips!("Leading Tile", retrigger);
+            push_chips!("Geese", retrigger);
         }
     }
 
-    if has(RelicId::LowEcho) {
+    if has(RelicId::VoiceOfThePeople) {
         let mut retrigger = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -278,7 +298,24 @@ fn score_sets_inner(
             }
         }
         if retrigger > 0 {
-            push_chips!("Low Echo", retrigger);
+            push_chips!("Voice of the People", retrigger);
+        }
+    }
+
+    if has(RelicId::VoiceOfTheElite) {
+        let mut retrigger = 0i32;
+        for s in sets {
+            for &tid in &s.tile_ids {
+                if let Some(t) = tile_by_id(tiles, tid)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && t.rank >= 6
+                {
+                    retrigger += effective_point_value(t);
+                }
+            }
+        }
+        if retrigger > 0 {
+            push_chips!("Voice of the Elite", retrigger);
         }
     }
 
@@ -326,6 +363,22 @@ fn score_sets_inner(
             .unwrap_or(0);
         if ice_chips > 0 {
             push_chips!("Melting Ice", ice_chips);
+        }
+    }
+
+    if has(RelicId::Taotie) {
+        // Permanent +80 base, plus the accumulated chip bonus from every
+        // honor the mask has devoured this run. The accumulator grows in
+        // `apply_scored_melds` at cash-in time (each devoured honor adds
+        // 20 chips and the tile is permanently removed from the wall).
+        push_chips!("Taotie", 80);
+        let devoured_chips = ctx
+            .relic_counters
+            .get(&RelicId::Taotie)
+            .copied()
+            .unwrap_or(0);
+        if devoured_chips > 0 {
+            push_chips!("Taotie (devoured)", devoured_chips);
         }
     }
 
@@ -526,9 +579,6 @@ fn score_sets_inner(
         let scale = (4i32 - ctx.plays_used as i32).max(1);
         let bonus = 50 * scale;
         push_chips!("Tenpai Bonus", bonus);
-        for _ in 0..count(RelicId::TenpaiTalisman) {
-            push_chips!("Tenpai Talisman", bonus);
-        }
     }
 
     if has(RelicId::RedDragonRage) {
@@ -547,7 +597,7 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::WhiteSilence) {
+    if has(RelicId::WhiteDragonsHush) {
         for s in sets {
             if s.kind != SetKind::Pair {
                 continue;
@@ -558,7 +608,7 @@ fn score_sets_inner(
                 .and_then(|id| tile_by_id(tiles, *id))
                 .is_some_and(|t| t.suit == Suit::Dragon && t.rank == 3);
             if is_white_dragon {
-                push_mult!("White Silence", 4.0);
+                push_mult!("White Dragon's Hush", 4.0);
             }
         }
     }
@@ -699,10 +749,10 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::GoldFurnace) {
+    if has(RelicId::GoldenEngine) {
         let bonus = (ctx.gold.max(0) as f64 / 5.0).floor();
         if bonus > 0.0 {
-            push_mult!("Gold Furnace", bonus);
+            push_mult!("Golden Engine", bonus);
         }
     }
 
@@ -736,14 +786,18 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::CleanStreak) {
+    if has(RelicId::SilkMoth) {
+        push_mult!("Silk Moth", 2.0);
+    }
+
+    if has(RelicId::Humility) {
         let streak = ctx
             .relic_counters
-            .get(&RelicId::CleanStreak)
+            .get(&RelicId::Humility)
             .copied()
             .unwrap_or(0);
         if streak > 0 {
-            push_mult!("Clean Streak", 0.5 * streak as f64);
+            push_mult!("Humility", 0.5 * streak as f64);
         }
     }
 
@@ -780,10 +834,10 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::EmptyFrame) {
+    if has(RelicId::SolitarySage) {
         let empty = ctx.relics.max_slots.saturating_sub(ctx.relics.active.len());
         if empty > 0 {
-            push_mult!("Empty Frame", 1.5 * empty as f64);
+            push_mult!("Solitary Sage", 1.5 * empty as f64);
         }
     }
 
@@ -813,7 +867,7 @@ fn score_sets_inner(
     }
 
     if has(RelicId::WallWeaver) {
-        let overflow_extras = if ctx.relics.has(RelicId::Overflow) {
+        let overflow_extras = if ctx.relics.has(RelicId::StrengthInNumbers) {
             68
         } else {
             0
@@ -879,14 +933,14 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::RitualBlade) {
+    if has(RelicId::HungryGhost) {
         let perm_mult = ctx
             .relic_counters
-            .get(&RelicId::RitualBlade)
+            .get(&RelicId::HungryGhost)
             .copied()
             .unwrap_or(0);
         if perm_mult > 0 {
-            push_mult!("Ritual Blade", perm_mult as f64 / 10.0);
+            push_mult!("Hungry Ghost", perm_mult as f64 / 10.0);
         }
     }
 
@@ -942,9 +996,9 @@ fn score_sets_inner(
         push_mult!("Way of Sequences", delta);
     }
 
-    for _ in 0..count(RelicId::IronLantern) {
+    for _ in 0..count(RelicId::SilverFiligreeLantern) {
         let delta = mult;
-        push_mult!("Iron Lantern", delta);
+        push_mult!("Silver Filigree Lantern", delta);
     }
 
     for _ in 0..count(RelicId::GlassCannon) {

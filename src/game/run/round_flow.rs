@@ -66,7 +66,9 @@ impl RunState {
         self.apply_pending_round_resource_bonuses();
         self.sync_round_resource_caps();
         // Deal the wall and hand for this round.
-        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        let overflow = self
+            .relics
+            .has(crate::core::relic::RelicId::StrengthInNumbers);
         self.wall = Wall::from_filtered_with_packs(
             &self.removed_tile_ids,
             &self.tile_packs,
@@ -132,7 +134,7 @@ impl RunState {
         let fortunes = self.relics.has(RelicId::FortunesFavor);
         // Paper Lantern: 1-in-5 chance to burn up at round end. When it
         // burns, the slot empties and Paper goes extinct for the rest of
-        // the run — Iron Lantern then enters the shop pool.
+        // the run — Silver Filigree Lantern then enters the shop pool.
         // Fortune's Favor: 1-in-10 instead.
         if self.relics.has(RelicId::PaperLantern) {
             use rand::RngExt;
@@ -145,15 +147,17 @@ impl RunState {
                 self.note_relic_destroyed();
             }
         }
-        // Iron Lantern: 1-in-1000 chance to shatter at round end.
+        // Silver Filigree Lantern: 1-in-1000 chance to shatter at round end.
         // Fortune's Favor: 1-in-2000.
-        if self.relics.has(RelicId::IronLantern) {
+        if self.relics.has(RelicId::SilverFiligreeLantern) {
             use rand::RngExt;
 
             let mut rng = rand::rng();
             let denom = if fortunes { 2000 } else { 1000 };
             if rng.random_ratio(1, denom) {
-                self.relics.active.retain(|&r| r != RelicId::IronLantern);
+                self.relics
+                    .active
+                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
                 self.note_relic_destroyed();
             }
         }
@@ -218,7 +222,7 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_used = false;
+        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.boss.bonus_hand_size = 0;
@@ -280,7 +284,7 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_used = false;
+        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         // Reset per-round boss-effect state. The ante's `upcoming_boss` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.

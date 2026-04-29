@@ -8,9 +8,9 @@ use crate::core::boss::BossKind;
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedSet;
 use crate::core::progression::PlayerProgress;
-use crate::core::relic::{RelicId, RelicState, all_relic_defs, relic_description_live};
+use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::BlindKind;
-use crate::core::scoring::{ScoreBreakdown, TileEffectiveValue, tile_effective_value};
+use crate::core::scoring::ScoreBreakdown;
 use crate::core::structure::is_winning_structure_shape;
 use crate::core::tag::TagKind;
 use crate::core::talisman::TalismanKind;
@@ -813,14 +813,6 @@ impl<'a> GameEngine<'a> {
         run.auto_cash_in_on_full_structure
     }
 
-    pub fn tile_effective_value(
-        run: &RunState,
-        tile: &Tile,
-        dora_faces: &[(Suit, u8)],
-    ) -> TileEffectiveValue {
-        tile_effective_value(tile, &run.relics, dora_faces, &run.tile_debuffs)
-    }
-
     pub fn dora_matching_hand_indices(run: &RunState, dora_faces: &[(Suit, u8)]) -> Vec<usize> {
         run.hand
             .iter()
@@ -832,10 +824,6 @@ impl<'a> GameEngine<'a> {
                     .then_some(i)
             })
             .collect()
-    }
-
-    pub fn relic_live_description(run: &RunState, relic_id: RelicId) -> String {
-        relic_description_live(relic_id, &run.relic_counters, run.total_score_earned)
     }
 
     pub fn resumes_to_tutorial_shop(run: &RunState) -> bool {
@@ -850,67 +838,6 @@ impl<'a> GameEngine<'a> {
 
     pub fn current_upcoming_blind(run: &RunState) -> BlindKind {
         run.upcoming_blind
-    }
-
-    pub fn relic_tooltip_copy_detail(
-        run: &RunState,
-        relic_id: RelicId,
-        relic_index: usize,
-    ) -> Option<String> {
-        fn relic_name(id: RelicId) -> &'static str {
-            all_relic_defs()
-                .iter()
-                .find(|d| d.id == id)
-                .map(|d| d.name)
-                .unwrap_or("Unknown Relic")
-        }
-
-        fn copy_target_block(target: RelicId, run: &RunState) -> String {
-            format!(
-                "Copying: {}\n{}",
-                relic_name(target),
-                relic_description_live(target, &run.relic_counters, run.total_score_earned)
-            )
-        }
-
-        fn incompatible_block(reason: &str) -> String {
-            format!("Incompatible copy target.\n{reason}")
-        }
-
-        match relic_id {
-            RelicId::MirrorTile => {
-                let target = run.relics.active.get(relic_index + 1).copied();
-                Some(match target {
-                    Some(RelicId::MirrorTile | RelicId::ShadowHand) => incompatible_block(
-                        "Mirror Tile cannot resolve another copy relic to its right.",
-                    ),
-                    Some(target) => copy_target_block(target, run),
-                    None => {
-                        incompatible_block("Mirror Tile needs a relic immediately to its right.")
-                    }
-                })
-            }
-            RelicId::ShadowHand => {
-                let target = run.relics.active.first().copied();
-                Some(match target {
-                    Some(RelicId::ShadowHand | RelicId::MirrorTile) => incompatible_block(
-                        "Shadow Hand needs a non-copy relic in the first inventory slot.",
-                    ),
-                    Some(target) => copy_target_block(target, run),
-                    None => {
-                        incompatible_block("Shadow Hand needs a relic in the first inventory slot.")
-                    }
-                })
-            }
-            _ => None,
-        }
-        .map(|detail| {
-            if run.relics.is_debuffed(relic_id) {
-                format!("Disabled this round.\n\n{detail}")
-            } else {
-                detail
-            }
-        })
     }
 
     pub fn dispatch(&mut self, command: GameCommand) -> CommandOutcome {
@@ -1088,8 +1015,14 @@ impl<'a> GameEngine<'a> {
                     RelicId::MeltingIce => {
                         self.run.relic_counters.insert(RelicId::MeltingIce, 80);
                     }
+                    RelicId::Taotie => {
+                        self.run.relic_counters.insert(RelicId::Taotie, 0);
+                    }
                     RelicId::SilkThread => {
                         self.run.relic_counters.insert(RelicId::SilkThread, 40);
+                    }
+                    RelicId::SilkMoth => {
+                        self.run.relic_counters.insert(RelicId::SilkMoth, 0);
                     }
                     RelicId::TeaCeremony => {
                         self.run.relic_counters.insert(RelicId::TeaCeremony, 3);
@@ -1167,7 +1100,7 @@ impl<'a> GameEngine<'a> {
                         None,
                     );
                 }
-                if rid == RelicId::RitualBlade && index + 1 < self.run.relics.active.len() {
+                if rid == RelicId::HungryGhost && index + 1 < self.run.relics.active.len() {
                     let victim_id = self.run.relics.active[index + 1];
                     let victim_value = crate::core::relic::relic_sell_price(victim_id) as i32;
                     self.run.relics.active.remove(index + 1);
@@ -1175,9 +1108,9 @@ impl<'a> GameEngine<'a> {
                     *self
                         .run
                         .relic_counters
-                        .entry(RelicId::RitualBlade)
+                        .entry(RelicId::HungryGhost)
                         .or_insert(0) += victim_value * 2 * 10;
-                    self.run.relic_activations.push(RelicId::RitualBlade);
+                    self.run.relic_activations.push(RelicId::HungryGhost);
                     // Kintsugi counts the victim (involuntary destruction).
                     // The blade itself was sold, not destroyed, so don't
                     // credit it.

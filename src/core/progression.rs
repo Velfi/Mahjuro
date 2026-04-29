@@ -391,6 +391,19 @@ pub struct LevelUpResult {
     pub rules: Vec<RuleModifier>,
 }
 
+/// Every relic defined in `relics.json` that no earlier level unlocks. Keeps
+/// level 7 a catch-all so newly added relics are reachable without editing
+/// this file.
+fn level_7_relics() -> Vec<RelicId> {
+    use std::collections::HashSet;
+    let earlier: HashSet<RelicId> = (1..=6).flat_map(|l| unlocks_for_level(l).relics).collect();
+    crate::core::relic::all_relic_defs()
+        .iter()
+        .map(|d| d.id)
+        .filter(|id| !earlier.contains(id))
+        .collect()
+}
+
 fn unlocks_for_level(level: u32) -> LevelUnlocks {
     match level {
         1 => LevelUnlocks {
@@ -401,7 +414,12 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::JadeSerpent,
                 RelicId::RedSerpent,
             ],
-            rules: vec![RuleModifier::PairDoubleScore],
+            rules: vec![
+                RuleModifier::PairDoubleScore,
+                RuleModifier::SequenceWrap,
+                RuleModifier::NoSequenceBonus,
+                RuleModifier::HonorTripleScore,
+            ],
             yaku: vec![],
             dora: false,
         },
@@ -413,6 +431,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::ShantenShove,
                 RelicId::BlueSerpent,
                 RelicId::LowTide,
+                RelicId::HighTide,
                 RelicId::NoHonorButWealth,
                 RelicId::Sweepstakes,
                 RelicId::MeltingIce,
@@ -440,28 +459,27 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::Patience,
                 RelicId::GardenKeeper,
                 RelicId::PaperLantern,
-                RelicId::EmptyFrame,
+                RelicId::SolitarySage,
             ],
-            rules: vec![RuleModifier::SequenceWrap],
+            rules: vec![],
             yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
             dora: false,
         },
         4 => LevelUnlocks {
             relics: vec![
                 RelicId::HonorFury,
-                RelicId::WhiteSilence,
-                RelicId::Overflow,
-                // CodexCompass disabled — see core::relic::all_relic_defs.
+                RelicId::WhiteDragonsHush,
+                RelicId::StrengthInNumbers,
                 RelicId::EdgeRunner,
                 RelicId::TurtleShell,
                 RelicId::Tourist,
-                RelicId::LeadingTile,
+                RelicId::Geese,
                 RelicId::GhostHand,
-                RelicId::CleanStreak,
+                RelicId::Humility,
                 RelicId::Bonfire,
                 RelicId::StarTile,
             ],
-            rules: vec![RuleModifier::NoSequenceBonus],
+            rules: vec![],
             yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
             dora: true,
         },
@@ -471,27 +489,25 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::WildWinds,
                 RelicId::KanDrum,
                 RelicId::DoraCrown,
-                RelicId::TenpaiTalisman,
                 RelicId::LuckySeven,
                 RelicId::Minimalist,
                 RelicId::Disgust,
                 RelicId::Heirloom,
                 RelicId::SilkThread,
-                RelicId::LowEcho,
+                RelicId::VoiceOfThePeople,
+                RelicId::VoiceOfTheElite,
                 RelicId::Ikebana,
                 RelicId::TilePolisher,
                 RelicId::TeaCeremony,
             ],
-            rules: vec![RuleModifier::HonorTripleScore],
+            rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
             dora: false,
         },
         6 => LevelUnlocks {
             relics: vec![
-                // RiichiStick / RiverEraser / FuritenWard disabled — see
-                // core::relic::all_relic_defs and PATCH_D / PATCH_E docs.
                 RelicId::SecondWind,
-                RelicId::GoldFurnace,
+                RelicId::GoldenEngine,
                 RelicId::ClosedGate,
                 RelicId::RiverRunner,
                 RelicId::WayOfPurity,
@@ -505,24 +521,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
             dora: false,
         },
         7 => LevelUnlocks {
-            relics: vec![
-                RelicId::RedDragonRage,
-                RelicId::DragonEcho,
-                RelicId::EightTreasures,
-                RelicId::KongsBlessing,
-                RelicId::GlassCannon,
-                RelicId::Snowball,
-                RelicId::CurioCabinet,
-                RelicId::LotusBloom,
-                RelicId::LastBreath,
-                RelicId::IronLantern,
-                RelicId::FortunesFavor,
-                RelicId::SmokeBomb,
-                RelicId::PhantomRelic,
-                RelicId::RitualBlade,
-                RelicId::MirrorTile,
-                RelicId::ShadowHand,
-            ],
+            relics: level_7_relics(),
             rules: vec![],
             yaku: vec![],
             dora: false,
@@ -573,6 +572,23 @@ mod tests {
         p.runs_completed = 6;
         let l4 = p.available_relics().len();
         assert!(l4 > l1);
+    }
+
+    #[test]
+    fn every_active_relic_is_reachable_by_level_7() {
+        use crate::core::relic::all_relic_defs;
+        use std::collections::HashSet;
+        let unlocked: HashSet<RelicId> =
+            (1..=7).flat_map(|l| unlocks_for_level(l).relics).collect();
+        let missing: Vec<RelicId> = all_relic_defs()
+            .iter()
+            .map(|d| d.id)
+            .filter(|id| !unlocked.contains(id))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "relics in assets/data/relics.json never unlocked at any level: {missing:?}",
+        );
     }
 
     #[test]

@@ -37,7 +37,14 @@ impl ApplicationHandler for App {
         self.input = Some(InputState::new().expect("input"));
         // Keep the debug menu wrapper alive for the full app lifetime.
         // Dropping it invalidates the installed native menubar on macOS.
-        self.debug.menu = Some(DebugMenuBar::new(&window));
+        // Release builds ship without the debug menu — the `Option` stays
+        // `None` so the poll site below is a no-op. Set `MAHJURO_DEBUG_MENU=1`
+        // at build time to compile the menu into a release build (for
+        // perf metrics).
+        #[cfg(debug_menu_enabled)]
+        {
+            self.debug.menu = Some(DebugMenuBar::new(&window));
+        }
         log::info!("input + debug menu init in {:?}", t0.elapsed());
 
         log::info!("App::resumed() total: {:?}", t_resumed.elapsed());
@@ -248,9 +255,8 @@ impl ApplicationHandler for App {
                                 .iter()
                                 .all(|kind| self.progress.boss_times_encountered.contains_key(kind))
                             {
-                                self.steam.unlock_achievement(
-                                    crate::steam::Achievement::AllBossesSeen,
-                                );
+                                self.steam
+                                    .unlock_achievement(crate::steam::Achievement::AllBossesSeen);
                             }
                         }
                         GameEvent::BossDefeated(bk) => {
@@ -285,6 +291,9 @@ impl ApplicationHandler for App {
                                 .schedule_sfx(audio::SfxId::for_yaku(yk), now + offset);
                             yaku_stinger_index += 1;
                         }
+                        GameEvent::AchievementUnlocked(ach) => {
+                            self.steam.unlock_achievement(ach);
+                        }
                     }
                 }
 
@@ -300,7 +309,8 @@ impl ApplicationHandler for App {
                 #[cfg(not(target_os = "macos"))]
                 let skip_legacy_update_poll = false;
                 if !skip_legacy_update_poll
-                    && let Some(result) = self.update_checker.poll()
+                    && let Some(checker) = self.update_checker.as_mut()
+                    && let Some(result) = checker.poll()
                 {
                     let modal = match result {
                         update_check::UpdateResult::UpdateAvailable { new_version } => {
@@ -571,8 +581,10 @@ impl ApplicationHandler for App {
                     for a in &actions {
                         match a {
                             UiAction::Confirm => {
-                                if let Some(version) = self.pending_update_prompt.take() {
-                                    self.update_checker.start_install(version);
+                                if let Some(version) = self.pending_update_prompt.take()
+                                    && let Some(checker) = self.update_checker.as_mut()
+                                {
+                                    checker.start_install(version);
                                 }
                                 self.modals.advance_page();
                                 break;
@@ -796,6 +808,7 @@ impl ApplicationHandler for App {
                     self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
                     self.gfx.tileset_name = opts.tileset_name.clone();
+                    self.gfx.surface_kind = opts.surface_kind;
                     self.gfx.gamma = opts.gamma;
                     self.gfx.shadows_enabled = opts.shadows_enabled;
                     self.gfx.ssr_enabled = opts.ssr_enabled;
@@ -806,6 +819,7 @@ impl ApplicationHandler for App {
                     self.run.set_hints_enabled(opts.hints_enabled);
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
+                        input.xy_quick_action = opts.xy_quick_action;
                     }
                 }
 
@@ -1018,6 +1032,9 @@ impl ApplicationHandler for App {
 
                     if state == ElementState::Pressed {
                         self.mouse_clicked = true;
+                        if let Some(input) = self.input.as_mut() {
+                            input.mode = InputMode::Cursor;
+                        }
 
                         // Debug "Object Hit Test" one-shot picker. If armed,
                         // consume this click: hit-test the cursor against
@@ -1149,6 +1166,7 @@ impl ApplicationHandler for App {
                                 && cursor.1 >= by
                                 && cursor.1 <= by + bh
                             {
+                                self.audio.play_sfx(audio::SfxId::TileClick);
                                 match btn.action {
                                     ButtonAction::Ui(a) => self.mouse_actions.push(a),
                                     ButtonAction::Scene(id) => {
@@ -1188,6 +1206,7 @@ impl ApplicationHandler for App {
                                     // drag-to-swap state is recorded — the
                                     // gesture is now hold-to-multi-select,
                                     // not click-and-drag-to-reorder.
+                                    self.audio.play_sfx(audio::SfxId::TileClick);
                                     self.mouse_actions.push(UiAction::Confirm);
                                 } else if let Some(slot) = clicked_relic_slot {
                                     input.drag = Some(ui::input::DragState {
@@ -1257,9 +1276,22 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let (Some(input), Some(win)) = (self.input.as_mut(), self.window.as_ref()) {
-                    let was_hidden = input.mode != InputMode::Cursor;
-                    input.mode = InputMode::Cursor;
-                    input.last_cursor = (position.x as f32, position.y as f32);
+                    let new_cursor = (position.x as f32, position.y as f32);
+                    // Only flip back to Cursor mode if the cursor actually
+                    // moved meaningfully. Skip while in Controller mode —
+                    // micro-movements still fight stick navigation; switching
+                    // to Cursor uses LMB instead (see MouseInput).
+                    let dx = new_cursor.0 - input.last_cursor.0;
+                    let dy = new_cursor.1 - input.last_cursor.1;
+                    let moved = (dx * dx + dy * dy) > 4.0;
+                    let was_hidden = moved && input.mode != InputMode::Cursor;
+                    if moved && input.mode != InputMode::Controller {
+                        // Pointer jitter / OS drift used to flip Controller→Cursor
+                        // and break stick navigation; explicit mouse use is LMB
+                        // (see MouseInput).
+                        input.mode = InputMode::Cursor;
+                    }
+                    input.last_cursor = new_cursor;
                     let size = win.inner_size();
                     let layout = self
                         .layout_engine
@@ -1699,31 +1731,11 @@ impl ApplicationHandler for App {
             _event_loop.exit();
             return;
         }
-        let cascade_active = matches!(&self.scene, Scene::Gameplay(g) if g.is_animating());
-        let collection_3d = matches!(&self.scene, Scene::Collection(c) if c.has_3d_tab());
-        let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
-        let gameplay_active = matches!(&self.scene, Scene::Gameplay(_));
-        let shop_active = matches!(&self.scene, Scene::Shop(_));
-        let splash_active = matches!(&self.scene, Scene::Splash(_));
-        let start_screen_active = matches!(&self.scene, Scene::StartScreen(_));
-        let needs_redraw = !self.anim.is_idle()
-            || self
-                .renderer
-                .as_ref()
-                .map(|r| r.is_spinning())
-                .unwrap_or(false)
-            || cascade_active
-            || collection_3d
-            || transitioning
-            || self.modals.needs_redraw()
-            || self.gfx.smoke_quality != crate::persistence::SmokeQuality::Off
-            || self.tooltips.is_active()
-            || gameplay_active
-            || shop_active
-            || splash_active
-            || start_screen_active
-            || !self.overlay_stack.is_empty();
-        if needs_redraw && let Some(w) = self.window.as_ref() {
+        // Continuous redraw: input (including gilrs) is processed from
+        // `RedrawRequested`; presenting stays vsync-gated in the GPU path.
+        // Trade CPU work for predictable latency — [`UiLayout::solve`] and the
+        // renderer cache cheap wins when window size is unchanged.
+        if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
     }

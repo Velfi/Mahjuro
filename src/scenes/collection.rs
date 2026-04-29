@@ -246,6 +246,7 @@ impl CollectionScene {
 
     /// Whether the scene needs continuous redraws to animate 3D content.
     /// During the rebuild the whole scene is 3D, so this is always true.
+    #[allow(dead_code)] // Was used for redraw gating when collection mixed 2D/3D tabs.
     pub fn has_3d_tab(&self) -> bool {
         true
     }
@@ -611,6 +612,7 @@ impl CollectionScene {
                                 relic_id: *relic_id,
                                 glow: if is_focus && !silhouette { 0.6 } else { 0.0 },
                                 silhouette,
+                                debuffed: false,
                                 pick_id: Some(boss_i as u32),
                             },
                             hover_target: if is_focus { 1.0 } else { 0.0 },
@@ -653,7 +655,7 @@ impl CollectionScene {
                     }
                     ArtifactKind::PlaqueOnly => {
                         use crate::render::primitive::{
-                            DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                            DecalLayout, DecalSpec, MaterialSpec, MeshId,
                         };
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
@@ -665,7 +667,6 @@ impl CollectionScene {
                                 material: MaterialSpec::lacquered_wood_flat().with_decal(
                                     DecalSpec {
                                         text: boss.name.clone(),
-                                        palette: DecalPalette::GoldGilded,
                                         layout: DecalLayout::Fit {
                                             target_short_edge:
                                                 crate::render::decal::PLAQUE_DECAL_HEIGHT,
@@ -766,6 +767,7 @@ impl CollectionScene {
                             relic_id: *relic_id,
                             glow: if silhouette { 0.0 } else { 0.9 },
                             silhouette,
+                            debuffed: false,
                             pick_id: None,
                         },
                         hover_target: 1.0,
@@ -818,7 +820,7 @@ impl CollectionScene {
                         ]
                     };
                     use crate::render::primitive::{
-                        DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                        DecalLayout, DecalSpec, MaterialSpec, MeshId,
                     };
                     let closeup_silhouette = !boss.unlocked;
                     let closeup_material = if closeup_silhouette {
@@ -828,7 +830,6 @@ impl CollectionScene {
                     } else {
                         MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
                             text: label,
-                            palette: DecalPalette::GoldGilded,
                             layout: DecalLayout::Fit {
                                 target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
                             },
@@ -872,7 +873,7 @@ impl CollectionScene {
             );
             {
                 use crate::render::primitive::{
-                    DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                    DecalLayout, DecalSpec, MaterialSpec, MeshId,
                 };
                 hud_plaques.push(Object3d {
                     pos: anchor.pos,
@@ -883,7 +884,6 @@ impl CollectionScene {
                         shape: MeshId::BeveledSlab,
                         material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
                             text: card_text,
-                            palette: DecalPalette::GoldGilded,
                             layout: DecalLayout::Fit {
                                 target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
                             },
@@ -908,7 +908,7 @@ impl CollectionScene {
                 let stats_h = h * 0.08;
                 let stats_wz = hud_wz - card_h * 0.65 - stats_h * 0.55;
                 use crate::render::primitive::{
-                    DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
+                    DecalLayout, DecalSpec, MaterialSpec, MeshId,
                 };
                 hud_plaques.push(Object3d {
                     pos: [card_px, hud_py, stats_wz],
@@ -919,7 +919,6 @@ impl CollectionScene {
                         shape: MeshId::BeveledSlab,
                         material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
                             text: stats_text,
-                            palette: DecalPalette::GoldGilded,
                             layout: DecalLayout::Fit {
                                 target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
                             },

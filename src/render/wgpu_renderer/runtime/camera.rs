@@ -80,12 +80,7 @@ impl CameraFrame {
     /// `model` transforms local-space corners; `half` is the half-extents
     /// in local space; `center_y` shifts the local-space box along Y
     /// (some meshes are centered, others sit on their base).
-    pub(super) fn project_aabb_rect(
-        &self,
-        model: Mat4,
-        half: [f32; 3],
-        center_y: f32,
-    ) -> [f32; 4] {
+    pub(super) fn project_aabb_rect(&self, model: Mat4, half: [f32; 3], center_y: f32) -> [f32; 4] {
         let corners = [
             glam::Vec3::new(-half[0], center_y - half[1], -half[2]),
             glam::Vec3::new(half[0], center_y - half[1], -half[2]),
@@ -132,6 +127,7 @@ impl WgpuRenderer {
                     ssr_stride,
                     ssr_max_steps,
                 ],
+                felt: [self.felt_shader_lod, 0.0, 0.0, 0.0],
             }),
         );
 

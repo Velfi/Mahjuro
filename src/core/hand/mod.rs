@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 mod decomposition;
 mod validation;
 
-pub use decomposition::{
-    detect_all_sets, enumerate_decompositions, find_pairs_and_triplets,
-};
+pub use decomposition::{detect_all_sets, enumerate_decompositions, find_pairs_and_triplets};
 pub use validation::{suggest_completions, validate_selection, validate_selection_with_rules};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -32,6 +30,6 @@ pub struct DetectedSet {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod proptests;
+#[cfg(test)]
+mod tests;

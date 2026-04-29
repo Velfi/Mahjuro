@@ -53,14 +53,16 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_used = false;
+        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
 
         // Re-deal the wall and hand.
-        let overflow = self.relics.has(crate::core::relic::RelicId::Overflow);
+        let overflow = self
+            .relics
+            .has(crate::core::relic::RelicId::StrengthInNumbers);
         self.wall = Wall::from_filtered_with_packs(
             &self.removed_tile_ids,
             &self.tile_packs,

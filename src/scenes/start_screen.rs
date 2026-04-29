@@ -181,7 +181,7 @@ impl SceneBehavior for StartScreenScene {
                 UiAction::Confirm => activated = true,
                 UiAction::Cancel | UiAction::Pause => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    *ctx.quit_requested = true;
+                    self.focus = Some(MenuFocus::Quit);
                 }
                 _ => {}
             }
@@ -308,7 +308,7 @@ impl SceneBehavior for StartScreenScene {
                 rotation: cam_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
-                    label: label_for(item, in_progress).to_string(),
+                    label: std::borrow::Cow::Borrowed(label_for(item, in_progress)),
                     pick_id: None,
                 },
                 hover_target: 0.0,
@@ -463,10 +463,7 @@ impl SceneBehavior for StartScreenScene {
         }];
 
         // ── Catch-all click target (full-screen invisible button) ───────
-        let buttons = vec![super::ButtonDef {
-            rect: (0.0, 0.0, w, h),
-            action: super::ButtonAction::Scene(0),
-        }];
+        let buttons = vec![super::ButtonDef::scene((0.0, 0.0, w, h), 0)];
 
         // ── Assemble the frame ──────────────────────────────────────────
         let mut frame = UiFrame::new();

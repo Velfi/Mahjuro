@@ -28,6 +28,13 @@ pub enum Achievement {
     Stake2Unlocked,
     /// Encountered every boss blind at least once.
     AllBossesSeen,
+    /// Silk Thread metamorphosed into Silk Moth — the player babied a
+    /// fragile relic all the way to its terminal state instead of selling
+    /// it. Marks engagement with the fragile / scaling cluster.
+    SilkMothEmerged,
+    /// Melting Ice thawed into Taotie — same fragile-cluster milestone
+    /// as `SilkMothEmerged`, but for the chips half of the pair.
+    TaotieAwakened,
 }
 
 impl Achievement {
@@ -42,6 +49,8 @@ impl Achievement {
             Self::TenRunsPlayed => "TEN_RUNS_PLAYED",
             Self::Stake2Unlocked => "STAKE_2_UNLOCKED",
             Self::AllBossesSeen => "ALL_BOSSES_SEEN",
+            Self::SilkMothEmerged => "SILK_MOTH_EMERGED",
+            Self::TaotieAwakened => "TAOTIE_AWAKENED",
         }
     }
 }

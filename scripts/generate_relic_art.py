@@ -37,7 +37,7 @@ Usage:
     python scripts/generate_relic_art.py --artifact object     # only object renders
     python scripts/generate_relic_art.py --artifact height     # only relief/height sources
     python scripts/generate_relic_art.py --artifact mask       # only rewrite masks from existing heights
-    python scripts/generate_relic_art.py --artifact both --name overflow
+    python scripts/generate_relic_art.py --artifact both --name strength_in_numbers
     python scripts/generate_relic_art.py --force               # regenerate all
     python scripts/generate_relic_art.py --relic 17            # one relic by index
     python scripts/generate_relic_art.py --name kan_drum       # one relic by slug
@@ -47,6 +47,7 @@ Usage:
 
 import argparse
 import base64
+import json
 import os
 import re
 import sys
@@ -144,57 +145,62 @@ def style_prefix(rarity: str) -> str:
     return f"{STYLE_CORE}\n\n{profile}"
 
 
-RELIC_RS_PATH = (
-    Path(__file__).resolve().parent.parent / "src" / "core" / "relic.rs"
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RELIC_RS_PATH = REPO_ROOT / "src" / "core" / "relic.rs"
+RELIC_JSON_PATH = REPO_ROOT / "assets" / "data" / "relics.json"
 
 
 def load_slug_to_rarity() -> dict:
-    """Parse src/core/relic.rs for the authoritative slug → rarity mapping.
+    """Build the slug → rarity mapping from the game's source-of-truth files.
 
-    Joins two match tables from the Rust source:
-      - `asset_filename` arms: `RelicId::TripletBoost => "triplet_boost.png"`
-      - `all_relic_defs` entries: `id: RelicId::TripletBoost, ... rarity: Rarity::Common`
+    Slugs come from `asset_filename` arms in src/core/relic.rs (e.g.
+    `RelicId::TripletBoost => "triplet_boost.png"`). Rarities come from
+    assets/data/relics.json, which `all_relic_defs` deserializes at runtime.
+    The two are joined on the snake_case slug.
 
-    Returns `{ "triplet_boost": "Common", ... }`. Fails loud if relic.rs is
-    missing or a RelicId appears in one table but not the other — drift between
-    the script and the game must be surfaced, not silently defaulted.
+    Returns `{ "triplet_boost": "Common", ... }`. Fails loud if either file is
+    missing or unparseable — drift between the script and the game must be
+    surfaced, not silently defaulted.
     """
     if not RELIC_RS_PATH.exists():
         raise SystemExit(
-            f"Cannot read rarity map: {RELIC_RS_PATH} does not exist."
+            f"Cannot read slug list: {RELIC_RS_PATH} does not exist."
         )
-    text = RELIC_RS_PATH.read_text()
+    if not RELIC_JSON_PATH.exists():
+        raise SystemExit(
+            f"Cannot read rarity map: {RELIC_JSON_PATH} does not exist."
+        )
 
-    id_to_slug = {
-        m.group(1): m.group(2)
+    text = RELIC_RS_PATH.read_text()
+    slugs = {
+        m.group(1)
         for m in re.finditer(
-            r'RelicId::(\w+)\s*=>\s*"([a-z0-9_]+)\.png"', text
+            r'RelicId::\w+\s*=>\s*"([a-z0-9_]+)\.png"', text
         )
     }
-
-    id_to_rarity = {}
-    for m in re.finditer(
-        r"id:\s*RelicId::(\w+)\s*,[^}]*?rarity:\s*Rarity::(\w+)",
-        text,
-        flags=re.DOTALL,
-    ):
-        id_to_rarity[m.group(1)] = m.group(2)
-
-    if not id_to_slug or not id_to_rarity:
+    if not slugs:
         raise SystemExit(
-            "Failed to parse relic.rs — asset_filename arms or "
-            "all_relic_defs entries did not match expected shape."
+            "Failed to parse relic.rs — asset_filename arms did not match "
+            "expected shape."
         )
 
+    try:
+        defs = json.loads(RELIC_JSON_PATH.read_text())
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Failed to parse {RELIC_JSON_PATH}: {e}")
+
     slug_to_rarity = {}
-    for relic_id, slug in id_to_slug.items():
-        rarity = id_to_rarity.get(relic_id)
-        if rarity is None:
-            # RelicId has an asset filename but no RelicDef — harmless (the
-            # script only generates for slugs in RELICS), so skip silently.
+    for entry in defs:
+        slug = entry.get("id")
+        rarity = entry.get("rarity")
+        if not slug or not rarity:
+            raise SystemExit(
+                f"relics.json entry missing id/rarity: {entry!r}"
+            )
+        if slug not in slugs:
+            # Defined in JSON but no asset_filename arm — harmless for art gen.
             continue
-        slug_to_rarity[slug] = rarity
+        slug_to_rarity[slug] = rarity.capitalize()
     return slug_to_rarity
 
 
@@ -227,10 +233,13 @@ RELICS = [
     (
         "sequence_surge",
         "Sequence Surge",
-        "A sleek experimental monorail car on a single elevated rail, three "
-        "carriages linked nose to tail, speeding through a foggy valley. "
-        "Streamlined 1960s futurism, motion blur on the landscape.",
-        "Silver monorail, teal fog, olive hillside, rust rail supports.",
+        "Three mahjong tiles standing upright in a tight row at the center "
+        "of an emerald felt table — a 4, 5, and 6 of bamboo — with a "
+        "trailing streak of warm light arcing through them as if caught "
+        "mid-rush. Faint motion blur on the felt behind the row, gold "
+        "sparks flicking off the trailing edge. A few stray face-down "
+        "wall tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, bamboo green marks, warm gold light streak, subtle amber sparks.",
     ),
     (
         "pair_power",
@@ -244,67 +253,101 @@ RELICS = [
     (
         "honor_fury",
         "Honor Fury",
-        "A ceremonial bronze temple bell on a heavy timber frame, mid-strike "
-        "from a suspended log ram. Visible shockwave rings emanate from the "
-        "bell. Mountain monastery setting, overcast sky.",
-        "Oxidized bronze bell, dark timber, grey shockwaves, slate sky.",
+        "A triplet of honor tiles standing upright in a tight row at the "
+        "center of an emerald felt table — a wind tile flanked by a red "
+        "dragon and a green dragon — their faces glowing hot from within "
+        "as if forged. Embers and faint heat shimmer rise from the seams "
+        "between them, and concentric shockwave rings ripple outward across "
+        "the felt. A few stray face-down wall tiles lie blurred in the "
+        "background.",
+        "Ivory tile faces, deep emerald felt, glowing crimson and jade honor marks, warm ember sparks, faint gold shockwaves.",
     ),
     (
         "red_dragon_rage",
         "Red Dragon Rage",
-        "A deep-red experimental rocket sled on a desert salt flat rail, "
-        "exhaust flame blasting from twin rear nozzles. Heat shimmer warps "
-        "the horizon. Ground-level perspective.",
-        "Crimson fuselage, orange exhaust, bleached desert, pale sky.",
+        "Inked scroll illustration of three dragon mahjong tiles standing "
+        "upright in a tight triplet on an emerald felt table — a red dragon "
+        "flanked by a green dragon and a white dragon. The center tile's "
+        "crimson 'chun' character is alive: its brushstrokes uncoil into a "
+        "serpentine eastern dragon that bursts forward off the tile face, "
+        "scaled crimson body lashing through the air with its jaws thrown "
+        "open in a roar. A plume of brushwork flame trails from its mouth "
+        "and scorches the faces of the flanking tiles, leaving sumi-e "
+        "smoke curls drifting upward. The dragon's tail still loops back "
+        "into unfinished crimson calligraphy strokes on the tile face. A "
+        "few stray face-down wall tiles lie blurred in the background.",
+        "Painterly inked scroll illustration, sumi-e brushwork, ivory tile faces, deep emerald felt, crimson chun calligraphy uncoiling into a coiled eastern dragon, jade-green and blue-edged white dragon glyphs, brushstroke flame and smoke curls, warm amber rim light.",
     ),
     (
         "green_luck",
         "Green Luck",
-        "A dented olive-green Volkswagen Beetle parked alone in a field of "
-        "wild grass, one headlight out, a four-leaf clover decal on the door. "
-        "Late afternoon golden light. Quietly lucky.",
-        "Olive green car, golden grass, warm amber light.",
+        "A single mahjong tile standing upright at the center of an emerald "
+        "felt table, its face carved with the green bamboo 'one bam' — a "
+        "stylized peacock with jade plumage. Small gold coins are stacked "
+        "in a neat pile beside the tile, with a few more spilling toward "
+        "the foreground catching warm light. A scatter of numbered suit "
+        "tiles — bamboos and circles, no honors — lies blurred in the "
+        "background.",
+        "Ivory tile face, deep emerald felt, jade-green peacock mark, warm gold coins, soft amber rim light.",
     ),
     (
-        "white_silence",
-        "White Silence",
-        "A white single-engine biplane parked on a frozen lake, engine off, "
-        "propeller still. Perfect silence. Pale overcast sky reflected in "
-        "glassy ice. No footprints, no tracks.",
-        "Cream white fuselage, pale blue ice, flat grey sky.",
+        "white_dragons_hush",
+        "White Dragon's Hush",
+        "A pair of blank-faced white dragon mahjong tiles standing upright "
+        "side by side at the center of an emerald felt table, their ivory "
+        "faces unmarked except for the carved blue-edged border of the "
+        "haku tile. A faint cool moonlit halo rings the pair, and the "
+        "felt around them is utterly still — even the stray face-down "
+        "wall tiles in the blurred background seem to hush. A single "
+        "small zodiac tile lies face-up just beside the pair, as if "
+        "drawn from quiet.",
+        "Ivory tile faces, deep emerald felt, blue-edged white dragon borders, cool pale moonlit rim light, hushed muted shadows.",
     ),
     (
         "joker_tile",
         "Joker Tile",
-        "A peculiar multi-purpose utility vehicle with mismatched parts — "
-        "half truck cab, half boat hull, with a crane arm and a small radar "
-        "dish. Parked in a junkyard. It shouldn't work but clearly does.",
-        "Mismatched rust, olive, and primer grey panels, amber junkyard.",
+        "A single mahjong tile standing upright at the center of an emerald "
+        "felt table, its face split into four uneven quadrants showing "
+        "ghostly impressions of different tile faces — a bamboo stick, a "
+        "circle dot, a character glyph, and a wind arrow — overlapping like "
+        "shifting reflections. A faint prismatic shimmer plays across the "
+        "ivory surface as if the tile cannot decide what it is. A few stray "
+        "face-down wall tiles lie blurred in the background.",
+        "Ivory tile face, deep emerald felt, prismatic shimmer, muted bamboo green / circle blue / character crimson marks.",
     ),
     (
-        "overflow",
-        "Overflow",
-        "A massive cylindrical grain silo with its top hatch blown open, "
-        "grain cascading down the sides in golden streams. A small conveyor "
-        "belt feeds more in at the base. Industrial farmland setting.",
-        "Weathered steel silo, golden grain, olive fields, overcast sky.",
+        "strength_in_numbers",
+        "Strength in Numbers",
+        "A double-stacked mahjong wall sitting at the center of an emerald "
+        "felt table, far taller than a normal four-row wall — six rows "
+        "high, face-down tiles packed tight. The top is bowing outward "
+        "and tiles are spilling off the back edges in slow cascades, "
+        "tumbling down onto the felt and pooling at the base of the wall. "
+        "A few loose tiles have rolled forward into the foreground. Soft "
+        "amber rim light catches the lacquered tile backs.",
+        "Lacquered face-down mahjong tiles, deep emerald felt, towering double-stacked wall, tumbling cascade of tiles spilling off the edges, soft amber rim light, dark warm shadows.",
     ),
     (
         "quick_draw",
         "Quick Draw",
-        "A lone revolver mid-unholster from a worn leather gun belt, barrel "
-        "already clearing the lip of the holster in a freeze-frame blur. A "
-        "single brass cartridge glints in the foreground. Dusty saloon plank "
-        "floor, low raking sunlight through slats.",
-        "Blued steel revolver, tan leather belt, brass cartridge, warm dusty amber light.",
+        "A neat row of face-down mahjong wall tiles along the back of an "
+        "emerald felt table, with one tile mid-flight in a freeze-frame "
+        "arc as it lifts from the wall toward the foreground — a streak "
+        "of warm light trailing behind it. The tile is just starting to "
+        "rotate face-up, hinting at the glyph beneath. A few stray "
+        "face-up tiles rest blurred in the foreground.",
+        "Ivory tile faces, deep emerald felt, motion-blurred warm gold light streak, dark lacquered tile backs, soft amber rim light.",
     ),
     (
         "chain_reaction",
         "Chain Reaction",
-        "A row of large industrial dominoes — concrete blocks — toppling in "
-        "sequence down a factory floor. The first has already fallen, the "
-        "last still stands. Dust clouds at each impact point.",
-        "Grey concrete blocks, rust floor, amber dust, industrial lighting.",
+        "Two short rows of mahjong tiles laid face-up on an emerald felt "
+        "table, one row behind the other. The back row glows softly as if "
+        "just scored, with a single arc of warm light leaping forward "
+        "from its last tile to ignite the first tile of the front row, "
+        "kindling that one in turn. Faint gold sparks trail along the arc. "
+        "A few stray face-down wall tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, warm gold arc of light, soft amber afterglow on the back row, drifting gold sparks.",
     ),
     (
         "multiplier_master",
@@ -326,18 +369,29 @@ RELICS = [
     (
         "wild_winds",
         "Wild Winds",
-        "A small weather station on an exposed coastal cliff, four spinning "
-        "anemometer cups blurred by violent wind. The instrument mast bends "
-        "slightly. Storm clouds roll in from the sea.",
-        "Steel grey mast, spinning chrome cups, dark teal sea, slate clouds.",
+        "Three mahjong tiles standing upright in a tight row at the center "
+        "of an emerald felt table — a 4 of bamboo on the left, a 6 of "
+        "bamboo on the right, and a wind tile in the middle slot. The "
+        "wind tile's carved glyph is heavily motion-blurred, smeared "
+        "sideways into ghostly streaks as if shifting between forms "
+        "faster than the eye can fix. Strong horizontal motion-blur lines "
+        "rake across the wind tile and trail off both edges of the row, "
+        "with petals and dust caught in the streaking blur. The 4 and 6 "
+        "stand sharp and still in contrast. A few stray face-down wall "
+        "tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, bamboo green marks, deep blue wind glyph smeared in heavy horizontal motion blur, pale wind-streak light, drifting motion-blur petals and dust, sharp focus on the flanking number tiles.",
     ),
     (
         "dragon_echo",
         "Dragon Echo",
-        "A large parabolic acoustic mirror — a concrete listening dish — on "
-        "a coastal bluff, aimed out to sea. Three progressively fainter "
-        "echo-wave arcs visible in the misty air before it.",
-        "Pale concrete dish, teal mist, amber echo arcs, grey-green bluff.",
+        "A triplet of red dragon mahjong tiles standing upright at the "
+        "center of an emerald felt table, their crimson 'chun' glyphs "
+        "burning with inner light. Ghostly translucent echoes of the same "
+        "triplet recede behind it in three progressively fainter arcs, as "
+        "if a dragon's roar reverberating across the felt. Faint embers "
+        "drift between the layers. A few stray face-down wall tiles lie "
+        "blurred in the background.",
+        "Ivory tile faces, deep emerald felt, glowing crimson dragon glyphs, ghostly amber echo arcs, drifting ember sparks.",
     ),
     (
         "shanten_shove",
@@ -359,50 +413,28 @@ RELICS = [
     (
         "dora_crown",
         "Dora Crown",
-        "An ornate brass astrolabe on a velvet-lined display stand, its "
-        "interlocking rings set with a single red glass cabochon at the apex. "
-        "A dim collector's study, leather-bound books in background.",
-        "Patina brass rings, crimson cabochon, dark velvet, amber lamplight.",
-    ),
-    (
-        "riichi_stick",
-        "Riichi Stick",
-        "A single ivory baton with a red enamel inlay stripe, resting on a "
-        "felt-lined presentation case. Brass clasps on the case. Museum "
-        "artifact lighting — single spot from above.",
-        "Ivory baton, crimson enamel, dark green felt, brass clasps.",
-    ),
-    (
-        "tenpai_talisman",
-        "Tenpai Talisman",
-        "A folded paper omamori charm with a silk tassel and drawstring, its "
-        "face stamped with a single mahjong tile glyph surrounded by a ring "
-        "of small waiting-tile icons, as if the final tile is about to arrive.",
-        "Deep indigo silk, gold ink stamp, ivory tile glyph, crimson tassel cord.",
-    ),
-    (
-        "river_eraser",
-        "River Eraser",
-        "A canal lock with its gates half-open, water draining rapidly from "
-        "the chamber. The receding waterline leaves dark wet marks on the "
-        "stone walls. A small control house sits atop.",
-        "Dark stone walls, teal draining water, rust gates, grey sky.",
-    ),
-    (
-        "furiten_ward",
-        "Furiten Ward",
-        "A medieval pavise shield — tall and rectangular — planted upright in "
-        "muddy ground. Its face bears an abstract ward sigil in faded gold "
-        "paint. Two crossbow bolts are embedded in it, deflected.",
-        "Weathered wood shield, faded gold sigil, rust bolts, ochre mud.",
+        "A single mahjong tile lying face-up at the center of an emerald "
+        "felt table — a dora indicator with its glyph carved in red — "
+        "wearing a small Chinese imperial mianguan crown hovering just "
+        "above its face: a flat rectangular gold-and-lacquer board with "
+        "rows of beaded jade tassels hanging from its front and back "
+        "edges, accented by ornate carved dragon and cloud motifs. A "
+        "second dora indicator tile lies face-up just behind it, slightly "
+        "offset. Soft warm light glows from beneath both tiles, and a few "
+        "flecks of gold drift across the felt. A few stray face-down "
+        "wall tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, crimson dora glyphs, gold-and-black-lacquer mianguan crown, jade beaded tassels, carved dragon and cloud motifs, warm amber underglow, drifting gold flecks.",
     ),
     (
         "round_compass",
         "Round Compass",
-        "A large ship's binnacle compass on a teak pedestal, its brass gimbal "
-        "housing a compass card with ornate wind-rose points. The needle "
-        "points firmly east. Teak deck planking beneath.",
-        "Polished brass housing, cream compass card, warm teak wood.",
+        "Four wind mahjong tiles — East, South, West, North — laid face-up "
+        "in a ring at the cardinal points of an emerald felt table, their "
+        "glyphs aligned outward like a compass rose. A faint golden "
+        "wind-rose is etched into the felt between them, and a glowing "
+        "needle of warm light arcs from the center toward the East tile. "
+        "A few stray face-down wall tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, deep blue wind glyphs, etched gold wind-rose, warm amber needle of light.",
     ),
     (
         "eight_treasures",
@@ -421,20 +453,17 @@ RELICS = [
         "Ivory tile faces, deep vermilion altar cloth, bright gold halo, soft incense haze.",
     ),
     (
-        "codex_compass",
-        "Codex Compass",
-        "A field surveyor's theodolite on a wooden tripod, its brass telescope "
-        "pointing at an angle, with a leather-bound logbook open at the base. "
-        "Mountain pass landscape, low clouds.",
-        "Brass theodolite, dark wood tripod, cream logbook, slate mountains.",
-    ),
-    (
         "garden_keeper",
         "Garden Keeper",
-        "A squat cast-iron greenhouse heater with ornate legs, its chimney "
-        "puffing gentle steam. Through the glass panes behind it, tropical "
-        "plants press against the fogged glass. Victorian botanical garden.",
-        "Dark iron heater, teal glass panes, green foliage, amber steam.",
+        "A small bell-shaped glass cloche dome resting on an emerald felt "
+        "table, sealing in a tiny private greenhouse. Inside, a single "
+        "flower mahjong tile stands upright with two real living blossoms "
+        "— a delicate plum and an orchid — growing out of the carved "
+        "glyph on its face, leaves and tendrils curling around the tile. "
+        "Soft warm grow-light glows from beneath, and faint condensation "
+        "beads the inside of the glass. A few stray face-down wall tiles "
+        "lie blurred on the felt outside the dome.",
+        "Clear glass cloche dome with beaded condensation, ivory tile face, deep emerald felt, soft pastel pink plum and jade orchid blossoms, curling green leaves, warm amber grow-light underglow.",
     ),
     (
         "ikebana",
@@ -447,37 +476,50 @@ RELICS = [
     (
         "hanami",
         "Hanami",
-        "A small wooden vendor's cart under a canopy of cherry blossom "
-        "branches, petals drifting onto stacked wooden boxes of goods. "
-        "Gold-painted price placards lean against the boxes. Spring market.",
-        "Warm wood cart, pink petals, gold placards, soft daylight.",
+        "A miniature cherry tree growing from a small lacquered pot at "
+        "the center of an emerald felt table — gnarled dark trunk, "
+        "delicate spreading branches — where every blossom on the tree "
+        "is actually a small upright mahjong flower tile clipped to the "
+        "branch like a pink bloom, ivory faces painted with plum, orchid, "
+        "bamboo, and chrysanthemum motifs. A few flower tiles have fallen "
+        "and lie scattered face-up on the felt below, with stacks of warm "
+        "gold coins gathered beneath the tree where the tiles have "
+        "dropped. Loose pink petals drift through the air. A few stray "
+        "face-down wall tiles lie blurred in the background.",
+        "Dark gnarled cherry trunk and branches, ivory mahjong flower tiles clipped on as blossoms, soft pastel pink and jade flower glyphs, deep emerald felt, lacquered black pot, warm gold coin stacks beneath fallen tiles, drifting pink petals, soft amber rim light.",
     ),
     (
         "jade_serpent",
         "Jade Serpent",
-        "A jade-green snake coiled around a bundle of bamboo stalks, its "
-        "scales formed from tiny mahjong tile faces. A simple terrarium "
-        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
-        "slightly off — the snake has too-large friendly eyes.",
-        "Cream background, jade green snake, bamboo greens, muted moss and pebble accents.",
+        "A glazed porcelain serpent figurine coiled around a bundle of "
+        "bamboo stalks, its body sculpted from creamy white china with "
+        "fine crackle glaze and inlaid scales of polished jade cabochons. "
+        "Its eyes are tiny faceted emeralds catching the light. The "
+        "figurine rests on a dark lacquer plinth against a soft, neutral "
+        "studio backdrop.",
+        "Cream porcelain body, polished jade scales, faceted emerald eyes, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
         "red_serpent",
         "Red Serpent",
-        "A red snake coiled around a single Chinese mahjong character tile, "
-        "its scales formed from tiny mahjong tile faces. A simple terrarium "
-        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
-        "slightly off — the snake has too-large friendly eyes.",
-        "Cream background, crimson snake, ivory tile with dark ink character, muted moss and pebble accents.",
+        "A glazed porcelain serpent figurine coiled around a single mahjong "
+        "character tile, its body sculpted from creamy white china with "
+        "fine crackle glaze and inlaid scales of polished carved ruby and "
+        "carnelian. Its eyes are tiny faceted rubies catching the light. "
+        "The figurine rests on a dark lacquer plinth against a soft, "
+        "neutral studio backdrop.",
+        "Cream porcelain body, polished ruby and carnelian scales, faceted ruby eyes, ivory tile with dark ink character, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
         "blue_serpent",
         "Blue Serpent",
-        "A blue snake coiled around a single blue mahjong circles/dots tile, "
-        "its scales formed from tiny mahjong tile faces. A simple terrarium "
-        "display with moss and pebbles. Soft diffused daylight. Cheerful, "
-        "slightly off — the snake has too-large friendly eyes.",
-        "Cream background, cobalt blue snake, ivory tile with blue dot pips, muted moss and pebble accents.",
+        "A glazed porcelain serpent figurine coiled around a single mahjong "
+        "circles/dots tile, its body sculpted from creamy white china with "
+        "fine crackle glaze and inlaid scales of polished lapis lazuli and "
+        "sapphire. Its eyes are tiny faceted sapphires catching the light. "
+        "The figurine rests on a dark lacquer plinth against a soft, "
+        "neutral studio backdrop.",
+        "Cream porcelain body, polished lapis and sapphire scales, faceted sapphire eyes, ivory tile with blue dot pips, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
         "low_tide",
@@ -488,20 +530,33 @@ RELICS = [
         "Dark hull on brown mud, white measuring stakes, grey flat light.",
     ),
     (
+        "high_tide",
+        "High Tide",
+        "A small coastal survey boat afloat on the same tidal estuary, the "
+        "waterline risen to swallow the mud flats. Measuring stakes driven into "
+        "the bed at intervals, only their tops still showing above the water. "
+        "Flat grey estuary light.",
+        "Dark hull on grey water, white measuring stakes barely showing above the surface, grey flat light.",
+    ),
+    (
         "merchants_eye",
         "Merchant's Eye",
-        "A jeweler's loupe mounted on a small brass articulating arm, clamped "
-        "to a watchmaker's bench. Under the lens, the internal gears of a "
-        "pocket watch are magnified. Tools scattered around.",
-        "Brass loupe and arm, steel gears, dark wood bench, amber light.",
+        "A brass jeweler's loupe hovering over a single mahjong tile lying "
+        "face-up on an emerald felt table, magnifying its carved glyph "
+        "into sharp focus. A few scattered gold coins and stray face-down wall "
+        "tiles lie blurred in the background.",
+        "Polished brass loupe, ivory tile face, deep emerald felt, paper price tag with red string, warm gold coin accents, soft amber lamplight.",
     ),
     (
         "edge_runner",
         "Edge Runner",
-        "A narrow-gauge mining locomotive on a precarious cliff-side rail, "
-        "the track barely wider than the wheels. Sheer rock face on one side, "
-        "deep gorge on the other. Dramatic vertigo perspective.",
-        "Dark iron locomotive, rust narrow rail, grey cliff, teal gorge.",
+        "Two mahjong tiles standing upright at opposite ends of an emerald "
+        "felt table — a '1 of circles' on the left and a '9 of circles' on "
+        "the right — with a taut line of light arcing between them across "
+        "the felt like a tightrope. The middle of the table is empty save "
+        "for soft shadow; faint gold sparks trail along the light. A few "
+        "stray face-down wall tiles lie blurred in the background.",
+        "Ivory tile faces, deep emerald felt, deep blue circle marks, warm gold light arc, subtle amber sparks.",
     ),
     (
         "lucky_seven",
@@ -539,34 +594,53 @@ RELICS = [
     (
         "closed_gate",
         "Closed Gate",
-        "A heavy blast door in a concrete dam wall — circular, submarine-"
-        "style, with a spoked locking wheel. Fully sealed. Water stains "
-        "streak the concrete above. Industrial, impassable.",
-        "Steel blast door, raw concrete, rust water stains, amber light.",
+        "A short row of mahjong tiles standing upright at the center of an "
+        "emerald felt table — only terminals and honors: a 1 of bamboo, a "
+        "9 of circles, a red dragon, an East wind. Between them a heavy "
+        "ornamental gate is etched into the felt in faint gold lines, its "
+        "doors drawn shut behind the row as if barring the middle ranks "
+        "from entry. A few stray face-down wall tiles lie blurred in the "
+        "background.",
+        "Ivory tile faces, deep emerald felt, deep blue circle and crimson dragon marks, etched gold gate lines, warm amber rim light.",
     ),
     (
-        "gold_furnace",
-        "Gold Furnace",
-        "A small cupellation furnace — brick-built, dome-topped — with its "
-        "front grate open showing a crucible of molten gold inside, glowing "
-        "intensely. Tongs and ingot molds nearby. Assay office setting.",
-        "Red brick furnace, bright gold molten glow, dark iron tools.",
+        "golden_engine",
+        "Golden Engine",
+        "A small ornate brass machine sitting at the center of an emerald "
+        "felt table — part steam engine, part music box — with polished "
+        "brass pipes, a glass dome, and a coin-slotted hopper on top. "
+        "Stacks of gold coins are feeding into the hopper, while a tiny "
+        "pressure gauge on its face has its needle pinned to the right. "
+        "Warm golden exhaust vapor curls upward from the pipes, glittering "
+        "with flecks of gold. A few stray face-down wall tiles lie blurred "
+        "in the background.",
+        "Polished brass machine body, glass dome, deep emerald felt, warm gold coin stacks feeding the hopper, pinned brass pressure gauge, golden exhaust vapor with drifting gold flecks, soft amber rim light.",
     ),
     (
         "snowball",
         "Snowball",
-        "A hefty snowball mid-roll down a pine-shadowed hillside, its surface "
-        "crusted with bark flecks and pebbles gathered on the way. A widening "
-        "track carves through deep powder behind it.",
-        "Bright packed snow, blue shadows, dark pines, scattered debris, crisp winter light.",
+        "A massive sphere built entirely from packed mahjong tiles, "
+        "rolling across an emerald felt table. Tiles of every suit — "
+        "bamboos, circles, characters, winds, dragons — are jammed "
+        "together at every angle, ivory faces and lacquered backs "
+        "pressed into the curve, with a few loose tiles tumbling along "
+        "to be absorbed at the leading edge. A widening trail of fallen "
+        "tiles curves across the felt behind it. A few stray face-down "
+        "wall tiles lie blurred in the background.",
+        "Ivory tile faces, lacquered tile backs, deep emerald felt, multicolored suit marks, warm amber rim light, drifting motion blur on the trail.",
     ),
     (
         "second_wind",
         "Second Wind",
-        "A wind-up tin toy soldier with its key being turned for a second "
-        "time — hand visible on the key. The soldier is mid-march, one "
-        "foot forward. Scuffed paint shows it's been wound before.",
-        "Olive tin soldier, brass wind-up key, scuffed paint, wood floor.",
+        "A small pull-back wind-up toy car mid-action on an emerald felt "
+        "table — chunky cartoon proportions, painted tin body with chrome "
+        "bumpers and rubber tires. A hand has just released it: the car "
+        "lurches forward in a freeze-frame burst, tiny gold sparks "
+        "kicking from the rear wheels and a streak of warm motion-blur "
+        "light trailing behind. A single mahjong tile is pinned face-up "
+        "under one wheel as it launches off. A few stray face-down wall "
+        "tiles lie blurred in the background.",
+        "Painted tin toy car, chrome bumpers, rubber tires, deep emerald felt, ivory tile face, warm gold spark trail, motion-blur streak, soft amber rim light.",
     ),
     (
         "glass_cannon",
@@ -579,10 +653,16 @@ RELICS = [
     (
         "last_breath",
         "Last Breath",
-        "A fading candle flame enclosed in a narrow metal lantern, with a "
-        "single bright final flare bursting from the wick. The shape should "
-        "feel like a final-chance omen rendered as a crisp enamel badge.",
-        "Warm brass body, ivory flame core, ember orange highlights, deep soot accents.",
+        "A single hero mahjong tile stands front and center on deep "
+        "emerald felt, its carved glyph blazing molten gold as if lit from "
+        "within. Behind it, the rest of the final hand is fanned outward "
+        "in a theatrical kabuki-pose arc, each tile angled to catch the "
+        "light — deep blue circles, jade-green bamboo, crimson characters. "
+        "Sharp gold rays radiate outward from the hero tile across the "
+        "felt, and a translucent ghost echo of each tile rises just beside "
+        "it, scoring a second time. Drifting gold sparks hang in the air "
+        "around the pose.",
+        "Ivory tile faces, deep emerald felt, molten gold glyph, sharp radiating gold rays, fanned kabuki arc, ghostly translucent echo tiles, drifting gold sparks.",
     ),
     (
         "tile_polisher",
@@ -601,11 +681,14 @@ RELICS = [
         "Warm cream paper, amber inner glow, muted red tassel, dark bronze hook.",
     ),
     (
-        "iron_lantern",
-        "Iron Lantern",
-        "A sturdy iron lantern with a protected inner flame and thick cage "
-        "bars, shaped like a tougher successor to a paper lantern.",
-        "Dark iron frame, warm gold flame, soot black accents, dim amber glow.",
+        "silver_filigree_lantern",
+        "Silver Filigree Lantern",
+        "An ornate silver lantern wrapped in delicate filigree scrollwork — "
+        "fine pierced silver vinework forms the cage around a steady inner "
+        "flame. Heirloom craftsmanship, like a temple votive elevated to "
+        "treasure. The successor to a humble paper lantern.",
+        "Polished silver filigree, cool argent highlights, warm gold flame, "
+        "soft pearl-white inner glow, faint indigo shadow in the recesses.",
     ),
     (
         "mirror_tile",
@@ -624,20 +707,47 @@ RELICS = [
         "Crisp ivory tile faces, deep bamboo green marks, pale jade halo, warm gold rim light.",
     ),
     (
-        "leading_tile",
-        "Leading Tile",
-        "A prominent first mahjong tile at the head of a short formation, "
-        "visually emphasized like a leader's banner badge.",
-        "Ivory tiles, dark ink markings, warm gold trim, subtle navy shadows.",
+        "geese",
+        "Geese",
+        "Five geese rising in a tight V-formation across a misty dawn sky "
+        "above a reedy marsh, wings spread mid-beat. The lead bird at the apex "
+        "is haloed warm gold, the four followers trailing in receding pairs "
+        "behind it. A ghostly translucent echo lifts off each goose, drifting "
+        "a wingbeat behind its source, telegraphing each of the five firing "
+        "twice. Trails of gold sparks streak through the air in their wake. "
+        "Below, dark water and silhouetted reeds catch faint amber light from "
+        "the rising sun.",
+        "Warm amber dawn sky, gold V-formation of geese, ghostly translucent echoes, drifting gold sparks, dark marsh water.",
     ),
     (
-        "low_echo",
-        "Low Echo",
-        "Four low-numbered mahjong tiles (1, 2, 3, 4) standing in a row on "
-        "a dark felt table, with translucent duplicate silhouettes of each "
-        "tile radiating outward behind them like acoustic echoes. Faint "
-        "concentric sound rings ripple from the group.",
-        "Ivory tile faces, deep ink numerals, pale teal echo silhouettes, dark felt, soft gold rings.",
+        "voice_of_the_people",
+        "Voice of the People",
+        "Four ivory mahjong character-suit tiles standing in a row on deep "
+        "emerald felt, their faces carrying the traditional crimson "
+        "man-zu numerals one, two, three, and four — 一, 二, 三, 四 — "
+        "painted as bold brushed characters. Behind each tile, two or three "
+        "ghostly translucent echo copies of the same tile fan outward in "
+        "fading teal and warm gold, as if the common ranks are answering "
+        "back in chorus. Soft concentric gold ripples spread across the "
+        "felt at the tiles' feet, and warm amber rim light catches their "
+        "edges. A few stray face-down wall tiles lie blurred in the "
+        "background.",
+        "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale teal echo silhouettes, soft gold ripples, warm amber rim light.",
+    ),
+    (
+        "voice_of_the_elite",
+        "Voice of the Elite",
+        "Four ivory mahjong character-suit tiles standing in a row on deep "
+        "emerald felt, their faces carrying the traditional crimson "
+        "man-zu numerals six, seven, eight, and nine — 六, 七, 八, 九 — "
+        "painted as bold brushed characters. Behind each tile, two or three "
+        "ghostly translucent echo copies of the same tile fan outward in "
+        "fading crimson and warm gold, as if the high ranks are repeating "
+        "their decree down the line. Soft concentric gold ripples spread "
+        "across the felt at the tiles' feet, and warm amber rim light "
+        "catches their edges. A few stray face-down wall tiles lie blurred "
+        "in the background.",
+        "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale crimson echo silhouettes, soft gold ripples, warm amber rim light.",
     ),
     (
         "tea_ceremony",
@@ -654,11 +764,17 @@ RELICS = [
         "Pale cyan ghost hand, ivory tile, cool indigo shadows, silver outline.",
     ),
     (
-        "clean_streak",
-        "Clean Streak",
-        "A neatly aligned series of polished tiles with a shining streak "
-        "running across them like a reward for consistency.",
-        "Ivory tiles, bright white gleam, pale gold edging, cool slate accents.",
+        "humility",
+        "Humility",
+        "A hooded pilgrim in plain travel robes walking forward along a "
+        "narrow road, staff in hand, head bowed. Behind them in the dusk "
+        "an ornate golden crown set with a crimson dragon glyph lies "
+        "abandoned in the dirt, half-forgotten. Ahead of the pilgrim the "
+        "path is lit by a row of small humble lanterns receding into the "
+        "distance, each one burning a little brighter than the last, "
+        "drawing the eye toward the horizon. Painterly illustration with "
+        "soft brushwork and warm amber lighting against a deep twilight sky.",
+        "Painterly illustration, hooded pilgrim in muted travel robes, abandoned golden crown with crimson glyph in shadow behind, row of lanterns ahead with intensifying warm amber glow, deep twilight sky, soft brushwork.",
     ),
     (
         "obsession",
@@ -684,16 +800,63 @@ RELICS = [
     (
         "melting_ice",
         "Melting Ice",
-        "A cracked ice shard dripping away around a trapped tile, fragile and "
-        "temporary, rendered as a clean enamel pin.",
-        "Pale blue ice, white frost, cool grey cracks, faint cyan glow.",
+        "A clear block of ice resting at the center of an emerald felt "
+        "table, with something dark frozen deep inside — only the faintest "
+        "hint of curling horns and a pair of eyes glinting bronze through "
+        "the fractures, the rest lost to refraction and frost. Hairline "
+        "cracks lace the ice and meltwater has begun pooling on the felt "
+        "around the block's base.",
+        "Pale blue ice, white frost, cool grey internal cracks, deep "
+        "emerald felt, faint cyan refraction, dim shape within with two "
+        "bronze glints, glistening meltwater pool, soft amber rim light.",
+    ),
+    (
+        "taotie",
+        "Taotie",
+        "A green-patinated bronze taotie ritual mask centered on an "
+        "emerald felt table — broad bulging eyes, twin curling horns "
+        "rising over the brow, jaws cracked open in a hungry grin baring "
+        "blunt bronze teeth. A single mahjong tile is captured mid-flight "
+        "just above the open mouth, tilted and being drawn down into it; "
+        "faint motion-blur lines trail behind the tile to read the pull "
+        "as gravitational, not gentle. A shallow pool of meltwater from "
+        "the parent ice still glistens beneath the mask's chin, and a few "
+        "stray face-down wall tiles lie blurred in the background.",
+        "Green-patinated bronze, deep jade highlights, warm bronze "
+        "underglow in the recessed eye sockets, ivory tile face with "
+        "crimson dragon glyph being devoured, deep emerald felt, "
+        "glistening meltwater puddle, soft amber rim light.",
     ),
     (
         "silk_thread",
         "Silk Thread",
-        "A taut silk thread winding around a tile and fraying at the ends, "
-        "thin, elegant, and precarious.",
-        "Soft ivory thread, muted rose accents, cream tile, pale gold trim.",
+        "A plump silkworm in the act of cocooning a single mahjong tile at "
+        "the center of an emerald felt table — fresh ivory silk fans out "
+        "from the worm's mouth and partially wraps the tile in a glossy, "
+        "translucent skein, the still-bare lower half of the tile face "
+        "showing through. The worm is mid-motion, its segmented body "
+        "curled along the tile's edge, head lifted as it spins another "
+        "loop. A single mulberry leaf rests on the felt beside the "
+        "in-progress cocoon, and a few stray face-down wall tiles lie "
+        "blurred in the background.",
+        "Pale cream silkworm, glossy ivory silk, deep emerald felt, "
+        "muted jade mulberry leaf, soft cream tile face with faint amber "
+        "warmth from within the half-cocoon.",
+    ),
+    (
+        "silk_moth",
+        "Silk Moth",
+        "A pale silk moth with broad ivory wings emerging from a split "
+        "cocoon at the center of an emerald felt table — the cocoon is "
+        "torn open along its seam, the discarded silk shell still threaded "
+        "around the remains of a single mahjong tile beneath it. Fine "
+        "silk strands trail from the moth's legs and the cocoon's torn "
+        "rim, drifting across the felt. The moth's wings are unfurled "
+        "and dusted with a faint amber underglow as if freshly hatched. "
+        "A few stray face-down wall tiles lie blurred in the background.",
+        "Ivory moth wings, soft pearl silk strands, deep emerald felt, "
+        "warm amber underglow, cream tile fragment beneath the cocoon, "
+        "muted gold dust on the wings.",
     ),
     (
         "shadow_hand",
@@ -703,11 +866,18 @@ RELICS = [
         "Deep indigo shadow, soft silver edge light, muted ivory accents, charcoal background tones.",
     ),
     (
-        "empty_frame",
-        "Empty Frame",
-        "An ornate empty frame with a dramatic hollow center, meant to read "
-        "clearly as a missing-slot emblem.",
-        "Antique gold frame, dark hollow center, warm brass shine, muted umber details.",
+        "solitary_sage",
+        "Solitary Sage",
+        "A solitary robed mahjong sage seated cross-legged atop a single "
+        "upright ivory tile on an emerald felt table, eyes closed in deep "
+        "meditation, draped in faded crimson and umber silks that pool around "
+        "the tile's base. The felt around him is utterly bare — no wall, no "
+        "opponents, no scattered tiles — only the lone master and his lone "
+        "tile. Warm amber rim light haloes his shoulders and drifts as faint "
+        "gold sparks around him, and a single carved dragon glyph on the tile "
+        "beneath glows softly in deep crimson. He plays alone because none "
+        "remain worthy.",
+        "Faded crimson and umber silks, ivory tile face, deep emerald felt, warm amber rim light, soft gold sparks, muted crimson glyph glow.",
     ),
     (
         "gold_idol",
@@ -719,9 +889,12 @@ RELICS = [
     (
         "jade_abacus",
         "Jade Abacus",
-        "A compact abacus with jade beads and a sturdy brass frame, rendered "
-        "as a crisp economy-themed badge.",
-        "Green jade beads, warm brass frame, ivory highlights, dark wood accents.",
+        "A compact abacus with polished jade beads and a warm brass frame "
+        "resting on an emerald felt table. Beside it, neat stacks of gold "
+        "coins are grouped in fours, and a single mahjong tile carved with "
+        "a jade-green character glyph leans against the frame. A few stray "
+        "face-down wall tiles lie blurred in the background.",
+        "Polished jade beads, warm brass frame, deep emerald felt, warm gold coin stacks, ivory tile with jade-green glyph, dark wood accents.",
     ),
     (
         "nest_egg",
@@ -798,19 +971,29 @@ RELICS = [
         "Aged gold chest, deep mahogany wood, pale cyan phantom glow, cool indigo shadows.",
     ),
     (
-        "ritual_blade",
-        "Ritual Blade",
-        "An ornate ceremonial blade pointed downward over a relic-like charm, "
-        "sharp, sacrificial, and symbolic.",
-        "Polished steel blade, crimson inlay, dark bronze hilt, warm gold accents.",
+        "hungry_ghost",
+        "Hungry Ghost",
+        "A translucent gaunt ghost-figure looming over an emerald felt "
+        "table — distended belly, hollow sunken eyes, a tiny pinhole "
+        "mouth — its grasping spectral hands cradling a single mahjong "
+        "tile that is dissolving upward into wisps of pale smoke and "
+        "drifting gold sparks as it is consumed. Faint red joss-paper "
+        "embers smolder around the ghost's edges, and the air shimmers "
+        "with cold draft. A few stray face-down wall tiles lie blurred "
+        "in the background.",
+        "Translucent pale ghost figure, distended belly, sunken hollow eyes, pinhole mouth, deep emerald felt, ivory tile dissolving into pale smoke, drifting gold sparks, smoldering red joss-paper embers, cool wraith-light, soft amber rim light.",
     ),
     (
         "disgust",
         "Disgust",
-        "A weather vane whose East and West cardinal arms have curled inward "
-        "and fused at the tips into a single grimacing mouth, the North and "
-        "South arms hanging slack. A pale sour wisp curls from the joined mouth.",
-        "Tarnished bronze body, muted teal patina, pale sickly green wisp, charcoal accents.",
+        "An East wind mahjong tile standing upright at the center of an "
+        "emerald felt table, leaning slightly away with a sour curl of pale "
+        "green wisp rising from its glyph. Beside it, three West wind tiles "
+        "are clustered together as if uninvited but inseparable — one "
+        "leaning in, two stacked just behind. A faint sickly sheen plays "
+        "across all four tile faces. A few stray face-down wall tiles lie "
+        "blurred in the background.",
+        "Ivory tile faces, deep emerald felt, deep blue East and West wind glyphs, pale sickly green wisp, muted charcoal shadows.",
     ),
     (
         "curio_cabinet",
@@ -848,10 +1031,21 @@ RELICS = [
     (
         "no_honor_but_wealth",
         "No Honor But Wealth",
-        "A toppled honor tile lying face-down at the base of a neat stack of gold "
-        "coins, a single coin balanced on edge atop the stack. Greedy, irreverent, "
-        "badge-clean.",
-        "Ivory honor tile, warm gold coins, deep crimson accents, charcoal shadow.",
+        "Two opposing hands meeting across an emerald felt table mid-trade, "
+        "mirrored toward each other. From the right side of the frame, a "
+        "RIGHT hand enters palm-up with the thumb on the LEFT side of "
+        "the palm, cradling a small pile of warm gold coins, a few "
+        "spilling onto the felt; this hand wears a dark embroidered "
+        "sleeve with a subtle gold trim. From the left side of the frame, "
+        "the OPPOSITE arm enters — a LEFT hand, palm-down, thumb on the "
+        "RIGHT side of the palm, fingers spread to sweep a cluster of "
+        "face-up honor mahjong tiles (winds and dragons) back toward "
+        "itself; this arm wears a plain pale sleeve, distinctly different "
+        "from the other. The two hands are clearly mirror-opposites of "
+        "each other, not duplicates — anatomically correct opposing "
+        "right and left hands. The transaction is frozen mid-motion. A "
+        "few stray face-down wall tiles lie blurred in the background.",
+        "Anatomically opposing right-hand and left-hand pair (mirror images, NOT two right hands), distinct dark embroidered sleeve versus plain pale sleeve, ivory honor tile faces with deep blue wind and crimson dragon glyphs, deep emerald felt, warm gold coins in an open palm-up right hand, palm-down left hand sweeping tiles, soft amber rim light.",
     ),
     (
         "sweepstakes",
@@ -879,10 +1073,13 @@ RELICS = [
     (
         "heirloom",
         "Heirloom",
-        "An ornate antique pocket watch hanging from a fine chain, its engraved "
-        "back faintly worn from generations of handling. A subtle patina gleam "
-        "catches the rim. Timeless keepsake feel.",
-        "Deep gold casing, warm amber patina, ivory watch face, dark brown chain accents.",
+        "A single antique mahjong tile standing upright at the center of an "
+        "emerald felt table, its ivory face yellowed with age and its "
+        "carved glyph rubbed soft and shallow from generations of handling. "
+        "A faint warm patina glow rims the edges, and tiny notches along "
+        "the sides hint at decades of play. A few stray face-down wall "
+        "tiles lie blurred in the background.",
+        "Aged ivory tile face, deep emerald felt, soft worn glyph, warm amber patina rim light, muted dark wood accents.",
     ),
     (
         "tourist",

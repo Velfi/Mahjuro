@@ -1,7 +1,10 @@
+pub mod abacus_mesh;
 pub mod animation;
 pub mod bone_tablet_mesh;
+pub mod book_mesh;
 pub mod cabinet_mesh;
 
+pub mod bell_tassel_mesh;
 pub mod candle_mesh;
 pub mod coin_mesh;
 pub mod decal;
@@ -29,6 +32,8 @@ pub mod ribbon_mesh;
 pub mod river_mesh;
 pub mod score_popups;
 pub mod score_reel;
+pub mod shop_bell_mesh;
+pub mod showcase_decal_atlas;
 pub mod shrine_mesh;
 pub mod table_mesh;
 pub mod table_transform;

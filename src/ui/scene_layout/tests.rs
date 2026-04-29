@@ -247,6 +247,14 @@ fn sanitize_gameplay_restores_non_finite_fields() {
 }
 
 #[test]
+fn sanitize_gameplay_restores_all_zero_fog_wall() {
+    let mut p = GameplayPositions::default();
+    p.fog_wall = crate::ui::placement::Placement::default();
+    sanitize_gameplay_positions(&mut p);
+    assert!(approx(p.fog_wall.ny, 0.55));
+}
+
+#[test]
 fn sanitize_leaves_valid_placements_alone() {
     let mut p = ShopPositions::default();
     p.counter.nx = 0.42;

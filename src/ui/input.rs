@@ -1,6 +1,6 @@
 //! Unified input: mouse, keyboard, gamepad → semantic actions.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gilrs::{Axis, Button, Event as GilEvent, Gilrs};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -36,6 +36,13 @@ pub enum UiAction {
     TriggerStructure,
     /// Commit: discard all selected tiles and auto-draw back to full hand.
     CommitDiscard,
+    /// Move focus onto the gameplay Play button (no commit). Emitted by the
+    /// gamepad West (X) face when the "X and Y quick action" setting is OFF.
+    FocusPlayButton,
+    /// Move focus onto the gameplay Discard button (no commit). Emitted by
+    /// the gamepad North (Y) face when the "X and Y quick action" setting
+    /// is OFF.
+    FocusDiscardButton,
     NavigateHudNext,
     NavigateHudPrev,
     SortBySuit,
@@ -116,6 +123,11 @@ impl MarqueeSelect {
     }
 }
 
+/// Delay before the first repeated UI nav step while a direction is held
+/// (gamepad D-pad / left stick). Mirrors desktop key-repeat feel.
+const NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(400);
+const NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(90);
+
 pub struct InputState {
     pub gilrs: Option<Gilrs>,
     pub focus_slot: usize,
@@ -125,9 +137,13 @@ pub struct InputState {
     pub drag: Option<DragState>,
     /// When true, gamepad South (A) and East (B) are swapped.
     pub swap_ab: bool,
-    /// Last non-neutral horizontal left-stick direction we emitted:
-    /// -1 = left, +1 = right, 0 = neutral. Prevents a single tilt from
-    /// generating a burst of repeated focus moves.
+    /// When true, gamepad West (X) immediately commits ScoreHand and North
+    /// (Y) immediately commits CommitDiscard. When false, those buttons
+    /// only move focus onto the corresponding action button — the player
+    /// must press Confirm (A) to actually fire the action.
+    pub xy_quick_action: bool,
+    /// Last non-neutral horizontal left-stick direction:
+    /// -1 = left, +1 = right, 0 = neutral.
     left_stick_x_dir: i8,
     /// Last non-neutral vertical left-stick direction we emitted:
     /// -1 = up, +1 = down, 0 = neutral.
@@ -135,6 +151,13 @@ pub struct InputState {
     /// Timestamp of the latest stick-navigation edge. Kept for future
     /// tuning / diagnostics and to make the gating behavior explicit.
     last_stick_nav_at: Instant,
+    /// While a D-pad direction is held, next time to emit a repeat (after the
+    /// initial [`ButtonPressed`] step).
+    dpad_repeat: Option<(UiAction, Instant)>,
+    /// Left stick: repeat horizontal nav while tilt is held past the deadzone.
+    stick_repeat_x: Option<(i8, Instant)>,
+    /// Left stick: repeat vertical nav while tilt is held past the deadzone.
+    stick_repeat_y: Option<(i8, Instant)>,
 }
 
 impl InputState {
@@ -148,9 +171,13 @@ impl InputState {
             mode: InputMode::Cursor,
             drag: None,
             swap_ab: settings.swap_ab,
+            xy_quick_action: settings.xy_quick_action,
             left_stick_x_dir: 0,
             left_stick_y_dir: 0,
             last_stick_nav_at: Instant::now(),
+            dpad_repeat: None,
+            stick_repeat_x: None,
+            stick_repeat_y: None,
         })
     }
 
@@ -180,96 +207,248 @@ impl InputState {
     /// Poll gilrs; returns emitted actions.  Sets mode to Controller if any
     /// action is produced.  Returns true if the mode changed.
     pub fn poll_gamepads(&mut self, actions: &mut Vec<UiAction>) -> bool {
-        let Some(ref mut gilrs) = self.gilrs else {
-            return false;
-        };
         let before = actions.len();
-        const STICK_DEADZONE: f32 = 0.65;
-        while let Some(GilEvent { event, .. }) = gilrs.next_event() {
-            use gilrs::EventType::*;
-            match event {
-                ButtonPressed(Button::South, _) => actions.push(if self.swap_ab {
-                    UiAction::Cancel
-                } else {
-                    UiAction::Confirm
-                }),
-                ButtonReleased(Button::South, _) => {
-                    if !self.swap_ab {
-                        actions.push(UiAction::ConfirmRelease);
-                    }
-                }
-                ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
-                    UiAction::Confirm
-                } else {
-                    UiAction::Cancel
-                }),
-                ButtonReleased(Button::East, _) => {
-                    if self.swap_ab {
-                        actions.push(UiAction::ConfirmRelease);
-                    }
-                }
-                ButtonPressed(Button::LeftTrigger2, _) => actions.push(UiAction::TriggerStructure),
-                ButtonPressed(Button::RightTrigger2, _) => actions.push(UiAction::TriggerStructure),
-                ButtonPressed(Button::West, _) => actions.push(UiAction::ScoreHand),
-                ButtonPressed(Button::North, _) => actions.push(UiAction::CommitDiscard),
-                AxisChanged(Axis::LeftStickX, v, _) => {
-                    let new_dir = if v >= STICK_DEADZONE {
-                        1
-                    } else if v <= -STICK_DEADZONE {
-                        -1
+        {
+            let Some(ref mut gilrs) = self.gilrs else {
+                return false;
+            };
+            const STICK_DEADZONE: f32 = 0.65;
+            while let Some(GilEvent { event, .. }) = gilrs.next_event() {
+                use gilrs::EventType::*;
+                match event {
+                    ButtonPressed(Button::South, _) => actions.push(if self.swap_ab {
+                        UiAction::Cancel
                     } else {
-                        0
-                    };
-                    if new_dir != 0 && new_dir != self.left_stick_x_dir {
-                        actions.push(if new_dir > 0 {
-                            UiAction::FocusNext
-                        } else {
-                            UiAction::FocusPrev
-                        });
-                        self.last_stick_nav_at = Instant::now();
+                        UiAction::Confirm
+                    }),
+                    ButtonReleased(Button::South, _) => {
+                        if !self.swap_ab {
+                            actions.push(UiAction::ConfirmRelease);
+                        }
                     }
-                    self.left_stick_x_dir = new_dir;
-                }
-                AxisChanged(Axis::LeftStickY, v, _) => {
-                    let new_dir = if v >= STICK_DEADZONE {
-                        1
-                    } else if v <= -STICK_DEADZONE {
-                        -1
+                    ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
+                        UiAction::Confirm
                     } else {
-                        0
-                    };
-                    if new_dir != 0 && new_dir != self.left_stick_y_dir {
-                        actions.push(if new_dir > 0 {
-                            UiAction::FocusDown
-                        } else {
-                            UiAction::FocusUp
-                        });
-                        self.last_stick_nav_at = Instant::now();
+                        UiAction::Cancel
+                    }),
+                    ButtonReleased(Button::East, _) => {
+                        if self.swap_ab {
+                            actions.push(UiAction::ConfirmRelease);
+                        }
                     }
-                    self.left_stick_y_dir = new_dir;
+                    ButtonPressed(Button::LeftTrigger2, _) => {
+                        actions.push(UiAction::TriggerStructure)
+                    }
+                    ButtonPressed(Button::RightTrigger2, _) => {
+                        actions.push(UiAction::TriggerStructure)
+                    }
+                    ButtonPressed(Button::West, _) => actions.push(if self.xy_quick_action {
+                        UiAction::ScoreHand
+                    } else {
+                        UiAction::FocusPlayButton
+                    }),
+                    ButtonPressed(Button::North, _) => actions.push(if self.xy_quick_action {
+                        UiAction::CommitDiscard
+                    } else {
+                        UiAction::FocusDiscardButton
+                    }),
+                    AxisChanged(Axis::LeftStickX, v, _) => {
+                        let old_dir = self.left_stick_x_dir;
+                        let new_dir = if v >= STICK_DEADZONE {
+                            1
+                        } else if v <= -STICK_DEADZONE {
+                            -1
+                        } else {
+                            0
+                        };
+                        self.left_stick_x_dir = new_dir;
+                        if new_dir == 0 {
+                            self.stick_repeat_x = None;
+                        } else if new_dir != old_dir {
+                            actions.push(if new_dir > 0 {
+                                UiAction::FocusNext
+                            } else {
+                                UiAction::FocusPrev
+                            });
+                            self.last_stick_nav_at = Instant::now();
+                            self.stick_repeat_x =
+                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                        }
+                    }
+                    AxisChanged(Axis::LeftStickY, v, _) => {
+                        let old_dir = self.left_stick_y_dir;
+                        let new_dir = if v >= STICK_DEADZONE {
+                            1
+                        } else if v <= -STICK_DEADZONE {
+                            -1
+                        } else {
+                            0
+                        };
+                        self.left_stick_y_dir = new_dir;
+                        if new_dir == 0 {
+                            self.stick_repeat_y = None;
+                        } else if new_dir != old_dir {
+                            actions.push(if new_dir > 0 {
+                                UiAction::FocusUp
+                            } else {
+                                UiAction::FocusDown
+                            });
+                            self.last_stick_nav_at = Instant::now();
+                            self.stick_repeat_y =
+                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                        }
+                    }
+                    ButtonPressed(Button::DPadRight, _) => {
+                        actions.push(UiAction::FocusNext);
+                        self.dpad_repeat = Some((
+                            UiAction::FocusNext,
+                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                        ));
+                    }
+                    ButtonPressed(Button::DPadLeft, _) => {
+                        actions.push(UiAction::FocusPrev);
+                        self.dpad_repeat = Some((
+                            UiAction::FocusPrev,
+                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                        ));
+                    }
+                    ButtonPressed(Button::DPadDown, _) => {
+                        actions.push(UiAction::FocusDown);
+                        self.dpad_repeat = Some((
+                            UiAction::FocusDown,
+                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                        ));
+                    }
+                    ButtonPressed(Button::DPadUp, _) => {
+                        actions.push(UiAction::FocusUp);
+                        self.dpad_repeat =
+                            Some((UiAction::FocusUp, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                    }
+                    ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
+                    ButtonPressed(Button::Select, _) => actions.push(UiAction::Help),
+                    ButtonPressed(Button::LeftTrigger, _) => {
+                        actions.push(UiAction::NavigateHudPrev);
+                        actions.push(UiAction::TabPrev);
+                    }
+                    ButtonPressed(Button::RightTrigger, _) => {
+                        actions.push(UiAction::NavigateHudNext);
+                        actions.push(UiAction::TabNext);
+                    }
+                    _ => {}
                 }
-                ButtonPressed(Button::DPadRight, _) => actions.push(UiAction::FocusNext),
-                ButtonPressed(Button::DPadLeft, _) => actions.push(UiAction::FocusPrev),
-                ButtonPressed(Button::DPadDown, _) => actions.push(UiAction::FocusDown),
-                ButtonPressed(Button::DPadUp, _) => actions.push(UiAction::FocusUp),
-                ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
-                ButtonPressed(Button::Select, _) => actions.push(UiAction::Help),
-                ButtonPressed(Button::LeftTrigger, _) => {
-                    actions.push(UiAction::NavigateHudPrev);
-                    actions.push(UiAction::TabPrev);
-                }
-                ButtonPressed(Button::RightTrigger, _) => {
-                    actions.push(UiAction::NavigateHudNext);
-                    actions.push(UiAction::TabNext);
-                }
-                _ => {}
             }
         }
+        let Some(gilrs) = self.gilrs.as_ref() else {
+            return false;
+        };
+        Self::emit_held_navigation_repeats(
+            gilrs,
+            &mut self.dpad_repeat,
+            &mut self.stick_repeat_x,
+            &mut self.stick_repeat_y,
+            actions,
+        );
         if actions.len() > before && self.mode != InputMode::Controller {
             self.mode = InputMode::Controller;
             return true;
         }
         false
+    }
+
+    fn emit_held_navigation_repeats(
+        gilrs: &Gilrs,
+        dpad_repeat: &mut Option<(UiAction, Instant)>,
+        stick_repeat_x: &mut Option<(i8, Instant)>,
+        stick_repeat_y: &mut Option<(i8, Instant)>,
+        actions: &mut Vec<UiAction>,
+    ) {
+        let now = Instant::now();
+
+        let mut clear_dpad = false;
+        if let Some((action, next_at)) = dpad_repeat.as_mut() {
+            if !Self::gamepad_nav_button_pressed(gilrs, *action) {
+                clear_dpad = true;
+            } else if now >= *next_at {
+                actions.push(*action);
+                *next_at = now + NAV_REPEAT_INTERVAL;
+            }
+        }
+        if clear_dpad {
+            *dpad_repeat = None;
+        }
+
+        const STICK_DEADZONE: f32 = 0.65;
+        let (sx, sy) = Self::sample_left_stick_dirs(gilrs, STICK_DEADZONE);
+
+        let mut clear_sx = false;
+        if let Some((dir, next_at)) = stick_repeat_x.as_mut() {
+            if sx == 0 || sx != *dir {
+                clear_sx = true;
+            } else if now >= *next_at {
+                actions.push(if *dir > 0 {
+                    UiAction::FocusNext
+                } else {
+                    UiAction::FocusPrev
+                });
+                *next_at = now + NAV_REPEAT_INTERVAL;
+            }
+        }
+        if clear_sx {
+            *stick_repeat_x = None;
+        }
+
+        let mut clear_sy = false;
+        if let Some((dir, next_at)) = stick_repeat_y.as_mut() {
+            if sy == 0 || sy != *dir {
+                clear_sy = true;
+            } else if now >= *next_at {
+                actions.push(if *dir > 0 {
+                    UiAction::FocusUp
+                } else {
+                    UiAction::FocusDown
+                });
+                *next_at = now + NAV_REPEAT_INTERVAL;
+            }
+        }
+        if clear_sy {
+            *stick_repeat_y = None;
+        }
+    }
+
+    fn gamepad_nav_button_pressed(gilrs: &Gilrs, action: UiAction) -> bool {
+        let btn = match action {
+            UiAction::FocusNext => Button::DPadRight,
+            UiAction::FocusPrev => Button::DPadLeft,
+            UiAction::FocusDown => Button::DPadDown,
+            UiAction::FocusUp => Button::DPadUp,
+            _ => return false,
+        };
+        gilrs.gamepads().any(|(_, gp)| gp.is_pressed(btn))
+    }
+
+    fn sample_left_stick_dirs(gilrs: &Gilrs, deadzone: f32) -> (i8, i8) {
+        for (_, gp) in gilrs.gamepads() {
+            let x = gp.value(Axis::LeftStickX);
+            let y = gp.value(Axis::LeftStickY);
+            let sx = if x >= deadzone {
+                1
+            } else if x <= -deadzone {
+                -1
+            } else {
+                0
+            };
+            let sy = if y >= deadzone {
+                1
+            } else if y <= -deadzone {
+                -1
+            } else {
+                0
+            };
+            if sx != 0 || sy != 0 {
+                return (sx, sy);
+            }
+        }
+        (0, 0)
     }
 
     /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
@@ -471,6 +650,8 @@ pub fn apply_ui_actions(
             | UiAction::FocusPrev
             | UiAction::FocusDown
             | UiAction::FocusUp
+            | UiAction::FocusPlayButton
+            | UiAction::FocusDiscardButton
             | UiAction::NavigateHudNext
             | UiAction::NavigateHudPrev
             | UiAction::TabNext

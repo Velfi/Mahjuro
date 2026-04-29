@@ -3,7 +3,7 @@
 //! Each Mahjong tile maps to a codepoint in the Unicode Mahjong Tile block
 //! (U+1F000–U+1F021).  We try to rasterise that glyph from a system or
 //! project-local font; if the font doesn't carry those emoji outlines we fall
-//! back to a short ASCII notation ("1m", "5p", "E", …).
+//! back to plain-language text (rank digits, wind names, etc.).
 //!
 //! To get the real Unicode tile glyphs, drop any TTF/OTF that covers the
 //! Mahjong block (e.g. Noto Emoji) at `assets/font.ttf` in the project root.
@@ -42,46 +42,25 @@ fn finish_tile_decal_rgba(mut rgba: Vec<u8>, width: u32, height: u32, flip_h: bo
     rgba
 }
 
-/// Short ASCII label used when the Unicode glyph isn't available.
-pub fn tile_short_label(tile: &Tile) -> String {
+/// Readable label for fallback tile-face rasterization and 2D tile overlays when the
+/// Mahjong Unicode glyph is unavailable — no `m`/`s`/`p`, wind initials, or kanji.
+pub fn tile_face_display_label(tile: &Tile) -> String {
     match tile.suit {
-        // 🎴 Characters (man) — use the rank number
-        Suit::Characters => format!("{}", tile.rank),
-        // 🎋 Bamboos (sou) — use the rank number
-        Suit::Bamboos => format!("{}", tile.rank),
-        // ⭕ Circles (pin) — use the rank number
-        Suit::Circles => format!("{}", tile.rank),
+        Suit::Characters | Suit::Bamboos | Suit::Circles => format!("{}", tile.rank),
         Suit::Wind => match tile.rank {
-            1 => "E",
-            2 => "S",
-            3 => "W",
-            4 => "N",
-            _ => "?",
-        }
-        .to_string(),
+            1 => "East".into(),
+            2 => "South".into(),
+            3 => "West".into(),
+            4 => "North".into(),
+            _ => "?".into(),
+        },
         Suit::Dragon => match tile.rank {
-            1 => "Chun",
-            2 => "Hatsu",
-            3 => "Haku",
-            _ => "?",
-        }
-        .to_string(),
-        Suit::Flower => match tile.rank {
-            1 => "梅", // plum
-            2 => "蘭", // orchid
-            3 => "菊", // chrysanthemum
-            4 => "竹", // bamboo
-            _ => "✿",
-        }
-        .to_string(),
-        Suit::Season => match tile.rank {
-            1 => "春", // spring
-            2 => "夏", // summer
-            3 => "秋", // autumn
-            4 => "冬", // winter
-            _ => "☀",
-        }
-        .to_string(),
+            1 => "Red".into(),
+            2 => "Green".into(),
+            3 => "White".into(),
+            _ => "?".into(),
+        },
+        Suit::Flower | Suit::Season => tile.full_name(),
     }
 }
 
@@ -320,9 +299,9 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
 /// `atlas.toml` layout) instead of rasterizing glyphs. Falls back to font
 /// rasterization if the atlas is missing or doesn't list this tile code.
 ///
-/// `flip_decal_h`: set `true` for **hand** tiles (table rack). The mesh → world
-/// pose makes the procedural UV map read backwards unless the atlas is mirrored
-/// horizontally once. Showcase / pack tiles use `false` with their own pose.
+/// `flip_decal_h`: horizontally mirror the rasterised atlas before upload. Face UVs
+/// in `tile_3d.wgsl` handle orientation relative to the mesh; callers normally use
+/// `false`. Keep `true` only if a specific layout still needs an extra horizontal flip.
 pub fn rasterize_tile_face_decal(
     tile: &Tile,
     ui_font: Option<&fontdue::Font>,
@@ -368,7 +347,7 @@ pub fn rasterize_tile_face_decal(
     }
 
     let color = tile.suit_color();
-    let label = tile_short_label(tile);
+    let label = tile_face_display_label(tile);
     let emoji = tile_suit_emoji(tile);
 
     // Top half: suit-coloured short label.
@@ -418,6 +397,13 @@ pub fn rasterize_tile_face_decal(
     }
 
     finish_tile_decal_rgba(rgba, width, height, flip_decal_h)
+}
+
+/// Transparent RGBA containing only the debuff X (matches [`draw_debuff_marker`] on tiles).
+pub fn rasterize_debuff_marker_overlay(width: u32, height: u32) -> Vec<u8> {
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    draw_debuff_marker(&mut rgba, width, height);
+    rgba
 }
 
 fn draw_debuff_marker(rgba: &mut [u8], width: u32, height: u32) {
@@ -951,28 +937,6 @@ fn advance_width(
 /// ratio so glyphs don't get stretched by the bilinear sampler when the face
 /// isn't ~landscape — see the call site in `wgpu_renderer.rs`.
 pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
-
-/// Measure how tall a plaque needs to be to fit `text` at `font_px`, wrapping
-/// at `inner_w` pixels. Returns `(line_count, line_height_px)` — multiply and
-/// add the scene's chosen vertical padding to get the full plaque pixel height.
-/// Lets shop/gameplay scenes size the description plaque from the wrapped
-/// line count instead of shrinking the font to fit a fixed box.
-pub fn measure_plaque_wrap(
-    ui_font: Option<&fontdue::Font>,
-    text: &str,
-    inner_w: f32,
-    font_px: f32,
-) -> (usize, f32) {
-    let Some(font) = ui_font else {
-        return (1, font_px * 1.2);
-    };
-    let line_h = font
-        .horizontal_line_metrics(font_px)
-        .map(|lm| lm.new_line_size)
-        .unwrap_or(font_px * 1.2);
-    let lines = wrap_lines(font, None, text, font_px, inner_w);
-    (lines.len().max(1), line_h)
-}
 
 /// Reference long-edge size (in texels) for the ofuda decal texture. The
 /// other dimension is computed at draw time from the paper face's world-space
@@ -1980,10 +1944,6 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
 /// Unified entry point for decal rasterization used by the generic
 /// [`crate::render::draw_cmd::Object3dKind::Primitive`] dispatch.
 /// Dispatches to the existing layout-specialized rasterizers below.
-/// `palette` is currently honored only by layouts that expose an ink
-/// parameter ([`DecalLayout::Fixed`]); the gilded three-pass layouts
-/// (`Fit`, `HexStrip`) still use their hard-coded gilded palette —
-/// migrating their internal blits to take a palette is a follow-up.
 pub fn rasterize_decal(
     spec: &crate::render::primitive::DecalSpec,
     width: u32,
@@ -1991,7 +1951,7 @@ pub fn rasterize_decal(
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
 ) -> Vec<u8> {
-    use crate::render::primitive::{DecalLayout, DecalPalette};
+    use crate::render::primitive::DecalLayout;
     match &spec.layout {
         DecalLayout::Fit { .. } => {
             rasterize_plaque_decal(&spec.text, ui_font, emoji_font, width, height)
@@ -2004,26 +1964,6 @@ pub fn rasterize_decal(
             };
             let _ = emoji_font;
             rasterize_ofuda_decal(title, rule, ui_font, width, height)
-        }
-        DecalLayout::Fixed {
-            width: fw,
-            height: fh,
-        } => {
-            // GoldGilded: three-pass engraved-gilded treatment
-            // (shadow / gold body / champagne highlight) to match the
-            // shop action props and hanging plaques. Every other
-            // palette uses the simpler single-ink tablet label look
-            // with a soft drop shadow.
-            if matches!(spec.palette, DecalPalette::GoldGilded) {
-                let _ = (fw, fh, emoji_font); // wood_tablet is fixed 512x192
-                rasterize_wood_tablet_decal(&spec.text, ui_font)
-            } else {
-                let ink = match spec.palette {
-                    DecalPalette::GoldGilded => unreachable!(),
-                    DecalPalette::ParchmentInk => [0.18, 0.12, 0.08, 1.0],
-                };
-                rasterize_tablet_label_decal(&spec.text, ui_font, emoji_font, *fw, *fh, ink)
-            }
         }
     }
 }
@@ -2051,7 +1991,6 @@ pub fn decal_dimensions(
             let w = ((h as f32 * face_aspect).round() as u32).clamp(256, 4096);
             (w, h)
         }
-        DecalLayout::Fixed { width, height } => (*width, *height),
     }
 }
 

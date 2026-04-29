@@ -40,6 +40,26 @@ pub struct ScreenshotCli {
     pub boss: Option<String>,
     #[arg(long)]
     pub fresh_progress: bool,
+    /// Drive shop focus to a specific prop or item before capture, so
+    /// hover/focus-only chrome (plaques, spotlights, focus rings) renders
+    /// in the screenshot. Only honored when `--scene shop`.
+    /// Values: `journal`, `bell`, `abacus`, `sell-tray`, `relic:N`,
+    /// `ribbon:N`, `talisman:N`, `pack:N` (N is 0-based index).
+    #[arg(long)]
+    pub shop_focus: Option<String>,
+    /// Override the Yaku Journal cover-open animation amount (0.0 = closed,
+    /// 1.0 = fully open). Only honored when `--scene shop`. Useful for
+    /// capturing mid-tween states without trying to time the screenshot
+    /// precisely against the live animation.
+    #[arg(long)]
+    pub journal_open: Option<f32>,
+    /// Override the click-to-open journal transition progress (0.0 = just
+    /// clicked, 1.0 = about to push YakuJournalScene). Drives both the
+    /// cover-open phase and the zoom phase via a single `[0, 1]` time
+    /// fraction relative to `JournalTransition::TOTAL_DUR`. Only honored
+    /// when `--scene shop`.
+    #[arg(long)]
+    pub journal_transition: Option<f32>,
 }
 
 #[derive(Debug, Args)]

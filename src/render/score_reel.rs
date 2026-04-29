@@ -307,7 +307,7 @@ impl ScoreReel {
                 let cur_z = y_offset - slot_h;
 
                 out.push(make_placement(
-                    &prev_label,
+                    prev_label,
                     col_center_x,
                     prev_z,
                     digit_placement,
@@ -315,7 +315,7 @@ impl ScoreReel {
                     emissive,
                 ));
                 out.push(make_placement(
-                    &cur_label,
+                    cur_label,
                     col_center_x,
                     cur_z,
                     digit_placement,
@@ -326,7 +326,7 @@ impl ScoreReel {
                 // Idle: just the current digit, centred.
                 let cur_label = digit_label(c.current);
                 out.push(make_placement(
-                    &cur_label,
+                    cur_label,
                     col_center_x,
                     0.0,
                     digit_placement,
@@ -399,10 +399,20 @@ fn digits_for(score: u64) -> usize {
     }
 }
 
-fn digit_label(d: u8) -> String {
-    char::from_digit(d as u32, 10)
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "0".to_string())
+fn digit_label(d: u8) -> &'static str {
+    match d {
+        0 => "0",
+        1 => "1",
+        2 => "2",
+        3 => "3",
+        4 => "4",
+        5 => "5",
+        6 => "6",
+        7 => "7",
+        8 => "8",
+        9 => "9",
+        _ => "0",
+    }
 }
 
 /// Spring easing with overshoot. `t` in [0, 1], output in [0, 1] with a brief
@@ -447,7 +457,7 @@ fn make_placement(
             scale: digit_scale,
             rotation_x: PITCH,
             rotation_y: rot_y,
-            label: label.to_string(),
+            label: std::sync::Arc::from(label),
             emissive,
             material: GlyphMaterial::Plain,
         },

@@ -140,7 +140,10 @@ pub fn push_button(
         action,
     } = spec;
     push_button_visuals(quads, labels, rect, label, variant, state);
-    buttons.push(ButtonDef::ui((rect[0], rect[1], rect[2], rect[3]), action));
+    buttons.push(
+        ButtonDef::ui((rect[0], rect[1], rect[2], rect[3]), action)
+            .with_hover_label(label.to_string()),
+    );
 }
 
 fn push_button_visuals(

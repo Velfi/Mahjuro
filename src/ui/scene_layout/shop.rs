@@ -29,9 +29,6 @@ pub struct ShopPositions {
     pub reroll_prop: Placement,
     pub leave_prop: Placement,
     pub ofuda: Placement,
-    pub hover_title_plaque: Placement,
-    pub hover_desc_plaque: Placement,
-    pub hover_owned_plaque: Placement,
     pub owned_talismans: Placement,
     pub smoke_curtain: Placement,
     pub camera_eye_y_frac: f32,
@@ -68,7 +65,9 @@ impl Default for ShopPositions {
                 ry_deg: 0.0,
                 rz_deg: -27.0,
             },
-            ribbons: Placement::at(0.76, 1.571_634_9, -105.245_094),
+            // Same vertical band as talismans / relic back-row (ny must stay ~0–1;
+            // older defaults accidentally used ny ≫ 1, which drew ribbons below the viewport).
+            ribbons: Placement::at(0.76, 0.333_764_26, 39.431_37),
             relic_spread_nx: 0.075,
             ribbon_spread_nx: 0.050,
             talisman_spread_nx: 0.055,
@@ -97,9 +96,6 @@ impl Default for ShopPositions {
                 rz_deg: -38.0,
             },
             ofuda: Placement::at(0.050_925_925, -0.034_220_53, -4.086_677_6),
-            hover_title_plaque: Placement::at(-0.001_736_110_1, 0.285_171_06, -16.900_726),
-            hover_desc_plaque: Placement::at(-0.001_446_759_2, 0.0, -29.786_219),
-            hover_owned_plaque: Placement::at(0.0, -0.22, 0.0),
             owned_talismans: Placement {
                 nx: 0.0,
                 ny: 0.0,
@@ -211,24 +207,6 @@ pub const SHOP_HIERARCHY: &[Node] = &[Node::Group {
             ],
         },
         Node::Group {
-            name: "shop.hover",
-            label: "Hover plaques",
-            children: &[
-                Node::Leaf {
-                    name: "shop.hover.title_plaque",
-                    label: "Title plaque",
-                },
-                Node::Leaf {
-                    name: "shop.hover.desc_plaque",
-                    label: "Description plaque",
-                },
-                Node::Leaf {
-                    name: "shop.hover.owned_plaque",
-                    label: "Owned item plaque",
-                },
-            ],
-        },
-        Node::Group {
             name: "shop.celebrations",
             label: "Celebrations",
             children: &[
@@ -266,9 +244,6 @@ pub enum ShopField {
     RerollProp,
     LeaveProp,
     Ofuda,
-    HoverTitlePlaque,
-    HoverDescPlaque,
-    HoverOwnedPlaque,
     OwnedTalismans,
     SmokeCurtain,
     CelebPackCloseup,
@@ -293,9 +268,6 @@ pub fn lookup_shop_field(name: &str) -> Option<ShopField> {
         "shop.props.reroll_prop" => ShopField::RerollProp,
         "shop.props.leave_prop" => ShopField::LeaveProp,
         "shop.props.ofuda" => ShopField::Ofuda,
-        "shop.hover.title_plaque" => ShopField::HoverTitlePlaque,
-        "shop.hover.desc_plaque" => ShopField::HoverDescPlaque,
-        "shop.hover.owned_plaque" => ShopField::HoverOwnedPlaque,
         "shop.shelf.owned_talismans" => ShopField::OwnedTalismans,
         "shop.props.smoke_curtain" => ShopField::SmokeCurtain,
         "shop.celebrations.pack_closeup" => ShopField::CelebPackCloseup,
@@ -323,9 +295,6 @@ pub fn shop_field_path(field: ShopField) -> &'static str {
         ShopField::RerollProp => "shop.props.reroll_prop",
         ShopField::LeaveProp => "shop.props.leave_prop",
         ShopField::Ofuda => "shop.props.ofuda",
-        ShopField::HoverTitlePlaque => "shop.hover.title_plaque",
-        ShopField::HoverDescPlaque => "shop.hover.desc_plaque",
-        ShopField::HoverOwnedPlaque => "shop.hover.owned_plaque",
         ShopField::OwnedTalismans => "shop.shelf.owned_talismans",
         ShopField::SmokeCurtain => "shop.props.smoke_curtain",
         ShopField::CelebPackCloseup => "shop.celebrations.pack_closeup",
@@ -351,9 +320,6 @@ impl ShopField {
         ShopField::RerollProp,
         ShopField::LeaveProp,
         ShopField::Ofuda,
-        ShopField::HoverTitlePlaque,
-        ShopField::HoverDescPlaque,
-        ShopField::HoverOwnedPlaque,
         ShopField::OwnedTalismans,
         ShopField::SmokeCurtain,
         ShopField::CelebPackCloseup,
@@ -380,9 +346,6 @@ impl ShopPositions {
             ShopField::RerollProp => &mut self.reroll_prop,
             ShopField::LeaveProp => &mut self.leave_prop,
             ShopField::Ofuda => &mut self.ofuda,
-            ShopField::HoverTitlePlaque => &mut self.hover_title_plaque,
-            ShopField::HoverDescPlaque => &mut self.hover_desc_plaque,
-            ShopField::HoverOwnedPlaque => &mut self.hover_owned_plaque,
             ShopField::OwnedTalismans => &mut self.owned_talismans,
             ShopField::SmokeCurtain => &mut self.smoke_curtain,
             ShopField::CelebPackCloseup => &mut self.celeb_pack_closeup,
@@ -408,9 +371,6 @@ impl ShopPositions {
             ShopField::RerollProp => &self.reroll_prop,
             ShopField::LeaveProp => &self.leave_prop,
             ShopField::Ofuda => &self.ofuda,
-            ShopField::HoverTitlePlaque => &self.hover_title_plaque,
-            ShopField::HoverDescPlaque => &self.hover_desc_plaque,
-            ShopField::HoverOwnedPlaque => &self.hover_owned_plaque,
             ShopField::OwnedTalismans => &self.owned_talismans,
             ShopField::SmokeCurtain => &self.smoke_curtain,
             ShopField::CelebPackCloseup => &self.celeb_pack_closeup,
@@ -444,6 +404,16 @@ pub fn sanitize_shop_positions(p: &mut ShopPositions) {
     sanitize_placements("shop", p, ShopField::ALL, |positions, field| {
         positions.field_mut(field)
     });
+    let defaults = ShopPositions::default();
+    // Recover from persisted / legacy layouts where ribbon anchors were far below the screen.
+    if p.ribbons.ny > 1.05 || p.ribbons.ny < -0.05 || p.ribbons.lift_mm < -50.0 {
+        log::warn!(
+            "[Layout] shop.for_sale.ribbons placement was off-screen (ny={:?}, lift_mm={:?}); restoring defaults",
+            p.ribbons.ny,
+            p.ribbons.lift_mm
+        );
+        p.ribbons = defaults.ribbons;
+    }
 }
 
 pub fn save_shop_positions(pos: &ShopPositions) -> anyhow::Result<()> {

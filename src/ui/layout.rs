@@ -31,8 +31,7 @@ pub struct ViewportCtx {
 }
 
 /// Solved UI layout for one frame.
-#[derive(Debug)]
-
+#[derive(Clone, Debug)]
 pub struct LayoutResult {
     pub window_w: f32,
     pub window_h: f32,
@@ -95,6 +94,8 @@ pub const HAND_HUD_STACK_Y_FRAC: f32 = 0.38;
 
 pub struct UiLayout {
     solver: Solver,
+    /// Last `(width, height)` → layout when identical next frame (continuous redraw).
+    solve_cache: Option<(f32, f32, LayoutResult)>,
     win_w: Variable,
     win_h: Variable,
     score_left: Variable,
@@ -163,6 +164,7 @@ impl UiLayout {
 
         Self {
             solver,
+            solve_cache: None,
             win_w,
             win_h,
             score_left,
@@ -182,6 +184,13 @@ impl UiLayout {
     }
 
     pub fn solve(&mut self, width: f32, height: f32) -> LayoutResult {
+        if let Some((w, h, cached)) = &self.solve_cache
+            && *w == width
+            && *h == height
+        {
+            return cached.clone();
+        }
+
         let sh = (height as f64 * SCORE_H_RATIO).max(36.0);
         let mh = (height as f64 * MOD_H_RATIO).max(24.0);
         self.solver
@@ -234,14 +243,16 @@ impl UiLayout {
             });
         }
 
-        LayoutResult {
+        let result = LayoutResult {
             window_w: ww,
             window_h: hh,
             score_panel,
             modifier_strip,
             hand_strip,
             hand_slots,
-        }
+        };
+        self.solve_cache = Some((width, height, result.clone()));
+        result
     }
 }
 

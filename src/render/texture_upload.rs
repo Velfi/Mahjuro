@@ -12,11 +12,12 @@ use wgpu::util::DeviceExt;
 
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
-use crate::render::decal::{rasterize_tile_face_decal, tile_short_label, tile_suit_emoji};
+use crate::render::decal::{rasterize_tile_face_decal, tile_face_display_label, tile_suit_emoji};
 use crate::render::lit_mesh::ShadowCasterUniform;
 use crate::scenes::BackgroundId;
 
 use super::gpu_types::*;
+use super::wgpu_renderer::resources::DecodedBackgroundImage;
 
 // ---------------------------------------------------------------------------
 // Texture helpers
@@ -512,7 +513,7 @@ pub(crate) fn make_hand_tile_gpu(
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
     let rgba =
-        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, true);
+        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, false);
     let (decal_texture, decal_view) =
         upload_rgba_texture(device, queue, "hand-tile-decal", &rgba, DECAL_W, DECAL_H);
 
@@ -603,7 +604,7 @@ pub(crate) fn make_hand_tile_gpu(
         }],
     });
 
-    let symbol = tile_short_label(tile);
+    let symbol = tile_face_display_label(tile);
     let suit_emoji = tile_suit_emoji(tile).to_string();
     let suit_color = tile.suit_color();
     HandTileGpu {

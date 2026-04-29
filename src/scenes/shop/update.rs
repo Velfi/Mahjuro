@@ -1,4 +1,5 @@
 use super::*;
+use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
 use crate::scenes::{MeldGuideScene, OverlayRequest, YakuJournalScene, options};
 
 impl ShopScene {
@@ -16,10 +17,99 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        // Leave bell wobble — ease toward 1 while cursor/focus is on the bell
+        // (same hit sources as draw; bypass `live_shop_hit` so Dish props like
+        // `PICK_LEAVE_PROP` stay eligible).
+        {
+            let raw_hit = self
+                .focus
+                .and_then(|f| f.to_hit())
+                .or(ctx.picked_shop_object);
+            let leave_active = matches!(
+                raw_hit,
+                Some(ShopHit::Dish(id)) if id == PICK_LEAVE_PROP
+            );
+            let target = if leave_active { 1.0 } else { 0.0 };
+            let k = 1.0 - (-14.0_f32 * dt).exp();
+            self.leave_bell_hover_anim += (target - self.leave_bell_hover_anim) * k;
+        }
         self.particles.update(dt);
         // Advance bug orbit phases.
         for (i, phase) in self.bug_phases.iter_mut().enumerate() {
             *phase = (*phase + BUG_PARAMS[i].2 * dt) % std::f32::consts::TAU;
+        }
+
+        // Yaku-Journal cover-open tween. Skip entirely when the
+        // screenshot CLI has pinned the value with `--journal-open`.
+        // When a click-to-open transition is in flight, the
+        // `JournalTransition::open_progress` curve drives the open
+        // amount directly, overriding focus. Once the full transition
+        // window has elapsed, push `YakuJournalScene` and clear the
+        // transition so the next frame is inside the journal.
+        if let Some(p) = self.journal_transition_locked_at {
+            // Re-anchor the synthetic transition each tick so wall-clock
+            // drift can't move us past the locked progress fraction.
+            // Read elapsed *after* re-anchoring so the captured frame
+            // sees exactly the requested progress.
+            let target_elapsed = JournalTransition::TOTAL_DUR * p;
+            // Preserve the existing direction if any, default to
+            // Opening — `set_journal_transition_for_screenshot`
+            // assumes forward-direction captures.
+            let dir = self
+                .journal_transition
+                .map(|t| t.dir)
+                .unwrap_or(JournalDirection::Opening);
+            self.journal_transition = Some(JournalTransition {
+                start: now - std::time::Duration::from_secs_f32(target_elapsed),
+                dir,
+            });
+        }
+        // If we just resumed from `YakuJournalScene` (which was pushed
+        // at the end of a forward transition), kick off the reverse
+        // animation so the book closes back into its counter spot.
+        // `journal_was_open` is the latch for that — set when we
+        // pushed, cleared when the reverse starts.
+        if self.journal_was_open && self.journal_transition.is_none() {
+            self.journal_was_open = false;
+            self.journal_transition = Some(JournalTransition {
+                start: now,
+                dir: JournalDirection::Closing,
+            });
+        }
+        if let Some(t) = self.journal_transition {
+            self.journal_open_amount = t.open_progress();
+            self.journal_open_target = self.journal_open_amount;
+            if self.journal_transition_locked_at.is_none() && t.done() {
+                match t.dir {
+                    JournalDirection::Opening => {
+                        self.journal_transition = None;
+                        self.journal_was_open = true;
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            super::Scene::YakuJournal(YakuJournalScene::new()),
+                        )));
+                        return None;
+                    }
+                    JournalDirection::Closing => {
+                        // Animation complete; clear and let the shop
+                        // resume normally.
+                        self.journal_transition = None;
+                        self.journal_open_amount = 0.0;
+                        self.journal_open_target = 0.0;
+                    }
+                }
+            }
+            // Hold here so the focus-driven branch below doesn't run
+            // while the transition is in flight.
+        } else if let Some(locked) = self.journal_open_lock {
+            self.journal_open_amount = locked;
+            self.journal_open_target = locked;
+        } else {
+            // Stay closed until click — no hover/focus peek; only `JournalTransition` opens.
+            self.journal_open_target = 0.0;
+            let rate = 6.0;
+            let alpha = 1.0 - (-rate * dt).exp();
+            self.journal_open_amount +=
+                (self.journal_open_target - self.journal_open_amount) * alpha;
         }
         self.score_popups.update(now);
 
@@ -102,6 +192,9 @@ impl ShopScene {
                     let dominated = celeb.fully_settled() || celeb.dismissed;
                     if dominated && has_input {
                         self.pack_celebration = None;
+                        // Deferred from `apply_buy_action` while the celebration
+                        // dimmer hid the HUD — snap to Leave now that it’s visible.
+                        self.focus = Some(ShopFocus::NextRound);
                         return None;
                     }
                 }
@@ -285,25 +378,25 @@ impl ShopScene {
                             &self.talisman_items,
                             &shop,
                         ) {
-                            let result = apply_shop_action(
+                            self.apply_buy_action(
                                 action,
-                                &mut self.items,
-                                &mut self.zodiac_items,
-                                &mut self.talisman_items,
-                                &mut self.pack_items,
                                 ctx.run,
                                 ctx.bus,
-                            );
-                            self.handle_shop_action_result(
-                                result,
                                 ctx.cursor_pos,
-                                ctx.bus,
                                 ctx.overlay_request,
                             );
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                                super::Scene::YakuJournal(YakuJournalScene::new()),
-                            )));
+                            // Click-to-open: start the journal transition
+                            // animation. The scene push happens in
+                            // `update_impl` once `JournalTransition::done()`
+                            // returns true; until then, the cover-open +
+                            // zoom animation plays in the shop.
+                            if self.journal_transition.is_none() {
+                                self.journal_transition = Some(JournalTransition {
+                                    start: Instant::now(),
+                                    dir: JournalDirection::Opening,
+                                });
+                            }
                             return None;
                         }
                     }
@@ -329,7 +422,7 @@ impl ShopScene {
             if matches!(a, UiAction::Cancel) {
                 self.held_item_drag = None;
                 self.mouse_drag = None;
-                self.focus = None;
+                self.focus = Some(ShopFocus::NextRound);
                 continue;
             }
         }
@@ -401,9 +494,12 @@ impl ShopScene {
                 continue;
             };
             if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                    super::Scene::YakuJournal(YakuJournalScene::new()),
-                )));
+                if self.journal_transition.is_none() {
+                    self.journal_transition = Some(JournalTransition {
+                        start: Instant::now(),
+                        dir: JournalDirection::Opening,
+                    });
+                }
                 return None;
             }
             if matches!(hit, ShopHit::Dish(id) if id == PICK_LEAVE_PROP) {
@@ -450,19 +546,11 @@ impl ShopScene {
                 &self.talisman_items,
                 &shop,
             ) {
-                let result = apply_shop_action(
+                self.apply_buy_action(
                     action,
-                    &mut self.items,
-                    &mut self.zodiac_items,
-                    &mut self.talisman_items,
-                    &mut self.pack_items,
                     ctx.run,
                     ctx.bus,
-                );
-                self.handle_shop_action_result(
-                    result,
                     ctx.cursor_pos,
-                    ctx.bus,
                     ctx.overlay_request,
                 );
             }

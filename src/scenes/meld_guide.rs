@@ -1,8 +1,8 @@
 //! Meld Guide — visual onboarding scene teaching melds, tile categories, and yaku.
 //!
 //! Replaces the old text-only glossary overlay with a paginated 3D-tile diagram
-//! that shows concrete tile examples for each meld type, tile category, flower
-//! wildcards, and every yaku hand pattern.
+//! that shows concrete tile examples: basic melds, tile categories, flowers, and
+//! every yaku hand pattern.
 //!
 //! Accessible from the start screen ("Meld Guide" button) or mid-game via the
 //! pause menu. When entered mid-game, the previous scene is suspended by `App`
@@ -20,14 +20,14 @@ use super::start_screen::StartScreenScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Page indices ──────────────────────────────────────────────────────────
+//
+// Intro material is condensed onto two pages so navigation stays short; each
+// page shows multiple labelled tile groups (pair + sequences + triplets + kong,
+// then categories + flowers).
 
-const PAGE_PAIR: usize = 0;
-const PAGE_SEQUENCE: usize = 1;
-const PAGE_TRIPLET: usize = 2;
-const PAGE_KONG: usize = 3;
-const PAGE_CATEGORIES: usize = 4;
-const PAGE_FLOWERS: usize = 5;
-const YAKU_PAGE_START: usize = 6;
+const PAGE_BASIC_MELDS: usize = 0;
+const PAGE_TILES_AND_FLOWERS: usize = 1;
+const YAKU_PAGE_START: usize = 2;
 
 fn total_pages() -> usize {
     YAKU_PAGE_START + YakuKind::all().len()
@@ -132,21 +132,15 @@ impl SceneBehavior for MeldGuideScene {
         });
 
         // ── Lights ────────────────────────────────────────────────
-        let light_y = h * 0.20;
-        for &(lx, ly) in &[
-            (w * 0.25, h * 0.30),
-            (w * 0.75, h * 0.30),
-            (w * 0.50, h * 0.50),
-            (w * 0.25, h * 0.70),
-            (w * 0.75, h * 0.70),
-        ] {
-            frame.point_lights.push(PointLight {
-                pos: [lx, ly, light_y],
-                radius: h * 1.2,
-                color: [1.0, 0.97, 0.90],
-                intensity: 2.2,
-            });
-        }
+        // Match the Yaku Journal: one soft, high, wide-radius fill. Multiple
+        // overlapping lights at high intensity caused harsh specular streaks on
+        // tile faces against this scene's black backdrop (same issue journal fixed).
+        frame.point_lights.push(PointLight {
+            pos: [w * 0.5, h * 0.38, h * 1.35],
+            radius: h * 2.9,
+            color: [1.0, 0.96, 0.88],
+            intensity: 1.15,
+        });
 
         // ── Page content ──────────────────────────────────────────
         let (title, description, groups) = page_content(self.page);
@@ -166,7 +160,12 @@ impl SceneBehavior for MeldGuideScene {
 
         // Description
         let desc_font = typography::size(typography::BODY, h, ui_scale).max(15.0);
-        let desc_h = desc_font * 3.5;
+        let desc_lines = if self.page < YAKU_PAGE_START {
+            5.2
+        } else {
+            3.5
+        };
+        let desc_h = desc_font * desc_lines;
         let desc_y = title_y + title_h + h * 0.01;
         frame.text(TextLabel {
             rect: [w * 0.1, desc_y, w * 0.8, desc_h],
@@ -360,61 +359,51 @@ fn t(suit: Suit, rank: u8, id: u32) -> Tile {
 /// Returns `(title, description, groups)` for the given page index.
 fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
     match page {
-        PAGE_PAIR => (
-            "Pair",
-            "Two identical tiles. Every complete hand needs exactly one pair.",
-            vec![TileGroup {
-                label: "Pair",
-                tiles: vec![t(Suit::Bamboos, 5, 0), t(Suit::Bamboos, 5, 1)],
-                accent: color::CHAMPAGNE,
-            }],
-        ),
-        PAGE_SEQUENCE => (
-            "Sequence",
-            "Three consecutive tiles of the same number suit (e.g. 4-5-6). Honors and flowers cannot form sequences.",
-            vec![TileGroup {
-                label: "Sequence",
-                tiles: vec![
-                    t(Suit::Characters, 4, 0),
-                    t(Suit::Characters, 5, 1),
-                    t(Suit::Characters, 6, 2),
-                ],
-                accent: [0.35, 0.70, 0.85, 0.9],
-            }],
-        ),
-        PAGE_TRIPLET => (
-            "Triplet",
-            "Three identical tiles. Scores 50 chips \u{2014} almost double a sequence's 28.",
-            vec![TileGroup {
-                label: "Triplet",
-                tiles: vec![
-                    t(Suit::Circles, 7, 0),
-                    t(Suit::Circles, 7, 1),
-                    t(Suit::Circles, 7, 2),
-                ],
-                accent: color::GOLD,
-            }],
-        ),
-        PAGE_KONG => (
-            "Kong",
-            "Four identical tiles. Counts as a triplet for yaku detection but scores 80 chips.",
-            vec![TileGroup {
-                label: "Kong",
-                tiles: vec![
-                    t(Suit::Wind, 1, 0),
-                    t(Suit::Wind, 1, 1),
-                    t(Suit::Wind, 1, 2),
-                    t(Suit::Wind, 1, 3),
-                ],
-                accent: [0.85, 0.65, 0.20, 0.9],
-            }],
-        ),
-        PAGE_CATEGORIES => (
-            "Tile Categories",
-            "Number suits have ranks 1\u{2013}9. Rank 1 and 9 are 'terminals.' Winds and Dragons are 'honors.' Many yaku care about these categories.",
+        PAGE_BASIC_MELDS => (
+            "Basic melds",
+            "Pair: two identical tiles (every complete hand needs exactly one). Sequence: three consecutive tiles in one number suit; honors and flowers cannot form sequences. Triplet: three identical tiles. Kong: four identical tiles \u{2014} counts as a triplet for yaku and scores more chips.",
             vec![
                 TileGroup {
-                    label: "Number Suits",
+                    label: "Pair",
+                    tiles: vec![t(Suit::Bamboos, 5, 0), t(Suit::Bamboos, 5, 1)],
+                    accent: color::CHAMPAGNE,
+                },
+                TileGroup {
+                    label: "Sequence",
+                    tiles: vec![
+                        t(Suit::Characters, 4, 2),
+                        t(Suit::Characters, 5, 3),
+                        t(Suit::Characters, 6, 4),
+                    ],
+                    accent: [0.35, 0.70, 0.85, 0.9],
+                },
+                TileGroup {
+                    label: "Triplet",
+                    tiles: vec![
+                        t(Suit::Circles, 7, 5),
+                        t(Suit::Circles, 7, 6),
+                        t(Suit::Circles, 7, 7),
+                    ],
+                    accent: color::GOLD,
+                },
+                TileGroup {
+                    label: "Kong",
+                    tiles: vec![
+                        t(Suit::Wind, 1, 8),
+                        t(Suit::Wind, 1, 9),
+                        t(Suit::Wind, 1, 10),
+                        t(Suit::Wind, 1, 11),
+                    ],
+                    accent: [0.85, 0.65, 0.20, 0.9],
+                },
+            ],
+        ),
+        PAGE_TILES_AND_FLOWERS => (
+            "Tiles & flowers",
+            "Number suits use ranks 1\u{2013}9; 1 and 9 are terminals; winds and dragons are honors. Flowers are wildcards: they can form their own melds (any two as a pair, any three as a triplet) or stand in for one missing tile in a sequence or triplet.",
+            vec![
+                TileGroup {
+                    label: "Number suits",
                     tiles: vec![
                         t(Suit::Characters, 3, 0),
                         t(Suit::Bamboos, 6, 1),
@@ -436,23 +425,17 @@ fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
                     ],
                     accent: [0.70, 0.55, 0.85, 0.9],
                 },
-            ],
-        ),
-        PAGE_FLOWERS => (
-            "Flowers (Wildcards)",
-            "Flower tiles are wildcards. They can form their own melds (any 2 = pair, any 3 = triplet) or substitute for one missing tile in a sequence or triplet.",
-            vec![
                 TileGroup {
-                    label: "Flower Pair",
-                    tiles: vec![t(Suit::Flower, 1, 0), t(Suit::Flower, 2, 1)],
+                    label: "Flower pair",
+                    tiles: vec![t(Suit::Flower, 1, 8), t(Suit::Flower, 2, 9)],
                     accent: [0.85, 0.55, 0.70, 0.9],
                 },
                 TileGroup {
-                    label: "Flower as Wildcard",
+                    label: "Flower wildcard",
                     tiles: vec![
-                        t(Suit::Characters, 4, 2),
-                        t(Suit::Flower, 3, 3),
-                        t(Suit::Characters, 6, 4),
+                        t(Suit::Characters, 4, 10),
+                        t(Suit::Flower, 3, 11),
+                        t(Suit::Characters, 6, 12),
                     ],
                     accent: [0.85, 0.55, 0.70, 0.9],
                 },
@@ -484,21 +467,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "All tiles ranked 2\u{2013}8 \u{2014} no terminals (1/9) or honors.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[2, 3, 4],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[5, 6, 7],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[8, 8, 8],
@@ -511,21 +494,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "All melds are triplets or kongs \u{2014} no sequences allowed.",
             meld_groups(&[
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Characters,
                     &[1, 1, 1],
                     trip_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Bamboos,
                     &[5, 5, 5],
                     trip_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[9, 9, 9],
@@ -538,20 +521,20 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Every tile is a terminal (1 or 9) or an honor (wind/dragon).",
             meld_groups(&[
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Characters,
                     &[1, 1, 1],
                     trip_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Bamboos,
                     &[9, 9, 9],
                     trip_color,
                 ),
-                ("Trip", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
+                ("Triplet", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
                 ("Pair", SetKind::Pair, Suit::Circles, &[1, 1], pair_color),
             ]),
         ),
@@ -559,21 +542,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Two identical sequences in the same suit.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[4, 4, 4],
@@ -586,28 +569,28 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair), not 2x7 seven pairs.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[7, 7, 7],
                     trip_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[7, 8, 9],
@@ -620,21 +603,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "All tiles from a single number suit, no honors.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Bamboos,
                     &[7, 7, 7],
@@ -647,21 +630,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Same numerical sequence in all three number suits.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Circles,
                     &[4, 5, 6],
@@ -674,21 +657,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Every meld contains a terminal (rank 1 or 9). Pair is also terminal.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[7, 8, 9],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[1, 1, 1],
@@ -701,21 +684,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "1\u{2013}9 straight in one suit: three sequences covering 1-2-3, 4-5-6, 7-8-9.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[7, 8, 9],
@@ -728,20 +711,20 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "One number suit plus honors only \u{2014} no other number suits.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[2, 3, 4],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[6, 7, 8],
                     seq_color,
                 ),
-                ("Trip", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
+                ("Triplet", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
                 ("Pair", SetKind::Pair, Suit::Bamboos, &[9, 9], pair_color),
             ]),
         ),
@@ -749,14 +732,14 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "Triplet (or kong) of any dragon, or of the current round wind.",
             meld_groups(&[
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Dragon,
                     &[1, 1, 1],
                     trip_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[2, 3, 4],
@@ -781,21 +764,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             "A valid hand that triggers no other yaku \u{2014} scores base chips \u{00d7} 1 mult.",
             meld_groups(&[
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Characters,
                     &[1, 2, 3],
                     seq_color,
                 ),
                 (
-                    "Seq",
+                    "Sequence",
                     SetKind::Sequence,
                     Suit::Bamboos,
                     &[4, 5, 6],
                     seq_color,
                 ),
                 (
-                    "Trip",
+                    "Triplet",
                     SetKind::Triplet,
                     Suit::Circles,
                     &[3, 3, 3],
@@ -862,7 +845,9 @@ fn layout_tile_groups(
 
     let total_w = total_tiles as f32 * tile_size + num_gaps as f32 * gap;
     let start_x = (window_w - total_w) * 0.5;
-    let center_y = area_top_y + (window_h * 0.75 - area_top_y) * 0.45;
+    // Sit tile rows closer to the description so the black band below stays
+    // smaller (multi-group pages used to leave most of the window empty).
+    let center_y = area_top_y + (window_h * 0.72 - area_top_y) * 0.30;
 
     let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
     let label_gap = (12.0 * scale).max(8.0);

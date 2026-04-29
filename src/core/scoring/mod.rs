@@ -15,7 +15,6 @@
 mod pipeline;
 #[cfg(test)]
 mod tests;
-mod tile_value;
 
 use crate::core::hand::{DetectedSet, SetKind};
 use crate::core::tile::Tile;
@@ -24,8 +23,6 @@ use crate::core::yaku::YakuKind;
 #[cfg(test)]
 pub use pipeline::score_sets;
 pub use pipeline::score_sets_with_original;
-#[allow(unused_imports)]
-pub use tile_value::{TileEffectiveValue, tile_effective_value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepKind {

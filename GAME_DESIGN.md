@@ -80,13 +80,13 @@ Yaku level up via **zodiacs**: using a zodiac consumable boosts its bound yaku b
 * **Core scoring** — TripletBoost, SequenceSurge, PairPower, HonorFury
 * **Info / tempo** — ShantenShove, WallPeek, KanDrum, DoraCrown, Riichi
 * **Flower / suit synergy** — GardenKeeper, Ikebana, JadeSerpent, RedSerpent, BlueSerpent
-* **Conditional scaling** — Momentum, Minimalist, ClosedGate, GoldFurnace, Snowball
+* **Conditional scaling** — Momentum, Minimalist, ClosedGate, GoldenEngine, Snowball
 * **Play budget** — SecondWind (+1 play), GlassCannon (fewer plays, ×2 mult)
-* **Retrigger / echo** — LeadingTile, LowEcho, TeaCeremony, GhostHand
-* **Fragile / scaling** — MeltingIce, SilkThread, CleanStreak, Obsession, Bonfire
+* **Retrigger / echo** — Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
+* **Fragile / scaling** — MeltingIce (thaws into Taotie at 0), SilkThread (metamorphoses into SilkMoth at 0), Humility, Obsession, Bonfire
 * **Economy** — GoldIdol, JadeAbacus, NestEgg, Patience
 * **Way-of** conditional mult — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
-* **Chaos / sell-to-activate** — FortunesFavor, CrackedTile, StarTile, SmokeBomb, PhantomRelic, RitualBlade
+* **Chaos / sell-to-activate** — FortunesFavor, CrackedTile, StarTile, SmokeBomb, PhantomRelic, HungryGhost
 
 Relics come in Common / Uncommon / Rare tiers that gate shop availability and price.
 

@@ -243,6 +243,7 @@ impl AnimationController {
         t
     }
 
+    #[allow(dead_code)] // Was used for redraw gating; kept as an introspection helper.
     pub fn is_idle(&self) -> bool {
         self.tweens.is_empty()
     }

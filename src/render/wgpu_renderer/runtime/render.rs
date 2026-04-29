@@ -2,12 +2,54 @@ use super::*;
 
 impl WgpuRenderer {
     pub fn render(&mut self, frame: &UiFrame, settings: RenderSettings) -> anyhow::Result<()> {
+        self.render_to(frame, settings, None)
+    }
+
+    /// Render `frame` into the offscreen `journal_scene_texture`. Used
+    /// by the shop scene as a pre-pass while the journal book is open
+    /// so the book mesh can sample a live render of the embedded yaku-
+    /// journal scene as its page-content surface.
+    pub fn render_journal_prepass(
+        &mut self,
+        frame: &UiFrame,
+        settings: RenderSettings,
+    ) -> anyhow::Result<()> {
+        // Move the view out of `self` for the duration of the call so
+        // the borrow checker is happy with `&mut self` re-entering
+        // `render_to`. The view is cheap to recreate from the texture
+        // (it's just a TextureView descriptor).
+        let view = self
+            .journal_scene_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.render_to(frame, settings, Some(&view))
+    }
+
+    /// Render `frame` either to the swapchain (when `output_override` is
+    /// `None`) or to a caller-provided color view (when `Some`). The
+    /// override path is used for the journal pre-pass: the shop calls
+    /// `render_to` once with `output_override = Some(&journal_scene_view)`
+    /// and a journal `UiFrame`, then again with `output_override = None`
+    /// for the live shop frame whose book mesh samples the journal target.
+    ///
+    /// Internal scratch buffers (`scene_color_texture`, depth, bloom
+    /// ping/pong) are reused across both calls — only one render is in
+    /// flight at a time and the override path's encoder is submitted
+    /// before the swapchain path begins. Temporal SSR inputs
+    /// (`scene_prev_texture`, `ssr_prev_depth_texture`) are updated only
+    /// when `output_override` is `None` (the visible frame).
+    pub fn render_to(
+        &mut self,
+        frame: &UiFrame,
+        settings: RenderSettings,
+        output_override: Option<&wgpu::TextureView>,
+    ) -> anyhow::Result<()> {
         let RenderSettings {
             smoke_quality,
             smoke_amount,
             effects_quality,
             tile_preset,
             tile_material,
+            surface_kind,
             tileset_name,
             draw_settle_speed,
             sort_settle_speed,
@@ -15,7 +57,7 @@ impl WgpuRenderer {
             shadows_enabled,
             ssr_enabled,
         } = settings;
-        self.apply_render_settings(tile_material, &tileset_name);
+        self.apply_render_settings(tile_material, surface_kind, effects_quality, &tileset_name);
 
         // Upload any relic/background textures that finished decoding.
         self.poll_relic_textures();
@@ -26,18 +68,40 @@ impl WgpuRenderer {
         // a plain render-attachment texture owned by `self.target`. Either
         // way we end up with a `&wgpu::Texture` (for the screenshot copy)
         // and a `TextureView` (for the render passes).
-        let surface_frame: Option<wgpu::SurfaceTexture> = match self.acquire_render_frame()? {
-            RenderFrame::Draw(frame) => frame,
-            RenderFrame::Skip => return Ok(()),
+        //
+        // Journal pre-pass override: when `output_override` is `Some`, skip
+        // surface acquisition entirely and use the caller's view. Screenshot
+        // capture is also skipped on this path — only the final swapchain
+        // pass produces a presentable image.
+        let is_prepass = output_override.is_some();
+        let (surface_frame, frame_texture_opt): (
+            Option<wgpu::SurfaceTexture>,
+            Option<wgpu::Texture>,
+        ) = if is_prepass {
+            (None, None)
+        } else {
+            let sf = match self.acquire_render_frame()? {
+                RenderFrame::Draw(frame) => frame,
+                RenderFrame::Skip => return Ok(()),
+            };
+            let tex: wgpu::Texture = match (&sf, &self.target) {
+                (Some(sf), _) => sf.texture.clone(),
+                (None, RenderTarget::Offscreen { texture, .. }) => texture.clone(),
+                (None, RenderTarget::Surface(_)) => {
+                    unreachable!("Surface target always produces a surface_frame or early-returns")
+                }
+            };
+            (sf, Some(tex))
         };
-        let frame_texture: wgpu::Texture = match (&surface_frame, &self.target) {
-            (Some(sf), _) => sf.texture.clone(),
-            (None, RenderTarget::Offscreen { texture, .. }) => texture.clone(),
-            (None, RenderTarget::Surface(_)) => {
-                unreachable!("Surface target always produces a surface_frame or early-returns")
-            }
+        let owned_view: Option<wgpu::TextureView> = frame_texture_opt
+            .as_ref()
+            .map(|t| t.create_view(&wgpu::TextureViewDescriptor::default()));
+        let view: &wgpu::TextureView = match output_override {
+            Some(v) => v,
+            None => owned_view
+                .as_ref()
+                .expect("non-prepass render must own a swapchain view"),
         };
-        let view = frame_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bloom_active = Self::bloom_is_active(frame);
 
         // Lerp per-tile slide animations toward 0 (ease-out) and advance
@@ -66,6 +130,7 @@ impl WgpuRenderer {
         // `tile_glow_pipeline` immediately after the 3D relic boxes so the
         // warm light blooms out around the box silhouette.
         let mut relic_glows: Vec<GpuInstance> = Vec::new();
+        let mut relic_debuff_markers: Vec<GpuInstance> = Vec::new();
 
         // ── Person-at-the-table camera ──────────────────────────────────
         // Z-up world, standard right-hand conventions: +X right, +Y into the
@@ -88,7 +153,8 @@ impl WgpuRenderer {
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
-        let project_to_screen = |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
+        let project_to_screen =
+            |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
 
         // ── Debug axes overlay ──────────────────────────────────────────
         self.write_debug_axes_uniforms(frame, &camera);
@@ -202,68 +268,152 @@ impl WgpuRenderer {
         };
 
         // ── Pre-rasterize text labels → GPU textures + bind groups ──────
-        let make_text_draw = |device: &wgpu::Device,
-                              queue: &wgpu::Queue,
-                              text_bgl: &wgpu::BindGroupLayout,
-                              sampler: &wgpu::Sampler,
-                              lbl: &TextLabel,
-                              font: &fontdue::Font,
-                              emoji_fallback: Option<&fontdue::Font>|
-         -> TextDraw {
-            // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
-            // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
-            // when layout math produces a negative rect width.
-            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
-            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
-            let align = match lbl.align {
-                TextAlign::Left => LabelAlign::Left,
-                TextAlign::Center => LabelAlign::Center,
-                TextAlign::Right => LabelAlign::Right,
+        // Caches the rasterized texture + bind group in `text_label_cache`
+        // keyed on the inputs that affect produced pixels. The per-frame
+        // instance buffer (rect + color) is rebuilt every call since it's
+        // cheap and animates freely. Marquee labels (non-zero scroll_offset)
+        // bypass the cache because the offset is baked into the raster and
+        // would otherwise fill the cache with single-use entries.
+        let make_text_draw =
+            |device: &wgpu::Device,
+             queue: &wgpu::Queue,
+             text_bgl: &wgpu::BindGroupLayout,
+             sampler: &wgpu::Sampler,
+             cache: &mut HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
+             frame_id: u64,
+             lbl: &TextLabel,
+             font: &fontdue::Font,
+             emoji_fallback: Option<&fontdue::Font>|
+             -> TextDraw {
+                // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
+                // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
+                // when layout math produces a negative rect width.
+                let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+                let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+                let align = match lbl.align {
+                    TextAlign::Left => LabelAlign::Left,
+                    TextAlign::Center => LabelAlign::Center,
+                    TextAlign::Right => LabelAlign::Right,
+                };
+                let scroll_offset_px = lbl.scroll_offset.round() as i32;
+                let cacheable = scroll_offset_px == 0;
+                let shape_key = TextLabelShapeKey {
+                    emoji_path: emoji_fallback.is_some(),
+                    font_px: lbl.font_px.map(|p| p.round() as u32),
+                    width_px: tw,
+                    height_px: th,
+                    align: lbl.align,
+                    scroll_offset_px,
+                };
+
+                let (bind_group, owned_tex) = if cacheable {
+                    // Two-level lookup: hit path borrows &str (no String alloc).
+                    let inner = cache.entry(shape_key).or_default();
+                    if let Some(entry) = inner.get_mut(lbl.text.as_str()) {
+                        entry.last_used = frame_id;
+                        (entry.bind_group.clone(), None)
+                    } else {
+                        let rgba = rasterize_label_styled_with_fallback(
+                            font,
+                            emoji_fallback,
+                            &lbl.text,
+                            tw,
+                            th,
+                            crate::render::decal::LabelStyle {
+                                font_px: lbl.font_px,
+                                align,
+                                scroll_offset: lbl.scroll_offset,
+                            },
+                        );
+                        let (tex, view) =
+                            upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+                        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("text-lbl-bg"),
+                            layout: text_bgl,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(sampler),
+                                },
+                            ],
+                        });
+                        let bg_clone = bg.clone();
+                        inner.insert(
+                            lbl.text.clone(),
+                            CachedTextLabel {
+                                tex,
+                                bind_group: bg,
+                                last_used: frame_id,
+                            },
+                        );
+                        (bg_clone, None)
+                    }
+                } else {
+                    // Marquee path: rasterize fresh, do not insert into cache.
+                    let rgba = rasterize_label_styled_with_fallback(
+                        font,
+                        emoji_fallback,
+                        &lbl.text,
+                        tw,
+                        th,
+                        crate::render::decal::LabelStyle {
+                            font_px: lbl.font_px,
+                            align,
+                            scroll_offset: lbl.scroll_offset,
+                        },
+                    );
+                    let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+                    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("text-lbl-bg"),
+                        layout: text_bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(sampler),
+                            },
+                        ],
+                    });
+                    (bg, Some(tex))
+                };
+
+                let inst = GpuInstance {
+                    rect: lbl.rect,
+                    color: lbl.color,
+                };
+                let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("text-inst"),
+                    contents: bytemuck::cast_slice(&[inst]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                TextDraw {
+                    inst_buf,
+                    bind_group,
+                    _tex: owned_tex,
+                }
             };
-            let rgba = rasterize_label_styled_with_fallback(
-                font,
-                emoji_fallback,
-                &lbl.text,
-                tw,
-                th,
-                crate::render::decal::LabelStyle {
-                    font_px: lbl.font_px,
-                    align,
-                    scroll_offset: lbl.scroll_offset,
-                },
-            );
-            let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("text-lbl-bg"),
-                layout: text_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    },
-                ],
-            });
-            let inst = GpuInstance {
-                rect: lbl.rect,
-                color: lbl.color,
-            };
-            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("text-inst"),
-                contents: bytemuck::cast_slice(&[inst]),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            TextDraw {
-                inst_buf,
-                bind_group,
-                _tex: tex,
-            }
-        };
 
         // ── Hand tile face/emoji label GPU draws (consumed by HandTileFaces) ──
+        // Bump the cache frame stamp once per render() so make_text_draw can
+        // mark every entry it touches. Evict entries that haven't been hit
+        // for TEXT_CACHE_TTL_FRAMES — labels whose text/size has changed
+        // shouldn't keep their stale GPU texture pinned forever.
+        self.text_cache_frame = self.text_cache_frame.wrapping_add(1);
+        let cache_frame_id = self.text_cache_frame;
+        let ttl_cutoff = cache_frame_id.saturating_sub(TEXT_CACHE_TTL_FRAMES);
+        // Walk the two-level map: drop stale entries from each inner bucket,
+        // then drop any inner bucket that became empty.
+        self.text_label_cache.retain(|_, inner| {
+            inner.retain(|_, entry| entry.last_used >= ttl_cutoff);
+            !inner.is_empty()
+        });
         let mut hand_face_draws: Vec<TextDraw> = Vec::new();
         if let Some(ref font) = self.ui_font {
             for lbl in &tile_labels {
@@ -272,6 +422,8 @@ impl WgpuRenderer {
                     &self.queue,
                     &self.text_bind_group_layout,
                     &self.tile_sampler,
+                    &mut self.text_label_cache,
+                    cache_frame_id,
                     lbl,
                     font,
                     None,
@@ -285,6 +437,8 @@ impl WgpuRenderer {
                     &self.queue,
                     &self.text_bind_group_layout,
                     &self.tile_sampler,
+                    &mut self.text_label_cache,
+                    cache_frame_id,
                     lbl,
                     font,
                     None,
@@ -462,6 +616,8 @@ impl WgpuRenderer {
                             &self.queue,
                             &self.text_bind_group_layout,
                             &self.tile_sampler,
+                            &mut self.text_label_cache,
+                            cache_frame_id,
                             lbl,
                             font,
                             self.emoji_font.as_ref(),
@@ -509,10 +665,6 @@ impl WgpuRenderer {
                     let idx = showcase_tile_batches.len();
                     showcase_tile_batches.push(placements.as_slice());
                     ops.push(RenderOp::ShowcaseTileBatch(idx));
-                    i += 1;
-                }
-                DrawCmd::GlossaryAnchor { .. } => {
-                    // Pure metadata for the tooltip overlay; no draw work.
                     i += 1;
                 }
                 DrawCmd::Object3d(obj) => {
@@ -574,6 +726,8 @@ impl WgpuRenderer {
                     &self.queue,
                     &self.text_bind_group_layout,
                     &self.tile_sampler,
+                    &mut self.text_label_cache,
+                    cache_frame_id,
                     &lbl,
                     font,
                     None,
@@ -605,14 +759,33 @@ impl WgpuRenderer {
                 &self.queue,
                 view_proj_arr,
                 model,
-                self.table_mesh.default_material,
+                self.table_material,
             );
+
+            // Felt shells share `table_instance`'s uniform; shell layer comes
+            // from `@builtin(instance_index)` in `vs_felt_shell_instanced`.
         }
         // Reset the debug pickable catch-all for this frame; each draw
         // loop below appends entries it wants to expose to
         // `pick_debug_object`.
         self.last_debug_pickables.clear();
         self.last_debug_trimesh_pickables.clear();
+        self.last_gameplay_fog_wall_horizon_y = frame.gameplay_fog_wall_horizon_y;
+        if let Some(hy) = frame.gameplay_fog_wall_horizon_y {
+            let py = hy.clamp(0.0, 1.0) * h;
+            let center = pixel_to_world(w, h, w * 0.5, py, 720.0);
+            let model = translate_rot_scale(
+                center,
+                Mat4::IDENTITY,
+                glam::Vec3::new(w * 12.0, 160.0, 140.0),
+            );
+            self.last_debug_pickables.push((
+                "gameplay.fog_wall".to_string(),
+                model,
+                glam::Vec3::splat(0.5),
+                0.0,
+            ));
+        }
 
         // Candles migrated to Object3dKind::Candle.
 
@@ -739,7 +912,6 @@ impl WgpuRenderer {
 
         self.write_gameplay_hud_uniforms(&camera, &yaku_tablet_batches);
 
-
         // Wood tablets migrated to Object3dKind::WoodTablet.
 
         self.run_object3d_placement(
@@ -749,7 +921,17 @@ impl WgpuRenderer {
             &mut object3d_draw_list,
             &mut ops,
             &mut relic_glows,
+            &mut relic_debuff_markers,
         );
+
+        if !relic_debuff_markers.is_empty() && self.debuff_marker_overlay.is_none() {
+            self.debuff_marker_overlay = Some(super::super::make_debuff_marker_overlay_gpu(
+                &self.device,
+                &self.queue,
+                &self.text_bind_group_layout,
+                &self.tile_sampler,
+            ));
+        }
 
         // ── Arrange-mode bounding box overlay ──────────────────────────────
         self.push_arrange_bbox_overlay(frame, &camera, &mut quad_buffers, &mut ops);
@@ -766,6 +948,19 @@ impl WgpuRenderer {
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("relic-glow-instances"),
                         contents: bytemuck::cast_slice(&relic_glows),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
+        };
+
+        let relic_debuff_buffer = if relic_debuff_markers.is_empty() {
+            None
+        } else {
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("relic-debuff-marker-instances"),
+                        contents: bytemuck::cast_slice(&relic_debuff_markers),
                         usage: wgpu::BufferUsages::VERTEX,
                     }),
             )
@@ -788,14 +983,18 @@ impl WgpuRenderer {
         let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled);
         let light_view_proj_arr = shadow_frame.light_view_proj_arr;
 
+        let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
+        self.prev_frame_shadows_enabled = shadows_enabled;
+        let mut shadow_uniforms_changed = shadow_just_enabled;
+
         self.write_per_instance_shadow_casters(
             frame,
             &camera,
             light_view_proj_arr,
             &tile_pick_models,
             &shrine_batches,
+            &mut shadow_uniforms_changed,
         );
-
 
         self.run_showcase_tiles_placement(
             &camera,
@@ -807,6 +1006,7 @@ impl WgpuRenderer {
             &mut tile_3d_rects,
             &mut tile_pick_models,
             &mut tile_glows,
+            &mut shadow_uniforms_changed,
         );
 
         let mut encoder = self
@@ -814,6 +1014,15 @@ impl WgpuRenderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+
+        // Paint the open-book's page-spread albedo. CPU-rasterised
+        // each frame and uploaded via `queue.write_texture` — the
+        // alternative GPU side-pipeline path was abandoned because the
+        // refactor needed to share `make_text_draw` etc. with the main
+        // render loop carried too much risk for the gameplay path. At
+        // 1024×1024 RGBA the upload is well under any plausible
+        // bandwidth budget on modern hardware.
+        self.upload_journal_page_content();
 
         // Run fluid simulation compute passes (before render pass).
         //
@@ -837,11 +1046,11 @@ impl WgpuRenderer {
             &mut encoder,
             frame,
             shadows_enabled,
+            shadow_uniforms_changed,
             &showcase_tile_batches,
             &shrine_batches,
             &tile_3d_rects,
         );
-
 
         // Pre-create background image instance buffer (must outlive render pass).
         let bg_inst = GpuInstance {
@@ -869,7 +1078,11 @@ impl WgpuRenderer {
         let split_idx = ops.iter().position(|o| matches!(o, RenderOp::FluidSmoke));
         let split_end = split_idx.unwrap_or(ops.len());
 
-        let process_ctx = ProcessOpCtx {
+        // Pass A / post-smoke always render into `scene_color_view`
+        // (`Rgba16Float`). Do not key this on `is_prepass`: the journal
+        // pre-pass still draws the 3D scene into that HDR buffer before
+        // tonemapping to the journal target.
+        let process_ctx_scene = ProcessOpCtx {
             frame,
             bg_inst_buf: &bg_inst_buf,
             quad_buffers: &quad_buffers,
@@ -884,7 +1097,34 @@ impl WgpuRenderer {
             tile_glow_buffer: tile_glow_buffer.as_ref(),
             relic_glows: &relic_glows,
             relic_glow_buffer: relic_glow_buffer.as_ref(),
+            relic_debuff_markers: &relic_debuff_markers,
+            relic_debuff_buffer: relic_debuff_buffer.as_ref(),
             smoke_quality,
+            scene_hdr_attachment: true,
+        };
+        // Text overlay loads the final `view` (swapchain or journal), not
+        // `scene_color_view`; match that attachment's format for 2D pipelines.
+        let overlay_hdr =
+            is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float);
+        let process_ctx_overlay = ProcessOpCtx {
+            frame,
+            bg_inst_buf: &bg_inst_buf,
+            quad_buffers: &quad_buffers,
+            gradient_quad_buffers: &gradient_quad_buffers,
+            flame_buffers: &flame_buffers,
+            text_draws: &text_draws,
+            tile_face_inst_buffers: &tile_face_inst_buffers,
+            tile_face_quads: &tile_face_quads,
+            object3d_draw_list: &object3d_draw_list,
+            showcase_tile_batches: &showcase_tile_batches,
+            tile_glows: &tile_glows,
+            tile_glow_buffer: tile_glow_buffer.as_ref(),
+            relic_glows: &relic_glows,
+            relic_glow_buffer: relic_glow_buffer.as_ref(),
+            relic_debuff_markers: &relic_debuff_markers,
+            relic_debuff_buffer: relic_debuff_buffer.as_ref(),
+            smoke_quality,
+            scene_hdr_attachment: overlay_hdr,
         };
 
         // ── Pre-pass: shooting-star cascade into half-res offscreen ─────
@@ -919,120 +1159,221 @@ impl WgpuRenderer {
 
         // ── Pass A: clear + draw everything that lives behind the smoke ──
         {
-            let main_ts = self
-                .gpu_profiler
-                .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.scene_color_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                occlusion_query_set: None,
-                timestamp_writes: main_ts,
-                multiview_mask: None,
-            });
-            for op in &ops[..split_end] {
-                // 2D HUD text labels are drawn into the swapchain in a
-                // separate overlay pass after the SSR snapshot, so they
-                // don't end up in `scene_prev_texture` and get reflected by
-                // the lacquered table. See the overlay pass below the
-                // end-of-frame copies.
-                //
-                // `Plaque` ops are also held back: the score plaque now
-                // carries an engraved decal texture (the score header
-                // text) baked onto its +Z face, and if it were drawn here
-                // the lacquered-table SSR would reflect that engraved
-                // text into the table — recreating the exact ghost-text
-                // artefact the overlay pass was originally introduced to
-                // avoid. We snapshot `scene_prev` + `ssr_prev_depth`
-                // immediately after this loop and *then* draw the plaques
-                // in a sibling pass that loads the swapchain.
-                if matches!(op, RenderOp::TextDraw(_)) {
-                    continue;
-                }
-                self.process_op(&mut pass, op, &process_ctx);
+            #[cfg(debug_assertions)]
+            let split_main_for_profile = self.gpu_profiler.is_sampling()
+                && ops[..split_end]
+                    .iter()
+                    .any(|o| matches!(o, RenderOp::Table));
+            #[cfg(not(debug_assertions))]
+            let split_main_for_profile = false;
+
+            macro_rules! pass_a_draw_loop {
+                ($pass:expr, $skip_table:expr, $only_table:expr) => {{
+                    for op in &ops[..split_end] {
+                        // 2D HUD text labels are drawn into the swapchain in a
+                        // separate overlay pass after the SSR snapshot, so they
+                        // don't end up in `scene_prev_texture` and get reflected by
+                        // the lacquered table. See the overlay pass below the
+                        // end-of-frame copies.
+                        //
+                        // `Plaque` ops are also held back: the score plaque now
+                        // carries an engraved decal texture (the score header
+                        // text) baked onto its +Z face, and if it were drawn here
+                        // the lacquered-table SSR would reflect that engraved
+                        // text into the table — recreating the exact ghost-text
+                        // artefact the overlay pass was originally introduced to
+                        // avoid. We snapshot `scene_prev` + `ssr_prev_depth`
+                        // immediately after this loop and *then* draw the plaques
+                        // in a sibling pass that loads the swapchain.
+                        if matches!(op, RenderOp::TextDraw(_)) {
+                            continue;
+                        }
+                        let is_table = matches!(op, RenderOp::Table);
+                        if $only_table && !is_table {
+                            continue;
+                        }
+                        if $skip_table && is_table {
+                            continue;
+                        }
+                        self.process_op(&mut $pass, op, &process_ctx_scene);
+                    }
+                }};
             }
 
-            // Debug world-axes overlay: draw three colored bars after the
-            // normal pass-A 3D ops so they sit on top of the table. Uses
-            // the shared `relic_box_mesh` unit cube; per-instance uniforms
-            // were written above.
-            if frame.debug_axes {
-                pass.set_pipeline(&self.lit_mesh_pipeline);
-                pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
-                pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(
-                    self.relic_box_mesh.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                for inst in self.debug_axes_instances.iter() {
-                    pass.set_bind_group(0, &inst.bind_group, &[]);
-                    pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+            if split_main_for_profile {
+                let ts_table = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainTable);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("main-pass-table"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    occlusion_query_set: None,
+                    timestamp_writes: ts_table,
+                    multiview_mask: None,
+                });
+                pass_a_draw_loop!(pass, false, true);
+                drop(pass);
+
+                let ts_scene = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainScene);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("main-pass-scene"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    occlusion_query_set: None,
+                    timestamp_writes: ts_scene,
+                    multiview_mask: None,
+                });
+                pass_a_draw_loop!(pass, true, false);
+                if frame.debug_axes {
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.relic_box_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    for inst in self.debug_axes_instances.iter() {
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                    }
+                }
+            } else {
+                let main_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("main-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.scene_color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    occlusion_query_set: None,
+                    timestamp_writes: main_ts,
+                    multiview_mask: None,
+                });
+                pass_a_draw_loop!(pass, false, false);
+                if frame.debug_axes {
+                    pass.set_pipeline(&self.lit_mesh_pipeline);
+                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                    pass.set_index_buffer(
+                        self.relic_box_mesh.index_buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    for inst in self.debug_axes_instances.iter() {
+                        pass.set_bind_group(0, &inst.bind_group, &[]);
+                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                    }
                 }
             }
         }
 
         // ── SSR snapshot ────────────────────────────────────────────────
-        // Capture the swapchain colour and depth buffers BEFORE the
-        // hanging plaques are drawn. The lacquered-table SSR samples
-        // these textures next frame, so plaques (and the engraved score
-        // text decal on their +Z face) never end up in the table's
-        // reflection. The smoke pass below still gets a fresh, full
-        // (with-plaques) depth via its own `depth_copy_texture` copy.
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.scene_color_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.scene_prev_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::Extent3d {
-                width: self.size.width.max(1),
-                height: self.size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-        );
-        encoder.copy_texture_to_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.depth_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.ssr_prev_depth_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::DepthOnly,
-            },
-            wgpu::Extent3d {
-                width: self.size.width.max(1),
-                height: self.size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-        );
+        // Capture scene colour + depth into temporal SSR inputs BEFORE the
+        // hanging plaques. Lacquered surfaces sample `scene_prev_texture` /
+        // `ssr_prev_depth_texture` next frame; only the primary swapchain
+        // pass may publish them — not `output_override` prepasses (e.g.
+        // shop journal → book texture), which would stomp history with the
+        // wrong scene.
+        //
+        // Skipped when `is_prepass`: plaques/smoke ordering below still
+        // applies only to the visible frame path.
+        if !is_prepass {
+            // Capture the swapchain colour and depth buffers BEFORE the
+            // hanging plaques are drawn. The lacquered-table SSR samples
+            // these textures next frame, so plaques (and the engraved score
+            // text decal on their +Z face) never end up in the table's
+            // reflection. The smoke pass below still gets a fresh, full
+            // (with-plaques) depth via its own `depth_copy_texture` copy.
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.scene_color_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.scene_prev_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: self.size.width.max(1),
+                    height: self.size.height.max(1),
+                    depth_or_array_layers: 1,
+                },
+            );
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.depth_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::DepthOnly,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.ssr_prev_depth_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::DepthOnly,
+                },
+                wgpu::Extent3d {
+                    width: self.size.width.max(1),
+                    height: self.size.height.max(1),
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
 
         // ── Pass B: only created when there's a FluidSmoke marker. The
         // ── live depth buffer is copied into a sibling texture so the
@@ -1165,7 +1506,7 @@ impl WgpuRenderer {
                 if matches!(op, RenderOp::TextDraw(_)) {
                     continue;
                 }
-                self.process_op(&mut pass, op, &process_ctx);
+                self.process_op(&mut pass, op, &process_ctx_scene);
             }
         }
 
@@ -1353,7 +1694,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &self.post_bloom_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -1368,6 +1709,68 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
             pass.set_bind_group(0, &bloom_composite_bg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        let tonemap_mode =
+            if is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float) {
+                1.0f32
+            } else {
+                0.0f32
+            };
+        let tonemap_params_buf =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tonemap-params"),
+                    contents: bytemuck::bytes_of(&TonemapParams {
+                        exposure: self.tonemap_exposure,
+                        mode: tonemap_mode,
+                        _pad: [0.0; 2],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+        let tonemap_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-bg"),
+            layout: &self.tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tonemap_params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        let tonemap_pipe = if is_prepass {
+            &self.tonemap_rgba16f_pipeline
+        } else {
+            &self.tonemap_pipeline
+        };
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tonemap-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(tonemap_pipe);
+            pass.set_bind_group(0, &tonemap_bg, &[]);
             pass.draw(0..3, 0..1);
         }
 
@@ -1391,7 +1794,7 @@ impl WgpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -1413,7 +1816,7 @@ impl WgpuRenderer {
             });
             for op in &ops {
                 if matches!(op, RenderOp::TextDraw(_)) {
-                    self.process_op(&mut pass, op, &process_ctx);
+                    self.process_op(&mut pass, op, &process_ctx_overlay);
                 }
             }
         }
@@ -1438,12 +1841,19 @@ impl WgpuRenderer {
         // After submit + poll(Wait), map and PNG-encode synchronously.
         // The surface texture is still owned by us until present(), so
         // this is safe. Tied into the same encoder so no extra submit.
-        let screenshot_path = self.pending_screenshot.take();
-        let screenshot_staging = if let Some(ref path) = screenshot_path {
-            log::info!("screenshot: encoding capture for {}", path.display());
-            Some(self.encode_screenshot_copy(&mut encoder, &frame_texture, path))
-        } else {
+        // Skipped on the journal pre-pass — only the final swapchain
+        // pass produces a presentable image worth screenshotting.
+        let screenshot_path = if is_prepass {
             None
+        } else {
+            self.pending_screenshot.take()
+        };
+        let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
+            (Some(path), Some(ft)) => {
+                log::info!("screenshot: encoding capture for {}", path.display());
+                Some(self.encode_screenshot_copy(&mut encoder, ft, path))
+            }
+            _ => None,
         };
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -23,9 +23,9 @@ pub enum RelicId {
     HonorFury,
     RedDragonRage,
     GreenLuck,
-    WhiteSilence,
+    WhiteDragonsHush,
     JokerTile,
-    Overflow,
+    StrengthInNumbers,
     QuickDraw,
     ChainReaction,
     MultiplierMaster,
@@ -42,18 +42,6 @@ pub enum RelicId {
     KanDrum,
     /// Reveal an extra dora indicator at round start; dora chips become +35.
     DoraCrown,
-    /// First riichi declaration each round costs no discard; failed riichi
-    /// floors at 80% target instead of 60%. (No-op until Patch E lands the
-    /// declaration UI.)
-    RiichiStick,
-    /// Tenpai Bonus is doubled.
-    TenpaiTalisman,
-    /// Once per round, clear 3 tiles from your river. (No-op until Patch D
-    /// lands the river system.)
-    RiverEraser,
-    /// Your river only retains the last 6 tiles instead of 12. (No-op until
-    /// Patch D lands the river system.)
-    FuritenWard,
     /// Round Wind triplets/kongs grant +6 mult instead of the base +3.
     RoundCompass,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
@@ -62,8 +50,6 @@ pub enum RelicId {
     /// both triplet and pair" semantic was never wired into yaku detection;
     /// this flat bonus replaces it as a real, scoring effect.)
     KongsBlessing,
-    /// Reserved relic id; the old yaku-loadout swap mechanic no longer exists.
-    CodexCompass,
     // ── Flower-synergy relics ──────────────────────────────────────────
     /// Each flower's triggered effect fires a second time.
     GardenKeeper,
@@ -80,6 +66,8 @@ pub enum RelicId {
     BlueSerpent,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
     LowTide,
+    /// Tiles ranked 7–9 in scored sets: +6 chips each.
+    HighTide,
     /// Relics cost 25% less in the shop, rounded down (minimum $1).
     MerchantsEye,
     /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
@@ -95,7 +83,7 @@ pub enum RelicId {
     /// All scored tiles are terminals or honors: +4 mult.
     ClosedGate,
     /// +1 mult per 5 gold held.
-    GoldFurnace,
+    GoldenEngine,
     /// +0.1 mult per 100 total score earned this run.
     Snowball,
     /// +1 play per round.
@@ -110,11 +98,11 @@ pub enum RelicId {
     /// run. Accumulated in `relic_counters[TilePolisher]`.
     TilePolisher,
     /// +6 mult, but 1-in-5 chance to be destroyed at end of each round.
-    /// When destroyed, replaced by Iron Lantern.
+    /// When destroyed, replaced by Silver Filigree Lantern.
     PaperLantern,
     /// Replaces Paper Lantern when it burns. ×2 final mult, 1-in-1000
     /// chance to break at end of round.
-    IronLantern,
+    SilverFiligreeLantern,
     /// Copies the scoring effect of the relic immediately after it in
     /// the player's relic inventory. No effect if it's the last slot.
     MirrorTile,
@@ -122,10 +110,12 @@ pub enum RelicId {
     WayOfPurity,
     // ── Patch G: 25 Balatro-inspired relics ───────────────────────────
     // Retrigger
-    /// Retrigger the first tile in each scored set.
-    LeadingTile,
+    /// Retrigger the first 5 scored tiles in the hand.
+    Geese,
     /// Retrigger tiles ranked 1–4 in scored sets.
-    LowEcho,
+    VoiceOfThePeople,
+    /// Retrigger tiles ranked 6–9 in scored sets.
+    VoiceOfTheElite,
     /// Retrigger all scored tiles for 3 plays, then self-destructs.
     TeaCeremony,
     /// Tiles NOT in scored sets each grant +2 chips.
@@ -133,7 +123,7 @@ pub enum RelicId {
     // Scaling
     /// +0.5 mult per consecutive play without honor tiles. Resets when
     /// honors are scored.
-    CleanStreak,
+    Humility,
     /// +0.3 mult per round you don't score your most-used yaku.
     Obsession,
     /// +0.4 mult per relic sold this run.
@@ -141,15 +131,31 @@ pub enum RelicId {
     /// +20 chips permanently each time you score a sequence.
     RiverRunner,
     // Fragile
-    /// +80 chips, loses 8 chips per play. Destroyed at 0.
+    /// +80 chips, loses 8 chips per play. Transforms into Taotie at 0
+    /// instead of vanishing.
     MeltingIce,
-    /// +4 mult, loses 0.3 mult per discard. Destroyed at 0.
+    /// Successor to Melting Ice. Created in-place when Melting Ice's counter
+    /// would hit 0 — the bronze mask thaws free. Permanent +80 chips base.
+    /// At cash-in, every scored honor (wind/dragon) tile is *devoured*: the
+    /// tile is permanently removed from the run's wall (added to
+    /// `removed_tile_ids`, the same primitive Kiln uses) and Taotie's chip
+    /// bonus grows by +20 per devoured honor. `relic_counters[Taotie]` holds
+    /// the accumulated chip bonus; divide by 20 for the devoured-count
+    /// shown in the live tooltip.
+    Taotie,
+    /// +4 mult, loses 0.3 mult per discard. Transforms into Silk Moth at 0
+    /// instead of vanishing.
     SilkThread,
+    /// Successor to Silk Thread. Created in-place when Silk Thread's counter
+    /// would hit 0 — the cocoon hatches. +2 mult on every scored hand and
+    /// +$1 every discard. Counter `relic_counters[SilkMoth]` tracks
+    /// cumulative gold paid out across the run for the live tooltip.
+    SilkMoth,
     // Copy / Meta
     /// Copies the effect of the first relic in your inventory.
     ShadowHand,
     /// +1.5 mult per empty relic slot.
-    EmptyFrame,
+    SolitarySage,
     // Economy
     /// +3 gold at round end.
     GoldIdol,
@@ -180,7 +186,7 @@ pub enum RelicId {
     PhantomRelic,
     /// Destroy the relic to the right; gain permanent mult equal to
     /// double its sell value.
-    RitualBlade,
+    HungryGhost,
     /// East + n West tiles count as a pair / triplet / kong (n = 1 / 2 / 3).
     /// Validation happens by relabelling the West tiles as East before the
     /// standard meld decomposition runs.
@@ -237,9 +243,9 @@ impl RelicId {
             RelicId::HonorFury => "honor_fury.png",
             RelicId::RedDragonRage => "red_dragon_rage.png",
             RelicId::GreenLuck => "green_luck.png",
-            RelicId::WhiteSilence => "white_silence.png",
+            RelicId::WhiteDragonsHush => "white_dragons_hush.png",
             RelicId::JokerTile => "joker_tile.png",
-            RelicId::Overflow => "overflow.png",
+            RelicId::StrengthInNumbers => "strength_in_numbers.png",
             RelicId::QuickDraw => "quick_draw.png",
             RelicId::ChainReaction => "chain_reaction.png",
             RelicId::MultiplierMaster => "multiplier_master.png",
@@ -251,14 +257,9 @@ impl RelicId {
             RelicId::ShantenShove => "shanten_shove.png",
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
-            RelicId::RiichiStick => "riichi_stick.png",
-            RelicId::TenpaiTalisman => "tenpai_talisman.png",
-            RelicId::RiverEraser => "river_eraser.png",
-            RelicId::FuritenWard => "furiten_ward.png",
             RelicId::RoundCompass => "round_compass.png",
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
-            RelicId::CodexCompass => "codex_compass.png",
             RelicId::GardenKeeper => "garden_keeper.png",
             RelicId::Ikebana => "ikebana.png",
             RelicId::Hanami => "hanami.png",
@@ -266,6 +267,7 @@ impl RelicId {
             RelicId::RedSerpent => "red_serpent.png",
             RelicId::BlueSerpent => "blue_serpent.png",
             RelicId::LowTide => "low_tide.png",
+            RelicId::HighTide => "high_tide.png",
             RelicId::MerchantsEye => "merchants_eye.png",
             RelicId::EdgeRunner => "edge_runner.png",
             RelicId::LuckySeven => "lucky_seven.png",
@@ -273,28 +275,31 @@ impl RelicId {
             RelicId::Minimalist => "minimalist.png",
             RelicId::TurtleShell => "turtle_shell.png",
             RelicId::ClosedGate => "closed_gate.png",
-            RelicId::GoldFurnace => "gold_furnace.png",
+            RelicId::GoldenEngine => "golden_engine.png",
             RelicId::Snowball => "snowball.png",
             RelicId::SecondWind => "second_wind.png",
             RelicId::GlassCannon => "glass_cannon.png",
             RelicId::LastBreath => "last_breath.png",
             RelicId::TilePolisher => "tile_polisher.png",
             RelicId::PaperLantern => "paper_lantern.png",
-            RelicId::IronLantern => "iron_lantern.png",
+            RelicId::SilverFiligreeLantern => "silver_filigree_lantern.png",
             RelicId::MirrorTile => "mirror_tile.png",
             RelicId::WayOfPurity => "way_of_purity.png",
-            RelicId::LeadingTile => "leading_tile.png",
-            RelicId::LowEcho => "low_echo.png",
+            RelicId::Geese => "geese.png",
+            RelicId::VoiceOfThePeople => "voice_of_the_people.png",
+            RelicId::VoiceOfTheElite => "voice_of_the_elite.png",
             RelicId::TeaCeremony => "tea_ceremony.png",
             RelicId::GhostHand => "ghost_hand.png",
-            RelicId::CleanStreak => "clean_streak.png",
+            RelicId::Humility => "humility.png",
             RelicId::Obsession => "obsession.png",
             RelicId::Bonfire => "bonfire.png",
             RelicId::RiverRunner => "river_runner.png",
             RelicId::MeltingIce => "melting_ice.png",
+            RelicId::Taotie => "taotie.png",
             RelicId::SilkThread => "silk_thread.png",
+            RelicId::SilkMoth => "silk_moth.png",
             RelicId::ShadowHand => "shadow_hand.png",
-            RelicId::EmptyFrame => "empty_frame.png",
+            RelicId::SolitarySage => "solitary_sage.png",
             RelicId::GoldIdol => "gold_idol.png",
             RelicId::JadeAbacus => "jade_abacus.png",
             RelicId::NestEgg => "nest_egg.png",
@@ -307,7 +312,7 @@ impl RelicId {
             RelicId::StarTile => "star_tile.png",
             RelicId::SmokeBomb => "smoke_bomb.png",
             RelicId::PhantomRelic => "phantom_relic.png",
-            RelicId::RitualBlade => "ritual_blade.png",
+            RelicId::HungryGhost => "hungry_ghost.png",
             RelicId::Disgust => "disgust.png",
             RelicId::CurioCabinet => "curio_cabinet.png",
             RelicId::LotusBloom => "lotus_bloom.png",
@@ -363,7 +368,6 @@ struct RelicDefRaw {
 pub struct RelicVisualDef {
     pub material: RelicRenderMaterial,
     pub ui_tilt_x_deg: f32,
-    pub ui_spin_rate_deg: f32,
     pub thickness_scale: f32,
 }
 
@@ -421,17 +425,16 @@ pub fn relic_visual(id: RelicId) -> RelicVisualDef {
         Rarity::Legendary => Gold,
     };
 
-    let (ui_tilt_x_deg, ui_spin_rate_deg, thickness_scale) = match material {
-        Iron => (-18.0, 28.0, 1.0),
-        Copper => (-18.0, 28.0, 1.0),
-        Silver => (-18.0, 28.0, 1.02),
-        Gold => (-18.0, 28.0, 1.04),
+    let (ui_tilt_x_deg, thickness_scale) = match material {
+        Iron => (-18.0, 1.0),
+        Copper => (-18.0, 1.0),
+        Silver => (-18.0, 1.02),
+        Gold => (-18.0, 1.04),
     };
 
     RelicVisualDef {
         material,
         ui_tilt_x_deg,
-        ui_spin_rate_deg,
         thickness_scale,
     }
 }
@@ -509,9 +512,21 @@ pub fn relic_description_live(
             let remaining = counters.get(&RelicId::MeltingIce).copied().unwrap_or(80);
             format!("{base} [{remaining} chips left]")
         }
+        RelicId::Taotie => {
+            // Counter stores accumulated chips (20 per devoured honor); the
+            // honor count is the counter divided by that rate. Both numbers
+            // are useful — count is the flavor read, chips is the math.
+            let chips = counters.get(&RelicId::Taotie).copied().unwrap_or(0);
+            let devoured = chips / 20;
+            format!("{base} [{devoured} honors devoured, +{chips} chips]")
+        }
         RelicId::SilkThread => {
             let thread = counters.get(&RelicId::SilkThread).copied().unwrap_or(40);
             format!("{base} [+{:.1} mult left]", thread as f64 / 10.0)
+        }
+        RelicId::SilkMoth => {
+            let paid = counters.get(&RelicId::SilkMoth).copied().unwrap_or(0);
+            format!("{base} [${paid} produced]")
         }
         RelicId::TeaCeremony => {
             let charges = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(3);
@@ -520,8 +535,8 @@ pub fn relic_description_live(
                 if charges == 1 { "" } else { "s" }
             )
         }
-        RelicId::CleanStreak => {
-            let streak = counters.get(&RelicId::CleanStreak).copied().unwrap_or(0);
+        RelicId::Humility => {
+            let streak = counters.get(&RelicId::Humility).copied().unwrap_or(0);
             format!(
                 "{base} [streak: {streak}, +{:.1} mult]",
                 0.5 * streak as f64
@@ -539,8 +554,8 @@ pub fn relic_description_live(
             let sold = counters.get(&RelicId::Bonfire).copied().unwrap_or(0);
             format!("{base} [{sold} sold, +{:.1} mult]", 0.4 * sold as f64)
         }
-        RelicId::RitualBlade => {
-            let perm = counters.get(&RelicId::RitualBlade).copied().unwrap_or(0);
+        RelicId::HungryGhost => {
+            let perm = counters.get(&RelicId::HungryGhost).copied().unwrap_or(0);
             format!("{base} [+{:.1} mult stored]", perm as f64 / 10.0)
         }
         RelicId::PhantomRelic => {
@@ -704,14 +719,15 @@ pub struct ScoreContext<'a> {
     /// Yaku detected on prior plays in the current round, used by The Censor
     /// boss to halve repeat-yaku contributions. Empty in normal rounds.
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
-    /// Player's current gold at the moment of scoring (for Gold Furnace).
+    /// Player's current gold at the moment of scoring (for Golden Engine).
     pub gold: i32,
     /// Cumulative score earned across the entire run (for Snowball).
     pub total_score: u64,
     /// True when this is the player's last remaining play this round
-    /// (plays_remaining == 1 at scoring time). Powers Last Breath.
+    /// (plays_remaining == 0 at scoring time). Powers Last Breath when
+    /// combined with a structure cash-in.
     pub is_final_play: bool,
-    /// Per-relic mutable counters (clean_streak, melting_ice chips,
+    /// Per-relic mutable counters (humility, melting_ice chips,
     /// tile_polisher accumulated bonus, river_runner accumulated bonus, etc.).
     /// Keyed by RelicId, value meaning varies by relic.
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
@@ -722,7 +738,7 @@ pub struct ScoreContext<'a> {
     /// **Structure migration:** relics that used to fire on every "scoring play" may need a
     /// split: effects that should happen when melds **land** (`RunState::commit_selection_to_structure`)
     /// vs when the player **cashes in** (`trigger_structure`). Examples wired today: MeltingIce /
-    /// Tea / CleanStreak on commit; TilePolisher / River Runner / Star Tile / KanDrum / scoring
+    /// Tea / Humility on commit; TilePolisher / River Runner / Star Tile / KanDrum / scoring
     /// cascades on trigger. Audit new "per play" relics against this split.
     pub structure: Option<crate::core::structure::StructureTriggerMeta>,
 }
@@ -759,217 +775,203 @@ mod tests {
         );
     }
 
-    /// `assets/data/relics.json` must have exactly one entry per active
-    /// `RelicId` variant. The match below uses an exhaustive pattern so the
-    /// compiler forces a decision when a new variant is added: include it
-    /// in `EXPECTED_PRESENT` (most relics) or `EXPECTED_ABSENT` (the four
-    /// disabled-pending-future-patch ids). Drift between the enum and the
-    /// data file will then either fail to compile or fail this test.
+    /// `assets/data/relics.json` must have exactly one entry per `RelicId`
+    /// variant. The match in `ALL_VARIANTS` below is exhaustive, so the
+    /// compiler forces an update when a new variant is added; the data
+    /// file is then checked against that list.
     #[test]
-    fn every_relic_variant_has_one_data_entry_or_is_explicitly_disabled() {
+    fn every_relic_variant_has_one_data_entry() {
         use super::all_relic_defs;
         use std::collections::BTreeSet;
 
-        // Sample one of every variant so the exhaustiveness check below
-        // covers the whole enum. New variants must be classified here.
-        fn classify(id: RelicId) -> Classification {
-            use Classification::*;
-            match id {
-                RelicId::RiichiStick
-                | RelicId::RiverEraser
-                | RelicId::FuritenWard
-                | RelicId::CodexCompass => Absent,
-
-                RelicId::TripletBoost
-                | RelicId::SequenceSurge
-                | RelicId::PairPower
-                | RelicId::HonorFury
-                | RelicId::RedDragonRage
-                | RelicId::GreenLuck
-                | RelicId::WhiteSilence
-                | RelicId::JokerTile
-                | RelicId::Overflow
-                | RelicId::QuickDraw
-                | RelicId::ChainReaction
-                | RelicId::MultiplierMaster
-                | RelicId::SetMagnet
-                | RelicId::WildWinds
-                | RelicId::DragonEcho
-                | RelicId::ShantenShove
-                | RelicId::KanDrum
-                | RelicId::DoraCrown
-                | RelicId::TenpaiTalisman
-                | RelicId::RoundCompass
-                | RelicId::EightTreasures
-                | RelicId::KongsBlessing
-                | RelicId::GardenKeeper
-                | RelicId::Ikebana
-                | RelicId::Hanami
-                | RelicId::JadeSerpent
-                | RelicId::RedSerpent
-                | RelicId::BlueSerpent
-                | RelicId::LowTide
-                | RelicId::MerchantsEye
-                | RelicId::EdgeRunner
-                | RelicId::LuckySeven
-                | RelicId::Momentum
-                | RelicId::Minimalist
-                | RelicId::TurtleShell
-                | RelicId::ClosedGate
-                | RelicId::GoldFurnace
-                | RelicId::Snowball
-                | RelicId::SecondWind
-                | RelicId::GlassCannon
-                | RelicId::LastBreath
-                | RelicId::TilePolisher
-                | RelicId::PaperLantern
-                | RelicId::IronLantern
-                | RelicId::MirrorTile
-                | RelicId::WayOfPurity
-                | RelicId::LeadingTile
-                | RelicId::LowEcho
-                | RelicId::TeaCeremony
-                | RelicId::GhostHand
-                | RelicId::CleanStreak
-                | RelicId::Obsession
-                | RelicId::Bonfire
-                | RelicId::RiverRunner
-                | RelicId::MeltingIce
-                | RelicId::SilkThread
-                | RelicId::ShadowHand
-                | RelicId::EmptyFrame
-                | RelicId::GoldIdol
-                | RelicId::JadeAbacus
-                | RelicId::NestEgg
-                | RelicId::Patience
-                | RelicId::WayOfPairs
-                | RelicId::WayOfTriplets
-                | RelicId::WayOfSequences
-                | RelicId::FortunesFavor
-                | RelicId::CrackedTile
-                | RelicId::StarTile
-                | RelicId::SmokeBomb
-                | RelicId::PhantomRelic
-                | RelicId::RitualBlade
-                | RelicId::Disgust
-                | RelicId::CurioCabinet
-                | RelicId::LotusBloom
-                | RelicId::WallWeaver
-                | RelicId::KongCollector
-                | RelicId::NoHonorButWealth
-                | RelicId::Sweepstakes
-                | RelicId::BeggarsCup
-                | RelicId::Cosmopolitan
-                | RelicId::Heirloom
-                | RelicId::Tourist
-                | RelicId::Kintsugi
-                | RelicId::AntTrail
-                | RelicId::BrocadePouch => Present,
+        // Exhaustive match: adding a new RelicId variant without adding
+        // it here is a compile error. The safety chain is:
+        // enum -> exhaustive match -> ALL_VARIANTS -> data file.
+        const ALL_VARIANTS: &[RelicId] = {
+            // Touch every variant so the match below stays exhaustive.
+            const fn _exhaustive(id: RelicId) {
+                match id {
+                    RelicId::TripletBoost
+                    | RelicId::SequenceSurge
+                    | RelicId::PairPower
+                    | RelicId::HonorFury
+                    | RelicId::RedDragonRage
+                    | RelicId::GreenLuck
+                    | RelicId::WhiteDragonsHush
+                    | RelicId::JokerTile
+                    | RelicId::StrengthInNumbers
+                    | RelicId::QuickDraw
+                    | RelicId::ChainReaction
+                    | RelicId::MultiplierMaster
+                    | RelicId::SetMagnet
+                    | RelicId::WildWinds
+                    | RelicId::DragonEcho
+                    | RelicId::ShantenShove
+                    | RelicId::KanDrum
+                    | RelicId::DoraCrown
+                    | RelicId::RoundCompass
+                    | RelicId::EightTreasures
+                    | RelicId::KongsBlessing
+                    | RelicId::GardenKeeper
+                    | RelicId::Ikebana
+                    | RelicId::Hanami
+                    | RelicId::JadeSerpent
+                    | RelicId::RedSerpent
+                    | RelicId::BlueSerpent
+                    | RelicId::LowTide
+                    | RelicId::HighTide
+                    | RelicId::MerchantsEye
+                    | RelicId::EdgeRunner
+                    | RelicId::LuckySeven
+                    | RelicId::Momentum
+                    | RelicId::Minimalist
+                    | RelicId::TurtleShell
+                    | RelicId::ClosedGate
+                    | RelicId::GoldenEngine
+                    | RelicId::Snowball
+                    | RelicId::SecondWind
+                    | RelicId::GlassCannon
+                    | RelicId::LastBreath
+                    | RelicId::TilePolisher
+                    | RelicId::PaperLantern
+                    | RelicId::SilverFiligreeLantern
+                    | RelicId::MirrorTile
+                    | RelicId::WayOfPurity
+                    | RelicId::Geese
+                    | RelicId::VoiceOfThePeople
+                    | RelicId::VoiceOfTheElite
+                    | RelicId::TeaCeremony
+                    | RelicId::GhostHand
+                    | RelicId::Humility
+                    | RelicId::Obsession
+                    | RelicId::Bonfire
+                    | RelicId::RiverRunner
+                    | RelicId::MeltingIce
+                    | RelicId::Taotie
+                    | RelicId::SilkThread
+                    | RelicId::SilkMoth
+                    | RelicId::ShadowHand
+                    | RelicId::SolitarySage
+                    | RelicId::GoldIdol
+                    | RelicId::JadeAbacus
+                    | RelicId::NestEgg
+                    | RelicId::Patience
+                    | RelicId::WayOfPairs
+                    | RelicId::WayOfTriplets
+                    | RelicId::WayOfSequences
+                    | RelicId::FortunesFavor
+                    | RelicId::CrackedTile
+                    | RelicId::StarTile
+                    | RelicId::SmokeBomb
+                    | RelicId::PhantomRelic
+                    | RelicId::HungryGhost
+                    | RelicId::Disgust
+                    | RelicId::CurioCabinet
+                    | RelicId::LotusBloom
+                    | RelicId::WallWeaver
+                    | RelicId::KongCollector
+                    | RelicId::NoHonorButWealth
+                    | RelicId::Sweepstakes
+                    | RelicId::BeggarsCup
+                    | RelicId::Cosmopolitan
+                    | RelicId::Heirloom
+                    | RelicId::Tourist
+                    | RelicId::Kintsugi
+                    | RelicId::AntTrail
+                    | RelicId::BrocadePouch => {}
+                }
             }
-        }
-
-        enum Classification {
-            Present,
-            Absent,
-        }
-
-        // Enumeration of every variant. Adding a new variant without
-        // updating this list keeps `classify` failing to compile (any
-        // missing arm is a compile error), so the safety chain is:
-        // enum -> classify exhaustive match -> ALL list -> data file.
-        // If you add a new RelicId, append it here AND give it a
-        // classify arm; one of the two will yell at you if you don't.
-        const ALL: &[RelicId] = &[
-            RelicId::TripletBoost,
-            RelicId::SequenceSurge,
-            RelicId::PairPower,
-            RelicId::HonorFury,
-            RelicId::RedDragonRage,
-            RelicId::GreenLuck,
-            RelicId::WhiteSilence,
-            RelicId::JokerTile,
-            RelicId::Overflow,
-            RelicId::QuickDraw,
-            RelicId::ChainReaction,
-            RelicId::MultiplierMaster,
-            RelicId::SetMagnet,
-            RelicId::WildWinds,
-            RelicId::DragonEcho,
-            RelicId::ShantenShove,
-            RelicId::KanDrum,
-            RelicId::DoraCrown,
-            RelicId::RiichiStick,
-            RelicId::TenpaiTalisman,
-            RelicId::RiverEraser,
-            RelicId::FuritenWard,
-            RelicId::RoundCompass,
-            RelicId::EightTreasures,
-            RelicId::KongsBlessing,
-            RelicId::CodexCompass,
-            RelicId::GardenKeeper,
-            RelicId::Ikebana,
-            RelicId::Hanami,
-            RelicId::JadeSerpent,
-            RelicId::RedSerpent,
-            RelicId::BlueSerpent,
-            RelicId::LowTide,
-            RelicId::MerchantsEye,
-            RelicId::EdgeRunner,
-            RelicId::LuckySeven,
-            RelicId::Momentum,
-            RelicId::Minimalist,
-            RelicId::TurtleShell,
-            RelicId::ClosedGate,
-            RelicId::GoldFurnace,
-            RelicId::Snowball,
-            RelicId::SecondWind,
-            RelicId::GlassCannon,
-            RelicId::LastBreath,
-            RelicId::TilePolisher,
-            RelicId::PaperLantern,
-            RelicId::IronLantern,
-            RelicId::MirrorTile,
-            RelicId::WayOfPurity,
-            RelicId::LeadingTile,
-            RelicId::LowEcho,
-            RelicId::TeaCeremony,
-            RelicId::GhostHand,
-            RelicId::CleanStreak,
-            RelicId::Obsession,
-            RelicId::Bonfire,
-            RelicId::RiverRunner,
-            RelicId::MeltingIce,
-            RelicId::SilkThread,
-            RelicId::ShadowHand,
-            RelicId::EmptyFrame,
-            RelicId::GoldIdol,
-            RelicId::JadeAbacus,
-            RelicId::NestEgg,
-            RelicId::Patience,
-            RelicId::WayOfPairs,
-            RelicId::WayOfTriplets,
-            RelicId::WayOfSequences,
-            RelicId::FortunesFavor,
-            RelicId::CrackedTile,
-            RelicId::StarTile,
-            RelicId::SmokeBomb,
-            RelicId::PhantomRelic,
-            RelicId::RitualBlade,
-            RelicId::Disgust,
-            RelicId::CurioCabinet,
-            RelicId::LotusBloom,
-            RelicId::WallWeaver,
-            RelicId::KongCollector,
-            RelicId::NoHonorButWealth,
-            RelicId::Sweepstakes,
-            RelicId::BeggarsCup,
-            RelicId::Cosmopolitan,
-            RelicId::Heirloom,
-            RelicId::Tourist,
-            RelicId::Kintsugi,
-            RelicId::AntTrail,
-            RelicId::BrocadePouch,
-        ];
+            &[
+                RelicId::TripletBoost,
+                RelicId::SequenceSurge,
+                RelicId::PairPower,
+                RelicId::HonorFury,
+                RelicId::RedDragonRage,
+                RelicId::GreenLuck,
+                RelicId::WhiteDragonsHush,
+                RelicId::JokerTile,
+                RelicId::StrengthInNumbers,
+                RelicId::QuickDraw,
+                RelicId::ChainReaction,
+                RelicId::MultiplierMaster,
+                RelicId::SetMagnet,
+                RelicId::WildWinds,
+                RelicId::DragonEcho,
+                RelicId::ShantenShove,
+                RelicId::KanDrum,
+                RelicId::DoraCrown,
+                RelicId::RoundCompass,
+                RelicId::EightTreasures,
+                RelicId::KongsBlessing,
+                RelicId::GardenKeeper,
+                RelicId::Ikebana,
+                RelicId::Hanami,
+                RelicId::JadeSerpent,
+                RelicId::RedSerpent,
+                RelicId::BlueSerpent,
+                RelicId::LowTide,
+                RelicId::HighTide,
+                RelicId::MerchantsEye,
+                RelicId::EdgeRunner,
+                RelicId::LuckySeven,
+                RelicId::Momentum,
+                RelicId::Minimalist,
+                RelicId::TurtleShell,
+                RelicId::ClosedGate,
+                RelicId::GoldenEngine,
+                RelicId::Snowball,
+                RelicId::SecondWind,
+                RelicId::GlassCannon,
+                RelicId::LastBreath,
+                RelicId::TilePolisher,
+                RelicId::PaperLantern,
+                RelicId::SilverFiligreeLantern,
+                RelicId::MirrorTile,
+                RelicId::WayOfPurity,
+                RelicId::Geese,
+                RelicId::VoiceOfThePeople,
+                RelicId::VoiceOfTheElite,
+                RelicId::TeaCeremony,
+                RelicId::GhostHand,
+                RelicId::Humility,
+                RelicId::Obsession,
+                RelicId::Bonfire,
+                RelicId::RiverRunner,
+                RelicId::MeltingIce,
+                RelicId::Taotie,
+                RelicId::SilkThread,
+                RelicId::SilkMoth,
+                RelicId::ShadowHand,
+                RelicId::SolitarySage,
+                RelicId::GoldIdol,
+                RelicId::JadeAbacus,
+                RelicId::NestEgg,
+                RelicId::Patience,
+                RelicId::WayOfPairs,
+                RelicId::WayOfTriplets,
+                RelicId::WayOfSequences,
+                RelicId::FortunesFavor,
+                RelicId::CrackedTile,
+                RelicId::StarTile,
+                RelicId::SmokeBomb,
+                RelicId::PhantomRelic,
+                RelicId::HungryGhost,
+                RelicId::Disgust,
+                RelicId::CurioCabinet,
+                RelicId::LotusBloom,
+                RelicId::WallWeaver,
+                RelicId::KongCollector,
+                RelicId::NoHonorButWealth,
+                RelicId::Sweepstakes,
+                RelicId::BeggarsCup,
+                RelicId::Cosmopolitan,
+                RelicId::Heirloom,
+                RelicId::Tourist,
+                RelicId::Kintsugi,
+                RelicId::AntTrail,
+                RelicId::BrocadePouch,
+            ]
+        };
 
         let in_data: BTreeSet<RelicId> = all_relic_defs().iter().map(|d| d.id).collect();
         assert_eq!(
@@ -978,26 +980,21 @@ mod tests {
             "duplicate ids in assets/data/relics.json"
         );
 
-        for &id in ALL {
-            match classify(id) {
-                Classification::Present => assert!(
-                    in_data.contains(&id),
-                    "{id:?} is classified Present but missing from assets/data/relics.json"
-                ),
-                Classification::Absent => assert!(
-                    !in_data.contains(&id),
-                    "{id:?} is classified Absent but appears in assets/data/relics.json"
-                ),
-            }
+        for &id in ALL_VARIANTS {
+            assert!(
+                in_data.contains(&id),
+                "{id:?} is missing from assets/data/relics.json"
+            );
         }
 
-        // Catch entries in the data file that aren't in ALL (e.g. typo'd
-        // ids that snuck past serde because they happen to deserialize).
-        let all_set: BTreeSet<RelicId> = ALL.iter().copied().collect();
+        // Catch entries in the data file that aren't in ALL_VARIANTS
+        // (e.g. typo'd ids that snuck past serde because they happen
+        // to deserialize).
+        let all_set: BTreeSet<RelicId> = ALL_VARIANTS.iter().copied().collect();
         for id in &in_data {
             assert!(
                 all_set.contains(id),
-                "{id:?} is in relics.json but missing from the test's ALL list"
+                "{id:?} is in relics.json but missing from the test's ALL_VARIANTS list"
             );
         }
     }

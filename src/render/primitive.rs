@@ -25,6 +25,11 @@ pub enum MeshId {
     DiscSquare,
     /// Existing round dish mesh.
     DiscRound,
+    /// Hand-thrown porcelain dish — rounded ceramic bowl with a
+    /// continuous curved profile, smooth-shaded sides, rolled lip, and
+    /// recessed inner basin. Y-up; pair with the Z-up rotation in
+    /// `shape_orientation` for table-aligned dishes.
+    PorcelainDish,
     /// Upright lacquered-wood slab with chain nubs (the former
     /// dedicated `Plaque` mesh).
     BeveledSlab,
@@ -40,6 +45,21 @@ pub enum MeshId {
     /// `Ofuda` mesh. Carries a title/rule calligraphy decal via
     /// `DecalLayout::TitleRule`.
     Ofuda,
+    /// Chinese suanpan abacus — wooden frame, reckoning beam, and vertical
+    /// rods only (no beads). Pair with [`MeshId::AbacusHeavenBeads`] +
+    /// [`MeshId::AbacusEarthBeads`] for the shop reroll prop.
+    Abacus,
+    /// Heaven deck beads (upper two per rod) — same layout as [`MeshId::Abacus`].
+    AbacusHeavenBeads,
+    /// Earth deck beads (lower five per rod) — same layout as [`MeshId::Abacus`].
+    AbacusEarthBeads,
+    /// Bonshō-inspired temple bell — cast ridges, nyū bosses, tsuki-za
+    /// striking plate, ryūzu horn stubs, and suspension stem. Used as the
+    /// shop counter's leave prop.
+    ShopBell,
+    /// Crimson silk tassel under [`MeshId::ShopBell`] — sways via scene
+    /// rotation; anchored to the bell lip in the shop scene.
+    BellTassel,
 }
 
 /// Layout strategy for decal rasterization.
@@ -53,25 +73,12 @@ pub enum DecalLayout {
     Fit { target_short_edge: u32 },
     /// Two-line title over body copy.
     TitleRule { target_short_edge: u32 },
-    /// Caller-specified pixel dimensions. No auto-fit.
-    Fixed { width: u32, height: u32 },
-}
-
-/// Preset palette for the three-pass engrave rasterizer.
-#[derive(Clone, Copy, Debug)]
-
-pub enum DecalPalette {
-    /// Warm gold gilding over dark lacquer (plaques, cabinet faces).
-    GoldGilded,
-    /// Dark ink on parchment (ofuda).
-    ParchmentInk,
 }
 
 /// Decal rasterization recipe.
 #[derive(Clone, Debug)]
 pub struct DecalSpec {
     pub text: String,
-    pub palette: DecalPalette,
     pub layout: DecalLayout,
 }
 
@@ -120,6 +127,44 @@ impl MaterialSpec {
         }
     }
 
+    /// Polished brass — wider rim halo and more diffuse retention than
+    /// `metal()`, so hanging brass props stay legible in overhead light.
+    pub fn brass() -> Self {
+        Self {
+            kind: MaterialKind::Brass,
+            specular_strength: 1.0,
+            specular_power: 256.0,
+            decal: None,
+        }
+    }
+
+    /// Glazed porcelain — cool-white dielectric with a tight pinpoint
+    /// highlight, broad wet-glaze lobe, Fresnel rim, and warm wrap-SSS.
+    /// The shader also drives crazing (the spider-web of fine cracks
+    /// across aged glaze) off the warmth/tint of `obj.color`: pristine
+    /// white stays clean, sepia/cream tints get a light crackle, and
+    /// brown-stained tints get heavy antique crazing.
+    pub fn porcelain() -> Self {
+        Self {
+            kind: MaterialKind::Porcelain,
+            specular_strength: 0.7,
+            specular_power: 128.0,
+            decal: None,
+        }
+    }
+
+    /// Porcelain for **small** props (shop abacus beads, etc.): same glaze
+    /// model as [`Self::porcelain`], but lower spec energy so rims and
+    /// wet-glaze lobes do not read emissive next to dark wood.
+    pub fn porcelain_prop() -> Self {
+        Self {
+            kind: MaterialKind::Porcelain,
+            specular_strength: 0.32,
+            specular_power: 72.0,
+            decal: None,
+        }
+    }
+
     /// Attach a decal to this material, returning the modified spec.
     pub fn with_decal(mut self, decal: DecalSpec) -> Self {
         self.decal = Some(decal);
@@ -134,7 +179,6 @@ impl MaterialSpec {
 pub fn plaque_decal(text: impl Into<String>) -> DecalSpec {
     DecalSpec {
         text: text.into(),
-        palette: DecalPalette::GoldGilded,
         layout: DecalLayout::Fit {
             target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
         },

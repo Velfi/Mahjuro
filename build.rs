@@ -17,6 +17,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    emit_debug_menu_cfg();
+
+    // Defer resolving steam_api64.dll until first use so we can run `main` and
+    // skip Steamworks when the DLL is missing (see `steam::steamworks_dll_ready`).
+    let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("windows-msvc") && target.contains("x86_64") {
+        println!("cargo:rustc-link-arg=/DELAYLOAD:steam_api64.dll");
+    }
+
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -71,6 +80,26 @@ fn main() {
             dst.display(),
             e,
         );
+    }
+}
+
+/// Enable the `debug_menu_enabled` cfg whenever the debug menubar should be
+/// compiled in. Always on in debug builds; in release builds, opt in by
+/// setting `MAHJURO_DEBUG_MENU=1` — useful for collecting accurate perf
+/// metrics with the debug overlays available.
+fn emit_debug_menu_cfg() {
+    println!("cargo:rustc-check-cfg=cfg(debug_menu_enabled)");
+    println!("cargo:rerun-if-env-changed=MAHJURO_DEBUG_MENU");
+
+    let debug_profile = env::var("DEBUG")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(false);
+    let env_opt_in = env::var("MAHJURO_DEBUG_MENU")
+        .map(|v| !v.is_empty() && v != "0")
+        .unwrap_or(false);
+
+    if debug_profile || env_opt_in {
+        println!("cargo:rustc-cfg=debug_menu_enabled");
     }
 }
 

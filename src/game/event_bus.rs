@@ -99,6 +99,10 @@ pub enum GameEvent {
     /// A committed hand awarded this yaku — App layer bumps
     /// `PlayerProgress::yaku_times_scored` and saves.
     YakuScored(crate::core::yaku::YakuKind),
+    /// Gameplay code asks the App layer to fire a Steam achievement.
+    /// Used for milestones the gameplay layer detects but cannot unlock
+    /// directly (the `steam` module is owned by `main`, not `game`).
+    AchievementUnlocked(crate::steam::Achievement),
 }
 
 #[derive(Default)]

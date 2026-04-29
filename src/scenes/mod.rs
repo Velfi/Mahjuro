@@ -4,6 +4,7 @@
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
+pub mod journal_transition;
 pub mod material_viewer;
 pub mod meld_guide;
 pub mod options;
@@ -247,9 +248,12 @@ pub enum ButtonAction {
 }
 
 /// A clickable UI button: screen rect + the action it triggers.
+#[derive(Clone)]
 pub struct ButtonDef {
     pub rect: (f32, f32, f32, f32),
     pub action: ButtonAction,
+    /// Cursor-hover hint (shown above the rect when [`crate::ui::input::InputMode::Cursor`]).
+    pub hover_label: Option<std::borrow::Cow<'static, str>>,
 }
 
 impl ButtonDef {
@@ -258,6 +262,7 @@ impl ButtonDef {
         Self {
             rect,
             action: ButtonAction::Ui(action),
+            hover_label: None,
         }
     }
 
@@ -266,7 +271,13 @@ impl ButtonDef {
         Self {
             rect,
             action: ButtonAction::Scene(id),
+            hover_label: None,
         }
+    }
+
+    pub fn with_hover_label(mut self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        self.hover_label = Some(label.into());
+        self
     }
 }
 
@@ -307,10 +318,9 @@ pub trait SceneBehavior {
     ///
     /// **Pattern contract:** any new in-scene overlay that should block
     /// input and hover for elements below it MUST be reported here. The
-    /// two universal gates (`skip_tooltips` and the `active_buttons` safety
-    /// wipe in `main.rs`) consult `App::modal_overlay_active`, so a scene
-    /// that forgets to declare its overlay will leak hover/clicks through
-    /// it.
+    /// `active_buttons` safety wipe in `main.rs` consults
+    /// `App::modal_overlay_active`, so a scene that forgets to declare its
+    /// overlay will leak hover/clicks through it.
     ///
     /// Default: `false`. Scenes without internal overlays inherit the
     /// safe answer automatically.

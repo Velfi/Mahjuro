@@ -1,3 +1,10 @@
+// When the debug menu is gated out (release builds without
+// `MAHJURO_DEBUG_MENU=1`), nothing in this module is instantiated.
+// The variants stay defined because `DebugAction` is matched in
+// `main/debug_actions.rs` and rustc would otherwise complain about unused
+// enum variants.
+#![cfg_attr(not(debug_menu_enabled), allow(dead_code))]
+
 //! Native OS menubar "Debug" menu using muda.
 //!
 //! Provides debug shortcuts for setting player level, gold, relics, and card inventory.

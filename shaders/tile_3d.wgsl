@@ -7,6 +7,8 @@ struct CameraUniform {
     // offset procedural noise so each tile's pattern is unique — currently
     // only sampled by the tortoise-shell branch in `tortoise_albedo`.
     tile_seed: f32,
+    // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
+    decal_atlas_uv: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
@@ -320,12 +322,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
     // by the renderer); local Z is the short axis (extent 0.734, screen-horizontal).
     // Decal U follows local Z (horizontal on the face) and V follows local X
-    // (vertical). Hand-rack decals are mirrored once at CPU rasterise time
-    // (`rasterize_tile_face_decal` flip_decal_h) so this linear map matches
-    // left-to-right glyph layout; showcase tiles pass flip_decal_h = false.
-    let decal_uv = vec2<f32>(in.local_pos.z * 1.362 + 0.5, in.local_pos.x + 0.5);
+    // (vertical). Invert U only so atlas glyphs match left-to-right reading;
+    // full `(1-u, 1-v)` over-corrects and mirrors the face horizontally.
+    let raw_u = in.local_pos.z * 1.362 + 0.5;
+    let raw_v = in.local_pos.x + 0.5;
+    let decal_uv_face = vec2<f32>(1.0 - raw_u, raw_v);
+    let decal_uv = decal_uv_face * cam.decal_atlas_uv.zw + cam.decal_atlas_uv.xy;
     let decal = textureSample(decal_tex, base_sampler, decal_uv);
-    let in_uv = decal_uv.x >= 0.0 && decal_uv.x <= 1.0 && decal_uv.y >= 0.0 && decal_uv.y <= 1.0;
+    let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
     let decal_a = select(0.0, decal.a, is_front && in_uv);
     let decal_rgb = decal.rgb;
 

@@ -362,6 +362,9 @@ impl WgpuRenderer {
             && self.last_wood_tablet_models.is_empty()
             && self.last_bowl_model.is_none()
             && self.last_mirror_model.is_none()
+            && !self
+                .last_primitive_pick_models
+                .contains_key(&crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID)
         {
             return None;
         }
@@ -439,6 +442,14 @@ impl WgpuRenderer {
             if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
                 consider(GameplayPick::WoodTablet(i), t);
             }
+        }
+        // Yaku Journal book — same unit-cube proxy as shop (`Object3dKind::Book`).
+        if let Some(model) = self
+            .last_primitive_pick_models
+            .get(&crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID)
+            && let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0)
+        {
+            consider(GameplayPick::JournalBook, t);
         }
         // Discard bowl — tighter local AABB from the bowl mesh constants.
         if let Some(model) = self.last_bowl_model.as_ref()
@@ -586,82 +597,92 @@ impl WgpuRenderer {
         }
 
         let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -half.x, half.x),
-                (lo.y, ld.y, -half.y + oy, half.y + oy),
-                (lo.z, ld.z, -half.z, half.z),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
 
         let mut best: Option<(&str, f32)> = None;
-        for (name, model, half, oy) in &self.last_debug_pickables {
-            if let Some(t) = slab_test(*model, *half, *oy) {
-                match best {
-                    Some((_, bt)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t)),
+
+        if !self.last_debug_pickables.is_empty() || !self.last_debug_trimesh_pickables.is_empty() {
+            let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
+            let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
+            let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
+            let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
+            let near_w = cam.inv_view_proj * near_clip;
+            let far_w = cam.inv_view_proj * far_clip;
+            if near_w.w.abs() > 1e-6 && far_w.w.abs() > 1e-6 {
+                let near = near_w.truncate() / near_w.w;
+                let far = far_w.truncate() / far_w.w;
+                let world_origin = near;
+                let world_dir = (far - near).normalize_or_zero();
+                if world_dir.length_squared() >= 1e-6 {
+                    let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
+                        let inv = model.inverse();
+                        let lo = inv.transform_point3(world_origin);
+                        let ld = inv.transform_vector3(world_dir);
+                        let bounds = [
+                            (lo.x, ld.x, -half.x, half.x),
+                            (lo.y, ld.y, -half.y + oy, half.y + oy),
+                            (lo.z, ld.z, -half.z, half.z),
+                        ];
+                        let mut t_min = f32::NEG_INFINITY;
+                        let mut t_max = f32::INFINITY;
+                        for (o, d, lo_b, hi_b) in bounds {
+                            if d.abs() < 1e-8 {
+                                if o < lo_b || o > hi_b {
+                                    return None;
+                                }
+                            } else {
+                                let inv_d = 1.0 / d;
+                                let mut t1 = (lo_b - o) * inv_d;
+                                let mut t2 = (hi_b - o) * inv_d;
+                                if t1 > t2 {
+                                    std::mem::swap(&mut t1, &mut t2);
+                                }
+                                if t1 > t_min {
+                                    t_min = t1;
+                                }
+                                if t2 < t_max {
+                                    t_max = t2;
+                                }
+                                if t_min > t_max {
+                                    return None;
+                                }
+                            }
+                        }
+                        let t_enter = if t_min >= 0.0 { t_min } else { t_max };
+                        if t_enter < 0.0 { None } else { Some(t_enter) }
+                    };
+
+                    for (name, model, half, oy) in &self.last_debug_pickables {
+                        if let Some(t) = slab_test(*model, *half, *oy) {
+                            match best {
+                                Some((_, bt)) if t > bt => {}
+                                _ => best = Some((name.as_str(), t)),
+                            }
+                        }
+                    }
+                    for (name, model, mesh) in &self.last_debug_trimesh_pickables {
+                        if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir)
+                        {
+                            match best {
+                                Some((_, bt)) if t > bt => {}
+                                _ => best = Some((name.as_str(), t)),
+                            }
+                        }
+                    }
                 }
             }
         }
-        for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best {
-                    Some((_, bt)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t)),
-                }
+
+        if let Some((n, _)) = best {
+            return Some(n.to_string());
+        }
+
+        if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
+            let cy_frac = cursor_y / cam.viewport_h;
+            if (cy_frac - hy).abs() < 0.11 {
+                return Some("gameplay.fog_wall".to_string());
             }
         }
-        best.map(|(n, _)| n.to_string())
+        None
     }
 
     /// Raycast the cursor ray against registered pickables and return the
@@ -769,81 +790,96 @@ impl WgpuRenderer {
         }
 
         let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-
-        let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
-            let inv = model.inverse();
-            let lo = inv.transform_point3(world_origin);
-            let ld = inv.transform_vector3(world_dir);
-            let bounds = [
-                (lo.x, ld.x, -half.x, half.x),
-                (lo.y, ld.y, -half.y + oy, half.y + oy),
-                (lo.z, ld.z, -half.z, half.z),
-            ];
-            let mut t_min = f32::NEG_INFINITY;
-            let mut t_max = f32::INFINITY;
-            for (o, d, lo_b, hi_b) in bounds {
-                if d.abs() < 1e-8 {
-                    if o < lo_b || o > hi_b {
-                        return None;
-                    }
-                } else {
-                    let inv_d = 1.0 / d;
-                    let mut t1 = (lo_b - o) * inv_d;
-                    let mut t2 = (hi_b - o) * inv_d;
-                    if t1 > t2 {
-                        std::mem::swap(&mut t1, &mut t2);
-                    }
-                    if t1 > t_min {
-                        t_min = t1;
-                    }
-                    if t2 < t_max {
-                        t_max = t2;
-                    }
-                    if t_min > t_max {
-                        return None;
-                    }
-                }
-            }
-            let t_enter = if t_min >= 0.0 { t_min } else { t_max };
-            if t_enter < 0.0 { None } else { Some(t_enter) }
-        };
 
         let mut best: Option<(&str, f32, Mat4)> = None;
-        for (name, model, half, oy) in &self.last_debug_pickables {
-            if let Some(t) = slab_test(*model, *half, *oy) {
-                match best {
-                    Some((_, bt, _)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t, *model)),
+
+        if !self.last_debug_pickables.is_empty() || !self.last_debug_trimesh_pickables.is_empty() {
+            let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
+            let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
+            let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
+            let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
+            let near_w = cam.inv_view_proj * near_clip;
+            let far_w = cam.inv_view_proj * far_clip;
+            if near_w.w.abs() > 1e-6 && far_w.w.abs() > 1e-6 {
+                let near = near_w.truncate() / near_w.w;
+                let far = far_w.truncate() / far_w.w;
+                let world_origin = near;
+                let world_dir = (far - near).normalize_or_zero();
+                if world_dir.length_squared() >= 1e-6 {
+                    let slab_test = |model: glam::Mat4, half: glam::Vec3, oy: f32| -> Option<f32> {
+                        let inv = model.inverse();
+                        let lo = inv.transform_point3(world_origin);
+                        let ld = inv.transform_vector3(world_dir);
+                        let bounds = [
+                            (lo.x, ld.x, -half.x, half.x),
+                            (lo.y, ld.y, -half.y + oy, half.y + oy),
+                            (lo.z, ld.z, -half.z, half.z),
+                        ];
+                        let mut t_min = f32::NEG_INFINITY;
+                        let mut t_max = f32::INFINITY;
+                        for (o, d, lo_b, hi_b) in bounds {
+                            if d.abs() < 1e-8 {
+                                if o < lo_b || o > hi_b {
+                                    return None;
+                                }
+                            } else {
+                                let inv_d = 1.0 / d;
+                                let mut t1 = (lo_b - o) * inv_d;
+                                let mut t2 = (hi_b - o) * inv_d;
+                                if t1 > t2 {
+                                    std::mem::swap(&mut t1, &mut t2);
+                                }
+                                if t1 > t_min {
+                                    t_min = t1;
+                                }
+                                if t2 < t_max {
+                                    t_max = t2;
+                                }
+                                if t_min > t_max {
+                                    return None;
+                                }
+                            }
+                        }
+                        let t_enter = if t_min >= 0.0 { t_min } else { t_max };
+                        if t_enter < 0.0 { None } else { Some(t_enter) }
+                    };
+
+                    for (name, model, half, oy) in &self.last_debug_pickables {
+                        if let Some(t) = slab_test(*model, *half, *oy) {
+                            match best {
+                                Some((_, bt, _)) if t > bt => {}
+                                _ => best = Some((name.as_str(), t, *model)),
+                            }
+                        }
+                    }
+                    for (name, model, mesh) in &self.last_debug_trimesh_pickables {
+                        if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir)
+                        {
+                            match best {
+                                Some((_, bt, _)) if t > bt => {}
+                                _ => best = Some((name.as_str(), t, *model)),
+                            }
+                        }
+                    }
                 }
             }
         }
-        for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best {
-                    Some((_, bt, _)) if t > bt => {}
-                    _ => best = Some((name.as_str(), t, *model)),
-                }
+
+        if let Some((n, _, m)) = best {
+            return Some((n.to_string(), Some(m)));
+        }
+
+        if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
+            let cy_frac = cursor_y / cam.viewport_h;
+            if (cy_frac - hy).abs() < 0.11 {
+                let model = self
+                    .last_debug_pickables
+                    .iter()
+                    .find(|(name, _, _, _)| name == "gameplay.fog_wall")
+                    .map(|(_, m, _, _)| *m);
+                return Some(("gameplay.fog_wall".to_string(), model));
             }
         }
-        best.map(|(n, _, m)| (n.to_string(), Some(m)))
+        None
     }
 }

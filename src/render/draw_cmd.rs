@@ -25,6 +25,8 @@ use crate::render::lit_mesh::MaterialParams;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 /// Per-frame camera override supplied by a scene that wants to draw the 3D
 /// world from a perspective other than the renderer's default "person at the
@@ -330,13 +332,13 @@ pub enum Object3dKind {
     // decal text as `"{title}\n{rule}"`.)
     /// Carved bone tablet with a single engraved name and progress glow.
     YakuTablet {
-        label: String,
+        label: Cow<'static, str>,
         active: bool,
         hover: f32,
     },
     /// Lacquered wood action tablet with press/hover animation envelopes.
     WoodTablet {
-        label: String,
+        label: Cow<'static, str>,
         /// When `Some`, the tablet's screen-space rect is published to
         /// `aux_dish_rects` and its model matrix to
         /// `last_primitive_pick_models` keyed by this id. Lets scenes
@@ -344,6 +346,22 @@ pub enum Object3dKind {
         /// journal button) reach a wood tablet without introducing a
         /// separate pick channel.
         pick_id: Option<u32>,
+    },
+    /// Closed leather-bound book with a calligraphy spine label.
+    /// Used by the shop scene's journal prop. Same pick-routing
+    /// pattern as `WoodTablet` (via `aux_dish_rects` +
+    /// `last_primitive_pick_models`) so existing `ShopHit::Dish(pid)`
+    /// click handlers reach it unchanged.
+    Book {
+        spine_label: Cow<'static, str>,
+        pick_id: Option<u32>,
+        /// Cover-open animation amount, 0.0 (closed, cover flush over
+        /// the page surface) to 1.0 (fully open, cover swung ~170°
+        /// around the spine axis to lay flat on the camera-right,
+        /// exposing the page-content surface). The renderer applies
+        /// `Rz(+open_amount * 170°)` around the spine hinge axis when
+        /// uploading the cover sub-instance.
+        open_amount: f32,
     },
 
     // ── Props ────────────────────────────────────────────────────────
@@ -364,6 +382,8 @@ pub enum Object3dKind {
         /// Render as a near-black matte silhouette (no texture, no glow)
         /// for locked Collection entries.
         silhouette: bool,
+        /// Boss Hex (and similar): draw the same debuff X overlay as debuffed tiles.
+        debuffed: bool,
         /// Optional pick id. When `Some`, the renderer snapshots this
         /// relic's model matrix into `last_collection_relic_pickables` so
         /// `pick_collection_object` can return the pick id for clicks that
@@ -436,7 +456,11 @@ pub enum Object3dKind {
         scale: f32,
         rotation_x: f32,
         rotation_y: f32,
-        label: String,
+        /// `Arc<str>` so per-frame clones (every popup, every reel digit, every
+        /// cascade-HUD glyph) are a refcount bump, not a fresh allocation. The
+        /// downstream consumer in `object3d_placement.rs` calls `as_ref()` /
+        /// `&label` to get `&str` for the per-label mesh cache.
+        label: Arc<str>,
         emissive: f32,
         material: GlyphMaterial,
     },
@@ -646,12 +670,6 @@ pub enum DrawCmd {
     /// Floating 3D extruded-glyph score popups. Each placement carries its
     /// own label string; the renderer lazily builds a per-string mesh on
     /// first use and reuses it on subsequent frames.
-    /// Non-rendered hover region anchored at a screen rect that resolves
-    /// to a glossary term. Lets scenes attach a tooltip to a 3D object
-    /// (e.g. the coin pile, the wall stack) by giving its approximate
-    /// 2D screen footprint and the glossary term to look up.
-    GlossaryAnchor { rect: [f32; 4], term: &'static str },
-
     // ── General-purpose 3D objects ──────────────────────────────────
     /// Single general-purpose lit-mesh object. See [`Object3d`].
     Object3d(Object3d),
@@ -740,12 +758,25 @@ pub struct UiFrame {
     /// Arrange-mode clamp hints. Drawn as a faint band when the named
     /// pickable is the current selection — see [`ArrangeClamp`].
     pub arrange_clamps: Vec<ArrangeClamp>,
+    /// Gameplay only: [`MountainHaze`] horizon height in normalized screen Y
+    /// (0 = top, 1 = bottom). Overrides volumetric `haze_horizon_y` for this
+    /// frame; sourced from gameplay scene layout `fog_wall.ny`.
+    pub gameplay_fog_wall_horizon_y: Option<f32>,
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
     /// that want the "looking into infinity" effect (e.g. the collection
     /// corridor) set this to pull the viewport toward a fisheye lens.
     pub fisheye_strength: f32,
+    /// Optional pre-pass `UiFrame` rendered into `journal_scene_texture`
+    /// before the main frame. Set by the shop while the journal book is
+    /// open: the embedded `YakuJournalScene` builds its own UiFrame and
+    /// the application loop runs it through `render_to(.., Some(view))`
+    /// before rendering the shop. The shop's open-book mesh samples the
+    /// resulting texture in screen space, so the page region reads as a
+    /// window cut through the page mesh into a live render of the
+    /// post-transition scene.
+    pub journal_prepass_frame: Option<Box<UiFrame>>,
 }
 
 impl UiFrame {
@@ -767,6 +798,8 @@ impl UiFrame {
             transition_progress: 0.0,
             arrange_clamps: Vec::new(),
             fisheye_strength: 0.0,
+            journal_prepass_frame: None,
+            gameplay_fog_wall_horizon_y: None,
         }
     }
 
@@ -827,9 +860,6 @@ impl UiFrame {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Text));
     }
 
-    pub fn glossary_anchor(&mut self, rect: [f32; 4], term: &'static str) {
-        self.cmds.push(DrawCmd::GlossaryAnchor { rect, term });
-    }
     pub fn object3d(&mut self, obj: Object3d) {
         self.cmds.push(DrawCmd::Object3d(obj));
     }
@@ -870,7 +900,6 @@ impl UiFrame {
                 | DrawCmd::FluidSmoke
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
-                | DrawCmd::GlossaryAnchor { .. }
                 | DrawCmd::Object3d(_)
                 | DrawCmd::Object3dBatch(_)
                 | DrawCmd::MountainHaze => {}
