@@ -24,6 +24,8 @@ fn main() {
     let target = env::var("TARGET").unwrap_or_default();
     if target.contains("windows-msvc") && target.contains("x86_64") {
         println!("cargo:rustc-link-arg=/DELAYLOAD:steam_api64.dll");
+        // `__delayLoadHelper2` lives in delayimp.lib (required for /DELAYLOAD).
+        println!("cargo:rustc-link-lib=delayimp");
     }
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
