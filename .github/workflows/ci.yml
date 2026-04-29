@@ -8,6 +8,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+  actions: write # upload-artifact
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     strategy:
@@ -38,7 +46,7 @@ jobs:
       HAS_AZURE_CREDS: ${{ secrets.AZURE_CLIENT_ID != '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -69,7 +77,7 @@ jobs:
             xvfb
 
       - name: Cache Cargo registry and target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -169,7 +177,7 @@ jobs:
           Copy-Item -Recurse assets staging\assets
           Get-ChildItem staging\assets -Recurse -Include *.blend,*.blend1 | Remove-Item -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: staging/

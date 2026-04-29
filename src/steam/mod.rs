@@ -141,7 +141,7 @@ pub(crate) fn steamworks_dll_ready() -> bool {
     type HMODULE = *mut std::ffi::c_void;
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetModuleFileNameW(h_module: HMODULE, lp_filename: *mut u16, n_size: u32) -> u32;
         fn LoadLibraryW(lp_lib_file_name: *const u16) -> HMODULE;
     }
