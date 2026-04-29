@@ -15,6 +15,7 @@ env:
 
 permissions:
   contents: write
+  actions: write # upload/download artifacts within the workflow run
 
 jobs:
   build-release:
@@ -48,7 +49,7 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
@@ -155,7 +156,7 @@ jobs:
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Cache Cargo registry and target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -347,7 +348,7 @@ jobs:
           echo "appcast.xml written:"
           cat appcast.xml
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: matrix.name == 'macOS'
         with:
           name: appcast.xml
@@ -478,12 +479,12 @@ jobs:
           NAME="${{ steps.update_archive.outputs.filename }}${{ steps.update_archive_win.outputs.filename }}${{ steps.update_archive_linux.outputs.filename }}"
           echo "filename=${NAME}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.update.outputs.filename }}
           path: ${{ steps.update.outputs.filename }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.filename }}
           path: ${{ steps.artifact.outputs.filename }}
@@ -496,11 +497,11 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: true
@@ -519,7 +520,7 @@ jobs:
 
       - name: Create GitHub Release (with CHANGELOG body)
         if: steps.notes.outputs.have_notes == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Mahjuro ${{ env.RELEASE_TAG }}
@@ -530,7 +531,7 @@ jobs:
 
       - name: Create GitHub Release (auto-generated fallback)
         if: steps.notes.outputs.have_notes != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Mahjuro ${{ env.RELEASE_TAG }}
