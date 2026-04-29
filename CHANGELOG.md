@@ -7,6 +7,33 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.4.5 — 2026-04-29
+
+### Added
+- New control option "X and Y Quick Action". When off, pressing X or Y on the controller only moves focus onto the Play or Discard button — you must press A to commit. Defaults to on (the existing instant-commit behavior).
+
+### Changed
+- "Destroyed" is now a styled keyword in tooltips, highlighted in crimson and explained by a Glossary entry that ties together the relic, tile, and transformation cases. Paper Lantern, Silver Filigree Lantern, Silk Thread, and Melting Ice descriptions were rephrased to use the keyword consistently — Silk Thread and Melting Ice now say "Transforms at 0" so it's clear that becoming Silk Moth or Taotie isn't a destruction (Kintsugi will not fire on it).
+- Bright spots and warm lighting no longer blow out to flat white on standard displays while looking softer on HDR—the game now maps scene lighting through a single tone curve so SDR and HDR stay in the same ballpark.
+- When the Hex boss disables one of your relics for the round, that relic now shows the same debuff mark as debuffed tiles so you can see which one is shut off at a glance.
+- Green felt shell detail now scales more gently with the Effects quality setting, and the 3D table path does less redundant work when tiles move or when nothing casts a shadow—especially noticeable on slower machines or in busy scenes.
+- Polychrome talismans no longer pick up an extra self-lit glow in the shop, so the token stays readable instead of washing out in bloom.
+- Release builds no longer ship the Debug menu, and on Windows the game now launches without a black console window behind it. Both are still present in development builds.
+- Reworked the Leading Tile relic into Geese — it now retriggers the first 5 scored tiles in the hand instead of just the first tile of each scored set.
+- I redid the art for many relics to make them more mahjong themed, added some relics, and reworked some relics. Stuff that expires should be more fun now.
+- Shop counter interaction props (sell tray, reroll, leave, journal) are tuned for clearer silhouettes and contrast under the lamp, including a lacquered wood pedestal under the sell tray.
+- When launched through Steam, Mahjuro no longer runs its built-in updater — Steam handles updates instead, so the two won't fight over replacing the game. Non-Steam builds keep updating themselves like before.
+
+### Fixed
+- Gamepad and controller navigation now stay responsive on every screen; inputs no longer sometimes pile up and dump when you move the mouse.
+- Using a gamepad no longer randomly stops handling navigation when the mouse pointer shifts slightly; moving from controller to mouse now expects an actual click.
+- The debug-menu "Set Player Level" shortcut now triggers the level-up celebration modal for any newly-unlocked relics and rules, matching what happens after a normal run.
+- Fixed a crash that could happen when opening the in-game journal from the shop.
+- The red mult preview chips next to the trigger button no longer jitter around between frames while the cascade is animating.
+- The relic on a "New Relic" celebration card now appears in its slot above the relic name instead of floating off behind the card.
+- Shop's mountain haze no longer renders as visible blocky grid cells on Windows; the fog now drifts as a smooth wash on every platform.
+- Kintsugi, Ant Trail, and Brocade Pouch can now appear in runs — level 7 unlocks every remaining relic, so nothing in the collection stays permanently out of reach.
+
 ## 0.4.4 — 2026-04-27
 
 ### Changed
