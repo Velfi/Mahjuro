@@ -77,9 +77,26 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
             *v = (*v - 8).max(0);
             if *v == 0 {
-                self.relics.active.retain(|&r| r != RelicId::MeltingIce);
+                // Metamorphosis: Melting Ice doesn't vanish — the bronze
+                // mask frozen inside thaws free in the same slot. Not a
+                // destruction (Kintsugi must NOT count it), so we do an
+                // in-place swap rather than calling `note_relic_destroyed`.
                 self.relic_counters.remove(&RelicId::MeltingIce);
-                self.note_relic_destroyed();
+                if let Some(slot) = self
+                    .relics
+                    .active
+                    .iter()
+                    .position(|&r| r == RelicId::MeltingIce)
+                {
+                    self.relics.active[slot] = RelicId::Taotie;
+                } else {
+                    self.relics.active.push(RelicId::Taotie);
+                }
+                self.relic_counters.insert(RelicId::Taotie, 0);
+                self.relic_activations.push(RelicId::Taotie);
+                bus.push(GameEvent::AchievementUnlocked(
+                    crate::steam::Achievement::TaotieAwakened,
+                ));
             }
         }
         if self.relics.has(RelicId::TeaCeremony) {
@@ -91,11 +108,11 @@ impl RunState {
                 self.note_relic_destroyed();
             }
         }
-        if self.relics.has(RelicId::CleanStreak) {
+        if self.relics.has(RelicId::Humility) {
             let has_honors = scoring_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
-            let v = self.relic_counters.entry(RelicId::CleanStreak).or_insert(0);
+            let v = self.relic_counters.entry(RelicId::Humility).or_insert(0);
             if has_honors {
                 *v = 0;
             } else {
@@ -134,13 +151,14 @@ impl RunState {
         }
 
         let effective = boss::effective_hand_size(self);
-        let draw_target = if self.relics.has(RelicId::QuickDraw) && !self.quickdraw_used {
-            self.quickdraw_used = true;
-            self.relic_activations.push(RelicId::QuickDraw);
-            effective + 1
-        } else {
-            effective
-        };
+        let draw_target =
+            if self.relics.has(RelicId::QuickDraw) && self.quickdraw_uses_remaining > 0 {
+                self.quickdraw_uses_remaining -= 1;
+                self.relic_activations.push(RelicId::QuickDraw);
+                effective + 1
+            } else {
+                effective
+            };
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };
@@ -250,11 +268,35 @@ impl RunState {
         if self.relics.has(RelicId::RiverRunner) {
             let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
             if seq_count > 0 {
-                *self
-                    .relic_counters
-                    .entry(RelicId::RiverRunner)
-                    .or_insert(0) += 20 * seq_count;
+                *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) += 20 * seq_count;
                 self.relic_activations.push(RelicId::RiverRunner);
+            }
+        }
+        if self.relics.has(RelicId::Taotie) {
+            // The hungry mask devours honors at the moment of consumption.
+            // Each devoured honor permanently grows Taotie's chip bonus by
+            // CHIPS_PER_DEVOURED and is removed from the run's tile supply
+            // (won't reappear in next round's wall — same primitive Kiln
+            // uses). The wall has 28 honors total; Kiln's 56-tile cap is
+            // never threatened, so we skip the budget check.
+            //
+            // Anti-synergy with Honor Fury / Round Compass / Yakuhai is
+            // deliberate — feeding the mask drains the supply those relics
+            // depend on, which gives the build a real shape.
+            const CHIPS_PER_DEVOURED: i32 = 20;
+            let mut devoured = 0i32;
+            for tile in &scoring_tiles {
+                if matches!(tile.suit, Suit::Wind | Suit::Dragon) {
+                    self.removed_tile_ids.insert(tile.id);
+                    self.tile_enhancements.remove(&tile.id);
+                    devoured += 1;
+                }
+            }
+            if devoured > 0 {
+                *self.relic_counters.entry(RelicId::Taotie).or_insert(0) +=
+                    CHIPS_PER_DEVOURED * devoured;
+                self.relic_activations.push(RelicId::Taotie);
+                bus.push(GameEvent::TilesDestroyed);
             }
         }
         if self.relics.has(RelicId::StarTile) && !breakdown.detected_yaku.is_empty() {

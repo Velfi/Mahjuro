@@ -3,31 +3,33 @@ use super::*;
 #[derive(Copy, Clone)]
 pub(super) struct ShowcaseTileCtx<'a> {
     pub(super) device: &'a wgpu::Device,
-    pub(super) queue: &'a wgpu::Queue,
     pub(super) layout: &'a wgpu::BindGroupLayout,
     pub(super) shadow_caster_layout: &'a wgpu::BindGroupLayout,
     pub(super) primitives: &'a [TilePrimitiveGpu],
     pub(super) sampler: &'a wgpu::Sampler,
-    pub(super) ui_font: Option<&'a fontdue::Font>,
-    pub(super) emoji_font: Option<&'a fontdue::Font>,
+    pub(super) decal_atlas: &'a crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu,
 }
 
 pub(super) fn make_showcase_tile_gpu(
     ctx: &ShowcaseTileCtx<'_>,
     base_color_factor: [f32; 4],
     tile: &Tile,
-    tile_set: Option<&str>,
 ) -> ShowcaseTileGpu {
     let ShowcaseTileCtx {
         device,
-        queue,
         layout,
         shadow_caster_layout,
         primitives,
         sampler,
-        ui_font,
-        emoji_font,
+        decal_atlas,
     } = *ctx;
+    let key = (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual);
+    let decal_atlas_uv = decal_atlas
+        .lookup
+        .get(&key)
+        .copied()
+        .unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    let decal_view = &decal_atlas.view;
     let identity = Mat4::IDENTITY;
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("showcase-tile-cam"),
@@ -37,24 +39,10 @@ pub(super) fn make_showcase_tile_gpu(
             base_color_factor,
             cam_pos: [0.0; 3],
             tile_seed: 0.0,
+            decal_atlas_uv,
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-
-    const DECAL_W: u32 = 192;
-    const DECAL_H: u32 = 256;
-    // Use `true` (hand-tile quality) so hand-strip tiles get the same
-    // full-resolution decal as the old HandTileGpu path did.
-    let rgba =
-        rasterize_tile_face_decal(tile, ui_font, emoji_font, DECAL_W, DECAL_H, tile_set, true);
-    let (_decal_texture, decal_view) = upload_rgba_texture(
-        device,
-        queue,
-        "showcase-tile-decal",
-        &rgba,
-        DECAL_W,
-        DECAL_H,
-    );
 
     let bind_groups: Vec<wgpu::BindGroup> = primitives
         .iter()
@@ -77,7 +65,7 @@ pub(super) fn make_showcase_tile_gpu(
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&decal_view),
+                        resource: wgpu::BindingResource::TextureView(decal_view),
                     },
                 ],
             })
@@ -93,6 +81,7 @@ pub(super) fn make_showcase_tile_gpu(
             base_color_factor,
             cam_pos: [0.0; 3],
             tile_seed: 0.0,
+            decal_atlas_uv,
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -117,19 +106,20 @@ pub(super) fn make_showcase_tile_gpu(
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&decal_view),
+                        resource: wgpu::BindingResource::TextureView(decal_view),
                     },
                 ],
             })
         })
         .collect();
 
+    let initial_shadow = ShadowCasterUniform {
+        light_view_proj: identity.to_cols_array(),
+        model: identity.to_cols_array(),
+    };
     let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("showcase-tile-shadow-uniform"),
-        contents: bytemuck::bytes_of(&ShadowCasterUniform {
-            light_view_proj: identity.to_cols_array(),
-            model: identity.to_cols_array(),
-        }),
+        contents: bytemuck::bytes_of(&initial_shadow),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -142,12 +132,14 @@ pub(super) fn make_showcase_tile_gpu(
     });
 
     ShowcaseTileGpu {
+        decal_atlas_uv,
         uniform_buffer,
         bind_groups,
         outline_uniform_buffer,
         outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
+        cached_shadow_caster: initial_shadow,
         tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),
     }
 }
@@ -170,6 +162,36 @@ pub(super) fn make_tile_face_overlay_gpu(
         upload_rgba_texture(device, queue, "tile-face-overlay", &rgba, DECAL_W, DECAL_H);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("tile-face-overlay-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    TileFaceOverlayGpu {
+        _texture: texture,
+        bind_group,
+    }
+}
+
+pub(crate) fn make_debuff_marker_overlay_gpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+) -> TileFaceOverlayGpu {
+    const W: u32 = 192;
+    const H: u32 = 256;
+    let rgba = crate::render::decal::rasterize_debuff_marker_overlay(W, H);
+    let (texture, view) = upload_rgba_texture(device, queue, "relic-debuff-marker", &rgba, W, H);
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("relic-debuff-marker-bg"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {

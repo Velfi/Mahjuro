@@ -74,11 +74,13 @@ enum Row {
     Effects,
     Tile,
     Tileset,
+    Surface,
     UiScale,
     Shadows,
     Ssr,
     Hdr,
     SwapAb,
+    XyQuickAction,
     AutoCashInOnFullStructure,
     Hints,
 }
@@ -112,11 +114,13 @@ const ROWS: &[Row] = &[
     Row::Effects,
     Row::Tile,
     Row::Tileset,
+    Row::Surface,
     Row::UiScale,
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
     Row::SwapAb,
+    Row::XyQuickAction,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
 ];
@@ -142,6 +146,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
+    ContentSlot::Row(Row::Surface),
     ContentSlot::Row(Row::UiScale),
     ContentSlot::Header(Section::Rendering),
     ContentSlot::Row(Row::Shadows),
@@ -149,6 +154,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Hdr),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
+    ContentSlot::Row(Row::XyQuickAction),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
 ];
@@ -296,11 +302,13 @@ pub struct OptionsScene {
     pub tile_preset: crate::persistence::TilePreset,
     pub tileset_name: String,
     pub available_tilesets: Vec<String>,
+    pub surface_kind: crate::persistence::SurfaceKind,
     pub gamma: f32,
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
     pub swap_ab: bool,
+    pub xy_quick_action: bool,
     pub auto_cash_in_on_full_structure: bool,
     pub hints_enabled: bool,
     pub ui_scale: f32,
@@ -337,11 +345,13 @@ impl OptionsScene {
             tile_preset: settings.tile_preset,
             tileset_name,
             available_tilesets,
+            surface_kind: settings.surface_kind,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
+            xy_quick_action: settings.xy_quick_action,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             hints_enabled: settings.hints_enabled,
             ui_scale: settings.ui_scale,
@@ -362,6 +372,14 @@ impl OptionsScene {
         self.tileset_name = self.available_tilesets[next].clone();
     }
 
+    fn cycle_surface(&mut self, delta: isize) {
+        self.surface_kind = if delta >= 0 {
+            self.surface_kind.next()
+        } else {
+            self.surface_kind.prev()
+        };
+    }
+
     fn save_settings(&self) {
         let mut settings = crate::persistence::load_settings();
         settings.master_volume = self.master_volume;
@@ -373,11 +391,13 @@ impl OptionsScene {
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
+        settings.surface_kind = self.surface_kind;
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
         settings.ssr_enabled = self.ssr_enabled;
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
+        settings.xy_quick_action = self.xy_quick_action;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.hints_enabled = self.hints_enabled;
         settings.ui_scale = self.ui_scale;
@@ -484,10 +504,12 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
+            Row::Surface => self.cycle_surface(1),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
@@ -511,10 +533,12 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
+            Row::Surface => self.cycle_surface(-1),
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
@@ -564,6 +588,10 @@ impl OptionsScene {
                 self.cycle_tileset(1);
                 self.save_settings();
             }
+            Row::Surface => {
+                self.cycle_surface(1);
+                self.save_settings();
+            }
             Row::Shadows => {
                 self.shadows_enabled = !self.shadows_enabled;
                 self.save_settings();
@@ -578,6 +606,10 @@ impl OptionsScene {
             }
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
+                self.save_settings();
+            }
+            Row::XyQuickAction => {
+                self.xy_quick_action = !self.xy_quick_action;
                 self.save_settings();
             }
             Row::AutoCashInOnFullStructure => {
@@ -1047,6 +1079,7 @@ impl OptionsScene {
                     }
                     Row::Tile => format!("Tile Style: {}", self.tile_preset.label()),
                     Row::Tileset => format!("Tile Set: {}", self.tileset_name),
+                    Row::Surface => format!("Surface: {}", self.surface_kind.label()),
                     Row::Shadows => format!(
                         "Shadows: {}",
                         if self.shadows_enabled { "ON" } else { "OFF" }
@@ -1055,11 +1088,12 @@ impl OptionsScene {
                         "Reflections: {}",
                         if self.ssr_enabled { "ON" } else { "OFF" }
                     ),
-                    Row::Hdr => format!(
-                        "HDR: {} (restart required)",
-                        if self.hdr_enabled { "ON" } else { "OFF" }
-                    ),
+                    Row::Hdr => format!("HDR: {}", if self.hdr_enabled { "ON" } else { "OFF" }),
                     Row::SwapAb => format!("Swap A/B: {}", if self.swap_ab { "ON" } else { "OFF" }),
+                    Row::XyQuickAction => format!(
+                        "X and Y Quick Action: {}",
+                        if self.xy_quick_action { "ON" } else { "OFF" }
+                    ),
                     Row::AutoCashInOnFullStructure => format!(
                         "Auto Cash-In on Full Structure: {}",
                         if self.auto_cash_in_on_full_structure {

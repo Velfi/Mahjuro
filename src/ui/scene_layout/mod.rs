@@ -35,7 +35,9 @@ mod start_screen;
 mod tutorial;
 
 pub use collection::{CollectionPositions, load_collection_positions, save_collection_positions};
-pub use gameplay::{GameplayPositions, load_gameplay_positions, save_gameplay_positions};
+pub use gameplay::{
+    GAMEPLAY_HIERARCHY, GameplayPositions, load_gameplay_positions, save_gameplay_positions,
+};
 pub use shop::{
     CANONICAL_WINDOW_W, HFRAC_TO_MM, SHOP_HIERARCHY, ShopPositions, load_shop_positions,
     save_shop_positions,

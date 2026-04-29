@@ -11,18 +11,16 @@ pub(super) enum GameplayButton {
     Trigger,
     Discard,
     /// Yaku Journal book — focusable so keyboard / controller players can
-    /// reach the journal without a mouse. Confirming pushes the
-    /// `YakuJournalScene` onto the overlay stack (see the `Confirm`
-    /// handler in `update`); it has no `UiAction` analogue because the
-    /// push operates on the scene stack, not the action queue.
+    /// reach the journal without a mouse. Confirming starts the same
+    /// cover-open + zoom transition as the shop, then pushes
+    /// `YakuJournalScene` when the animation completes.
     Journal,
 }
 
 impl GameplayButton {
     /// Maps a focusable action button to its `UiAction`. Returns `None`
     /// for buttons whose activation is *not* expressible as a `UiAction`
-    /// — currently only `Journal`, which toggles a scene-local overlay
-    /// pushed as the `YakuJournalScene` overlay from the `Confirm` handler.
+    /// — currently only `Journal` (transition + overlay push from `Confirm`).
     pub(super) fn ui_action(self) -> Option<UiAction> {
         Some(match self {
             GameplayButton::SortSuit => UiAction::SortBySuit,
@@ -104,6 +102,24 @@ pub(super) fn wrap_hand_tile_focus(
         }
         _ => None,
     }
+}
+
+/// Pick the focus to adopt after using the consumable at `used_idx`. The
+/// consumable list shifted left, so the next consumable now lives at
+/// `used_idx`. If the row is now empty, fall back to the first hand tile
+/// in the focus graph.
+pub(super) fn focus_after_consumable_use(
+    used_idx: usize,
+    remaining: usize,
+    focus_rects: &[(FocusTarget, [f32; 4])],
+) -> Option<FocusTarget> {
+    if remaining > 0 {
+        let next = used_idx.min(remaining - 1);
+        return Some(FocusTarget::Consumable(next));
+    }
+    focus_rects
+        .iter()
+        .find_map(|(t, _)| matches!(t, FocusTarget::HandTile(_)).then_some(*t))
 }
 
 pub(super) fn play_select_sfx(

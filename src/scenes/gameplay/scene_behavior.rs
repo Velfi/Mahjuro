@@ -1,8 +1,15 @@
 use super::*;
 use super::{animation_state, cascade_controller, input_handler};
+use crate::core::consumable::Consumable;
+use crate::core::relic::{all_relic_defs, relic_description_live};
 use crate::scenes::options;
 use crate::scenes::tutorial_overlay::TutorialOverlay;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
+use crate::render::theme::color;
+use crate::ui::inspect_plaque::{
+    dora_focus_tooltip_strings, gameplay_consumable_description_full, hand_tile_inspect_lines,
+    push_focus_tooltip_panel_2d,
+};
 
 impl SceneBehavior for GameplayScene {
     /// Borrow the in-pause-menu options overlay, if the player has opened it.
@@ -98,6 +105,10 @@ impl SceneBehavior for GameplayScene {
             return None;
         }
 
+        if input_handler::tick_gameplay_journal_transition(self, &mut ctx, now, dt) {
+            return None;
+        }
+
         // Help action opens the Meld Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
@@ -118,7 +129,6 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // Yaku Journal overlay: same modal pattern. Opened by clicking the Journal book on the table
         // Pause menu handling — drives the menu while paused and intercepts
         // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
@@ -229,12 +239,13 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        if let Some(t) = input_handler::process_focus_and_actions(self, &mut ctx, now, focus_kind_before) {
+        if let Some(t) =
+            input_handler::process_focus_and_actions(self, &mut ctx, now, focus_kind_before)
+        {
             return t;
         }
         None
     }
-
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let layout = ctx.layout;
@@ -304,12 +315,8 @@ impl SceneBehavior for GameplayScene {
                 .dora_faces
                 .iter()
                 .map(|(suit, rank)| {
-                    use crate::core::tile::{Suit, Tile};
-                    if *suit == Suit::Flower {
-                        "\u{1F33A}".to_string()
-                    } else {
-                        Tile::new(*suit, *rank, 0).label()
-                    }
+                    use crate::core::tile::Tile;
+                    Tile::new(*suit, *rank, 0).full_name()
                 })
                 .collect::<Vec<_>>()
                 .join(",");
@@ -455,34 +462,28 @@ impl SceneBehavior for GameplayScene {
 
         // ── Frame accumulators ───────────────────────────────────────────
         //
-        // The migrated draw_frame separates HUD content into three layers
-        // and pushes them into the final `UiFrame` at the end of this
-        // function in canonical order:
+        // The migrated draw_frame separates HUD content into layers and
+        // pushes them into the final `UiFrame` at the end of this function
+        // in canonical order:
         //
         //   1. PERSISTENT HUD (`hud_quads` + optional `hud_text`) — particles,
-        //      etc. Lives between the 3D backdrop and the
-        //      `HandTileFaces` marker so tile faces read on top of HUD
-        //      panels they overlap.
+        //      etc. Lives between the 3D backdrop and the `HandTileFaces`
+        //      marker so tile faces read on top of HUD panels they overlap.
         //
-        //   2. HOVER LAYER (`hover_quads` + `hover_text`) — tile hover
-        //      outline, tile/yaku/zodiac/relic hover tooltips. Lives
-        //      *after* the `HandTileFaces` marker so tooltips always sit
-        //      on top of tile faces.
+        //   2. Focus rings (`hover_quads`) — brass frame for keyboard /
+        //      controller focus.
         //
         //   3. PAUSE OVERLAY (`pause_quads` + `pause_text`) — built only
-        //      when the pause menu is open, sits above the hover layer.
+        //      when the pause menu is open; sits above focus rings.
         //
-        // Within each accumulator, quads are pushed first then text on
-        // top, which preserves the existing visual contract (text reads
-        // above panels). The crucial fix vs. the legacy dual-vec model is
-        // that hover tooltips' background quads no longer compete with
-        // persistent text — they're a separate downstream batch.
         let mut hud_quads: Vec<GpuInstance> = Vec::new();
-        let hud_text: Vec<TextLabel> = Vec::new();
+        let mut hud_text: Vec<TextLabel> = Vec::new();
+        let mut inspect_tooltip_quads: Vec<GpuInstance> = Vec::new();
+        let mut inspect_tooltip_texts: Vec<TextLabel> = Vec::new();
         let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
         let mut structure_pile_tokens: Vec<Object3d> = Vec::new();
+        // Brass focus-ring quads (keyboard/controller focus).
         let mut hover_quads: Vec<GpuInstance> = Vec::new();
-        let mut hover_text: Vec<TextLabel> = Vec::new();
 
         // Focus rect graph: every focusable HUD element pushes its
         // screen-space rect here as it's laid out below. Stashed in
@@ -494,13 +495,10 @@ impl SceneBehavior for GameplayScene {
         let input_handler::YakuPanelOutputs {
             yaku_preview_effective_tiles: _yaku_preview_effective_tiles,
             yaku_preview_sets: _yaku_preview_sets,
-            is_chicken_hand,
-            hovered_yaku_kind,
             yaku_tablet_placements,
             structure_showcase: yaku_structure_showcase,
             structure_pile_tokens: yaku_structure_pile_tokens,
             cam_rot,
-            visible_previews_kinds,
         } = input_handler::build_yaku_panel_and_tablets(
             self,
             layout,
@@ -520,8 +518,6 @@ impl SceneBehavior for GameplayScene {
             yaku_panel_h,
             yaku_row_y,
             trigger_btn_rect,
-            &mut hover_quads,
-            &mut hover_text,
         );
         // Merge the yaku-panel structure showcase + preview pile pushes
         // into the outer accumulators so the rest of the draw_frame logic
@@ -543,7 +539,7 @@ impl SceneBehavior for GameplayScene {
             mut wood_tablet_placements,
             discard_bowl_placement,
             bronze_mirror_placement,
-            journal_pick_idx: _journal_pick_idx,
+            journal_book,
         } = input_handler::build_action_row_and_journal(
             self,
             layout,
@@ -562,7 +558,6 @@ impl SceneBehavior for GameplayScene {
             discard_enabled,
             now,
             &mut focus_rect_graph,
-            &mut hover_text,
         );
         let _ = &mut wood_tablet_placements;
 
@@ -580,13 +575,12 @@ impl SceneBehavior for GameplayScene {
         // Coin pile screen rect — kept in sync with the actual 3D pile
         // draw down at the bottom of `draw_frame` (search "Coin pile —"
         // around the dish_explicit call). We compute it up here so the
-        // `FocusTarget::Gold` focus rect, the gold tooltip anchor, *and*
-        // the pile draw all use exactly the same screen-space footprint
-        // — keeping the focus ring, hover tooltip, and physical pile
+        // `FocusTarget::Gold` focus rect and the pile draw all use exactly
+        // the same screen-space footprint — keeping the focus ring and
         // visually locked together as the score panel resizes. `None`
         // when there's no gold to display (no pile is drawn).
         // Dora indicator screen rect. Pre-computed up here so the focus
-        // rect graph entry and the focus tooltip can both use it.
+        // rect graph entry can both use it.
         // Prefer the renderer's projected plinth rect (one frame stale,
         // tracks the actual on-screen quad as the camera or arrange-mode
         // overrides shift it). Falls back to a screen-position estimate on
@@ -636,10 +630,9 @@ impl SceneBehavior for GameplayScene {
         // composite can drift over the wood face without text floating
         // on top of it.
         let _ = (ctx_x, ctx_y, ctx_w, ctx_h, &score_text_top, &score_text_bot);
-        // The Sort/Play labels are now engraved directly on the wood tablets
-        // (per-instance decals applied in the renderer's tablet pass), and
-        // the Discard bowl reads as a bowl visually, so no 2D button text
-        // labels are pushed into the HUD overlay anymore.
+        // The Sort/Play labels are engraved on the wood tablets (per-instance decals).
+        // Discard river + play mirror use centered text in their projected rects in the
+        // persistent HUD pass (see `hud_text` just before `frame.texts(hud_text)`).
 
         // The 3D action objects (sort suit / sort rank / play hand wood
         // tablets + discard bowl) no longer go through `frame.buttons`.
@@ -661,14 +654,11 @@ impl SceneBehavior for GameplayScene {
             input_handler::build_consumable_dish(
                 self,
                 layout,
-                run,
                 &ctx,
                 &interaction,
                 paused,
                 &mut focus_rect_graph,
                 &mut buttons,
-                &mut hover_quads,
-                &mut hover_text,
             );
 
         // Particle instances. Pushed into the persistent HUD layer (under
@@ -697,21 +687,6 @@ impl SceneBehavior for GameplayScene {
                 }
             }
         }
-
-        input_handler::build_tile_hover_tooltip(
-            self,
-            layout,
-            run,
-            &ctx,
-            &gameplay,
-            &interaction,
-            &hand_slots,
-            scale,
-            hovered_yaku_kind.is_some(),
-            &buttons,
-            &mut hover_quads,
-            &mut hover_text,
-        );
 
         // Phase 8: the `?` glossary badge has been removed from the
         // gameplay HUD. The glossary is now reachable from the pause menu's
@@ -776,30 +751,12 @@ impl SceneBehavior for GameplayScene {
         // tile_outline_pipeline (which catches candlelight), so no 2D
         // selection overlay is added here.
 
-        let (relic_objects, wind_gusts) = input_handler::build_relic_tray_and_wind(
-            self,
-            layout,
-            run,
-            &gameplay,
-            &ctx,
-            now,
-            &hand_slots,
-            is_chicken_hand,
-            &visible_previews_kinds,
-            coin_pile_rect,
-            dora_rect,
-            &mut hover_quads,
-            &mut hover_text,
-        );
+        let (relic_objects, wind_gusts) =
+            input_handler::build_relic_tray_and_wind(self, layout, run, now, &hand_slots);
 
         // ── Frame assembly ──────────────────────────────────────────────
         //
         // Now push every layer into a fresh `UiFrame` in canonical order.
-        // The single ordered cmd list (push order = z order) is what kills
-        // the legacy "tooltip BG renders under parent text" bug class:
-        // every hover-layer push happens *after* every persistent-HUD
-        // text push, so a tooltip background can never compete with a
-        // parent text label drawn in the same flush.
         let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
@@ -826,6 +783,10 @@ impl SceneBehavior for GameplayScene {
             frame.camera_override = Some(camera);
         }
         frame.background(BackgroundId::Black);
+        frame.mountain_haze();
+        // Committed horizon only — interactive `App::draw` overwrites with the
+        // full arrange preview so `set_haze_tuning` matches `DrawCtx::arrange_preview`.
+        frame.gameplay_fog_wall_horizon_y = Some(self.positions.fog_wall.ny.clamp(0.0, 1.0));
         frame.table();
 
         // Build hand tile placements for the showcase pipeline.
@@ -910,14 +871,6 @@ impl SceneBehavior for GameplayScene {
         if !relic_objects.is_empty() {
             frame.object3d_batch(relic_objects);
         }
-        // Flames are submitted later (just before `fluid_smoke`) so every
-        // 3D scene object — plaques, ofuda, coin pile, flying coins,
-        // tablets — lands in the main pass *before* the additive flame
-        // quads. The flame pipeline doesn't write depth, so anything
-        // drawn after it passes its Less depth test against the plain
-        // table/background and paints over the flame (e.g. the coin
-        // pile on the right-side candle).
-
         // PERSISTENT HUD: hanging plaque + ofuda (3D wood/paper) → score
         // panel pip indicators → score header text → modifier strip text →
         // yaku card bodies + button bar quads + zodiac slots + particles +
@@ -1030,7 +983,6 @@ impl SceneBehavior for GameplayScene {
                     material: crate::render::primitive::MaterialSpec::plain().with_decal(
                         crate::render::primitive::DecalSpec {
                             text: format!("{}\n{}", ofuda_title_text, ofuda_rule_text),
-                            palette: crate::render::primitive::DecalPalette::ParchmentInk,
                             layout: crate::render::primitive::DecalLayout::TitleRule {
                                 target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                             },
@@ -1222,7 +1174,8 @@ impl SceneBehavior for GameplayScene {
         if !yaku_tablet_placements.is_empty() {
             frame.object3d_batch(yaku_tablet_placements);
         }
-        // Phase 4: wood sort/journal/trigger + lacquered bowl + bronze mirror.
+        // Phase 4: wood sort/trigger + lacquered bowl + bronze mirror.
+        // Journal book is drawn later — last among gameplay props — so zoom depth cannot lose to bowl/mirror/etc.
         if !wood_tablet_placements.is_empty() {
             frame.object3d_batch(wood_tablet_placements);
         }
@@ -1232,9 +1185,10 @@ impl SceneBehavior for GameplayScene {
         if let Some(mirror) = bronze_mirror_placement {
             frame.object3d(mirror);
         }
-        // Phase 5: brass talisman/zodiac dish on the right side of the
-        // table. Dish is sized to wrap the consumables strip; pendants are
-        // pushed in slot order.
+        // Talisman/zodiac dish on the right side of the table. Glazed
+        // porcelain with an aged-cream tint so the shader's crazing
+        // pattern lands on it — reads as a well-loved temple ceramic
+        // rather than a fresh kiln piece.
         if let Some((sx, sy, sw, sh)) = talisman_dish_strip {
             let dish_pad_x = sw * 0.10;
             let dish_pad_y = sh * 0.40;
@@ -1243,19 +1197,23 @@ impl SceneBehavior for GameplayScene {
                 pos: [
                     sx + sw * 0.5 + td.nx * layout.window_w,
                     sy + sh * 0.5 + td.ny * layout.window_h,
-                    layout.mm(td.lift_mm) + layout.mm(10.0) * 0.5,
+                    layout.mm(td.lift_mm) + layout.mm(18.0) * 0.5,
                 ],
-                // Brass tray rim ~10mm tall — small decorative dish.
+                // Porcelain dish ~18mm tall — gives the bowl profile
+                // enough vertical depth that the curved silhouette
+                // reads as ceramic dishware rather than a flat coaster.
                 extents: [
                     sw + dish_pad_x * 2.0,
-                    layout.mm(10.0),
+                    layout.mm(18.0),
                     sh + dish_pad_y * 2.0,
                 ],
                 rotation: glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                color: [1.0, 1.0, 1.0, 1.0],
+                // Aged cream — same tint as the gold dish so the two
+                // ceramic surfaces read as a matched set across the table.
+                color: [0.88, 0.84, 0.78, 1.0],
                 kind: Object3dKind::Primitive {
-                    shape: crate::render::primitive::MeshId::DiscSquare,
-                    material: crate::render::primitive::MaterialSpec::plain(),
+                    shape: crate::render::primitive::MeshId::PorcelainDish,
+                    material: crate::render::primitive::MaterialSpec::porcelain(),
                     pick_id: Some(PICK_CONSUMABLE_DISH),
                     shadow_caster: true,
                     silhouette: false,
@@ -1289,25 +1247,65 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
+        // Journal zoom: darken HUD briefly so the scaled book does not z-fight tiles/props behind it.
+        if let Some(t) = self.journal_transition {
+            let zp = t.zoom_progress();
+            if zp > 0.001 {
+                let smoothed = zp * zp * (3.0 - 2.0 * zp);
+                let a = smoothed * 0.72;
+                frame.quad(GpuInstance {
+                    rect: [0.0, 0.0, layout.window_w, layout.window_h],
+                    color: [0.03, 0.04, 0.06, a],
+                });
+            }
+        }
+        if let Some(book) = journal_book {
+            frame.object3d(book);
+        }
+
         // Additive 2D flame quads. Submitted last among the 3D-pass
         // draws so the coin pile, flying coins, and every other mesh
         // are already in the depth buffer when the flame pipeline
         // (depth-test Always, depth-write off) stamps pixels on top.
-        // This is only visible when smoke is Off — with smoke on, the
-        // flame pipeline is skipped in the renderer and flames are
-        // composited volumetrically instead.
         frame.flames(flame_instances);
 
-        // Volumetric smoke pass. Pushed *after* every persistent 3D scene
-        // object (plaques, ofuda, peg block, yaku/wood tablets, bowl,
-        // talisman dish, coins, wall stack) so all of them
-        // land in pass A and the smoke draws over them — mirroring the
-        // shop scene's order. Pushing this earlier (next to the candles)
-        // dropped most of the table HUD into pass B, where it painted
-        // right over the smoke and hid it. The 2D HUD text below, plus
-        // `hand_tile_faces` and the hover/pause overlays, remain after
-        // this marker so they stay readable on top of the haze.
-        frame.fluid_smoke();
+        // Play mirror + discard river: labels centered in projected rects (not cursor hover tooltips).
+        if !paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+            && self.journal_transition.is_none()
+        {
+            let body_px = crate::render::theme::typography::size(
+                crate::render::theme::typography::BODY,
+                layout.window_h,
+                ctx.ui_scale,
+            )
+            .max(11.0);
+            let push_centered = |out: &mut Vec<TextLabel>, rect: [f32; 4], copy: &'static str| {
+                if rect[2] <= 1.0 || rect[3] <= 1.0 {
+                    return;
+                }
+                let fs = body_px
+                    .min(rect[3] * 0.24)
+                    .min(rect[2] * 0.14)
+                    .max(10.0);
+                out.push(TextLabel {
+                    rect,
+                    text: copy.into(),
+                    color: color::CHAMPAGNE,
+                    font_px: Some(fs),
+                    align: crate::render::wgpu_renderer::TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                });
+            };
+            if let Some(rect) = ctx.proj.bowl_rect {
+                push_centered(&mut hud_text, rect, "Discard tiles");
+            }
+            if let Some(rect) = ctx.proj.mirror_rect {
+                push_centered(&mut hud_text, rect, "Score hand");
+            }
+        }
 
         frame.texts(hud_text);
 
@@ -1342,7 +1340,7 @@ impl SceneBehavior for GameplayScene {
         }
         // Anchor the gold focus rect to the actual 3D coin pile (when
         // there is gold to display). The pile rect was computed up at
-        // the top of `draw_frame` so the focus ring, hover tooltip, and
+        // the top of `draw_frame` so the focus ring and
         // physical pile draw all share one source of truth.
         if let Some(rect) = coin_pile_rect {
             focus_rect_graph.push((FocusTarget::Gold, rect));
@@ -1361,9 +1359,140 @@ impl SceneBehavior for GameplayScene {
         // player can read what the brass plinth represents.
         focus_rect_graph.push((FocusTarget::Dora, dora_rect));
 
+        // Focus inspect: [`crate::ui::tooltip`] frame + wrapped text (shop uses the same helper).
+        if !self.pause_menu.paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+            && self.journal_transition.is_none()
+        {
+            if let Some(target) = self.focus {
+                if let Some(rect) = focus_rect_graph
+                    .iter()
+                    .find_map(|(t, r)| (*t == target).then_some(*r))
+                {
+                    match target {
+                        FocusTarget::Relic(i) => {
+                            let ids = GameEngine::active_relics(run);
+                            if let Some(&rid) = ids.get(i) {
+                                let def = all_relic_defs().iter().find(|d| d.id == rid);
+                                let name = def
+                                    .map(|d| d.name.to_string())
+                                    .unwrap_or_else(|| "Relic".into());
+                                let rare =
+                                    def.map(|d| format!("{:?}", d.rarity)).unwrap_or_default();
+                                let desc = relic_description_live(
+                                    rid,
+                                    &run.relic_counters,
+                                    run.total_score_earned,
+                                );
+                                push_focus_tooltip_panel_2d(
+                                    &mut inspect_tooltip_quads,
+                                    &mut inspect_tooltip_texts,
+                                    layout.window_w,
+                                    layout.window_h,
+                                    ctx.ui_scale,
+                                    Some(rect),
+                                    &name,
+                                    &desc,
+                                    &format!("Tier · {rare}"),
+                                    color::MIST,
+                                    false,
+                                    false,
+                                );
+                            }
+                        }
+                        FocusTarget::Consumable(i) => {
+                            if let Some(&c) = interaction.consumables.get(i) {
+                                let kind = match c {
+                                    Consumable::Zodiac(_) => "Ribbon",
+                                    Consumable::Talisman(_) => "Talisman",
+                                };
+                                let title = format!("{} · {}", kind, c.name());
+                                let desc = gameplay_consumable_description_full(c);
+                                push_focus_tooltip_panel_2d(
+                                    &mut inspect_tooltip_quads,
+                                    &mut inspect_tooltip_texts,
+                                    layout.window_w,
+                                    layout.window_h,
+                                    ctx.ui_scale,
+                                    Some(rect),
+                                    &title,
+                                    &desc,
+                                    "",
+                                    color::GOLD,
+                                    false,
+                                    false,
+                                );
+                            }
+                        }
+                        FocusTarget::HandTile(i) => {
+                            if let Some(&tile) = interaction.hand.get(i) {
+                                let tile = Self::display_tile(tile, run);
+                                let lines = hand_tile_inspect_lines(
+                                    &tile,
+                                    &gameplay.dora_faces,
+                                    &run.tile_debuffs,
+                                    interaction.selected.get(i).copied().unwrap_or(false),
+                                );
+                                let title = lines
+                                    .first()
+                                    .map(|(s, _)| s.as_str())
+                                    .unwrap_or("Tile");
+                                let desc = lines
+                                    .iter()
+                                    .skip(1)
+                                    .map(|(s, _)| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                push_focus_tooltip_panel_2d(
+                                    &mut inspect_tooltip_quads,
+                                    &mut inspect_tooltip_texts,
+                                    layout.window_w,
+                                    layout.window_h,
+                                    ctx.ui_scale,
+                                    Some(rect),
+                                    title,
+                                    &desc,
+                                    "",
+                                    color::BRASS,
+                                    false,
+                                    false,
+                                );
+                            }
+                        }
+                        FocusTarget::Dora => {
+                            let (title, cta, desc) = dora_focus_tooltip_strings(
+                                ctx.progress.dora_enabled(),
+                                &gameplay.dora_faces,
+                            );
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                layout.window_w,
+                                layout.window_h,
+                                ctx.ui_scale,
+                                Some(rect),
+                                &title,
+                                &desc,
+                                &cta,
+                                color::GOLD,
+                                false,
+                                false,
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !inspect_tooltip_quads.is_empty() || !inspect_tooltip_texts.is_empty() {
+                frame.quads(inspect_tooltip_quads);
+                frame.texts(inspect_tooltip_texts);
+            }
+        }
+
         // Centralized focus ring: a single brass frame around whatever
-        // `self.focus` is currently pointing at, pushed into the hover
-        // layer so it sits above all HUD elements. Hand tiles get their
+        // `self.focus` is currently pointing at, in the `hover_quads`
+        // batch so it sits above all HUD elements. Hand tiles get their
         // focus indicator via `ShowcaseTilePlacement.outline`, so we
         // suppress the 2D ring for HandTile to avoid double-ringing.
         if let Some(target) = self.focus
@@ -1383,15 +1512,9 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        // HOVER LAYER: tile hover outline + tooltip, yaku card hover
-        // tooltip, zodiac slot hover tooltip, relic hover outline +
-        // tooltip. Pushed *after* `hand_tile_faces` so they always sit
-        // on top of the visible tile rank text, not under it.
-        // Suppressed when an app-level modal is active so tooltip text
-        // doesn't bleed through the modal's semi-transparent dimmer.
+        // Focus-ring layer (brass frame only). Pushed *after* `hand_tile_faces`.
         if !ctx.modal_active {
             frame.quads(hover_quads);
-            frame.texts(hover_text);
         }
 
         // PAUSE OVERLAY: dim panel + buttons + text built earlier into
@@ -1408,6 +1531,24 @@ impl SceneBehavior for GameplayScene {
         frame.point_lights = point_lights;
         frame.spot_lights = spot_lights;
         frame.wind_gusts = wind_gusts;
+        // Projected rects for the discard river + play mirror: hit-test order
+        // before the fullscreen 3D catch-all (same id — dispatcher uses
+        // `picked_gameplay_object`). Labels render centered in these rects in the
+        // persistent HUD text pass above.
+        if !self.pause_menu.paused {
+            if let Some(rect) = ctx.proj.bowl_rect {
+                buttons.push(ButtonDef::scene(
+                    (rect[0], rect[1], rect[2], rect[3]),
+                    GAMEPLAY_3D_HIT_ID,
+                ));
+            }
+            if let Some(rect) = ctx.proj.mirror_rect {
+                buttons.push(ButtonDef::scene(
+                    (rect[0], rect[1], rect[2], rect[3]),
+                    GAMEPLAY_3D_HIT_ID,
+                ));
+            }
+        }
         // Catch-all 3D-hit dispatcher: a full-screen `ButtonDef::scene`
         // pushed last so it only wins the first-hit search if no other
         // (smaller) button matched the cursor first. The matching click

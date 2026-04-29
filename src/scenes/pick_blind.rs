@@ -1042,7 +1042,6 @@ impl SceneBehavior for PickBlindScene {
                         material: crate::render::primitive::MaterialSpec::plain().with_decal(
                             crate::render::primitive::DecalSpec {
                                 text: format!("{}\n{}", def.name, description),
-                                palette: crate::render::primitive::DecalPalette::ParchmentInk,
                                 layout: crate::render::primitive::DecalLayout::TitleRule {
                                     target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                                 },

@@ -58,38 +58,46 @@ impl WgpuRenderer {
         // headless mode hard-picks Rgba8UnormSrgb — every backend supports
         // it as RENDER_ATTACHMENT | COPY_SRC and the existing PNG readback
         // already handles sRGB8 correctly (no BGRA swap needed).
-        let format = match surface_opt.as_ref() {
+        let (format, swapchain_sdr_format, swapchain_hdr_available) = match surface_opt.as_ref() {
             Some(surface) => {
                 let caps = surface.get_capabilities(&adapter);
-                if hdr_enabled {
-                    if caps.formats.contains(&wgpu::TextureFormat::Rgba16Float) {
+                let swapchain_sdr_format = caps
+                    .formats
+                    .iter()
+                    .find(|f| f.is_srgb())
+                    .copied()
+                    .unwrap_or(caps.formats[0]);
+                let swapchain_hdr_available =
+                    caps.formats.contains(&wgpu::TextureFormat::Rgba16Float);
+                let format = if hdr_enabled {
+                    if swapchain_hdr_available {
                         log::info!("HDR enabled — using Rgba16Float surface format");
                         wgpu::TextureFormat::Rgba16Float
                     } else {
                         log::warn!(
                             "HDR requested but Rgba16Float not supported; falling back to sRGB"
                         );
-                        caps.formats
-                            .iter()
-                            .find(|f| f.is_srgb())
-                            .copied()
-                            .unwrap_or(caps.formats[0])
+                        swapchain_sdr_format
                     }
                 } else {
-                    caps.formats
-                        .iter()
-                        .find(|f| f.is_srgb())
-                        .copied()
-                        .unwrap_or(caps.formats[0])
-                }
+                    swapchain_sdr_format
+                };
+                (format, swapchain_sdr_format, swapchain_hdr_available)
             }
             None => {
                 if hdr_enabled {
                     log::info!("headless renderer ignoring hdr_enabled; screenshots are sRGB8");
                 }
-                wgpu::TextureFormat::Rgba8UnormSrgb
+                (
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    false,
+                )
             }
         };
+
+        // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
+        let scene_hdr_format = SCENE_HDR_FORMAT;
 
         let mut limits =
             wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
@@ -629,7 +637,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -697,7 +705,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -792,7 +800,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     // Additive blend so flames brighten whatever's behind them.
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent {
@@ -872,7 +880,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent {
                                 src_factor: wgpu::BlendFactor::One,
@@ -947,7 +955,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent {
                                 src_factor: wgpu::BlendFactor::One,
@@ -1007,7 +1015,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent {
                                 src_factor: wgpu::BlendFactor::One,
@@ -1062,7 +1070,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -1139,7 +1147,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent {
                                 src_factor: wgpu::BlendFactor::One,
@@ -1202,7 +1210,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -1241,7 +1249,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -1287,7 +1295,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     // Additive blend so the glow brightens the table /
                     // tile sides without darkening anything.
                     blend: Some(wgpu::BlendState {
@@ -1340,6 +1348,7 @@ impl WgpuRenderer {
                 view_proj: Mat4::IDENTITY.to_cols_array(),
                 view_pos: [0.0; 4],
                 params: [0.0; 4],
+                felt: [2.0, 0.0, 0.0, 0.0],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -1353,12 +1362,41 @@ impl WgpuRenderer {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
-        let (scene_prev_texture, scene_prev_view) =
-            create_scene_prev(&device, format, size.width.max(1), size.height.max(1));
-        let (scene_color_texture, scene_color_view) =
-            create_scene_color(&device, format, size.width.max(1), size.height.max(1));
-        let (cascade_offscreen_texture, cascade_offscreen_view) =
-            create_cascade_offscreen(&device, format, size.width.max(1), size.height.max(1));
+        let (scene_prev_texture, scene_prev_view) = create_scene_prev(
+            &device,
+            scene_hdr_format,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        let (scene_color_texture, scene_color_view) = create_scene_color(
+            &device,
+            scene_hdr_format,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        let (post_bloom_texture, post_bloom_view) = create_scene_color(
+            &device,
+            scene_hdr_format,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        // Journal page target — the shop's open-book mesh samples this
+        // as the page-spread albedo so the embedded yaku-journal scene
+        // appears painted on the open pages.
+        let journal_page_texture = create_journal_page(&device, format);
+        // Fullscreen offscreen for the live yaku-journal GPU render.
+        let (journal_scene_texture, journal_scene_view) = create_journal_scene(
+            &device,
+            scene_hdr_format,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        let (cascade_offscreen_texture, cascade_offscreen_view) = create_cascade_offscreen(
+            &device,
+            scene_hdr_format,
+            size.width.max(1),
+            size.height.max(1),
+        );
         let cascade_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("cascade-composite-bg"),
             layout: &cascade_composite_layout,
@@ -1376,9 +1414,9 @@ impl WgpuRenderer {
         let bloom_w = (size.width.max(1) / 2).max(1);
         let bloom_h = (size.height.max(1) / 2).max(1);
         let (bloom_ping_texture, bloom_ping_view) =
-            create_post_texture(&device, format, bloom_w, bloom_h, "bloom-ping");
+            create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-ping");
         let (bloom_pong_texture, bloom_pong_view) =
-            create_post_texture(&device, format, bloom_w, bloom_h, "bloom-pong");
+            create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-pong");
         let bloom_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("bloom-params"),
             contents: bytemuck::bytes_of(&BloomParams {
@@ -1453,7 +1491,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -1505,7 +1543,68 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+
+        // Felt fluff shells: same blend/depth as `lit_mesh_blended_pipeline` but
+        // `vs_felt_shell_instanced` uses `instance_index` as the shell layer so
+        // one draw replaces N per-shell uniform buffers + bind-group swaps.
+        let lit_mesh_felt_shell_instanced_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("lit-mesh-felt-shell-instanced-pipeline"),
+                layout: Some(&lit_mesh_pl),
+                vertex: wgpu::VertexState {
+                    module: &lit_mesh_shader,
+                    entry_point: Some("vs_felt_shell_instanced"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                offset: 0,
+                                shader_location: 0,
+                                format: wgpu::VertexFormat::Float32x3,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: 12,
+                                shader_location: 1,
+                                format: wgpu::VertexFormat::Float32x3,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: 24,
+                                shader_location: 2,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                        ],
+                    }],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &lit_mesh_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: scene_hdr_format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -1611,14 +1710,15 @@ impl WgpuRenderer {
                 ],
             });
 
-        let text_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("text-pl"),
-            bind_group_layouts: &[Some(&globals_layout), Some(&text_bind_group_layout)],
-            immediate_size: 0,
-        });
+        let text_overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("text-pl"),
+                bind_group_layouts: &[Some(&globals_layout), Some(&text_bind_group_layout)],
+                immediate_size: 0,
+            });
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("text-pipeline"),
-            layout: Some(&text_layout),
+            layout: Some(&text_overlay_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &text_shader,
                 entry_point: Some("vs_main"),
@@ -1644,6 +1744,35 @@ impl WgpuRenderer {
             multiview_mask: None,
             cache: None,
         });
+        let text_pipeline_scene_hdr =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("text-pipeline-scene-hdr"),
+                layout: Some(&text_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &text_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[vertex_layout.clone(), instance_layout.clone()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &text_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: scene_hdr_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
 
         // ---- Image pipeline (full-colour textured quads for relic icons, etc.) ----
         let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1652,9 +1781,38 @@ impl WgpuRenderer {
                 include_str!("../../../shaders/image_quad.wgsl").into(),
             ),
         });
+        let image_pipeline_scene_hdr =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("image-pipeline-scene-hdr"),
+                layout: Some(&text_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[vertex_layout.clone(), instance_layout.clone()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: scene_hdr_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_ui.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("image-pipeline"),
-            layout: Some(&text_layout),
+            layout: Some(&text_overlay_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &image_shader,
                 entry_point: Some("vs_main"),
@@ -1787,7 +1945,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -1812,7 +1970,7 @@ impl WgpuRenderer {
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: scene_hdr_format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -1850,7 +2008,7 @@ impl WgpuRenderer {
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format,
+                        format: scene_hdr_format,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -1861,6 +2019,82 @@ impl WgpuRenderer {
                 multiview_mask: None,
                 cache: None,
             });
+
+        let tonemap_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tonemap-bg-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let tonemap_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tonemap-pl"),
+                bind_group_layouts: &[Some(&tonemap_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let tonemap_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tonemap-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/tonemap_composite.wgsl").into(),
+            ),
+        });
+        let make_tonemap_pipe = |label: &'static str, out_fmt: wgpu::TextureFormat| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&tonemap_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &tonemap_shader_module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &tonemap_shader_module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: out_fmt,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let tonemap_pipeline = make_tonemap_pipe("tonemap-pipeline", config.format);
+        let tonemap_rgba16f_pipeline =
+            make_tonemap_pipe("tonemap-rgba16f-pipeline", wgpu::TextureFormat::Rgba16Float);
+
         let bloom_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bloom-scene-bg"),
             layout: &bloom_bind_group_layout,
@@ -2042,7 +2276,7 @@ impl WgpuRenderer {
                     &device,
                     &queue,
                     &globals_layout,
-                    format,
+                    scene_hdr_format,
                     size.width as f32,
                     size.height as f32,
                 ))
@@ -2186,6 +2420,14 @@ impl WgpuRenderer {
                     "primitive-dish-round",
                 )),
             );
+            primitive_meshes.insert(
+                MeshId::PorcelainDish,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_porcelain_dish_mesh(),
+                    "primitive-porcelain-dish",
+                )),
+            );
             // Cylinder is sized by `Object3d::extents` — reuse the coin
             // mesh (Y-up unit cylinder) so callers pay nothing extra.
             primitive_meshes.insert(
@@ -2204,6 +2446,46 @@ impl WgpuRenderer {
                     "primitive-ofuda",
                 )),
             );
+            primitive_meshes.insert(
+                MeshId::Abacus,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_abacus_mesh(),
+                    "primitive-abacus",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::AbacusHeavenBeads,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_abacus_heaven_beads_mesh(),
+                    "primitive-abacus-heaven-beads",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::AbacusEarthBeads,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_abacus_earth_beads_mesh(),
+                    "primitive-abacus-earth-beads",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::ShopBell,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_shop_bell_mesh(),
+                    "primitive-shop-bell",
+                )),
+            );
+            primitive_meshes.insert(
+                MeshId::BellTassel,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &build_bell_tassel_mesh(),
+                    "primitive-bell-tassel",
+                )),
+            );
         }
         // Per-shape texture override: the coin cylinder needs its
         // engraved heightmap bound at both albedo and relief slots so
@@ -2216,6 +2498,8 @@ impl WgpuRenderer {
         > = HashMap::new();
         let bone_tablet_mesh = LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
         let wood_tablet_mesh = LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
+        let book_mesh = LitMeshGpu::new(&device, &build_book_body_mesh(), "book");
+        let book_cover_mesh = LitMeshGpu::new(&device, &build_book_cover_mesh(), "book-cover");
         // The legacy "bowl" slot now hosts the discard river mesh — a stone
         // trough with an animated water surface. Field/variant names stayed
         // (`bowl_mesh`, `BowlPlacement`, `GameplayPick::DiscardBowl`) to keep
@@ -2514,6 +2798,8 @@ impl WgpuRenderer {
         // single instance, so reserving a fixed cap would be silly.
         let yaku_tablet_instances = make_pool(MAX_YAKU_TABLET_SLOTS);
         let wood_tablet_instances = make_pool(MAX_WOOD_TABLET_SLOTS);
+        let book_instances = make_pool(MAX_BOOK_SLOTS);
+        let book_cover_instances = make_pool(MAX_BOOK_SLOTS);
         let bowl_instances = make_pool(MAX_BOWL_SLOTS);
         // Bronze mirror face heightmap (Han/Tang four-spirit relief). Bound
         // at slot 1 of every mirror instance; the metal branch in
@@ -2603,11 +2889,19 @@ impl WgpuRenderer {
             hand_tiles: Vec::new(),
             showcase_tiles: Vec::new(),
             tile_face_overlays: HashMap::new(),
+            debuff_marker_overlay: None,
+            text_label_cache: HashMap::new(),
+            text_cache_frame: 0,
             vertex_buffer,
             index_buffer,
             text_pipeline,
+            text_pipeline_scene_hdr,
             text_bind_group_layout,
+            text_overlay_pipeline_layout,
+            text_shader_module: text_shader,
+            image_shader_module: image_shader,
             image_pipeline,
+            image_pipeline_scene_hdr,
             ui_font,
             emoji_font,
             size,
@@ -2665,12 +2959,16 @@ impl WgpuRenderer {
             last_aux_dish_aabbs: Vec::new(),
             bone_tablet_mesh,
             wood_tablet_mesh,
+            book_mesh,
+            book_cover_mesh,
             bowl_mesh,
             mirror_mesh,
             tally_stick_base_mesh,
             tally_stick_tip_mesh,
             yaku_tablet_instances,
             wood_tablet_instances,
+            book_instances,
+            book_cover_instances,
             bowl_instances,
             mirror_instances,
             tally_stick_instances,
@@ -2689,6 +2987,7 @@ impl WgpuRenderer {
             last_bowl_model: None,
             last_mirror_model: None,
             last_debug_pickables: Vec::new(),
+            last_gameplay_fog_wall_horizon_y: None,
             last_debug_trimesh_pickables: Vec::new(),
             active_scene_key: None,
             debug_arrange_override: None,
@@ -2709,6 +3008,9 @@ impl WgpuRenderer {
             prev_tile_world: HashMap::new(),
             prev_cursor_world: None,
             prev_cursor_screen: None,
+            prev_frame_shadows_enabled: false,
+            showcase_decal_atlas: None,
+            showcase_decal_atlas_tileset: None,
             lit_mesh_material_layout,
             lit_mesh_ssr_layout,
             lit_mesh_ssr_buffer,
@@ -2718,6 +3020,10 @@ impl WgpuRenderer {
             scene_prev_view,
             scene_color_texture,
             scene_color_view,
+            journal_page_texture,
+            journal_scene_texture,
+            journal_scene_view,
+            journal_scene_view_generation: 0,
             bloom_extract_pipeline,
             bloom_blur_pipeline,
             bloom_composite_pipeline,
@@ -2733,8 +3039,19 @@ impl WgpuRenderer {
             bloom_ping_view,
             bloom_pong_texture,
             bloom_pong_view,
+            post_bloom_texture,
+            post_bloom_view,
+            tonemap_pipeline,
+            tonemap_rgba16f_pipeline,
+            tonemap_bind_group_layout,
+            tonemap_shader_module,
+            tonemap_pipeline_layout,
+            swapchain_sdr_format,
+            swapchain_hdr_available,
+            tonemap_exposure: 1.0,
             lit_mesh_pipeline,
             lit_mesh_blended_pipeline,
+            lit_mesh_felt_shell_instanced_pipeline,
             lit_mesh_white_view,
             lit_mesh_relief_default_view,
             talisman_height_views,
@@ -2751,6 +3068,11 @@ impl WgpuRenderer {
             relic_meshes: HashMap::new(),
             candle_instances,
             table_instance,
+            active_felt_shell_count: 0,
+            felt_shader_lod: 2.0,
+            // Default to felt; `apply_render_settings` overwrites this each
+            // frame once the user's persisted choice has been threaded in.
+            table_material: crate::render::lit_mesh::MaterialParams::felt_green(),
             relic_instances,
             shadow_map_view,
             shadow_caster_layout,

@@ -12,6 +12,9 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
     model: mat4x4<f32>,
     base_color_factor: vec4<f32>,
+    cam_pos: vec3<f32>,
+    tile_seed: f32,
+    decal_atlas_uv: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;

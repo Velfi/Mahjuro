@@ -49,8 +49,17 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VsOut {
 }
 
 // ── Hash / noise primitives ──────────────────────────────────────────
+// Integer-bit hash. The classic `fract(sin(dot(...)) * 43758.5453)`
+// trick relies on `sin` of a very large argument, which is
+// implementation-defined: Metal gives a nice spread, but DX12/Vulkan
+// shader compilers on Windows often round adjacent inputs to the same
+// value, so neighbouring lattice cells collapse to identical hashes
+// and the FBM lattice becomes visibly blocky.
 fn hash21(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+    var q = vec2<u32>(bitcast<u32>(p.x), bitcast<u32>(p.y));
+    q = q * vec2<u32>(1597334673u, 3812015801u);
+    let n = (q.x ^ q.y) * 1597334673u;
+    return f32(n) * (1.0 / 4294967296.0);
 }
 
 // Value noise: bilinear-interpolated hash grid. Cheap, smooth enough for

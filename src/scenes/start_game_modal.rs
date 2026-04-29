@@ -22,6 +22,7 @@ use super::start_screen::StartScreenScene;
 use crate::render::draw_cmd::UiFrame;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -189,10 +190,16 @@ impl TileSelectScene {
                     // desaturation (handled by the theme) — no padlock glyph,
                     // the dimmed treatment is enough to read "locked".
                     let label = stake_glyph(s).to_string();
+                    let tooltip = Some(Cow::Owned(format!(
+                        "{} — {}",
+                        s.label(),
+                        s.description()
+                    )));
                     wt::Node::Item(wt::Item {
                         id: ModalAction::StakeSelect(s).id(),
                         size: wt::Size::Auto,
                         enabled: unlocked,
+                        tooltip,
                         kind: wt::ItemKind::Button {
                             label,
                             variant,

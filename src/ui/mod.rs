@@ -1,6 +1,6 @@
 pub mod focus_nav;
-pub mod glossary;
 pub mod input;
+pub mod inspect_plaque;
 pub mod layout;
 pub mod modal;
 pub mod placement;

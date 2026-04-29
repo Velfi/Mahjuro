@@ -151,6 +151,8 @@ struct SsrGlobals {
     // x = enabled (0/1), y = max_distance (world units),
     // z = stride (world units / step), w = max_steps
     params: vec4<f32>,
+    // x = felt procedural LOD (0..2), yzw unused
+    felt: vec4<f32>,
 };
 @group(3) @binding(0) var<uniform> ssr_globals: SsrGlobals;
 @group(3) @binding(1) var ssr_scene_prev: texture_2d<f32>;
@@ -215,6 +217,8 @@ struct VsOut {
     @location(2) local_pos: vec3<f32>,
     @location(3) uv: vec2<f32>,
     @location(4) local_n: vec3<f32>,
+    /// Felt shell layer index (0 = base plane); from uniform or instance_index.
+    @location(5) felt_shell_layer: f32,
 };
 
 @vertex
@@ -253,6 +257,17 @@ fn vs_main(
         world_normal = normalize(cross(t_x, t_y));
     }
 
+    // Felt (kind 19): per-shell extrusion along world +Z. Shell 0 is the
+    // base felt plane; shells 1..N are stacked above it with increasing
+    // alpha cutoff so only the densest fiber centres reach the top
+    // shell. Shell step is in world units — the cumulative fluff height
+    // is `shell_step * SHELL_COUNT` (~1.3 mm at 1 unit = 1 cm).
+    if (mesh.material_params.x > 18.5 && mesh.material_params.x < 19.5) {
+        let shell_index = mesh.material_params.w;
+        let shell_step = 0.13; // world units per layer
+        world_pos_out.z = world_pos_out.z + shell_index * shell_step;
+    }
+
     var o: VsOut;
     o.clip_pos = mesh.view_proj * vec4<f32>(world_pos_out, 1.0);
     o.world_pos = world_pos_out;
@@ -262,6 +277,53 @@ fn vs_main(
     o.local_pos = pos;
     o.uv = uv;
     o.local_n = n;
+    o.felt_shell_layer = mesh.material_params.w;
+    return o;
+}
+
+/// Same as `vs_main` but felt fluff layers use `@builtin(instance_index)+1`
+/// as the shell layer so one instanced draw replaces N separate uniform writes.
+@vertex
+fn vs_felt_shell_instanced(
+    @location(0) pos: vec3<f32>,
+    @location(1) n: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @builtin(instance_index) instance_index: u32,
+) -> VsOut {
+    var world_normal = normalize((mesh.model * vec4<f32>(n, 0.0)).xyz);
+    var world_pos_out = (mesh.model * vec4<f32>(pos, 1.0)).xyz;
+
+    if (mesh.material_params.x > 2.5 && mesh.material_params.x < 3.5) {
+        let amp = 1.6;
+        let eps_w = 1.0;
+        let wxy = world_pos_out.xy;
+        let h_c = wood_height_world(wxy);
+        let h_x = wood_height_world(wxy + vec2<f32>(eps_w, 0.0));
+        let h_y = wood_height_world(wxy + vec2<f32>(0.0, eps_w));
+
+        world_pos_out.z = world_pos_out.z + h_c * amp;
+
+        let dh_x = (h_x - h_c) * amp;
+        let dh_y = (h_y - h_c) * amp;
+        let t_x = vec3<f32>(eps_w, 0.0, dh_x);
+        let t_y = vec3<f32>(0.0, eps_w, dh_y);
+        world_normal = normalize(cross(t_x, t_y));
+    }
+
+    if (mesh.material_params.x > 18.5 && mesh.material_params.x < 19.5) {
+        let shell_index = f32(instance_index) + 1.0;
+        let shell_step = 0.13;
+        world_pos_out.z = world_pos_out.z + shell_index * shell_step;
+    }
+
+    var o: VsOut;
+    o.clip_pos = mesh.view_proj * vec4<f32>(world_pos_out, 1.0);
+    o.world_pos = world_pos_out;
+    o.world_n = world_normal;
+    o.local_pos = pos;
+    o.uv = uv;
+    o.local_n = n;
+    o.felt_shell_layer = f32(instance_index) + 1.0;
     return o;
 }
 
@@ -284,6 +346,38 @@ fn vnoise2(p: vec2<f32>) -> f32 {
     let c = hash21(i + vec2<f32>(0.0, 1.0));
     let d = hash21(i + vec2<f32>(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// 2D Voronoi edge field. Returns F2 - F1, the distance from the sample
+// point to the *nearest cell border* — small near a border, larger inside
+// a cell. Threshold the result with a small constant to draw the edge
+// network. Used for porcelain crazing (the spider-web of fine cracks
+// across aged glaze) but generic. Cells are jittered random points
+// inside a 3x3 lattice neighborhood, so cell shape is irregular like
+// real shrinkage cracks rather than a regular tile floor.
+fn voronoi2_edge(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    var f1 = 8.0;
+    var f2 = 8.0;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let g = vec2<f32>(f32(dx), f32(dy));
+            let h = vec2<f32>(
+                hash21(i + g),
+                hash21(i + g + vec2<f32>(17.3, 4.7)),
+            );
+            let r = g + h - f;
+            let d = dot(r, r);
+            if (d < f1) {
+                f2 = f1;
+                f1 = d;
+            } else if (d < f2) {
+                f2 = d;
+            }
+        }
+    }
+    return sqrt(f2) - sqrt(f1);
 }
 
 // 3D value noise: trilinear-blends 8 hashed lattice corners. Cheap and
@@ -490,6 +584,210 @@ fn wood_sample_world(world_xy: vec2<f32>) -> WoodSample {
     return wood_sample_basis(wood_basis_world(world_xy));
 }
 
+// ── Felt (mahjong-parlor green baize) ─────────────────────────────────
+// Procedural felt sampler used by the `FeltGreen` material on the
+// horizontal table. Samples in world XY so the felt grain stays at a
+// fixed physical scale regardless of how far the table is stretched
+// (the gameplay table is enlarged to "infinite plane" extents). Returns
+// a low-saturation green albedo plus a slightly perturbed normal so the
+// broad sheen breaks up across the surface.
+struct FeltSample {
+    albedo: vec3<f32>,
+    n: vec3<f32>,
+};
+
+// World-space frequency of the felt fiber field. Tuned so the grain
+// reads at table-tile scale rather than dissolving into a flat colour.
+const FELT_SCALE: f32 = 0.18;
+
+// Sample the procedural felt field. `micro_strength` controls how much
+// of the high-frequency microfiber normal perturbation to apply — call
+// sites fade this out at distance so the sub-mm fibers don't alias
+// into screen-space noise on the horizon.
+//
+// Stage 9 hook: to escape procedural land entirely and use authored
+// PBR textures, replace the body of this function with samples from
+// new bindings (albedo, normal, roughness, AO, height) added to the
+// lit_mesh material layout. Keep this signature so the call sites in
+// the FS don't change. The procedural path is fine as a fallback.
+fn felt_sample_world(
+    world_xy: vec2<f32>,
+    base_n: vec3<f32>,
+    micro_strength: f32,
+    lod: f32,
+) -> FeltSample {
+    let lod_clamped = clamp(lod, 0.0, 2.0);
+
+    // Effects Off — uniform baize tint; skips all procedural noise.
+    if (lod_clamped < 0.5) {
+        var s: FeltSample;
+        s.albedo = vec3<f32>(0.038, 0.135, 0.058);
+        s.n = normalize(base_n);
+        return s;
+    }
+
+    let p = world_xy * FELT_SCALE;
+
+    // ── Screen-space derivative for noise filtering ─────────────────
+    let footprint = max(fwidth(p.x), fwidth(p.y));
+
+    let macro_filter = 1.0 - smoothstep(0.4, 1.4, footprint * 0.6);
+    let macro_var = clamp(
+        0.5 + (fbm2(p * 0.6) - 0.5) * macro_filter * 0.4,
+        0.0, 1.0,
+    );
+
+    let dark  = vec3<f32>(0.022, 0.080, 0.035);
+    let mid_c = vec3<f32>(0.038, 0.135, 0.058);
+    let light = vec3<f32>(0.060, 0.185, 0.085);
+    var c = mix(dark, mid_c, macro_var);
+    c = mix(c, light, smoothstep(0.55, 0.95, macro_var));
+
+    let full_detail = lod_clamped >= 1.995;
+
+    // Effects Low — macro palette + light fiber normal; no microfiber /
+    // mid-octave / multi-tap micro normals (major ALU savings).
+    if (!full_detail) {
+        let fiber_p = p * vec2<f32>(38.0, 14.0);
+        let fiber_footprint = max(fwidth(fiber_p.x), fwidth(fiber_p.y));
+        let fiber_filter = 1.0 - smoothstep(0.5, 1.5, fiber_footprint);
+        let fiber = (vnoise2(fiber_p) - 0.5) * 0.12 * fiber_filter;
+        c = c * (1.0 + fiber * 0.6);
+        let dx = (vnoise2(fiber_p + vec2<f32>(0.0, 1.7)) - 0.5);
+        let dy = (vnoise2(fiber_p + vec2<f32>(2.3, 0.0)) - 0.5);
+        let macro_offset = vec3<f32>(dx, dy, 0.0) * 0.05 * fiber_filter;
+        var s: FeltSample;
+        s.albedo = max(c, vec3<f32>(0.0));
+        s.n = normalize(base_n + macro_offset);
+        return s;
+    }
+
+    // Mid-frequency tonal noise — fills in between the low octave and
+    // the fiber octave so the felt has variation at the cm-scale,
+    // not just the chunky 10-cm-scale. Faded out independently.
+    let mid_filter = 1.0 - smoothstep(0.05, 0.20, footprint);
+    let mid_n = (fbm2(p * 3.5) - 0.5) * mid_filter * 0.18;
+
+    // High-frequency anisotropic fiber noise: stretched along Y so the
+    // fuzz reads as combed in one direction. Same multi-octave fade
+    // so the fibers don't alias into chunky lattice cells.
+    let fiber_p = p * vec2<f32>(38.0, 14.0);
+    let fiber_footprint = max(fwidth(fiber_p.x), fwidth(fiber_p.y));
+    let fiber_filter = 1.0 - smoothstep(0.5, 1.5, fiber_footprint);
+    let fiber = (vnoise2(fiber_p) - 0.5) * 0.12 * fiber_filter;
+
+    // Sub-mm microfiber field: a 5.5× higher-frequency version of the
+    // fiber noise. Faded with distance via `micro_strength` PLUS the
+    // per-pixel footprint check.
+    let micro_p = fiber_p * 5.5;
+    let micro_footprint = fiber_footprint * 5.5;
+    let micro_filter = (1.0 - smoothstep(0.5, 1.5, micro_footprint)) * micro_strength;
+
+    // Subtle fiber-tinted variance so the surface doesn't read as a
+    // flat painted plane. Mid octave folds in for cm-scale variation.
+    c = c * (1.0 + fiber * 0.6 + mid_n);
+
+    // Perturb the normal along TWO octaves of the fiber field. Both
+    // octaves are footprint-filtered to avoid the noise lattice
+    // showing through as visible blocks on distant surface.
+    let dx = (vnoise2(fiber_p + vec2<f32>(0.0, 1.7)) - 0.5);
+    let dy = (vnoise2(fiber_p + vec2<f32>(2.3, 0.0)) - 0.5);
+    let mdx = (vnoise2(micro_p + vec2<f32>(0.0, 1.7)) - 0.5);
+    let mdy = (vnoise2(micro_p + vec2<f32>(2.3, 0.0)) - 0.5);
+    let macro_offset = vec3<f32>(dx,  dy,  0.0) * 0.05 * fiber_filter;
+    let micro_offset = vec3<f32>(mdx, mdy, 0.0) * 0.025 * micro_filter;
+    let n  = normalize(base_n + macro_offset + micro_offset);
+
+    var s: FeltSample;
+    s.albedo = max(c, vec3<f32>(0.0));
+    s.n = n;
+    return s;
+}
+
+// Soft circle field: returns a 0..1 mask where 1 is the centre of any
+// circle sampled by the hash. Used for tile-contact ghosts (Stage 5)
+// and edge-wear hotspots (Stage 6). Each cell of a coarse grid hashes
+// to a centre offset and a radius — most cells produce nothing, a few
+// produce dim rings.
+fn felt_contact_field(world_xy: vec2<f32>, cell_size: f32, density: f32, max_r: f32) -> f32 {
+    let g = world_xy / cell_size;
+    let cell = floor(g);
+    let local = g - cell;
+    var acc = 0.0;
+    // 3x3 neighbourhood lookup — handles circles that span cell boundaries.
+    for (var dx = -1; dx <= 1; dx = dx + 1) {
+        for (var dy = -1; dy <= 1; dy = dy + 1) {
+            let neighbour = cell + vec2<f32>(f32(dx), f32(dy));
+            let h0 = hash21(neighbour);
+            // Most cells skip — only `density` fraction host a ring.
+            if (h0 > density) {
+                continue;
+            }
+            let h1 = hash21(neighbour + vec2<f32>(17.3, 0.0));
+            let h2 = hash21(neighbour + vec2<f32>(0.0, 23.7));
+            let h3 = hash21(neighbour + vec2<f32>(91.1, 41.5));
+            // Centre offset within the cell + radius scale.
+            let centre = neighbour + vec2<f32>(h1, h2);
+            let r = mix(0.18, max_r, h3);
+            let d = length(g - centre);
+            // Soft falloff — fades to zero at the radius.
+            let m = 1.0 - smoothstep(r * 0.4, r, d);
+            acc = max(acc, m);
+        }
+    }
+    return acc;
+}
+
+// Apply Stage 5 (contact ghosts), Stage 6 (edge wear + dust), and
+// Stage 7 (sub-visible weave) to a base felt albedo. Kept in one
+// function so the felt branch in the FS is just a single call. All
+// detail layers are filtered by the screen-space derivative so they
+// fade out cleanly as the surface moves further from the camera —
+// this is what kills the pixellated lattice look on distant felt.
+fn felt_apply_wear_dust(base: vec3<f32>, world_xy: vec2<f32>, lod: f32) -> vec3<f32> {
+    // Contact rings + weave are skipped below Medium — `felt_contact_field`
+    // is the hottest helper here (nested 3×3 grid).
+    if (lod < 1.995) {
+        return max(base, vec3<f32>(0.0));
+    }
+
+    var c = base;
+    let footprint = max(fwidth(world_xy.x), fwidth(world_xy.y));
+
+    // ── Stage 5: Tile contact ghosts ───────────────────────────────
+    // Persistent dark rings sprinkled across the felt — read as the
+    // memory of past tile placements where the nap was compressed.
+    // Amplitude pulled back to a near-imperceptible 0.8% so the surface
+    // reads as fresh card-table baize rather than a worn parlor table.
+    let contact_filter = 1.0 - smoothstep(8.0, 24.0, footprint);
+    let contact_mask = felt_contact_field(world_xy, 36.0, 0.10, 0.5);
+    c = c * (1.0 - contact_mask * 0.008 * contact_filter);
+
+    // ── Stage 6a: Edge-wear hotspots ───────────────────────────────
+    // Disabled: the wear ring read as a stain on fresh baize. Real
+    // card-table felt only shows wear after years of use; the table
+    // here should look new.
+
+    // ── Stage 6b: Dust / lint specks ──────────────────────────────
+    // Disabled. At any visible density these read as digital noise on
+    // the felt rather than as dust — the high-frequency fiber field
+    // already carries the surface variation we need.
+
+    // ── Stage 7: Sub-visible weave lattice ─────────────────────────
+    // Real baize has a fine perpendicular weave. Two perpendicular
+    // sin grids modulate the brightness by ±2% — invisible at game
+    // distance, adds depth on close-up screenshots. Fades out as the
+    // weave frequency exceeds Nyquist for the current pixel footprint.
+    let weave_freq = 28.0;
+    let weave_filter = 1.0 - smoothstep(0.05, 0.18, footprint * weave_freq);
+    let weave_x = sin(world_xy.x * weave_freq);
+    let weave_y = sin(world_xy.y * weave_freq);
+    let weave = (weave_x + weave_y) * 0.5;
+    c = c * (1.0 + weave * 0.025 * weave_filter);
+
+    return max(c, vec3<f32>(0.0));
+}
+
 @fragment
 fn fs_main(
     in: VsOut,
@@ -506,7 +804,8 @@ fn fs_main(
     //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water,
     //   8 = Foil, 9 = Glass, 10 = Enamel,
     //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
-    //   15 = Polychrome, 16 = Porcelain, 17 = Brass
+    //   15 = Polychrome, 16 = Porcelain, 17 = Brass, 18 = Leather,
+    //   19 = FeltGreen
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
@@ -521,6 +820,28 @@ fn fs_main(
     let is_poly      = (kind > 14.5 && kind < 15.5);
     let is_porcelain = (kind > 15.5 && kind < 16.5);
     let is_brass     = (kind > 16.5 && kind < 17.5);
+    let is_leather   = (kind > 17.5 && kind < 18.5);
+    let is_felt      = (kind > 18.5 && kind < 19.5);
+    let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
+
+    // ── Felt shell early discard (perf) ─────────────────────────────
+    // Felt fluff layers (shell index > 0 in material_params.w) discard
+    // most fragments — moving this check to the top of the fragment
+    // shader skips ~90% of the per-fragment lighting cost (point-light
+    // loop, SSS, rim, etc.) for shells where the dense fiber test fails.
+    // The base felt plane (shell 0) and all other materials skip this
+    // block.
+    if (is_felt && in.felt_shell_layer > 0.5) {
+        let shell_index = in.felt_shell_layer;
+        let p = in.world_pos.xy * FELT_SCALE * vec2<f32>(38.0, 14.0);
+        let dens = vnoise2(p) * 0.7 + vnoise2(p * 2.3 + 1.7) * 0.3;
+        let max_shells = 10.0;
+        let t = clamp(shell_index / max_shells, 0.0, 1.0);
+        let threshold = mix(0.35, 0.80, t);
+        if (dens < threshold) {
+            discard;
+        }
+    }
     // Brass is a conductor too; group with metal for the per-light
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
     // heightmap perturbation since brass fittings are smooth, not
@@ -542,7 +863,7 @@ fn fs_main(
     // the per-kind heightmap index used by the relief sampling (no per-kind
     // shader branching keys off it any more — each MaterialKind has its own
     // dedicated branch).
-    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel;
+    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel && !is_felt;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -560,6 +881,73 @@ fn fs_main(
         // Brass: smooth polished conductor, no heightmap. Albedo is the
         // base tint and the conductor Fresnel sheen does the rest.
         albedo = mesh.base_color.rgb;
+    }
+    if (is_leather) {
+        // UV.x sentinels (set in book_mesh.rs):
+        //   < 1.5             : leather body (default)
+        //   ≈ 2.0             : page-stack edge (cream stratified paper)
+        //   ≈ 3.0             : silk ribbon bookmark (saturated gold)
+        //   ≥ 3.5 (4.0 + tex_u): page-content surface, sample journal
+        //                        render target at (uv.x − 4.0, uv.y)
+        if (in.uv.x > 3.5) {
+            // Page content. The book body's per-instance base_color.a
+            // carries `open_amount` (0 = closed, 1 = fully open) so we
+            // can discard page fragments while the cover still
+            // occludes them. Once the cover has swung > halfway, the
+            // page surface fades in; before that, it's invisible.
+            if (mesh.base_color.a < 0.5) {
+                discard;
+            }
+            // Sample the live journal-scene render target at slot 3
+            // (`relief_tex`) in **screen space**, not UV. The journal
+            // scene was rendered into a fullscreen texture matching the
+            // swapchain dims, so reading by `frag_coord / screen_size`
+            // makes the page region read as a window cut through the
+            // page mesh into the underlying scene. As the book scales
+            // up during the open/close transition, the page region
+            // grows on screen and reveals more of the journal frame —
+            // at full zoom the page covers the whole viewport and the
+            // shop-side journal scene push is a visual no-op.
+            let tex_dim = vec2<f32>(textureDimensions(relief_tex, 0));
+            let tex_uv = in.clip_pos.xy / tex_dim;
+            albedo = textureSampleLevel(relief_tex, albedo_samp, tex_uv, 0.0).rgb;
+        } else if (in.uv.x > 2.5) {
+            // Silk ribbon — saturated gold-yellow that pops against
+            // the cordovan cover. Subtle striations along the ribbon
+            // axis (local Z) read as woven silk grain.
+            let weft = 0.5 + 0.5 * cos(in.local_pos.z * 180.0);
+            let warp = 0.5 + 0.5 * cos(in.local_pos.x * 220.0);
+            let weave = 0.85 + 0.15 * (weft * 0.6 + warp * 0.4);
+            let silk_a = vec3<f32>(1.20, 0.88, 0.34);
+            let silk_b = vec3<f32>(0.78, 0.50, 0.18);
+            albedo = mix(silk_b, silk_a, weave);
+        } else if (in.uv.x > 1.5) {
+            // Page-stack edge — procedural cream paper striations on
+            // the visible edges of the bound page block. Independent
+            // of the journal render target.
+            let stripe = 0.5 + 0.5 * cos(in.local_pos.y * 220.0);
+            let cream_a = vec3<f32>(1.05, 0.98, 0.84);
+            let cream_b = vec3<f32>(0.84, 0.74, 0.55);
+            albedo = mix(cream_b, cream_a, stripe) * 0.96;
+        } else {
+            // Leather body: procedural cordovan with grain-driven tonal
+            // variation. Two octaves of noise modulate the flat base
+            // tint so the cover reads as hand-rubbed leather rather
+            // than painted plastic. The carved-decal block below lays
+            // the gold title on top of this grained under-coat.
+            let coarse = noise3(in.local_pos * 18.0);
+            let fine   = noise3(in.local_pos * 64.0);
+            // Tone the body (±9%) — enough to break up the flat surface
+            // without reading as spotty. Bias toward darker so the
+            // base oxblood stays rich.
+            let tone = 0.91 + 0.18 * coarse;
+            // Fine pore darkening — micro-pits where dye pools deeper.
+            let pore = 1.0 - 0.18 * smoothstep(0.55, 0.85, fine);
+            // Subtle warming on the high points so the polish picks up
+            // gold rather than washing toward pink.
+            let high = smoothstep(0.55, 0.95, coarse);
+            albedo = mesh.base_color.rgb * tone * pore + vec3<f32>(0.05, 0.025, 0.0) * high;
+        }
     }
     if (is_foil) {
         // Foil: base_color.rgb is the metallic wrapper tint; the texture is
@@ -616,6 +1004,108 @@ fn fs_main(
         wood_grain = w.grain;
         wood_pore = w.pore;
     }
+    if (is_felt) {
+        // Mahjong-parlor green felt: procedural baize overrides the (white)
+        // albedo tex. Sampled in world XY for the same reason as kind 3 —
+        // the gameplay table is enlarged to "infinite plane" extents and
+        // we don't want the felt grain to stretch with the model scale.
+        // The perturbed normal is folded into `n` after the world-normal
+        // setup further down. Albedo doesn't need the microfiber octave
+        // (only the normal does), so we pass strength 0 here.
+        let f = felt_sample_world(in.world_pos.xy, vec3<f32>(0.0, 0.0, 1.0), 0.0, felt_lod);
+        albedo = f.albedo;
+        albedo = felt_apply_wear_dust(albedo, in.world_pos.xy, felt_lod);
+    }
+
+    // ── Porcelain crazing (the spider-web of fine cracks across aged
+    // glaze) ────────────────────────────────────────────────────────
+    // Age is driven by `base_color.r`: pristine white (r≈1) stays clean,
+    // sepia/cream (r≈0.85) gets a light crackle, antique brown (r≈0.55)
+    // gets heavy crazing. This couples the cracks to the visual age the
+    // artist is already painting via tint, without needing a new uniform
+    // field. The crack mask is hoisted so the porcelain spec block below
+    // can dip the glaze lobes inside the cracks, and the normal block
+    // can break the highlight across them.
+    var crazing_age = 0.0;
+    var crack_mask = 0.0;
+    var crack_local_perturb = vec3<f32>(0.0);
+    if (is_porcelain) {
+        crazing_age = clamp((1.0 - mesh.base_color.r) * 1.6, 0.0, 1.0);
+        if (crazing_age > 0.001) {
+            // Tri-planar pick: project local_pos onto whichever pair of
+            // local axes is most perpendicular to the local normal, so a
+            // ±Y-faced cap parameterizes in XZ, a ±Z-faced top in XY, and
+            // ±X side walls in YZ. Cell continuity breaks at the
+            // dominant-axis switch but real glaze crazing is independent
+            // per-face anyway (each face has its own shrinkage stress),
+            // so the seam reads as natural.
+            let an = abs(in.local_n);
+            var p2: vec2<f32>;
+            var basis_u: vec3<f32>;
+            var basis_v: vec3<f32>;
+            if (an.y >= an.x && an.y >= an.z) {
+                p2 = in.local_pos.xz;
+                basis_u = vec3<f32>(1.0, 0.0, 0.0);
+                basis_v = vec3<f32>(0.0, 0.0, 1.0);
+            } else if (an.z >= an.x) {
+                p2 = in.local_pos.xy;
+                basis_u = vec3<f32>(1.0, 0.0, 0.0);
+                basis_v = vec3<f32>(0.0, 1.0, 0.0);
+            } else {
+                p2 = in.local_pos.yz;
+                basis_u = vec3<f32>(0.0, 1.0, 0.0);
+                basis_v = vec3<f32>(0.0, 0.0, 1.0);
+            }
+
+            // Voronoi cells in object space. The mesh local extent is
+            // ~1 unit, so a frequency of ~16 yields ~16 cells across the
+            // major silhouette — large enough that individual cracks
+            // read as visible lines at typical relic / tablet sizes
+            // (~80–120px on screen when the player is engaged with the
+            // prop), rather than dissolving into per-pixel speckle. The
+            // hash-jitter inside the helper means each instance gets a
+            // unique pattern.
+            let p_obj = p2 * 16.0;
+            let edge = voronoi2_edge(p_obj);
+            // Thin line, AA'd by screen-space derivative so subpixel
+            // cracks don't shimmer. The fwidth term means the line
+            // visibly fades to nothing once each crack is much
+            // narrower than a pixel — no separate distance-fade
+            // needed, this scales correctly to whatever projection.
+            let line_w = 0.08 + fwidth(edge) * 1.2;
+            let crack = 1.0 - smoothstep(0.0, line_w, edge);
+            // Coverage modulation — some patches of an aged piece craze
+            // densely while others stay clear. Without this every
+            // antique relic looks uniformly cracked. Frequency picked
+            // so the coverage patches are roughly 2–3× the cell size.
+            let cov_noise = vnoise2(p2 * 2.5);
+            let coverage = smoothstep(0.20, 0.85, cov_noise * 0.7 + 0.8);
+            crack_mask = crack * coverage * crazing_age;
+
+            // Finite-difference the edge field for normal perturbation.
+            // Each crack tilts the surface slightly so the highlight
+            // breaks across the fracture instead of sliding over it.
+            // eps in the same units as p_obj (post-frequency scale).
+            let eps = 0.05;
+            let edge_u = voronoi2_edge(p_obj + vec2<f32>(eps, 0.0));
+            let edge_v = voronoi2_edge(p_obj + vec2<f32>(0.0, eps));
+            let dhdu = (edge_u - edge) / eps * crack_mask * 0.4;
+            let dhdv = (edge_v - edge) / eps * crack_mask * 0.4;
+            crack_local_perturb = -basis_u * dhdu - basis_v * dhdv;
+
+            // Tea/dust stain in the cracks. Real aged crazing is amber
+            // /sepia, never pure black — liquid wicks into the body
+            // through the cracks and stains the surrounding glaze.
+            // A second slow noise lets some cracks read younger and
+            // some darker, which sells "decades of accumulated stain"
+            // rather than "uniformly inked decal".
+            let stain_var = 0.5 + 0.5 * vnoise2(p2 * 0.6);
+            let stain_strength = mix(0.55, 0.95, stain_var);
+            let stain_tint = vec3<f32>(0.40, 0.30, 0.22);
+            albedo = mix(albedo, albedo * stain_tint, crack_mask * stain_strength);
+        }
+    }
+
     // ── Carved & gold-leafed decal compositing ───────────────────────
     // Where the decal has alpha, the text is treated as gold paint sitting
     // inside a shallow carved channel. We perturb the surface normal at
@@ -693,6 +1183,59 @@ fn fs_main(
             let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
             n = normalize(mix(n, perturbed_world, blend_edge));
         }
+    }
+
+    // ── Leather grain normal perturbation ───────────────────────────
+    // Sample noise at two scales and finite-difference it into a
+    // tangent-space normal so the cover catches raking light as if
+    // pebbled. Same model-matrix re-orientation pattern as the carved
+    // decal — the book is a uniformly-scaled local +Y face after the
+    // shop's `cam_rot`, so the upper-3×3 transform is exact. Skipped on
+    // page-edge fragments (paper is flat, not pebbled).
+    if (is_leather && in.uv.x < 1.5) {
+        let p = in.local_pos * 32.0;
+        let eps = 0.04;
+        let n_c = noise3(p);
+        let n_x = noise3(p + vec3<f32>(eps, 0.0, 0.0));
+        let n_z = noise3(p + vec3<f32>(0.0, 0.0, eps));
+        let grain_amp = 0.55;
+        let dhdu = (n_x - n_c) * grain_amp;
+        let dhdv = (n_z - n_c) * grain_amp;
+        let perturbed_local = normalize(vec3<f32>(-dhdu, 1.0, -dhdv));
+        let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        n = normalize(mix(n, perturbed_world, 0.45));
+    }
+
+    // ── Porcelain crazing normal perturbation ───────────────────────
+    // The local-space perturbation vector was computed up in the albedo
+    // block (already aligned to the tri-planar tangent basis we picked
+    // there). Add it to the local normal, transform back to world, and
+    // mix in by the crack mask so flat glaze keeps its mirror-finish
+    // and only crack cells flex the highlight.
+    if (is_porcelain && crack_mask > 0.001) {
+        let perturbed_local = normalize(in.local_n + crack_local_perturb);
+        let perturbed_world = normalize((mesh.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+        n = normalize(mix(n, perturbed_world, clamp(crack_mask * 0.6, 0.0, 0.6)));
+    }
+
+    // ── Felt fiber normal perturbation ──────────────────────────────
+    // Resample the felt fiber field (the same one that drove albedo)
+    // and use its perturbed normal so the broad sheen breaks up across
+    // the surface. Felt isn't a mirror but it isn't perfectly Lambertian
+    // either — this is what makes the candle pools read as "soft glow on
+    // baize" rather than "spotlight on painted plane".
+    //
+    // The microfiber octave (sub-mm fiber wobble) is faded out with
+    // distance from the camera so distant felt doesn't alias into
+    // shimmering noise on the horizon. Within ~0.3 world units of the
+    // camera we get full microfiber detail; past 1.5 units it drops to
+    // zero and only the macro fiber field remains.
+    if (is_felt) {
+        let cam_for_fade = ssr_globals.view_pos.xyz;
+        let dist = length(cam_for_fade - in.world_pos);
+        let micro_strength = 1.0 - smoothstep(0.3, 1.5, dist);
+        let f = felt_sample_world(in.world_pos.xy, n, micro_strength, felt_lod);
+        n = f.n;
     }
 
     // ── Discard-river material ─────────────────────────────────────────
@@ -1073,8 +1616,29 @@ fn fs_main(
         // lit-through rather than flat painted. Tint biases slightly
         // toward the base colour so coloured glazes stay coherent.
         wrap = 0.40;
-        sss_strength = 0.22;
+        // Low `spec_strength` marks prop presets (e.g. shop abacus beads):
+        // pull wrap energy down so tiny beads don't halo like wax.
+        sss_strength = select(0.22, 0.10, mesh.material_params.y < 0.45);
         sss_tint = mix(vec3<f32>(1.00, 0.95, 0.90), mesh.base_color.rgb, 0.30);
+    } else if (is_leather) {
+        // Leather: warm wrap so the shadow side keeps a tinted bleed
+        // rather than going pure black under the candle pools — real
+        // leather scatters a touch of light through its surface dye.
+        // Tint pulls toward the base colour so cordovan reads warm and
+        // a tan-leather variant would read honey.
+        wrap = 0.35;
+        sss_strength = 0.28;
+        sss_tint = mesh.base_color.rgb + vec3<f32>(0.18, 0.10, 0.04);
+    } else if (is_felt) {
+        // Felt: gentle wrap so the dark side of each candle pool
+        // doesn't read as dead black. Real wool fibers scatter a small
+        // amount of light through the surface — tinted slightly green
+        // so the bleed feels like the felt's own colour rather than a
+        // foreign halo. Strength stays low; felt is much less
+        // translucent than wax or leather.
+        wrap = 0.22;
+        sss_strength = 0.14;
+        sss_tint = vec3<f32>(0.10, 0.18, 0.08);
     }
 
     // ── Back-transmission (Penner SSS) tunables ──────────────────────
@@ -1252,9 +1816,103 @@ fn fs_main(
                 let glaze_tint = vec3<f32>(1.0, 0.98, 0.96);
                 let wide_lobe = pow(nh, max(spec_power * 0.35, 1.0)) * 0.55;
                 let rim = 0.45 * pow(1.0 - ndv, 3.0);
+                // Inside a crack the glaze surface is interrupted, so dip
+                // the wet-glaze and rim terms (the pinpoint stays — the
+                // crack walls themselves can still be glossy, only the
+                // unbroken-glaze film is missing). 0.6 = full dip in the
+                // line centre, 0 = pristine glaze.
+                let glaze_break = 1.0 - 0.6 * crack_mask;
+                // `spec_strength` scales the Blinn lobe (`s`) for the chiclet
+                // pinch — these wet-glaze + silhouette rims did not, so tiny
+                // props (e.g. abacus beads) blew out white. Normalize to the
+                // default porcelain preset (~0.7) so dish-sized pieces match
+                // their historical brightness when strength stays at 0.7.
+                let glaze_k = mesh.material_params.y / 0.7;
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glaze_tint * 1.55;
-                spec_acc = spec_acc + lc * intensity * atten * wide_lobe * cand_vis * glaze_tint * 0.80;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * glaze_tint;
+                spec_acc = spec_acc + lc * intensity * atten * wide_lobe * cand_vis * glaze_tint * 0.80 * glaze_break * glaze_k;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * glaze_tint * glaze_break * glaze_k;
+            } else if (is_leather) {
+                let vdh = max(dot(view_dir, h), 0.0);
+                let ndv = max(dot(n, view_dir), 0.0);
+                if (in.uv.x > 1.5) {
+                    // Page edges: matte paper, almost zero specular —
+                    // just a hint of glance to keep them from looking
+                    // dead flat under the candles.
+                    let paper_lobe = pow(nh, 4.0) * 0.06;
+                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * paper_lobe * vec3<f32>(0.95, 0.92, 0.84);
+                } else {
+                    // Leather body: dielectric with a broad waxy sheen,
+                    // no tight pinpoint. Two layered lobes — a soft
+                    // hand-rubbed polish and a wider Fresnel-rim sheen
+                    // at glancing angles — give cordovan its
+                    // characteristic warm dull glow without ever
+                    // picking up a glassy hotspot.
+                    // Dielectric F0 ≈ 0.04, biased very slightly warm
+                    // by the base tint so highlights pick up the
+                    // leather hue.
+                    let fresnel = 0.04 + 0.30 * pow(1.0 - vdh, 5.0);
+                    let polish_tint = mix(vec3<f32>(1.0, 0.95, 0.85), mesh.base_color.rgb + vec3<f32>(0.4), 0.35);
+                    // Soft polish lobe — wide, half-energy.
+                    let soft_polish = pow(nh, max(spec_power, 1.0)) * 0.55;
+                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * soft_polish * fresnel * polish_tint;
+                    // Sheen rim: glancing-angle bloom that reads as
+                    // the waxed edge catching the candle. Independent
+                    // of lobe sharpness so it shows up on flat panels
+                    // too.
+                    let sheen = pow(1.0 - ndv, 2.5) * pow(nh, 4.0) * 0.45;
+                    spec_acc = spec_acc + lc * intensity * atten * cand_vis * sheen * polish_tint;
+                }
+            } else if (is_felt) {
+                // ── Felt anisotropic sheen (Kajiya-Kay) ─────────────────
+                // Real felt has a nap direction. Light raking across the
+                // nap glows softly; light along it stays matte. We pick
+                // world +Y as the nap axis (matches the anisotropic
+                // frequency ratio used in felt_sample_world). The lobe
+                // is sharpest perpendicular to the tangent — sin(θ)^k
+                // around the tangent ring.
+                //
+                // Two perpendicular tangent samples (warp + weft) so the
+                // weave catches light from both major axes — single-axis
+                // Kajiya reads as "brushed metal" not "fabric."
+                let nap_y = vec3<f32>(0.0, 1.0, 0.0);
+                let nap_x = vec3<f32>(1.0, 0.0, 0.0);
+                let t_warp = normalize(nap_y - n * dot(n, nap_y));
+                let t_weft = normalize(nap_x - n * dot(n, nap_x));
+
+                let tdh_w = dot(t_warp, h);
+                let tdh_x = dot(t_weft, h);
+                let sin_w = sqrt(max(1.0 - tdh_w * tdh_w, 0.0));
+                let sin_x = sqrt(max(1.0 - tdh_x * tdh_x, 0.0));
+                // Warp lobe (along nap) is broader; weft (across) is
+                // tighter — felted wool isn't perfectly woven so the
+                // two lobes are unequal.
+                let aniso_w = pow(sin_w, max(spec_power * 6.0, 1.0)) * 0.65;
+                let aniso_x = pow(sin_x, max(spec_power * 12.0, 1.0)) * 0.35;
+                let aniso = aniso_w + aniso_x;
+
+                // Schlick Fresnel — felt is a dielectric, F0 ≈ 0.04, but
+                // the sheen rim swells aggressively at glancing angles.
+                let vdh = max(dot(view_dir, h), 0.0);
+                let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
+                // Slight green-yellow tint so the highlight feels like
+                // it's picking up the felt's own colour rather than a
+                // foreign white plastic glint.
+                let sheen_tint = vec3<f32>(0.85, 1.05, 0.78);
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis
+                         * aniso * fresnel * sheen_tint * spec_strength * 8.0;
+
+                // ── Retroreflection rim ─────────────────────────────
+                // Real felt fibers retroreflect light back toward the
+                // viewer, which is why pool/poker baize looks slightly
+                // lit-from-within at grazing angles. Modeled as a
+                // view-dependent rim term — strongest where the surface
+                // turns away from the camera. Tinted by the felt's own
+                // sheen colour so the bloom feels like the fabric
+                // glowing rather than a foreign halo.
+                let ndv = max(dot(n, view_dir), 0.0);
+                let retro = pow(1.0 - ndv, 4.0) * 0.55;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis
+                         * retro * sheen_tint * 0.6;
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
@@ -1606,6 +2264,17 @@ fn fs_main(
         let warm_edge = vec3<f32>(1.00, 0.88, 0.60);
         albedo = mix(albedo, warm_edge, rim);
     }
+    if (is_leather && in.uv.x < 1.5) {
+        // Leather rim: soft warm halo where the cover face curves away
+        // from the camera, suggesting the polish lifts the edge tint
+        // toward toasted-honey. Subtler than the brass rim — leather
+        // is a dielectric, not a conductor. Skipped on page-edge
+        // fragments — paper has its own aging tint above.
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 2.2) * 0.22;
+        let warm_edge = mix(mesh.base_color.rgb + vec3<f32>(0.35, 0.20, 0.10), vec3<f32>(0.95, 0.78, 0.50), 0.45);
+        albedo = mix(albedo, warm_edge, rim);
+    }
 
     // No directional shadow gating now that there's no directional light;
     // analytic candle AABB occlusion (`cand_vis` above) already darkens
@@ -1713,8 +2382,13 @@ fn fs_main(
     // cool channels and a blue popup ends up orange. Add an unlit
     // emissive floor so the popup's tint dominates; the holographic sheen
     // and iridescent rim still layer on top as accents.
+    //
+    // Talisman tablets share MaterialKind::Polychrome but pass a lower
+    // specular_power in material_params.z (~32); extruded glyphs use ~48.
+    // Skip the emissive floor for tablets so shop tokens stay lit by the
+    // scene instead of blowing out with bloom.
     var emissive = vec3<f32>(0.0);
-    if (is_poly) {
+    if (is_poly && mesh.material_params.z >= 40.0) {
         emissive = mesh.base_color.rgb * 0.85;
     }
     rgb = rgb
@@ -1728,5 +2402,16 @@ fn fs_main(
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(rgb, vec3<f32>(inv_g));
-    return vec4<f32>(out_rgb, mesh.base_color.a);
+
+    // Felt shells fade their alpha slightly at the top (the early
+    // discard above already culled most pixels; surviving shell tips
+    // fade to soft tips here).
+    var out_alpha = mesh.base_color.a;
+    if (is_felt && in.felt_shell_layer > 0.5) {
+        let shell_index = in.felt_shell_layer;
+        let max_shells = 10.0;
+        let t = clamp(shell_index / max_shells, 0.0, 1.0);
+        out_alpha = mesh.base_color.a * (1.0 - t * 0.4);
+    }
+    return vec4<f32>(out_rgb, out_alpha);
 }

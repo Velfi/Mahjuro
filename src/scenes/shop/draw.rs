@@ -1,5 +1,9 @@
 use super::*;
 
+use glam::Vec3;
+
+use crate::render::world_space::pixel_to_world;
+
 impl ShopScene {
     pub(super) fn draw_frame_impl(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
@@ -232,10 +236,8 @@ impl ShopScene {
             anim_id: 0,
             arrange_name: None,
         });
-        // Yaku Journal anchor — placed later (after `cam_rot` and
-        // `hover` are in scope) as a wood action tablet. These
-        // bindings stay here because downstream lighting code keys
-        // point lights off `journal_cx/cy/cz`.
+        // Yaku Journal anchor — mesh is emitted near the end of `draw_frame`;
+        // bindings stay here because lighting keys point lights off `journal_cx/cy/cz`.
         let journal_cx = self.positions.book.nx * w;
         let journal_cy = self.positions.book.ny * h;
         let journal_cz = layout.mm(self.positions.book.lift_mm);
@@ -245,6 +247,21 @@ impl ShopScene {
         // draws its own large closeup pack centered on screen, and the 2D dim
         // quad can't depth-occlude the shelf packs behind it.
         if self.pack_celebration.is_none() {
+            // Pre-compute which pack pick id (if any) is currently
+            // focused/hovered so each pack can ramp `hover_target` and
+            // light up the additive halo + foil-tint warm shift in the
+            // renderer. Mirrors the live-hover lookup further down,
+            // narrowed to `ShopHit::TilePack` because we only need this
+            // for the pack push.
+            let focused_pack_pick_id = self
+                .focus
+                .and_then(|f| f.to_hit())
+                .or(ctx.picked_shop_object)
+                .and_then(|hit| match hit {
+                    ShopHit::TilePack(id) => Some(id),
+                    ShopHit::Dish(id) if is_tile_pack_pick(id) => Some(id),
+                    _ => None,
+                });
             let ext = layout.pack_extents;
             let mut pack_objs: Vec<Object3d> = Vec::new();
             for (i, pack) in self.pack_items.iter().enumerate() {
@@ -252,6 +269,12 @@ impl ShopScene {
                     continue;
                 }
                 let (cx, cy, cz) = layout.pack_centers_px[i];
+                let pick_id = PICK_TILE_PACK_BASE + i as u32;
+                let hover_target = if focused_pack_pick_id == Some(pick_id) {
+                    1.0
+                } else {
+                    0.0
+                };
                 pack_objs.push(Object3d {
                     // Center-lift so the pack sits on the counter (ext[2] is height).
                     pos: [cx, cy, cz + ext[2] * 0.5],
@@ -260,9 +283,9 @@ impl ShopScene {
                     color: pack.kind.foil_tint(),
                     kind: Object3dKind::Pack {
                         kind: pack.kind,
-                        pick_id: Some(PICK_TILE_PACK_BASE + i as u32),
+                        pick_id: Some(pick_id),
                     },
-                    hover_target: 0.0,
+                    hover_target,
                     anim_id: 0,
                     arrange_name: None,
                 });
@@ -298,6 +321,7 @@ impl ShopScene {
                     relic_id: item.relic,
                     glow: 0.0,
                     silhouette: false,
+                    debuffed: false,
                     pick_id: None,
                 },
                 hover_target: 0.0,
@@ -345,6 +369,7 @@ impl ShopScene {
                     relic_id: rid,
                     glow,
                     silhouette: false,
+                    debuffed: false,
                     pick_id: None,
                 },
                 hover_target: 0.0,
@@ -827,7 +852,7 @@ impl ShopScene {
         // Pre-compute action prop state (needed for hover_info and 3D chrome rendering).
         let reroll_affordable =
             self.mode == ShopMode::Standard && shop.gold >= self.reroll_cost as i32;
-        // Pre-compute hover item info for both the 3D plaque and the 2D description overlay.
+        // Pre-compute hover item info for the 2D tooltip overlay.
         let n_for_sale_relics_hud = self.items.len().min(layout.niche_count);
         let hover_info: Option<(String, String, String, [f32; 4])> = hover.map(|hit| {
             let n_for_sale_zodiacs = self.zodiac_items.len();
@@ -988,20 +1013,38 @@ impl ShopScene {
                     String::new(),
                     color::CHAMPAGNE,
                 ),
-                ShopHit::Dish(id) if id == PICK_REROLL_PROP => (
-                    "Restock".to_string(),
-                    format!("Refresh shop for {}g", self.reroll_cost),
-                    if reroll_affordable {
-                        format!("{}g", self.reroll_cost)
+                ShopHit::Dish(id) if id == PICK_REROLL_PROP => {
+                    if self.mode == ShopMode::Tutorial {
+                        (
+                            "Curated Stock".to_string(),
+                            "Tutorial stock — restock is unavailable here.".to_string(),
+                            String::new(),
+                            color::CHAMPAGNE,
+                        )
+                    } else if self.reroll_cost == 0 {
+                        (
+                            "Restock".to_string(),
+                            "Refresh the shop once at no gold cost.".to_string(),
+                            "FREE".to_string(),
+                            color::GOLD,
+                        )
                     } else {
-                        format!("${} (have {}g)", self.reroll_cost, shop.display_gold)
-                    },
-                    if reroll_affordable {
-                        color::GOLD
-                    } else {
-                        color::RUBY
-                    },
-                ),
+                        (
+                            "Restock".to_string(),
+                            format!("Refresh shop for {}g", self.reroll_cost),
+                            if reroll_affordable {
+                                format!("{}g", self.reroll_cost)
+                            } else {
+                                format!("${} (have {}g)", self.reroll_cost, shop.display_gold)
+                            },
+                            if reroll_affordable {
+                                color::GOLD
+                            } else {
+                                color::RUBY
+                            },
+                        )
+                    }
+                }
                 ShopHit::Dish(id) if id == PICK_SELL_TRAY => (
                     "Sell".to_string(),
                     "Focus an owned relic or consumable, then click here to sell it".to_string(),
@@ -1178,102 +1221,7 @@ impl ShopScene {
         }
         frame.point_lights = point_lights;
 
-        // ── Hover item 3D anchor for plaque placement ───────────────────
-        // Resolves the world-space top-face anchor of the currently hovered
-        // item's AABB so the title plaque floats above it. Returned as
-        // (pixel_x, pixel_y, world_z).
-        let hover_item_pos: Option<(f32, f32, f32)> = hover.map(|hit| {
-            if let Some(&[px, py, wz]) = self.hover_anchor_overrides.get(&hit) {
-                return (px, py, wz);
-            }
-            let n_for_sale_relics = self.items.len().min(layout.niche_count);
-            match hit {
-                ShopHit::Relic(i) => {
-                    if i < n_for_sale_relics {
-                        let (px, py, wy) = layout.niche_centers_px[i];
-                        let niche_base = layout.counter_extents[0] * 0.055;
-                        let half = relic_half_extents(self.items[i].relic, niche_base);
-                        (px, py, wy + half[2] * 2.0)
-                    } else {
-                        let oi = i - n_for_sale_relics;
-                        if oi < n_owned_relics {
-                            layout.owned_relic_pos(oi)
-                        } else {
-                            (w * 0.5, h * 0.5, 0.0)
-                        }
-                    }
-                }
-                ShopHit::Ribbon(i) => {
-                    let n_for_sale = self.zodiac_items.len();
-                    if i < n_for_sale {
-                        if i < layout.ribbon_count {
-                            layout.ribbon_anchors_px[i]
-                        } else {
-                            (w * 0.5, h * 0.5, 0.0)
-                        }
-                    } else {
-                        let oi = i - n_for_sale;
-                        layout.owned_ribbon_pos(oi)
-                    }
-                }
-                ShopHit::Talisman(i) => {
-                    let n_for_sale = self.talisman_items.len();
-                    if i < n_for_sale {
-                        if i < layout.talisman_anchor_count {
-                            let (ax, ay, awy) = layout.talisman_anchors_px[i];
-                            (ax, ay, awy + layout.talisman_wall_width)
-                        } else {
-                            (w * 0.5, h * 0.5, 0.0)
-                        }
-                    } else {
-                        let oi = i - n_for_sale;
-                        layout.owned_talisman_pos(oi)
-                    }
-                }
-                ShopHit::TilePack(id) => {
-                    let idx = tile_pack_index_from_pick(id).unwrap_or(0);
-                    let center = layout
-                        .pack_centers_px
-                        .get(idx)
-                        .copied()
-                        .unwrap_or(layout.pack_centers_px[0]);
-                    (center.0, center.1, center.2 + layout.pack_extents[2])
-                }
-                ShopHit::Dish(id) => {
-                    if id == PICK_RELIC_DISH {
-                        layout.relic_dish_center_px
-                    } else if id == PICK_JOURNAL_BOOK {
-                        (journal_cx, journal_cy, journal_cz)
-                    } else if id == PICK_COIN_DISH {
-                        layout.coin_dish_center_px
-                    } else if id == PICK_REROLL_PROP {
-                        (
-                            self.positions.reroll_prop.nx * w,
-                            layout.counter_world_y + h * 0.5,
-                            layout.mm(self.positions.reroll_prop.lift_mm),
-                        )
-                    } else if id == PICK_LEAVE_PROP {
-                        (
-                            self.positions.leave_prop.nx * w,
-                            layout.counter_world_y + h * 0.5,
-                            layout.mm(self.positions.leave_prop.lift_mm),
-                        )
-                    } else if id == PICK_SELL_TRAY {
-                        let vis_px_min = w * 0.25;
-                        let vis_w2 = w * 0.5;
-                        (
-                            vis_px_min + self.positions.sell_tray.nx * vis_w2,
-                            layout.relic_dish_center_px.1,
-                            layout.mm(self.positions.sell_tray.lift_mm),
-                        )
-                    } else {
-                        (w * 0.5, h * 0.5, 0.0)
-                    }
-                }
-            }
-        });
-
-        // ── 3D shop chrome: Ofuda sign, info plaque, action props, sell tray ──
+        // ── 3D shop chrome: Ofuda sign, counter plaque, action props, sell tray ──
         let cam_rot = camera_facing_rotation(layout.camera.eye, layout.camera.target);
 
         // Path sign: Ofuda scroll. Arrange-mode placement contributes
@@ -1297,7 +1245,6 @@ impl ShopScene {
                 material: crate::render::primitive::MaterialSpec::plain().with_decal(
                     crate::render::primitive::DecalSpec {
                         text: format!("{}\n{}", plaque_top_text, plaque_bot_text),
-                        palette: crate::render::primitive::DecalPalette::ParchmentInk,
                         layout: crate::render::primitive::DecalLayout::TitleRule {
                             target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
                         },
@@ -1337,202 +1284,78 @@ impl ShopScene {
             arrange_name: Some("shop.shelf.coin_dish"),
         });
 
-        // Info plaque: title+CTA above the hovered item.
-        //
-        // Player-owned items live on the bottom-shelf trays (y≈0.84h), so the
-        // for-sale layout — title above, description below — pushes the
-        // description off the bottom of the screen. For owned items we draw a
-        // single combined plaque (title / sell price / description) anchored
-        // at its own arrange-mode placement so it can be positioned
-        // independently from the for-sale hover plaques.
-        let hover_is_owned = match hover {
-            Some(ShopHit::Relic(i)) => i >= n_for_sale_relics_hud,
-            Some(ShopHit::Ribbon(i)) => i >= self.zodiac_items.len(),
-            Some(ShopHit::Talisman(i)) => i >= self.talisman_items.len(),
-            _ => false,
-        };
-        if let Some((ref title, ref desc, ref cta, _)) = hover_info
-            && !title.is_empty()
-            && let Some((tpx, tpy, twz)) = hover_item_pos
-        {
-            let plaque_rot = glam::Mat4::from_rotation_x((-80.0_f32).to_radians()) * cam_rot;
-            let plaque_z = layout.mm(4.0);
-
-            // Clamp a plaque's pixel-X so its full width stays inside
-            // the camera frustum at the plaque's world depth. Without
-            // this, plaques anchored to edge items (far-left relics or
-            // far-right ribbons) slide past the screen edge.
-            let clamp_plaque_px = |center_px: f32, plaque_w: f32, py: f32, wz: f32| -> f32 {
-                let world_y = h * 0.5 - py;
-                let (fw_min, fw_max) = layout.camera.frustum_x_range_at(w, h, world_y, wz);
-                let px_min = (fw_min + w * 0.5).max(0.0);
-                let px_max = (fw_max + w * 0.5).min(w);
-                let margin = w * 0.01;
-                let lo = px_min + plaque_w * 0.5 + margin;
-                let hi = px_max - plaque_w * 0.5 - margin;
-                if hi <= lo {
-                    (px_min + px_max) * 0.5
-                } else {
-                    center_px.clamp(lo, hi)
-                }
-            };
-
-            if hover_is_owned {
-                // Combined owned-item plaque: title / sell price /
-                // description, stacked on one sign. Width sized like
-                // the description plaque so long relic descriptions
-                // don't shrink against the font clamp; height sized
-                // to wrapped content.
-                let owned_p = &self.positions.hover_owned_plaque;
-                let plaque_w = w * 0.38;
-                let text = if desc.is_empty() {
-                    format!("{}\n{}", title, cta)
-                } else {
-                    format!("{}\n{}\n{}", title, cta, desc)
-                };
-                let font_px = (h * 0.022).max(14.0);
-                let pad_frac = 0.1;
-                let inner_w = plaque_w * (1.0 - 2.0 * pad_frac);
-                let (line_count, line_h) =
-                    measure_plaque_wrap(load_ui_font().as_ref(), &text, inner_w, font_px);
-                let content_h = line_count as f32 * line_h;
-                let plaque_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.10);
-
-                let py = tpy + owned_p.ny * h;
-                let wz = (twz + h * 0.05 + layout.mm(owned_p.lift_mm)).max(0.0);
-                let px = clamp_plaque_px(tpx + owned_p.nx * w, plaque_w, py, wz);
-                frame.object3d(Object3d {
-                    pos: [px, py, wz],
-                    extents: [plaque_w, plaque_h, plaque_z],
-                    rotation: plaque_rot,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::Primitive {
-                        shape: crate::render::primitive::MeshId::BeveledSlab,
-                        material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                            .with_decal(crate::render::primitive::plaque_decal(text)),
-                        pick_id: None,
-                        shadow_caster: false,
-                        silhouette: false,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0xAC0E,
-                    arrange_name: Some("shop.hover.owned_plaque"),
-                });
-            } else {
-                let plaque_w = w * 0.22;
-                let plaque_h = h * 0.12;
-
-                // Title plaque: anchored to the top face of the
-                // item's AABB, floated up in screen-space and pulled
-                // forward toward the camera. Arrange-mode placement
-                // contributes additive deltas.
-                let title_p = &self.positions.hover_title_plaque;
-                let title_py = tpy - h * 0.28 + title_p.ny * h;
-                let title_wz = twz + h * 0.14 + layout.mm(title_p.lift_mm);
-                let title_px = clamp_plaque_px(tpx + title_p.nx * w, plaque_w, title_py, title_wz);
-                frame.object3d(Object3d {
-                    pos: [title_px, title_py, title_wz],
-                    extents: [plaque_w, plaque_h, plaque_z],
-                    rotation: plaque_rot,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::Primitive {
-                        shape: crate::render::primitive::MeshId::BeveledSlab,
-                        material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                            .with_decal(crate::render::primitive::plaque_decal(format!(
-                                "{}\n{}",
-                                title, cta
-                            ))),
-                        pick_id: None,
-                        shadow_caster: false,
-                        silhouette: false,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0xAC00,
-                    arrange_name: Some("shop.hover.title_plaque"),
-                });
-
-                // Description plaque: anchored below the item so the
-                // player can read what the focused relic/ribbon/
-                // talisman actually does.
-                if !desc.is_empty() {
-                    let desc_p = &self.positions.hover_desc_plaque;
-                    // Wider + shorter than the title plaque.
-                    let desc_w = w * 0.38;
-                    let font_px = (h * 0.022).max(14.0);
-                    let pad_frac = 0.1;
-                    let inner_w = desc_w * (1.0 - 2.0 * pad_frac);
-                    let (line_count, line_h) =
-                        measure_plaque_wrap(load_ui_font().as_ref(), desc, inner_w, font_px);
-                    let content_h = line_count as f32 * line_h;
-                    let desc_h = (content_h / (1.0 - 2.0 * pad_frac)).max(h * 0.08);
-                    let desc_py = tpy + h * 0.10 + desc_p.ny * h;
-                    let desc_wz = (twz - h * 0.10 + layout.mm(desc_p.lift_mm)).max(0.0);
-                    let desc_px = clamp_plaque_px(tpx + desc_p.nx * w, desc_w, desc_py, desc_wz);
-                    frame.object3d(Object3d {
-                        pos: [desc_px, desc_py, desc_wz],
-                        extents: [desc_w, desc_h, plaque_z],
-                        rotation: plaque_rot,
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::Primitive {
-                            shape: crate::render::primitive::MeshId::BeveledSlab,
-                            material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                                .with_decal(crate::render::primitive::plaque_decal(desc.clone())),
-                            pick_id: None,
-                            shadow_caster: false,
-                            silhouette: false,
-                        },
-                        hover_target: 0.0,
-                        anim_id: 0xAC0D,
-                        arrange_name: Some("shop.hover.desc_plaque"),
-                    });
-                }
-            }
-        }
-
-        // Reroll prop — left end of counter.
-        let reroll_label = if self.mode == ShopMode::Tutorial {
-            "Curated Stock".to_string()
-        } else {
-            format!("Restock {}g", self.reroll_cost)
-        };
+        // Reroll prop — lacquered wood frame + porcelain bead mesh (same pose).
+        // Restock cost appears in the 2D hover tooltip; beads use no pick_id (frame owns hits).
         let reroll_color = if reroll_affordable {
-            [0.85, 0.78, 0.55, 1.0]
+            [1.02, 0.82, 0.48, 1.0]
         } else {
-            [0.45, 0.42, 0.35, 1.0]
+            [0.48, 0.44, 0.34, 1.0]
         };
         let hover_is_reroll = matches!(hover, Some(ShopHit::Dish(id)) if id == PICK_REROLL_PROP);
         {
-            use crate::render::primitive::{
-                DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
-            };
+            use crate::render::primitive::{MaterialSpec, MeshId};
             let disabled = !reroll_affordable;
             let alpha = if disabled { 0.45 } else { reroll_color[3] };
             let color = [reroll_color[0], reroll_color[1], reroll_color[2], alpha];
+            let abacus_pos = [
+                self.positions.reroll_prop.nx * w,
+                layout.counter_world_y + h * 0.5,
+                layout.mm(self.positions.reroll_prop.lift_mm),
+            ];
+            let abacus_extents = [w * 0.112, layout.mm(44.0), h * 0.112];
             frame.object3d(Object3d {
-                pos: [
-                    self.positions.reroll_prop.nx * w,
-                    layout.counter_world_y + h * 0.5,
-                    layout.mm(self.positions.reroll_prop.lift_mm),
-                ],
-                extents: [w * 0.09, layout.mm(35.0), h * 0.065],
+                pos: abacus_pos,
+                extents: abacus_extents,
                 rotation: cam_rot,
                 color,
                 kind: Object3dKind::Primitive {
-                    shape: MeshId::ShopActionProp,
-                    material: MaterialSpec {
-                        kind: crate::render::lit_mesh::MaterialKind::Plain,
-                        specular_strength: 0.4,
-                        specular_power: 32.0,
-                        decal: Some(DecalSpec {
-                            text: reroll_label,
-                            palette: DecalPalette::GoldGilded,
-                            layout: DecalLayout::Fixed {
-                                width: 512,
-                                height: 192,
-                            },
-                        }),
-                    },
+                    shape: MeshId::Abacus,
+                    material: MaterialSpec::lacquered_wood_flat(),
                     pick_id: Some(PICK_REROLL_PROP),
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: if hover_is_reroll { 1.0 } else { 0.0 },
+                anim_id: 0xAC01,
+                arrange_name: Some("shop.props.reroll_prop"),
+            });
+            // Suanpan convention: heaven (upper) vs earth (lower) decks often use
+            // distinct glaze colours — cool celadon vs warm ivory here.
+            let heaven_bead_color = if reroll_affordable {
+                [0.68_f32, 0.76, 0.74, alpha]
+            } else {
+                [0.44, 0.48, 0.46, alpha]
+            };
+            let earth_bead_color = if reroll_affordable {
+                [0.80_f32, 0.73, 0.65, alpha]
+            } else {
+                [0.50, 0.46, 0.42, alpha]
+            };
+            frame.object3d(Object3d {
+                pos: abacus_pos,
+                extents: abacus_extents,
+                rotation: cam_rot,
+                color: heaven_bead_color,
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::AbacusHeavenBeads,
+                    material: MaterialSpec::porcelain_prop(),
+                    pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: if hover_is_reroll { 1.0 } else { 0.0 },
+                anim_id: 0xAC01,
+                arrange_name: Some("shop.props.reroll_prop"),
+            });
+            frame.object3d(Object3d {
+                pos: abacus_pos,
+                extents: abacus_extents,
+                rotation: cam_rot,
+                color: earth_bead_color,
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::AbacusEarthBeads,
+                    material: MaterialSpec::porcelain_prop(),
+                    pick_id: None,
                     shadow_caster: false,
                     silhouette: false,
                 },
@@ -1542,41 +1365,37 @@ impl ShopScene {
             });
         }
 
-        // Leave prop — right end of counter.
-        let leave_label = if self.mode == ShopMode::Tutorial {
-            "Face Boss"
-        } else {
-            "Continue On"
-        };
+        // Leave prop — bonshō-inspired bell + swaying silk tassel on the
+        // right end of the counter. Action label lives on the hover plaque.
         let hover_is_leave = matches!(hover, Some(ShopHit::Dish(id)) if id == PICK_LEAVE_PROP);
+        let leave_px = self.positions.leave_prop.nx * w;
+        let leave_py = layout.counter_world_y + h * 0.5;
+        let leave_pz = layout.mm(self.positions.leave_prop.lift_mm);
+        let bell_extents = [w * 0.112, layout.mm(54.0), h * 0.195];
+        // Mesh mouth is local −Z, hanger local +Z; `camera_facing_rotation` alone
+        // leaves the bell inverted for the shop camera — flip 180° around local X
+        // so the lip opens downward and the crown/stem read above it.
+        let anim = self.leave_bell_hover_anim.clamp(0.0, 1.0);
+        let tw = self.age_secs;
+        let wobble_x = anim * ((tw * 10.5).sin() * 0.052 + (tw * 18.7).sin() * 0.014);
+        let wobble_y = anim * (tw * 8.3 + 1.1).sin() * 0.045;
+        let leave_bell_rot = cam_rot
+            * glam::Mat4::from_rotation_x(std::f32::consts::PI)
+            * glam::Mat4::from_rotation_y(wobble_y)
+            * glam::Mat4::from_rotation_x(wobble_x);
         {
-            use crate::render::primitive::{
-                DecalLayout, DecalPalette, DecalSpec, MaterialSpec, MeshId,
-            };
+            use crate::render::primitive::{MaterialSpec, MeshId};
             frame.object3d(Object3d {
-                pos: [
-                    self.positions.leave_prop.nx * w,
-                    layout.counter_world_y + h * 0.5,
-                    layout.mm(self.positions.leave_prop.lift_mm),
-                ],
-                extents: [w * 0.09, layout.mm(35.0), h * 0.065],
-                rotation: cam_rot,
-                color: [0.92, 0.88, 0.72, 1.0],
+                pos: [leave_px, leave_py, leave_pz],
+                extents: bell_extents,
+                rotation: leave_bell_rot,
+                // Polished brass conductor: the brass shader branch keeps
+                // a warm rim halo and ~22% diffuse so the bell reads as
+                // shiny gold from any angle, not just along the spec lobe.
+                color: [1.52, 1.12, 0.46, 1.0],
                 kind: Object3dKind::Primitive {
-                    shape: MeshId::ShopActionProp,
-                    material: MaterialSpec {
-                        kind: crate::render::lit_mesh::MaterialKind::Plain,
-                        specular_strength: 0.4,
-                        specular_power: 32.0,
-                        decal: Some(DecalSpec {
-                            text: leave_label.to_string(),
-                            palette: DecalPalette::GoldGilded,
-                            layout: DecalLayout::Fixed {
-                                width: 512,
-                                height: 192,
-                            },
-                        }),
-                    },
+                    shape: MeshId::ShopBell,
+                    material: MaterialSpec::brass(),
                     pick_id: Some(PICK_LEAVE_PROP),
                     shadow_caster: false,
                     silhouette: false,
@@ -1585,26 +1404,40 @@ impl ShopScene {
                 anim_id: 0xAC02,
                 arrange_name: Some("shop.props.leave_prop"),
             });
-        }
 
-        // Yaku Journal — wood action tablet styled like gameplay's
-        // action-bar journal button. Replaces the 3D book prop so the
-        // journal affordance reads the same across scenes. Click
-        // routes through `ShopHit::Dish(PICK_JOURNAL_BOOK)` via the
-        // WoodTablet dispatch's `pick_id` hook.
-        frame.object3d(Object3d {
-            pos: [journal_cx, journal_cy, journal_cz],
-            extents: [w * 0.06, layout.mm(16.0), h * 0.11],
-            rotation: cam_rot,
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::WoodTablet {
-                label: "Journal".to_string(),
-                pick_id: Some(PICK_JOURNAL_BOOK),
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("shop.props.journal"),
-        });
+            // Mouth-centre anchor on local −Z lip — converted through the
+            // same camera-facing pose as the bell body for stable coupling.
+            let bell_center_w = pixel_to_world(w, h, leave_px, leave_py, leave_pz);
+            let lip_scaled = Vec3::new(
+                0.0,
+                0.0,
+                crate::render::shop_bell_mesh::LIP_Z * bell_extents[2],
+            );
+            let lip_w = bell_center_w + leave_bell_rot.transform_vector3(lip_scaled);
+            let tassel_pos = [lip_w.x + w * 0.5, h * 0.5 - lip_w.y, lip_w.z];
+            let tw = self.age_secs;
+            let sway_x = (tw * 1.12).sin() * 0.16 + (tw * 2.17 + 0.4).sin() * 0.028;
+            let sway_y = (tw * 0.91 + 2.1).sin() * 0.11;
+            let tassel_rot = leave_bell_rot
+                * glam::Mat4::from_rotation_x(sway_x)
+                * glam::Mat4::from_rotation_y(sway_y);
+            frame.object3d(Object3d {
+                pos: tassel_pos,
+                extents: [w * 0.028, layout.mm(26.0), h * 0.072],
+                rotation: tassel_rot,
+                color: [1.08, 0.26, 0.32, 1.0],
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::BellTassel,
+                    material: MaterialSpec::plain(),
+                    pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("shop.props.leave_tassel"),
+            });
+        }
 
         // Sell tray — bottom shelf row, accessible from all item types.
         // Highlight when an item is being dragged toward it or when a sellable
@@ -1618,23 +1451,49 @@ impl ShopScene {
         )
         .is_some();
         let has_active_drag = self.held_item_drag.is_some() || self.mouse_drag.is_some();
+        // Brass alms-bowl: warm gold rim glow when a sellable item is
+        // focused or being dragged; aged-brass neutral tint otherwise.
         let sell_tray_color = if has_sellable_focus || has_active_drag {
-            [0.70, 0.90, 0.60, 1.0]
+            [1.14, 0.88, 0.42, 1.0]
         } else {
-            [0.45, 0.55, 0.45, 0.7]
+            [0.74, 0.54, 0.26, 0.88]
         };
         let sell_tray_px_x = {
             let vis_px_min = w * 0.25;
             let vis_w = w * 0.5;
             vis_px_min + self.positions.sell_tray.nx * vis_w
         };
+        let tray_lift_z = layout.mm(self.positions.sell_tray.lift_mm);
+        let sell_tray_rim_height = layout.mm(13.0);
+        let bowl_half_z = sell_tray_rim_height * 0.5;
+        let pedestal_thick = layout.mm(3.5);
+        let pedestal_center_z = tray_lift_z - bowl_half_z - pedestal_thick * 0.5 - layout.mm(0.25);
+        {
+            use crate::render::primitive::{MaterialSpec, MeshId};
+            frame.object3d(Object3d {
+                pos: [
+                    sell_tray_px_x,
+                    layout.relic_dish_center_px.1,
+                    pedestal_center_z,
+                ],
+                extents: [w * 0.098, h * 0.078, pedestal_thick],
+                rotation: glam::Mat4::IDENTITY,
+                color: [0.48, 0.32, 0.18, 1.0],
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::Cube,
+                    material: MaterialSpec::lacquered_wood_flat(),
+                    pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: 0.0,
+                anim_id: 0xAC04,
+                arrange_name: Some("shop.props.sell_tray_pedestal"),
+            });
+        }
         frame.object3d(Object3d {
-            pos: [
-                sell_tray_px_x,
-                layout.relic_dish_center_px.1,
-                layout.mm(self.positions.sell_tray.lift_mm),
-            ],
-            extents: [w * 0.09, layout.mm(4.0), h * 0.065],
+            pos: [sell_tray_px_x, layout.relic_dish_center_px.1, tray_lift_z],
+            extents: [w * 0.095, sell_tray_rim_height, h * 0.072],
             rotation: glam::Mat4::IDENTITY,
             color: sell_tray_color,
             kind: Object3dKind::SellTray {
@@ -1854,10 +1713,124 @@ impl ShopScene {
             }
         }
 
+        // ── In-rect hover labels for diegetic shop props ─────────────────
+        // The four shop props (abacus, bell, alms-bowl, leather book) lost
+        // their face decals when we swapped them off the slab/tablet
+        // primitives. Mirror the gameplay scene's river / mirror pattern:
+        // when a prop is hovered or focused, overlay a 2D gold label
+        // centered on its projected screen rect so the player sees what
+        // they're about to click on. Same anchoring (`aux_dish_rects`),
+        // same gold tint, same `no_glossary` opt-out.
+        let prop_label_for = |id: u32| -> Option<String> {
+            if id == PICK_REROLL_PROP {
+                Some(if self.mode == ShopMode::Tutorial {
+                    "Curated Stock".to_string()
+                } else if self.reroll_cost == 0 {
+                    "Restock — FREE".to_string()
+                } else {
+                    format!("Restock — {}g", self.reroll_cost)
+                })
+            } else if id == PICK_LEAVE_PROP {
+                Some(
+                    if self.mode == ShopMode::Tutorial {
+                        "Face Boss"
+                    } else {
+                        "Continue On"
+                    }
+                    .to_string(),
+                )
+            } else if id == PICK_JOURNAL_BOOK {
+                Some("Journal".to_string())
+            } else if id == PICK_SELL_TRAY {
+                Some("Sell".to_string())
+            } else {
+                None
+            }
+        };
+        if self.pack_celebration.is_none() {
+            for (pid, r) in ctx.proj.aux_dish_rects.iter() {
+                let Some(id) = pid else { continue };
+                if r[2] < 1.0 || r[3] < 1.0 || !r[0].is_finite() || !r[1].is_finite() {
+                    continue;
+                }
+                let Some(label) = prop_label_for(*id) else {
+                    continue;
+                };
+                // Suppress the journal book's 2D "Journal" label during the
+                // open/close transition — the book's projected rect grows 7×
+                // during the zoom, so the auto-sized label balloons into giant
+                // overlay text superimposed on the cover.
+                if *id == PICK_JOURNAL_BOOK && self.journal_transition.is_some() {
+                    continue;
+                }
+                let prop_hovered = matches!(hover, Some(ShopHit::Dish(hid)) if hid == *id);
+                let prop_focused = matches!(self.focus, Some(f) if f.to_hit().map(|h| matches!(h, ShopHit::Dish(hid) if hid == *id)).unwrap_or(false));
+                if !prop_hovered && !prop_focused {
+                    continue;
+                }
+                let label_h = (r[3] * 0.32).max(22.0);
+                let label_rect = [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h];
+                if let Some(clamped) = clamp_rect_to_viewport(label_rect, w, h) {
+                    texts.push(TextLabel {
+                        rect: clamped,
+                        text: label,
+                        color: [1.0, 0.84, 0.40, 1.0],
+                        align: TextAlign::Center,
+                        no_glossary: true,
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // Full hover tooltip (name, price / action, description).
+        let hover_is_owned_tooltip = match hover {
+            Some(ShopHit::Relic(i)) => i >= n_for_sale_relics_hud,
+            Some(ShopHit::Ribbon(i)) => i >= self.zodiac_items.len(),
+            Some(ShopHit::Talisman(i)) => i >= self.talisman_items.len(),
+            _ => false,
+        };
+        let hover_skip_title_tooltip = matches!(
+            hover,
+            Some(ShopHit::Dish(id))
+                if id == PICK_JOURNAL_BOOK
+                    || id == PICK_LEAVE_PROP
+                    || id == PICK_REROLL_PROP
+                    || id == PICK_SELL_TRAY
+        );
+        let tooltip_anchor = hover.and_then(|hit| {
+            let f = ShopFocus::from_hit(hit);
+            focus_rect_graph
+                .iter()
+                .find(|(g, _)| *g == f)
+                .map(|(_, r)| *r)
+        });
+        if self.pack_celebration.is_none()
+            && self.journal_transition.is_none()
+            && let Some((ref title, ref desc, ref cta, col)) = hover_info
+            && !title.is_empty()
+        {
+            crate::ui::inspect_plaque::push_focus_tooltip_panel_2d(
+                &mut quads,
+                &mut texts,
+                w,
+                h,
+                ui_scale,
+                tooltip_anchor,
+                title,
+                desc,
+                cta,
+                col,
+                hover_is_owned_tooltip,
+                hover_skip_title_tooltip,
+            );
+        }
+
         // Push the brass focus ring on top of the 2D HUD layer so it
         // sits above the cabinet wood and dishes. Skipped during pause
         // because the overlay's own buttons take focus.
         if !self.pause_menu.paused
+            && self.pack_celebration.is_none()
             && let Some(target) = self.focus
         {
             let rect_lookup = focus_rect_graph
@@ -2070,6 +2043,57 @@ impl ShopScene {
         if !glyph_placements.is_empty() {
             frame.object3d_batch(glyph_placements);
         }
+
+        // Journal — last opaque shop prop so zoom depth wins over sell tray / counter clutter.
+        if let Some(t) = self.journal_transition {
+            let zp = t.zoom_progress();
+            if zp > 0.001 {
+                let smoothed = zp * zp * (3.0 - 2.0 * zp);
+                let a = smoothed * 0.72;
+                frame.quad(GpuInstance {
+                    rect: [0.0, 0.0, w, h],
+                    color: [0.03, 0.04, 0.06, a],
+                });
+            }
+        }
+        let (journal_zoom, journal_pos) = match self.journal_transition {
+            Some(t) => {
+                let z = t.zoom_progress();
+                let smoothed = z * z * (3.0 - 2.0 * z);
+                let zoom = 1.0 + smoothed * 7.0;
+                let cx = w * 0.5;
+                let cy = h * 0.5;
+                let pos = [
+                    journal_cx + (cx - journal_cx) * smoothed,
+                    journal_cy + (cy - journal_cy) * smoothed,
+                    journal_cz,
+                ];
+                (zoom, pos)
+            }
+            None => (1.0, [journal_cx, journal_cy, journal_cz]),
+        };
+        let (face_w, face_h) =
+            crate::scenes::journal_transition::book_cover_face_extents_xy(w, journal_zoom);
+        frame.object3d(Object3d {
+            pos: journal_pos,
+            extents: [
+                face_w,
+                layout.mm(crate::scenes::journal_transition::BOOK_SPINE_THICKNESS_MM)
+                    * journal_zoom,
+                face_h,
+            ],
+            rotation: cam_rot,
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Book {
+                spine_label: std::borrow::Cow::Borrowed("Journal"),
+                pick_id: Some(PICK_JOURNAL_BOOK),
+                open_amount: self.journal_open_amount,
+            },
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("shop.props.journal"),
+        });
+
         for (rect, color) in self.particles.instances() {
             frame.quad(GpuInstance { rect, color });
         }
@@ -2079,6 +2103,38 @@ impl ShopScene {
             "Mahjuro — Shop (Round {}) — Gold: {}",
             self.came_from_round, shop.gold
         );
+
+        // Journal pre-pass: while the open-book mesh has its cover swung
+        // open at all (steady focus or mid-transition), build a UiFrame
+        // for the embedded `YakuJournalScene` and stash it on
+        // `journal_prepass_frame`. The application loop renders that
+        // frame into `journal_scene_texture` before the main shop pass,
+        // and the book mesh's leather shader samples that texture in
+        // screen space — so the page region reads as a window cut
+        // through into the post-transition scene rather than a flat
+        // baked decal. At full zoom the page covers the viewport and
+        // the post-transition `YakuJournalScene` push is a visual no-op.
+        if self.journal_open_amount > 0.001 {
+            let scratch = crate::scenes::YakuJournalScene::new();
+            let inner_ctx = DrawCtx {
+                layout: ctx.layout,
+                anim: ctx.anim,
+                run: ctx.run,
+                progress: ctx.progress,
+                active_profile: ctx.active_profile,
+                game_in_progress: ctx.game_in_progress,
+                proj: ctx.proj,
+                picked_gameplay_object: ctx.picked_gameplay_object,
+                picked_shop_object: ctx.picked_shop_object,
+                debug_visibility: ctx.debug_visibility,
+                ui_scale: ctx.ui_scale,
+                modal_active: ctx.modal_active,
+                arrange_preview: ctx.arrange_preview.clone(),
+                shop_smoke_tuning: ctx.shop_smoke_tuning,
+            };
+            let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
+            frame.journal_prepass_frame = Some(Box::new(prepass));
+        }
 
         frame
     }

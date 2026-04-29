@@ -2,8 +2,10 @@
 
 #[path = "wgpu_renderer/init.rs"]
 mod init;
+#[path = "wgpu_renderer/journal_target.rs"]
+mod journal_target;
 #[path = "wgpu_renderer/resources.rs"]
-mod resources;
+pub(crate) mod resources;
 #[path = "wgpu_renderer/runtime.rs"]
 mod runtime;
 #[path = "wgpu_renderer/showcase.rs"]
@@ -26,7 +28,12 @@ use winit::window::Window;
 use crate::core::relic::{RelicId, RelicRenderMaterial, relic_visual};
 use crate::core::tile::{Suit, Tile};
 use crate::core::tile_pack::TilePackKind;
+use crate::render::abacus_mesh::{
+    build_abacus_earth_beads_mesh, build_abacus_heaven_beads_mesh, build_abacus_mesh,
+};
+use crate::render::bell_tassel_mesh::build_bell_tassel_mesh;
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
+use crate::render::book_mesh::{build_book_body_mesh, build_book_cover_mesh};
 use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
 use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
@@ -58,8 +65,9 @@ use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::primitive::MeshId;
 use crate::render::relic_dish::{
-    build_dish_mesh, build_pack_mesh, build_relic_mesh, build_relic_mesh_from_rgba,
-    build_round_dish_mesh, build_shop_action_prop_mesh, build_tent_card_mesh,
+    build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
+    build_relic_mesh_from_rgba, build_round_dish_mesh, build_shop_action_prop_mesh,
+    build_tent_card_mesh,
 };
 use crate::render::relic_pipeline::spawn_relic_loader;
 use crate::render::ribbon_mesh::build_ribbon_mesh;
@@ -67,6 +75,7 @@ use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
     build_river_mesh,
 };
+use crate::render::shop_bell_mesh::build_shop_bell_mesh;
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
@@ -75,7 +84,7 @@ use crate::render::table_transform::{
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
-use crate::render::texture_upload::load_pack_textures;
+use crate::render::texture_upload::{load_pack_textures, spawn_background_loader};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::world_space::pixel_to_world;
@@ -116,6 +125,15 @@ struct BloomParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TonemapParams {
+    exposure: f32,
+    /// 0 = ACES + SDR swapchain; 1 = linear exposure only (HDR surface / journal float target).
+    mode: f32,
+    _pad: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [f32; 16],
     model: [f32; 16],
@@ -126,6 +144,8 @@ struct CameraUniform {
     /// offset procedural noise so every tile's tortoise-shell pattern (and
     /// future material variations) is unique. Not all materials sample it.
     tile_seed: f32,
+    /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
+    decal_atlas_uv: [f32; 4],
 }
 
 #[repr(C)]
@@ -139,12 +159,16 @@ pub struct GpuInstance {
 /// quality tiers, tile-look choices, animation settle speeds, gamma, and
 /// the shadow/SSR toggles. Grouped so the render entry point takes one
 /// value instead of ten individual params.
+#[derive(Clone)]
 pub struct RenderSettings {
     pub smoke_quality: crate::persistence::SmokeQuality,
     pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
+    /// Which procedural surface the table mesh routes through (walnut wood
+    /// or green felt). Matches the user's Options-scene choice.
+    pub surface_kind: crate::persistence::SurfaceKind,
     /// Subdirectory of `assets/sets/` whose PNGs should be used for tile faces.
     pub tileset_name: String,
     pub draw_settle_speed: f32,
@@ -474,6 +498,8 @@ struct TilePrimitiveGpu {
 }
 
 /// A relic icon to draw as a textured quad at a screen-space rect.
+/// (Struct retained for draw payloads; fields unused since glossary relic hovers were removed.)
+#[allow(dead_code)]
 pub struct RelicIcon {
     /// Position in screen pixels: [x, y, w, h].
     pub rect: [f32; 4],
@@ -482,7 +508,7 @@ pub struct RelicIcon {
 }
 
 /// Horizontal alignment of text inside its rect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum TextAlign {
     Left,
     #[default]
@@ -512,10 +538,9 @@ pub struct TextLabel {
     pub font_px: Option<f32>,
     /// Horizontal alignment within the rect.
     pub align: TextAlign,
-    /// Suppress glossary-term tooltip detection on this label.  Set on labels
-    /// that are part of an element with its own dedicated hover tooltip
-    /// (e.g. yaku progress cards), so terms inside them don't get underlined
-    /// or trigger nested tooltips.
+    /// Legacy flag from the removed glossary-hover pass; kept so call sites
+    /// stay stable.
+    #[allow(dead_code)]
     pub no_glossary: bool,
     /// Horizontal scroll offset in pixels (for marquee-style text).
     /// Shifts the rasterised text leftward by this many pixels so the
@@ -536,6 +561,40 @@ impl Default for TextLabel {
         }
     }
 }
+
+/// Outer cache key for a rasterized text label: the "shape" of the label —
+/// font kind, integer-quantized font_px, rect width/height in px, alignment,
+/// integer-quantized scroll offset. Cheap to hash, no allocation. The inner
+/// map is keyed on the text string itself, so hit-path lookups can borrow
+/// `&str` and avoid allocating a `String` to probe with.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct TextLabelShapeKey {
+    /// Font kind: `false` = ui_font, `true` = emoji-fallback path.
+    emoji_path: bool,
+    /// Font size in px, quantized to int. `None` means auto-size from rect.
+    font_px: Option<u32>,
+    /// Rasterized texture width in px (rect.w clamped to [1, 16384]).
+    width_px: u32,
+    /// Rasterized texture height in px (rect.h clamped to [1, 16384]).
+    height_px: u32,
+    align: TextAlign,
+    /// Scroll offset in px, quantized to int. Distinct values still rasterize
+    /// distinct entries; identical-offset frames collide.
+    scroll_offset_px: i32,
+}
+
+/// Cached GPU resources for a rasterized text label. The texture is owned
+/// here; the `bind_group` is cloned out into per-frame `TextDraw`s.
+struct CachedTextLabel {
+    #[allow(dead_code)]
+    tex: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    /// Last frame on which this entry was used, used for TTL eviction.
+    last_used: u64,
+}
+
+/// Frames an unused entry stays in `text_label_cache` before eviction.
+const TEXT_CACHE_TTL_FRAMES: u64 = 120;
 
 /// GPU resources for a single hand tile.
 ///
@@ -564,6 +623,8 @@ struct HandTileGpu {
 
 /// GPU resources for a showcase tile (pack celebration, hand strip, choose-tiles grid, etc.).
 struct ShowcaseTileGpu {
+    /// Sub-rect within `showcase_decal_atlas` for this tile identity (see `tile_3d.wgsl`).
+    decal_atlas_uv: [f32; 4],
     uniform_buffer: wgpu::Buffer,
     bind_groups: Vec<wgpu::BindGroup>,
     /// Outline shell uniform + bind groups — always allocated so the bind
@@ -572,6 +633,8 @@ struct ShowcaseTileGpu {
     outline_bind_groups: Vec<wgpu::BindGroup>,
     shadow_uniform_buffer: wgpu::Buffer,
     shadow_bind_group: wgpu::BindGroup,
+    /// Last-uploaded shadow caster uniform — skips writes + shadow depth pass when static.
+    cached_shadow_caster: crate::render::lit_mesh::ShadowCasterUniform,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
@@ -818,13 +881,32 @@ pub struct WgpuRenderer {
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
         HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+    /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
+    debuff_marker_overlay: Option<TileFaceOverlayGpu>,
+    /// Cached text-label rasterizations. Two-level map so the hit path can
+    /// borrow `&str` for the text component (stdlib `HashMap<String, _>`
+    /// accepts `&str` via `Borrow<str>`) — avoids cloning every label's text
+    /// just to probe the cache. Rect/color animate per-frame and live on the
+    /// per-frame instance buffer instead. Entries are evicted when their
+    /// `last_used` frame stamp falls more than `TEXT_CACHE_TTL_FRAMES` behind
+    /// `text_cache_frame`.
+    text_label_cache: HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
+    /// Monotonically increasing frame counter for `text_label_cache` eviction.
+    text_cache_frame: u64,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     // --- Text overlay pipeline ---
     text_pipeline: wgpu::RenderPipeline,
+    /// Same as `text_pipeline` but `Rgba16Float` color attachment (journal prepass).
+    text_pipeline_scene_hdr: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    /// Globals + text bind groups — shared by swapchain-format text/image pipelines.
+    text_overlay_pipeline_layout: wgpu::PipelineLayout,
+    text_shader_module: wgpu::ShaderModule,
+    image_shader_module: wgpu::ShaderModule,
     // --- Image quad pipeline (full-colour textures for relic icons) ---
     image_pipeline: wgpu::RenderPipeline,
+    image_pipeline_scene_hdr: wgpu::RenderPipeline,
     ui_font: Option<fontdue::Font>,
     emoji_font: Option<fontdue::Font>,
     pub size: winit::dpi::PhysicalSize<u32>,
@@ -898,6 +980,12 @@ pub struct WgpuRenderer {
     /// pointer motion — otherwise a static cursor over an orbiting/swaying
     /// camera would emit continuous puffs as the unprojected world hit drifts.
     prev_cursor_screen: Option<(f32, f32)>,
+    /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
+    prev_frame_shadows_enabled: bool,
+    /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
+    showcase_decal_atlas: Option<crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu>,
+    /// Tileset name the atlas was baked for; rebuilt when Options tileset changes.
+    showcase_decal_atlas_tileset: Option<String>,
 
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
@@ -914,14 +1002,35 @@ pub struct WgpuRenderer {
     /// Sampler used by the SSR pass for both the scene-history colour
     /// texture and the depth snapshot.
     lit_mesh_ssr_sampler: wgpu::Sampler,
-    /// Snapshot of the previous frame's swapchain colour. Read by the
+    /// Snapshot of the previous frame's linear HDR scene colour. Read by the
     /// lacquered floor as the SSR source.
     scene_prev_texture: wgpu::Texture,
     scene_prev_view: wgpu::TextureView,
-    /// Current frame's full scene color, rendered offscreen before bloom
-    /// and final composite into the swapchain.
+    /// Current frame's linear HDR scene color (`Rgba16Float`), rendered offscreen
+    /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
+    /// Offscreen color texture that the embedded yaku-journal scene
+    /// renders into. The shop's open-book mesh samples this view as
+    /// the page-spread albedo, so the journal content appears literally
+    /// painted on the open pages. 1024×1024, RGBA8 sRGB. Cleared each
+    /// frame the journal is being shown; the leather shader's page
+    /// sentinel branch reads `albedo_tex` for fragments where
+    /// `uv.x > 1.5` (page faces tagged in `book_mesh.rs`).
+    pub(crate) journal_page_texture: wgpu::Texture,
+    /// Fullscreen offscreen target for the live GPU render of the
+    /// yaku-journal scene. The book mesh's leather shader samples this
+    /// in screen space (not UV) so the rendered scene reads as a window
+    /// cut through the page region. Window-sized; resized in `resize()`.
+    pub(crate) journal_scene_texture: wgpu::Texture,
+    pub(crate) journal_scene_view: wgpu::TextureView,
+    /// Generation counter, bumped every time `journal_scene_view` is
+    /// recreated (resize, surface reconfigure, etc.). Cached bind groups
+    /// that bind that view stamp this counter and re-bind when it
+    /// drifts. Without it, a destroyed-texture validation error fires
+    /// the first frame after resize because the cached bind group still
+    /// holds a stale view.
+    pub(crate) journal_scene_view_generation: u32,
     bloom_extract_pipeline: wgpu::RenderPipeline,
     bloom_blur_pipeline: wgpu::RenderPipeline,
     bloom_composite_pipeline: wgpu::RenderPipeline,
@@ -937,6 +1046,20 @@ pub struct WgpuRenderer {
     bloom_ping_view: wgpu::TextureView,
     bloom_pong_texture: wgpu::Texture,
     bloom_pong_view: wgpu::TextureView,
+    /// Scene + bloom composite in linear HDR before tonemap → swapchain / journal.
+    post_bloom_texture: wgpu::Texture,
+    post_bloom_view: wgpu::TextureView,
+    tonemap_pipeline: wgpu::RenderPipeline,
+    tonemap_rgba16f_pipeline: wgpu::RenderPipeline,
+    tonemap_bind_group_layout: wgpu::BindGroupLayout,
+    tonemap_shader_module: wgpu::ShaderModule,
+    tonemap_pipeline_layout: wgpu::PipelineLayout,
+    /// Surface format used when HDR is off (or unavailable).
+    swapchain_sdr_format: wgpu::TextureFormat,
+    /// Whether `Rgba16Float` was in the surface capabilities at init.
+    swapchain_hdr_available: bool,
+    /// Global exposure applied in the tonemap pass (linear HDR → display).
+    pub tonemap_exposure: f32,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -944,6 +1067,8 @@ pub struct WgpuRenderer {
     /// ghost trails). Alpha-blended, no depth write — same shader and bind
     /// group layouts as `lit_mesh_pipeline`.
     lit_mesh_blended_pipeline: wgpu::RenderPipeline,
+    /// Felt fluff shells: instanced `vs_felt_shell_instanced` + shared table uniform.
+    lit_mesh_felt_shell_instanced_pipeline: wgpu::RenderPipeline,
     /// 1×1 white texture used as a placeholder albedo for procedural meshes
     /// that don't sample from a texture.
     lit_mesh_white_view: wgpu::TextureView,
@@ -993,6 +1118,17 @@ pub struct WgpuRenderer {
     candle_instances: Vec<[LitMeshInstance; 2]>,
     /// Single uniform buffer + bind group for the gameplay-scene table.
     table_instance: LitMeshInstance,
+    /// How many felt shell-fluff layers to draw this frame (instanced in one
+    /// draw using `lit_mesh_felt_shell_instanced_pipeline`). Set by
+    /// `apply_render_settings` from `effects_quality.felt_shell_count()` (max 10).
+    pub(super) active_felt_shell_count: usize,
+    /// Uploaded to `SsrGlobals.felt.x` — procedural felt shader tier (see
+    /// [`crate::persistence::EffectsQuality::felt_shader_lod`]).
+    pub(super) felt_shader_lod: f32,
+    /// Active material params for the gameplay-scene table. Switched between
+    /// `lacquered_wood()` and `felt_green()` by `apply_render_settings`
+    /// based on the user's `SurfaceKind` choice.
+    pub(super) table_material: MaterialParams,
     /// Pre-allocated per-relic-placeholder instances. Sized at startup to
     /// match `MAX_RELIC_SLOTS`; indexed by placement order each frame.
     relic_instances: Vec<LitMeshInstance>,
@@ -1129,12 +1265,19 @@ pub struct WgpuRenderer {
     // ── Skeuomorphic gameplay HUD meshes (phase 1 infrastructure) ──────
     bone_tablet_mesh: LitMeshGpu,
     wood_tablet_mesh: LitMeshGpu,
+    book_mesh: LitMeshGpu,
+    book_cover_mesh: LitMeshGpu,
     bowl_mesh: LitMeshGpu,
     mirror_mesh: LitMeshGpu,
     tally_stick_base_mesh: LitMeshGpu,
     tally_stick_tip_mesh: LitMeshGpu,
     yaku_tablet_instances: Vec<LitMeshInstance>,
     wood_tablet_instances: Vec<LitMeshInstance>,
+    book_instances: Vec<LitMeshInstance>,
+    /// Per-book front-cover instances. Drawn as a sibling to
+    /// `book_instances` with an extra hinge rotation around the local
+    /// spine axis so the cover can swing open. One slot per book.
+    book_cover_instances: Vec<LitMeshInstance>,
     bowl_instances: Vec<LitMeshInstance>,
     mirror_instances: Vec<LitMeshInstance>,
     /// Per-stick instances for the tally-counter fans. Each visible stick
@@ -1201,6 +1344,9 @@ pub struct WgpuRenderer {
     /// renderer walks the frame's draw cmds; consumed by
     /// `pick_debug_object`.
     pub(super) last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
+    /// Latest gameplay fog-wall horizon (normalized screen Y). Used for arrange-mode
+    /// screen-band picking when the cursor ray misses the invisible pick slab.
+    pub(super) last_gameplay_fog_wall_horizon_y: Option<f32>,
     /// Trimesh pickables for objects whose tight silhouette differs enough
     /// from an AABB that the box feels wrong (lamp cord + cone shade).
     /// `(name, model, triangle_list_ref)` — triangles are stored per mesh
@@ -1290,10 +1436,10 @@ pub enum GameplayPick {
     /// tablets aren't clickable, just informational).
     YakuTablet(usize),
     /// Index into the most recent `WoodTabletBatch` — 0 = sort suit,
-    /// 1 = sort rank, 2 = yaku journal book. The play-hand action is no
-    /// longer a wood tablet — it's now the bronze mirror, picked
-    /// separately as `BronzeMirror`.
+    /// 1 = sort rank, 2 = cash-in tablet when structure is committed.
     WoodTablet(usize),
+    /// Leather-bound Yaku Journal book (same mesh as the shop).
+    JournalBook,
     /// The discard bowl. Click target = commit the selected discard.
     DiscardBowl,
     /// The bronze mirror. Click target = play the selected hand.
@@ -1329,6 +1475,8 @@ pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
 /// Maximum number of wood action tablets per frame (sort suit, sort rank, play).
 pub const MAX_WOOD_TABLET_SLOTS: usize = 8;
+/// Maximum number of leather books per frame (shop uses 1: journal).
+pub const MAX_BOOK_SLOTS: usize = 2;
 /// Maximum number of bowls per frame (gameplay uses 1: discard).
 pub const MAX_BOWL_SLOTS: usize = 2;
 /// Maximum number of bronze mirrors per frame (gameplay uses 1: play hand).
@@ -1561,6 +1709,7 @@ impl WgpuRenderer {
     }
 
     /// Returns true while any tile animation (spin or lift lerp) is still running.
+    #[allow(dead_code)] // Was used for redraw gating; kept for diagnostics / future idle paths.
     pub fn is_spinning(&self) -> bool {
         const SPIN_SECS: f32 = 0.4;
         let spin_active = if let Some((_slot, start)) = self.focus_spin {

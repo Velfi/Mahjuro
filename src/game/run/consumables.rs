@@ -165,9 +165,18 @@ impl RunState {
     /// The wall needs enough tiles to deal a full hand each round.
     const MAX_REMOVED_TILES: usize = 56;
 
-    /// Permanently destroy the selected tiles from the hand (Kiln talisman).
-    /// Removed tile IDs are recorded so they never appear in future walls.
-    /// Returns the number of tiles actually destroyed.
+    /// Canonical *tile destroyed* path (Kiln talisman).
+    ///
+    /// The "destroyed" keyword is the
+    /// player-facing name for permanent removal of a tile from a run; for
+    /// tiles, that means writing the tile id into `removed_tile_ids` so the
+    /// per-round `Wall::from_filtered_with_packs` rebuild excludes it for
+    /// the rest of the run. New tile-destruction effects (Taotie's devour
+    /// is the other current site, in `scoring_flow.rs`) should follow the
+    /// same primitive: insert into `removed_tile_ids`, drop the tile's
+    /// enhancement, and emit `GameEvent::TilesDestroyed`. Round-only effects
+    /// (e.g. Tempest's wall burn) are *not* destruction — they just draw off
+    /// this round's wall and leave `removed_tile_ids` untouched.
     pub fn destroy_selected_tiles(&mut self, bus: &mut crate::game::event_bus::EventBus) -> usize {
         let budget = Self::MAX_REMOVED_TILES.saturating_sub(self.removed_tile_ids.len());
         let mut destroyed = 0usize;

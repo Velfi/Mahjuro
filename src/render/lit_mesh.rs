@@ -6,6 +6,8 @@
 //! branches on `material_kind` so candles and the wood table can share one
 //! pipeline.
 
+use std::cell::RefCell;
+
 use wgpu::util::DeviceExt;
 
 use crate::render::tile_glb::Vertex3dTex;
@@ -100,6 +102,24 @@ pub enum MaterialKind {
     /// so the ceramic reads as glazed rather than matte plastic.
     /// Composites engraved decals (same `has_decal` path as Plain).
     Porcelain = 16,
+    /// Polished brass — smooth conductor with a wider warm-gold rim halo
+    /// than `Metal` and a touch more diffuse retained, so brass fittings
+    /// read as bright polished metal in overhead light without going
+    /// near-black off-axis. Use for hanging brass props (bells, rails).
+    Brass = 17,
+    /// Bookbinding leather — warm dielectric with procedural grain,
+    /// broad soft sheen (no tight pinpoint), subtle Fresnel rim, and a
+    /// little wrap-SSS so the shadow side stays warm rather than dead
+    /// black. `base_color` drives the leather tint (oxblood, cordovan,
+    /// tan). Composites engraved decals via the same `has_decal` path
+    /// as Plain/LacqueredWoodFlat.
+    Leather = 18,
+    /// Mahjong-parlor green felt — procedural baize with anisotropic
+    /// fuzz (fibers oriented mostly along Y), broad low-strength sheen,
+    /// and slight tone variance across the surface. Routed by the
+    /// table-mesh draw when the user picks `SurfaceKind::GreenFelt`.
+    /// No clearcoat, no SSR — felt is a diffuse dielectric.
+    FeltGreen = 19,
 }
 
 /// Compact per-mesh material parameters.
@@ -136,10 +156,21 @@ impl MaterialParams {
             specular_power: 96.0,
         }
     }
+    pub fn felt_green() -> Self {
+        Self {
+            kind: MaterialKind::FeltGreen,
+            // Fallback tint if the procedural sampler is bypassed; the shader
+            // recolours from its own palette on the felt branch.
+            base_color: [0.07, 0.20, 0.10, 1.0],
+            // Felt has no pinpoint highlight — broad soft sheen only.
+            specular_strength: 0.04,
+            specular_power: 8.0,
+        }
+    }
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MeshUniform {
     pub view_proj: [f32; 16],
     pub model: [f32; 16],
@@ -190,7 +221,7 @@ impl LitMeshGpu {
 /// model matrix. The shadow vertex shader (`shaders/shadow.wgsl`) reads
 /// this and emits clip positions in light space.
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowCasterUniform {
     pub light_view_proj: [f32; 16],
     pub model: [f32; 16],
@@ -229,6 +260,19 @@ pub struct LitMeshInstance {
     pub decal_texture: Option<wgpu::Texture>,
     pub decal_label_hash: u64,
     pub decal_size: (u32, u32),
+    /// Generation stamp for the relief-slot view this instance's bind
+    /// group was last bound against. The journal book body uses the
+    /// renderer's `journal_scene_view_generation` here so a recreated
+    /// (post-resize) view forces re-binding before the next draw — the
+    /// alternative is a "Texture has been destroyed" validation error
+    /// the first frame after resize. Other lit-mesh instances bind a
+    /// stable per-renderer view at slot 3 and ignore this field.
+    pub relief_view_generation: u32,
+    /// Last CPU-side copy of the main-pass uniform; skips redundant
+    /// `queue.write_buffer` when nothing changed (big win for static shop/menu).
+    last_main_uniform: RefCell<MeshUniform>,
+    /// Last shadow caster uniform — paired with shadow passes skipping when idle.
+    last_shadow_uniform: RefCell<ShadowCasterUniform>,
 }
 
 impl LitMeshInstance {
@@ -241,14 +285,15 @@ impl LitMeshInstance {
         sampler: &wgpu::Sampler,
     ) -> Self {
         let identity = glam::Mat4::IDENTITY.to_cols_array();
+        let initial_main = MeshUniform {
+            view_proj: identity,
+            model: identity,
+            base_color: [1.0; 4],
+            material_params: [0.0; 4],
+        };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("lit-mesh-uniform"),
-            contents: bytemuck::bytes_of(&MeshUniform {
-                view_proj: identity,
-                model: identity,
-                base_color: [1.0; 4],
-                material_params: [0.0; 4],
-            }),
+            contents: bytemuck::bytes_of(&initial_main),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -273,12 +318,13 @@ impl LitMeshInstance {
                 },
             ],
         });
+        let initial_shadow = ShadowCasterUniform {
+            light_view_proj: identity,
+            model: identity,
+        };
         let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("lit-mesh-shadow-uniform"),
-            contents: bytemuck::bytes_of(&ShadowCasterUniform {
-                light_view_proj: identity,
-                model: identity,
-            }),
+            contents: bytemuck::bytes_of(&initial_shadow),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -297,6 +343,9 @@ impl LitMeshInstance {
             decal_texture: None,
             decal_label_hash: 0,
             decal_size: (0, 0),
+            relief_view_generation: u32::MAX,
+            last_main_uniform: RefCell::new(initial_main),
+            last_shadow_uniform: RefCell::new(initial_shadow),
         }
     }
 
@@ -420,17 +469,25 @@ impl LitMeshInstance {
 
     /// Write the per-instance shadow caster uniform with the current
     /// frame's light view-projection and the instance's model matrix.
+    /// Upload shadow caster uniform if it differs from the last upload.
+    /// Returns `true` when the GPU buffer was written (shadow map must redraw).
     pub fn write_shadow_uniform(
         &self,
         queue: &wgpu::Queue,
         light_view_proj: [f32; 16],
         model: glam::Mat4,
-    ) {
+    ) -> bool {
         let u = ShadowCasterUniform {
             light_view_proj,
             model: model.to_cols_array(),
         };
+        let mut last = self.last_shadow_uniform.borrow_mut();
+        if *last == u {
+            return false;
+        }
+        *last = u;
         queue.write_buffer(&self.shadow_uniform_buffer, 0, bytemuck::bytes_of(&u));
+        true
     }
 
     pub fn write_uniform(
@@ -487,6 +544,11 @@ impl LitMeshInstance {
                 params_w,
             ],
         };
+        let mut last = self.last_main_uniform.borrow_mut();
+        if *last == u {
+            return;
+        }
+        *last = u;
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
     }
 
@@ -512,6 +574,11 @@ impl LitMeshInstance {
                 0.0,
             ],
         };
+        let mut last = self.last_main_uniform.borrow_mut();
+        if *last == u {
+            return;
+        }
+        *last = u;
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
     }
 }
@@ -595,6 +662,9 @@ pub struct SsrGlobals {
     /// x = enabled (0/1), y = max_distance (world units), z = stride
     /// (world units per step), w = max_steps
     pub params: [f32; 4],
+    /// x = felt procedural LOD (`EffectsQuality::felt_shader_lod`): 0 =
+    /// minimal (effects Off), 1 = Low, 2 = Medium/High full detail.
+    pub felt: [f32; 4],
 }
 
 /// Bind-group layout for the lit_mesh SSR group (group 3): SSR globals
@@ -701,6 +771,195 @@ pub fn push_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, aabb: A
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+}
+
+/// Right circular cylinder with axis parallel to **+Y**, spanning `y0..y1`,
+/// circular footprint centered at `(cx, cz)` in XZ. Includes both caps and a
+/// smooth-shaded barrel (radial normals). UVs zeroed.
+pub fn push_cylinder_y(
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+    cx: f32,
+    cz: f32,
+    y0: f32,
+    y1: f32,
+    radius: f32,
+    segments: usize,
+) {
+    debug_assert!(y1 > y0);
+    let n = segments.max(4);
+    let two_pi = std::f32::consts::TAU;
+
+    // Barrel (radial normals).
+    let barrel_bot = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, y0, cz + radius * st],
+            normal: [ct, 0.0, st],
+            uv: [0.0, 0.0],
+        });
+    }
+    let barrel_top = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, y1, cz + radius * st],
+            normal: [ct, 0.0, st],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = i as u32;
+        let i1 = ((i + 1) % n) as u32;
+        let b0 = barrel_bot + i0;
+        let b1 = barrel_bot + i1;
+        let t0 = barrel_top + i0;
+        let t1 = barrel_top + i1;
+        indices.extend_from_slice(&[b0, b1, t1, b0, t1, t0]);
+    }
+
+    // Bottom cap (−Y).
+    let c_bot = vertices.len() as u32;
+    vertices.push(Vertex3dTex {
+        position: [cx, y0, cz],
+        normal: [0.0, -1.0, 0.0],
+        uv: [0.0, 0.0],
+    });
+    let ring_bot = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, y0, cz + radius * st],
+            normal: [0.0, -1.0, 0.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = ring_bot + i as u32;
+        let i1 = ring_bot + ((i + 1) % n) as u32;
+        indices.extend_from_slice(&[c_bot, i0, i1]);
+    }
+
+    // Top cap (+Y).
+    let c_top = vertices.len() as u32;
+    vertices.push(Vertex3dTex {
+        position: [cx, y1, cz],
+        normal: [0.0, 1.0, 0.0],
+        uv: [0.0, 0.0],
+    });
+    let ring_top = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, y1, cz + radius * st],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = ring_top + i as u32;
+        let i1 = ring_top + ((i + 1) % n) as u32;
+        indices.extend_from_slice(&[c_top, i1, i0]);
+    }
+}
+
+/// Right circular cylinder with axis parallel to **+Z**, spanning `z0..z1`,
+/// circular footprint centered at `(cx, cy)` in XY. Includes both caps and a
+/// smooth-shaded barrel (radial XY normals). UVs zeroed.
+pub fn push_cylinder_z(
+    vertices: &mut Vec<Vertex3dTex>,
+    indices: &mut Vec<u32>,
+    cx: f32,
+    cy: f32,
+    z0: f32,
+    z1: f32,
+    radius: f32,
+    segments: usize,
+) {
+    debug_assert!(z1 > z0);
+    let n = segments.max(4);
+    let two_pi = std::f32::consts::TAU;
+
+    let barrel_bot = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, cy + radius * st, z0],
+            normal: [ct, st, 0.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    let barrel_top = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, cy + radius * st, z1],
+            normal: [ct, st, 0.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = i as u32;
+        let i1 = ((i + 1) % n) as u32;
+        let b0 = barrel_bot + i0;
+        let b1 = barrel_bot + i1;
+        let t0 = barrel_top + i0;
+        let t1 = barrel_top + i1;
+        indices.extend_from_slice(&[b0, b1, t1, b0, t1, t0]);
+    }
+
+    // Bottom cap (−Z).
+    let c_bot = vertices.len() as u32;
+    vertices.push(Vertex3dTex {
+        position: [cx, cy, z0],
+        normal: [0.0, 0.0, -1.0],
+        uv: [0.0, 0.0],
+    });
+    let ring_bot = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, cy + radius * st, z0],
+            normal: [0.0, 0.0, -1.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = ring_bot + i as u32;
+        let i1 = ring_bot + ((i + 1) % n) as u32;
+        indices.extend_from_slice(&[c_bot, i1, i0]);
+    }
+
+    // Top cap (+Z).
+    let c_top = vertices.len() as u32;
+    vertices.push(Vertex3dTex {
+        position: [cx, cy, z1],
+        normal: [0.0, 0.0, 1.0],
+        uv: [0.0, 0.0],
+    });
+    let ring_top = vertices.len() as u32;
+    for i in 0..n {
+        let t = two_pi * i as f32 / n as f32;
+        let (ct, st) = (t.cos(), t.sin());
+        vertices.push(Vertex3dTex {
+            position: [cx + radius * ct, cy + radius * st, z1],
+            normal: [0.0, 0.0, 1.0],
+            uv: [0.0, 0.0],
+        });
+    }
+    for i in 0..n {
+        let i0 = ring_top + i as u32;
+        let i1 = ring_top + ((i + 1) % n) as u32;
+        indices.extend_from_slice(&[c_top, i0, i1]);
     }
 }
 

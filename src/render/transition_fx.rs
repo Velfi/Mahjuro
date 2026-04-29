@@ -5,6 +5,22 @@ use crate::render::draw_cmd::{TileFaceQuad, UiFrame};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::GpuInstance;
 
+/// ~1080p; scales particle-style transitions so tile count tracks screen area.
+const TRANSITION_REF_AREA: f32 = 1920.0 * 1080.0;
+
+/// Grid overlays target ~`divisor` columns via `w / divisor`; clamps only enforce a
+/// readable minimum size and stop tiles from dominating very small windows.
+fn grid_overlay_tile_short_px(w: f32, divisor: f32, min_px: f32, max_frac_w: f32) -> f32 {
+    (w / divisor).clamp(min_px, w * max_frac_w)
+}
+
+/// Fixed-layout transitions at reference resolution use `base_at_ref` tiles; scales with
+/// window area (capped) so density stays similar from laptop to 4K.
+fn scaled_overlay_tile_count(base_at_ref: f32, w: f32, h: f32, min_c: usize, max_c: usize) -> usize {
+    let n = (base_at_ref * w * h / TRANSITION_REF_AREA).round() as i32;
+    n.max(min_c as i32).min(max_c as i32) as usize
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OverlayTransitionKind {
     TileTeeth,
@@ -44,9 +60,9 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
         color: color::alpha(color::OBSIDIAN, 0.14 + cover * 0.36),
     });
 
-    let tile_size = (w / 18.5).clamp(40.0, 68.0);
+    let tile_size = grid_overlay_tile_short_px(w, 18.5, 30.0, 0.056);
     let tooth_overlap = tile_size * 0.18;
-    let column_step = (tile_size * 1.22).max(42.0);
+    let column_step = tile_size * 1.22;
     let cols = (w / column_step).ceil() as usize + 1;
     let row_step = tile_size - tooth_overlap;
     let rows = (h / row_step).ceil() as usize + 2;
@@ -133,7 +149,7 @@ fn push_forest_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
         color: color::alpha(color::OBSIDIAN, 0.12 + cover * 0.42),
     });
 
-    let tile_w = (w / 17.0).clamp(42.0, 72.0);
+    let tile_w = grid_overlay_tile_short_px(w, 17.0, 30.0, 0.062);
     let tile_h = tile_w * 1.34;
     let col_step = tile_w * 0.74;
     let cols = (w / col_step).ceil() as usize + 3;
@@ -193,7 +209,7 @@ fn push_maelstrom(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
     });
 
     let seq = tile_sequence();
-    let count = 96usize;
+    let count = scaled_overlay_tile_count(96.0, w, h, 56, 220);
     let max_radius = w.max(h) * 0.72;
     let min_radius = w.min(h) * 0.08;
     let cx = w * (0.52 + (t * PI * 1.3).sin() * 0.05);
@@ -208,7 +224,8 @@ fn push_maelstrom(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
         let angle = phase + f * PI * 5.6 + arm * PI * 0.5;
         let radius = min_radius + (1.0 - smoothstep(cover)) * max_radius * (0.20 + f * 0.92);
         let orbit = radius + (f * PI * 5.0 + t * PI * 2.0).sin() * w.min(h) * 0.02;
-        let size = (w.min(h) * (0.045 + (1.0 - f) * 0.055)).clamp(34.0, 86.0);
+        let min_d = w.min(h);
+        let size = (min_d * (0.045 + (1.0 - f) * 0.055)).clamp(min_d * 0.028, min_d * 0.078);
         let tile_w = size;
         let tile_h = size * 1.34;
         let left = cx + angle.cos() * orbit - tile_w * 0.5;
@@ -253,7 +270,8 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
     });
 
     let arms = 4usize;
-    let per_arm = 26usize;
+    let total_spiral = scaled_overlay_tile_count(104.0, w, h, 48, 220);
+    let per_arm = ((total_spiral + arms - 1) / arms).max(12);
     let seq = tile_sequence();
     let max_radius = w.max(h) * 0.62;
     let spin = t * PI * 1.6;
@@ -273,7 +291,8 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
             let drift = ((t * PI * 2.8) + i as f32 * 0.55 + arm as f32).sin() * w.min(h) * 0.012;
             let orbit_x = (radius + drift) * angle.cos();
             let orbit_y = (radius * 0.64 + drift * 0.6) * angle.sin();
-            let size = (w.min(h) * (0.040 + (1.0 - f) * 0.040)).clamp(32.0, 74.0);
+            let min_d = w.min(h);
+            let size = (min_d * (0.040 + (1.0 - f) * 0.040)).clamp(min_d * 0.026, min_d * 0.068);
             let tile_w = size;
             let tile_h = size * 1.34;
             let left = cx + orbit_x - tile_w * 0.5;
@@ -296,12 +315,13 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
         }
     }
 
-    let star_count = 18usize;
+    let star_count = scaled_overlay_tile_count(18.0, w, h, 12, 36);
     for i in 0..star_count {
         let f = i as f32 / star_count as f32;
         let angle = spin * 1.4 + f * PI * 2.0;
         let radius = max_radius * (0.70 + f * 0.28);
-        let size = (w.min(h) * 0.022).clamp(10.0, 18.0);
+        let min_dim = w.min(h);
+        let size = (min_dim * 0.022).clamp(8.0, min_dim * 0.028);
         frame.quad(GpuInstance {
             rect: [
                 cx + angle.cos() * radius - size * 0.5,
@@ -329,7 +349,7 @@ fn push_tile_waterfall(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
         color: color::alpha(color::OBSIDIAN, 0.10 + cover * 0.38),
     });
 
-    let tile_w = (w / 19.0).clamp(38.0, 62.0);
+    let tile_w = grid_overlay_tile_short_px(w, 19.0, 28.0, 0.058);
     let tile_h = tile_w * 1.34;
     let col_step = tile_w * 1.08;
     let cols = (w / col_step).ceil() as usize + 2;
@@ -388,8 +408,10 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     let seq = tile_sequence();
     let fan_count = 4usize;
-    let per_fan = 17usize;
-    let base_size = (w.min(h) * 0.075).clamp(42.0, 80.0);
+    let total_fan = scaled_overlay_tile_count(68.0, w, h, 36, 160);
+    let per_fan = ((total_fan + fan_count - 1) / fan_count).max(8);
+    let min_d = w.min(h);
+    let base_size = (min_d * 0.075).clamp(34.0, min_d * 0.102);
     let mut quads = Vec::with_capacity(fan_count * per_fan * 3);
     let mut faces = Vec::with_capacity(fan_count * per_fan);
 

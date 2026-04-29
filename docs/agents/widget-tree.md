@@ -74,6 +74,8 @@ impl MyScene {
 
 7. **Heterogeneous rows (sliders/toggles/cycles) — handle adjustment in the scene.** `update_flat` only fires `Click(Row)` actions. For arrow-key slider adjustment or cycle stepping, read `self.tree.focused()` and apply the change in the scene's own action loop. See [`options.rs`](../../src/scenes/options.rs) `update_input` for the canonical pattern.
 
+8. **Cursor-hover tooltips are opt-in.** Tree [`Item`](../../src/ui/widget_tree.rs) and [`FlatItem`](../../src/ui/widget_tree.rs) carry an optional `tooltip`; default is none. Use [`FlatItem::with_tooltip`](../../src/ui/widget_tree.rs), [`button_id_tooltip`](../../src/ui/widget_tree.rs), or set `Item.tooltip` when building custom rows.
+
 ## Adding or reordering an item
 
 1. Add an enum variant.

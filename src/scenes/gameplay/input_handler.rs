@@ -8,14 +8,67 @@ use std::time::Instant;
 use super::GameplayScene;
 use super::cascade_hud::CascadeShowcase;
 use super::focus::{
-    FocusTarget, GameplayButton, focus_kind, focus_kind_sfx, play_select_sfx, wrap_hand_tile_focus,
+    FocusTarget, GameplayButton, focus_after_consumable_use, focus_kind, focus_kind_sfx,
+    play_select_sfx, wrap_hand_tile_focus,
 };
 use crate::core::scoring::StepKind;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
 use crate::render::animation::ENTITY_SCORE_PANEL;
+use crate::scenes::journal_transition::{
+    BOOK_SPINE_THICKNESS_MM, JournalDirection, JournalTransition, YAKU_JOURNAL_BOOK_PICK_ID,
+    book_cover_face_extents_xy,
+};
 use crate::scenes::{OverlayRequest, Scene, SceneTransition, UpdateCtx, YakuJournalScene};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{UiAction, apply_ui_actions};
+
+/// Advances journal cover-open + zoom; pushes [`YakuJournalScene`] when the
+/// forward animation completes. Returns `true` when the overlay was pushed
+/// and `update()` should return immediately.
+pub(super) fn tick_gameplay_journal_transition(
+    scene: &mut GameplayScene,
+    ctx: &mut UpdateCtx<'_>,
+    now: Instant,
+    dt: f32,
+) -> bool {
+    if scene.journal_was_open && scene.journal_transition.is_none() {
+        scene.journal_was_open = false;
+        scene.journal_transition = Some(JournalTransition {
+            start: now,
+            dir: JournalDirection::Closing,
+        });
+    }
+
+    if let Some(t) = scene.journal_transition {
+        scene.journal_open_amount = t.open_progress();
+        scene.journal_open_target = scene.journal_open_amount;
+        if t.done() {
+            match t.dir {
+                JournalDirection::Opening => {
+                    scene.journal_transition = None;
+                    scene.journal_was_open = true;
+                    *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                        Scene::YakuJournal(YakuJournalScene::new()),
+                    )));
+                    return true;
+                }
+                JournalDirection::Closing => {
+                    scene.journal_transition = None;
+                    scene.journal_open_amount = 0.0;
+                    scene.journal_open_target = 0.0;
+                }
+            }
+        }
+    } else {
+        // Closed until click — no hover/focus “peek”; only `JournalTransition` opens the cover.
+        scene.journal_open_target = 0.0;
+        let rate = 6.0;
+        let alpha = 1.0 - (-rate * dt).exp();
+        scene.journal_open_amount +=
+            (scene.journal_open_target - scene.journal_open_amount) * alpha;
+    }
+    false
+}
 
 /// Run the unified focus model, 3D-hit dispatcher, action handlers, and
 /// `apply_ui_actions` cleanup from `update()`. Returns `Some(transition)`
@@ -155,17 +208,19 @@ pub(super) fn process_focus_and_actions(
                 // Navigation overrides for the two-row action bar:
                 let overridden = match (scene.focus, dir) {
                     // LEFT from Play (commit melds) → Discard
-                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Left) => focus_rects
-                        .iter()
-                        .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Discard)))
-                        .map(|(t, _)| *t),
+                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Left) => {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| {
+                                matches!(t, FocusTarget::Button(GameplayButton::Discard))
+                            })
+                            .map(|(t, _)| *t)
+                    }
                     // RIGHT from Discard → Play (commit melds)
                     (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Right) => {
                         focus_rects
                             .iter()
-                            .find(|(t, _)| {
-                                matches!(t, FocusTarget::Button(GameplayButton::Play))
-                            })
+                            .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
                             .map(|(t, _)| *t)
                     }
                     _ => None,
@@ -182,8 +237,7 @@ pub(super) fn process_focus_and_actions(
             // against the press-time snapshot.
             if let (Some(m), Some(FocusTarget::HandTile(idx))) =
                 (scene.marquee.as_mut(), scene.focus)
-                && let Some((added, removed)) =
-                    GameEngine::apply_marquee_selection(ctx.run, m, idx)
+                && let Some((added, removed)) = GameEngine::apply_marquee_selection(ctx.run, m, idx)
                 && (added > 0 || removed > 0)
             {
                 play_select_sfx(ctx.bus, added, removed);
@@ -252,9 +306,12 @@ pub(super) fn process_focus_and_actions(
                         }
                     }
                     Some(FocusTarget::Button(GameplayButton::Journal)) => {
-                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                            Scene::YakuJournal(YakuJournalScene::new()),
-                        )));
+                        if scene.journal_transition.is_none() {
+                            scene.journal_transition = Some(JournalTransition {
+                                start: now,
+                                dir: JournalDirection::Opening,
+                            });
+                        }
                         return Some(None);
                     }
                     Some(FocusTarget::Button(b)) => {
@@ -270,16 +327,9 @@ pub(super) fn process_focus_and_actions(
                         match outcome.data {
                             CommandData::UseConsumable {
                                 result:
-                                    crate::game::run::ConsumableUseResult::Zodiac {
-                                        yaku,
-                                        new_level,
-                                    },
+                                    crate::game::run::ConsumableUseResult::Zodiac { yaku, new_level },
                             } => {
-                                log::info!(
-                                    "Used Zodiac → {} now level {}",
-                                    yaku.name(),
-                                    new_level,
-                                );
+                                log::info!("Used Zodiac → {} now level {}", yaku.name(), new_level,);
                                 let label = format!("{} Lvl.{}", yaku.name(), new_level);
                                 let src = ctx.cursor_pos;
                                 scene.score_popups.spawn(
@@ -315,10 +365,8 @@ pub(super) fn process_focus_and_actions(
                             }
                             _ => {}
                         }
-                        // Clear focus so the next press doesn't double-
-                        // fire on whatever consumable shifted into the
-                        // freed slot.
-                        scene.focus = None;
+                        let remaining = GameEngine::read_interaction(ctx.run).consumable_count;
+                        scene.focus = focus_after_consumable_use(i, remaining, &focus_rects);
                     }
                     Some(FocusTarget::Peg(_))
                     | Some(FocusTarget::Gold)
@@ -340,13 +388,38 @@ pub(super) fn process_focus_and_actions(
                 scene.marquee = None;
                 continue;
             }
-            // Cancel: clear focus AND let the existing
+            // Cancel: snap focus to the hand AND let the existing
             // clear_selection path run via apply_ui_actions.
             UiAction::Cancel => {
                 scene.held_relic_drag = None;
                 scene.marquee = None;
-                scene.focus = None;
+                scene.focus = focus_rects
+                    .iter()
+                    .find_map(|(t, _)| matches!(t, FocusTarget::HandTile(_)).then_some(*t));
                 actions_for_scene.push(a);
+                continue;
+            }
+            // X / Y as focus moves (when "X and Y quick action" is OFF):
+            // place focus on Play / Discard so the player can read its
+            // tooltip and confirm with A. We only honour the request if
+            // the corresponding button is actually present in the focus
+            // graph this frame.
+            UiAction::FocusPlayButton => {
+                if focus_rects
+                    .iter()
+                    .any(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
+                {
+                    scene.focus = Some(FocusTarget::Button(GameplayButton::Play));
+                }
+                continue;
+            }
+            UiAction::FocusDiscardButton => {
+                if focus_rects
+                    .iter()
+                    .any(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Discard)))
+                {
+                    scene.focus = Some(FocusTarget::Button(GameplayButton::Discard));
+                }
                 continue;
             }
             _ => {}
@@ -371,22 +444,19 @@ pub(super) fn process_focus_and_actions(
         use crate::render::wgpu_renderer::GameplayPick;
         let gameplay = GameEngine::read(ctx.run);
         let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
-        let journal_tablet_i: usize = if has_structure { 3 } else { 2 };
-        if matches!(
-            ctx.picked_gameplay_object,
-            Some(GameplayPick::WoodTablet(i)) if i == journal_tablet_i
-        ) {
-            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::YakuJournal(
-                YakuJournalScene::new(),
-            ))));
+        if matches!(ctx.picked_gameplay_object, Some(GameplayPick::JournalBook))
+            && scene.journal_transition.is_none()
+        {
+            scene.journal_transition = Some(JournalTransition {
+                start: now,
+                dir: JournalDirection::Opening,
+            });
             return Some(None);
         }
         let action = match ctx.picked_gameplay_object {
             Some(GameplayPick::WoodTablet(0)) => Some(UiAction::SortBySuit),
             Some(GameplayPick::WoodTablet(1)) => Some(UiAction::SortByRank),
-            Some(GameplayPick::WoodTablet(2)) if has_structure => {
-                Some(UiAction::TriggerStructure)
-            }
+            Some(GameplayPick::WoodTablet(2)) if has_structure => Some(UiAction::TriggerStructure),
             Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
             Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
             _ => None,
@@ -648,36 +718,23 @@ pub(super) fn process_focus_and_actions(
 }
 
 /// Build the relic tray (3D enamel medallions across the top of the
-/// screen), the relic-focused hover ring + tooltip, the display-only
-/// focus tooltips for pegs/gold/yaku tablets/dora, and the post-deal
-/// smoke breath / debug `B` wind gust impulses. Behaviour is a verbatim
-/// lift of the inline draw_frame chunk; relocated for organisation.
+/// screen) and the post-deal smoke breath / debug `B` wind gust impulses.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_relic_tray_and_wind(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     run: &crate::game::run::RunState,
-    gameplay: &crate::game::engine::GameplayReadModel,
-    ctx: &crate::scenes::DrawCtx<'_>,
     now: Instant,
     hand_slots: &[(f32, f32, f32, f32)],
-    is_chicken_hand: bool,
-    visible_preview_kinds: &[crate::core::yaku::YakuKind],
-    coin_pile_rect: Option<[f32; 4]>,
-    dora_rect: [f32; 4],
-    hover_quads: &mut Vec<crate::render::wgpu_renderer::GpuInstance>,
-    hover_text: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
-) -> (Vec<crate::render::draw_cmd::Object3d>, Vec<crate::render::draw_cmd::WindGust>) {
+) -> (
+    Vec<crate::render::draw_cmd::Object3d>,
+    Vec<crate::render::draw_cmd::WindGust>,
+) {
+    use super::DEBUG_WIND_DURATION;
+    use super::RELIC_GLOW_LIFETIME;
     use crate::core::relic::relic_visual;
     use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
     use crate::render::table_transform::rot_rx_ry_rz_deg;
-    use crate::render::theme::typography;
-    use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-    use crate::ui::widget::{self, TextStyle};
-    use super::focus::PegKind;
-    use super::tooltip::{push_tooltip, relic_tooltip_copy_detail, yaku_card_shape_text};
-    use super::DEBUG_WIND_DURATION;
-    use super::RELIC_GLOW_LIFETIME;
 
     // ── Relic tray (horizontal row across the top of the screen) ────
     // Each active relic renders as a face-on enamel medallion using the
@@ -788,6 +845,7 @@ pub(super) fn build_relic_tray_and_wind(
                     relic_id: rid,
                     glow,
                     silhouette: false,
+                    debuffed: run.relics.is_debuffed(rid),
                     pick_id: None,
                 },
                 hover_target: 0.0,
@@ -796,286 +854,6 @@ pub(super) fn build_relic_tray_and_wind(
             });
         }
     }
-
-    // Focus / hover detection: in cursor mode, the Phase A sync in
-    // `update()` already wrote `FocusTarget::Relic(i)` whenever the
-    // cursor was over a projected relic rect; in keyboard / controller
-    // mode the player navigates focus there with directional input.
-    // Either way, the relic tooltip and outline show whenever
-    // `self.focus` is `Some(Relic(i))`.
-    let hovered_relic_idx: Option<usize> = match scene.focus {
-        Some(FocusTarget::Relic(i)) if i < ctx.proj.relic_rects.len() => Some(i),
-        _ => None,
-    };
-    if let Some(hi) = hovered_relic_idx
-        && let (Some(rect), Some(rid)) = (
-            ctx.proj.relic_rects.get(hi),
-            relic_objects.get(hi).and_then(|o| match o.kind {
-                Object3dKind::Relic { relic_id, .. } => Some(relic_id),
-                _ => None,
-            }),
-        )
-    {
-        // Gold rim drawn around the projected screen rect — cheap
-        // 2D outline that hugs the visible 3D box.
-        let [rx, ry, rw, rh] = *rect;
-        let t = (rh * 0.04).clamp(2.0, 4.0);
-        let rim = crate::render::theme::color::CHAMPAGNE;
-        hover_quads.push(GpuInstance {
-            rect: [rx - t, ry - t, rw + t * 2.0, t],
-            color: rim,
-        });
-        hover_quads.push(GpuInstance {
-            rect: [rx - t, ry + rh, rw + t * 2.0, t],
-            color: rim,
-        });
-        hover_quads.push(GpuInstance {
-            rect: [rx - t, ry, t, rh],
-            color: rim,
-        });
-        hover_quads.push(GpuInstance {
-            rect: [rx + rw, ry, t, rh],
-            color: rim,
-        });
-
-        // Tooltip: name + description in a small dark panel anchored
-        // above the hovered relic.
-        use crate::core::relic::all_relic_defs;
-        let defs = all_relic_defs();
-        if let Some(def) = defs.iter().find(|d| d.id == rid) {
-            let mut live_desc = GameEngine::relic_live_description(ctx.run, rid);
-            if let Some(copy_detail) = relic_tooltip_copy_detail(rid, hi, run) {
-                live_desc.push_str("\n\n");
-                live_desc.push_str(&copy_detail);
-            }
-            let pad = 18.0_f32;
-            let tip_w = 440.0_f32;
-            let title_h = 38.0_f32;
-            // Pre-wrap the description so the tooltip box can grow
-            // tall enough to fit every line.
-            let body_style = TextStyle {
-                tier: typography::BODY,
-                color: crate::render::theme::color::PARCHMENT,
-                padding: 0.0,
-                align: TextAlign::Left,
-            };
-            let body_line_h = typography::size(body_style.tier, layout.window_h, ctx.ui_scale);
-            let body_step = body_line_h * 1.6;
-            let body_box = body_line_h * 1.8;
-            let body_inner_w = tip_w - pad * 2.0;
-            let wrapped_lines = widget::wrap_text(&live_desc, body_inner_w, body_line_h);
-            let body_h = (wrapped_lines.len() as f32 * body_step).max(body_box);
-            let tip_h = pad * 2.0 + title_h + body_h;
-            let mut tip_x = rx + rw * 0.5 - tip_w * 0.5;
-            let mut tip_y = ry - tip_h - 8.0;
-            // Clamp to window so the tooltip stays visible.
-            tip_x = tip_x.clamp(8.0, layout.window_w - tip_w - 8.0);
-            if tip_y < 8.0 {
-                tip_y = ry + rh + 8.0;
-            }
-            if tip_y + tip_h > layout.window_h - 8.0 {
-                tip_y = (layout.window_h - tip_h - 8.0).max(8.0);
-            }
-            let bg =
-                crate::render::theme::color::alpha(crate::render::theme::color::MIDNIGHT, 0.96);
-            hover_quads.push(GpuInstance {
-                rect: [tip_x, tip_y, tip_w, tip_h],
-                color: bg,
-            });
-            // Gold border (4 thin quads).
-            let bt = 1.5_f32;
-            let border = crate::render::theme::color::BRASS;
-            hover_quads.push(GpuInstance {
-                rect: [tip_x, tip_y, tip_w, bt],
-                color: border,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tip_x, tip_y + tip_h - bt, tip_w, bt],
-                color: border,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tip_x, tip_y + bt, bt, tip_h - bt * 2.0],
-                color: border,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tip_x + tip_w - bt, tip_y + bt, bt, tip_h - bt * 2.0],
-                color: border,
-            });
-            hover_text.push(TextLabel {
-                rect: [tip_x + pad, tip_y + pad, tip_w - pad * 2.0, title_h],
-                text: def.name.to_string(),
-                color: crate::render::theme::color::CHAMPAGNE,
-                ..Default::default()
-            });
-            widget::push_text_block(
-                hover_text,
-                [
-                    tip_x + pad,
-                    tip_y + pad + title_h,
-                    tip_w - pad * 2.0,
-                    body_h,
-                ],
-                &live_desc,
-                body_style,
-                layout.window_h,
-                ctx.ui_scale,
-            );
-        }
-    }
-    // Display-only focus tooltips: when the player navigates focus
-    // onto a counter peg or the gold counter, surface a small info
-    // panel with the current count. These are anchored to whatever
-    // rect the focus rect graph published for the same target.
-    match scene.focus {
-        Some(FocusTarget::Peg(kind)) => {
-            let gameplay = GameEngine::read(run);
-            let rect_idx = match kind {
-                PegKind::Hands => 0,
-                PegKind::Discards => 1,
-            };
-            if let Some(r) = ctx.proj.peg_rects[rect_idx] {
-                let (title, body) = match kind {
-                    PegKind::Hands => (
-                        "Hands Remaining".to_string(),
-                        format!(
-                            "{} of {} plays left this round. Each Play Hand consumes one peg.",
-                            gameplay.plays_remaining, gameplay.plays_max,
-                        ),
-                    ),
-                    PegKind::Discards => (
-                        "Discards Remaining".to_string(),
-                        format!(
-                            "{} of {} discards left this round. Each Discard consumes one peg.",
-                            gameplay.discards_remaining, gameplay.discards_max,
-                        ),
-                    ),
-                };
-                push_tooltip(
-                    hover_quads,
-                    hover_text,
-                    (r[0] + r[2] * 0.5, r[1]),
-                    crate::ui::layout::ViewportCtx {
-                        window_w: layout.window_w,
-                        window_h: layout.window_h,
-                        ui_scale: ctx.ui_scale,
-                    },
-                    &title,
-                    &body,
-                );
-            }
-        }
-        Some(FocusTarget::Gold) => {
-            let gameplay = GameEngine::read(run);
-            // Anchor the tooltip just above the coin pile so the
-            // hover label points at the actual gold rather than the
-            // unrelated score-panel cartouche. When there's no gold
-            // (no pile drawn) we fall back to skipping the tooltip
-            // entirely — `FocusTarget::Gold` is only reachable from
-            // the focus rect graph, which is also gated on a
-            // populated `coin_pile_rect`.
-            if let Some(rect) = coin_pile_rect {
-                push_tooltip(
-                    hover_quads,
-                    hover_text,
-                    (rect[0] + rect[2] * 0.5, rect[1]),
-                    crate::ui::layout::ViewportCtx {
-                        window_w: layout.window_w,
-                        window_h: layout.window_h,
-                        ui_scale: ctx.ui_scale,
-                    },
-                    "Gold",
-                    &format!(
-                        "${}. Earned from clearing blinds. Spend in the shop on relics, ribbons, talismans, and pack rerolls.",
-                        gameplay.gold,
-                    ),
-                );
-            }
-        }
-        Some(FocusTarget::YakuTablet(i)) => {
-            // Mirror the cursor-hover yaku tooltip path: same title +
-            // body, same anchor (just above the projected tablet
-            // rect). Falls back to the visible_previews entry rather
-            // than re-running the preview pipeline.
-            let (title, body) = if is_chicken_hand && i == 0 {
-                (
-                    "\u{1F414} Chicken Hand".to_string(),
-                    "A valid hand with no yaku. Scores base chips \u{00D7} 1 mult. \
-                     Build toward a yaku to multiply your score."
-                        .to_string(),
-                )
-            } else if let Some(yk) = visible_preview_kinds.get(i).copied() {
-                (
-                    format!(
-                        "{}  (+{} mult, +{} chips)",
-                        yk.name(),
-                        yk.mult_bonus(),
-                        yk.chip_bonus()
-                    ),
-                    yaku_card_shape_text(yk).to_string(),
-                )
-            } else {
-                ("".to_string(), "".to_string())
-            };
-            if !title.is_empty() {
-                let (ax, ay) = match ctx.proj.yaku_tablet_rects.get(i).copied() {
-                    Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
-                        (px + pw * 0.5, py)
-                    }
-                    _ => (layout.window_w * 0.5, layout.window_h * 0.5),
-                };
-                push_tooltip(
-                    hover_quads,
-                    hover_text,
-                    (ax, ay),
-                    crate::ui::layout::ViewportCtx {
-                        window_w: layout.window_w,
-                        window_h: layout.window_h,
-                        ui_scale: ctx.ui_scale,
-                    },
-                    &title,
-                    &body,
-                );
-            }
-        }
-        Some(FocusTarget::Dora) => {
-            let per_dora = if gameplay.has_dora_crown { 35 } else { 25 };
-            let dora_faces = gameplay.dora_faces.clone();
-            let body = if dora_faces.is_empty() {
-                format!("Each dora in a scored set: +{per_dora} chips.")
-            } else {
-                let names: Vec<String> = dora_faces
-                    .iter()
-                    .map(|&(suit, rank)| {
-                        crate::core::tile::Tile::new(suit, rank, 0).full_name()
-                    })
-                    .collect();
-                let label = if names.len() == 1 { "Dora" } else { "Doras" };
-                format!(
-                    "{label}: {}. Each in a scored set: +{per_dora} chips.",
-                    names.join(", ")
-                )
-            };
-            push_tooltip(
-                hover_quads,
-                hover_text,
-                (dora_rect[0] + dora_rect[2] * 0.5, dora_rect[1]),
-                crate::ui::layout::ViewportCtx {
-                    window_w: layout.window_w,
-                    window_h: layout.window_h,
-                    ui_scale: ctx.ui_scale,
-                },
-                "Dora",
-                &body,
-            );
-        }
-        _ => {}
-    }
-
-    // The glossary-suppression branch from the legacy path is gone:
-    // when the glossary is open we early-return a dedicated frame at
-    // the very top of `draw_frame`, so by the time we reach this
-    // point the glossary is *not* open and every variable below uses
-    // its real value directly.
 
     // Post-deal smoke breath. `wind_delay_secs` after the most
     // recent deal we exhale a soft sweep of impulses across the hand
@@ -1229,27 +1007,21 @@ pub(super) fn build_relic_tray_and_wind(
 }
 
 /// Build the consumable inventory dish (Zodiacs + Talismans) — brass dish,
-/// pendant placements, focus rects, click buttons, hover tooltip. Behaviour
-/// is a verbatim lift of the inline `draw_frame` chunk; relocated for
-/// organisation.
+/// pendant placements, focus rects, click buttons.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_consumable_dish(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
-    run: &crate::game::run::RunState,
     ctx: &crate::scenes::DrawCtx<'_>,
     interaction: &crate::game::engine::GameplayInteractionReadModel,
     paused: bool,
     focus_rect_graph: &mut Vec<(FocusTarget, [f32; 4])>,
     buttons: &mut Vec<crate::scenes::ButtonDef>,
-    hover_quads: &mut Vec<crate::render::wgpu_renderer::GpuInstance>,
-    hover_text: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
 ) -> (
     Vec<crate::render::draw_cmd::Object3d>,
     Vec<crate::render::draw_cmd::Object3d>,
     Option<(f32, f32, f32, f32)>,
 ) {
-    use super::tooltip::push_tooltip;
     use super::PICK_CONSUMABLE_DISH;
     use super::ZODIAC_USE_BASE;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -1262,7 +1034,7 @@ pub(super) fn build_consumable_dish(
     // their enhancement onto every tile in the current hand at once.
     //
     // Phase 5: the flat slot backgrounds + gold rims are gone; the
-    // consumable inventory now lives on a brass `DishExplicit` with
+    // consumable inventory now lives on a porcelain dish with
     // `TalismanBatch` pendants for each filled slot. The text labels
     // and click handlers stay at the same screen positions so hover +
     // input plumbing is unchanged.
@@ -1272,7 +1044,7 @@ pub(super) fn build_consumable_dish(
     let mut ribbon_dish_placements: Vec<Object3d> = Vec::new();
     let mut talisman_dish_strip: Option<(f32, f32, f32, f32)> = None;
     if consumable_capacity > 0 {
-        // The brass dish is a 3D object — use base resolution scale
+        // The porcelain dish is a 3D object — use base resolution scale
         // so its placement stays stable regardless of UI scale.
         let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
         let slot_w = (140.0 * zscale).max(120.0);
@@ -1288,13 +1060,12 @@ pub(super) fn build_consumable_dish(
         talisman_dish_strip = Some((strip_x, strip_y, total_w, slot_h));
 
         // ── Projection-aware slot rects ──────────────────────────────
-        // The brass dish gets projected through the gameplay camera
+        // The porcelain dish gets projected through the gameplay camera
         // to a different on-screen position than its raw pixel anchor.
         // We look up the previous frame's projected dish rect and
         // remap each per-slot rect through the same affine transform
-        // (treating the dish as roughly planar). This keeps the
-        // tooltip hit-test, focus ring, click target, and tooltip
-        // anchor in lockstep with the visible pendant.
+        // (treating the dish as roughly planar). This keeps the focus
+        // ring and click target in lockstep with the visible pendant.
         //
         // Must match the dish-padding values used at the
         // `frame.dish_explicit(...)` push site below.
@@ -1398,14 +1169,14 @@ pub(super) fn build_consumable_dish(
                         }
                     }
                     crate::core::consumable::Consumable::Zodiac(_) => {
-                        let proj_rect = ctx
-                            .proj
-                            .ribbon_rects
-                            .get(ribbon_draw_i)
-                            .copied()
-                            .filter(|r| {
-                                r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite()
-                            });
+                        let proj_rect =
+                            ctx.proj
+                                .ribbon_rects
+                                .get(ribbon_draw_i)
+                                .copied()
+                                .filter(|r| {
+                                    r[2] > 1.0 && r[3] > 1.0 && r[0].is_finite() && r[1].is_finite()
+                                });
                         ribbon_draw_i += 1;
                         if let Some(r) = proj_rect {
                             (r[0], r[1], r[2], r[3])
@@ -1436,22 +1207,14 @@ pub(super) fn build_consumable_dish(
                         crate::core::talisman::TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0],
                         crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
                         crate::core::talisman::TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
-                        crate::core::talisman::TalismanKind::Polychrome => {
-                            [0.82, 0.55, 0.95, 1.0]
-                        }
+                        crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
                         crate::core::talisman::TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
                         crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
                         crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire
-                        crate::core::talisman::TalismanKind::Characters => {
-                            [0.82, 0.08, 0.18, 1.0]
-                        } // ruby
+                        crate::core::talisman::TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
                         crate::core::talisman::TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
-                        crate::core::talisman::TalismanKind::Wildflower => {
-                            [0.92, 0.48, 0.62, 1.0]
-                        }
-                        crate::core::talisman::TalismanKind::Conformity => {
-                            [0.62, 0.60, 0.68, 1.0]
-                        }
+                        crate::core::talisman::TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
+                        crate::core::talisman::TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
                     },
                 };
                 // Rest the pendant on the dish's rim. The dish is
@@ -1505,52 +1268,11 @@ pub(super) fn build_consumable_dish(
                         });
                     }
                 }
-                // The persistent on-slot labels (name + sub) are
-                // gone — the brass dish + colored pendant are the
-                // visual representation, and the hover tooltip below
-                // supplies the full name/description on demand.
-                let (tooltip_title, tooltip_body) = match item {
-                    crate::core::consumable::Consumable::Zodiac(z) => {
-                        let level = GameEngine::read_yaku_progress(run).level_of(z.yaku());
-                        (
-                            format!("{} (Zodiac)", z.name()),
-                            format!(
-                                "Click or press to use. Permanently raises {} from level {} to {} for the rest of the run (+0.5 mult, +20 chips per level).",
-                                z.yaku().name(),
-                                level,
-                                level + 1,
-                            ),
-                        )
-                    }
-                    crate::core::consumable::Consumable::Talisman(t) => (
-                        format!("{} (Talisman)", t.name()),
-                        format!("Click or press to use. {}", t.description()),
-                    ),
-                };
                 if !paused {
                     buttons.push(crate::scenes::ButtonDef::scene(
                         (fx, fy, fw, fh),
                         ZODIAC_USE_BASE + slot_idx as u32,
                     ));
-                }
-                // Tooltip is now driven by `self.focus`. In cursor
-                // mode the Phase A sync in `update()` writes
-                // `FocusTarget::Consumable(i)` whenever the cursor is
-                // over a slot rect; in keyboard / controller mode the
-                // player navigates here with spatial nav.
-                if scene.focus == Some(FocusTarget::Consumable(slot_idx)) {
-                    push_tooltip(
-                        hover_quads,
-                        hover_text,
-                        (fx + fw * 0.5, fy),
-                        crate::ui::layout::ViewportCtx {
-                            window_w: layout.window_w,
-                            window_h: layout.window_h,
-                            ui_scale: ctx.ui_scale,
-                        },
-                        &tooltip_title,
-                        &tooltip_body,
-                    );
                 }
             }
         }
@@ -1568,14 +1290,12 @@ pub(super) struct ActionRowOutputs {
     pub(super) wood_tablet_placements: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) discard_bowl_placement: Option<crate::render::draw_cmd::Object3d>,
     pub(super) bronze_mirror_placement: Option<crate::render::draw_cmd::Object3d>,
-    pub(super) journal_pick_idx: usize,
+    pub(super) journal_book: Option<crate::render::draw_cmd::Object3d>,
 }
 
 /// Build the action-row 3D objects (sort tablets, discard bowl, bronze
 /// mirror, optional cash-in tablet) plus the Yaku Journal book tablet.
-/// Pushes button focus rects into `focus_rect_graph` and hover labels
-/// into `hover_text`. Behaviour is a verbatim lift of the inline
-/// `draw_frame` chunk; relocated for organisation.
+/// Pushes button focus rects into `focus_rect_graph`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_action_row_and_journal(
     scene: &GameplayScene,
@@ -1586,7 +1306,7 @@ pub(super) fn build_action_row_and_journal(
     btn_rects: &[(f32, f32, f32, f32); 5],
     rank_btn_rect: (f32, f32, f32, f32),
     journal_btn_cx: f32,
-    journal_btn_w: f32,
+    _journal_btn_w: f32,
     action_world_z_py: f32,
     action_hud_table_lift: f32,
     cam_rot: glam::Mat4,
@@ -1595,13 +1315,10 @@ pub(super) fn build_action_row_and_journal(
     discard_enabled: bool,
     now: Instant,
     focus_rect_graph: &mut Vec<(FocusTarget, [f32; 4])>,
-    hover_text: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
 ) -> ActionRowOutputs {
     use super::focus::ALL_BUTTONS;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
-    use crate::render::wgpu_renderer::{TextAlign, TextLabel};
     use crate::render::world_space::LayoutAnchorPx;
-    use crate::ui::focus_nav::clamp_rect_to_viewport;
     // Phase 4: action row is now physical objects.
     //   - Sort by Suit / Sort by Rank → carved wood tablets
     //   - Discard / Play              → bowl + mirror (row below hand, above sort;
@@ -1717,7 +1434,7 @@ pub(super) fn build_action_row_and_journal(
                     rotation: cam_rot,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::WoodTablet {
-                        label: label.to_string(),
+                        label: std::borrow::Cow::Borrowed(label),
                         pick_id: None,
                     },
                     hover_target: 0.0,
@@ -1778,22 +1495,6 @@ pub(super) fn build_action_row_and_journal(
                 // projected mesh rect — no layout-rect fallback, so
                 // on the very first frame after a scene transition
                 // the label briefly doesn't appear.
-                if let Some(r) = ctx.proj.bowl_rect.filter(|_| hovered) {
-                    let label_h = (r[3] * 0.38).max(28.0);
-                    let label_rect = [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h];
-                    if let Some(clamped) =
-                        clamp_rect_to_viewport(label_rect, layout.window_w, layout.window_h)
-                    {
-                        hover_text.push(TextLabel {
-                            rect: clamped,
-                            text: "Discard tiles".to_string(),
-                            color: [1.0, 0.84, 0.40, 1.0],
-                            align: TextAlign::Center,
-                            no_glossary: true,
-                            ..Default::default()
-                        });
-                    }
-                }
             }
             3 => {
                 // Bronze mirror — left side of that same row (paired with the bowl).
@@ -1829,27 +1530,6 @@ pub(super) fn build_action_row_and_journal(
                 // when it's the active selection. Same projected-mesh
                 // anchoring as the river label above (no layout-rect
                 // fallback).
-                if let Some(r) = ctx.proj.mirror_rect.filter(|_| hovered) {
-                    let label_h = (r[3] * 0.38).max(28.0);
-                    let mirror_label = if gameplay.uses_structure_bank {
-                        "Commit melds"
-                    } else {
-                        "Score hand"
-                    };
-                    let label_rect = [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h];
-                    if let Some(clamped) =
-                        clamp_rect_to_viewport(label_rect, layout.window_w, layout.window_h)
-                    {
-                        hover_text.push(TextLabel {
-                            rect: clamped,
-                            text: mirror_label.to_string(),
-                            color: [1.0, 0.84, 0.40, 1.0],
-                            align: TextAlign::Center,
-                            no_glossary: true,
-                            ..Default::default()
-                        });
-                    }
-                }
             }
             4 => {
                 let tablet_thickness = (bh * 0.35).max(8.0);
@@ -1876,54 +1556,24 @@ pub(super) fn build_action_row_and_journal(
                     rotation: wiggle * cam_rot,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::WoodTablet {
-                        label: "Cash in".to_string(),
+                        label: std::borrow::Cow::Borrowed("Cash in"),
                         pick_id: None,
                     },
                     hover_target: 0.0,
                     anim_id: 0,
                     arrange_name: None,
                 });
-                if let Some(r) = ctx.proj.wood_tablet_rects.get(2).filter(|_| hovered) {
-                    let label_h = (r[3] * 0.38).max(28.0);
-                    let label_rect = [r[0], r[1] + r[3] * 0.5 - label_h * 0.5, r[2], label_h];
-                    if let Some(clamped) =
-                        clamp_rect_to_viewport(label_rect, layout.window_w, layout.window_h)
-                    {
-                        hover_text.push(TextLabel {
-                            rect: clamped,
-                            text: "Cash in structure (T)".to_string(),
-                            color: [1.0, 0.84, 0.40, 1.0],
-                            align: TextAlign::Center,
-                            no_glossary: true,
-                            ..Default::default()
-                        });
-                    }
-                }
             }
             _ => {}
         }
     }
 
-    // Yaku Journal book — an additional wood-tablet placement reusing
-    // the existing wood-tablet pipeline + pick path so we don't have
-    // to plumb a new mesh through the renderer just for the book.
-    // Sits in the *bottom action row* to the right of the two sort
-    // tablets (bowl/mirror sit in the row above). Clicking it
-    // pushes the YakuJournalScene — the click is dispatched in
-    // `update()` via `GameplayPick::WoodTablet(journal_pick_idx)` —
-    // journal is slot 3 when the cash-in tablet is present (slot 2),
-    // otherwise slot 2 when there is no committed structure to cash in.
-    let journal_pick_idx = wood_tablet_placements.len();
-    // The journal "lights up" on either cursor pick or keyboard focus,
-    // matching how the other action buttons treat hover. The
+    // Yaku Journal — same leather-bound book mesh + zoom transition as the shop.
     let (_, rby, _, rbh) = rank_btn_rect;
-    let book_w = journal_btn_w;
-    let book_h = rbh * 0.95;
-    // Journal is the third button in the centered sort row — position
-    // comes directly from action_bar_layout's centered group calculation.
     let book_cy = rby + rbh * 0.5;
     let book_cx = journal_btn_cx;
-    let book_thickness = (book_h * 0.45).max(8.0);
+    let w = layout.window_w;
+    let h = layout.window_h;
     let journal_anchor = LayoutAnchorPx {
         px: book_cx,
         py: book_cy + action_world_z_py,
@@ -1931,240 +1581,61 @@ pub(super) fn build_action_row_and_journal(
     }
     .to_draw_cmd_triple();
     let tp = &scene.positions.tablet_journal;
-    wood_tablet_placements.push(Object3d {
-        pos: [
-            journal_anchor[0] + tp.nx * layout.window_w,
-            journal_anchor[1] + tp.ny * layout.window_h,
-            journal_anchor[2] + layout.mm(tp.lift_mm),
+    let journal_base_x = journal_anchor[0] + tp.nx * w;
+    let journal_base_y = journal_anchor[1] + tp.ny * h;
+    let journal_base_z = journal_anchor[2] + layout.mm(tp.lift_mm);
+
+    let (journal_zoom, journal_pos) = match scene.journal_transition {
+        Some(t) => {
+            let z = t.zoom_progress();
+            let smoothed = z * z * (3.0 - 2.0 * z);
+            let zoom = 1.0 + smoothed * 7.0;
+            let cx = w * 0.5;
+            let cy = h * 0.5;
+            let pos = [
+                journal_base_x + (cx - journal_base_x) * smoothed,
+                journal_base_y + (cy - journal_base_y) * smoothed,
+                journal_base_z,
+            ];
+            (zoom, pos)
+        }
+        None => (1.0, [journal_base_x, journal_base_y, journal_base_z]),
+    };
+
+    let (face_w, face_h) = book_cover_face_extents_xy(w, journal_zoom);
+    let journal_book = Some(Object3d {
+        pos: journal_pos,
+        extents: [
+            face_w,
+            layout.mm(BOOK_SPINE_THICKNESS_MM) * journal_zoom,
+            face_h,
         ],
-        extents: [book_w, book_thickness, book_h],
-        // Placement rotation applied centrally via
-        // `committed_arrange_rotations`.
         rotation: cam_rot,
         color: [1.0, 1.0, 1.0, 1.0],
-        kind: Object3dKind::WoodTablet {
-            label: "Journal".to_string(),
-            pick_id: None,
+        kind: Object3dKind::Book {
+            spine_label: std::borrow::Cow::Borrowed("Journal"),
+            pick_id: Some(YAKU_JOURNAL_BOOK_PICK_ID),
+            open_amount: scene.journal_open_amount,
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: None,
+        arrange_name: Some("shop.props.journal"),
     });
-    // Anchor the Journal button's keyboard-nav focus rect on the
-    // renderer's projected wood-tablet rect for the journal slot.
-    // Same one-frame stale snapshot pattern as the other action
-    // buttons; first-frame absence is harmless.
-    if let Some(&rect) = ctx.proj.wood_tablet_rects.get(journal_pick_idx) {
+
+    if let Some(rect) = ctx
+        .proj
+        .aux_dish_rects
+        .iter()
+        .find_map(|(pid, r)| (*pid == Some(YAKU_JOURNAL_BOOK_PICK_ID)).then_some(*r))
+    {
         focus_rect_graph.push((FocusTarget::Button(GameplayButton::Journal), rect));
     }
-    // The Journal label is engraved directly on the wood tablet
-    // via a per-instance decal texture — no 2D overlay.
 
     ActionRowOutputs {
         wood_tablet_placements,
         discard_bowl_placement,
         bronze_mirror_placement,
-        journal_pick_idx,
-    }
-}
-
-/// Build the per-frame tile hover tooltip — show tile name, base/effective
-/// chips, mult bonus, source breakdown, flower effect, selection state.
-/// Suppressed during cascade, while paused, and when the cursor is over
-/// any 2D UI element. Behaviour is a verbatim lift of the inline
-/// `draw_frame` chunk; relocated for organisation.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_tile_hover_tooltip(
-    scene: &GameplayScene,
-    layout: &crate::ui::layout::LayoutResult,
-    run: &crate::game::run::RunState,
-    ctx: &crate::scenes::DrawCtx<'_>,
-    gameplay: &crate::game::engine::GameplayReadModel,
-    interaction: &crate::game::engine::GameplayInteractionReadModel,
-    hand_slots: &[(f32, f32, f32, f32)],
-    scale: f32,
-    hovered_yaku: bool,
-    buttons: &[crate::scenes::ButtonDef],
-    hover_quads: &mut Vec<crate::render::wgpu_renderer::GpuInstance>,
-    hover_text: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
-) {
-    use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
-    // Tile hover tooltip — show full info for the tile under the cursor.
-    // Anchored to the perspective-projected tile rect (one frame stale,
-    // supplied by the renderer) so it tracks the actual visible tile
-    // position rather than the flat layout slot. Falls back to the slot
-    // rect on the very first frame before the renderer has projected.
-    // Suppressed during cascade and while the pause menu is open.
-    //
-    // Also suppressed when the cursor is over any 2D UI element (a
-    // button or a hovered yaku card). The 3D raycast pick happily
-    // intersects a hand tile even when the cursor sits visually atop a
-    // floating UI panel above the hand, which used to surface the tile
-    // tooltip + ▼ pointer underneath the panel's own tooltip. Gating
-    // here keeps a single tooltip on screen at a time.
-    let cursor_over_ui = {
-        let (cx, cy) = scene.cursor_pos;
-        let in_button = buttons.iter().any(|b| {
-            let (bx, by, bw, bh) = b.rect;
-            cx >= bx && cx <= bx + bw && cy >= by && cy <= by + bh
-        });
-        in_button || hovered_yaku
-    };
-    if scene.cascade_queue.is_empty() && !scene.pause_menu.paused && !cursor_over_ui {
-        // The tile tooltip now follows the unified focus model: it
-        // shows whenever `self.focus` points at a hand tile. In
-        // cursor mode the Phase A cursor sync in `update()` writes
-        // `FocusTarget::HandTile(i)` whenever the cursor's raycast
-        // pick lands on a tile, so this naturally collapses hover and
-        // controller-focus into one path.
-        let hovered_idx: Option<usize> = match scene.focus {
-            Some(FocusTarget::HandTile(i)) if interaction.hand_len > 0 => {
-                Some(i.min(interaction.hand_len - 1))
-            }
-            _ => None,
-        };
-
-        if let Some(idx) = hovered_idx
-            && let Some(&raw_tile) = interaction.hand.get(idx)
-        {
-            let tile = GameplayScene::display_tile(raw_tile, run);
-            // Resolve the anchor rect: prefer the projected rect for
-            // this index, otherwise the flat slot rect.
-            let anchor: (f32, f32, f32, f32) = ctx
-                .proj
-                .hand_rects
-                .iter()
-                .find(|(i, _)| *i == idx)
-                .map(|(_, r)| (r[0], r[1], r[2], r[3]))
-                .or_else(|| hand_slots.get(idx).copied())
-                .unwrap_or((0.0, 0.0, 0.0, 0.0));
-            let (ax, ay, aw, ah) = anchor;
-
-            // ── Build the lines ───────────────────────────────
-            let lines: Vec<String> = {
-                // Show the tile's *effective* value: base point worth
-                // plus every per-tile bonus that doesn't depend on the
-                // surrounding meld structure (talisman enhancements,
-                // dora, owned chip relics). The total chips line is the
-                // headline; the per-source breakdown follows so the
-                // player can see *why* the tile is worth what it is.
-                let dora_faces = gameplay.dora_faces.clone();
-                let eff = GameEngine::tile_effective_value(run, &tile, &dora_faces);
-                let name = tile.full_name();
-                let category = tile.category();
-                let is_selected = interaction.selected.get(idx).copied().unwrap_or(false);
-
-                let mut v: Vec<String> = Vec::new();
-                v.push(name);
-                if eff.bonus_chips != 0 || eff.mult_bonus != 0.0 {
-                    // Effective chips (base + bonuses).
-                    v.push(format!(
-                        "{category} · {} pts (base {})",
-                        eff.total_chips(),
-                        eff.base_chips,
-                    ));
-                } else {
-                    v.push(format!("{category} · {} pts", eff.base_chips));
-                }
-                if eff.mult_bonus != 0.0 {
-                    v.push(format!("+{:.1} mult", eff.mult_bonus));
-                }
-                for (src, body) in &eff.sources {
-                    v.push(format!("{src}: {body}"));
-                }
-                if let Some(fx) = tile.flower_effect_label() {
-                    v.push(format!("flower: {fx}"));
-                }
-                if is_selected {
-                    v.push("selected".to_string());
-                }
-                v
-            };
-
-            // ── Geometry ──────────────────────────────────────
-            // Floors mirror the glossary tooltip in `ui::tooltip` so
-            // small windows and low `ui_scale` don't squish text below
-            // legible size.
-            let line_h = (18.0 * scale).max(20.0);
-            let pad_x = (8.0 * scale).max(8.0);
-            let pad_y = (6.0 * scale).max(8.0);
-            let char_px = (7.5 * scale).max(6.0);
-            let widest = lines.iter().map(|s| s.chars().count()).max().unwrap_or(0) as f32;
-            let tw = (widest * char_px + pad_x * 2.0).max(200.0);
-            let th = line_h * lines.len() as f32 + pad_y * 2.0;
-
-            // Position: below the anchor's bottom edge (the tile
-            // face is nearest camera at the AABB bottom, so placing
-            // the tooltip above the AABB would land on the face).
-            // Flip above if there isn't room below.
-            let mut tx = ax + (aw - tw) * 0.5;
-            let mut ty = ay + ah + 6.0 * scale;
-            if ty + th > layout.window_h - 4.0 {
-                ty = ay - th - 6.0 * scale;
-            }
-            if ty < 4.0 {
-                ty = 4.0;
-            }
-            if tx + tw > layout.window_w - 4.0 {
-                tx = layout.window_w - tw - 4.0;
-            }
-            if tx < 4.0 {
-                tx = 4.0;
-            }
-
-            // Background. Pushed into the hover layer so the
-            // tooltip BG always lands ABOVE the persistent HUD
-            // text labels (this is the structural fix).
-            hover_quads.push(GpuInstance {
-                rect: [tx, ty, tw, th],
-                color: [0.06, 0.06, 0.12, 0.95],
-            });
-            // Gold border.
-            let bc = [0.65, 0.55, 0.25, 0.85];
-            let b = 1.5;
-            hover_quads.push(GpuInstance {
-                rect: [tx, ty, tw, b],
-                color: bc,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tx, ty + th - b, tw, b],
-                color: bc,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tx, ty, b, th],
-                color: bc,
-            });
-            hover_quads.push(GpuInstance {
-                rect: [tx + tw - b, ty, b, th],
-                color: bc,
-            });
-
-            // Text lines. First line uses the suit colour as a
-            // visual cue (matches the new dragon-by-rank palette);
-            // subsequent lines are the standard ivory-gold.
-            let suit_rgba = tile.suit_color();
-            let title_color = [
-                (suit_rgba[0] * 0.6 + 0.4).min(1.0),
-                (suit_rgba[1] * 0.6 + 0.4).min(1.0),
-                (suit_rgba[2] * 0.6 + 0.4).min(1.0),
-                1.0,
-            ];
-            let body_color = [0.95, 0.85, 0.4, 1.0];
-            for (i, line) in lines.into_iter().enumerate() {
-                let color = if i == 0 { title_color } else { body_color };
-                hover_text.push(TextLabel {
-                    rect: [
-                        tx + pad_x,
-                        ty + pad_y + i as f32 * line_h,
-                        tw - pad_x * 2.0,
-                        line_h,
-                    ],
-                    text: line,
-                    color,
-                    ..Default::default()
-                });
-            }
-        }
+        journal_book,
     }
 }
 
@@ -2172,19 +1643,14 @@ pub(super) fn build_tile_hover_tooltip(
 pub(super) struct YakuPanelOutputs {
     pub(super) yaku_preview_effective_tiles: Vec<crate::core::tile::Tile>,
     pub(super) yaku_preview_sets: Vec<crate::core::hand::DetectedSet>,
-    pub(super) is_chicken_hand: bool,
-    pub(super) hovered_yaku_kind: Option<crate::core::yaku::YakuKind>,
     pub(super) yaku_tablet_placements: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) structure_showcase: Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     pub(super) structure_pile_tokens: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) cam_rot: glam::Mat4,
-    pub(super) visible_previews_kinds: Vec<crate::core::yaku::YakuKind>,
 }
 
 /// Build the yaku progress panel (previews, structure showcase tiles,
-/// preview piles), the yaku tablet placements, and the yaku/chicken-hand
-/// hover tooltips. Behaviour is a verbatim lift of the inline `draw_frame`
-/// chunk; relocated for organisation.
+/// preview piles) and the yaku tablet placements.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_yaku_panel_and_tablets(
     scene: &GameplayScene,
@@ -2205,14 +1671,11 @@ pub(super) fn build_yaku_panel_and_tablets(
     yaku_panel_h: f32,
     yaku_row_y: f32,
     trigger_btn_rect: (f32, f32, f32, f32),
-    hover_quads: &mut Vec<crate::render::wgpu_renderer::GpuInstance>,
-    hover_text: &mut Vec<crate::render::wgpu_renderer::TextLabel>,
 ) -> YakuPanelOutputs {
     use super::cascade_hud::{
         PreviewPilePlacement, push_structure_preview_pile, structure_preview_chip_stack_count,
         structure_preview_mult_stack_count,
     };
-    use super::tooltip::{push_tooltip, yaku_card_shape_text};
     use crate::core::yaku::yaku_preview;
     use crate::render::draw_cmd::{
         CameraParams, CascadeTokenKind, Object3d, Object3dKind, ShowcaseTilePlacement,
@@ -2425,17 +1888,10 @@ pub(super) fn build_yaku_panel_and_tablets(
                     extents: token_extents,
                 },
                 0.35,
-                0xA17E_0000_u64 ^ preview_mult.to_bits(),
+                0xA17E_0000_u64 ^ mult_stack_count as u64,
             );
         }
     }
-
-    // Captured during the loop below — `(yaku_kind, anchor_x, anchor_y)`
-    // for the card the cursor is currently hovering, if any. The tooltip
-    // is pushed into the *hover layer* after the loop completes so it
-    // draws on top of every yaku card regardless of which one captured it.
-    let mut hovered_yaku: Option<(crate::core::yaku::YakuKind, f32, f32)> = None;
-    let mut hovered_chicken: Option<(f32, f32)> = None;
 
     // Phase 9: with the Yaku Journal taking over the "browse all
     // yaku" job, the in-play tablet row collapses to *only firing
@@ -2515,7 +1971,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                 rotation: yaku_tablet_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::YakuTablet {
-                    label: "\u{1F414} Chicken Hand".to_string(),
+                    label: std::borrow::Cow::Borrowed("\u{1F414} Chicken Hand"),
                     active: true,
                     hover: if hovered_now { 1.0 } else { 0.0 },
                 },
@@ -2523,15 +1979,6 @@ pub(super) fn build_yaku_panel_and_tablets(
                 anim_id: 0,
                 arrange_name: None,
             });
-            if hovered_now {
-                let (ax, ay) = match ctx.proj.yaku_tablet_rects.first().copied() {
-                    Some([px, py, pw, _ph]) if pw > 0.0 && px.is_finite() && py.is_finite() => {
-                        (px + pw * 0.5, py)
-                    }
-                    _ => (center_px, panel_y),
-                };
-                hovered_chicken = Some((ax, ay));
-            }
         } else {
             for (i, p) in visible_previews.iter().enumerate() {
                 let cx = panel_x + i as f32 * (card_w + card_gap);
@@ -2558,7 +2005,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     rotation: yaku_tablet_rot,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::YakuTablet {
-                        label: p.kind.name().to_string(),
+                        label: std::borrow::Cow::Borrowed(p.kind.name()),
                         active: p.active,
                         hover: if hovered_now { 1.0 } else { 0.0 },
                     },
@@ -2566,81 +2013,16 @@ pub(super) fn build_yaku_panel_and_tablets(
                     anim_id: 0,
                     arrange_name: None,
                 });
-                // The yaku name is now engraved directly on the bone tablet
-                // via a per-instance decal texture (see the renderer's tablet
-                // pass), so no 2D text overlay is pushed here.
-
-                // Hover tracking for the tooltip pass below the loop.
-                // Anchor the tooltip to the *projected* on-screen rect so
-                // it pops up next to the tablet the player can actually
-                // see — falls back to the input pixel rect on the first
-                // frame before projection data is available.
-                if hovered_now {
-                    let (ax, ay) = match ctx.proj.yaku_tablet_rects.get(i).copied() {
-                        Some([px, py, pw, _ph])
-                            if pw > 0.0 && px.is_finite() && py.is_finite() =>
-                        {
-                            (px + pw * 0.5, py)
-                        }
-                        _ => (center_px, cy),
-                    };
-                    hovered_yaku = Some((p.kind, ax, ay));
-                }
             }
         }
     }
-    // Yaku card hover tooltip — pushed into the *hover layer* so its
-    // background quad lands AFTER every persistent HUD text label, which
-    // is the structural fix for the legacy "tooltip BG renders under
-    // parent text" bug class.
-    if let Some((yk, ax, ay)) = hovered_yaku {
-        let title = format!(
-            "{}  (+{} mult, +{} chips)",
-            yk.name(),
-            yk.mult_bonus(),
-            yk.chip_bonus()
-        );
-        let body = yaku_card_shape_text(yk).to_string();
-        push_tooltip(
-            hover_quads,
-            hover_text,
-            (ax, ay),
-            crate::ui::layout::ViewportCtx {
-                window_w: layout.window_w,
-                window_h: layout.window_h,
-                ui_scale: ctx.ui_scale,
-            },
-            &title,
-            &body,
-        );
-    }
-    if let Some((ax, ay)) = hovered_chicken {
-        push_tooltip(
-            hover_quads,
-            hover_text,
-            (ax, ay),
-            crate::ui::layout::ViewportCtx {
-                window_w: layout.window_w,
-                window_h: layout.window_h,
-                ui_scale: ctx.ui_scale,
-            },
-            "\u{1F414} Chicken Hand",
-            "A valid hand with no yaku. Scores base chips \u{00D7} 1 mult. \
-             Build toward a yaku to multiply your score.",
-        );
-    }
 
-    let visible_previews_kinds: Vec<crate::core::yaku::YakuKind> =
-        visible_previews.iter().map(|p| p.kind).collect();
     YakuPanelOutputs {
         yaku_preview_effective_tiles,
         yaku_preview_sets,
-        is_chicken_hand,
-        hovered_yaku_kind: hovered_yaku.map(|(yk, _, _)| yk),
         yaku_tablet_placements,
         structure_showcase,
         structure_pile_tokens,
         cam_rot,
-        visible_previews_kinds,
     }
 }

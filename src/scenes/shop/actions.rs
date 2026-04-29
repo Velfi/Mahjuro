@@ -60,9 +60,9 @@ pub(super) fn generate_shop_stock(
     let defs = all_relic_defs();
     // Some relics are never offered in the shop — they only appear via
     // special means (transformation, duplication, etc.).
-    // Paper ↔ Iron Lantern follow a Gros Michel / Cavendish pool swap:
-    // Paper is in the pool until it burns, then extinct run-wide and Iron
-    // takes its place.
+    // Paper ↔ Silver Filigree Lantern follow a Gros Michel / Cavendish pool
+    // swap: Paper is in the pool until it burns, then extinct run-wide and
+    // Silver Filigree takes its place.
     let mut relic_pool: Vec<&_> = defs
         .iter()
         .filter(|d| {
@@ -75,7 +75,7 @@ pub(super) fn generate_shop_stock(
             if d.id == RelicId::PaperLantern && paper_lantern_extinct {
                 return false;
             }
-            if d.id == RelicId::IronLantern && !paper_lantern_extinct {
+            if d.id == RelicId::SilverFiligreeLantern && !paper_lantern_extinct {
                 return false;
             }
             true
@@ -251,6 +251,13 @@ impl ShopScene {
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),
             age_secs: 0.0,
+            leave_bell_hover_anim: 0.0,
+            journal_open_amount: 0.0,
+            journal_open_target: 0.0,
+            journal_open_lock: None,
+            journal_transition: None,
+            journal_transition_locked_at: None,
+            journal_was_open: false,
             bug_phases: {
                 let mut phases = [0.0_f32; BUG_COUNT];
                 for (i, p) in phases.iter_mut().enumerate() {
@@ -262,7 +269,6 @@ impl ShopScene {
             positions: crate::ui::scene_layout::load_shop_positions(),
             held_item_drag: None,
             mouse_drag: None,
-            hover_anchor_overrides: std::collections::HashMap::new(),
         }
     }
 
@@ -277,11 +283,50 @@ impl ShopScene {
         }
     }
 
-    /// Apply a sell action and update `self.focus` so it stays on a
-    /// neighbor of the sold item instead of snapping to `None`. Focus
-    /// pointing at a different row is preserved; focus pointing at the
-    /// sold row is rebased to the left neighbor (falling back to the
-    /// sell tray when the row empties).
+    /// Apply a purchase / use-consumable action and snap focus to the
+    /// "move on" bell on success, so the player isn't left hovering the
+    /// now-empty slot.
+    pub(super) fn apply_buy_action(
+        &mut self,
+        action: ShopAction,
+        run: &mut crate::game::run::RunState,
+        bus: &mut crate::game::event_bus::EventBus,
+        cursor_pos: (f32, f32),
+        overlay_request: &mut Option<OverlayRequest>,
+    ) {
+        let before = (
+            self.items.len(),
+            self.zodiac_items.len(),
+            self.talisman_items.len(),
+            self.pack_items.iter().filter(|p| p.sold).count(),
+        );
+        let result = apply_shop_action(
+            action,
+            &mut self.items,
+            &mut self.zodiac_items,
+            &mut self.talisman_items,
+            &mut self.pack_items,
+            run,
+            bus,
+        );
+        let defer_focus_snap = matches!(
+            &result,
+            ShopActionResult::PackCelebration(_) | ShopActionResult::ZodiacApplied { .. }
+        );
+        let after = (
+            self.items.len(),
+            self.zodiac_items.len(),
+            self.talisman_items.len(),
+            self.pack_items.iter().filter(|p| p.sold).count(),
+        );
+        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
+        if before != after && !defer_focus_snap {
+            self.focus = Some(ShopFocus::NextRound);
+        }
+    }
+
+    /// Apply a sell action and snap focus to the "move on" bell so the
+    /// player isn't left hovering an empty slot.
     pub(super) fn apply_sell_action(
         &mut self,
         action: ShopAction,
@@ -290,7 +335,6 @@ impl ShopScene {
         cursor_pos: (f32, f32),
         overlay_request: &mut Option<OverlayRequest>,
     ) {
-        let classified = classify_sell(action, &GameEngine::read_shop(run));
         let result = apply_shop_action(
             action,
             &mut self.items,
@@ -301,27 +345,7 @@ impl ShopScene {
             bus,
         );
         self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
-        if let Some((row, sold_owned_idx)) = classified {
-            let shop = GameEngine::read_shop(run);
-            let owned_relics_after = shop.owned_relics.len();
-            let owned_ribbons_after = shop.owned_zodiacs.len();
-            let owned_talismans_after = shop.owned_talismans.len();
-            self.focus = focus_after_sell(
-                self.focus,
-                row,
-                sold_owned_idx,
-                SellRowCounts {
-                    n_for_sale_relics: self.items.len(),
-                    n_for_sale_ribbons: self.zodiac_items.len(),
-                    n_for_sale_talismans: self.talisman_items.len(),
-                    owned_relics_after,
-                    owned_ribbons_after,
-                    owned_talismans_after,
-                },
-            );
-        } else {
-            self.focus = None;
-        }
+        self.focus = Some(ShopFocus::NextRound);
     }
 
     /// Route a `ShopActionResult` to the appropriate visual feedback.

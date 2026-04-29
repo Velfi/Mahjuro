@@ -89,7 +89,8 @@ impl Tile {
         self.suit == Suit::Flower
     }
 
-    /// Short display label, e.g. "3m", "7s", "East", "Red".
+    /// Compact notation for logs and fallback decals (`3m`/`7s`, winds `E`/`S`/…).
+    /// Prefer [`Self::full_name`] for player-visible UI copy.
     pub fn label(&self) -> String {
         match self.suit {
             Suit::Wind => match self.rank {
@@ -113,8 +114,7 @@ impl Tile {
         }
     }
 
-    /// Long, human-readable name suitable for tooltips, e.g.
-    /// "5 of Bamboo", "East Wind", "Red Dragon (Chun)".
+    /// Long, human-readable name, e.g. "5 of Bamboo", "East Wind", "Red Dragon (Chun)".
     pub fn full_name(&self) -> String {
         match self.suit {
             Suit::Characters => format!("{} of Characters", self.rank),
@@ -148,39 +148,6 @@ impl Tile {
                 _ => format!("Season {}", self.rank),
             },
         }
-    }
-
-    /// Classification used in scoring and tooltips:
-    /// - "terminal" for 1 or 9 of a numbered suit
-    /// - "simple"   for 2–8 of a numbered suit
-    /// - "honor"    for any wind or dragon
-    pub fn category(&self) -> &'static str {
-        match self.suit {
-            Suit::Wind | Suit::Dragon => "honor",
-            Suit::Flower | Suit::Season => "bonus",
-            Suit::Characters | Suit::Bamboos | Suit::Circles => {
-                if self.rank == 1 || self.rank == 9 {
-                    "terminal"
-                } else {
-                    "simple"
-                }
-            }
-        }
-    }
-
-    /// One-line description of this flower's triggered scoring effect, or
-    /// `None` for non-flower tiles. Suitable for tooltips and tile info.
-    pub fn flower_effect_label(&self) -> Option<&'static str> {
-        if self.suit != Suit::Flower {
-            return None;
-        }
-        Some(match self.rank {
-            1 => "+40 chips",
-            2 => "+1.5 mult",
-            3 => "+15 chips per meld",
-            4 => "+$4 gold",
-            _ => return None,
-        })
     }
 
     /// Base point value of a single tile face: numbered tiles are worth their

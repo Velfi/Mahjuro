@@ -2,11 +2,15 @@ use super::*;
 
 /// Pre-rasterized text label uploaded to the GPU as a texture + bind group.
 /// Built per-frame in render() during the text-label pre-rasterize pass.
+/// `bind_group` may be a clone of an entry in `text_label_cache`. When it is,
+/// `_tex` is None (the texture is owned by the cache). For non-cacheable
+/// marquee labels, we own the texture here so it stays alive until the frame
+/// command buffer is submitted.
 pub(super) struct TextDraw {
     pub inst_buf: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
-    pub _tex: wgpu::Texture,
+    pub _tex: Option<wgpu::Texture>,
 }
 
 /// One unit of work in the ordered render-op list. The cmd-walk in
@@ -41,6 +45,8 @@ pub(super) enum RenderOp {
 pub(super) enum DrawKind {
     YakuTablet,
     WoodTablet,
+    Book,
+    BookCover,
     Relic,
     Pack,
     Ribbon,

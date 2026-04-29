@@ -1389,7 +1389,7 @@ fn sample_random_hand_with_extra_pack(
         &run.removed_tile_ids,
         &packs,
         &run.tile_enhancements,
-        run.relics.has(RelicId::Overflow),
+        run.relics.has(RelicId::StrengthInNumbers),
     );
     let mut hand = Vec::with_capacity(size);
     for _ in 0..size {
@@ -1428,7 +1428,7 @@ fn best_play_score_for_hand(
 /// happen to draw the right tiles." A handful of synthetic hands surface that
 /// expected value.
 ///
-/// Wall-mutating relics (`Overflow`, `SetMagnet`, `QuickDraw`, `WildWinds`,
+/// Wall-mutating relics (`StrengthInNumbers`, `SetMagnet`, `QuickDraw`, `WildWinds`,
 /// `JokerTile`) are still under-valued because we don't simulate draws between
 /// plays. Rarity tie-break compensates.
 fn remaining_antes_including_current(ante: u32) -> u32 {
@@ -1766,7 +1766,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
             &run.removed_tile_ids,
             &run.tile_packs,
             &run.tile_enhancements,
-            run.relics.has(RelicId::Overflow),
+            run.relics.has(RelicId::StrengthInNumbers),
         );
         let mut base_hand = Vec::with_capacity(run.mode.hand_size);
         let mut base_wall = base_wall;
@@ -1901,7 +1901,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
             if d.id == RelicId::PaperLantern && extinct {
                 return false;
             }
-            if d.id == RelicId::IronLantern && !extinct {
+            if d.id == RelicId::SilverFiligreeLantern && !extinct {
                 return false;
             }
             true

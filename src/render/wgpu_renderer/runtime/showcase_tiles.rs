@@ -17,14 +17,17 @@ impl WgpuRenderer {
         tile_3d_rects: &mut Vec<(usize, [f32; 4])>,
         tile_pick_models: &mut Vec<(usize, Mat4)>,
         tile_glows: &mut Vec<GpuInstance>,
+        shadow_uniforms_changed: &mut bool,
     ) {
         let cam_pos = camera.cam_pos;
         let view_proj = camera.view_proj;
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
-        let project_to_screen = |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
-        let project_unit_cube_rect = |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
+        let project_to_screen =
+            |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
+        let project_unit_cube_rect =
+            |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
             camera.project_aabb_rect(model, half, center_y)
         };
@@ -50,22 +53,19 @@ impl WgpuRenderer {
                     .next()
                     .map(|p| &p.tile);
                 if let Some(tile) = placeholder_tile {
+                    let decal_atlas = self
+                        .showcase_decal_atlas
+                        .as_ref()
+                        .expect("apply_render_settings must build decal atlas before showcase");
                     let ctx = ShowcaseTileCtx {
                         device: &self.device,
-                        queue: &self.queue,
                         layout: &self.tile_material_layout,
                         shadow_caster_layout: &self.shadow_caster_layout,
                         primitives: &self.tile_primitives,
                         sampler: &self.tile_sampler,
-                        ui_font: self.ui_font.as_ref(),
-                        emoji_font: self.emoji_font.as_ref(),
+                        decal_atlas,
                     };
-                    let stg = make_showcase_tile_gpu(
-                        &ctx,
-                        self.tile_base_color_factor,
-                        tile,
-                        self.tile_set.as_deref(),
-                    );
+                    let stg = make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, tile);
                     self.showcase_tiles.push(stg);
                 } else {
                     break;
@@ -137,22 +137,20 @@ impl WgpuRenderer {
                     );
                     // Re-rasterise decal if the tile identity changed.
                     if self.showcase_tiles[slot_cursor].tile_id != wanted_id {
+                        let decal_atlas = self
+                            .showcase_decal_atlas
+                            .as_ref()
+                            .expect("apply_render_settings must build decal atlas before showcase");
                         let ctx = ShowcaseTileCtx {
                             device: &self.device,
-                            queue: &self.queue,
                             layout: &self.tile_material_layout,
                             shadow_caster_layout: &self.shadow_caster_layout,
                             primitives: &self.tile_primitives,
                             sampler: &self.tile_sampler,
-                            ui_font: self.ui_font.as_ref(),
-                            emoji_font: self.emoji_font.as_ref(),
+                            decal_atlas,
                         };
-                        self.showcase_tiles[slot_cursor] = make_showcase_tile_gpu(
-                            &ctx,
-                            self.tile_base_color_factor,
-                            &p.tile,
-                            self.tile_set.as_deref(),
-                        );
+                        self.showcase_tiles[slot_cursor] =
+                            make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, &p.tile);
                     }
 
                     // Build model matrix from the placement's explicit 3D transform.
@@ -285,6 +283,7 @@ impl WgpuRenderer {
                             base_color_factor: sc_bcf,
                             cam_pos: cam_pos.to_array(),
                             tile_seed,
+                            decal_atlas_uv: stg.decal_atlas_uv,
                         }),
                     );
                     // Outline shell: write inflated model matrix when requested.
@@ -301,17 +300,26 @@ impl WgpuRenderer {
                                 base_color_factor: sc_bcf,
                                 cam_pos: cam_pos.to_array(),
                                 tile_seed,
+                                decal_atlas_uv: stg.decal_atlas_uv,
                             }),
                         );
                     }
-                    self.queue.write_buffer(
-                        &stg.shadow_uniform_buffer,
-                        0,
-                        bytemuck::bytes_of(&ShadowCasterUniform {
-                            light_view_proj: light_view_proj_arr,
-                            model: model.to_cols_array(),
-                        }),
-                    );
+                    let su = ShadowCasterUniform {
+                        light_view_proj: light_view_proj_arr,
+                        model: model.to_cols_array(),
+                    };
+                    {
+                        let stg_mut = &mut self.showcase_tiles[slot_cursor];
+                        if stg_mut.cached_shadow_caster != su {
+                            stg_mut.cached_shadow_caster = su;
+                            self.queue.write_buffer(
+                                &stg_mut.shadow_uniform_buffer,
+                                0,
+                                bytemuck::bytes_of(&su),
+                            );
+                            *shadow_uniforms_changed = true;
+                        }
+                    }
 
                     slot_cursor += 1;
                 }
@@ -541,6 +549,5 @@ impl WgpuRenderer {
             self.queue
                 .write_buffer(&self.tile_occluders_buffer, 0, bytemuck::bytes_of(&occ));
         }
-
     }
 }

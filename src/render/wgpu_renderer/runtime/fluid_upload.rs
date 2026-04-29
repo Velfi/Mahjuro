@@ -176,8 +176,7 @@ impl WgpuRenderer {
                                         let pos = center + perp * (s * offset)
                                             - tangent * (offset * 0.4)
                                             + z_lift;
-                                        let vel =
-                                            perp * (s * swirl_vel) - tangent * retrograde;
+                                        let vel = perp * (s * swirl_vel) - tangent * retrograde;
                                         fluid.inject_impulse(
                                             pos,
                                             vel,

@@ -8,7 +8,6 @@ use glam::Mat4;
 use crate::core::relic::RelicId;
 use crate::core::tile::{Suit, TileEnhancement};
 use crate::render::world_space::pixel_to_world;
-use crate::scenes::BackgroundId;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -213,10 +212,9 @@ pub struct TextLabel {
     pub font_px: Option<f32>,
     /// Horizontal alignment within the rect.
     pub align: TextAlign,
-    /// Suppress glossary-term tooltip detection on this label.  Set on labels
-    /// that are part of an element with its own dedicated hover tooltip
-    /// (e.g. yaku progress cards), so terms inside them don't get underlined
-    /// or trigger nested tooltips.
+    /// Legacy flag from the removed glossary-hover pass; kept so call sites
+    /// stay stable.
+    #[allow(dead_code)]
     pub no_glossary: bool,
 }
 
@@ -381,10 +379,11 @@ pub enum GameplayPick {
     /// tablets aren't clickable, just informational).
     YakuTablet(usize),
     /// Index into the most recent `WoodTabletBatch` — 0 = sort suit,
-    /// 1 = sort rank, 2 = yaku journal book. The play-hand action is no
-    /// longer a wood tablet — it's now the bronze mirror, picked
-    /// separately as `BronzeMirror`.
+    /// 1 = sort rank, 2 = cash-in tablet when structure is committed.
+    /// The play-hand action is the bronze mirror (`BronzeMirror`).
     WoodTablet(usize),
+    /// Leather-bound Yaku Journal book (same mesh as the shop counter).
+    JournalBook,
     /// The discard bowl. Click target = commit the selected discard.
     DiscardBowl,
     /// The bronze mirror. Click target = play the selected hand.
@@ -462,18 +461,4 @@ pub(crate) struct DecodedRelicImage {
     pub relief_rgba: Vec<u8>,
     pub relief_width: u32,
     pub relief_height: u32,
-}
-
-/// Pre-loaded background texture + bind group for the image pipeline.
-pub(crate) struct BackgroundTextureGpu {
-    pub texture: wgpu::Texture,
-    pub bind_group: wgpu::BindGroup,
-}
-
-/// Decoded background image data sent from the background loader thread.
-pub(crate) struct DecodedBackgroundImage {
-    pub id: BackgroundId,
-    pub rgba: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
 }

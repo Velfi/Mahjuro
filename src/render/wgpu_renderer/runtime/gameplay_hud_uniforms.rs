@@ -12,7 +12,8 @@ impl WgpuRenderer {
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
-        let project_to_screen = |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
+        let project_to_screen =
+            |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
         // ── Skeuomorphic gameplay HUD uniform writes (phase 1) ─────────
         //
         // The new HUD meshes (plaque, ofuda, tablets, bowl, peg block, wall

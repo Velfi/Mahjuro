@@ -21,6 +21,17 @@ pub use achievement::Achievement;
 /// Mahjuro's Steam App ID (configured in Steamworks partner backend).
 const MAHJURO_APP_ID: u32 = 4636490;
 
+/// Whether this process was launched by the Steam client. Steam injects
+/// these env vars into every game it spawns, so this is true even when
+/// `SteamClient::init` later fails (offline mode, license check race,
+/// etc.) — useful for "we're running off a Steam-installed binary, leave
+/// auto-update to Steam" decisions.
+pub fn launched_via_steam() -> bool {
+    std::env::var_os("SteamAppId").is_some()
+        || std::env::var_os("SteamGameId").is_some()
+        || std::env::var_os("SteamClientLaunch").is_some()
+}
+
 pub enum SteamClient {
     /// Steam initialized successfully. The inner client is `Send + Sync`
     /// in `steamworks` 0.13, so callbacks can be ticked from the main
@@ -62,6 +73,11 @@ impl SteamClient {
     /// `--no-steam` and headless CLI paths.
     pub fn disabled() -> Self {
         Self::Disabled
+    }
+
+    /// Whether Steamworks initialized successfully this session.
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
     }
 
     /// Drain pending Steam callbacks. Should be called once per frame
@@ -108,4 +124,51 @@ impl SteamClient {
         }
         log::info!("unlocked Steam achievement: {api_name}");
     }
+}
+
+/// Whether `steam_api64.dll` can be loaded from the executable directory.
+///
+/// On Windows we link the Steam API with `/DELAYLOAD` so the process starts even
+/// when the redistributable DLL is absent; this probes [`LoadLibrary`] before any
+/// Steamworks calls so we can fall back to [`SteamClient::Disabled`] instead of
+/// a loader error dialog.
+#[cfg(windows)]
+pub(crate) fn steamworks_dll_ready() -> bool {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::path::PathBuf;
+
+    type HMODULE = *mut std::ffi::c_void;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetModuleFileNameW(h_module: HMODULE, lp_filename: *mut u16, n_size: u32) -> u32;
+        fn LoadLibraryW(lp_lib_file_name: *const u16) -> HMODULE;
+    }
+
+    const CAP: usize = 512;
+    let mut buf = vec![0u16; CAP];
+    let n = unsafe { GetModuleFileNameW(std::ptr::null_mut(), buf.as_mut_ptr(), CAP as u32) };
+    if n == 0 || (n as usize) >= CAP {
+        log::warn!("GetModuleFileNameW failed; cannot probe for steam_api64.dll");
+        return false;
+    }
+    let exe = OsString::from_wide(&buf[..n as usize]);
+    let exe_path = PathBuf::from(exe);
+    let Some(dir) = exe_path.parent() else {
+        return false;
+    };
+    let dll_path = dir.join("steam_api64.dll");
+    let wide: Vec<u16> = dll_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let h = unsafe { LoadLibraryW(wide.as_ptr()) };
+    !h.is_null()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn steamworks_dll_ready() -> bool {
+    true
 }

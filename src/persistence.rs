@@ -87,14 +87,15 @@ impl SmokeQuality {
     /// low-frequency field — the bilateral composite upsample hides the
     /// divisor cleanly, and the raymarch is fullscreen-fragment-bound, so
     /// halving the target is a ~4× win. Temporal reprojection in the
-    /// raymarch reconstructs detail across frames, so even Ultra can run
-    /// at half-res without visible softening.
+    /// raymarch reconstructs detail across frames. High runs at /3 (the
+    /// perf-tuned default for retina) while Ultra stays at /2 for
+    /// users who want the fidelity-preserved tuning.
     pub fn target_divisor(self) -> u32 {
         match self {
             Self::Off => 1,
             Self::Low => 4,
             Self::Medium => 2,
-            Self::High => 2,
+            Self::High => 3,
             Self::Ultra => 2,
         }
     }
@@ -209,6 +210,30 @@ impl EffectsQuality {
             Self::Low => 0.0,
             Self::Medium => 1.0,
             Self::High => 2.0,
+        }
+    }
+
+    /// Number of felt shell-fluff layers to draw on top of the base
+    /// table. Each shell is a fullscreen-fragment-bound extra draw of
+    /// the table mesh, so this is the dominant felt-mode perf knob.
+    /// `Off` skips shells entirely (felt still renders, just flat).
+    pub fn felt_shell_count(self) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::Low => 1,
+            Self::Medium => 3,
+            Self::High => 8,
+        }
+    }
+
+    /// Procedural felt shader tier for `lit_mesh.wgsl` (`SsrGlobals.felt.x`).
+    /// `0` = minimal baize tint (effects Off), `1` = reduced noise path
+    /// (Low), `2` = full detail (Medium/High). Complements [`Self::felt_shell_count`].
+    pub fn felt_shader_lod(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Low => 1.0,
+            Self::Medium | Self::High => 2.0,
         }
     }
 }
@@ -344,6 +369,47 @@ fn default_tile_material() -> TileMaterial {
     TileMaterial::Bamboo
 }
 
+/// The endless playing surface beneath the tiles. Controls which procedural
+/// branch the table mesh routes through in `lit_mesh.wgsl` — walnut wood
+/// vs mahjong-parlor green felt.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
+pub enum SurfaceKind {
+    /// Lacquered walnut — original surface, glossy clearcoat + SSR.
+    Walnut,
+    /// Mahjong-parlor green felt — broad soft sheen, no clearcoat, no SSR.
+    #[default]
+    GreenFelt,
+}
+
+impl SurfaceKind {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Walnut => Self::GreenFelt,
+            Self::GreenFelt => Self::Walnut,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Walnut => Self::GreenFelt,
+            Self::GreenFelt => Self::Walnut,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Walnut => "Walnut",
+            Self::GreenFelt => "Green Felt",
+        }
+    }
+}
+
+fn default_surface_kind() -> SurfaceKind {
+    SurfaceKind::GreenFelt
+}
+
 fn default_tileset_name() -> String {
     "original".to_string()
 }
@@ -371,6 +437,8 @@ pub struct AppSettings {
     pub tile_preset: TilePreset,
     #[serde(default = "default_tile_material")]
     pub tile_material: TileMaterial,
+    #[serde(default = "default_surface_kind")]
+    pub surface_kind: SurfaceKind,
     #[serde(default = "default_tileset_name")]
     pub tileset_name: String,
     #[serde(default = "default_gamma")]
@@ -383,6 +451,8 @@ pub struct AppSettings {
     pub hdr_enabled: bool,
     #[serde(default)]
     pub swap_ab: bool,
+    #[serde(default = "default_true")]
+    pub xy_quick_action: bool,
     #[serde(default = "default_true")]
     pub auto_cash_in_on_full_structure: bool,
     #[serde(default)]
@@ -425,12 +495,14 @@ impl Default for AppSettings {
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
+            surface_kind: SurfaceKind::GreenFelt,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
             shadows_enabled: true,
             ssr_enabled: true,
             hdr_enabled: false,
             swap_ab: false,
+            xy_quick_action: true,
             auto_cash_in_on_full_structure: true,
             hints_enabled: false,
             ui_scale: 1.0,

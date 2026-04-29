@@ -240,52 +240,12 @@ impl App {
                 // player isn't offered "Continue" into a finished game.
                 persistence::delete_saved_run(self.active_profile);
 
-                if let Some(result) = level_up {
+                if let Some(result) = level_up
+                    && let Some(modal) = build_level_up_modal(&result, ww, wh)
+                {
                     log::info!("Level up! Now level {}", result.new_level);
-                    let mut pages = Vec::new();
-
-                    // Relic pages.
-                    let relic_defs = core::relic::all_relic_defs();
-                    for rid in &result.relics {
-                        if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
-                            let accent = match def.rarity {
-                                core::relic::Rarity::Common => render::theme::color::rarity(0),
-                                core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
-                                core::relic::Rarity::Rare => render::theme::color::rarity(2),
-                                core::relic::Rarity::Legendary => render::theme::color::rarity(3),
-                            };
-                            pages.push(UnlockPage {
-                                category: "New Relic".into(),
-                                name: def.name.into(),
-                                description: def.description.into(),
-                                relic_id: Some(*rid),
-                                accent_color: accent,
-                            });
-                        }
-                    }
-
-                    // Rule pages.
-                    for rm in &result.rules {
-                        pages.push(UnlockPage {
-                            category: "New Rule".into(),
-                            name: rm.name().into(),
-                            description: rm.description().into(),
-                            relic_id: None,
-                            accent_color: render::theme::color::AMBER,
-                        });
-                    }
-
-                    if !pages.is_empty() {
-                        let modal = Modal::new(
-                            format!("Level Up! — Level {}", result.new_level),
-                            "",
-                            ModalTheme::Success,
-                        )
-                        .with_pages(pages)
-                        .with_fireworks(ww * 0.5, wh * 0.7, ww * 0.7, 8);
-                        self.pending_post_game_over_modals.push(modal);
-                        self.audio.play_sfx(audio::SfxId::LevelUp);
-                    }
+                    self.pending_post_game_over_modals.push(modal);
+                    self.audio.play_sfx(audio::SfxId::LevelUp);
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
@@ -380,27 +340,28 @@ impl App {
             self.scene.draw_frame(ctx)
         };
 
+        // Fold fog-wall arrange preview here (same `ArrangePreview` math as `ctx`)
+        // so mountain-haze `horizon_y` and the pick slab respond immediately.
+        if self.overlay_stack.is_empty() {
+            if let Scene::Gameplay(ref gp) = self.scene {
+                let ww = size.width as f32;
+                let wh = size.height as f32;
+                frame.gameplay_fog_wall_horizon_y = Some(gameplay_fog_wall_horizon_y_for_tune(
+                    &gp.positions.fog_wall,
+                    &self.debug.arrange_mode,
+                    ww,
+                    wh,
+                ));
+            }
+        }
+
         let h = size.height as f32;
         self.debug.last_effective_camera = frame
             .camera_override
             .unwrap_or_else(|| CameraParams::default_table_camera(h));
 
-        // Index of the last cmd produced by the scene itself, captured
-        // BEFORE any modal/tuning/sfx/fps/tooltip overlay is appended
-        // below. Used by the tooltip-overlay snapshot a few lines down so
-        // glossary-hover scanning only sees scene content (not modal text
-        // or fps debug labels).
-        let scene_cmds_end = frame.cmds.len();
-
         win.set_title(&frame.window_title);
-        self.active_buttons = frame
-            .buttons
-            .iter()
-            .map(|b| ButtonDef {
-                rect: b.rect,
-                action: b.action,
-            })
-            .collect();
+        self.active_buttons = frame.buttons.clone();
 
         // Click-safety wipe: if any modal-like overlay is up, scene buttons
         // must not be clickable through it. Overlays that want their own
@@ -411,44 +372,6 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Snapshot the scene's text labels and relic icons for the
-        // tooltip overlay's glossary-hover scanning, by walking the
-        // scene's portion of `frame.cmds` (everything pushed up to
-        // `scene_cmds_end`). This works uniformly for migrated scenes
-        // (which push directly into `frame.cmds`) AND legacy scenes
-        // (whose `into_frame()` lands their `text_labels` / `relic_icons`
-        // as `DrawCmd::Text` / `DrawCmd::RelicIcon` in the same list).
-        // Walking the cmds list — instead of snapshotting separate
-        // `output.text_labels` / `output.relic_icons` vecs — is what
-        // makes the migration transparent to the tooltip system.
-        let scene_text_labels: Vec<TextLabel> = frame.cmds[..scene_cmds_end]
-            .iter()
-            .filter_map(|c| {
-                if let crate::render::draw_cmd::DrawCmd::Text(l) = c {
-                    Some(TextLabel {
-                        rect: l.rect,
-                        text: l.text.clone(),
-                        color: l.color,
-                        font_px: l.font_px,
-                        align: l.align,
-                        no_glossary: l.no_glossary,
-                        scroll_offset: l.scroll_offset,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let scene_glossary_anchors: Vec<([f32; 4], &'static str)> = frame.cmds[..scene_cmds_end]
-            .iter()
-            .filter_map(|c| {
-                if let crate::render::draw_cmd::DrawCmd::GlossaryAnchor { rect, term } = c {
-                    Some((*rect, *term))
-                } else {
-                    None
-                }
-            })
-            .collect();
         // Forward the cursor position so the renderer can project it onto
         // the table plane and feed it into the volumetric smoke sim.
         frame.cursor_pos = self.input.as_ref().map(|i| i.last_cursor);
@@ -513,17 +436,47 @@ impl App {
         }
 
         self.modals.update();
-        if let Some((modal_insts, modal_labels, modal_buttons, modal_relic_objects)) = self
+        if let Some((
+            modal_insts,
+            modal_labels,
+            modal_buttons,
+            modal_relic_objects,
+            modal_gradient_quads,
+        )) = self
             .modals
             .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
+            if !modal_gradient_quads.is_empty() {
+                frame.gradient_quads(modal_gradient_quads);
+            }
             if !modal_relic_objects.is_empty() {
                 // Near-orthographic camera looking down -Y at the felt so
                 // pixel_to_world's (world_x, world_y, lift_z) maps cleanly
                 // to screen space with Z up — matches the scene-wide axis
                 // convention used by tutorial/collection relic cards.
+                //
+                // The underlying scene's 3D content is hidden by the
+                // modal card, but its meshes still wrote to the depth
+                // buffer using the scene's camera. Under our overridden
+                // modal camera those depth values are nonsense and end
+                // up cutting through the relic. Strip every scene 3D
+                // draw and lit-mesh op so the relic owns the depth
+                // buffer for its own pass. Quads and text don't write
+                // depth, so the modal card backdrop is unaffected.
+                use crate::render::draw_cmd::DrawCmd;
+                frame.cmds.retain(|cmd| {
+                    !matches!(
+                        cmd,
+                        DrawCmd::Object3d(_)
+                            | DrawCmd::Object3dBatch(_)
+                            | DrawCmd::ShowcaseTileBatch(_)
+                            | DrawCmd::TileFaceQuad(_)
+                            | DrawCmd::Table
+                    )
+                });
+                let w = size.width as f32;
                 let h = size.height as f32;
                 frame.camera_override = Some(CameraParams {
                     eye: [0.0, -h * 3.0, 0.0],
@@ -531,6 +484,48 @@ impl App {
                     up: [0.0, 0.0, 1.0],
                     fovy_deg: 20.0,
                 });
+                // Reveal lighting rig: strong warm key from upper-
+                // right, cooler fill from upper-left, and a low warm
+                // rim from behind/below to lift the relic's bottom
+                // edge off the felt slab. The override camera looks
+                // along +Y at the world origin; pixel-space coords
+                // map to world via (world_x = px - w/2,
+                // world_y = h/2 - py, world_z = lift), so lights with
+                // py > h/2 sit in front of the relic (world -Y).
+                //
+                // Higher key intensity than the previous flat rig
+                // because the new staging has a felt slab, contact
+                // halo, and TV-distance viewing — the relic needs to
+                // *pop* off the stage rather than blend into it.
+                use crate::render::wgpu_renderer::PointLight;
+                frame.point_lights = vec![
+                    // Warm key, upper-right. Tuned softer than the
+                    // old rig so the textured relic face reads its
+                    // engraving instead of blooming to white.
+                    PointLight {
+                        pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
+                        radius: h * 1.6,
+                        color: [1.00, 0.94, 0.82],
+                        intensity: 2.0,
+                    },
+                    // Cool fill, upper-left — softens shadow side
+                    // without flattening the form.
+                    PointLight {
+                        pos: [w * 0.5 - w * 0.22, h * 0.5 + h * 0.35, h * 0.30],
+                        radius: h * 1.3,
+                        color: [0.78, 0.86, 1.00],
+                        intensity: 0.9,
+                    },
+                    // Warm low rim, behind the relic. Sits at
+                    // py < h/2 (world +Y, behind the relic), low Z so
+                    // it grazes the bottom edge of the disk.
+                    PointLight {
+                        pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
+                        radius: h * 1.0,
+                        color: [1.00, 0.78, 0.42],
+                        intensity: 1.0,
+                    },
+                ];
                 frame.object3d_batch(modal_relic_objects);
             }
             // Replace scene buttons with modal buttons so only dismiss works.
@@ -593,43 +588,65 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Tooltip overlay — pushed *after* modals/tuning so it sits on top
-        // of all scene/modal content. Suppressed whenever any modal-like
-        // overlay is up so hover effects don't leak through to elements
-        // below it. See `App::modal_overlay_active` for the contract.
-        let skip_tooltips = modal_active || matches!(&self.scene, Scene::Options(_));
-        if !skip_tooltips {
-            let cursor = self
-                .input
-                .as_ref()
-                .map(|i| i.last_cursor)
-                .unwrap_or((0.0, 0.0));
-            let ww = size.width as f32;
-            let wh = size.height as f32;
-            let btn_rects: Vec<(f32, f32, f32, f32)> =
-                self.active_buttons.iter().map(|b| b.rect).collect();
-            let owns_fortunes_favor = self
-                .run
-                .relics
-                .has(crate::core::relic::RelicId::FortunesFavor);
-            self.tooltips.update_and_draw_into(
-                &mut frame,
-                cursor,
-                crate::ui::tooltip::TooltipSources {
-                    base_labels: &scene_text_labels,
-                    button_rects: &btn_rects,
-                    relic_icons: &[],
-                    glossary_anchors: &scene_glossary_anchors,
-                },
-                crate::ui::layout::ViewportCtx {
-                    window_w: ww,
-                    window_h: wh,
-                    ui_scale: self.gfx.ui_scale,
-                },
-                owns_fortunes_favor,
-            );
-        } else {
-            self.tooltips.clear();
+        // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as
+        // click hit-test): first matching rect with a label wins — so smaller rects
+        // pushed before a fullscreen catch-all still show tooltips.
+        if let Some(ref input) = self.input {
+            if input.mode == crate::ui::input::InputMode::Cursor {
+                let cursor = input.last_cursor;
+                let w = size.width as f32;
+                let h = size.height as f32;
+                let scale = self.gfx.ui_scale;
+                if let Some(btn) = self.active_buttons.iter().find(|b| {
+                    let (bx, by, bw, bh) = b.rect;
+                    let inside = cursor.0 >= bx
+                        && cursor.0 <= bx + bw
+                        && cursor.1 >= by
+                        && cursor.1 <= by + bh;
+                    inside && b.hover_label.is_some()
+                }) {
+                    if let Some(ref label) = btn.hover_label {
+                        let pad = (h * 0.012 * scale).max(6.0);
+                        let tooltip_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
+                        let est_chars = label.chars().count().max(1);
+                        let tooltip_w = ((est_chars as f32 * tooltip_h * 0.52 + pad * 2.0)
+                            .max(72.0))
+                        .min(w * 0.5);
+                        let (bx, by, bw, bh) = btn.rect;
+                        let cx = bx + bw * 0.5;
+                        let mut tip_x = cx - tooltip_w * 0.5;
+                        tip_x = tip_x.max(pad).min(w - tooltip_w - pad);
+                        let mut tip_y = by - tooltip_h - pad;
+                        if tip_y < pad {
+                            tip_y = by + bh + pad;
+                        }
+                        if tip_y + tooltip_h > h - pad {
+                            tip_y = (h - tooltip_h - pad).max(pad);
+                        }
+                        // Same brass + midnight frame as [`crate::ui::tooltip`] / focus inspect panels.
+                        let mut tip_quads: Vec<GpuInstance> = Vec::with_capacity(2);
+                        crate::ui::tooltip::push_tooltip_frame_quads(
+                            &mut tip_quads,
+                            tip_x,
+                            tip_y,
+                            tooltip_w,
+                            tooltip_h,
+                        );
+                        for q in tip_quads {
+                            frame.quad(q);
+                        }
+                        frame.text(TextLabel {
+                            rect: [tip_x, tip_y, tooltip_w, tooltip_h],
+                            text: label.as_ref().to_owned(),
+                            color: crate::render::theme::color::PARCHMENT,
+                            font_px: Some(tooltip_h * 0.52),
+                            align: crate::render::wgpu_renderer::TextAlign::Center,
+                            no_glossary: true,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
         }
 
         // FPS counter overlay (debug) — pushed last so it's always on top.
@@ -789,12 +806,15 @@ impl App {
         // Push mountain-haze art-direction knobs into the haze shader's
         // uniform — lets the Volumetric debug overlay drive density,
         // colour, horizon band, and wind speed live.
+        let haze_horizon_y = frame
+            .gameplay_fog_wall_horizon_y
+            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
         renderer.set_haze_tuning(
             self.volumetric_tuning.haze_density,
             self.volumetric_tuning.haze_color_r,
             self.volumetric_tuning.haze_color_g,
             self.volumetric_tuning.haze_color_b,
-            self.volumetric_tuning.haze_horizon_y,
+            haze_horizon_y,
             self.volumetric_tuning.haze_drift_speed,
         );
 
@@ -814,23 +834,125 @@ impl App {
             None
         });
 
-        if let Err(e) = renderer.render(
-            &frame,
-            crate::render::wgpu_renderer::RenderSettings {
-                smoke_quality: self.gfx.smoke_quality,
-                smoke_amount: self.gfx.smoke_amount,
-                effects_quality: self.gfx.effects_quality,
-                tile_preset: self.gfx.tile_preset,
-                tile_material: active_material,
-                tileset_name: self.gfx.tileset_name.clone(),
-                draw_settle_speed,
-                sort_settle_speed,
-                gamma: self.gfx.gamma,
-                shadows_enabled: self.gfx.shadows_enabled,
-                ssr_enabled: self.gfx.ssr_enabled,
-            },
-        ) {
+        let render_settings = crate::render::wgpu_renderer::RenderSettings {
+            smoke_quality: self.gfx.smoke_quality,
+            smoke_amount: self.gfx.smoke_amount,
+            effects_quality: self.gfx.effects_quality,
+            tile_preset: self.gfx.tile_preset,
+            tile_material: active_material,
+            surface_kind: self.gfx.surface_kind,
+            tileset_name: self.gfx.tileset_name.clone(),
+            draw_settle_speed,
+            sort_settle_speed,
+            gamma: self.gfx.gamma,
+            shadows_enabled: self.gfx.shadows_enabled,
+            ssr_enabled: self.gfx.ssr_enabled,
+        };
+
+        renderer.set_hdr_enabled(self.gfx.hdr_enabled);
+
+        // Journal pre-pass: when the shop set `journal_prepass_frame`,
+        // render that frame to the offscreen `journal_scene_texture`
+        // before the main pass. The shop's book mesh samples that texture
+        // in screen space, so the page region reads as a live render of
+        // the embedded yaku-journal scene rather than a flat decal.
+        // That path must not update lacquer SSR history (`scene_prev` /
+        // depth prev); only `renderer.render` below publishes those.
+        if let Some(prepass) = frame.journal_prepass_frame.take() {
+            if let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone()) {
+                log::error!("journal prepass: {e:?}");
+            }
+        }
+
+        if let Err(e) = renderer.render(&frame, render_settings) {
             log::error!("render: {e:?}");
         }
     }
+}
+
+/// Build the paginated celebration modal for a level-up. Returns `None`
+/// when the level grants nothing displayable (no new relics or rules).
+pub(super) fn build_level_up_modal(
+    result: &core::progression::LevelUpResult,
+    window_w: f32,
+    window_h: f32,
+) -> Option<Modal> {
+    let mut pages = Vec::new();
+    let relic_defs = core::relic::all_relic_defs();
+    for rid in &result.relics {
+        if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
+            let accent = match def.rarity {
+                core::relic::Rarity::Common => render::theme::color::rarity(0),
+                core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
+                core::relic::Rarity::Rare => render::theme::color::rarity(2),
+                core::relic::Rarity::Legendary => render::theme::color::rarity(3),
+            };
+            pages.push(UnlockPage {
+                category: "New Relic".into(),
+                name: def.name.into(),
+                description: def.description.into(),
+                relic_id: Some(*rid),
+                accent_color: accent,
+            });
+        }
+    }
+    for rm in &result.rules {
+        pages.push(UnlockPage {
+            category: "New Rule".into(),
+            name: rm.name().into(),
+            description: rm.description().into(),
+            relic_id: None,
+            accent_color: render::theme::color::AMBER,
+        });
+    }
+    if pages.is_empty() {
+        return None;
+    }
+    Some(
+        Modal::new(
+            format!("Level Up! — Level {}", result.new_level),
+            "",
+            ModalTheme::Success,
+        )
+        .with_pages(pages)
+        // Lantern-mote celebration: rises from the bottom band of the
+        // screen behind the hero relic. Spread is wide so motes drift
+        // across the full backdrop rather than columning behind the
+        // relic. Internally this gets multiplied (see
+        // `Fireworks::launch`) so the modest count produces a dense
+        // swarm without spammy callsites.
+        .with_fireworks(window_w * 0.5, window_h * 0.92, window_w * 0.85, 24),
+    )
+}
+
+/// Effective mountain-haze horizon for gameplay: committed [`Placement::ny`]
+/// plus staged arrange deltas when the selection includes [`gameplay.fog_wall`].
+fn gameplay_fog_wall_horizon_y_for_tune(
+    fog_wall: &crate::ui::placement::Placement,
+    arrange_mode: &Option<Option<crate::main_debug_state::ArrangeModeState>>,
+    ww: f32,
+    wh: f32,
+) -> f32 {
+    let base = *fog_wall;
+    let merged = match arrange_mode {
+        Some(Some(st)) => {
+            let ap = crate::ui::placement::ArrangePreview {
+                name: st.object_name.clone(),
+                dnx: if ww > 0.0 { st.delta_px / ww } else { 0.0 },
+                dny: if wh > 0.0 { st.delta_py / wh } else { 0.0 },
+                d_lift_mm: st.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
+                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
+                d_rx_deg: st.delta_rx_deg,
+                d_ry_deg: st.delta_ry_deg,
+                d_rz_deg: st.delta_rz_deg,
+            };
+            ap.applied_to(
+                crate::ui::scene_layout::GAMEPLAY_HIERARCHY,
+                "gameplay.fog_wall",
+                base,
+            )
+        }
+        _ => base,
+    };
+    merged.ny.clamp(0.0, 1.0)
 }

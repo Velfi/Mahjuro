@@ -9,7 +9,6 @@ mod focus;
 mod hand_layout;
 mod input_handler;
 mod scene_behavior;
-mod tooltip;
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -27,6 +26,7 @@ use crate::render::score_reel::ScoreReel;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
 
+use super::journal_transition::JournalTransition;
 use super::pause_menu::PauseMenu;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -43,7 +43,7 @@ use hand_layout::hand_slots_for_count;
 
 /// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
 /// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
-/// so the per-slot hit-test, focus ring, click target, and tooltip
+/// so the per-slot hit-test, focus ring, and click target
 /// anchor track the visible (perspective-projected) dish position
 /// instead of the raw pixel anchor we hand the renderer.
 const PICK_CONSUMABLE_DISH: u32 = 1;
@@ -104,7 +104,7 @@ pub struct GameplayScene {
     /// auto-draw fires once `Instant::now()` reaches this deadline, giving the
     /// discard departure animation time to play out.
     pending_refill: Option<Instant>,
-    /// Latest cursor position (window coords), captured each update for hover tooltips.
+    /// Latest cursor position (window coords), captured each update for hover picking.
     cursor_pos: (f32, f32),
     /// Score panel (2) + hand strip — upper pair (2) + lower pair (2) + footlight (1).
     /// Updated every frame; consumed in `draw()` to position flames + lights.
@@ -221,6 +221,12 @@ pub struct GameplayScene {
     /// Horizontal shuffle offset per slot (in pixels). Used when tiles are
     /// sorted so they slide smoothly into their new positions.
     hand_slide_x: Vec<f32>,
+    /// Cover-open / zoom sequence before pushing [`super::YakuJournalScene`], matching the shop book.
+    journal_transition: Option<JournalTransition>,
+    journal_open_amount: f32,
+    journal_open_target: f32,
+    /// Set after the forward transition pushes the journal; cleared when the closing animation starts.
+    journal_was_open: bool,
     /// Normalized screen-relative positions for the gameplay scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::GameplayPositions,
@@ -444,6 +450,10 @@ impl GameplayScene {
             hand_tile_uids: Vec::new(),
             hand_slide_y: Vec::new(),
             hand_slide_x: Vec::new(),
+            journal_transition: None,
+            journal_open_amount: 0.0,
+            journal_open_target: 0.0,
+            journal_was_open: false,
             positions: crate::ui::scene_layout::load_gameplay_positions(),
         }
     }
@@ -567,7 +577,9 @@ impl GameplayScene {
     /// streaming destinations, so chip/mult popups always land on the tokens
     /// the player is watching pulse.
     #[allow(private_interfaces)]
-    pub(super) fn cascade_token_layout(layout: &crate::ui::layout::LayoutResult) -> CascadeTokenLayout {
+    pub(super) fn cascade_token_layout(
+        layout: &crate::ui::layout::LayoutResult,
+    ) -> CascadeTokenLayout {
         let ms = layout.modifier_strip;
         let src_h = ms.h * 0.36;
         let pill_y = ms.y + src_h;

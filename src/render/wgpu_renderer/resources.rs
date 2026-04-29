@@ -1,16 +1,20 @@
 use super::*;
 
+/// Linear HDR color format for the main 3D scene, bloom chain, and journal
+/// GPU scene target — independent of swapchain (SDR vs HDR).
+pub(crate) const SCENE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
 /// Pre-loaded background texture + bind group for the image pipeline.
-pub(super) struct BackgroundTextureGpu {
-    pub(super) bind_group: wgpu::BindGroup,
+pub(crate) struct BackgroundTextureGpu {
+    pub bind_group: wgpu::BindGroup,
 }
 
 /// Decoded background image data sent from the background loader thread.
-pub(super) struct DecodedBackgroundImage {
-    pub(super) id: BackgroundId,
-    pub(super) rgba: Vec<u8>,
-    pub(super) width: u32,
-    pub(super) height: u32,
+pub(crate) struct DecodedBackgroundImage {
+    pub id: BackgroundId,
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub(super) fn relic_material_params(
@@ -273,61 +277,6 @@ pub(super) fn load_zodiac_ribbon_textures(
     crate::render::texture_upload::load_zodiac_ribbon_textures(device, queue)
 }
 
-/// Spawn a background thread that decodes all background PNGs and sends the RGBA
-/// data back over a channel.
-pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
-    let (tx, rx) = mpsc::channel();
-
-    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::Menu, BackgroundId::Score]
-        .iter()
-        .filter_map(|id| id.asset_path().map(|p| (*id, p)))
-        .collect();
-
-    std::thread::Builder::new()
-        .name("bg-loader".into())
-        .spawn(move || {
-            let t_thread = Instant::now();
-            let mut decoded = 0usize;
-            let mut decode_time = std::time::Duration::ZERO;
-            for (id, asset_path) in backgrounds {
-                let bytes = match crate::asset_path::get(asset_path) {
-                    Some(file) => file.data.to_vec(),
-                    None => {
-                        log::warn!("background image not found: {asset_path}");
-                        continue;
-                    }
-                };
-                let t_decode = Instant::now();
-                let img = match image::load_from_memory(&bytes) {
-                    Ok(img) => img.into_rgba8(),
-                    Err(e) => {
-                        log::warn!("failed to decode background {asset_path}: {e}");
-                        continue;
-                    }
-                };
-                decode_time += t_decode.elapsed();
-                decoded += 1;
-                let (w, h) = img.dimensions();
-                let msg = DecodedBackgroundImage {
-                    id,
-                    rgba: img.into_raw(),
-                    width: w,
-                    height: h,
-                };
-                if tx.send(msg).is_err() {
-                    break;
-                }
-            }
-            log::info!(
-                "bg-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
-                t_thread.elapsed(),
-            );
-        })
-        .expect("failed to spawn bg-loader thread");
-
-    rx
-}
-
 pub(super) fn create_depth(
     device: &wgpu::Device,
     width: u32,
@@ -402,6 +351,66 @@ pub(super) fn create_scene_color(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+    (tex, view)
+}
+
+/// Offscreen color target for the embedded yaku-journal scene. The
+/// shop's open-book mesh samples this as the page-spread albedo so the
+/// journal content appears literally painted on the open pages. Fixed
+/// 1024×1024 RGBA8 sRGB regardless of swapchain size — pages don't
+/// resize with the window, and the page content doesn't need HDR
+/// precision. Hardcoded sRGB8 (rather than reusing the swapchain
+/// format) so `upload_journal_test_pattern`'s 4-byte-per-pixel write
+/// matches when the surface is in HDR mode (`Rgba16Float` = 8 bpp).
+pub(super) fn create_journal_page(
+    device: &wgpu::Device,
+    _format: wgpu::TextureFormat,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("journal-page-target"),
+        size: wgpu::Extent3d {
+            width: 1024,
+            height: 1024,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+/// Fullscreen offscreen target for the embedded yaku-journal scene's
+/// real GPU render. The shop's open-book mesh samples this view in
+/// screen space so the journal content reads as a window cut through
+/// the page region rather than a flat decal stuck on the page mesh.
+/// Window-sized so its content lines up 1:1 with the post-transition
+/// `YakuJournalScene` after handoff.
+pub(super) fn create_journal_scene(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("journal-scene-target"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());

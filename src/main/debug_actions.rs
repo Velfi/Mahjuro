@@ -16,7 +16,7 @@ impl App {
                     _ => 0,
                 };
                 self.progress.runs_completed = runs;
-                self.progress.check_level_up();
+                let level_up = self.progress.check_level_up();
                 self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
                 log::info!(
@@ -24,6 +24,19 @@ impl App {
                     level,
                     runs
                 );
+                if let Some(result) = level_up {
+                    let win_size = self
+                        .window
+                        .as_ref()
+                        .map(|w| w.inner_size())
+                        .unwrap_or(PhysicalSize::new(800, 600));
+                    let ww = win_size.width as f32;
+                    let wh = win_size.height as f32;
+                    if let Some(modal) = main_draw::build_level_up_modal(&result, ww, wh) {
+                        self.modals.push(modal);
+                        self.audio.play_sfx(audio::SfxId::LevelUp);
+                    }
+                }
             }
             DebugAction::SetGold(amount) => {
                 self.run.gold = amount as i32;

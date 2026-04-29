@@ -386,7 +386,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
             RelicId::HonorFury
             | RelicId::RedDragonRage
             | RelicId::GreenLuck
-            | RelicId::WhiteSilence
+            | RelicId::WhiteDragonsHush
             | RelicId::WildWinds
             | RelicId::DragonEcho
             | RelicId::RoundCompass => honors += 2,

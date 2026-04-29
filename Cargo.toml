@@ -3,6 +3,10 @@ name = "mahjuro"
 version = "0.4.4"
 edition = "2024"
 
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
 [dependencies]
 anyhow = "1.0.102"
 bytemuck = { version = "1.23", features = ["derive"] }
@@ -33,14 +37,22 @@ arboard = "3.6.1"
 enum_dispatch = "0.3"
 rodio = { version = "0.19", features = ["vorbis"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
-self_update = { version = "0.42", features = ["archive-zip", "archive-tar", "compression-flate2"] }
+self_update = { version = "0.42", features = [
+    "archive-zip",
+    "archive-tar",
+    "compression-flate2",
+] }
 rayon = "1.11.0"
 human_format = "1.2.1"
 steamworks = "0.13"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSURL", "NSString", "NSBundle"] }
+objc2-foundation = { version = "0.3", features = [
+    "NSURL",
+    "NSString",
+    "NSBundle",
+] }
 
 [dev-dependencies]
 proptest = "1.6"

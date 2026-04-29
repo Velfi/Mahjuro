@@ -1,6 +1,7 @@
 //! Floating 3D score popups used for short-lived textual beats such as
 //! zodiac level-ups or generic structure-growth callouts.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use rand::RngExt;
@@ -43,7 +44,7 @@ const FINAL_COLOR: [f32; 4] = [1.00, 0.95, 0.76, 1.0];
 
 #[derive(Clone, Debug)]
 struct ScorePopup {
-    label: String,
+    label: Arc<str>,
     born_at: Instant,
     source_xy: (f32, f32),
     dest_xy: (f32, f32),
@@ -86,7 +87,7 @@ impl ScorePopupSystem {
     /// `None` falls back to `LIFT_BASE` (the old behavior).
     pub fn spawn(
         &mut self,
-        label: String,
+        label: impl Into<Arc<str>>,
         source_xy: (f32, f32),
         dest_xy: (f32, f32),
         dest_lift: Option<f32>,
@@ -104,7 +105,7 @@ impl ScorePopupSystem {
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
         self.popups.push(ScorePopup {
-            label,
+            label: label.into(),
             born_at: Instant::now(),
             source_xy,
             dest_xy,
@@ -125,7 +126,7 @@ impl ScorePopupSystem {
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * (YAW_JITTER * 0.6);
         self.popups.push(ScorePopup {
-            label: "X".to_string(),
+            label: Arc::from("X"),
             born_at: Instant::now(),
             source_xy,
             dest_xy: source_xy,
@@ -184,7 +185,8 @@ impl ScorePopupSystem {
                         scale: p.base_scale * scale_mul * screen_scale,
                         rotation_x: 0.08,
                         rotation_y: p.yaw,
-                        label: p.label.clone(),
+                        // Arc clone — refcount bump, no allocation.
+                        label: Arc::clone(&p.label),
                         emissive,
                         material: p.material,
                     },

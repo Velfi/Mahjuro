@@ -14,18 +14,21 @@ use crate::render::tile_glb::Vertex3dTex;
 /// Corner radius as a fraction of the full extent. Drives the in-plane
 /// corner rounding of the side wall *and* the pillow bulge on the top
 /// and bottom caps, so the whole silhouette reads as one continuous
-/// porcelain chiclet.
+/// porcelain pebble. Larger values give a rounder, softer silhouette
+/// at the cost of cap area — the engraved decal sits on the inset cap
+/// quad, so values much above 0.25 start clipping multi-syllable yaku
+/// names (e.g. "Chiitoitsu").
 const RADIUS: f32 = 0.22;
 
-/// Quadrant tessellation for the rounded vertical corners. 6 segments
-/// per 90° (24 around the full perimeter) keeps the rounded corners
-/// smooth at typical on-screen sizes. Together with the 4 straight
-/// edges that's 28 perimeter samples per ring.
-const CORNER_SEGMENTS: usize = 6;
+/// Quadrant tessellation for the rounded vertical corners. 10 segments
+/// per 90° (40 around the full perimeter) keeps the rounded corners
+/// smooth even at close inspection.
+const CORNER_SEGMENTS: usize = 10;
 
-/// Number of latitude layers from the belly (vertical side) to the flat
-/// cap rim. Higher = smoother pillow at the cost of more vertices.
-const PILLOW_LAYERS: usize = 5;
+/// Number of latitude layers from the belly (vertical side) to the
+/// cap rim. More layers = smoother shoulder transition where the side
+/// curves up into the flat top.
+const PILLOW_LAYERS: usize = 9;
 
 /// Build the bone tablet mesh as a smooth rounded pillow.
 ///
@@ -250,14 +253,18 @@ fn stitch_rings(indices: &mut Vec<u32>, base: u32, layers: usize, ring_len: u32,
     }
 }
 
-/// Cap the top or bottom of the pillow with a triangle fan: a new
-/// centre vertex at `(0, layer.y, 0)` with a pure ±Y normal, plus a
-/// new ring of vertices at the cap rim — re-emitted so the normals are
-/// pure ±Y (not the blended ones of the side ring) and so UVs on the
-/// top cap map the cap quad for decal sampling.
+/// Cap the top or bottom of the pillow with a triangle fan: a centre
+/// vertex at `(0, layer.y, 0)` with a pure ±Y normal, plus a new ring
+/// of vertices at the cap rim. The rim vertices use *smoothly blended*
+/// normals matching the final side ring, so the shading transition
+/// from curved shoulder into flat cap is continuous and the tablet
+/// reads as one rounded pebble rather than a chiclet with a hard
+/// shoulder seam. The cap geometry stays planar (so the engraved decal
+/// still maps cleanly to a square top) — only the shading interpolation
+/// is curved.
 ///
-/// The rim samples on the fan share positions with the final side
-/// ring, but with different normals/UVs — so we must emit fresh
+/// The rim samples share positions with the final side ring but with
+/// different UVs (decal-mapped on the top cap), so we still emit fresh
 /// vertices here.
 fn emit_cap(
     vertices: &mut Vec<Vertex3dTex>,
@@ -268,18 +275,26 @@ fn emit_cap(
     up: bool,
 ) {
     let ring_len = ring.len() as u32;
-    let normal = if up {
+    let centre_normal = if up {
         [0.0, 1.0, 0.0]
     } else {
         [0.0, -1.0, 0.0]
     };
+    // Rim normals match the side-ring blend at this layer (mostly ±Y
+    // with a horizontal nudge proportional to `1 - tilt`). At the cap
+    // layer `tilt` is at its maximum (sin(π/2) = 1), so the horizontal
+    // component is small but non-zero — exactly what we want so light
+    // wraps around the rim instead of cliff-shadowing into a hard edge.
+    let up_sign = if up { 1.0 } else { -1.0 };
+    let horiz = (1.0 - layer.tilt).max(0.0);
+    let vert = layer.tilt;
 
     // UVs on the top cap map the rounded-rectangle rim into [0,1]²,
     // with (+u = +X, +v = +Z). Bottom cap UVs are zeroed (never used).
     let centre_idx = vertices.len() as u32;
     vertices.push(Vertex3dTex {
         position: [0.0, layer.y, 0.0],
-        normal,
+        normal: centre_normal,
         uv: if up { [0.5, 0.5] } else { [0.0, 0.0] },
     });
 
@@ -287,10 +302,14 @@ fn emit_cap(
     for sample in ring {
         let x = sample.x * layer.scale;
         let z = sample.z * layer.scale;
+        let nx = sample.nx * horiz;
+        let ny = up_sign * vert;
+        let nz = sample.nz * horiz;
+        let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-5);
         let uv = if up { [x + 0.5, z + 0.5] } else { [0.0, 0.0] };
         vertices.push(Vertex3dTex {
             position: [x, layer.y, z],
-            normal,
+            normal: [nx / len, ny / len, nz / len],
             uv,
         });
     }

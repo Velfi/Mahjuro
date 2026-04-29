@@ -148,10 +148,37 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
             *v = (*v - 3).max(0);
             if *v == 0 {
-                self.relics.active.retain(|&r| r != RelicId::SilkThread);
+                // Metamorphosis: Silk Thread doesn't vanish — it cocoons,
+                // then hatches into Silk Moth in the same slot. This isn't
+                // a destruction (Kintsugi must NOT count it), so we do an
+                // in-place swap rather than calling `note_relic_destroyed`.
                 self.relic_counters.remove(&RelicId::SilkThread);
-                self.note_relic_destroyed();
+                if let Some(slot) = self
+                    .relics
+                    .active
+                    .iter()
+                    .position(|&r| r == RelicId::SilkThread)
+                {
+                    self.relics.active[slot] = RelicId::SilkMoth;
+                } else {
+                    self.relics.active.push(RelicId::SilkMoth);
+                }
+                self.relic_counters.insert(RelicId::SilkMoth, 0);
+                self.relic_activations.push(RelicId::SilkMoth);
+                bus.push(GameEvent::AchievementUnlocked(
+                    crate::steam::Achievement::SilkMothEmerged,
+                ));
             }
+        }
+
+        // Silk Moth: produce $1 per discard action and accumulate the lifetime
+        // total in `relic_counters[SilkMoth]` so the live tooltip can show it.
+        // Fires after the SilkThread→SilkMoth swap above so the very discard
+        // that cracked the cocoon already pays out.
+        if self.relics.has(RelicId::SilkMoth) {
+            self.gold = self.gold.saturating_add(1);
+            *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
+            self.relic_activations.push(RelicId::SilkMoth);
         }
 
         count

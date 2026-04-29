@@ -11,6 +11,7 @@ impl WgpuRenderer {
         encoder: &mut wgpu::CommandEncoder,
         frame: &UiFrame,
         shadows_enabled: bool,
+        shadow_uniforms_changed: bool,
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         shrine_batches: &[&[ShrinePlacement]],
         tile_3d_rects: &[(usize, [f32; 4])],
@@ -20,7 +21,7 @@ impl WgpuRenderer {
         // the light's POV. Skipped entirely when shadows are disabled —
         // the lit shaders short-circuit on `params.x = 0` and the stale
         // map contents go unread.
-        if shadows_enabled {
+        if shadows_enabled && shadow_uniforms_changed {
             let shadow_ts = self
                 .gpu_profiler
                 .pass_writes(crate::render::gpu_profiler::PassSlot::Shadow);

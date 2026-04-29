@@ -116,6 +116,29 @@ impl TilePackKind {
         }
     }
 
+    /// Wax-seal color for the merchant-envelope detail centered on the pack
+    /// face. Each pack picks a wax tone that contrasts with its [`foil_tint`]
+    /// so the seal reads as a focal point at thumbnail size — typically a
+    /// deep, slightly warm red, shifted per kind to harmonize with the
+    /// wrapper. Used by the seal-baking pipeline (`scripts/bake_pack_seals.py`)
+    /// and as the hover-glow accent for the pack on the shop counter.
+    pub fn seal_color(self) -> [f32; 4] {
+        match self {
+            // Honors (gold foil) — imperial cinnabar.
+            Self::Honors => [0.74, 0.18, 0.16, 1.0],
+            // Terminals (copper foil) — oxblood, deeper than the wrapper.
+            Self::Terminals => [0.56, 0.14, 0.12, 1.0],
+            // Flowers (rose foil) — plum wax so it doesn't melt into the wrapper.
+            Self::Flowers => [0.52, 0.14, 0.30, 1.0],
+            // Bamboo (jade foil) — vermilion, classic temple-stamp red.
+            Self::BambooGrove => [0.78, 0.18, 0.14, 1.0],
+            // Coin Cache (silver foil) — burgundy.
+            Self::CoinCache => [0.58, 0.10, 0.18, 1.0],
+            // Scroll Library (indigo foil) — sealing-wax red.
+            Self::ScrollLibrary => [0.72, 0.18, 0.18, 1.0],
+        }
+    }
+
     pub fn shop_price(self) -> u32 {
         match self {
             Self::Flowers => 5,

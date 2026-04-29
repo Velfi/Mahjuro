@@ -73,8 +73,7 @@ pub(super) fn build_flame_emitters(
             if falloff <= 0.0 {
                 continue;
             }
-            wind_world +=
-                glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]) * falloff;
+            wind_world += glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]) * falloff;
         }
         // Flame-relative wind: 300 units/s → 1.0 is the heuristic that
         // matches the previous 2D behaviour.

@@ -5,8 +5,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::rules::RuleModifier;
-use crate::core::tile::Tile;
 use crate::core::tile::Suit;
+use crate::core::tile::Tile;
 
 use super::DetectedSet;
 use super::SetKind;

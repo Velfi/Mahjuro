@@ -2,36 +2,41 @@
 
 use std::time::Instant;
 
-use rand::RngExt;
-
 use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
 use crate::render::table_transform::rot_rx_ry_rz_deg;
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
 use crate::ui::widget::wrap_text;
 
 /// Assembled render data emitted by `ModalQueue::draw`: instanced quads,
-/// text labels, clickable button rects, and 3D relic meshes.
+/// text labels, clickable button rects, 3D relic meshes, and radial-
+/// gradient quads (used for the spotlight halo + lantern-mote glow,
+/// which need shader-side circular falloff that flat axis-aligned
+/// `GpuInstance` quads can't fake).
 pub type ModalDrawOutput = (
     Vec<GpuInstance>,
     Vec<TextLabel>,
     Vec<ButtonDef>,
     Vec<Object3d>,
+    Vec<GradientQuadInstance>,
 );
 
 /// Mutable buffers that a paginated modal's `draw_paginated` pushes
-/// into: 2D instanced quads, text labels, and the 3D relic objects that
-/// render above each page.
+/// into: 2D instanced quads, text labels, the 3D relic objects that
+/// render above each page, and radial-gradient sprites for the halo +
+/// mote glow.
 struct ModalDrawSink<'a> {
     instances: &'a mut Vec<GpuInstance>,
     labels: &'a mut Vec<TextLabel>,
     relic_objects: &'a mut Vec<Object3d>,
+    gradient_quads: &'a mut Vec<GradientQuadInstance>,
 }
 
 /// A single page in a paginated unlock carousel.
+#[derive(Clone)]
 pub struct UnlockPage {
     pub category: String,
     pub name: String,
@@ -79,183 +84,179 @@ impl ModalTheme {
     }
 }
 
-/// A single firework rocket: launches upward, then bursts into sparks.
+/// One drifting lantern mote: a slow-rising warm spark with subtle horizontal
+/// sway, a fade-in lead, a long bright body, and a fade-out tail. The
+/// per-mote `phase` makes the swarm asynchronous — replaces the noisy
+/// multicolor firework burst with the parlor-lantern aesthetic the rest of
+/// the game uses.
 #[derive(Clone)]
-struct Rocket {
+struct Mote {
     x: f32,
     y: f32,
-    vx: f32,
     vy: f32,
+    sway_amp: f32,
+    sway_freq: f32,
     color: [f32; 3],
-    fuse: f32, // time until burst (seconds)
-    trail_timer: f32,
-}
-
-/// A spark from a firework burst.
-#[derive(Clone)]
-struct Spark {
-    x: f32,
-    y: f32,
-    vx: f32,
-    vy: f32,
-    color: [f32; 3],
+    /// Total lifetime (seconds). Counts down each tick.
     life: f32,
+    /// Total intended lifetime — needed to ratio the brightness envelope
+    /// against `life`.
+    life_total: f32,
     size: f32,
+    /// Random phase offset so motes don't all sway in lockstep.
+    phase: f32,
 }
 
-/// Firework particle system: rockets launch, burst into radial sparks.
+/// Lantern-mote celebration field — slow warm sparks rise behind the
+/// hero relic, sway gently, and fade. Replaces the prior multi-color
+/// firework system; the API is unchanged so existing callers
+/// (`Modal::with_fireworks`, etc.) keep working.
 pub struct Fireworks {
-    rockets: Vec<Rocket>,
-    sparks: Vec<Spark>,
-    /// Accumulated trail sparks (tiny particles behind rockets).
-    trails: Vec<Spark>,
+    motes: Vec<Mote>,
+    /// Spawn budget remaining (motes left to emit). We stagger spawning
+    /// over the first ~2 seconds so the swarm rises in waves rather than
+    /// appearing all at once.
+    pending_spawn: usize,
+    spawn_timer: f32,
+    /// Geometry of the spawn band (set by `launch`). New motes pick a
+    /// random x within this band; their initial y is `base_y`.
+    spawn_center_x: f32,
+    spawn_base_y: f32,
+    spawn_spread: f32,
 }
 
 impl Fireworks {
     pub fn new() -> Self {
         Self {
-            rockets: Vec::new(),
-            sparks: Vec::new(),
-            trails: Vec::new(),
+            motes: Vec::new(),
+            pending_spawn: 0,
+            spawn_timer: 0.0,
+            spawn_center_x: 0.0,
+            spawn_base_y: 0.0,
+            spawn_spread: 0.0,
         }
     }
 
-    /// Launch a salvo of firework rockets from the bottom of the given rect area.
+    /// Schedule a swarm of `count` lantern motes to rise from a band
+    /// centered at `(center_x, base_y)` with horizontal `spread`. The
+    /// motes spawn over ~2s so the field reads as a continuous rise
+    /// rather than a single pop.
     pub fn launch(&mut self, center_x: f32, base_y: f32, spread: f32, count: usize) {
-        let mut rng = rand::rng();
-        let colors: [[f32; 3]; 6] = [
-            [1.0, 0.3, 0.2],  // red
-            [0.2, 0.9, 0.4],  // green
-            [0.3, 0.5, 1.0],  // blue
-            [1.0, 0.85, 0.2], // gold
-            [0.9, 0.3, 0.9],  // magenta
-            [0.2, 0.9, 0.9],  // cyan
-        ];
-        for _ in 0..count {
-            let color = colors[rng.random_range(0..colors.len())];
-            let x = center_x + (rng.random::<f32>() - 0.5) * spread;
-            let vx = (rng.random::<f32>() - 0.5) * 60.0;
-            let vy = -(180.0 + rng.random::<f32>() * 120.0); // upward
-            let fuse = 0.5 + rng.random::<f32>() * 0.6;
-            self.rockets.push(Rocket {
-                x,
-                y: base_y,
-                vx,
-                vy,
-                color,
-                fuse,
-                trail_timer: 0.0,
-            });
-        }
+        // Scale up: the new system is gentler per-mote, so to fill the
+        // hero stage we want a denser cloud than the old fireworks call
+        // would request. ~3x the requested count, then capped.
+        let scaled = (count * 3).min(160);
+        self.pending_spawn = self.pending_spawn.saturating_add(scaled);
+        self.spawn_center_x = center_x;
+        self.spawn_base_y = base_y;
+        self.spawn_spread = spread.max(1.0);
     }
 
-    /// Advance simulation by `dt` seconds.
+    /// Spawn one mote with randomized lifetime, color, and sway.
+    /// Per-mote size is derived from `spawn_spread` so the field
+    /// reads at the same visual density across resolutions — at 3840px
+    /// wide a 6px spark is a single dot, but scaling with the spread
+    /// keeps the motes legible at TV distance.
+    fn spawn_one(&mut self, rng: &mut impl rand::RngExt) {
+        // Warm palette: champagne / amber / soft gold. Subtle hue
+        // variance so the swarm doesn't read as a flat monochrome dust.
+        let palette: [[f32; 3]; 4] = [
+            [1.00, 0.86, 0.55], // champagne
+            [0.96, 0.78, 0.45], // gold
+            [1.00, 0.72, 0.38], // amber
+            [0.95, 0.90, 0.74], // pale ivory
+        ];
+        let color = palette[rng.random_range(0..palette.len())];
+        let x = self.spawn_center_x + (rng.random::<f32>() - 0.5) * self.spawn_spread;
+        // Velocity and sway amplitude scale with viewport so the
+        // motes climb proportional to screen height regardless of
+        // resolution. `spawn_spread` is roughly the window width,
+        // so 0.018 * spread per second ≈ 1.8% of the screen / sec.
+        let speed_unit = self.spawn_spread.max(1.0) * 0.001;
+        let vy = -(speed_unit * (24.0 + rng.random::<f32>() * 30.0));
+        let sway_amp = speed_unit * (8.0 + rng.random::<f32>() * 18.0);
+        let sway_freq = 0.6 + rng.random::<f32>() * 0.8;
+        let life_total = 3.0 + rng.random::<f32>() * 2.0;
+        // Mote size proportional to spread — 0.0025 * spread is
+        // ~6px at 2560-wide and ~10px at 3840-wide, which both
+        // read crisply.
+        let size_unit = self.spawn_spread * 0.0025;
+        let size = size_unit + rng.random::<f32>() * size_unit;
+        let phase = rng.random::<f32>() * std::f32::consts::TAU;
+        self.motes.push(Mote {
+            x,
+            y: self.spawn_base_y,
+            vy,
+            sway_amp,
+            sway_freq,
+            color,
+            life: life_total,
+            life_total,
+            size,
+            phase,
+        });
+    }
+
     pub fn update(&mut self, dt: f32) {
         let mut rng = rand::rng();
-        let mut new_sparks = Vec::new();
 
-        // Update rockets.
-        for r in &mut self.rockets {
-            r.x += r.vx * dt;
-            r.y += r.vy * dt;
-            r.vy += 40.0 * dt; // slight gravity on rockets
-            r.fuse -= dt;
-
-            // Trail particles.
-            r.trail_timer -= dt;
-            if r.trail_timer <= 0.0 {
-                r.trail_timer = 0.02;
-                self.trails.push(Spark {
-                    x: r.x,
-                    y: r.y,
-                    vx: (rng.random::<f32>() - 0.5) * 10.0,
-                    vy: 15.0 + rng.random::<f32>() * 10.0,
-                    color: [0.9, 0.8, 0.5],
-                    life: 0.3,
-                    size: 2.0,
-                });
+        // Stagger spawns: emit 1-2 motes per ~30ms while pending > 0.
+        if self.pending_spawn > 0 {
+            self.spawn_timer -= dt;
+            while self.spawn_timer <= 0.0 && self.pending_spawn > 0 {
+                self.spawn_one(&mut rng);
+                self.pending_spawn -= 1;
+                self.spawn_timer += 0.025;
             }
         }
 
-        // Burst rockets whose fuse expired.
-        let mut i = 0;
-        while i < self.rockets.len() {
-            if self.rockets[i].fuse <= 0.0 {
-                let r = self.rockets.remove(i);
-                let spark_count = 25 + rng.random_range(0..15);
-                for _ in 0..spark_count {
-                    let angle = rng.random::<f32>() * std::f32::consts::TAU;
-                    let speed = 40.0 + rng.random::<f32>() * 100.0;
-                    new_sparks.push(Spark {
-                        x: r.x,
-                        y: r.y,
-                        vx: angle.cos() * speed,
-                        vy: angle.sin() * speed,
-                        color: r.color,
-                        life: 0.6 + rng.random::<f32>() * 0.5,
-                        size: 2.0 + rng.random::<f32>() * 3.0,
-                    });
-                }
-            } else {
-                i += 1;
-            }
+        // Advance every mote.
+        for m in &mut self.motes {
+            m.life -= dt;
+            m.y += m.vy * dt;
+            // Subtle horizontal sway: position-driven so motes weave as
+            // they rise rather than tracking a straight column.
+            let t = (m.life_total - m.life) * m.sway_freq + m.phase;
+            // Apply sway as a per-frame x increment so it accumulates
+            // smoothly rather than snapping to a sin curve.
+            m.x += m.sway_amp * t.sin() * dt;
         }
-        self.sparks.extend(new_sparks);
-
-        // Update sparks.
-        for s in &mut self.sparks {
-            s.x += s.vx * dt;
-            s.y += s.vy * dt;
-            s.vy += 60.0 * dt; // gravity
-            s.vx *= 0.98; // air resistance
-            s.life -= dt;
-        }
-        self.sparks.retain(|s| s.life > 0.0);
-
-        // Update trails.
-        for t in &mut self.trails {
-            t.x += t.vx * dt;
-            t.y += t.vy * dt;
-            t.life -= dt;
-        }
-        self.trails.retain(|t| t.life > 0.0);
+        self.motes.retain(|m| m.life > 0.0);
     }
 
     pub fn is_active(&self) -> bool {
-        !self.rockets.is_empty() || !self.sparks.is_empty() || !self.trails.is_empty()
+        !self.motes.is_empty() || self.pending_spawn > 0
     }
 
-    /// Generate GPU instances for all firework particles.
+    /// Generate GPU instances for the mote field. Each mote is one
+    /// radial-gradient quad — the shader does the smoothstep falloff
+    /// from center to edge, so a single quad reads as a soft circular
+    /// glow at any resolution. (Earlier versions stacked 4-5
+    /// concentric flat quads to fake a halo; that always left the
+    /// brightest core looking like a sharp axis-aligned square.)
+    /// The returned `rect` is sized as the mote's *full* halo
+    /// diameter so the glow extends past the bright core; the shader
+    /// fades it to zero at the rect's edge.
     pub fn instances(&self) -> Vec<([f32; 4], [f32; 4])> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(self.motes.len());
+        for m in &self.motes {
+            // Brightness envelope: ramp up over first 0.4s, hold,
+            // fade out over last 1.0s. Keeps the swarm from popping
+            // into existence and gives a "lantern-light" easing.
+            let elapsed = m.life_total - m.life;
+            let fade_in = (elapsed / 0.4).clamp(0.0, 1.0);
+            let fade_out = (m.life / 1.0).clamp(0.0, 1.0);
+            let env = fade_in * fade_out;
 
-        // Rocket heads (bright).
-        for r in &self.rockets {
-            let s = 4.0;
+            // Halo diameter ~5x the per-mote `size` so the visible
+            // bright dot reads at roughly the original size while
+            // the radial fade extends well past it.
+            let s = m.size * 5.0;
             out.push((
-                [r.x - s * 0.5, r.y - s * 0.5, s, s],
-                [r.color[0], r.color[1], r.color[2], 1.0],
+                [m.x - s * 0.5, m.y - s * 0.5, s, s],
+                [m.color[0], m.color[1], m.color[2], 0.95 * env],
             ));
         }
-
-        // Trails (dim, small).
-        for t in &self.trails {
-            let alpha = (t.life / 0.3).max(0.0) * 0.6;
-            out.push((
-                [t.x - t.size * 0.5, t.y - t.size * 0.5, t.size, t.size],
-                [t.color[0], t.color[1], t.color[2], alpha],
-            ));
-        }
-
-        // Burst sparks.
-        for s in &self.sparks {
-            let alpha = (s.life / 1.1).max(0.0);
-            out.push((
-                [s.x - s.size * 0.5, s.y - s.size * 0.5, s.size, s.size],
-                [s.color[0], s.color[1], s.color[2], alpha],
-            ));
-        }
-
         out
     }
 }
@@ -343,13 +344,16 @@ impl ModalQueue {
     }
 
     /// Whether the modal has active animations that need redraws.
+    #[allow(dead_code)] // Was used for global redraw gating; modals still tick every frame now.
     pub fn needs_redraw(&self) -> bool {
         if let Some(modal) = self.queue.first() {
             if modal.opacity() < 1.0 {
                 return true;
             }
             if let Some(ref fw) = modal.fireworks {
-                return fw.is_active();
+                if fw.is_active() {
+                    return true;
+                }
             }
         }
         false
@@ -362,10 +366,10 @@ impl ModalQueue {
             .saturating_duration_since(self.last_update)
             .as_secs_f32();
         self.last_update = now;
-        if let Some(modal) = self.queue.first_mut()
-            && let Some(ref mut fw) = modal.fireworks
-        {
-            fw.update(dt);
+        if let Some(modal) = self.queue.first_mut() {
+            if let Some(ref mut fw) = modal.fireworks {
+                fw.update(dt);
+            }
         }
     }
 
@@ -424,6 +428,7 @@ impl ModalQueue {
         let mut labels = Vec::new();
         let mut buttons = Vec::new();
         let mut relic_objects: Vec<Object3d> = Vec::new();
+        let mut gradient_quads: Vec<GradientQuadInstance> = Vec::new();
 
         // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
         let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
@@ -442,6 +447,7 @@ impl ModalQueue {
                     instances: &mut instances,
                     labels: &mut labels,
                     relic_objects: &mut relic_objects,
+                    gradient_quads: &mut gradient_quads,
                 },
             );
         } else {
@@ -455,10 +461,19 @@ impl ModalQueue {
             );
         }
 
-        // Firework particles (rendered on top of dim overlay but mixed with card).
+        // Lantern-mote particles. Each mote emits one radial-gradient
+        // quad (soft circular glow with shader-side falloff) — a flat
+        // `GpuInstance` quad can't make a clean disc, so the older
+        // path's stacked-rect halo always read as a square.
         if let Some(ref fw) = modal.fireworks {
             for (rect, color) in fw.instances() {
-                instances.push(GpuInstance { rect, color });
+                gradient_quads.push(GradientQuadInstance {
+                    rect,
+                    color,
+                    // edge=1.0 → smoothstep covers the full radius;
+                    // mode=1.0 → radial falloff (full disc).
+                    feather: [1.0, 1.0, 0.0, 0.0],
+                });
             }
         }
 
@@ -468,7 +483,7 @@ impl ModalQueue {
             UiAction::Confirm,
         ));
 
-        Some((instances, labels, buttons, relic_objects))
+        Some((instances, labels, buttons, relic_objects, gradient_quads))
     }
 
     /// Draw a simple title+body modal (original behavior).
@@ -564,6 +579,13 @@ impl ModalQueue {
     }
 
     /// Draw a paginated unlock carousel page.
+    ///
+    /// Layout convention: there is no card. The relic mesh is the hero —
+    /// it sits centered on a small felt slab on an empty stage, with type
+    /// arranged around it like a museum placard, and a vignette darkens
+    /// the edges so the eye locks onto the relic. This matches the
+    /// game's pushdown-into-3D-felt grammar (yaku journal, collection,
+    /// etc.) and stays legible at TV viewing distance.
     fn draw_paginated(
         &self,
         modal: &Modal,
@@ -576,151 +598,188 @@ impl ModalQueue {
             instances,
             labels,
             relic_objects,
+            gradient_quads,
         } = out;
         let (window_w, window_h) = window;
         let page = &modal.pages[modal.current_page];
-        let padding = (20.0 * scale).max(10.0);
-        let card_w = (400.0 * scale).min(window_w * 0.85);
 
-        // Layout heights.
-        let category_h = (30.0 * scale).max(18.0);
-        let icon_h = if page.relic_id.is_some() {
-            (64.0 * scale).max(40.0)
-        } else {
-            0.0
-        };
-        let icon_gap = if page.relic_id.is_some() {
-            padding * 0.5
-        } else {
-            0.0
-        };
-        let name_h = (44.0 * scale).max(26.0);
-        let desc_lines = page.description.lines().count().max(1) as f32;
-        let desc_h = (desc_lines * 22.0 * scale).max(20.0).min(window_h * 0.3);
-        let nav_h = (24.0 * scale).max(16.0);
+        // ── Vignette (cinematic letterbox) ───────────────────────────
+        // Thin horizontal strips along the top and bottom of the
+        // screen, accumulating to a smooth dark band that frames the
+        // relic stage cinematically. We deliberately skip the left
+        // and right edges: full-height side strips create a visible
+        // vertical seam against the lit center column, while
+        // top-and-bottom only reads as a clean letterbox at TV
+        // distance. The relic-name + description column stays
+        // unaffected.
+        let [vr, vg, vb, _] = crate::render::theme::color::OBSIDIAN;
+        let layers = 24;
+        let strip_h = window_h * 0.30 / layers as f32;
+        for i in 0..layers {
+            // Per-strip alpha steady — stacking handles the gradient.
+            let a = 0.040 * alpha;
+            // Top band.
+            instances.push(GpuInstance {
+                rect: [0.0, i as f32 * strip_h, window_w, strip_h],
+                color: [vr, vg, vb, a],
+            });
+            // Bottom band.
+            instances.push(GpuInstance {
+                rect: [0.0, window_h - (i + 1) as f32 * strip_h, window_w, strip_h],
+                color: [vr, vg, vb, a],
+            });
+        }
 
-        let card_h = padding
-            + category_h
-            + padding * 0.5
-            + icon_h
-            + icon_gap
-            + name_h
-            + padding * 0.5
-            + desc_h
-            + padding * 0.75
-            + nav_h
-            + padding;
-        let card_x = (window_w - card_w) * 0.5;
-        let card_y = ((window_h - card_h) * 0.5).max(8.0);
+        // ── Hero stage layout ────────────────────────────────────────
+        // The relic occupies the upper-middle of the screen; type
+        // stacks below it; a footer pins page indicator + dismiss hint
+        // to the bottom edge. All sizes are derived from the smaller
+        // window dimension so a 4K TV scales up cleanly.
+        let base = window_w.min(window_h);
+        let center_x = window_w * 0.5;
 
-        // Border with page accent color.
-        let border = 3.0 * scale;
-        let [ar, ag, ab, aa] = page.accent_color;
-        instances.push(GpuInstance {
-            rect: [
-                card_x - border,
-                card_y - border,
-                card_w + border * 2.0,
-                card_h + border * 2.0,
-            ],
-            color: [ar, ag, ab, aa * alpha],
-        });
+        // The hero relic disk is sized by the smaller window dimension
+        // so it occupies a fixed fraction of the visible field on every
+        // aspect ratio — about 28% of the smaller axis, which reads
+        // clearly even on a couch-distance TV.
+        let icon_size = base * 0.30;
+        // Vertical centering biased slightly upward so the name +
+        // description below the relic have room without pushing the
+        // page indicator out of the lower vignette.
+        let icon_center_y = window_h * 0.40;
 
-        // Card background.
-        let [cr, cg, cb, ca] = modal.theme.bg_color();
-        instances.push(GpuInstance {
-            rect: [card_x, card_y, card_w, card_h],
-            color: [cr, cg, cb, ca * alpha],
-        });
+        // ── Stage spotlight pool ─────────────────────────────────────
+        // Single warm radial-gradient quad behind the relic. The
+        // gradient_quad shader does the actual circular falloff in
+        // the fragment stage (feather.y=1 selects radial mode), so
+        // we get a clean soft disc instead of the stacked-rect
+        // pseudo-halos earlier versions of this scene used.
+        if page.relic_id.is_some() {
+            let halo_size = icon_size * 2.6;
+            gradient_quads.push(GradientQuadInstance {
+                rect: [
+                    center_x - halo_size * 0.5,
+                    icon_center_y - halo_size * 0.5,
+                    halo_size,
+                    halo_size,
+                ],
+                color: [1.00, 0.78, 0.42, 0.32 * alpha],
+                feather: [1.0, 1.0, 0.0, 0.0],
+            });
+        }
 
-        let mut y = card_y + padding;
-        let content_w = card_w - padding * 2.0;
-
-        // Category label (e.g. "New Relic").
-        labels.push(TextLabel {
-            rect: [card_x + padding, y, content_w, category_h],
-            text: page.category.clone(),
-            color: {
-                let [r, g, b, a] = crate::render::theme::color::SLATE;
-                [r, g, b, a * alpha]
-            },
-            ..Default::default()
-        });
-        y += category_h + padding * 0.5;
-
-        // Relic icon (if applicable).
+        // ── Hero relic ───────────────────────────────────────────────
         if let Some(relic_id) = page.relic_id {
-            let icon_size = icon_h.min(content_w * 0.4);
-            let icon_x = card_x + (card_w - icon_size) * 0.5;
             let visual = relic_visual(relic_id);
-            let spin_deg = (Instant::now()
-                .saturating_duration_since(modal.shown_at)
-                .as_secs_f32()
-                * visual.ui_spin_rate_deg)
-                % 360.0;
             let face_size = icon_size * 0.80;
             let thick = face_size * 0.12 * visual.thickness_scale;
+            // Camera in main/draw.rs looks along +Y with up=+Z, so
+            // screen-vertical comes from world Z (lift) — not pixel Y.
+            // Park depth at the camera target plane and move the
+            // icon's vertical screen position into the lift.
+            //
+            // The relic mesh is a thin disk with its broad face on the
+            // local XZ plane (normal +Y for the textured front cap).
+            // The +Y-looking camera sits at -Y, so we flip the disk
+            // 180° so the front face points toward the camera. Mirrors
+            // the approach used by the collection scene's relic plaques.
+            //
             relic_objects.push(Object3d {
-                pos: [
-                    icon_x + icon_size * 0.5,
-                    y + icon_size * 0.5,
-                    icon_size * 0.38,
-                ],
+                pos: [center_x, window_h * 0.5, window_h * 0.5 - icon_center_y],
                 extents: [face_size, thick, face_size],
-                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, spin_deg, 0.0),
+                rotation: rot_rx_ry_rz_deg(180.0, 0.0, 0.0),
                 color: page.accent_color,
                 kind: Object3dKind::Relic {
                     relic_id,
-                    glow: alpha * 0.35,
+                    // Modest glow — the 2D spotlight halo behind the
+                    // relic does most of the visual lift; pushing the
+                    // disk's own glow too high blooms the textured
+                    // face into a featureless white circle.
+                    glow: alpha * 0.20,
                     silhouette: false,
+                    debuffed: false,
                     pick_id: None,
                 },
                 hover_target: 0.0,
                 anim_id: 0,
                 arrange_name: None,
             });
-            y += icon_h + icon_gap;
         }
 
-        // Item name — large, gold.
-        let [tr, tg, tb, ta] = modal.theme.title_color();
+        // ── Type column ──────────────────────────────────────────────
+        // All sizes scale against `base` (smaller window dim) so the
+        // hierarchy holds at any resolution.
+        let category_font = (base * 0.024).max(20.0);
+        let name_font = (base * 0.072).max(48.0);
+        let desc_font = (base * 0.030).max(24.0);
+        let nav_font = (base * 0.022).max(18.0);
+
+        // Category placard ("New Relic" / "New Rule") — sits above the
+        // relic, slate tone, smaller. Reads as a museum label.
+        let category_y = icon_center_y - icon_size * 0.55 - category_font * 1.6;
         labels.push(TextLabel {
-            rect: [card_x + padding, y, content_w, name_h],
+            rect: [0.0, category_y, window_w, category_font * 1.4],
+            text: page.category.to_uppercase(),
+            color: {
+                let [r, g, b, _] = crate::render::theme::color::MIST;
+                [r, g, b, 0.85 * alpha]
+            },
+            font_px: Some(category_font),
+            ..Default::default()
+        });
+
+        // Name — the largest type on screen. Gold-warm, sits just below
+        // the relic disk. We treat it as the page's hero label.
+        let name_y = icon_center_y + icon_size * 0.55 + base * 0.02;
+        let [tr, tg, tb, _ta] = crate::render::theme::color::CHAMPAGNE;
+        labels.push(TextLabel {
+            rect: [0.0, name_y, window_w, name_font * 1.3],
             text: page.name.clone(),
-            color: [tr, tg, tb, ta * alpha],
+            color: [tr, tg, tb, alpha],
+            font_px: Some(name_font),
             ..Default::default()
         });
-        y += name_h + padding * 0.5;
 
-        // Description.
-        let [dr, dg, db, da] = modal.theme.body_color();
+        // Description — wraps under the name, generous leading.
+        let desc_y = name_y + name_font * 1.5;
+        let desc_w = window_w * 0.7;
+        let desc_x = (window_w - desc_w) * 0.5;
+        let desc_lines = page.description.lines().count().max(1) as f32;
+        let desc_h = desc_lines * desc_font * 1.5;
+        let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
         labels.push(TextLabel {
-            rect: [card_x + padding, y, content_w, desc_h],
+            rect: [desc_x, desc_y, desc_w, desc_h],
             text: page.description.clone(),
-            color: [dr, dg, db, da * alpha],
+            color: [dr, dg, db, 0.92 * alpha],
+            font_px: Some(desc_font),
             ..Default::default()
         });
-        y += desc_h + padding * 0.75;
 
-        // Navigation hint + page indicator.
+        // ── Footer (page indicator + dismiss hint) ───────────────────
         let total = modal.pages.len();
         let current = modal.current_page + 1;
         let nav_text = if total > 1 {
             format!(
-                "\u{25c0}  {} / {}  \u{25b6}  \u{2022}  Enter to continue",
+                "\u{25c0}  {} / {}  \u{25b6}    Enter to continue",
                 current, total
             )
         } else {
             "Enter to continue".into()
         };
         labels.push(TextLabel {
-            rect: [card_x + padding, y, content_w, nav_h],
+            rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
             text: nav_text,
             color: {
-                let [r, g, b, a] = crate::render::theme::color::SLATE;
-                [r, g, b, a * 0.8 * alpha]
+                let [r, g, b, _] = crate::render::theme::color::MIST;
+                [r, g, b, 0.7 * alpha]
             },
+            font_px: Some(nav_font),
             ..Default::default()
         });
+
+        // Bottom hint strip — left as a single-line caption since
+        // multi-modal interaction (arrows + enter) is the same on
+        // gamepad, keyboard, and mouse via the Confirm action.
+        let _ = scale; // kept on signature for parity with simple draw
     }
 }

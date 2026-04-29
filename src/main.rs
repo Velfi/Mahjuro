@@ -1,5 +1,10 @@
 //! Mahjuro — UI-first shell: winit + wgpu + cassowary + input + scene system.
 
+// Release builds on Windows: detach from the console so launching the .exe
+// doesn't pop a black terminal behind the game window. Debug builds keep the
+// console so `log::info!` output is visible during development.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 pub mod asset_path;
 mod audio;
 mod bot;
@@ -8,6 +13,8 @@ pub mod crash_guard;
 mod debug_menu;
 mod debug_overlays;
 mod game;
+#[cfg(target_os = "macos")]
+mod macos_updater;
 #[path = "main/arrange.rs"]
 mod main_arrange;
 #[path = "main/bot_graph.rs"]
@@ -28,8 +35,6 @@ mod main_event_loop;
 mod main_headless;
 #[path = "main/render_settings.rs"]
 mod main_render_settings;
-#[cfg(target_os = "macos")]
-mod macos_updater;
 mod persistence;
 mod render;
 mod scenes;
@@ -42,7 +47,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
-use debug_menu::{DebugAction, DebugMenuBar};
+use debug_menu::DebugAction;
+#[cfg(debug_menu_enabled)]
+use debug_menu::DebugMenuBar;
 use debug_overlays::{
     CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, SmokeDebugOverlay,
     SmokeDebugResult, TuningOverlay, TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
@@ -68,7 +75,6 @@ use serde::{Deserialize, Serialize};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
-use ui::tooltip::TooltipState;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -146,12 +152,14 @@ struct App {
     pending_post_game_over_modals: Vec<Modal>,
     gfx: RenderSettings,
     debug: DebugState,
-    tooltips: TooltipState,
     cascade_tuning: CascadeTuning,
     shop_smoke_tuning: ShopSmokeTuning,
     volumetric_tuning: VolumetricTuning,
     deferred_round_end: Option<GameEvent>,
-    update_checker: update_check::UpdateChecker,
+    /// `None` when the Steam build is hosting us — Steam handles its own
+    /// update pipeline and self-replacing the binary fights the Steam
+    /// installer. Otherwise `Some` and polled every frame.
+    update_checker: Option<update_check::UpdateChecker>,
     /// `Some(version)` while the "update available" prompt modal is on
     /// screen. Confirming the modal triggers the install; cancelling
     /// clears this.
@@ -159,7 +167,8 @@ struct App {
     /// macOS-only: Sparkle's updater controller. Holds the framework alive
     /// for the lifetime of the app and keeps Sparkle's background scheduler
     /// running. `None` on dev builds where `Sparkle.framework` isn't
-    /// embedded yet — the legacy `update_checker` then takes over.
+    /// embedded yet (the legacy `update_checker` then takes over) or when
+    /// Steam is hosting us (Steam owns updates).
     #[cfg(target_os = "macos")]
     sparkle: Option<macos_updater::SparkleUpdater>,
     modifiers: ModifiersState,
@@ -215,16 +224,12 @@ impl App {
     ///   - The active scene's own internal overlays, via
     ///     [`Scene::has_blocking_overlay`].
     ///
-    /// Two universal gates in the main loop consult this:
-    ///   1. **Tooltip/hover gate** — `skip_tooltips` in the redraw path
-    ///      suppresses the global tooltip overlay so hover effects never
-    ///      leak through a modal.
-    ///   2. **Click safety wipe** — right after the scene populates
-    ///      `active_buttons`, those buttons are cleared if any modal is up,
-    ///      so scene buttons can never be clicked through. Overlays that
-    ///      *want* their own clickable surface (e.g. `ModalQueue`'s full-
-    ///      screen dismiss) write to `active_buttons` *after* the wipe in
-    ///      their own draw step.
+    /// The main loop also consults this for the **click safety wipe**:
+    /// right after the scene populates `active_buttons`, those buttons are
+    /// cleared if any modal is up, so scene buttons can never be clicked
+    /// through. Overlays that *want* their own clickable surface (e.g.
+    /// `ModalQueue`'s full-screen dismiss) write to `active_buttons`
+    /// *after* the wipe in their own draw step.
     ///
     /// To make a new overlay modal-blocking by default:
     ///   - If it's app-owned: add it to this OR-chain.
@@ -295,6 +300,15 @@ impl App {
             audio.set_enabled(false);
         }
         log::info!("App::new() settings + profile loaded in {:?}", t0.elapsed());
+        // Steam owns updates for Steam-installed builds: self-replacing the
+        // binary fights the Steam content system. Detect Steam two ways —
+        // the SDK signal (strongest: Steam *is* hosting us right now) and
+        // the env-var signal (catches "launched outside Steam from a Steam
+        // library" and offline-mode init failures).
+        let is_steam_build = steam.is_connected() || steam::launched_via_steam();
+        if is_steam_build {
+            log::info!("Steam-hosted build detected; skipping in-app updaters");
+        }
         Self {
             window: None,
             renderer: None,
@@ -333,6 +347,7 @@ impl App {
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
+                surface_kind: settings.surface_kind,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
                 shadows_enabled: settings.shadows_enabled,
@@ -341,7 +356,6 @@ impl App {
                 ui_scale: settings.ui_scale,
             },
             debug: DebugState::new(),
-            tooltips: TooltipState::new(),
             cascade_tuning: CascadeTuning::default(),
             shop_smoke_tuning: persistence::load_tuning_override::<ShopSmokeTuning>(
                 "ShopSmokeTuning",
@@ -349,10 +363,12 @@ impl App {
             volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
                 "VolumetricTuning",
             ),
-            update_checker: update_check::UpdateChecker::spawn(),
+            update_checker: (!is_steam_build).then(update_check::UpdateChecker::spawn),
             pending_update_prompt: None,
             #[cfg(target_os = "macos")]
-            sparkle: macos_updater::SparkleUpdater::start(),
+            sparkle: (!is_steam_build)
+                .then(macos_updater::SparkleUpdater::start)
+                .flatten(),
             modifiers: ModifiersState::default(),
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
             headless_screenshot: None,
@@ -474,6 +490,12 @@ fn main() -> anyhow::Result<()> {
             // achievements/overlay.
             let steam = if no_steam {
                 log::info!("--no-steam: skipping Steamworks init");
+                steam::SteamClient::disabled()
+            } else if !steam::steamworks_dll_ready() {
+                log::warn!(
+                    "steam_api64.dll was not found next to this executable (or failed to load); \
+                     Steam achievements and overlay are disabled this session",
+                );
                 steam::SteamClient::disabled()
             } else {
                 steam::SteamClient::init()

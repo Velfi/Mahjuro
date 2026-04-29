@@ -133,7 +133,7 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
         let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
             - coin_back_z_push
             - layout.window_h * scene.positions.coin_pile.ny;
-        let dish_rim = (coin_thickness * 2.5).max(10.0);
+        let dish_rim = (coin_thickness * 2.5).max(18.0);
         // Scale coin count with the magnitude of the change so bigger
         // payouts produce a more dramatic shower.
         let count = (delta.unsigned_abs() as usize).clamp(1, 12);
@@ -228,11 +228,10 @@ pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant
     let candle_flare_boost = 1.0 + scene.candle_flare;
     for c in scene.candles.iter_mut() {
         let t = scene.candle_time;
-        let target = (0.9
-            + 0.18 * (t * 7.3 + c.phase).sin()
-            + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
-            * candle_dim
-            * candle_flare_boost;
+        let target =
+            (0.9 + 0.18 * (t * 7.3 + c.phase).sin() + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
+                * candle_dim
+                * candle_flare_boost;
         // Exponential smoothing — keeps the light from snapping. Bump
         // the rate during a gust so the dim/recover edge reads as a
         // wind hit instead of a slow fade.
@@ -367,8 +366,7 @@ pub(super) fn build_candles_and_spotlights(
             cy_hand_upper,
         ),
         (
-            (strip_right + candle_w * 0.5 + bottom_pad)
-                .min(layout.window_w - candle_w * 0.5 - 4.0),
+            (strip_right + candle_w * 0.5 + bottom_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
             cy_hand_upper,
         ),
         (
@@ -376,8 +374,7 @@ pub(super) fn build_candles_and_spotlights(
             cy_hand_lower,
         ),
         (
-            (strip_right + candle_w * 0.5 + bottom_pad)
-                .min(layout.window_w - candle_w * 0.5 - 4.0),
+            (strip_right + candle_w * 0.5 + bottom_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
             cy_hand_lower,
         ),
         (layout.window_w * 0.5, layout.window_h * 1.55),
@@ -480,17 +477,13 @@ pub(super) fn build_candles_and_spotlights(
             // wick is much farther from the action row than any of the
             // table-edge candles — bump its radius and intensity to
             // compensate, otherwise the front row stays in shadow.
-            let (light_radius_mul, light_intensity) =
-                if i == 6 { (2.2, 1.0) } else { (1.0, 2.3) };
+            let (light_radius_mul, light_intensity) = if i == 6 { (2.2, 1.0) } else { (1.0, 2.3) };
             // Flare multiplier: boosts intensity and radius when a
             // monster hand clears the whole blind in one shot.
             let flare_mul = 1.0 + scene.candle_flare;
             point_lights.push(PointLight {
                 pos: [cx_j, cy_j, wick_world_y],
-                radius: radius_px
-                    * light_radius_mul
-                    * (1.05 + 0.3 * candle.flicker)
-                    * flare_mul,
+                radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker) * flare_mul,
                 color: [1.0, 0.55, 0.22],
                 intensity: light_intensity * candle.flicker * scene.light_ramp * flare_mul,
             });
@@ -573,8 +566,8 @@ pub(super) fn build_candles_and_spotlights(
                 let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
                     continue;
                 };
-                let budget = crate::render::wgpu_renderer::MAX_SPOT_LIGHTS
-                    .saturating_sub(spot_lights.len());
+                let budget =
+                    crate::render::wgpu_renderer::MAX_SPOT_LIGHTS.saturating_sub(spot_lights.len());
                 if budget == 0 {
                     break;
                 }
@@ -641,8 +634,8 @@ pub(super) fn build_candles_and_spotlights(
             && let Some(mirror) = bronze_mirror_placement
         {
             let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
-            let budget = crate::render::wgpu_renderer::MAX_POINT_LIGHTS
-                .saturating_sub(point_lights.len());
+            let budget =
+                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
             if budget > 0 {
                 let diam = mirror.extents[0];
                 point_lights.push(PointLight {
@@ -659,8 +652,8 @@ pub(super) fn build_candles_and_spotlights(
             && let Some(bowl) = discard_bowl_placement
         {
             let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
-            let budget = crate::render::wgpu_renderer::MAX_POINT_LIGHTS
-                .saturating_sub(point_lights.len());
+            let budget =
+                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
             if budget > 0 {
                 let diam = bowl.extents[0];
                 point_lights.push(PointLight {
@@ -690,7 +683,7 @@ pub(super) fn build_ambient_table_objects(
     layout: &crate::ui::layout::LayoutResult,
     gameplay: &crate::game::engine::GameplayReadModel,
     progress_dora_enabled: bool,
-    coin_pile_rect: Option<[f32; 4]>,
+    _coin_pile_rect: Option<[f32; 4]>,
     frame: &mut crate::render::draw_cmd::UiFrame,
 ) {
     use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -702,8 +695,8 @@ pub(super) fn build_ambient_table_objects(
     // Dora indicator plinth — ornate brass pedestal at center-stage
     // (back of the table by default; user-arrangeable). Holds 1–2
     // dora indicator tile faces. Only drawn once dora is unlocked
-    // (level 4+); the focusable rect powers the focus ring + glossary
-    // tooltip below.
+    // (level 4+); the focusable rect powers the focus ring + tooltip
+    // below.
     if progress_dora_enabled {
         let dora_p = &scene.positions.dora;
         let plinth_w = layout.mm(48.0);
@@ -820,7 +813,7 @@ pub(super) fn build_ambient_table_objects(
         let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
             - coin_back_z_push
             - layout.window_h * scene.positions.coin_pile.ny;
-        let dish_rim = (coin_thickness * 2.5).max(10.0);
+        let dish_rim = (coin_thickness * 2.5).max(18.0);
         let dish_w = scatter_half * 2.0 + coin_radius * 4.0;
         let dish_d = scatter_half * 2.0 + coin_radius * 4.0;
         frame.object3d(Object3d {
@@ -828,10 +821,13 @@ pub(super) fn build_ambient_table_objects(
             extents: [dish_w, dish_rim, dish_d],
             rotation: glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
                 * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
-            color: [1.0, 1.0, 1.0, 1.0],
+            // Aged-porcelain cream tint drives a light crazing pattern in
+            // the shader so the dish reads as a temple-merchant ceramic
+            // piece (well-loved, not fresh from the kiln).
+            color: [0.88, 0.84, 0.78, 1.0],
             kind: Object3dKind::Primitive {
-                shape: crate::render::primitive::MeshId::DiscSquare,
-                material: crate::render::primitive::MaterialSpec::plain(),
+                shape: crate::render::primitive::MeshId::PorcelainDish,
+                material: crate::render::primitive::MaterialSpec::porcelain(),
                 pick_id: None,
                 shadow_caster: true,
                 silhouette: false,
@@ -907,17 +903,5 @@ pub(super) fn build_ambient_table_objects(
         if !coins.is_empty() {
             frame.object3d_batch(coins);
         }
-        // Hover region for the coin pile → "Gold" glossary entry.
-        // We reuse the `coin_pile_rect` computed at the top of
-        // `draw_frame` so the glossary anchor, the focus-rect graph
-        // entry for `FocusTarget::Gold`, and the gold tooltip all
-        // share one source of truth — keeping the focus ring, hover
-        // tooltip, and physical pile visually locked together.
-        if let Some(rect) = coin_pile_rect {
-            frame.glossary_anchor(rect, "Gold");
-        }
-        // Dora plinth hover is handled by the `FocusTarget::Dora` tooltip
-        // path, which shows live dora-face data. Registering a glossary
-        // anchor here too would stack two tooltips over the plinth.
     }
 }

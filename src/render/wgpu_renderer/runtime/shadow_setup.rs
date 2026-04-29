@@ -83,6 +83,7 @@ impl WgpuRenderer {
         light_view_proj_arr: [f32; 16],
         tile_pick_models: &[(usize, Mat4)],
         shrine_batches: &[&[ShrinePlacement]],
+        shadow_uniforms_changed: &mut bool,
     ) {
         let w = camera.w;
         let h = camera.h;
@@ -117,8 +118,16 @@ impl WgpuRenderer {
                         );
                         let candle_name = self.scene_path("candle");
                         let model = self.apply_arrange_override(&candle_name, model);
-                        instances[0].write_shadow_uniform(&self.queue, light_view_proj_arr, model);
-                        instances[1].write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                        *shadow_uniforms_changed |= instances[0].write_shadow_uniform(
+                            &self.queue,
+                            light_view_proj_arr,
+                            model,
+                        );
+                        *shadow_uniforms_changed |= instances[1].write_shadow_uniform(
+                            &self.queue,
+                            light_view_proj_arr,
+                            model,
+                        );
                         slot_i += 1;
                     }
                 }
@@ -147,7 +156,7 @@ impl WgpuRenderer {
                         Mat4::IDENTITY,
                         glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
                     );
-                    self.shrine_instances[slot_i].write_shadow_uniform(
+                    *shadow_uniforms_changed |= self.shrine_instances[slot_i].write_shadow_uniform(
                         &self.queue,
                         light_view_proj_arr,
                         model,
@@ -192,11 +201,8 @@ impl WgpuRenderer {
                                 0.0,
                                 glam::Vec3::new(eff_w, cap_h, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
-                                &self.queue,
-                                light_view_proj_arr,
-                                top_model,
-                            );
+                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
                             ribbon_shadow_cursor += 1;
                             if mid_h > 0.0 {
                                 let mid_model = ribbon_submesh(
@@ -204,11 +210,13 @@ impl WgpuRenderer {
                                     -cap_h,
                                     glam::Vec3::new(eff_w, mid_h, depth),
                                 );
-                                self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
-                                    &self.queue,
-                                    light_view_proj_arr,
-                                    mid_model,
-                                );
+                                *shadow_uniforms_changed |= self.ribbon_instances
+                                    [ribbon_shadow_cursor]
+                                    .write_shadow_uniform(
+                                        &self.queue,
+                                        light_view_proj_arr,
+                                        mid_model,
+                                    );
                                 ribbon_shadow_cursor += 1;
                             }
                             let bot_model = ribbon_submesh(
@@ -216,11 +224,8 @@ impl WgpuRenderer {
                                 -(cap_h + mid_h),
                                 glam::Vec3::new(eff_w, cap_h, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
-                                &self.queue,
-                                light_view_proj_arr,
-                                bot_model,
-                            );
+                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);
                             ribbon_shadow_cursor += 1;
                         } else {
                             let model = ribbon_submesh(
@@ -228,11 +233,8 @@ impl WgpuRenderer {
                                 0.0,
                                 glam::Vec3::new(eff_w, eff_l, depth),
                             );
-                            self.ribbon_instances[ribbon_shadow_cursor].write_shadow_uniform(
-                                &self.queue,
-                                light_view_proj_arr,
-                                model,
-                            );
+                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
                             ribbon_shadow_cursor += 1;
                         }
                     }
@@ -262,11 +264,8 @@ impl WgpuRenderer {
                         let sz = o.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
                         let model =
                             translate_rot_scale(center, o.rotation, glam::Vec3::new(sx, sy, sz));
-                        self.talisman_instances[talisman_shadow_cursor].write_shadow_uniform(
-                            &self.queue,
-                            light_view_proj_arr,
-                            model,
-                        );
+                        *shadow_uniforms_changed |= self.talisman_instances[talisman_shadow_cursor]
+                            .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
                         talisman_shadow_cursor += 1;
                     }
                 }
@@ -310,7 +309,11 @@ impl WgpuRenderer {
                             if let Some(pool) = self.primitive_instances.get_mut(shape)
                                 && let Some(inst) = pool.get_mut(slot_i)
                             {
-                                inst.write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                                *shadow_uniforms_changed |= inst.write_shadow_uniform(
+                                    &self.queue,
+                                    light_view_proj_arr,
+                                    model,
+                                );
                             }
                         }
                         // CabinetColumn pairs with a CabinetRails
@@ -336,6 +339,7 @@ impl WgpuRenderer {
                         model: model.to_cols_array(),
                     }),
                 );
+                *shadow_uniforms_changed = true;
             }
         }
     }

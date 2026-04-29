@@ -458,12 +458,15 @@ pub fn build_dish_mesh() -> MeshCpu {
 /// the Plain material with no decal sampling.
 pub fn build_round_dish_mesh() -> MeshCpu {
     const SEGS: usize = 32;
-    // Thinner rim (was 0.10) so the lip reads delicate, wider footprint at
-    // the top and a noticeably narrower base for a tapered bowl silhouette.
-    const RIM_THICK: f32 = 0.04;
-    const RECESS_FLOOR: f32 = -0.10;
+    // Alms-bowl proportions: deeper basin, slightly thicker rim, narrow
+    // tapered base. The shop's sell-tray dispatch applies a per-instance
+    // color (warm/cool tint based on focus/drag state) so the recessed
+    // floor reads as "polished brass lighting up" when the player is
+    // dragging an item toward it.
+    const RIM_THICK: f32 = 0.072;
+    const RECESS_FLOOR: f32 = -0.32;
     const OUTER_R: f32 = 0.5;
-    const BASE_R: f32 = 0.32;
+    const BASE_R: f32 = 0.28;
     const INNER_R: f32 = OUTER_R - RIM_THICK;
     const INNER_BASE_R: f32 = BASE_R - RIM_THICK;
     const RIM_TOP: f32 = 0.5;
@@ -650,9 +653,278 @@ pub fn build_round_dish_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Plain,
-            base_color: [0.32, 0.22, 0.10, 1.0],
-            specular_strength: 0.55,
-            specular_power: 48.0,
+            // Brass default. Shop's sell-tray dispatch overrides this
+            // with the focus/drag-driven `sell_tray_color`, but the
+            // brass tone shows through for any other caller.
+            base_color: [0.78, 0.58, 0.28, 1.0],
+            specular_strength: 0.88,
+            specular_power: 104.0,
+        },
+    }
+}
+
+/// Hand-thrown porcelain dish — a rounded ceramic bowl with a continuous
+/// curved profile, smooth-shaded side wall, rolled lip, recessed inner
+/// cavity, and a small foot ring at the base. Local extents -0.5..+0.5
+/// on each axis (Y-up); revolve around Y. Side normals are smoothly
+/// interpolated along the profile so the dish reads as one continuous
+/// thrown form rather than a stack of cylindrical bands.
+///
+/// Slight per-segment radial wobble (sub-mm at game scale) breaks the
+/// silhouette away from machine-perfect circular so the dish reads as
+/// handcrafted.
+pub fn build_porcelain_dish_mesh() -> MeshCpu {
+    // Angular tessellation. 48 around the perimeter is enough to keep
+    // the silhouette smooth at typical viewing sizes without wobbling
+    // pixels at close zoom.
+    const SEGS: usize = 48;
+    // Radial wobble amplitude (fraction of OUTER_R). Hand-thrown dishes
+    // are rarely perfectly circular; ±0.4% reads as "made by hand" but
+    // doesn't deform the silhouette into something visibly lumpy.
+    const WOBBLE_AMP: f32 = 0.004;
+
+    // ── Outer profile (foot ring → base curve → swelling wall → rolled
+    //    rim). Each sample is (radius, y, n_radial, n_y) where the
+    //    normal is the *outward* surface normal at that profile point.
+    //    Normals are pre-computed analytically from the local profile
+    //    tangent so shading reads as a continuous curved surface.
+    // ──────────────────────────────────────────────────────────────
+    let outer_profile: [(f32, f32, f32, f32); 9] = {
+        // Profile points along the silhouette, before normals.
+        // (r, y) only — y goes -0.5 (bottom of foot) to +0.5 (rim top).
+        let pts: [(f32, f32); 9] = [
+            (0.22, -0.50), // 0: outer foot ring base
+            (0.24, -0.46), // 1: foot meets underside curve
+            (0.30, -0.38), // 2: belly starts to curve outward
+            (0.40, -0.22), // 3: lower belly
+            (0.46, -0.05), // 4: widest belly
+            (0.49, 0.15),  // 5: upper wall, slowing
+            (0.50, 0.32),  // 6: just below rim
+            (0.50, 0.46),  // 7: rim shoulder
+            (0.49, 0.50),  // 8: rim top, rolled slightly inward
+        ];
+        let mut out = [(0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32); 9];
+        for i in 0..pts.len() {
+            // Tangent is the average of the segments adjacent to this
+            // point (central difference). At the endpoints we use the
+            // single available segment.
+            let (pr, py) = pts[i];
+            let (tr, ty) = if i == 0 {
+                (pts[1].0 - pts[0].0, pts[1].1 - pts[0].1)
+            } else if i == pts.len() - 1 {
+                (pts[i].0 - pts[i - 1].0, pts[i].1 - pts[i - 1].1)
+            } else {
+                (pts[i + 1].0 - pts[i - 1].0, pts[i + 1].1 - pts[i - 1].1)
+            };
+            // Outward normal is perpendicular to the tangent, rotated 90°
+            // clockwise (so positive radial slope → upward-outward normal).
+            // Tangent (tr, ty) → normal (ty, -tr), then normalize.
+            let mut nr = ty;
+            let mut ny = -tr;
+            let mag = (nr * nr + ny * ny).sqrt().max(1e-6);
+            nr /= mag;
+            ny /= mag;
+            out[i] = (pr, py, nr, ny);
+        }
+        out
+    };
+
+    // ── Inner profile (rim lip → inner wall curve → recessed floor).
+    //    Mirrors the outer profile but inset to give the dish wall its
+    //    thickness, with a soft U-shaped basin floor.
+    // ──────────────────────────────────────────────────────────────
+    let inner_profile: [(f32, f32, f32, f32); 7] = {
+        let pts: [(f32, f32); 7] = [
+            (0.46, 0.50),  // 0: inner rim edge (just below outer rim top)
+            (0.45, 0.42),  // 1: inner shoulder, curves inward
+            (0.42, 0.25),  // 2: inner upper wall
+            (0.36, 0.05),  // 3: inner middle wall
+            (0.26, -0.18), // 4: lower inner wall
+            (0.14, -0.30), // 5: basin shoulder
+            (0.00, -0.34), // 6: basin floor centre
+        ];
+        let mut out = [(0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32); 7];
+        for i in 0..pts.len() {
+            let (pr, py) = pts[i];
+            let (tr, ty) = if i == 0 {
+                (pts[1].0 - pts[0].0, pts[1].1 - pts[0].1)
+            } else if i == pts.len() - 1 {
+                (pts[i].0 - pts[i - 1].0, pts[i].1 - pts[i - 1].1)
+            } else {
+                (pts[i + 1].0 - pts[i - 1].0, pts[i + 1].1 - pts[i - 1].1)
+            };
+            // Inward-facing normal: rotate the tangent the other way
+            // (the inside of the bowl points toward the central axis).
+            let mut nr = -ty;
+            let mut ny = tr;
+            let mag = (nr * nr + ny * ny).sqrt().max(1e-6);
+            nr /= mag;
+            ny /= mag;
+            out[i] = (pr, py, nr, ny);
+        }
+        out
+    };
+
+    // Hash-driven radial wobble. Stable per-segment so neighboring
+    // vertices share the same wobble offset and the silhouette stays
+    // continuous — only the cross-section perimeter is non-circular.
+    let wobble = |seg: usize| -> f32 {
+        let s = seg as f32;
+        let h = ((s * 12.9898).sin() * 43758.5453).fract();
+        (h - 0.5) * 2.0 * WOBBLE_AMP
+    };
+
+    let mut vertices: Vec<Vertex3dTex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let angle = |i: usize| (i as f32) / (SEGS as f32) * std::f32::consts::TAU;
+
+    // ── Outer wall: lathe the outer profile around Y. Each profile
+    //    layer emits one ring of SEGS+1 vertices (last == first for UV
+    //    continuity). Adjacent layers stitch into a quad strip.
+    // ──────────────────────────────────────────────────────────────
+    let outer_first = vertices.len() as u32;
+    for &(r, y, nr, ny) in outer_profile.iter() {
+        for i in 0..=SEGS {
+            let a = angle(i % SEGS);
+            let w = wobble(i % SEGS);
+            let rr = r * (1.0 + w);
+            let (cx, cz) = (a.cos(), a.sin());
+            vertices.push(Vertex3dTex {
+                position: [rr * cx, y, rr * cz],
+                normal: [nr * cx, ny, nr * cz],
+                uv: [(i as f32) / (SEGS as f32), (y + 0.5)],
+            });
+        }
+    }
+    let row = (SEGS + 1) as u32;
+    for layer in 0..(outer_profile.len() - 1) as u32 {
+        for i in 0..SEGS as u32 {
+            let i00 = outer_first + layer * row + i;
+            let i01 = outer_first + layer * row + i + 1;
+            let i10 = outer_first + (layer + 1) * row + i;
+            let i11 = outer_first + (layer + 1) * row + i + 1;
+            // CCW from outside (normal points outward).
+            indices.extend_from_slice(&[i00, i10, i01, i01, i10, i11]);
+        }
+    }
+
+    // ── Foot ring underside (normal -Y) — closes the foot at the
+    //    bottom. Triangle fan from the centre out to the foot perimeter.
+    //    The inner basin opens out the *top* so this disc has no hole.
+    // ──────────────────────────────────────────────────────────────
+    {
+        let bottom_y = outer_profile[0].1;
+        let bottom_r = outer_profile[0].0;
+        let center = vertices.len() as u32;
+        vertices.push(Vertex3dTex {
+            position: [0.0, bottom_y, 0.0],
+            normal: [0.0, -1.0, 0.0],
+            uv: [0.5, 0.5],
+        });
+        for i in 0..SEGS {
+            let a = angle(i);
+            let w = wobble(i);
+            let rr = bottom_r * (1.0 + w);
+            vertices.push(Vertex3dTex {
+                position: [rr * a.cos(), bottom_y, rr * a.sin()],
+                normal: [0.0, -1.0, 0.0],
+                uv: [0.5 + 0.5 * a.cos(), 0.5 + 0.5 * a.sin()],
+            });
+        }
+        for i in 0..SEGS {
+            let a = center + 1 + i as u32;
+            let b = center + 1 + ((i as u32 + 1) % SEGS as u32);
+            // CCW from below (normal -Y): center, b, a
+            indices.extend_from_slice(&[center, b, a]);
+        }
+    }
+
+    // ── Rim cap: a thin annular ring on top connecting the outer rim
+    //    edge (outer_profile last point) to the inner rim edge (inner
+    //    profile first point). Normal +Y so the rim catches an
+    //    overhead candle highlight that visually "reads" as a polished
+    //    glaze edge.
+    // ──────────────────────────────────────────────────────────────
+    {
+        let outer_last = outer_profile[outer_profile.len() - 1];
+        let inner_first = inner_profile[0];
+        for i in 0..SEGS {
+            let a0 = angle(i);
+            let a1 = angle(i + 1);
+            let w0 = wobble(i);
+            let w1 = wobble((i + 1) % SEGS);
+            let or0 = outer_last.0 * (1.0 + w0);
+            let or1 = outer_last.0 * (1.0 + w1);
+            let ir0 = inner_first.0 * (1.0 + w0);
+            let ir1 = inner_first.0 * (1.0 + w1);
+            let oy = outer_last.1;
+            let iy = inner_first.1;
+            let n = [0.0_f32, 1.0, 0.0];
+            let base = vertices.len() as u32;
+            vertices.push(Vertex3dTex {
+                position: [or0 * a0.cos(), oy, or0 * a0.sin()],
+                normal: n,
+                uv: [0.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [or1 * a1.cos(), oy, or1 * a1.sin()],
+                normal: n,
+                uv: [1.0, 0.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [ir1 * a1.cos(), iy, ir1 * a1.sin()],
+                normal: n,
+                uv: [1.0, 1.0],
+            });
+            vertices.push(Vertex3dTex {
+                position: [ir0 * a0.cos(), iy, ir0 * a0.sin()],
+                normal: n,
+                uv: [0.0, 1.0],
+            });
+            // CCW from above.
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    // ── Inner wall + basin: lathe the inner profile (which already
+    //    includes the floor-centre point at radius 0) around Y. The
+    //    last "ring" collapses to the central axis so we emit a fan
+    //    of degenerate triangles closing the basin floor.
+    // ──────────────────────────────────────────────────────────────
+    let inner_first = vertices.len() as u32;
+    for &(r, y, nr, ny) in inner_profile.iter() {
+        for i in 0..=SEGS {
+            let a = angle(i % SEGS);
+            let w = wobble(i % SEGS);
+            let rr = r * (1.0 + w);
+            let (cx, cz) = (a.cos(), a.sin());
+            vertices.push(Vertex3dTex {
+                position: [rr * cx, y, rr * cz],
+                normal: [nr * cx, ny, nr * cz],
+                uv: [(i as f32) / (SEGS as f32), 1.0 - (y + 0.5)],
+            });
+        }
+    }
+    for layer in 0..(inner_profile.len() - 1) as u32 {
+        for i in 0..SEGS as u32 {
+            let i00 = inner_first + layer * row + i;
+            let i01 = inner_first + layer * row + i + 1;
+            let i10 = inner_first + (layer + 1) * row + i;
+            let i11 = inner_first + (layer + 1) * row + i + 1;
+            // CCW from inside (normal points inward toward axis).
+            indices.extend_from_slice(&[i00, i01, i10, i01, i11, i10]);
+        }
+    }
+
+    MeshCpu {
+        vertices,
+        indices,
+        default_material: MaterialParams {
+            kind: MaterialKind::Porcelain,
+            base_color: [0.95, 0.94, 0.92, 1.0],
+            specular_strength: 0.7,
+            specular_power: 128.0,
         },
     }
 }
@@ -1419,12 +1691,12 @@ mod silhouette_tests {
             "eight_treasures",
             "glass_cannon",
             "cosmopolitan",
-            "empty_frame",
+            "solitary_sage",
             "garden_keeper",
             "gold_idol",
             "green_luck",
             "honor_fury",
-            "iron_lantern",
+            "silver_filigree_lantern",
             "multiplier_master",
         ] {
             let p = asset_dir.join(format!("{name}_mask.png"));

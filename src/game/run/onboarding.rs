@@ -66,7 +66,7 @@ impl RunState {
         self.round_score = 0;
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_used = false;
+        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
