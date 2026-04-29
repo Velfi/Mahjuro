@@ -98,6 +98,7 @@ pub enum DebugAction {
     OpenTransitionPlayground,
     /// Open a simple in-app About modal. Used on macOS to avoid the native
     /// About panel's icon conversion path in `muda`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     OpenAbout,
 }
 
