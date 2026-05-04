@@ -1,25 +1,3 @@
-[
-  { "id": "drought",       "name": "The Drought",       "description": "Start with half discards",                              "tier": "soft",   "min_ante": 1 },
-  { "id": "whisper",       "name": "The Whisper",       "description": "Hand size −1",                                          "tier": "soft",   "min_ante": 1 },
-  { "id": "tribute",       "name": "The Tribute",       "description": "Pay 1 gold each play",                                  "tier": "soft",   "min_ante": 1 },
-  { "id": "gate",          "name": "The Ink Gate",      "description": "Characters are debuffed",                               "tier": "soft",   "min_ante": 2 },
-  { "id": "grove",         "name": "The Jade Grove",    "description": "Bamboos are debuffed",                                  "tier": "soft",   "min_ante": 2 },
-  { "id": "coin",          "name": "The Copper Wheel",  "description": "Circles are debuffed",                                  "tier": "soft",   "min_ante": 2 },
-  { "id": "bloom",         "name": "The Bloom Rot",     "description": "Flowers are debuffed",                                  "tier": "soft",   "min_ante": 2 },
-  { "id": "hermit",        "name": "The Hermit",        "description": "Pairs score 0",                                         "tier": "medium", "min_ante": 3 },
-  { "id": "forest",        "name": "The Forest",        "description": "Sequences score half base chips",                       "tier": "medium", "min_ante": 3 },
-  { "id": "bureaucrat",    "name": "The Bureaucrat",    "description": "Must play exactly 5 tiles",                             "tier": "medium", "min_ante": 3 },
-  { "id": "drunkard",      "name": "The Drunkard",      "description": "Rank-5 tiles are debuffed",                             "tier": "medium", "min_ante": 3 },
-  { "id": "ash",           "name": "The Ash",           "description": "Simple tiles are debuffed",                             "tier": "medium", "min_ante": 3 },
-  { "id": "furnace",       "name": "The Furnace",       "description": "Terminals are debuffed",                                "tier": "medium", "min_ante": 3 },
-  { "id": "relic",         "name": "The Iconoclast",    "description": "Honor tiles are debuffed",                              "tier": "medium", "min_ante": 3 },
-  { "id": "blight",        "name": "The Blight",        "description": "Your most common opening-hand family is debuffed",      "tier": "medium", "min_ante": 3 },
-  { "id": "hex",           "name": "The Hex",           "description": "Disables one owned relic for the round",                "tier": "medium", "min_ante": 3 },
-  { "id": "famine",        "name": "The Famine",        "description": "Target doubled",                                        "tier": "hard",   "min_ante": 4 },
-  { "id": "tempest",       "name": "The Tempest",       "description": "Wall burns 1 tile after each play",                     "tier": "hard",   "min_ante": 4 },
-  { "id": "censor",        "name": "The Censor",        "description": "Repeated yaku score at half",                           "tier": "hard",   "min_ante": 4 },
-  { "id": "mirror",        "name": "The Mirror",        "description": "Silences your strongest scoring axis",                  "tier": "medium", "min_ante": 3 },
-  { "id": "counterweight", "name": "The Counterweight", "description": "Debuffs the tile family your relics support most",      "tier": "medium", "min_ante": 3 },
-  { "id": "tax_collector", "name": "The Tax Collector", "description": "Per-play gold cost scales to your hoard",               "tier": "medium", "min_ante": 3 },
-  { "id": "dragon",        "name": "The Dragon",        "description": "Structures without an honor score zero",                "tier": "final",  "min_ante": 7 }
-]
+version https://git-lfs.github.com/spec/v1
+oid sha256:96777c8378321c7aec7e9bf69817bbd93557758c582797862494761341720aca
+size 3754

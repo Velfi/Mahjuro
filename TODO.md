@@ -1,6 +1,3 @@
-# Current TODO
-
-- Revisit relic rearranging on the shop screen.
-- Investigate mirror- and shadow-hand interactions while touching shop relic order.
-- Investigate `SecondWind`; it appears to accumulate unexpectedly.
-- Rebalance `WildWinds`; it may still be too strong.
+version https://git-lfs.github.com/spec/v1
+oid sha256:4d4e975e752e3703ce3d67c1fb65b90d6e7853cebce417b2cca30976b1f670c8
+size 268
