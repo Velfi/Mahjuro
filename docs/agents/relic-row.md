@@ -1,3 +1,3 @@
-# Relic display row
-
-Use `relic_row(relics, score_panel, window_w)` from [`scenes/mod.rs`](../../src/scenes/mod.rs) to render a horizontal row of relic badges below the score panel. Returns `(Vec<GpuInstance>, Vec<TextLabel>)` to extend into the scene output. Used in gameplay, shop, and pick-blind scenes.
+version https://git-lfs.github.com/spec/v1
+oid sha256:01c24bc1ed3bb84b0f2303b19291d2116f120e0663c0559becd34e2c861a2b8f
+size 984

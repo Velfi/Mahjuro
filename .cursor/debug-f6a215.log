@@ -1,3 +1,3 @@
-{"data":{"gilrs_ok":true},"hypothesisId":"A","location":"input.rs:InputState::new","message":"gilrs_init","sessionId":"f6a215","timestamp":1777406402763}
-{"data":{},"hypothesisId":"D","location":"input.rs:poll_gamepads","message":"gilrs_connected","sessionId":"f6a215","timestamp":1777406402773}
-{"data":{"gp_actions":1,"gp_event_count":2,"was_mode":"Cursor"},"hypothesisId":"B","location":"input.rs:poll_gamepads","message":"mode_set_controller","sessionId":"f6a215","timestamp":1777406412440}
+version https://git-lfs.github.com/spec/v1
+oid sha256:5d670f17ec813af00ecd9aba2eabb2e72ce6a420bf79ad87d162b5eed358f4de
+size 495
