@@ -1,3 +1,11 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:133b758fc8fcd3859ecbe7d42d7d6a31839c2bfe81c21f0e55d48c918e1784cf
-size 128
+"DepotBuild"
+{
+	"DepotID" "__DEPOT_MACOS__"
+
+	"FileMapping"
+	{
+		"LocalPath" "macos/*"
+		"DepotPath" "."
+		"Recursive" "1"
+	}
+}
