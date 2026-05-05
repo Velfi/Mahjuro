@@ -1,3 +1,11 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:809b70205d2b82cfc626a9e202e5d8387e3fb4cc6b23ad339be411b26e87d440
-size 132
+"DepotBuild"
+{
+	"DepotID" "__DEPOT_WINDOWS__"
+
+	"FileMapping"
+	{
+		"LocalPath" "windows/*"
+		"DepotPath" "."
+		"Recursive" "1"
+	}
+}

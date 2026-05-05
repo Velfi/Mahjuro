@@ -1,3 +1,94 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:c7ff489711eaac4b9c50fc237aee8021636364a4b0604def4d207973a217b22e
-size 3286
+//! Layered visual-effect toggles for isolating GPU cost and debugging look.
+//!
+//! Live builds start from [`EffectLayers::BASELINE`] (heavy effects off; game-over
+//! moonlit / sunlit water stays on). Turn individual fields on, or assign
+//! [`EffectLayers::FULL`], to restore visuals.
+//!
+//! Suggested re-enable order (roughly cheapest / core-first → polish):
+//! 1. `procedural_surface_quality` — felt shells + global effects-quality tier
+//! 2. `shadows` — directional shadow map
+//! 3. `ssr` — lacquered-table reflections
+//! 4. `mountain_haze` — currently unused (gameplay draws its fog wall unconditionally)
+//! 5. `starfield`, `golden_dust`, `ember_drift` — fullscreen particle backdrops
+//! 6. `fullscreen_water_backdrop` — game-over moonlit / sunlit water (enabled in [`BASELINE`])
+//! 7. `transition_fullscreen_fx` — dramatic scene transitions
+//! 8. `hdr` — HDR swapchain path (still respects Options when layers allow)
+
+use crate::main_render_settings::RenderSettings as AppRenderSettings;
+use crate::persistence::EffectsQuality;
+use crate::render::wgpu_renderer::RenderSettings as WgpuRenderSettings;
+
+#[derive(Clone, Copy, Debug)]
+pub struct EffectLayers {
+    pub shadows: bool,
+    pub ssr: bool,
+    /// Felt fluff / `EffectsQuality` tier (also scales procedural vignette layers).
+    pub procedural_surface_quality: bool,
+    pub mountain_haze: bool,
+    pub starfield: bool,
+    pub golden_dust: bool,
+    pub ember_drift: bool,
+    pub hdr: bool,
+    pub transition_fullscreen_fx: bool,
+    pub fullscreen_water_backdrop: bool,
+}
+
+impl EffectLayers {
+    pub const BASELINE: Self = Self {
+        shadows: false,
+        ssr: false,
+        procedural_surface_quality: false,
+        mountain_haze: false,
+        starfield: false,
+        golden_dust: false,
+        ember_drift: false,
+        hdr: false,
+        transition_fullscreen_fx: false,
+        fullscreen_water_backdrop: true,
+    };
+
+    pub const FULL: Self = Self {
+        shadows: true,
+        ssr: true,
+        procedural_surface_quality: true,
+        mountain_haze: true,
+        starfield: true,
+        golden_dust: true,
+        ember_drift: true,
+        hdr: true,
+        transition_fullscreen_fx: true,
+        fullscreen_water_backdrop: true,
+    };
+
+    pub fn wgpu_render_settings(
+        self,
+        gfx: &AppRenderSettings,
+        tile_preset: crate::persistence::TilePreset,
+        tile_material: crate::persistence::TileMaterial,
+        surface_kind: crate::persistence::SurfaceKind,
+        tileset_name: String,
+        draw_settle_speed: f32,
+        sort_settle_speed: f32,
+    ) -> WgpuRenderSettings {
+        WgpuRenderSettings {
+            effects_quality: if self.procedural_surface_quality {
+                gfx.effects_quality
+            } else {
+                EffectsQuality::Off
+            },
+            tile_preset,
+            tile_material,
+            surface_kind,
+            tileset_name,
+            draw_settle_speed,
+            sort_settle_speed,
+            gamma: gfx.gamma,
+            shadows_enabled: gfx.shadows_enabled && self.shadows,
+            ssr_enabled: gfx.ssr_enabled && self.ssr,
+        }
+    }
+
+    pub fn hdr_enabled(self, gfx: &AppRenderSettings) -> bool {
+        gfx.hdr_enabled && self.hdr
+    }
+}

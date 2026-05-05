@@ -1,3 +1,42 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:074d67e125a42b408fef1538b7151d079fdceb52fea762864e959094d0e684b3
-size 1443
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Mahjuro</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mahjuro</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mahjuro.Mahjuro</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleExecutable</key>
+    <string>mahjuro</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Velfi/Mahjuro/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>qNRVb4+L+njDq0f5zY00jFMXakF/dsEgA8RF3yfVntk=</string>
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.games</string>
+</dict>
+</plist>

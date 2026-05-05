@@ -1,3 +1,5 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:e16a4bdf9fc99fc013521940953b4c0c3f9258029b94ecb8ac9dce1c44a5df29
-size 222
+#!/bin/sh
+# AppImage entry point. Locate the bundled binary regardless of how the
+# AppImage was invoked, then exec it with the original arguments.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/mahjuro" "$@"

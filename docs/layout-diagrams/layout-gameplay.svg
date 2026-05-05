@@ -1,3 +1,68 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:796eb64e23c766005fde7f59377367086dac75fdae2b446ab6320b032f1bba80
-size 5003
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560">
+  <defs>
+    <linearGradient id="felt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d2818"/>
+      <stop offset="50%" stop-color="#052812"/>
+      <stop offset="100%" stop-color="#021a0c"/>
+    </linearGradient>
+    <linearGradient id="woodbanner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5c4033"/>
+      <stop offset="100%" stop-color="#3d2918"/>
+    </linearGradient>
+  </defs>
+
+  <rect fill="url(#felt)" stroke="#166534" stroke-width="2" x="1" y="1" width="998" height="558" rx="6"/>
+
+  <!-- Cassowary: score panel flush top, ~9% window height (min 36px scaled here) -->
+  <rect fill="rgba(70,120,180,0.4)" stroke="#6eb5e8" stroke-width="1.2" x="0" y="0" width="1000" height="51"/>
+  <text fill="#e8eaed" font-family="sans-serif" font-size="9" font-weight="bold" x="10" y="22">Gameplay HUD</text>
+  <text fill="#cbd5e1" font-family="sans-serif" font-size="8" x="10" y="36">score strip (full width)</text>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="7" x="380" y="28">see gameplay-screenshot.png for art framing</text>
+
+  <!-- Modifier strip ~5% h; consumables: 2 slots in standard mode -->
+  <rect fill="rgba(90,100,130,0.35)" stroke="#8899cc" stroke-width="1.2" x="0" y="51" width="1000" height="28"/>
+  <text fill="#e8eaed" font-family="sans-serif" font-size="9" x="10" y="70">modifier strip (2D badges / text)</text>
+  <rect fill="#334155" stroke="#94a3b8" stroke-width="1" x="856" y="56" width="36" height="18" rx="2"/>
+  <rect fill="#334155" stroke="#94a3b8" stroke-width="1" x="898" y="56" width="36" height="18" rx="2"/>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="7" x="895" y="88" text-anchor="middle">2 consumable slots</text>
+
+  <!-- Relics: horizontal 3D tray (not a left bar); see input_handler build_relic_tray_and_wind -->
+  <rect fill="none" stroke="#a855f7" stroke-width="1" stroke-dasharray="3 2" x="200" y="82" width="600" height="22" rx="3"/>
+  <g fill="#c4b5fd" stroke="#7c3aed" stroke-width="0.6">
+    <circle cx="268" cy="93" r="7"/><circle cx="338" cy="93" r="7"/><circle cx="408" cy="93" r="7"/>
+    <circle cx="478" cy="93" r="7"/><circle cx="548" cy="93" r="7"/>
+  </g>
+  <text fill="#e9d5ff" font-family="sans-serif" font-size="7" x="500" y="112" text-anchor="middle">relic tray (horizontal row, up to 5)</text>
+
+  <!-- Structure bank showcase when structure_bank mode + committed melds -->
+  <rect fill="rgba(120,90,40,0.15)" stroke="#d4a84a" stroke-width="1" stroke-dasharray="5 3" x="168" y="118" width="664" height="34" rx="3"/>
+  <text fill="#fde68a" font-family="sans-serif" font-size="8" x="178" y="134">Structure strip (committed melds)</text>
+  <text fill="#a8a29e" font-family="sans-serif" font-size="7" x="178" y="146">CLI screenshot freezes full structure + Trigger tablet when complete</text>
+
+  <!-- Hand strip 16% inset, 68% width -->
+  <rect fill="rgba(40,90,70,0.18)" stroke="#5cbf8f" stroke-width="1.2" x="160" y="156" width="680" height="324"/>
+  <text fill="#bbf7d0" font-family="sans-serif" font-size="9" x="168" y="172">Hand strip (14 slots)</text>
+
+  <!-- 14 slots -->
+  <g fill="none" stroke="rgba(92,191,143,0.5)" stroke-width="0.7">
+    <rect x="160" y="198" width="48.571" height="252"/><rect x="208.571" y="198" width="48.571" height="252"/>
+    <rect x="257.143" y="198" width="48.571" height="252"/><rect x="305.714" y="198" width="48.571" height="252"/>
+    <rect x="354.286" y="198" width="48.571" height="252"/><rect x="402.857" y="198" width="48.571" height="252"/>
+    <rect x="451.429" y="198" width="48.571" height="252"/><rect x="500" y="198" width="48.571" height="252"/>
+    <rect x="548.571" y="198" width="48.571" height="252"/><rect x="597.143" y="198" width="48.571" height="252"/>
+    <rect x="645.714" y="198" width="48.571" height="252"/><rect x="694.286" y="198" width="48.571" height="252"/>
+    <rect x="742.857" y="198" width="48.571" height="252"/><rect x="791.429" y="198" width="48.571" height="252"/>
+  </g>
+
+  <!-- Ritual props row (3D, mid-upper over felt) -->
+  <text fill="#a7f3d0" font-family="sans-serif" font-size="7" x="500" y="188" text-anchor="middle">candles / bowl / dora (3D props above rack)</text>
+
+  <!-- Bottom action row -->
+  <rect fill="rgba(60,55,50,0.35)" stroke="#78716c" stroke-width="1" x="140" y="478" width="720" height="58" rx="3"/>
+  <text fill="#e7e5e4" font-family="sans-serif" font-size="8" x="160" y="498">Discard</text>
+  <text fill="#fcd34d" font-family="sans-serif" font-size="8" x="280" y="510">Sort suit / rank / Journal</text>
+  <text fill="#fde68a" font-family="sans-serif" font-size="8" x="780" y="510" text-anchor="middle">Play / Trigger structure</text>
+
+  <text fill="#64748b" font-family="sans-serif" font-size="7" x="24" y="548">layout.rs: score/mod/hand strips. Relics: gameplay/input_handler.rs tray (not LayoutResult). Consumables: cap 2 standard.</text>
+</svg>

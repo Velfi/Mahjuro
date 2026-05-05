@@ -1,3 +1,10 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:48364bfee60ff59b9a89c06c30f9b90d842e16a690780fcc5d44b3ca796be952
-size 1017
+# Mahjuro — Agent Notes
+
+Short pointers to deeper context. Read the linked file before working in the area.
+
+- [3D world space](docs/agents/world-space.md) — Z-up frame, table at `z = 0`, `WorldSurfaceAnchor` packing, `table_transform.rs` for mesh orientation.
+- [Scene placement](docs/agents/scene-placement.md) — screen vs world coordinates, `Object3d` euler vs `Placement` degrees, `PlacementAnchor` + arrange mode workflow.
+- [Font scaling](docs/agents/font-scaling.md) — `rasterize_label` width cap shrinks text in tall/narrow rects; use wide rects and split long content.
+- [Card / UI sizing](docs/agents/card-sizing.md) — `card_rect()` from `scenes/mod.rs` for menu cards spanning multiple hand slots.
+- [Relic display](docs/agents/relic-row.md) — gameplay horizontal 3D tray vs shop 3D props (no shared `relic_row()` helper).
+- [Widget tree (scene input)](docs/agents/widget-tree.md) — `Tree<A>` / `FlatItem<A>` immediate-mode UI; single source of truth for rects, automatic hover/keyboard nav.

@@ -1,3 +1,81 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:fa8f0547fed83859c2f03f10f68b707806f74950ef69352ae59c60314a9813cf
-size 2824
+; Mahjuro NSIS installer script.
+;
+; Expects the following /D defines passed on the makensis command line:
+;   /DVERSION=x.y.z       Display version (no leading "v")
+;   /DSOURCE_DIR=path     Directory containing mahjuro.exe and icon.ico
+;   /DOUTFILE=path        Output installer .exe path
+
+!include "MUI2.nsh"
+
+Name "Mahjuro"
+OutFile "${OUTFILE}"
+Unicode True
+
+; Per-user install — no admin rights required, no UAC prompt.
+RequestExecutionLevel user
+InstallDir "$LOCALAPPDATA\Programs\Mahjuro"
+InstallDirRegKey HKCU "Software\Mahjuro" "InstallDir"
+
+VIProductVersion "${VERSION}.0"
+VIAddVersionKey "ProductName" "Mahjuro"
+VIAddVersionKey "FileDescription" "Mahjuro"
+VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "CompanyName" "Mahjuro"
+VIAddVersionKey "LegalCopyright" "Mahjuro"
+
+!define MUI_ICON "${SOURCE_DIR}\icon.ico"
+!define MUI_UNICON "${SOURCE_DIR}\icon.ico"
+!define MUI_ABORTWARNING
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN "$INSTDIR\mahjuro.exe"
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Section "Mahjuro" SecMain
+  SectionIn RO
+  SetOutPath "$INSTDIR"
+
+  File "${SOURCE_DIR}\mahjuro.exe"
+  File "${SOURCE_DIR}\icon.ico"
+
+  WriteRegStr HKCU "Software\Mahjuro" "InstallDir" "$INSTDIR"
+  WriteUninstaller "$INSTDIR\Uninstall.exe"
+
+  CreateDirectory "$SMPROGRAMS\Mahjuro"
+  CreateShortCut "$SMPROGRAMS\Mahjuro\Mahjuro.lnk" "$INSTDIR\mahjuro.exe" "" "$INSTDIR\icon.ico"
+  CreateShortCut "$SMPROGRAMS\Mahjuro\Uninstall Mahjuro.lnk" "$INSTDIR\Uninstall.exe"
+
+  ; Add/Remove Programs entry (per-user, HKCU).
+  !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mahjuro"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "Mahjuro"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\icon.ico"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "Mahjuro"
+  WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+  WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
+  WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
+SectionEnd
+
+Section "Uninstall"
+  Delete "$INSTDIR\mahjuro.exe"
+  Delete "$INSTDIR\icon.ico"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
+
+  Delete "$SMPROGRAMS\Mahjuro\Mahjuro.lnk"
+  Delete "$SMPROGRAMS\Mahjuro\Uninstall Mahjuro.lnk"
+  RMDir "$SMPROGRAMS\Mahjuro"
+
+  DeleteRegKey HKCU "Software\Mahjuro"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mahjuro"
+SectionEnd

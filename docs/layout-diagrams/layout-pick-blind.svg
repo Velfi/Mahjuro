@@ -1,3 +1,55 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:741ff7ecdf94f902211c278dce80959f4258fb9ed6d6be844b1aa853868ad584
-size 3604
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560">
+  <defs>
+    <linearGradient id="floorlit" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#fefce8"/>
+      <stop offset="22%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <radialGradient id="spot" cx="22%" cy="72%" r="40%">
+      <stop offset="0%" stop-color="#fef3c7" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#1e293b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect fill="#030507" stroke="#334155" stroke-width="2" x="1" y="1" width="998" height="558" rx="6"/>
+  <rect fill="url(#spot)" x="0" y="0" width="1000" height="560"/>
+
+  <g fill="#fbbf24" fill-opacity="0.45">
+    <circle cx="180" cy="100" r="1.5"/><circle cx="820" cy="140" r="1.2"/><circle cx="450" cy="60" r="1"/><circle cx="600" cy="200" r="1.3"/>
+    <circle cx="320" cy="320" r="1"/><circle cx="900" cy="400" r="1.4"/><circle cx="100" cy="380" r="1.1"/><circle cx="700" cy="80" r="1"/>
+  </g>
+
+  <text fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="bold" x="24" y="26">Pick blind (from screenshot)</text>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="9" x="24" y="42">Black + embers; strong warm key on Small blind and floor lip</text>
+
+  <!-- Floor slab: bright left, falls off right -->
+  <path fill="url(#floorlit)" stroke="#64748b" stroke-width="1.5"
+        d="M 40 340 L 960 335 L 972 398 L 28 408 Z"/>
+
+  <!-- Small / Big / Boss masses (left glows, others silhouette) -->
+  <path fill="#f8fafc" fill-opacity="0.92" stroke="#e2e8f0" stroke-width="1"
+        d="M 165 310 L 215 305 L 228 220 L 248 215 L 262 305 L 312 312 L 305 338 L 172 342 Z"/>
+  <text fill="#fef08a" font-family="serif" font-size="10" x="238" y="195" text-anchor="middle">Small Blind</text>
+  <text fill="#fde047" font-family="serif" font-size="8" x="238" y="208" text-anchor="middle">target / reward lines</text>
+
+  <path fill="#334155" stroke="#1e293b" stroke-width="1"
+        d="M 430 318 L 518 312 L 538 175 L 558 172 L 578 312 L 662 318 L 648 352 L 442 358 Z"/>
+  <text fill="#cbd5e1" font-family="serif" font-size="10" x="548" y="165" text-anchor="middle">Big Blind</text>
+
+  <path fill="#1e293b" stroke="#0f172a" stroke-width="1"
+        d="M 688 322 L 818 312 L 852 140 L 878 138 L 902 312 L 932 318 L 908 368 L 698 372 Z"/>
+  <text fill="#e2e8f0" font-family="serif" font-size="9" x="790" y="125" text-anchor="middle">Boss title</text>
+  <text fill="#94a3b8" font-family="serif" font-size="8" x="790" y="138" text-anchor="middle">rule + tier tag</text>
+
+  <!-- Play / Skip altars under upcoming (shot: left cluster highlighted) -->
+  <rect fill="#422006" stroke="#fbbf24" stroke-width="2" x="168" y="378" width="88" height="36" rx="4"/>
+  <text fill="#fde68a" font-family="sans-serif" font-size="10" x="212" y="400" text-anchor="middle">Play</text>
+  <text fill="#ca8a04" font-family="sans-serif" font-size="7" x="212" y="410" text-anchor="middle">Begin / Enter</text>
+
+  <rect fill="#1e293b" stroke="#78716c" stroke-width="1" x="268" y="382" width="76" height="32" rx="3"/>
+  <text fill="#cbd5e1" font-family="sans-serif" font-size="9" x="306" y="402" text-anchor="middle">Skip</text>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="7" x="306" y="412" text-anchor="middle">reward line</text>
+
+  <text fill="#64748b" font-family="sans-serif" font-size="8" x="24" y="548">Code: shrine anchors 20% / 50% / 80% width, row y ~50% height; dishes follow upcoming index</text>
+</svg>
