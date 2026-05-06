@@ -2,8 +2,6 @@
 
 #[path = "wgpu_renderer/init.rs"]
 mod init;
-#[path = "wgpu_renderer/journal_target.rs"]
-mod journal_target;
 #[path = "wgpu_renderer/resources.rs"]
 pub(crate) mod resources;
 #[path = "wgpu_renderer/runtime.rs"]
@@ -1061,14 +1059,6 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
-    /// Offscreen color texture that the embedded yaku-journal scene
-    /// renders into. The shop's open-book mesh samples this view as
-    /// the page-spread albedo, so the journal content appears literally
-    /// painted on the open pages. 1024×1024, RGBA8 sRGB. Cleared each
-    /// frame the journal is being shown; the leather shader's page
-    /// sentinel branch reads `albedo_tex` for fragments where
-    /// `uv.x > 1.5` (page faces tagged in `book_mesh.rs`).
-    pub(crate) journal_page_texture: wgpu::Texture,
     /// Fullscreen offscreen target for the live GPU render of the
     /// yaku-journal scene. The book mesh's leather shader samples this
     /// in screen space (not UV) so the rendered scene reads as a window
@@ -1087,7 +1077,11 @@ pub struct WgpuRenderer {
     bloom_composite_pipeline: wgpu::RenderPipeline,
     bloom_bind_group_layout: wgpu::BindGroupLayout,
     bloom_composite_bind_group_layout: wgpu::BindGroupLayout,
-    bloom_params_buffer: wgpu::Buffer,
+    /// Per-pass bloom uniforms (extract / blur axis / composite differ in `data1`).
+    bloom_extract_params_buffer: wgpu::Buffer,
+    bloom_blur_h_params_buffer: wgpu::Buffer,
+    bloom_blur_v_params_buffer: wgpu::Buffer,
+    bloom_composite_params_buffer: wgpu::Buffer,
     bloom_sampler: wgpu::Sampler,
     bloom_scene_bind_group: wgpu::BindGroup,
     bloom_ping_bind_group: wgpu::BindGroup,
@@ -1103,6 +1097,8 @@ pub struct WgpuRenderer {
     tonemap_pipeline: wgpu::RenderPipeline,
     tonemap_rgba16f_pipeline: wgpu::RenderPipeline,
     tonemap_bind_group_layout: wgpu::BindGroupLayout,
+    tonemap_params_buffer: wgpu::Buffer,
+    tonemap_bind_group: wgpu::BindGroup,
     tonemap_shader_module: wgpu::ShaderModule,
     tonemap_pipeline_layout: wgpu::PipelineLayout,
     /// Surface format used when HDR is off (or unavailable).

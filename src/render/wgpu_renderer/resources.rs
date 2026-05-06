@@ -475,36 +475,6 @@ pub(super) fn create_scene_color(
     (tex, view)
 }
 
-/// Offscreen color target for the embedded yaku-journal scene. The
-/// shop's open-book mesh samples this as the page-spread albedo so the
-/// journal content appears literally painted on the open pages. Fixed
-/// 1024×1024 RGBA8 sRGB regardless of swapchain size — pages don't
-/// resize with the window, and the page content doesn't need HDR
-/// precision. Hardcoded sRGB8 (rather than reusing the swapchain
-/// format) so `upload_journal_test_pattern`'s 4-byte-per-pixel write
-/// matches when the surface is in HDR mode (`Rgba16Float` = 8 bpp).
-pub(super) fn create_journal_page(
-    device: &wgpu::Device,
-    _format: wgpu::TextureFormat,
-) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("journal-page-target"),
-        size: wgpu::Extent3d {
-            width: 1024,
-            height: 1024,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    })
-}
-
 /// Fullscreen offscreen target for the embedded yaku-journal scene's
 /// real GPU render. The shop's open-book mesh samples this view in
 /// screen space so the journal content reads as a window cut through

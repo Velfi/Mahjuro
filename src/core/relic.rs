@@ -134,11 +134,11 @@ pub enum RelicId {
     MeltingIce,
     /// Successor to Melting Ice. Created in-place when Melting Ice's counter
     /// would hit 0 — the bronze mask thaws free. Permanent +80 chips base.
-    /// At cash-in, every scored honor (wind/dragon) tile is *devoured*: the
+    /// At cash-in, every scored honor (wind/dragon) tile is destroyed: the
     /// tile is permanently removed from the run's wall (added to
     /// `removed_tile_ids`, the same primitive Kiln uses) and Taotie's chip
-    /// bonus grows by +20 per devoured honor. `relic_counters[Taotie]` holds
-    /// the accumulated chip bonus; divide by 20 for the devoured-count
+    /// bonus grows by +20 per tile. `relic_counters[Taotie]` holds
+    /// the accumulated chip bonus; divide by 20 for the honor count
     /// shown in the live tooltip.
     Taotie,
     /// +4 mult, loses 0.3 mult per discard. Transforms into Silk Moth at 0
@@ -510,12 +510,12 @@ pub fn relic_description_live(
             format!("{base} [{remaining} chips left]")
         }
         RelicId::Taotie => {
-            // Counter stores accumulated chips (20 per devoured honor); the
+            // Counter stores accumulated chips (20 per destroyed honor); the
             // honor count is the counter divided by that rate. Both numbers
             // are useful — count is the flavor read, chips is the math.
             let chips = counters.get(&RelicId::Taotie).copied().unwrap_or(0);
             let devoured = chips / 20;
-            format!("{base} [{devoured} honors devoured, +{chips} chips]")
+            format!("{base} [{devoured} honors destroyed, +{chips} chips]")
         }
         RelicId::SilkThread => {
             let thread = counters.get(&RelicId::SilkThread).copied().unwrap_or(40);
@@ -582,6 +582,14 @@ pub fn relic_description_live(
         RelicId::RiverRunner => {
             let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);
             format!("{base} [+{chips} chips]")
+        }
+        RelicId::LotusBloom => {
+            let blooms = counters.get(&RelicId::LotusBloom).copied().unwrap_or(0);
+            format!(
+                "{base} [{blooms} flower{}, +{:.1} mult]",
+                if blooms == 1 { "" } else { "s" },
+                0.5 * blooms as f64
+            )
         }
         _ => base.to_string(),
     }
