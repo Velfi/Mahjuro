@@ -42,8 +42,9 @@ impl WgpuRenderer {
             glam::Vec3::new(0.5, 0.5, 0.5),
             0.0,
         ));
-        let cap_h = eff_w * 0.6;
-        let mid_h = (eff_l - cap_h * 2.0).max(0.0);
+        // Three texture tiles (top / mid / bot) are authored as equal squares;
+        // split world length in thirds so each segment maps 1:1 without stretching.
+        let seg_h = eff_l / 3.0;
         let silk_mat = MaterialParams {
             kind: MaterialKind::Plain,
             base_color: obj.color,
@@ -56,16 +57,12 @@ impl WgpuRenderer {
                 .position(|&k| k == *z)? as u8;
             Some(tex_idx)
         });
-        // Emit segments: top cap (seg 0), optional mid (seg 1), bottom cap (seg 2).
-        let segments: &[(f32, f32, u8)] = if mid_h > 0.0 {
-            &[
-                (0.0, cap_h, 0),
-                (-cap_h, mid_h, 1),
-                (-(cap_h + mid_h), cap_h, 2),
-            ]
-        } else {
-            &[(0.0, cap_h, 0), (-(cap_h), cap_h, 2)]
-        };
+        // Emit segments: top (0), mid (1), bottom (2).
+        let segments: &[(f32, f32, u8)] = &[
+            (0.0, seg_h, 0),
+            (-seg_h, seg_h, 1),
+            (-(2.0 * seg_h), seg_h, 2),
+        ];
         for &(offset, seg_h, seg_idx) in segments {
             if obj3d_ribbon_slot >= MAX_RIBBON_SLOTS {
                 break;

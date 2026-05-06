@@ -30,6 +30,11 @@ fn split_render_ops_by_clear_depth(ops: &[RenderOp]) -> Vec<&[RenderOp]> {
 }
 
 impl WgpuRenderer {
+    /// Render one frame.
+    ///
+    /// `frame.cmds` is walked in order — earlier cmds render under later ones.
+    /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
+    /// draw, which is invisible to scenes and preserves ordering.
     pub fn render(&mut self, frame: &UiFrame, settings: RenderSettings) -> anyhow::Result<()> {
         self.render_to(frame, settings, None)
     }
@@ -481,6 +486,8 @@ impl WgpuRenderer {
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
+        let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         // Skeuomorphic gameplay HUD cmd buffers (phase 1).
         // Dead empty vecs — kept so existing shadow/draw loops that still iterate
         // these compile; scenes no longer push to these variants.
@@ -705,6 +712,43 @@ impl WgpuRenderer {
                     tile_face_quads.push(*face);
                     tile_face_inst_buffers.push(buf);
                     ops.push(RenderOp::TileFaceQuad(idx));
+                    i += 1;
+                }
+                DrawCmd::PromptIconQuad(icon) => {
+                    if !self
+                        .prompt_icon_overlays
+                        .contains_key(icon.asset_rel_path)
+                    {
+                        match make_prompt_icon_overlay_gpu(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            icon.asset_rel_path,
+                        ) {
+                            Some(gpu) => {
+                                self.prompt_icon_overlays
+                                    .insert(icon.asset_rel_path, gpu);
+                            }
+                            None => {
+                                log::warn!(
+                                    "Kenney prompt SVG missing or invalid: {}",
+                                    icon.asset_rel_path
+                                );
+                            }
+                        }
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("prompt-icon-quad"),
+                            contents: bytemuck::cast_slice(&[icon.inst]),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let idx = prompt_icon_quads.len();
+                    prompt_icon_quads.push(*icon);
+                    prompt_icon_inst_buffers.push(buf);
+                    ops.push(RenderOp::PromptIconQuad(idx));
                     i += 1;
                 }
                 DrawCmd::ShowcaseTileBatch(placements) => {
@@ -1080,6 +1124,8 @@ impl WgpuRenderer {
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
+            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
+            prompt_icon_quads: &prompt_icon_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1103,6 +1149,8 @@ impl WgpuRenderer {
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
+            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
+            prompt_icon_quads: &prompt_icon_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1166,7 +1214,10 @@ impl WgpuRenderer {
                         // lacquered-table SSR sample. Gameplay plaques are
                         // `Object3d` meshes (engraved decal on the mesh); they
                         // render here in Pass A like other lit meshes.
-                        if matches!(op, RenderOp::TextDraw(_)) {
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                        ) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1184,7 +1235,10 @@ impl WgpuRenderer {
             macro_rules! pass_a_draw_chunk {
                 ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
                     for op in $chunk.iter() {
-                        if matches!(op, RenderOp::TextDraw(_)) {
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                        ) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1586,7 +1640,12 @@ impl WgpuRenderer {
         // ── Overlay pass: 2D HUD text labels ────────────────────────────
         // After tonemap, Load the final target so labels are not in the linear
         // HDR `scene_prev_texture` used for lacquered-table SSR.
-        if ops.iter().any(|o| matches!(o, RenderOp::TextDraw(_))) {
+        if ops.iter().any(|o| {
+            matches!(
+                o,
+                RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+            )
+        }) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1611,7 +1670,10 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             for op in &ops {
-                if matches!(op, RenderOp::TextDraw(_)) {
+                if matches!(
+                    op,
+                    RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                ) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
                 }
             }
@@ -1636,7 +1698,7 @@ impl WgpuRenderer {
         };
         let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
             (Some(path), Some(ft)) => {
-                log::info!("screenshot: encoding capture for {}", path.display());
+                log::debug!("screenshot: encoding capture for {}", path.display());
                 Some(self.encode_screenshot_copy(&mut encoder, ft, path))
             }
             _ => None,
@@ -1646,7 +1708,7 @@ impl WgpuRenderer {
 
         if let (Some(path), Some(staging)) = (screenshot_path, screenshot_staging) {
             match self.finalize_screenshot(staging, &path) {
-                Ok(()) => log::info!("screenshot: wrote {}", path.display()),
+                Ok(()) => log::info!("screenshot saved → {}", path.display()),
                 Err(e) => log::error!("screenshot finalize failed: {e:?}"),
             }
         }

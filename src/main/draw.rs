@@ -286,6 +286,19 @@ impl App {
             .layout_engine
             .solve(size.width as f32, size.height as f32);
 
+        let item_inspect_top = matches!(
+            self.overlay_stack.last(),
+            Some(crate::scenes::Scene::ItemInspect(_))
+        );
+        let suspended_shop = match (&self.scene, item_inspect_top) {
+            (crate::scenes::Scene::Shop(s), true) => Some(s),
+            _ => None,
+        };
+        let suspended_collection = match (&self.scene, item_inspect_top) {
+            (crate::scenes::Scene::Collection(c), true) => Some(c),
+            _ => None,
+        };
+
         let ctx = DrawCtx {
             layout: &layout,
             anim: &self.anim,
@@ -340,6 +353,14 @@ impl App {
                 .as_ref()
                 .map(|i| i.mode)
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
+            gamepad_swap_ab: self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
+            gamepad_style: self
+                .input
+                .as_ref()
+                .map(|i| i.gamepad_style)
+                .unwrap_or_default(),
+            suspended_shop,
+            suspended_collection,
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -798,12 +819,12 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names for arrange mode.
-        let active_scene_key: Option<&'static str> = match &self.scene {
-            Scene::Shop(_) => Some("shop"),
+        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
+        let active_scene_key: Option<&'static str> = match scene_for_renderer {
+            Scene::Shop(_) | Scene::TilePackCelebration(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
-            Scene::Solitaire(_) => Some("solitaire"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
@@ -813,7 +834,7 @@ impl App {
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
-        renderer.set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+        renderer.set_committed_arrange_rotations(collect_committed_rotations(scene_for_renderer));
 
         renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
         let sl = self.debug.shop_env_lighting;

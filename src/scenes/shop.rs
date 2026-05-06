@@ -10,6 +10,16 @@ mod shared;
 mod update;
 mod view;
 
+use crate::render::draw_cmd::CameraParams;
+
+pub(crate) use self::layout::{ShopInventoryCounts, ShopLayout};
+pub(crate) use self::shared::{CelebPhase, PackCelebration};
+
+/// Perspective camera for tile-pack celebration overlay (not item-inspect orbit).
+pub(crate) fn shop_celebration_camera(w: f32, h: f32, env_h: f32) -> CameraParams {
+    view::shop_camera_base(w, h, env_h)
+}
+
 use self::layout::*;
 use self::shared::*;
 
@@ -27,12 +37,8 @@ use crate::core::consumable::Consumable;
 use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs, relic_shop_price};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
-use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::{GameEngine, ShopCommand, ShopCommandData, ShopReadModel};
-use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
-};
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::theme::{color, typography};
@@ -65,8 +71,6 @@ pub struct ShopScene {
     /// gameplay scene's identical mechanism. Wrapped in a `RefCell` because
     /// `draw_frame` takes `&self` but needs to update this stash.
     last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
-    /// Active tile-pack opening celebration, if any.
-    pack_celebration: Option<PackCelebration>,
     /// Floating 3D text popups for zodiac level-up feedback.
     score_popups: ScorePopupSystem,
     /// Particle burst effects for zodiac level-up feedback.
@@ -133,6 +137,8 @@ pub struct ShopScene {
     mouse_drag: Option<ShopDragSource>,
     /// Last `DrawCtx::shop_env_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
     drawn_env_height_scale: std::cell::Cell<f32>,
+    /// Gamepad North hold-to-sell: press time when a hold is in progress.
+    north_sell_hold_started: Option<std::time::Instant>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -158,6 +164,8 @@ pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// shop item is released over the sell tray. The shop's update() sells the
 /// item referenced by `mouse_drag` when this fires.
 pub const SHOP_DRAG_DROP_ID: u32 = 0x9700;
+/// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
+pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 0.5;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Reroll 2D button (kept for focus-nav compat).
@@ -185,6 +193,34 @@ const SHOP_RELIC_LEAN_COUNTER: f32 = 158.0;
 const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 
 impl ShopScene {
+    #[inline]
+    pub(crate) fn sell_hold_in_progress(&self) -> bool {
+        self.north_sell_hold_started.is_some()
+    }
+
+    /// Normalized hold progress for rumble / HUD ring (0..=1).
+    #[inline]
+    pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
+        self.north_sell_hold_started.map(|started| {
+            (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
+                .clamp(0.0, 1.0)
+        })
+    }
+
+    /// Inventory counts for [`ShopLayout::build`], e.g. tile-pack celebration overlay.
+    pub(crate) fn tile_pack_celeb_inventory_counts(
+        &self,
+        run: &crate::game::run::RunState,
+    ) -> ShopInventoryCounts {
+        let shop_rm = GameEngine::read_shop(run);
+        ShopInventoryCounts {
+            n_for_sale: self.items.len(),
+            n_for_sale_zodiacs: self.zodiac_items.len(),
+            n_for_sale_talismans: self.talisman_items.len(),
+            n_owned_relics: shop_rm.owned_relics.len(),
+        }
+    }
+
     /// Set focus from a stable slug — used by the screenshot CLI's
     /// `--shop-focus` flag so headless captures can preview hover-only
     /// chrome (focus rings, plaques, spotlights).
@@ -251,6 +287,24 @@ impl ShopScene {
             start: std::time::Instant::now(),
             dir: JournalDirection::Opening,
         });
+    }
+
+    /// Headless screenshot: initial orbit for [`crate::scenes::ItemInspectScene`]
+    /// from current focus and stock. Returns `None` when focus is missing,
+    /// not inspectable, or orbit math fails.
+    pub fn item_inspect_orbit_for_screenshot(
+        &self,
+        w: f32,
+        h: f32,
+        run: &crate::game::run::RunState,
+    ) -> Option<crate::scenes::item_inspect::ItemInspectOrbitState> {
+        let focus = self.focus?;
+        if !shop_focus_inspectable(focus) {
+            return None;
+        }
+        let env_h = self.drawn_env_height_scale.get();
+        let shop = GameEngine::read_shop(run);
+        view::shop_item_inspect_orbit_for_focus(self, w, h, env_h, &shop, focus)
     }
 }
 

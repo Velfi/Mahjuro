@@ -1,6 +1,11 @@
 use super::*;
 
+use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::ShopEnvDebugOverlay;
+use crate::game::engine::GameEngine;
+use crate::scenes::shop::PackCelebration;
+use crate::scenes::TilePackCelebrationScene;
+use rand::RngExt;
 
 impl App {
     pub(super) fn handle_debug_action(&mut self, action: DebugAction) {
@@ -175,8 +180,15 @@ impl App {
             },
             DebugAction::OpenPack => match &mut self.scene {
                 Scene::Shop(s) => {
-                    s.debug_open_pack(&mut self.run);
-                    log::info!("[Debug] Opened tile pack celebration");
+                    let kinds = TilePackKind::all();
+                    let kind = kinds[rand::rng().random_range(0..kinds.len())];
+                    let tiles = GameEngine::debug_add_pack(&mut self.run, kind);
+                    let celeb = PackCelebration::new(tiles, kind.name(), kind);
+                    let inventory = s.tile_pack_celeb_inventory_counts(&self.run);
+                    self.overlay_stack.push(Scene::TilePackCelebration(
+                        TilePackCelebrationScene::new(celeb, inventory),
+                    ));
+                    log::info!("[Debug] Opened tile pack celebration overlay");
                 }
                 _ => log::warn!("[Debug] Open Pack ignored — not in shop scene"),
             },
@@ -196,6 +208,7 @@ impl App {
                         Scene::TileSelect(_) => "TileSelect",
                         Scene::ProfileSelect(_) => "ProfileSelect",
                         Scene::Shop(_) => "Shop",
+                        Scene::ItemInspect(_) => "ItemInspect",
                         Scene::PickBlind(_) => "PickBlind",
                         Scene::Gameplay(_) => "Gameplay",
                         Scene::GameOver(_) => "GameOver",
@@ -203,14 +216,15 @@ impl App {
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::Options(_) => "Options",
                         Scene::Collection(_) => "Collection",
-                        Scene::Solitaire(_) => "Solitaire",
                         Scene::TutorialRecap(_) => "TutorialRecap",
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TileLiteracy(_) => "TileLiteracy",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
+                        Scene::RumbleLab(_) => "RumbleLab",
                         Scene::YakuJournal(_) => "YakuJournal",
                         Scene::ZodiacCelebration(_) => "ZodiacCelebration",
+                        Scene::TilePackCelebration(_) => "TilePackCelebration",
                     };
                     log::warn!("[Debug] Demo Cascade ignored — current scene is {name}");
                 }
@@ -249,6 +263,11 @@ impl App {
                     TransitionPlaygroundScene::new(true),
                 ));
                 log::info!("[Debug] Opened transition playground");
+            }
+            DebugAction::OpenRumbleLab => {
+                self.overlay_stack
+                    .push(Scene::RumbleLab(RumbleLabScene::new(true)));
+                log::info!("[Debug] Opened rumble lab");
             }
             DebugAction::OpenAbout => {
                 let body = format!(

@@ -192,44 +192,35 @@ impl WgpuRenderer {
                             glam::Vec3::splat(1.0),
                         );
                         if kind.is_some() {
-                            let nominal_cap = eff_w * 0.33;
-                            let cap_h = if eff_l < 2.0 * nominal_cap {
-                                eff_l / 2.0
-                            } else {
-                                nominal_cap
-                            };
-                            let mid_h = (eff_l - 2.0 * cap_h).max(0.0);
-                            let slots_needed = if mid_h > 0.0 { 3 } else { 2 };
+                            let seg_h = eff_l / 3.0;
+                            let slots_needed = 3;
                             if ribbon_shadow_cursor + slots_needed > MAX_RIBBON_SLOTS {
                                 break;
                             }
                             let top_model = ribbon_submesh(
                                 base_transform,
                                 0.0,
-                                glam::Vec3::new(eff_w, cap_h, depth),
+                                glam::Vec3::new(eff_w, seg_h, depth),
                             );
                             *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
                                 .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
                             ribbon_shadow_cursor += 1;
-                            if mid_h > 0.0 {
-                                let mid_model = ribbon_submesh(
-                                    base_transform,
-                                    -cap_h,
-                                    glam::Vec3::new(eff_w, mid_h, depth),
+                            let mid_model = ribbon_submesh(
+                                base_transform,
+                                -seg_h,
+                                glam::Vec3::new(eff_w, seg_h, depth),
+                            );
+                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(
+                                    &self.queue,
+                                    light_view_proj_arr,
+                                    mid_model,
                                 );
-                                *shadow_uniforms_changed |= self.ribbon_instances
-                                    [ribbon_shadow_cursor]
-                                    .write_shadow_uniform(
-                                        &self.queue,
-                                        light_view_proj_arr,
-                                        mid_model,
-                                    );
-                                ribbon_shadow_cursor += 1;
-                            }
+                            ribbon_shadow_cursor += 1;
                             let bot_model = ribbon_submesh(
                                 base_transform,
-                                -(cap_h + mid_h),
-                                glam::Vec3::new(eff_w, cap_h, depth),
+                                -(2.0 * seg_h),
+                                glam::Vec3::new(eff_w, seg_h, depth),
                             );
                             *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
                                 .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);

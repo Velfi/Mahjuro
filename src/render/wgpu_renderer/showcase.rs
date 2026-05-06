@@ -183,6 +183,36 @@ pub(crate) fn make_debuff_marker_overlay_gpu(
     }
 }
 
+pub(super) fn make_prompt_icon_overlay_gpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    asset_rel_path: &'static str,
+) -> Option<TileFaceOverlayGpu> {
+    let (rgba, w, h) = crate::render::kenney_svg::rasterize_embedded_svg_rgba(asset_rel_path)?;
+    let (texture, view) =
+        upload_rgba_texture(device, queue, "kenney-prompt-icon", &rgba, w, h);
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("kenney-prompt-icon-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    Some(TileFaceOverlayGpu {
+        _texture: texture,
+        bind_group,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // WgpuRenderer impl
 // ---------------------------------------------------------------------------

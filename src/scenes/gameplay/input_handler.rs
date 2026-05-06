@@ -13,6 +13,7 @@ use super::focus::{
 };
 use crate::core::scoring::StepKind;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
+use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::scenes::journal_transition::{
     BOOK_SPINE_THICKNESS_MM, JournalDirection, JournalTransition, YAKU_JOURNAL_BOOK_PICK_ID,
@@ -145,6 +146,11 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Gold
             | FocusTarget::YakuTablet(_)
             | FocusTarget::Dora => true,
+            FocusTarget::DiscardUndo => {
+                crate::persistence::load_settings().discard_undo_enabled
+                    && scene.discard_undo.is_some()
+                    && scene.pending_refill.is_none()
+            }
         };
         if !still_valid {
             scene.focus = None;
@@ -157,6 +163,14 @@ pub(super) fn process_focus_and_actions(
         let gameplay = GameEngine::read(ctx.run);
         let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
         if !has_structure {
+            scene.focus = None;
+        }
+    }
+    if matches!(scene.focus, Some(FocusTarget::DiscardUndo)) {
+        let ok = crate::persistence::load_settings().discard_undo_enabled
+            && scene.discard_undo.is_some()
+            && scene.pending_refill.is_none();
+        if !ok {
             scene.focus = None;
         }
     }
@@ -213,6 +227,15 @@ pub(super) fn process_focus_and_actions(
             _ => None,
         })
         .collect();
+    // `[` / `]` keyboard and LB / RB shoulder: cycle inventory + optional
+    // discard-undo anchor (Accessibility) without relying on spatial nav.
+    let undo_hud_eligible = crate::persistence::load_settings().discard_undo_enabled
+        && scene.discard_undo.is_some()
+        && scene.pending_refill.is_none();
+    let mut hud_cycle: Vec<FocusTarget> = consumable_targets.clone();
+    if undo_hud_eligible {
+        hud_cycle.push(FocusTarget::DiscardUndo);
+    }
 
     // Process actions. Directional input → spatial picker. Confirm →
     // route by self.focus variant. Cancel → clear focus AND fall
@@ -259,6 +282,20 @@ pub(super) fn process_focus_and_actions(
                             .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
                             .map(|(t, _)| *t)
                     }
+                    // DOWN from Discard (river) → Undo when the accessibility control is shown
+                    (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Down) => {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| matches!(t, FocusTarget::DiscardUndo))
+                            .map(|(t, _)| *t)
+                    }
+                    // UP from Undo → back to Discard
+                    (Some(FocusTarget::DiscardUndo), FocusDir::Up) => focus_rects
+                        .iter()
+                        .find(|(t, _)| {
+                            matches!(t, FocusTarget::Button(GameplayButton::Discard))
+                        })
+                        .map(|(t, _)| *t),
                     _ => None,
                 };
                 let hand_wrap = wrap_hand_tile_focus(scene.focus, dir, &focus_rects);
@@ -282,30 +319,30 @@ pub(super) fn process_focus_and_actions(
         }
 
         match a {
-            // Legacy "shoulder buttons cycle consumables" affordance.
-            // Steps through `Consumable` targets in order; wraps back
-            // to `None` after the last so the player can exit the
-            // strip without a separate keybind.
-            UiAction::NavigateHudNext if !consumable_targets.is_empty() => {
-                let cur_pos = consumable_targets
-                    .iter()
-                    .position(|t| Some(*t) == scene.focus);
-                scene.focus = match cur_pos {
-                    None => Some(consumable_targets[0]),
-                    Some(i) if i + 1 >= consumable_targets.len() => None,
-                    Some(i) => Some(consumable_targets[i + 1]),
-                };
-                continue;
-            }
-            UiAction::NavigateHudPrev => {
-                if !consumable_targets.is_empty() {
-                    let cur_pos = consumable_targets
+            // `[` / `]` (keyboard) and LB / RB (gamepad): cycle consumable
+            // slots, then the optional discard-undo control (Accessibility).
+            UiAction::NavigateHudNext => {
+                if !hud_cycle.is_empty() {
+                    let cur_pos = hud_cycle
                         .iter()
                         .position(|t| Some(*t) == scene.focus);
                     scene.focus = match cur_pos {
-                        None => Some(*consumable_targets.last().unwrap()),
+                        None => Some(hud_cycle[0]),
+                        Some(i) if i + 1 >= hud_cycle.len() => None,
+                        Some(i) => Some(hud_cycle[i + 1]),
+                    };
+                }
+                continue;
+            }
+            UiAction::NavigateHudPrev => {
+                if !hud_cycle.is_empty() {
+                    let cur_pos = hud_cycle
+                        .iter()
+                        .position(|t| Some(*t) == scene.focus);
+                    scene.focus = match cur_pos {
+                        None => Some(*hud_cycle.last().unwrap()),
                         Some(0) => None,
-                        Some(i) => Some(consumable_targets[i - 1]),
+                        Some(i) => Some(hud_cycle[i - 1]),
                     };
                 }
                 continue;
@@ -349,6 +386,10 @@ pub(super) fn process_focus_and_actions(
                             });
                         }
                         return Some(None);
+                    }
+                    Some(FocusTarget::DiscardUndo) => {
+                        actions_for_scene.push(UiAction::UndoDiscard);
+                        continue;
                     }
                     Some(FocusTarget::Button(b)) => {
                         if let Some(a) = b.ui_action() {
@@ -400,6 +441,11 @@ pub(super) fn process_focus_and_actions(
                                 }
                             }
                             _ => {}
+                        }
+                        if outcome.rejection.is_none()
+                            && matches!(outcome.data, CommandData::UseConsumable { .. })
+                        {
+                            scene.clear_discard_undo();
                         }
                         let remaining = GameEngine::read_interaction(ctx.run).consumable_count;
                         scene.focus = focus_after_consumable_use(i, remaining, &focus_rects);
@@ -458,6 +504,11 @@ pub(super) fn process_focus_and_actions(
                 }
                 continue;
             }
+            UiAction::ShopItemInspectToggle
+            | UiAction::ShopSellHoldPress
+            | UiAction::ShopSellHoldRelease => {
+                continue;
+            }
             _ => {}
         }
         actions_for_scene.push(a);
@@ -474,6 +525,15 @@ pub(super) fn process_focus_and_actions(
     // mouse and keyboard. Yaku tablets are hover-only and don't
     // contribute clicks.
     for &cid in ctx.button_clicks {
+        if cid == super::UNDO_DISCARD_CLICK_ID {
+            if crate::persistence::load_settings().discard_undo_enabled
+                && scene.discard_undo.is_some()
+                && scene.pending_refill.is_none()
+            {
+                actions_for_scene.push(UiAction::UndoDiscard);
+            }
+            continue;
+        }
         if cid != super::GAMEPLAY_3D_HIT_ID {
             continue;
         }
@@ -579,6 +639,9 @@ pub(super) fn process_focus_and_actions(
                     CommandData::PlaySelection { step } => step,
                     _ => 0,
                 };
+                if step > 0 {
+                    scene.clear_discard_undo();
+                }
                 let gained = outcome.after.round_score.saturating_sub(round_before);
                 log::info!(
                     "[score] Commit: step={} gained={} structure_bank={} breakdown_steps={} base_steps={}",
@@ -652,6 +715,9 @@ pub(super) fn process_focus_and_actions(
                         CommandData::TriggerStructure { earned } => earned,
                         _ => 0,
                     };
+                    if earned > 0 {
+                        scene.clear_discard_undo();
+                    }
                     let gained = outcome.after.round_score.saturating_sub(score_before);
                     log::info!(
                         "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
@@ -678,17 +744,31 @@ pub(super) fn process_focus_and_actions(
                 }
             }
             UiAction::SortBySuit => {
+                scene.clear_discard_undo();
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::SortHandBySuit);
                 ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::SortByRank => {
+                scene.clear_discard_undo();
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::SortHandByRank);
                 ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::CommitDiscard => {
                 let gameplay = GameEngine::read(ctx.run);
+                let settings_on = crate::persistence::load_settings().discard_undo_enabled;
+                if !settings_on {
+                    scene.discard_undo = None;
+                }
+                let snap_before = if settings_on
+                    && gameplay.selected_count > 0
+                    && gameplay.discards_remaining > 0
+                {
+                    Some(DiscardUndoSnapshot::capture(ctx.run))
+                } else {
+                    None
+                };
                 // Capture selected indices BEFORE discard so we can animate them departing.
                 if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
                     let selected_indices: Vec<usize> = ctx
@@ -712,10 +792,24 @@ pub(super) fn process_focus_and_actions(
                     _ => 0,
                 };
                 if discarded > 0 {
+                    if let Some(s) = snap_before {
+                        scene.discard_undo = Some(s);
+                    }
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                     let depart_lifetime =
                         std::time::Duration::from_millis(ctx.cascade_tuning.depart_lifetime_ms);
                     scene.pending_refill = Some(now + depart_lifetime);
+                }
+            }
+            UiAction::UndoDiscard => {
+                if crate::persistence::load_settings().discard_undo_enabled
+                    && scene.pending_refill.is_none()
+                    && let Some(snap) = scene.discard_undo.take()
+                {
+                    ctx.run.apply_discard_undo(snap);
+                    ctx.bus
+                        .push(crate::game::event_bus::GameEvent::UiSound(crate::audio::SfxId::TilePlace));
+                    ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }
             }
             _ => {}
@@ -725,13 +819,14 @@ pub(super) fn process_focus_and_actions(
     let non_handled: Vec<_> = actions_for_scene
         .iter()
         .filter(|a| {
-            !matches!(
+                !matches!(
                 a,
                 UiAction::ScoreHand
                     | UiAction::TriggerStructure
                     | UiAction::SortBySuit
                     | UiAction::SortByRank
                     | UiAction::CommitDiscard
+                    | UiAction::UndoDiscard
             )
         })
         .copied()

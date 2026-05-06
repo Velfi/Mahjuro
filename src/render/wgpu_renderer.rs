@@ -459,6 +459,50 @@ impl SpotLightsBuf {
 }
 
 impl PointLightsBuf {
+    /// Same as [`Self::from_lights`] but positions each light via the shop camera ray /
+    /// horizontal-plane hit used by perspective-correct `Object3d` placement.
+    fn from_lights_shop_camera(
+        src: &[PointLight],
+        cam: &crate::render::draw_cmd::CameraParams,
+        candle_count: u32,
+        flame_height_world: f32,
+        lit_mesh_punctual_intensity_scale: f32,
+        screen_w: f32,
+        screen_h: f32,
+        gamma: f32,
+        time: f32,
+    ) -> Self {
+        let mut lights = [PointLightGpu {
+            pos: [0.0; 4],
+            color: [0.0; 4],
+        }; MAX_POINT_LIGHTS];
+        let n = src.len().min(MAX_POINT_LIGHTS);
+        for (i, l) in src.iter().take(n).enumerate() {
+            let p = crate::render::world_space::world_on_camera_ray_plane_z(
+                screen_w,
+                screen_h,
+                cam,
+                l.pos[0],
+                l.pos[1],
+                l.pos[2],
+            );
+            lights[i] = PointLightGpu {
+                pos: [p.x, p.y, p.z, l.radius],
+                color: [l.color[0], l.color[1], l.color[2], l.intensity],
+            };
+        }
+        Self {
+            count: [n as u32, candle_count.min(n as u32), 0, 0],
+            extras: [
+                gamma.max(0.01),
+                time,
+                flame_height_world,
+                lit_mesh_punctual_intensity_scale,
+            ],
+            lights,
+        }
+    }
+
     /// Build the std140 light buffer, mapping each light's pixel-space
     /// `(x, y)` onto the table-plane world (`world_x = x - w/2`,
     /// `world_y = y - h/2`). The third position component is **+Z** lift above the felt.
@@ -945,6 +989,8 @@ pub struct WgpuRenderer {
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
         HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+    /// Cached Kenney SVG prompts keyed by `assets/` relative path (`&'static str` from scene code).
+    prompt_icon_overlays: HashMap<&'static str, TileFaceOverlayGpu>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -1261,7 +1307,7 @@ pub struct WgpuRenderer {
     /// `ZodiacBatch` cmds). Used by the shadow pass.
     last_ribbon_slot_count: usize,
     /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
-    /// is how many draw-slots that batch consumed (2-3 per textured ribbon,
+    /// is how many draw-slots that batch consumed (3 per textured ribbon,
     /// 1 per untextured).
     last_ribbon_batch_slot_counts: Vec<usize>,
     /// Per-talisman world-space model matrices for `pick_shop_object`.
@@ -1559,20 +1605,14 @@ impl WgpuRenderer {
         }
     }
 
-    /// Queue a screenshot of the next presented frame. The renderer copies
-    /// the surface texture into a staging buffer between `submit` and
-    /// `present`, then maps + PNG-encodes it synchronously. Intended for
-    /// the `screenshot` CLI subcommand; not for hot paths (the synchronous
-    /// readback stalls the GPU pipeline).
+    /// Queue a screenshot of the next fully rendered frame. The renderer
+    /// copies the presented color target (swapchain or headless render
+    /// texture) into a staging buffer, then maps + PNG-encodes it
+    /// synchronously. Intended for the `screenshot` CLI subcommand; not for
+    /// hot paths (the synchronous readback stalls the GPU pipeline).
     pub fn queue_screenshot(&self, path: std::path::PathBuf) {
         self.pending_screenshot.set(Some(path));
     }
-
-    /// `true` while a screenshot is queued and waiting for a draw call
-    /// to fulfill it. The capture-frame path in `App` polls this so it
-    /// keeps requesting redraws (instead of exiting early) when the
-    /// swapchain returns Outdated/Lost on the warmup frames and the
-    /// draw early-returns before the screenshot block.
 
     /// Begin a GPU pass timing capture for the next `frames` frames. The
     /// debug menu binds this to the "Profile GPU…" entry. Results are
@@ -1941,15 +1981,9 @@ impl WgpuRenderer {
         self.prev_tile_world.clear();
     }
 
-    /// Render one frame.
-    ///
-    /// `frame.cmds` is walked in order — earlier cmds render under later ones.
-    /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
-    /// draw, which is invisible to scenes and preserves ordering.
-
-    /// Encode a copy of the swapchain texture into a freshly-allocated
-    /// staging buffer using the active encoder. Returns the buffer + the
-    /// dimensions/padded-bytes-per-row needed to decode it.
+    /// Encode a copy of the active color target (swapchain or headless
+    /// render texture) into a freshly-allocated staging buffer using the
+    /// active encoder. Returns the buffer plus dimensions / padded row stride.
     fn encode_screenshot_copy(
         &self,
         encoder: &mut wgpu::CommandEncoder,

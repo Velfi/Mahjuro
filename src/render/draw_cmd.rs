@@ -271,6 +271,14 @@ pub struct TileFaceQuad {
     pub inst: GpuInstance,
 }
 
+/// Kenney-style input prompt drawn as a tinted image quad (`shaders/image_quad.wgsl`).
+#[derive(Clone, Copy, Debug)]
+pub struct PromptIconQuad {
+    pub inst: GpuInstance,
+    /// Path relative to `assets/` (embedded); selects the cached raster.
+    pub asset_rel_path: &'static str,
+}
+
 /// One shrine placement (used by the pick-blind scene to draw the three
 /// blind shrines side by side, each scaled by `extents`). Geometry is the
 /// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
@@ -651,6 +659,8 @@ pub enum DrawCmd {
     Flame(GpuInstance),
     /// Rasterized text label.
     Text(TextLabel),
+    /// Embedded SVG prompt icon (Kenney); rasterized once per `asset_rel_path`.
+    PromptIconQuad(PromptIconQuad),
     // ── Skeuomorphic gameplay HUD ──
     /// Batch of wood action tablets (sort suit / sort rank / play).
     /// Floating 3D extruded-glyph score popups. Each placement carries its
@@ -864,6 +874,11 @@ impl UiFrame {
             .extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
     }
 
+    pub fn prompt_icon_quads<I: IntoIterator<Item = PromptIconQuad>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::PromptIconQuad));
+    }
+
     /// Apply a global alpha multiplier to every queued cmd's color.
     /// Used by the main loop for scene transition fades.
     pub fn apply_alpha(&mut self, alpha: f32) {
@@ -874,6 +889,7 @@ impl UiFrame {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
+                DrawCmd::PromptIconQuad(icon) => icon.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally

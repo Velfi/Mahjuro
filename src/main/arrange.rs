@@ -59,6 +59,11 @@ pub fn apply_arrange_to_layout(
             let ok = apply_arrange(p, name, delta);
             (ok, ok.then(|| save_tutorial_positions(p)))
         }
+        crate::Scene::TilePackCelebration(t) => {
+            let p = &mut t.positions;
+            let ok = apply_arrange(p, name, delta);
+            (ok, ok.then(|| save_shop_positions(p)))
+        }
         _ => (false, None),
     };
 
@@ -84,6 +89,7 @@ pub fn sample_arrange_placement(
         crate::Scene::Collection(c) => c.positions.placement(name).copied(),
         crate::Scene::MainMenuExterior(s) => s.positions.placement(name).copied(),
         crate::Scene::TutorialCampaign(t) => t.positions.placement(name).copied(),
+        crate::Scene::TilePackCelebration(t) => t.positions.placement(name).copied(),
         _ => None,
     }
 }
@@ -120,6 +126,11 @@ pub fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
             let p = &mut t.positions;
             let ok = reset_arrange(p, name);
             (ok, ok.then(|| save_tutorial_positions(p)))
+        }
+        crate::Scene::TilePackCelebration(t) => {
+            let p = &mut t.positions;
+            let ok = reset_arrange(p, name);
+            (ok, ok.then(|| save_shop_positions(p)))
         }
         _ => (false, None),
     };
@@ -160,6 +171,10 @@ pub fn collect_committed_rotations(
                 Box::new(move |n| s.positions.placement(n).copied()),
             ),
             crate::Scene::TutorialCampaign(t) => (
+                t.positions.hierarchy(),
+                Box::new(move |n| t.positions.placement(n).copied()),
+            ),
+            crate::Scene::TilePackCelebration(t) => (
                 t.positions.hierarchy(),
                 Box::new(move |n| t.positions.placement(n).copied()),
             ),
@@ -217,6 +232,7 @@ pub fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
         crate::Scene::Collection(c) => c.positions.hierarchy(),
         crate::Scene::MainMenuExterior(s) => s.positions.hierarchy(),
         crate::Scene::TutorialCampaign(t) => t.positions.hierarchy(),
+        crate::Scene::TilePackCelebration(t) => t.positions.hierarchy(),
         _ => &[],
     };
     let mut out = Vec::new();

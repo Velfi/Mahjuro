@@ -1,3 +1,4 @@
+use crate::core::tile_pack::TilePackKind;
 use super::*;
 use crate::scenes::meld_guide;
 
@@ -20,13 +21,21 @@ pub(super) enum ShopAction {
     MoveRelicRight(usize),
 }
 
+#[inline]
+pub(crate) fn shop_focus_inspectable(f: ShopFocus) -> bool {
+    matches!(
+        f,
+        ShopFocus::Relic(_) | ShopFocus::Ribbon(_) | ShopFocus::Talisman(_) | ShopFocus::Pack(_)
+    )
+}
+
 /// Every shop element a controller / keyboard player can navigate to.
 /// Mirrors the [`ShopHit`] flat-index scheme so the same action-dispatch
 /// path that handles mouse clicks can also handle Confirm presses, plus
 /// a synthetic `NextRound` variant for the 2D button at the bottom of
 /// the screen (which has no 3D pick equivalent).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ShopFocus {
+pub(crate) enum ShopFocus {
     /// Index into the renderer's flat relic list — for-sale niches first,
     /// then owned-dish relics. Matches `ShopHit::Relic(i)`.
     Relic(usize),
@@ -457,7 +466,7 @@ pub(super) fn push_free_badge(
 
 /// Which phase the pack celebration is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CelebPhase {
+pub(crate) enum CelebPhase {
     /// Show the pack box up close; wait for player click to open.
     Closeup,
     /// Tiles flying out and arranging in a row.
@@ -467,21 +476,21 @@ pub(super) enum CelebPhase {
 /// Tile-pack opening celebration overlay. Blocks shop input while active
 /// and shows the acquired tiles flying out of the pack one by one, then
 /// arranging themselves in a readable row.
-pub(super) struct PackCelebration {
+pub(crate) struct PackCelebration {
     /// The tiles acquired from this pack (with enhancements already stamped).
-    pub(super) tiles: Vec<Tile>,
+    pub(crate) tiles: Vec<Tile>,
     /// Pack name for the header label.
-    pub(super) pack_name: &'static str,
+    pub(crate) pack_name: &'static str,
     /// Which pack kind this is (for rendering the box texture).
-    pub(super) pack_kind: TilePackKind,
+    pub(crate) pack_kind: TilePackKind,
     /// Current phase of the celebration.
-    pub(super) phase: CelebPhase,
+    pub(crate) phase: CelebPhase,
     /// Wall-clock time the *reveal* phase started (after closeup).
-    pub(super) started_at: Instant,
+    pub(crate) started_at: Instant,
     /// Whether the player has dismissed the celebration (confirm/click).
-    pub(super) dismissed: bool,
+    pub(crate) dismissed: bool,
     /// Number of tiles whose reveal sound has already been fired.
-    pub(super) revealed_count: usize,
+    pub(crate) revealed_count: usize,
 }
 
 impl PackCelebration {
@@ -494,7 +503,7 @@ impl PackCelebration {
     /// prompt appears.
     const SETTLE_SECS: f32 = 0.20;
 
-    pub(super) fn new(tiles: Vec<Tile>, pack_name: &'static str, pack_kind: TilePackKind) -> Self {
+    pub(crate) fn new(tiles: Vec<Tile>, pack_name: &'static str, pack_kind: TilePackKind) -> Self {
         Self {
             tiles,
             pack_name,
@@ -508,27 +517,42 @@ impl PackCelebration {
     }
 
     /// Total animation duration (all tiles landed + settle pause).
-    pub(super) fn total_duration(&self) -> f32 {
+    pub(crate) fn total_duration(&self) -> f32 {
         let n = self.tiles.len().max(1) as f32;
         (n - 1.0) * Self::STAGGER + Self::TILE_FLY_SECS + Self::SETTLE_SECS
     }
 
     /// Elapsed seconds since the celebration started.
-    pub(super) fn elapsed(&self) -> f32 {
+    pub(crate) fn elapsed(&self) -> f32 {
         Instant::now()
             .saturating_duration_since(self.started_at)
             .as_secs_f32()
     }
 
     /// True once all tiles have landed and the settle pause is over.
-    pub(super) fn fully_settled(&self) -> bool {
+    pub(crate) fn fully_settled(&self) -> bool {
         self.elapsed() >= self.total_duration()
     }
 
     /// Per-tile animation progress: 0.0 = hasn't started, 1.0 = landed.
-    pub(super) fn tile_progress(&self, idx: usize) -> f32 {
+    pub(crate) fn tile_progress(&self, idx: usize) -> f32 {
         let t = self.elapsed() - idx as f32 * Self::STAGGER;
         (t / Self::TILE_FLY_SECS).clamp(0.0, 1.0)
+    }
+
+    /// Headless screenshot: reveal phase with every tile landed and prompt visible.
+    pub(crate) fn screenshot_reveal_settled(
+        tiles: Vec<crate::core::tile::Tile>,
+        pack_name: &'static str,
+        pack_kind: crate::core::tile_pack::TilePackKind,
+    ) -> Self {
+        let mut s = Self::new(tiles, pack_name, pack_kind);
+        s.phase = CelebPhase::Reveal;
+        let dur = s.total_duration();
+        s.started_at =
+            Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
+        s.revealed_count = s.tiles.len();
+        s
     }
 }
 

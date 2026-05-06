@@ -95,6 +95,7 @@ pub enum DebugAction {
     OpenMaterialViewer,
     /// Push the transition playground scene onto the overlay stack.
     OpenTransitionPlayground,
+    OpenRumbleLab,
     /// Open a simple in-app About modal. Used on macOS to avoid the native
     /// About panel's icon conversion path in `muda`.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -227,6 +228,10 @@ impl DebugMenuBar {
             DebugAction::OpenTransitionPlayground,
         ));
         let _ = jumps_sub.append(&transition_playground_item);
+
+        let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
+        mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));
+        let _ = jumps_sub.append(&rumble_lab_item);
 
         let test_overlay_item = MenuItem::new("Test Overlay", true, None);
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));

@@ -5,6 +5,7 @@ pub mod celebration_overlay;
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
+pub mod item_inspect;
 pub mod journal_transition;
 pub mod main_menu_exterior;
 pub mod material_viewer;
@@ -13,8 +14,8 @@ pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
 pub mod profile_select;
+pub mod rumble_lab;
 pub mod shop;
-pub mod solitaire;
 pub mod splash;
 pub mod start_game_modal;
 pub mod tile_literacy;
@@ -25,18 +26,20 @@ pub mod tutorial_recap;
 pub mod tutorial_summary;
 pub mod yaku_journal;
 pub mod zodiac_celebration;
+pub mod tile_pack_celebration;
 
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
+pub use item_inspect::{ItemInspectHost, ItemInspectScene};
 pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
 pub use meld_guide::MeldGuideScene;
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
+pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
-pub use solitaire::SolitaireScene;
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
 pub use tile_literacy::TileLiteracyScene;
@@ -46,6 +49,7 @@ pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
 pub use zodiac_celebration::ZodiacCelebrationScene;
+pub use tile_pack_celebration::TilePackCelebrationScene;
 
 use enum_dispatch::enum_dispatch;
 
@@ -56,7 +60,7 @@ use crate::game::run::RunState;
 use crate::persistence::ResumeScene;
 use crate::render::animation::AnimationController;
 use crate::render::draw_cmd::UiFrame;
-use crate::ui::input::{InputMode, UiAction};
+use crate::ui::input::{InputMode, RumbleLabOp, UiAction};
 use crate::ui::layout::LayoutResult;
 
 /// Per-element visibility flags driven by the debug visibility modal.
@@ -199,6 +203,12 @@ pub struct UpdateCtx<'a> {
     pub headless: bool,
     /// Layer toggles (must match [`DrawCtx::effect_layers`] for the same frame).
     pub effect_layers: EffectLayers,
+    /// Gamepad right stick while shop item inspect is active (−1..1 each axis).
+    pub shop_inspect_orbit_stick: (f32, f32),
+    /// Shop inspect zoom: analog triggers (`RT − LT`) plus digital bumpers as ±1.
+    pub shop_inspect_zoom_triggers: f32,
+    /// Queued by the rumble lab scene; drained into input state after `update()`.
+    pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
@@ -254,6 +264,14 @@ pub struct DrawCtx<'a> {
     pub cursor_pos: (f32, f32),
     /// Active input device — cursor-driven scenes use this with `cursor_pos` for hover rings.
     pub input_mode: InputMode,
+    /// Reflects settings: when true, gamepad South/East (A/B) actions are swapped.
+    pub gamepad_swap_ab: bool,
+    /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
+    pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
+    /// Suspended shop beneath [`Scene::ItemInspect`] — used to paint the storeroom while orbiting.
+    pub suspended_shop: Option<&'a ShopScene>,
+    /// Suspended collection beneath [`Scene::ItemInspect`] for pedestal orbit.
+    pub suspended_collection: Option<&'a CollectionScene>,
 }
 
 /// What happens when a `ButtonDef` is clicked.
@@ -376,6 +394,7 @@ pub enum Scene {
     TileSelect(TileSelectScene),
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
+    ItemInspect(ItemInspectScene),
     PickBlind(PickBlindScene),
     Gameplay(GameplayScene),
     GameOver(GameOverScene),
@@ -383,12 +402,13 @@ pub enum Scene {
     MaterialViewer(MaterialViewerScene),
     Options(OptionsScene),
     Collection(CollectionScene),
-    Solitaire(SolitaireScene),
     TutorialRecap(TutorialRecapScene),
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
     TileLiteracy(TileLiteracyScene),
     TransitionPlayground(TransitionPlaygroundScene),
+    RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
     ZodiacCelebration(ZodiacCelebrationScene),
+    TilePackCelebration(TilePackCelebrationScene),
 }

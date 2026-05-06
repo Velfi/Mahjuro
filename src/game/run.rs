@@ -1,5 +1,7 @@
 //! Single-run state: wall, hand, score target, round modifiers.
 
+pub mod discard_undo;
+
 mod consumables;
 mod hand_ops;
 mod onboarding;
@@ -35,6 +37,7 @@ use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
+pub use discard_undo::DiscardUndoSnapshot;
 use crate::game::tutorial::TutorialState;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
@@ -673,6 +676,10 @@ pub struct RunState {
     /// underlying scene (shop) to spawn a score popup + particle burst.
     #[serde(skip)]
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
+    /// Set when the tile-pack celebration overlay pops; [`ShopScene`] consumes
+    /// it once to refocus the shelf (same as the old in-shop celebration path).
+    #[serde(skip)]
+    pub pending_shop_focus_snap_after_pack_celebration: bool,
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   Humility     → consecutive plays without honor tiles
@@ -864,6 +871,7 @@ impl RunState {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
+            pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: std::collections::BTreeMap::new(),
             tutorial: None,
             onboarding: None,
@@ -1059,6 +1067,7 @@ mod tests {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
+            pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: BTreeMap::new(),
             tutorial: None,
             onboarding: None,

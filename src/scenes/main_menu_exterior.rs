@@ -20,7 +20,6 @@ use super::meld_guide::MeldGuideScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
-use super::solitaire::SolitaireScene;
 use super::start_game_modal::TileSelectScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -28,7 +27,6 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 enum HubFocus {
     Continue,
     NewGame,
-    Solitaire,
     MeldGuide,
     Profile,
     Collection,
@@ -42,7 +40,6 @@ fn menu_items(in_progress: bool) -> Vec<HubFocus> {
         items.push(HubFocus::Continue);
     }
     items.push(HubFocus::NewGame);
-    items.push(HubFocus::Solitaire);
     items.push(HubFocus::MeldGuide);
     items.push(HubFocus::Profile);
     items.push(HubFocus::Collection);
@@ -61,7 +58,6 @@ fn label_for(item: HubFocus, in_progress: bool) -> &'static str {
                 "Play"
             }
         }
-        HubFocus::Solitaire => "Solitaire",
         HubFocus::MeldGuide => "Meld Guide",
         HubFocus::Profile => "Profile",
         HubFocus::Collection => "Collection",
@@ -223,7 +219,6 @@ impl SceneBehavior for MainMenuExteriorScene {
                     );
                     return Some(Scene::Shop(ShopScene::new(ctx.run)));
                 }
-                Some(HubFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
                 Some(HubFocus::MeldGuide) => {
                     return Some(Scene::MeldGuide(MeldGuideScene::new(false)));
                 }

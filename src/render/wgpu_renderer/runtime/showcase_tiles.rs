@@ -165,8 +165,25 @@ impl WgpuRenderer {
                     }
 
                     // Build model matrix from the placement's explicit 3D transform.
-                    let mut center =
-                        pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+                    // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
+                    // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
+                    // not flat `pixel_to_world`, or celebration tiles miss the frustum.
+                    let mut center = match (
+                        self.active_scene_key.as_deref(),
+                        frame.camera_override.as_ref(),
+                    ) {
+                        (Some("shop"), Some(cam)) => {
+                            crate::render::world_space::world_on_camera_ray_plane_z(
+                                w,
+                                h,
+                                cam,
+                                p.center_pos[0],
+                                p.center_pos[1],
+                                p.center_pos[2],
+                            )
+                        }
+                        _ => pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]),
+                    };
                     let tile_short_px = p.size_px * 0.85;
                     let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
                     let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();

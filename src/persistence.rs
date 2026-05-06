@@ -316,10 +316,16 @@ pub struct AppSettings {
     pub swap_ab: bool,
     #[serde(default = "default_true")]
     pub xy_quick_action: bool,
+    /// Controller vibration (shop hold-to-sell, scoring cascade, etc.). Default on.
+    #[serde(default = "default_true")]
+    pub hold_to_sell_rumble: bool,
     #[serde(default = "default_true")]
     pub auto_cash_in_on_full_structure: bool,
     #[serde(default)]
     pub hints_enabled: bool,
+    /// After a discard, offer a one-step undo until any other action.
+    #[serde(default)]
+    pub discard_undo_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
 }
@@ -364,8 +370,10 @@ impl Default for AppSettings {
             hdr_enabled: false,
             swap_ab: false,
             xy_quick_action: true,
+            hold_to_sell_rumble: true,
             auto_cash_in_on_full_structure: true,
             hints_enabled: false,
+            discard_undo_enabled: false,
             ui_scale: 1.0,
         }
     }

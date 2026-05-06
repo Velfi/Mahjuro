@@ -163,10 +163,31 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        self.queue.write_buffer(
-            &self.point_lights_buffer,
-            0,
-            bytemuck::bytes_of(&PointLightsBuf::from_lights(
+        let point_lights_buf = match (
+            self.active_scene_key.as_deref(),
+            frame.camera_override.as_ref(),
+        ) {
+            (Some("shop"), Some(cam))
+                if frame.cmds.iter().any(|c| {
+                    matches!(
+                        c,
+                        crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)
+                    )
+                }) =>
+            {
+                PointLightsBuf::from_lights_shop_camera(
+                    &frame.point_lights,
+                    cam,
+                    frame.candle_light_count,
+                    frame.flame_height_world,
+                    1.0,
+                    pl_w,
+                    pl_h,
+                    gamma,
+                    time_s,
+                )
+            }
+            _ => PointLightsBuf::from_lights(
                 &frame.point_lights,
                 frame.candle_light_count,
                 frame.flame_height_world,
@@ -175,7 +196,12 @@ impl WgpuRenderer {
                 pl_h,
                 gamma,
                 time_s,
-            )),
+            ),
+        };
+        self.queue.write_buffer(
+            &self.point_lights_buffer,
+            0,
+            bytemuck::bytes_of(&point_lights_buf),
         );
 
         // Shop `KHR_lights_punctual` uploads — `shop_glb` binding 0 / `lit_mesh` binding 2, inverse-square.

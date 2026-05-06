@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::scenes::shop::ShopScene;
+use crate::scenes::TilePackCelebrationScene;
 
 /// Map a user-supplied `--boss` slug (case-insensitive, spaces/underscores
 /// interchangeable) to a `BossKind`. Matches against canonical `name()`
@@ -26,6 +29,49 @@ fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
         }
     }
     anyhow::bail!("unknown --boss '{slug}'");
+}
+
+/// `--zodiac` for `zodiac_celebration` screenshots: slug or display name.
+fn parse_zodiac_slug(slug: &str) -> anyhow::Result<crate::core::zodiac::ZodiacKind> {
+    let normalized = slug
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-', ' '], "");
+    for z in crate::core::zodiac::ZodiacKind::all() {
+        if z.slug() == normalized || z.name().to_ascii_lowercase().replace(' ', "") == normalized {
+            return Ok(*z);
+        }
+    }
+    anyhow::bail!("unknown --zodiac '{slug}'");
+}
+
+/// `--pack` for `tile_pack_celebration`: variant name or compact pack title.
+fn parse_tile_pack_slug(slug: &str) -> anyhow::Result<crate::core::tile_pack::TilePackKind> {
+    use crate::core::tile_pack::TilePackKind;
+    let n = slug
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-', ' '], "");
+    for &k in TilePackKind::all() {
+        let debug_s = format!("{:?}", k).to_ascii_lowercase();
+        let compact: String = k
+            .name()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        if n == debug_s || n == compact {
+            return Ok(k);
+        }
+    }
+    anyhow::bail!("unknown --pack '{slug}' (try honors, terminals, flowers, bamboo_grove, coin_cache, scroll_library)");
+}
+
+fn shop_focus_slug_inspectable(slug: &str) -> bool {
+    slug.starts_with("relic:")
+        || slug.starts_with("ribbon:")
+        || slug.starts_with("talisman:")
+        || slug.starts_with("pack:")
 }
 
 /// Replace `run`'s freshly-dealt hand with a curated 14-tile winning hand
@@ -168,6 +214,27 @@ fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {
     asset_path::log_all_assets();
     let shop_like = matches!(s.scene.as_str(), "shop");
+    let collection_like = matches!(s.scene.as_str(), "collection");
+    if s.item_inspect && !shop_like && !collection_like {
+        anyhow::bail!(
+            "--item-inspect requires --scene shop or collection (tile_pack_celebration is a standalone scene)"
+        );
+    }
+    if s.item_inspect && shop_like {
+        let slug = s
+            .shop_focus
+            .as_deref()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--item-inspect with --scene shop requires --shop-focus on relic:N, ribbon:N, talisman:N, or pack:N"
+                )
+            })?;
+        if !shop_focus_slug_inspectable(slug) {
+            anyhow::bail!(
+                "--item-inspect with --scene shop requires inspectable --shop-focus (relic:N, ribbon:N, talisman:N, pack:N); got '{slug}'"
+            );
+        }
+    }
     if s.shop_focus.is_some() && !shop_like {
         anyhow::bail!("--shop-focus is only valid with --scene shop");
     }
@@ -176,6 +243,17 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     }
     if s.journal_transition.is_some() && !shop_like {
         anyhow::bail!("--journal-transition is only valid with --scene shop");
+    }
+    let celebration_like = matches!(s.scene.as_str(), "zodiac_celebration");
+    if s.zodiac.is_some() && !celebration_like {
+        anyhow::bail!("--zodiac is only valid with --scene zodiac_celebration");
+    }
+    if s.celebration_level.is_some() && !celebration_like {
+        anyhow::bail!("--celebration-level is only valid with --scene zodiac_celebration");
+    }
+    let pack_celeb_like = matches!(s.scene.as_str(), "tile_pack_celebration");
+    if s.pack.is_some() && !pack_celeb_like {
+        anyhow::bail!("--pack is only valid with --scene tile_pack_celebration");
     }
     let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
     let mut run = RunState::new_demo();
@@ -237,6 +315,10 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             Scene::MaterialViewer(scenes::MaterialViewerScene::new(false)),
             false,
         ),
+        "rumble_lab" => (
+            Scene::RumbleLab(scenes::RumbleLabScene::new(false)),
+            false,
+        ),
         // Layered the relic-unlock modal on top of the main-menu backdrop
         // so we can iterate on the modal's hero staging without driving a live
         // game state. The modal stages itself entirely on top.
@@ -247,12 +329,48 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 false,
             )
         }
+        "zodiac_celebration" => {
+            let z = s
+                .zodiac
+                .as_deref()
+                .map(parse_zodiac_slug)
+                .transpose()?
+                .unwrap_or(crate::core::zodiac::ZodiacKind::Snake);
+            let level = s.celebration_level.unwrap_or(2).max(1);
+            let yaku = z.yaku();
+            (
+                Scene::ZodiacCelebration(scenes::ZodiacCelebrationScene::new(
+                    z,
+                    yaku.name(),
+                    level,
+                )),
+                false,
+            )
+        }
+        "tile_pack_celebration" => {
+            let pack = s
+                .pack
+                .as_deref()
+                .map(parse_tile_pack_slug)
+                .transpose()?
+                .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
+            setup_shop_state(&mut run);
+            let shop = ShopScene::new(&mut run);
+            let counts = shop.tile_pack_celeb_inventory_counts(&run);
+            (
+                Scene::TilePackCelebration(TilePackCelebrationScene::new_headless_with_shop_counts(
+                    &run, pack, counts,
+                )),
+                true,
+            )
+        }
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: collection, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
-                material_viewer, relic_unlock)"
+                material_viewer, relic_unlock, zodiac_celebration, \
+                tile_pack_celebration)"
             )
         }
     };
@@ -264,10 +382,42 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         game_in_progress,
         s.fresh_progress,
     )?;
-    if s.shop_focus.is_some() && shop_like {
-        // Cursor-mode update reassigns focus from the cursor pick
-        // every tick; switch to controller mode so the focus we set
-        // pre-warmup persists.
+    if s.item_inspect {
+        let w = s.width.max(1) as f32;
+        let h = s.height.max(1) as f32;
+        let layout = app.layout_engine.solve(w, h);
+        match &mut app.scene {
+            Scene::Shop(shop) => {
+                let orbit = shop.item_inspect_orbit_for_screenshot(w, h, &app.run).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "--item-inspect: could not build inspect orbit (check --shop-focus index and stock)"
+                    )
+                })?;
+                app.overlay_stack.push(Scene::ItemInspect(
+                    scenes::ItemInspectScene::new(scenes::ItemInspectHost::Shop, orbit),
+                ));
+            }
+            Scene::Collection(coll) => {
+                let orbit = coll
+                    .item_inspect_orbit_for_screenshot(w, h, &layout, &app.progress)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "--item-inspect: collection tab has no artifacts or orbit failed"
+                        )
+                    })?;
+                app.overlay_stack.push(Scene::ItemInspect(
+                    scenes::ItemInspectScene::new(scenes::ItemInspectHost::Collection, orbit),
+                ));
+            }
+            _ => {}
+        }
+    }
+    if (s.shop_focus.is_some() && shop_like)
+        || (s.item_inspect && collection_like)
+    {
+        // Cursor-mode update reassigns focus from the cursor pick every
+        // tick; controller mode keeps pre-set shop/collection focus stable
+        // across warmup.
         app.input_mode_override = Some(crate::ui::input::InputMode::Controller);
     }
     if hero_play {
@@ -303,6 +453,9 @@ struct HeadlessApp {
     renderer: WgpuRenderer,
     layout_engine: UiLayout,
     scene: Scene,
+    /// Scene-owned overlays (e.g. [`Scene::ItemInspect`]) — same stack idea
+    /// as the winit `App`, so pushdown inspect screenshots match production.
+    overlay_stack: Vec<Scene>,
     run: RunState,
     anim: AnimationController,
     progress: crate::core::progression::PlayerProgress,
@@ -361,6 +514,7 @@ impl HeadlessApp {
             renderer,
             layout_engine: UiLayout::new(),
             scene,
+            overlay_stack: Vec::new(),
             run,
             anim: AnimationController::new(),
             progress,
@@ -512,6 +666,7 @@ impl HeadlessApp {
         let mut delete_profile: Option<usize> = None;
         let mut complete_onboarding = false;
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
+        let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let actions_this_tick: Vec<UiAction> = self
             .queued_actions
             .iter()
@@ -549,8 +704,37 @@ impl HeadlessApp {
             overlay_request: &mut overlay_request,
             headless: true,
             effect_layers: self.effect_layers,
+            shop_inspect_orbit_stick: (0.0, 0.0),
+            shop_inspect_zoom_triggers: 0.0,
+            rumble_lab_ops: &mut rumble_lab_ops,
         };
-        let _ = self.scene.update(update_ctx);
+        let update_result = if let Some(top) = self.overlay_stack.last_mut() {
+            top.update(update_ctx)
+        } else {
+            self.scene.update(update_ctx)
+        };
+        match overlay_request {
+            Some(scenes::OverlayRequest::Push(s)) => self.overlay_stack.push(*s),
+            Some(scenes::OverlayRequest::Pop) => {
+                self.overlay_stack.pop();
+            }
+            None => {}
+        }
+        let _ = update_result;
+
+        let item_inspect_top = matches!(
+            self.overlay_stack.last(),
+            Some(Scene::ItemInspect(_))
+        );
+        let suspended_shop = match (&self.scene, item_inspect_top) {
+            (Scene::Shop(s), true) => Some(s),
+            _ => None,
+        };
+        let suspended_collection = match (&self.scene, item_inspect_top) {
+            (Scene::Collection(c), true) => Some(c),
+            _ => None,
+        };
+
         let ctx = DrawCtx {
             layout: &layout,
             anim: &self.anim,
@@ -573,8 +757,16 @@ impl HeadlessApp {
             effect_layers: self.effect_layers,
             cursor_pos: (0.0, 0.0),
             input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
+            gamepad_swap_ab: false,
+            gamepad_style: crate::ui::button_prompts::GamepadStyle::default(),
+            suspended_shop,
+            suspended_collection,
         };
-        let mut frame: UiFrame = self.scene.draw_frame(ctx);
+        let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
+            top.draw_frame(ctx)
+        } else {
+            self.scene.draw_frame(ctx)
+        };
 
         // ── Modal overlay (relic_unlock screenshot path) ────────────
         // Mirrors the modal-staging block in `App::draw` (src/main/
@@ -644,19 +836,19 @@ impl HeadlessApp {
             }
         }
 
-        let active_scene_key: Option<&'static str> = match &self.scene {
-            Scene::Shop(_) => Some("shop"),
+        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
+        let active_scene_key: Option<&'static str> = match scene_for_renderer {
+            Scene::Shop(_) | Scene::TilePackCelebration(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
-            Scene::Solitaire(_) => Some("solitaire"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
         self.renderer
-            .set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+            .set_committed_arrange_rotations(collect_committed_rotations(scene_for_renderer));
         self.renderer
             .set_shop_env_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
         let sl = crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS;
@@ -739,7 +931,6 @@ impl HeadlessApp {
                 output.display()
             );
         }
-        log::info!("screenshot saved → {}", output.display());
         Ok(())
     }
 }

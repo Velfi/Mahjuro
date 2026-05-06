@@ -83,7 +83,7 @@ pub(super) fn tile_pack_index_from_pick(id: u32) -> Option<usize> {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct ShopLayout {
+pub(crate) struct ShopLayout {
     pub niche_centers_px: [(f32, f32, f32); KIOSK_RELIC_SLOTS],
     pub niche_count: usize,
     pub pack_centers_px: [(f32, f32, f32); N_TILE_PACKS],
@@ -96,12 +96,13 @@ pub(super) struct ShopLayout {
 }
 
 impl ShopLayout {
-    pub(super) fn mm(&self, n: f32) -> f32 {
+    pub(crate) fn mm(&self, n: f32) -> f32 {
         self.ppmm * n
     }
 }
 
-pub(super) struct ShopInventoryCounts {
+#[derive(Clone, Copy)]
+pub(crate) struct ShopInventoryCounts {
     pub n_for_sale: usize,
     pub n_for_sale_zodiacs: usize,
     pub n_for_sale_talismans: usize,
@@ -109,7 +110,7 @@ pub(super) struct ShopInventoryCounts {
 }
 
 impl ShopLayout {
-    pub(super) fn build(
+    pub(crate) fn build(
         layout: &crate::ui::layout::LayoutResult,
         positions: &crate::ui::scene_layout::ShopPositions,
         counts: ShopInventoryCounts,

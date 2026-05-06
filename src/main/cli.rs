@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 
 #[derive(Debug, Parser)]
@@ -21,11 +23,18 @@ pub enum Command {
     Sweep(SweepCli),
     StrategySweep(StrategySweepCli),
     ForcedRelicSweep(ForcedRelicSweepCli),
+    /// Render a single frame offscreen (no window) and save a PNG.
+    ///
+    /// Use `--scene tile_pack_celebration` for the pack-opening overlay alone
+    /// (black stage + settled reveal row); it is not `--scene shop`.
     Screenshot(ScreenshotCli),
 }
 
+/// Headless one-shot capture: runs `warmup_frames` settle ticks offscreen, then writes `--output`.
 #[derive(Debug, Args)]
 pub struct ScreenshotCli {
+    /// Root scene id (e.g. `shop`, `gameplay`, `collection`, `zodiac_celebration`,
+    /// `tile_pack_celebration`, `main_menu_exterior`, `start_screen`, …).
     #[arg(long)]
     pub scene: String,
     #[arg(long, default_value = "/tmp/mahjuro-screenshot.png")]
@@ -34,8 +43,11 @@ pub struct ScreenshotCli {
     pub width: u32,
     #[arg(long, default_value_t = 1080)]
     pub height: u32,
+    /// Extra idle ticks before the capture frame (layout/asset settling).
     #[arg(long, default_value_t = 12)]
     pub warmup_frames: u32,
+    /// Boss slug for runs where gameplay bosses matter (`gameplay`, `pick_blind`, …).
+    /// Parsed but otherwise low impact for menu-only scenes.
     #[arg(long)]
     pub boss: Option<String>,
     #[arg(long)]
@@ -60,6 +72,24 @@ pub struct ScreenshotCli {
     /// when `--scene shop`.
     #[arg(long)]
     pub journal_transition: Option<f32>,
+    /// Zodiac animal slug for `--scene zodiac_celebration` (e.g. snake,
+    /// dragon). Default: snake.
+    #[arg(long)]
+    pub zodiac: Option<String>,
+    /// New yaku level shown on `--scene zodiac_celebration`. Default: 2.
+    #[arg(long)]
+    pub celebration_level: Option<u32>,
+    /// Pack variant for `--scene tile_pack_celebration` only. Accepts compact
+    /// names from pack titles (`honors`, `terminals`, `bamboogrove`, …) or
+    /// `TilePackKind` debug strings (`Honors`, `ScrollLibrary`). Default: honors.
+    #[arg(long)]
+    pub pack: Option<String>,
+    /// Push the item-inspect overlay (orbit camera) before capture. Shop
+    /// requires `--shop-focus` on an inspectable target (`relic:N`,
+    /// `ribbon:N`, `talisman:N`, `pack:N`). Only valid with `--scene shop`
+    /// or `collection` (not `tile_pack_celebration`, which is already full-screen).
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub item_inspect: bool,
 }
 
 #[derive(Debug, Args)]
