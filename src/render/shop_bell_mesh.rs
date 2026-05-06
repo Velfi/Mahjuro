@@ -103,6 +103,9 @@ fn push_sphere(
                 ],
                 normal: [nx, ny, nz],
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -148,21 +151,33 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
                 position: [r0 * cx0, r0 * cy0, z0],
                 normal: n00,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [r0 * cx1, r0 * cy1, z0],
                 normal: n01,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [r1 * cx1, r1 * cy1, z1],
                 normal: n01,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [r1 * cx0, r1 * cy0, z1],
                 normal: n00,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
@@ -184,21 +199,33 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
             position: [ox0, oy0, LIP_Z],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ox1, oy1, LIP_Z],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix1, iy1, LIP_Z],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix0, iy0, LIP_Z],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
     }
@@ -210,6 +237,9 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
             position: [0.0, 0.0, CAP_Z],
             normal: [0.0, 0.0, 1.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         for seg in 0..SEGS {
             let a = angle(seg);
@@ -217,6 +247,9 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
                 position: [CAP_R * a.cos(), CAP_R * a.sin(), CAP_Z],
                 normal: [0.0, 0.0, 1.0],
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for seg in 0..SEGS {
@@ -279,6 +312,9 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
                 position: *corner,
                 normal: nrm,
                 uv: *uv,
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

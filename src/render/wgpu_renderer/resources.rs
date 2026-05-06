@@ -131,6 +131,21 @@ pub(super) fn white_albedo(
     )
 }
 
+/// 1×1 linear RGBA encoding tangent-space normal (0, 0, 1) → `(128, 128, 255, 255)`.
+pub(super) fn flat_normal_map_ts(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    upload_rgba_texture_linear(
+        device,
+        queue,
+        "tile-flat-normal-ts",
+        &[128, 128, 255, 255],
+        1,
+        1,
+    )
+}
+
 /// 1×1 mid-gray linear texture — default `relief_tex` for lit meshes that
 /// don't use a separate height map (enamel shader reads ~0.5 → flat relief).
 pub(super) fn flat_relief_height(
@@ -195,6 +210,108 @@ pub(super) fn upload_rgba_texture_linear(
     (tex, view)
 }
 
+/// Upload RGBA8 with optional CPU-generated mip chain (box filter).
+pub(super) fn upload_rgba_texture_with_mips(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    mips: bool,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    use crate::render::gltf_helpers::{cpu_mip_chain_rgba8, mip_level_count};
+    let mip_levels = if mips && width.max(height) > 1 {
+        mip_level_count(width, height)
+    } else {
+        1
+    };
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: mip_levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    if mip_levels == 1 {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    } else {
+        let chain = cpu_mip_chain_rgba8(rgba.to_vec(), width, height);
+        for (level, (data, mw, mh)) in chain.into_iter().enumerate() {
+            let level = level as u32;
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &tex,
+                    mip_level: level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(mw * 4),
+                    rows_per_image: Some(mh),
+                },
+                wgpu::Extent3d {
+                    width: mw,
+                    height: mh,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+    }
+    let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+    (tex, view)
+}
+
+/// glTF default metallic–roughness texel: roughness = 1 (G), metallic = 0 (B).
+pub(super) fn default_metallic_roughness_map(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    upload_rgba_texture_linear(device, queue, "gltf-default-mr", &[255, 255, 0, 255], 1, 1)
+}
+
+pub(super) fn default_emissive_map(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    upload_rgba_texture(
+        device,
+        queue,
+        "gltf-default-emissive",
+        &[0, 0, 0, 255],
+        1,
+        1,
+    )
+}
+
 /// Decode the embedded coin face heightmap PNG and upload it as a linear
 /// data texture. Falls back to a flat mid-gray 1×1 if the asset is missing
 /// or fails to decode (so the coin still renders, just without engraving).
@@ -242,8 +359,9 @@ pub(super) fn load_metal_heightmap(
         "mirror-heightmap" => "mirror-heightmap-flat",
         _ => "metal-heightmap-flat",
     };
-    let bytes = match crate::asset_path::get(path) {
-        Some(file) => file.data.to_vec(),
+    let bytes_opt = crate::asset_path::get(path);
+    let bytes = match &bytes_opt {
+        Some(file) => file.data.as_ref(),
         None => {
             log::warn!("{label} asset missing at {path} - using flat fallback");
             return upload_rgba_texture_linear(
@@ -256,7 +374,7 @@ pub(super) fn load_metal_heightmap(
             );
         }
     };
-    match image::load_from_memory(&bytes) {
+    match image::load_from_memory(bytes) {
         Ok(img) => {
             let rgba = img.into_rgba8();
             let (w, h) = rgba.dimensions();
@@ -357,36 +475,6 @@ pub(super) fn create_scene_color(
     (tex, view)
 }
 
-/// Offscreen color target for the embedded yaku-journal scene. The
-/// shop's open-book mesh samples this as the page-spread albedo so the
-/// journal content appears literally painted on the open pages. Fixed
-/// 1024×1024 RGBA8 sRGB regardless of swapchain size — pages don't
-/// resize with the window, and the page content doesn't need HDR
-/// precision. Hardcoded sRGB8 (rather than reusing the swapchain
-/// format) so `upload_journal_test_pattern`'s 4-byte-per-pixel write
-/// matches when the surface is in HDR mode (`Rgba16Float` = 8 bpp).
-pub(super) fn create_journal_page(
-    device: &wgpu::Device,
-    _format: wgpu::TextureFormat,
-) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("journal-page-target"),
-        size: wgpu::Extent3d {
-            width: 1024,
-            height: 1024,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    })
-}
-
 /// Fullscreen offscreen target for the embedded yaku-journal scene's
 /// real GPU render. The shop's open-book mesh samples this view in
 /// screen space so the journal content reads as a window cut through
@@ -471,8 +559,7 @@ pub(super) fn create_post_texture(
     (tex, view)
 }
 
-/// Sibling depth texture used as a sampleable snapshot of the scene depth
-/// between the pre-smoke and post-smoke render passes.
+/// Depth texture usable as a shader-sampled snapshot (e.g. SSR history).
 pub(super) fn create_depth_copy(
     device: &wgpu::Device,
     width: u32,

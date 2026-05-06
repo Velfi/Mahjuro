@@ -10,8 +10,6 @@ mod debug_axes;
 #[path = "runtime/flame_emitters.rs"]
 mod flame_emitters;
 use flame_emitters::build_flame_emitters;
-#[path = "runtime/fluid_upload.rs"]
-mod fluid_upload;
 #[path = "runtime/gameplay_hud_uniforms.rs"]
 mod gameplay_hud_uniforms;
 #[path = "runtime/object3d_placement.rs"]
@@ -35,6 +33,8 @@ use frame::RenderFrame;
 mod render;
 #[path = "runtime/shadow_setup.rs"]
 mod shadow_setup;
+#[path = "runtime/shop_environment.rs"]
+mod shop_environment;
 #[path = "runtime/showcase_tiles.rs"]
 mod showcase_tiles;
 #[path = "runtime/surface.rs"]

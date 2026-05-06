@@ -8,9 +8,7 @@
 use std::time::Instant;
 
 use super::GameplayScene;
-use super::{
-    CANDLE_FLARE_DECAY, LIGHT_RAMP_DELAY_SECS, LIGHT_RAMP_DURATION_SECS, OPENING_WIND_DELAY_SECS,
-};
+use super::{CANDLE_FLARE_DECAY, LIGHT_RAMP_DELAY_SECS, LIGHT_RAMP_DURATION_SECS};
 use crate::game::engine::GameEngine;
 use crate::render::candle_mesh::WICK_TIP_Y;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -30,7 +28,6 @@ pub(super) fn tick_basic_animations(
     if ctx.headless {
         scene.light_ramp = 1.0;
         scene.light_ramp_anchor = None;
-        scene.initial_smoke_fill_active = false;
     }
     scene.particles.update(dt);
     scene.flying_coins.update(dt);
@@ -86,18 +83,8 @@ pub(super) fn tick_wind_and_deal_detection(
     // `draw()` (no `cascade_tuning` access) can read these.
     scene.wind_delay_secs = ctx.cascade_tuning.wind_delay_ms as f32 / 1000.0;
     scene.wind_duration_secs = ctx.cascade_tuning.wind_duration_ms as f32 / 1000.0;
-    // First deal of the scene: shorten the wind_delay so the post-deal
-    // sweep fires shortly after the scene fade-in completes, blowing
-    // away the dense smoke curtain that the pick-blind scene already
-    // pumped into the persistent fluid sim. Subsequent post-discard
-    // refills get the normal (cascade-tuned) delay because they're
-    // ambient breath, not a transition handoff.
-    if scene.initial_smoke_fill_active {
-        scene.wind_delay_secs = OPENING_WIND_DELAY_SECS;
-    }
-
     // Detect deal events: any time the hand grows (initial round deal,
-    // post-discard refill) we stamp `last_deal_at` so the post-deal smoke
+    // post-discard refill) we stamp `last_deal_at` so the post-deal wind
     // gust can fire `wind_delay_secs` later. While `pending_blind` is
     // set, we intentionally ignore the stale previous-round hand — seed
     // `prev_hand_len` to it so the detector fires only once apply_blind
@@ -160,42 +147,6 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
             .push(crate::game::event_bus::GameEvent::GoldChanged { delta });
     }
     scene.prev_gold = cur_gold;
-}
-
-/// Clear the opening smoke curtain once the wind sweep + light ramp finish.
-pub(super) fn tick_initial_smoke_fill(scene: &mut GameplayScene, now: Instant) {
-    // The opening smoke curtain (`initial_smoke_fill_active`) is a
-    // one-shot: it floods the screen with positive-density impulses for
-    // the `wind_delay_secs` window after the *first* deal of this scene
-    // and then gets blown away by the existing post-deal wind sweep.
-    // Once that sweep finishes, clear the flag so subsequent
-    // post-discard refills don't re-flood the screen.
-    if scene.initial_smoke_fill_active
-        && let Some(deal_at) = scene.last_deal_at
-    {
-        let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
-        let wind_end = scene.wind_delay_secs + scene.wind_duration_secs;
-        let ramp_end = LIGHT_RAMP_DELAY_SECS + LIGHT_RAMP_DURATION_SECS;
-        // Do not clear `last_deal_at` until both the wind sweep and
-        // the candle light-ramp window have finished — otherwise
-        // `light_ramp` stops advancing (it keyed off `last_deal_at`)
-        // while still < 1 if wind tunings make `wind_end` < ~1.1s.
-        if elapsed >= wind_end.max(ramp_end) {
-            scene.initial_smoke_fill_active = false;
-            // Clear `last_deal_at` so the opening deal doesn't
-            // fire a second wind gust at the *normal* delay
-            // (3 s) after the shortened opening delay (1 s)
-            // already ran. Without this, `wind_delay_secs`
-            // reverts to 3.0 once the flag clears, and the
-            // check `elapsed >= 3.0` immediately passes for
-            // the same `last_deal_at` — producing a phantom
-            // second gust that blows away cursor smoke for
-            // several more seconds. The next post-discard
-            // refill will re-stamp `last_deal_at` and trigger
-            // a normal gust on its own schedule.
-            scene.last_deal_at = None;
-        }
-    }
 }
 
 /// Advance candle flicker, decay candle flare, and tick the light ramp.
@@ -440,7 +391,7 @@ pub(super) fn build_candles_and_spotlights(
             candle_placements.push(Object3d {
                 pos: [cx_j, cy_j, 0.0],
                 extents: [1.0, 1.0, 1.0],
-                rotation: glam::Mat4::IDENTITY,
+                rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Candle {
                     scale: candle_scale,
@@ -708,9 +659,11 @@ pub(super) fn build_ambient_table_objects(
         frame.object3d(Object3d {
             pos: [plinth_cx, plinth_cy, plinth_lift],
             extents: [plinth_w, plinth_h, plinth_d],
-            rotation: glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
-                * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
-                * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
+            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
+                glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
+                    * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
+                    * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
+            ),
             color: [1.0, 1.0, 1.0, 1.0],
             kind: crate::render::draw_cmd::Object3dKind::DoraPlinth { glow: 0.0 },
             hover_target: 0.0,
@@ -819,8 +772,10 @@ pub(super) fn build_ambient_table_objects(
         frame.object3d(Object3d {
             pos: [pile_cx, pile_cy, dish_rim * 0.5],
             extents: [dish_w, dish_rim, dish_d],
-            rotation: glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
-                * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
+                glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
+                    * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            ),
             // Aged-porcelain cream tint drives a light crazing pattern in
             // the shader so the dish reads as a temple-merchant ceramic
             // piece (well-loved, not fresh from the kiln).
@@ -886,7 +841,7 @@ pub(super) fn build_ambient_table_objects(
             coins.push(Object3d {
                 pos: [pile_cx + lx, pile_cy + lz, world_y],
                 extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
-                rotation: glam::Mat4::from_rotation_y(rot_y),
+                rotation: [0.0, rot_y, 0.0],
                 color: [1.00, 0.78, 0.30, 1.0],
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::Cylinder,

@@ -2,8 +2,6 @@
 //! Grouped so they can be synced in one go from `OptionsScene` state.
 
 pub struct RenderSettings {
-    pub smoke_quality: crate::persistence::SmokeQuality,
-    pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,

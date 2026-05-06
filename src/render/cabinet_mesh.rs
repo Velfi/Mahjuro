@@ -453,6 +453,9 @@ fn push_hex_disc(
         position: [0.0, 0.0, z],
         normal,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let perim_base = vertices.len() as u32;
     // Hexagon vertices: angular offsets 30°, 90°, 150°, 210°, 270°, 330°
@@ -465,6 +468,9 @@ fn push_hex_disc(
             position: [theta.cos() * radius, theta.sin() * radius, z],
             normal,
             uv: [0.5 + 0.5 * theta.cos(), 0.5 + 0.5 * theta.sin()],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     // Fan triangulation. Wind CCW from the side `normal` points to.

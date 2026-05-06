@@ -10,7 +10,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const PROFILE_COUNT: usize = 3;
@@ -133,7 +133,7 @@ impl SceneBehavior for ProfileSelectScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return Some(Scene::StartScreen(StartScreenScene::new()));
+                return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
             }
             if matches!(a, UiAction::Delete) {
                 let idx = self.cursor();
@@ -147,7 +147,7 @@ impl SceneBehavior for ProfileSelectScene {
         if let Some(PickProfile(idx)) = action {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.switch_profile = Some(idx);
-            return Some(Scene::StartScreen(StartScreenScene::new()));
+            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
         }
         None
     }
@@ -162,7 +162,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
 
         let showing_dialog = self.confirm_delete != ConfirmDelete::None;
@@ -192,9 +192,9 @@ impl SceneBehavior for ProfileSelectScene {
             // Card background.
             if !showing_dialog {
                 let bg_color = if is_focused {
-                    color::DUSK
+                    color::WALNUT_SOFT
                 } else {
-                    color::INDIGO
+                    color::WALNUT_RAISED
                 };
                 frame.quad(GpuInstance {
                     rect: [card_x, card_y, card_w, card_h],
@@ -257,7 +257,7 @@ impl SceneBehavior for ProfileSelectScene {
                 let stat_x = card_x + pad_x;
                 let stat_w = card_w - pad_x * 2.0;
                 let line1_y = card_y + pad_y + line_h + pad_y * 0.5;
-                let stat_color = color::MIST;
+                let stat_color = color::STONE;
 
                 frame.text(TextLabel {
                     rect: [stat_x, line1_y, stat_w, small_h],
@@ -300,7 +300,7 @@ impl SceneBehavior for ProfileSelectScene {
                 frame.text(TextLabel {
                     rect: [card_x + pad_x, empty_y, card_w - pad_x * 2.0, small_h],
                     text: "Empty — start a new adventure".into(),
-                    color: color::SLATE,
+                    color: color::UMBER,
                     ..Default::default()
                 });
             }
@@ -315,7 +315,7 @@ impl SceneBehavior for ProfileSelectScene {
             // Fully opaque overlay so card text underneath is completely hidden.
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
-                color: color::OBSIDIAN,
+                color: color::WALNUT_INK,
             });
 
             let dialog_w = (300.0 * scale).min(w * 0.85);
@@ -337,7 +337,7 @@ impl SceneBehavior for ProfileSelectScene {
             // Dialog background.
             frame.quad(GpuInstance {
                 rect: [dialog_x, dialog_y, dialog_w, dialog_h],
-                color: color::OBSIDIAN,
+                color: color::WALNUT_INK,
             });
 
             let msg_h = (24.0 * scale).max(16.0);
@@ -354,7 +354,7 @@ impl SceneBehavior for ProfileSelectScene {
             frame.text(TextLabel {
                 rect: [dialog_x, hint_y, dialog_w, hint_h],
                 text: "All progress will be lost.".into(),
-                color: color::MIST,
+                color: color::STONE,
                 ..Default::default()
             });
 
@@ -363,7 +363,7 @@ impl SceneBehavior for ProfileSelectScene {
             frame.text(TextLabel {
                 rect: [dialog_x, btn_y, dialog_w, btn_h],
                 text: "Enter to confirm  |  Esc to cancel".into(),
-                color: color::SLATE,
+                color: color::UMBER,
                 ..Default::default()
             });
         }
@@ -379,7 +379,7 @@ impl SceneBehavior for ProfileSelectScene {
         frame.text(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
             text: hint_text.into(),
-            color: color::SLATE,
+            color: color::UMBER,
             ..Default::default()
         });
 

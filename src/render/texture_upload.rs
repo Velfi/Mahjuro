@@ -332,10 +332,15 @@ pub(crate) fn load_pack_textures(
 pub(crate) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
     let (tx, rx) = mpsc::channel();
 
-    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::Menu, BackgroundId::Score]
-        .iter()
-        .filter_map(|id| id.asset_path().map(|p| (*id, p)))
-        .collect();
+    let backgrounds: Vec<(BackgroundId, &'static str)> = [
+        BackgroundId::Menu,
+        BackgroundId::Score,
+        BackgroundId::MainMenuExterior,
+        BackgroundId::ShopStoreroom,
+    ]
+    .iter()
+    .filter_map(|id| id.asset_path().map(|p| (*id, p)))
+    .collect();
 
     std::thread::Builder::new()
         .name("bg-loader".into())
@@ -436,8 +441,7 @@ pub(crate) fn create_scene_prev(
     (tex, view)
 }
 
-/// Sibling depth texture used as a sampleable snapshot of the scene depth
-/// between the pre-smoke and post-smoke render passes.
+/// Depth texture usable as a shader-sampled snapshot (e.g. SSR history).
 pub(crate) fn create_depth_copy(
     device: &wgpu::Device,
     width: u32,
@@ -545,46 +549,6 @@ pub(crate) fn make_hand_tile_gpu(
         })
         .collect();
 
-    // Outline shell uniform + matching bind groups. The outline pipeline
-    // only samples binding 0 (camera uniform) but we have to provide the
-    // texture/sampler bindings to satisfy the shared layout.
-    let outline_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("hand-tile-outline-cam"),
-        contents: bytemuck::bytes_of(&CameraUniform {
-            view_proj: identity.to_cols_array(),
-            model: identity.to_cols_array(),
-            base_color_factor,
-        }),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let outline_bind_groups: Vec<wgpu::BindGroup> = primitives
-        .iter()
-        .map(|prim| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("hand-tile-outline-bg"),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: outline_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&decal_view),
-                    },
-                ],
-            })
-        })
-        .collect();
-
     // Per-tile shadow caster uniform — written each frame the tile is
     // visible with the same model matrix as the main uniform.
     let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -610,8 +574,6 @@ pub(crate) fn make_hand_tile_gpu(
     HandTileGpu {
         uniform_buffer,
         bind_groups,
-        outline_uniform_buffer,
-        outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
         tile_id: (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual),

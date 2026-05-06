@@ -1,7 +1,7 @@
 use super::collection::collection_field_path;
 use super::gameplay::gameplay_field_path;
+use super::main_menu_exterior::main_menu_exterior_field_path;
 use super::shop::shop_field_path;
-use super::start_screen::start_screen_field_path;
 use super::tutorial::tutorial_field_path;
 use super::*;
 use crate::ui::{
@@ -9,8 +9,8 @@ use crate::ui::{
     scene_layout::{
         collection::{COLLECTION_HIERARCHY, CollectionField},
         gameplay::{GAMEPLAY_HIERARCHY, GameplayField, sanitize_gameplay_positions},
-        shop::{ShopField, sanitize_shop_positions},
-        start_screen::{START_SCREEN_HIERARCHY, StartScreenField},
+        main_menu_exterior::{MAIN_MENU_EXTERIOR_HIERARCHY, MainMenuExteriorField},
+        shop::{ShopField, SHOP_HIERARCHY, sanitize_shop_positions},
         tutorial::{TUTORIAL_HIERARCHY, TutorialField},
     },
 };
@@ -283,21 +283,21 @@ fn collection_hierarchy_leaves_all_resolve() {
 }
 
 #[test]
-fn start_screen_field_path_roundtrip() {
-    for &field in StartScreenField::ALL {
-        let path = start_screen_field_path(field);
+fn main_menu_exterior_field_path_roundtrip() {
+    for &field in MainMenuExteriorField::ALL {
+        let path = main_menu_exterior_field_path(field);
         assert_eq!(
-            super::start_screen::lookup_start_screen_field(path),
+            super::main_menu_exterior::lookup_main_menu_exterior_field(path),
             Some(field)
         );
     }
 }
 
 #[test]
-fn start_screen_hierarchy_leaves_all_resolve() {
+fn main_menu_exterior_hierarchy_leaves_all_resolve() {
     use crate::ui::placement::all_leaf_names;
-    let mut p = StartScreenPositions::default();
-    for leaf in all_leaf_names(START_SCREEN_HIERARCHY) {
+    let mut p = MainMenuExteriorPositions::default();
+    for leaf in all_leaf_names(MAIN_MENU_EXTERIOR_HIERARCHY) {
         assert!(p.placement_mut(leaf).is_some());
     }
 }

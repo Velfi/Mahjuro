@@ -46,7 +46,9 @@ pub enum GameEvent {
     },
     /// A scoring cascade just transitioned into its final-total beat.
     /// Fires once per cascade, on the frame the transition happens.
-    ScoreCascadeFinal,
+    ScoreCascadeFinal {
+        earned: u64,
+    },
     RoundComplete {
         reached_target: bool,
         payout: RoundPayout,

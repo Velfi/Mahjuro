@@ -12,6 +12,7 @@ mod core;
 pub mod crash_guard;
 mod debug_menu;
 mod debug_overlays;
+mod effect_layers;
 mod game;
 #[cfg(target_os = "macos")]
 mod macos_updater;
@@ -42,7 +43,6 @@ mod steam;
 mod ui;
 mod update_check;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -51,13 +51,12 @@ use debug_menu::DebugAction;
 #[cfg(debug_menu_enabled)]
 use debug_menu::DebugMenuBar;
 use debug_overlays::{
-    CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, SmokeDebugOverlay,
-    SmokeDebugResult, TuningOverlay, TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
+    CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
+    TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
 };
 use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
-use game::smoke_tuning::ShopSmokeTuning;
 use game::volumetric_tuning::VolumetricTuning;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame};
@@ -65,7 +64,8 @@ use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabe
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
-use scenes::shop::{SHOP_DRAG_DROP_ID, ShopScene};
+use scenes::rumble_lab::RumbleLabScene;
+use scenes::shop::SHOP_DRAG_DROP_ID;
 use scenes::splash::SplashScene;
 use scenes::transition_playground::TransitionPlaygroundScene;
 use scenes::tutorial_recap::TutorialRecapScene;
@@ -123,6 +123,8 @@ struct App {
     /// True on the frame a left mouse button press landed. Consumed by
     /// overlays that need raw click detection (e.g. the SFX test board).
     mouse_clicked: bool,
+    /// True while the left mouse button is held (for slider drag).
+    mouse_left_down: bool,
     scroll_delta: f32,
     active_buttons: Vec<ButtonDef>,
     scene: Scene,
@@ -151,9 +153,9 @@ struct App {
     modals: ModalQueue,
     pending_post_game_over_modals: Vec<Modal>,
     gfx: RenderSettings,
+    effect_layers: crate::effect_layers::EffectLayers,
     debug: DebugState,
     cascade_tuning: CascadeTuning,
-    shop_smoke_tuning: ShopSmokeTuning,
     volumetric_tuning: VolumetricTuning,
     deferred_round_end: Option<GameEvent>,
     /// `None` when the Steam build is hosting us — Steam handles its own
@@ -177,32 +179,12 @@ struct App {
     /// if the cursor moves far enough and is over the sell tray on mouse-up,
     /// a `SHOP_DRAG_DROP_ID` click is injected.
     shop_drag_start: Option<(crate::render::wgpu_renderer::ShopHit, (f32, f32))>,
-    /// When `Some`, the app boots into a single-scene capture mode: hidden
-    /// window, jump to the requested scene, render `warmup_frames`, write a
-    /// PNG, exit. Set by the `screenshot` CLI subcommand.
-    headless_screenshot: Option<HeadlessScreenshot>,
     /// Steamworks integration. Either `Connected` (initialized successfully
     /// and the user is signed into Steam) or `Disabled` (init failed,
     /// Steam isn't running, or `--no-steam` was passed). Every method on
     /// `SteamClient` is safe to call in either state — `Disabled` is a
     /// logged no-op — so no `Option` wrapping is needed at call sites.
     steam: steam::SteamClient,
-}
-
-/// Configuration for one-shot screenshot capture (see `Command::Screenshot`).
-#[derive(Debug, Clone)]
-struct HeadlessScreenshot {
-    output: PathBuf,
-    width: u32,
-    height: u32,
-    /// Counts down on each `RedrawRequested`. When it reaches 0, the next
-    /// frame is captured and the app exits.
-    frames_remaining: u32,
-    /// Number of capture-frame retries used so far. The renderer's
-    /// `draw()` early-returns when the swapchain is Outdated/Lost and
-    /// silently drops the queued screenshot; when that happens we tick
-    /// another frame and retry, bounded by ~30 attempts.
-    retries: u32,
 }
 
 impl App {
@@ -322,6 +304,7 @@ impl App {
             mouse_actions: Vec::new(),
             mouse_button_clicks: Vec::new(),
             mouse_clicked: false,
+            mouse_left_down: false,
             scroll_delta: 0.0,
             active_buttons: Vec::new(),
             scene: Scene::Splash(SplashScene::new()),
@@ -342,8 +325,6 @@ impl App {
             pending_post_game_over_modals: Vec::new(),
             deferred_round_end: None,
             gfx: RenderSettings {
-                smoke_quality: settings.smoke_quality,
-                smoke_amount: settings.smoke_amount,
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
@@ -355,11 +336,11 @@ impl App {
                 hdr_enabled: settings.hdr_enabled,
                 ui_scale: settings.ui_scale,
             },
+            // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
+            // flags to restore shadows, SSR, particles, transition FX, HDR, etc.
+            effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: DebugState::new(),
             cascade_tuning: CascadeTuning::default(),
-            shop_smoke_tuning: persistence::load_tuning_override::<ShopSmokeTuning>(
-                "ShopSmokeTuning",
-            ),
             volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
                 "VolumetricTuning",
             ),
@@ -371,7 +352,6 @@ impl App {
                 .flatten(),
             modifiers: ModifiersState::default(),
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
-            headless_screenshot: None,
             steam,
         }
     }

@@ -8,10 +8,11 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run_showcase_tiles_placement(
         &mut self,
+        frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         tile_basis: Mat4,
         tile_preset: crate::persistence::TilePreset,
-        dt: f32,
+        _dt: f32,
         light_view_proj_arr: [f32; 16],
         showcase_tile_batches: &[&[crate::render::draw_cmd::ShowcaseTilePlacement]],
         tile_3d_rects: &mut Vec<(usize, [f32; 4])>,
@@ -19,6 +20,17 @@ impl WgpuRenderer {
         tile_glows: &mut Vec<GpuInstance>,
         shadow_uniforms_changed: &mut bool,
     ) {
+        let hdr_tonemap = self.tile_hdr_tonemap(frame);
+        self.queue.write_buffer(
+            &self.tile_outline_frame_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&super::super::TileOutlineFrameUniform {
+                view_proj: camera.view_proj_arr,
+                hdr_tonemap,
+            }),
+        );
+        self.tile_outline_instances_staging.clear();
+        self.tile_outline_batch_ranges.clear();
         let cam_pos = camera.cam_pos;
         let view_proj = camera.view_proj;
         let view_proj_arr = camera.view_proj_arr;
@@ -62,7 +74,6 @@ impl WgpuRenderer {
                         layout: &self.tile_material_layout,
                         shadow_caster_layout: &self.shadow_caster_layout,
                         primitives: &self.tile_primitives,
-                        sampler: &self.tile_sampler,
                         decal_atlas,
                     };
                     let stg = make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, tile);
@@ -125,6 +136,7 @@ impl WgpuRenderer {
 
             let mut slot_cursor = 0usize;
             for batch in showcase_tile_batches.iter() {
+                let outline_batch_start = self.tile_outline_instances_staging.len() as u32;
                 for p in batch.iter() {
                     if slot_cursor >= MAX_SHOWCASE_TILE_SLOTS {
                         break;
@@ -146,7 +158,6 @@ impl WgpuRenderer {
                             layout: &self.tile_material_layout,
                             shadow_caster_layout: &self.shadow_caster_layout,
                             primitives: &self.tile_primitives,
-                            sampler: &self.tile_sampler,
                             decal_atlas,
                         };
                         self.showcase_tiles[slot_cursor] =
@@ -154,8 +165,25 @@ impl WgpuRenderer {
                     }
 
                     // Build model matrix from the placement's explicit 3D transform.
-                    let mut center =
-                        pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]);
+                    // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
+                    // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
+                    // not flat `pixel_to_world`, or celebration tiles miss the frustum.
+                    let mut center = match (
+                        self.active_scene_key.as_deref(),
+                        frame.camera_override.as_ref(),
+                    ) {
+                        (Some("shop"), Some(cam)) => {
+                            crate::render::world_space::world_on_camera_ray_plane_z(
+                                w,
+                                h,
+                                cam,
+                                p.center_pos[0],
+                                p.center_pos[1],
+                                p.center_pos[2],
+                            )
+                        }
+                        _ => pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]),
+                    };
                     let tile_short_px = p.size_px * 0.85;
                     let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
                     let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();
@@ -186,27 +214,8 @@ impl WgpuRenderer {
                     let oriented = base_rotation * tile_basis;
                     let model = translate_rot_scale(center, oriented, scale);
 
-                    // Smoke impulse: compare world position to previous frame's
-                    // position for this tile uid and inject velocity into fluid sim.
                     if let Some(pick_id) = p.pick_id {
                         let uid = p.tile.id;
-                        if let Some(prev) = self.prev_tile_world.get(&uid).copied() {
-                            let delta = center - prev;
-                            let speed = delta.length();
-                            if speed > 0.5
-                                && let Some(ref mut fluid) = self.fluid
-                            {
-                                let inv_dt = 1.0 / dt.max(1.0 / 120.0);
-                                fluid.inject_impulse(
-                                    center,
-                                    delta * inv_dt * 0.45,
-                                    tile_short_px * 0.55,
-                                    speed * 0.04,
-                                    0.0,
-                                    0.0,
-                                );
-                            }
-                        }
                         self.prev_tile_world.insert(uid, center);
 
                         // Project the tile's 8 corners for the screen AABB,
@@ -284,25 +293,18 @@ impl WgpuRenderer {
                             cam_pos: cam_pos.to_array(),
                             tile_seed,
                             decal_atlas_uv: stg.decal_atlas_uv,
+                            hdr_tonemap,
                         }),
                     );
-                    // Outline shell: write inflated model matrix when requested.
                     if p.outline {
                         const OUTLINE_GROW: f32 = 1.055;
                         let outline_scale = scale * OUTLINE_GROW;
                         let outline_model = translate_rot_scale(center, oriented, outline_scale);
-                        self.queue.write_buffer(
-                            &stg.outline_uniform_buffer,
-                            0,
-                            bytemuck::bytes_of(&CameraUniform {
-                                view_proj: view_proj_arr,
+                        self.tile_outline_instances_staging
+                            .push(super::super::TileOutlineInstance {
                                 model: outline_model.to_cols_array(),
                                 base_color_factor: sc_bcf,
-                                cam_pos: cam_pos.to_array(),
-                                tile_seed,
-                                decal_atlas_uv: stg.decal_atlas_uv,
-                            }),
-                        );
+                            });
                     }
                     let su = ShadowCasterUniform {
                         light_view_proj: light_view_proj_arr,
@@ -323,6 +325,17 @@ impl WgpuRenderer {
 
                     slot_cursor += 1;
                 }
+                let outline_n = self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
+                self.tile_outline_batch_ranges
+                    .push((outline_batch_start, outline_n));
+            }
+
+            if !self.tile_outline_instances_staging.is_empty() {
+                self.queue.write_buffer(
+                    &self.tile_outline_instance_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.tile_outline_instances_staging),
+                );
             }
 
             // Register the hand strip as a single debug-pickable so arrange
@@ -382,6 +395,7 @@ impl WgpuRenderer {
                     ));
                 }
             }
+
         }
 
         // Snapshot projected tile rects and pick models now that both the hand
@@ -426,18 +440,8 @@ impl WgpuRenderer {
                 .push(project_aabb_rect(*model, TALISMAN_LOCAL_HALF, 0.0));
         }
 
-        // Sync singleton shop-prop models (journal book, reroll prop, leave
-        // prop, sell tray) into `aux_dish_rects` so focus nav can reach
-        // them. Dishes authored via `DishExplicit` were already pushed
-        // during their pass; these props come through Object3d kinds that
-        // only update model snapshots, so we project them here. Packs live
-        // in `pack_rects` (both the PackBatch and Object3d paths populate
-        // it) and get appended last.
-        if let Some((model, pid)) = self.last_sell_tray_model {
-            self.proj
-                .aux_dish_rects
-                .push((Some(pid), project_unit_cube_rect(model)));
-        }
+        // Append pack rects to `aux_dish_rects` for focus nav (pack placements
+        // also flow through Object3d paths into `pack_rects`).
         for (rect, pick_id) in &self.proj.pack_rects {
             self.proj.aux_dish_rects.push((*pick_id, *rect));
         }

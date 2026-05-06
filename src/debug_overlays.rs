@@ -4,11 +4,12 @@
 
 use crate::audio;
 use crate::game::cascade::CascadeTuning;
-use crate::game::smoke_tuning::ShopSmokeTuning;
 use crate::game::volumetric_tuning::VolumetricTuning;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
+use winit::event::{ElementState, KeyEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 // ── Debug visibility overlay ────────────────────────────────────────────
 
@@ -715,7 +716,7 @@ impl SfxTestOverlay {
             ],
             color: [0.55, 0.45, 0.20, 0.85],
         });
-        // Panel background (Midnight Gold cool indigo).
+        // Panel background (theme WALNUT_DEEP — dark walnut).
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
             color: [0.06, 0.07, 0.14, 0.97],
@@ -1014,133 +1015,421 @@ impl CameraDebugOverlay {
     }
 }
 
-// ── Shop smoke tuning overlay ───────────────────────────────────────────
-//
-// Live-editable sliders for the shop scene's back-wall smoke curtain.
-// The overlay holds a mutable `ShopSmokeTuning`; the App copies the
-// current values into `self.shop_smoke_tuning` each frame the overlay
-// is open, so edits take effect immediately in the shop scene.
+// ── Shop environment + lighting debug (height scale + `shop_glb` tunables) ─
 
-pub const SMOKE_ROW_COUNT: usize = 11; // 9 sliders + Save-as-Default + Reset
-const SMOKE_SLIDER_ROWS: usize = SMOKE_ROW_COUNT - 2;
-const SMOKE_SAVE_ROW: usize = SMOKE_ROW_COUNT - 2;
-const SMOKE_RESET_ROW: usize = SMOKE_ROW_COUNT - 1;
-
-const SMOKE_SLIDER_META: [(&str, f32, f32, f32); SMOKE_SLIDER_ROWS] = [
-    ("Emitter Count", 1.0, 24.0, 1.0),
-    ("Density Base", 0.0, 1.0, 0.02),
-    ("Density Roll Amp", 0.0, 0.5, 0.01),
-    ("Density Billow Amp", 0.0, 0.5, 0.01),
-    ("Radius Base", 0.02, 0.40, 0.01),
-    ("Radius Billow Amp", 0.0, 0.20, 0.005),
-    ("Forward Velocity", 0.0, 40.0, 1.0),
-    ("Breathe Amp", 0.0, 40.0, 1.0),
-    ("Lift Fraction", 0.0, 1.0, 0.02),
+const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 8] = [
+    ("Height scale", 0.001, 40.0, 0.005),
+    ("glTF light intensity", 0.0, 40.0, 0.0025),
+    ("Linear exposure", 0.001, 40.0, 0.0025),
+    ("Ambient scale", 0.0, 10.0, 0.0025),
+    ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
+    ("Candle tint R", 0.0, 15.0, 0.0025),
+    ("Candle tint G", 0.0, 15.0, 0.0025),
+    ("Candle tint B", 0.0, 15.0, 0.0025),
 ];
 
-pub struct SmokeDebugOverlay {
+#[derive(Clone, Copy)]
+struct ShopEnvDebugLayout {
+    panel_x: f32,
+    panel_y: f32,
+    panel_w: f32,
+    rows_y0: f32,
+    row_h: f32,
+    row_gap: f32,
+    label_w: f32,
+    slider_w: f32,
+    value_w: f32,
+    scale: f32,
+    row_count: usize,
+}
+
+impl ShopEnvDebugLayout {
+    fn compute(window_w: f32, window_h: f32, ui_scale: f32, row_count: usize) -> Self {
+        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let row_h = (22.0 * scale).max(16.0);
+        let row_gap = (3.0 * scale).max(2.0);
+        let title_h = (24.0 * scale).max(16.0);
+        let pad = (8.0 * scale).max(5.0);
+        let margin = (10.0 * scale).max(6.0);
+        let panel_w = (320.0 * scale).min(window_w * 0.44);
+        let panel_x = window_w - panel_w - margin;
+        let panel_y = margin;
+        let rows_y0 = panel_y + pad + title_h + pad;
+        let label_w = panel_w * 0.38;
+        let slider_w = panel_w * 0.34;
+        let value_w = (panel_w - label_w - slider_w - 12.0 * scale).max(36.0);
+        Self {
+            panel_x,
+            panel_y,
+            panel_w,
+            rows_y0,
+            row_h,
+            row_gap,
+            label_w,
+            slider_w,
+            value_w,
+            scale,
+            row_count,
+        }
+    }
+
+    fn slider_track(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        let track_x = self.panel_x + self.label_w;
+        let track_h = (5.0 * self.scale).max(3.0);
+        let track_y = row_y + (self.row_h - track_h) * 0.5;
+        (track_x, track_y, self.slider_w, track_h)
+    }
+
+    fn value_cell(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        let x = self.panel_x + self.label_w + self.slider_w + 4.0 * self.scale;
+        (x, row_y, self.value_w, self.row_h)
+    }
+}
+
+#[inline]
+fn shop_env_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
+    mx >= r.0 && mx <= r.0 + r.2 && my >= r.1 && my <= r.1 + r.3
+}
+
+pub struct ShopEnvDebugOverlay {
     cursor: usize,
-    pub tuning: ShopSmokeTuning,
+    pub height_scale: f32,
+    pub lighting: crate::render::shop_glb::ShopEnvLightingTune,
+    /// Typing buffer for the value column (numeric).
+    editing: bool,
+    edit_buffer: String,
+    /// `Some(row)` while LMB drags that slider track.
+    dragging_slider: Option<usize>,
 }
 
-pub enum SmokeDebugResult {
-    Stay,
-    Close,
-    Reset,
-    /// Promote the current tuning to the persistent user-default.
-    SaveAsDefault,
-}
-
-impl SmokeDebugOverlay {
-    pub fn new(tuning: &ShopSmokeTuning) -> Self {
+impl ShopEnvDebugOverlay {
+    pub fn new(
+        height_scale: f32,
+        lighting: crate::render::shop_glb::ShopEnvLightingTune,
+    ) -> Self {
         Self {
             cursor: 0,
-            tuning: tuning.clone(),
+            height_scale,
+            lighting,
+            editing: false,
+            edit_buffer: String::new(),
+            dragging_slider: None,
         }
     }
 
-    pub fn update(&mut self, actions: &[UiAction]) -> SmokeDebugResult {
-        for a in actions {
-            match a {
-                UiAction::FocusDown => {
-                    self.cursor = (self.cursor + 1) % SMOKE_ROW_COUNT;
-                }
-                UiAction::FocusUp => {
-                    self.cursor = (self.cursor + SMOKE_ROW_COUNT - 1) % SMOKE_ROW_COUNT;
-                }
-                UiAction::FocusNext | UiAction::NavigateHudNext => {
-                    self.adjust(1.0);
-                }
-                UiAction::FocusPrev | UiAction::NavigateHudPrev => {
-                    self.adjust(-1.0);
-                }
-                UiAction::Confirm => {
-                    if self.cursor == SMOKE_SAVE_ROW {
-                        return SmokeDebugResult::SaveAsDefault;
-                    } else if self.cursor == SMOKE_RESET_ROW {
-                        return SmokeDebugResult::Reset;
-                    }
-                }
-                UiAction::Cancel | UiAction::Pause => {
-                    return SmokeDebugResult::Close;
-                }
-                _ => {}
-            }
-        }
-        SmokeDebugResult::Stay
+    fn row_count(&self) -> usize {
+        SHOP_ENV_DEBUG_ROW_META.len()
     }
 
-    fn adjust(&mut self, dir: f32) {
-        if self.cursor >= SMOKE_SLIDER_ROWS {
-            return;
-        }
-        let (_, min, max, step) = SMOKE_SLIDER_META[self.cursor];
-        let delta = dir * step;
-        let t = &mut self.tuning;
-        match self.cursor {
-            0 => {
-                let v = (t.emitter_count as f32 + delta).clamp(min, max);
-                t.emitter_count = v.round() as u32;
-            }
-            1 => t.density_base = (t.density_base + delta).clamp(min, max),
-            2 => t.density_roll_amp = (t.density_roll_amp + delta).clamp(min, max),
-            3 => t.density_billow_amp = (t.density_billow_amp + delta).clamp(min, max),
-            4 => t.radius_base = (t.radius_base + delta).clamp(min, max),
-            5 => t.radius_billow_amp = (t.radius_billow_amp + delta).clamp(min, max),
-            6 => t.forward_velocity_base = (t.forward_velocity_base + delta).clamp(min, max),
-            7 => {
-                t.forward_velocity_breathe_amp =
-                    (t.forward_velocity_breathe_amp + delta).clamp(min, max);
-            }
-            8 => t.lift_fraction = (t.lift_fraction + delta).clamp(min, max),
-            _ => {}
-        }
-    }
-
-    fn slider_value(&self, i: usize) -> f32 {
-        let t = &self.tuning;
-        match i {
-            0 => t.emitter_count as f32,
-            1 => t.density_base,
-            2 => t.density_roll_amp,
-            3 => t.density_billow_amp,
-            4 => t.radius_base,
-            5 => t.radius_billow_amp,
-            6 => t.forward_velocity_base,
-            7 => t.forward_velocity_breathe_amp,
-            8 => t.lift_fraction,
+    fn row_value(&self, row: usize) -> f32 {
+        match row {
+            0 => self.height_scale,
+            1 => self.lighting.gltf_light_intensity_scale,
+            2 => self.lighting.linear_exposure,
+            3 => self.lighting.ambient_scale,
+            4 => self.lighting.lit_mesh_gltf_punctual_scale,
+            5 => self.lighting.candle_light_color_mul[0],
+            6 => self.lighting.candle_light_color_mul[1],
+            7 => self.lighting.candle_light_color_mul[2],
             _ => 0.0,
         }
     }
 
-    fn format_value(&self, i: usize) -> String {
-        let v = self.slider_value(i);
-        if i == 0 {
-            format!("{}", v as u32)
-        } else if i == 6 || i == 7 {
-            format!("{:.1}", v)
+    fn set_row_value(&mut self, row: usize, v: f32) {
+        let (_, lo, hi, _) = SHOP_ENV_DEBUG_ROW_META[row];
+        let v = v.clamp(lo, hi);
+        match row {
+            0 => self.height_scale = v,
+            1 => self.lighting.gltf_light_intensity_scale = v,
+            2 => self.lighting.linear_exposure = v,
+            3 => self.lighting.ambient_scale = v,
+            4 => self.lighting.lit_mesh_gltf_punctual_scale = v,
+            5 => self.lighting.candle_light_color_mul[0] = v,
+            6 => self.lighting.candle_light_color_mul[1] = v,
+            7 => self.lighting.candle_light_color_mul[2] = v,
+            _ => {}
+        }
+    }
+
+    fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &ShopEnvDebugLayout) {
+        let (tx, _, tw, _) = layout.slider_track(row);
+        let (_, min, max, _) = SHOP_ENV_DEBUG_ROW_META[row];
+        let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
+        self.set_row_value(row, min + t * (max - min));
+    }
+
+    fn adjust_row(&mut self, dir: f32) {
+        if self.editing {
+            return;
+        }
+        let row = self.cursor.min(self.row_count().saturating_sub(1));
+        let (_, _, _, step) = SHOP_ENV_DEBUG_ROW_META[row];
+        let v = self.row_value(row) + dir * step;
+        self.set_row_value(row, v);
+    }
+
+    fn clear_edit(&mut self) {
+        self.editing = false;
+        self.edit_buffer.clear();
+    }
+
+    fn begin_editing(&mut self) {
+        let v = self.row_value(self.cursor);
+        let mut s = format!("{:.6}", v);
+        while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+            s.pop();
+        }
+        self.edit_buffer = s;
+        self.editing = true;
+    }
+
+    fn commit_edit(&mut self) {
+        let row = self.cursor.min(self.row_count().saturating_sub(1));
+        let t = self.edit_buffer.trim();
+        if let Ok(v) = t.parse::<f32>() {
+            self.set_row_value(row, v);
+        }
+        self.clear_edit();
+    }
+
+    fn push_edit_char(&mut self, c: char) {
+        if self.edit_buffer.len() >= 32 {
+            return;
+        }
+        if c == '-' && !self.edit_buffer.is_empty() {
+            return;
+        }
+        if c == '.' && self.edit_buffer.contains('.') {
+            return;
+        }
+        self.edit_buffer.push(c);
+    }
+
+    /// Copy `shop_glb` constant block to the clipboard.
+    pub fn copy_to_clipboard(&self) {
+        let l = self.lighting;
+        let text = format!(
+            concat!(
+                "pub const SHOP_ENV_HEIGHT_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = {:.6};\n",
+                "pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = {:.6};\n",
+                "pub const SHOP_ENV_AMBIENT_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = ",
+                "[{:.6}, {:.6}, {:.6}];",
+            ),
+            self.height_scale,
+            crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
+            l.gltf_light_intensity_scale,
+            l.linear_exposure,
+            l.ambient_scale,
+            l.lit_mesh_gltf_punctual_scale,
+            l.candle_light_color_mul[0],
+            l.candle_light_color_mul[1],
+            l.candle_light_color_mul[2],
+        );
+        match arboard::Clipboard::new() {
+            Ok(mut cb) => {
+                if let Err(e) = cb.set_text(&text) {
+                    log::error!("[Debug] Clipboard write failed: {e}");
+                } else {
+                    log::info!("[Debug] Shop env + lighting constants copied to clipboard");
+                }
+            }
+            Err(e) => log::error!("[Debug] Could not open clipboard: {e}"),
+        }
+    }
+
+    /// Keyboard while overlay is open. Returns `true` if the key was consumed
+    /// (caller should skip the normal gameplay key dispatch).
+    pub fn feed_key_event(&mut self, event: &KeyEvent, ctrl: bool) -> bool {
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return false;
+        };
+
+        if ctrl && matches!(code, KeyCode::KeyC) && !self.editing {
+            self.copy_to_clipboard();
+            return true;
+        }
+
+        if !self.editing {
+            return false;
+        }
+
+        match code {
+            KeyCode::Backspace => {
+                let _ = self.edit_buffer.pop();
+                true
+            }
+            KeyCode::Escape => {
+                self.clear_edit();
+                true
+            }
+            KeyCode::Enter | KeyCode::NumpadEnter => {
+                self.commit_edit();
+                true
+            }
+            KeyCode::Digit0 | KeyCode::Numpad0 => {
+                self.push_edit_char('0');
+                true
+            }
+            KeyCode::Digit1 | KeyCode::Numpad1 => {
+                self.push_edit_char('1');
+                true
+            }
+            KeyCode::Digit2 | KeyCode::Numpad2 => {
+                self.push_edit_char('2');
+                true
+            }
+            KeyCode::Digit3 | KeyCode::Numpad3 => {
+                self.push_edit_char('3');
+                true
+            }
+            KeyCode::Digit4 | KeyCode::Numpad4 => {
+                self.push_edit_char('4');
+                true
+            }
+            KeyCode::Digit5 | KeyCode::Numpad5 => {
+                self.push_edit_char('5');
+                true
+            }
+            KeyCode::Digit6 | KeyCode::Numpad6 => {
+                self.push_edit_char('6');
+                true
+            }
+            KeyCode::Digit7 | KeyCode::Numpad7 => {
+                self.push_edit_char('7');
+                true
+            }
+            KeyCode::Digit8 | KeyCode::Numpad8 => {
+                self.push_edit_char('8');
+                true
+            }
+            KeyCode::Digit9 | KeyCode::Numpad9 => {
+                self.push_edit_char('9');
+                true
+            }
+            KeyCode::Period | KeyCode::NumpadDecimal => {
+                self.push_edit_char('.');
+                true
+            }
+            KeyCode::Minus | KeyCode::NumpadSubtract => {
+                self.push_edit_char('-');
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `mouse`: `(x, y, clicked_this_frame, left_button_held)`.
+    ///
+    /// Returns `true` if the overlay should close.
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        mouse: Option<(f32, f32, bool, bool)>,
+        window_w: f32,
+        window_h: f32,
+        ui_scale: f32,
+    ) -> bool {
+        let layout = ShopEnvDebugLayout::compute(window_w, window_h, ui_scale, self.row_count());
+        let n = self.row_count();
+
+        if let Some((mx, my, clicked, held)) = mouse {
+            if let Some(di) = self.dragging_slider {
+                if held {
+                    self.apply_slider_mx(di, mx, &layout);
+                }
+            }
+
+            if (clicked || held) && self.dragging_slider.is_none() {
+                for i in 0..n {
+                    let track = layout.slider_track(i);
+                    if shop_env_point_in_rect(mx, my, track) {
+                        self.cursor = i;
+                        self.clear_edit();
+                        self.apply_slider_mx(i, mx, &layout);
+                        if held {
+                            self.dragging_slider = Some(i);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if clicked && self.dragging_slider.is_none() {
+                for i in 0..n {
+                    let cell = layout.value_cell(i);
+                    if shop_env_point_in_rect(mx, my, cell) {
+                        self.cursor = i;
+                        self.begin_editing();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some((_, _, _, held)) = mouse {
+            if !held {
+                self.dragging_slider = None;
+            }
         } else {
-            format!("{:.3}", v)
+            self.dragging_slider = None;
+        }
+
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % self.row_count();
+                    self.clear_edit();
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + self.row_count() - 1) % self.row_count();
+                    self.clear_edit();
+                }
+                UiAction::FocusNext
+                | UiAction::FocusPrev
+                | UiAction::NavigateHudNext
+                | UiAction::NavigateHudPrev => {
+                    if self.editing {
+                        continue;
+                    }
+                    let dir = match a {
+                        UiAction::FocusPrev | UiAction::NavigateHudPrev => -1.0,
+                        _ => 1.0,
+                    };
+                    self.adjust_row(dir);
+                }
+                UiAction::Confirm | UiAction::CommitDiscard => {
+                    if self.editing {
+                        self.commit_edit();
+                    } else {
+                        self.begin_editing();
+                    }
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    if self.editing {
+                        self.clear_edit();
+                    } else {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn format_row_display(row: usize, v: f32) -> String {
+        match row {
+            5..=7 => format!("{:.3}", v),
+            _ => format!("{:.4}", v),
         }
     }
 
@@ -1150,171 +1439,148 @@ impl SmokeDebugOverlay {
         window_h: f32,
         ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let layout = ShopEnvDebugLayout::compute(window_w, window_h, ui_scale, self.row_count());
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
-        // Compact side panel — no full-screen dim so the scene stays visible
-        // while tuning. Anchored to the right edge with a small margin.
-        let margin = (10.0 * scale).max(6.0);
-        let panel_w = (300.0 * scale).min(window_w * 0.40);
-        let row_h = (22.0 * scale).max(16.0);
-        let row_gap = (3.0 * scale).max(2.0);
-        let title_h = (24.0 * scale).max(16.0);
-        let hint_h = (14.0 * scale).max(10.0);
-        let panel_h =
-            title_h + row_gap + SMOKE_ROW_COUNT as f32 * (row_h + row_gap) + hint_h + row_gap * 2.0;
-        let panel_x = window_w - panel_w - margin;
-        let panel_y = margin;
+        let pad = (8.0 * layout.scale).max(5.0);
+        let title_h = (24.0 * layout.scale).max(16.0);
+        let hint_h = (13.0 * layout.scale).max(9.0);
+        let panel_h = pad
+            + title_h
+            + pad
+            + layout.row_count as f32 * (layout.row_h + layout.row_gap)
+            + pad
+            + hint_h * 2.0
+            + pad * 2.0;
 
         let border = 2.0;
         instances.push(GpuInstance {
             rect: [
-                panel_x - border,
-                panel_y - border,
-                panel_w + border * 2.0,
+                layout.panel_x - border,
+                layout.panel_y - border,
+                layout.panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.3, 0.45, 0.7, 0.85],
+            color: [0.35, 0.52, 0.28, 0.85],
         });
         instances.push(GpuInstance {
-            rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.08, 0.08, 0.14, 0.92],
+            rect: [layout.panel_x, layout.panel_y, layout.panel_w, panel_h],
+            color: [0.06, 0.07, 0.14, 0.97],
         });
 
         labels.push(TextLabel {
-            rect: [panel_x, panel_y + row_gap, panel_w, title_h],
-            text: "Shop Smoke".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            rect: [layout.panel_x, layout.panel_y + pad, layout.panel_w, title_h],
+            text: "Shop Env & Lighting".into(),
+            color: [0.65, 1.0, 0.55, 1.0],
             ..Default::default()
         });
 
-        let cursor_y = panel_y + row_gap + title_h + row_gap;
-        let label_w = panel_w * 0.44;
-        let slider_w = panel_w * 0.32;
-        let value_w = panel_w * 0.20;
-
-        for (i, &(name, min, max, _step)) in
-            SMOKE_SLIDER_META.iter().enumerate().take(SMOKE_SLIDER_ROWS)
-        {
-            let row_y = cursor_y + i as f32 * (row_h + row_gap);
+        for i in 0..layout.row_count {
+            let (name, min, max, _) = SHOP_ENV_DEBUG_ROW_META[i];
+            let row_y = layout.rows_y0 + i as f32 * (layout.row_h + layout.row_gap);
             let is_focused = self.cursor == i;
+            let v = self.row_value(i);
 
             let bg = if is_focused {
-                [0.20, 0.32, 0.50, 0.90]
+                [0.22, 0.38, 0.28, 0.95]
             } else {
-                [0.12, 0.15, 0.24, 0.75]
+                [0.10, 0.12, 0.20, 0.80]
             };
             instances.push(GpuInstance {
-                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
+                rect: [
+                    layout.panel_x + 4.0,
+                    row_y,
+                    layout.panel_w - 8.0,
+                    layout.row_h,
+                ],
                 color: bg,
             });
 
             let tc = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                [0.85, 1.0, 0.75, 1.0]
             } else {
-                [0.7, 0.72, 0.82, 0.9]
+                [0.65, 0.65, 0.78, 0.95]
             };
             labels.push(TextLabel {
-                rect: [panel_x + 6.0 * scale, row_y, label_w, row_h],
+                rect: [
+                    layout.panel_x + 6.0 * layout.scale,
+                    row_y,
+                    layout.label_w - 4.0 * layout.scale,
+                    layout.row_h,
+                ],
                 text: name.into(),
                 color: tc,
                 ..Default::default()
             });
 
-            let track_x = panel_x + label_w;
-            let track_h = (5.0 * scale).max(3.0);
-            let track_y = row_y + (row_h - track_h) * 0.5;
+            let (track_x, track_y, tw, th) = layout.slider_track(i);
             instances.push(GpuInstance {
-                rect: [track_x, track_y, slider_w, track_h],
+                rect: [track_x, track_y, tw, th],
                 color: [0.08, 0.08, 0.14, 1.0],
             });
-
-            let v = self.slider_value(i);
-            let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
-            let fill_w = slider_w * t;
+            let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
+            let fill_w = tw * t;
             let fill_color = if is_focused {
-                [0.35, 0.65, 0.90, 1.0]
+                [0.35, 0.85, 0.45, 1.0]
             } else {
-                [0.22, 0.42, 0.62, 0.85]
+                [0.22, 0.55, 0.32, 0.9]
             };
             instances.push(GpuInstance {
-                rect: [track_x, track_y, fill_w, track_h],
+                rect: [track_x, track_y, fill_w, th],
                 color: fill_color,
             });
-
-            let knob_size = track_h * 2.5;
+            let knob_size = th * 2.5;
             let knob_x = track_x + fill_w - knob_size * 0.5;
-            let knob_y = track_y + (track_h - knob_size) * 0.5;
+            let knob_y = track_y + (th - knob_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: if is_focused {
-                    [0.9, 0.9, 1.0, 1.0]
+                    [0.9, 1.0, 0.85, 1.0]
                 } else {
-                    [0.6, 0.6, 0.7, 0.9]
+                    [0.65, 0.75, 0.68, 0.95]
                 },
             });
 
-            let value_x = panel_x + label_w + slider_w + 4.0;
+            let (vx, vy, vw, vh) = layout.value_cell(i);
+            let value_text = if self.editing && i == self.cursor {
+                format!(
+                    "{}{}",
+                    self.edit_buffer,
+                    if is_focused { "\u{258c}" } else { "" }
+                )
+            } else {
+                Self::format_row_display(i, v)
+            };
+            instances.push(GpuInstance {
+                rect: [vx, vy + vh * 0.15, vw, vh * 0.7],
+                color: if self.editing && i == self.cursor {
+                    [0.05, 0.06, 0.10, 0.95]
+                } else {
+                    [0.08, 0.09, 0.13, 0.75]
+                },
+            });
             labels.push(TextLabel {
-                rect: [value_x, row_y, value_w, row_h],
-                text: self.format_value(i),
-                color: tc,
+                rect: [vx + 2.0 * layout.scale, vy, vw - 4.0 * layout.scale, vh],
+                text: value_text,
+                color: [tc[0] * 0.92, tc[1] * 0.92, tc[2] * 0.92, 1.0],
+                font_px: Some((layout.row_h * 0.48).max(10.0)),
                 ..Default::default()
             });
         }
 
-        let save_y = cursor_y + SMOKE_SLIDER_ROWS as f32 * (row_h + row_gap);
-        let save_focused = self.cursor == SMOKE_SAVE_ROW;
-        let save_bg = if save_focused {
-            [0.30, 0.50, 0.35, 0.95]
-        } else {
-            [0.15, 0.22, 0.18, 0.85]
-        };
-        instances.push(GpuInstance {
-            rect: [panel_x + 4.0, save_y, panel_w - 8.0, row_h],
-            color: save_bg,
-        });
+        let hint_y = layout.rows_y0 + layout.row_count as f32 * (layout.row_h + layout.row_gap) + pad;
         labels.push(TextLabel {
-            rect: [panel_x, save_y, panel_w, row_h],
-            text: "Save as Default".into(),
-            color: if save_focused {
-                [1.0, 1.0, 1.0, 1.0]
-            } else {
-                [0.75, 0.85, 0.78, 0.9]
-            },
+            rect: [layout.panel_x, hint_y, layout.panel_w, hint_h],
+            text: "Mouse: drag slider / click value to type".into(),
+            color: [0.55, 0.55, 0.65, 0.75],
             ..Default::default()
         });
-
-        let reset_y = save_y + row_h + row_gap;
-        let is_focused = self.cursor == SMOKE_RESET_ROW;
-        let bg = if is_focused {
-            [0.50, 0.30, 0.30, 0.95]
-        } else {
-            [0.22, 0.15, 0.18, 0.85]
-        };
-        instances.push(GpuInstance {
-            rect: [panel_x + 4.0, reset_y, panel_w - 8.0, row_h],
-            color: bg,
-        });
         labels.push(TextLabel {
-            rect: [panel_x, reset_y, panel_w, row_h],
-            text: "Reset to Defaults".into(),
-            color: if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
-            } else {
-                [0.7, 0.72, 0.82, 0.9]
-            },
-            ..Default::default()
-        });
-
-        let hint_y = reset_y + row_h + row_gap;
-        labels.push(TextLabel {
-            rect: [panel_x, hint_y, panel_w, hint_h],
-            text:
-                "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
-                    .into(),
-            color: [0.55, 0.6, 0.75, 0.9],
+            rect: [layout.panel_x, hint_y + hint_h, layout.panel_w, hint_h],
+            text: "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge  Enter edit/apply  Esc  Ctrl+C copy"
+                .into(),
+            color: [0.55, 0.55, 0.65, 0.75],
             ..Default::default()
         });
 
@@ -1322,14 +1588,13 @@ impl SmokeDebugOverlay {
     }
 }
 
+
 // ── Volumetric tuning overlay ───────────────────────────────────────────
 //
-// Global volumetric knobs (ambient dust floor; future god-ray/fog sliders).
-// Independent of any scene — edits flow through
-// `WgpuRenderer::set_dust_strength` into the fluid sim's inject pass, so
-// the effect shows up wherever the volumetric pipeline is running.
+// Mountain-haze / fog-wall knobs. Edits apply via `WgpuRenderer::set_haze_tuning`
+// on the next frame.
 
-pub const VOL_ROW_COUNT: usize = 9; // 7 sliders + Save-as-Default + Reset
+pub const VOL_ROW_COUNT: usize = 8; // 6 sliders + Save-as-Default + Reset
 const VOL_SLIDER_ROWS: usize = VOL_ROW_COUNT - 2;
 const VOL_SAVE_ROW: usize = VOL_ROW_COUNT - 2;
 const VOL_RESET_ROW: usize = VOL_ROW_COUNT - 1;
@@ -1338,7 +1603,6 @@ const VOL_RESET_ROW: usize = VOL_ROW_COUNT - 1;
 // `adjust` and `slider_value` below — add sliders there too when this
 // table grows.
 const VOL_SLIDER_META: [(&str, f32, f32, f32); VOL_SLIDER_ROWS] = [
-    ("Dust Strength", 0.0, 0.05, 0.001),
     ("Haze Density", 0.0, 3.0, 0.05),
     ("Haze Color R", 0.0, 0.5, 0.005),
     ("Haze Color G", 0.0, 0.5, 0.005),
@@ -1406,26 +1670,24 @@ impl VolumetricDebugOverlay {
         let delta = dir * step;
         let t = &mut self.tuning;
         match self.cursor {
-            0 => t.dust_strength = (t.dust_strength + delta).clamp(min, max),
-            1 => t.haze_density = (t.haze_density + delta).clamp(min, max),
-            2 => t.haze_color_r = (t.haze_color_r + delta).clamp(min, max),
-            3 => t.haze_color_g = (t.haze_color_g + delta).clamp(min, max),
-            4 => t.haze_color_b = (t.haze_color_b + delta).clamp(min, max),
-            5 => t.haze_horizon_y = (t.haze_horizon_y + delta).clamp(min, max),
-            6 => t.haze_drift_speed = (t.haze_drift_speed + delta).clamp(min, max),
+            0 => t.haze_density = (t.haze_density + delta).clamp(min, max),
+            1 => t.haze_color_r = (t.haze_color_r + delta).clamp(min, max),
+            2 => t.haze_color_g = (t.haze_color_g + delta).clamp(min, max),
+            3 => t.haze_color_b = (t.haze_color_b + delta).clamp(min, max),
+            4 => t.haze_horizon_y = (t.haze_horizon_y + delta).clamp(min, max),
+            5 => t.haze_drift_speed = (t.haze_drift_speed + delta).clamp(min, max),
             _ => {}
         }
     }
 
     fn slider_value(&self, i: usize) -> f32 {
         match i {
-            0 => self.tuning.dust_strength,
-            1 => self.tuning.haze_density,
-            2 => self.tuning.haze_color_r,
-            3 => self.tuning.haze_color_g,
-            4 => self.tuning.haze_color_b,
-            5 => self.tuning.haze_horizon_y,
-            6 => self.tuning.haze_drift_speed,
+            0 => self.tuning.haze_density,
+            1 => self.tuning.haze_color_r,
+            2 => self.tuning.haze_color_g,
+            3 => self.tuning.haze_color_b,
+            4 => self.tuning.haze_horizon_y,
+            5 => self.tuning.haze_drift_speed,
             _ => 0.0,
         }
     }
@@ -1434,8 +1696,7 @@ impl VolumetricDebugOverlay {
         // Match precision to the slider's step so tiny increments visibly
         // change the displayed value.
         match i {
-            0 => format!("{:.3}", self.slider_value(i)),
-            2..=4 => format!("{:.3}", self.slider_value(i)),
+            1..=3 => format!("{:.3}", self.slider_value(i)),
             _ => format!("{:.2}", self.slider_value(i)),
         }
     }

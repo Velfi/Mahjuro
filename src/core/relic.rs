@@ -16,7 +16,7 @@ use crate::core::tile::Suit;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelicId {
-    // ── 15 retuned keepers from Patch A ────────────────────────────────
+    // ── Core scoring & dragons ─────────────────────────────────────────
     TripletBoost,
     SequenceSurge,
     PairPower,
@@ -32,7 +32,7 @@ pub enum RelicId {
     SetMagnet,
     WildWinds,
     DragonEcho,
-    // ── 15 new relics introduced in Patch C ────────────────────────────
+    // ── Draw tempo, dora, wind, zodiac ──────────────────────────────────
     /// After refill, if the hand contains a partial you've invested in — a
     /// pair wanting a third, a triplet wanting a kong, or two numbered tiles
     /// of the same suit within 2 ranks wanting a sequence — draw 1 extra tile
@@ -46,9 +46,7 @@ pub enum RelicId {
     RoundCompass,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
-    /// Kongs grant +120 chips and +2 mult each. (The original "counts as
-    /// both triplet and pair" semantic was never wired into yaku detection;
-    /// this flat bonus replaces it as a real, scoring effect.)
+    /// Kongs grant +120 chips and +2 mult each when scored.
     KongsBlessing,
     // ── Flower-synergy relics ──────────────────────────────────────────
     /// Each flower's triggered effect fires a second time.
@@ -57,7 +55,7 @@ pub enum RelicId {
     Ikebana,
     /// Each flower scored grants +3 gold immediately.
     Hanami,
-    // ── 15 new relics ─────────────────────────────────────────────────
+    // ── Suit, rank, economy ───────────────────────────────────────────
     /// Bamboo-suit tiles in scored sets: +8 chips each.
     JadeSerpent,
     /// Characters-suit tiles in scored sets: +8 chips each.
@@ -90,7 +88,7 @@ pub enum RelicId {
     SecondWind,
     /// ×2 final mult, but 1 fewer play per round.
     GlassCannon,
-    // ── Balatro-inspired relics (Patch F) ─────────────────────────────
+    // ── Retrigger starters, mirrors, suit purity ───────────────────────
     /// On your final play of the round, retrigger all scored tiles (they
     /// each contribute their chip value a second time).
     LastBreath,
@@ -108,7 +106,7 @@ pub enum RelicId {
     MirrorTile,
     /// ×2.5 mult if every scored tile belongs to a single numbered suit.
     WayOfPurity,
-    // ── Patch G: 25 Balatro-inspired relics ───────────────────────────
+    // ── Broad relic pool ───────────────────────────────────────────────
     // Retrigger
     /// Retrigger the first 5 scored tiles in the hand.
     Geese,
@@ -136,11 +134,11 @@ pub enum RelicId {
     MeltingIce,
     /// Successor to Melting Ice. Created in-place when Melting Ice's counter
     /// would hit 0 — the bronze mask thaws free. Permanent +80 chips base.
-    /// At cash-in, every scored honor (wind/dragon) tile is *devoured*: the
+    /// At cash-in, every scored honor (wind/dragon) tile is destroyed: the
     /// tile is permanently removed from the run's wall (added to
     /// `removed_tile_ids`, the same primitive Kiln uses) and Taotie's chip
-    /// bonus grows by +20 per devoured honor. `relic_counters[Taotie]` holds
-    /// the accumulated chip bonus; divide by 20 for the devoured-count
+    /// bonus grows by +20 per tile. `relic_counters[Taotie]` holds
+    /// the accumulated chip bonus; divide by 20 for the honor count
     /// shown in the live tooltip.
     Taotie,
     /// +4 mult, loses 0.3 mult per discard. Transforms into Silk Moth at 0
@@ -191,7 +189,7 @@ pub enum RelicId {
     /// Validation happens by relabelling the West tiles as East before the
     /// standard meld decomposition runs.
     Disgust,
-    // ── Patch H: economy & scaling relics ─────────────────────────────
+    // ── Run economy, wall scaling, modifiers ──────────────────────────
     /// +mult equal to the summed live sell value of every *other* relic
     /// in your inventory. Grows as relics accumulate sell-value counters
     /// (e.g. Nest Egg) and as you collect more relics.
@@ -252,8 +250,7 @@ impl RelicId {
             RelicId::SetMagnet => "set_magnet.png",
             RelicId::WildWinds => "wild_winds.png",
             RelicId::DragonEcho => "dragon_echo.png",
-            // Patch C new relics — placeholder asset names that fall back to
-            // the relic's slug. Art for these can come later.
+            // Filenames for icons; loader falls back to the relic slug if missing.
             RelicId::ShantenShove => "shanten_shove.png",
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
@@ -497,10 +494,15 @@ pub fn relic_sell_price_live(
 
 /// Return a live description for relics whose counters change their tooltip.
 /// Falls back to the static `RelicDef::description` when no counter applies.
+///
+/// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
+/// Shadow Hand append which relic they copy and a compatibility line (ordering
+/// matches gameplay).
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
     total_score: u64,
+    inventory_focus: Option<(&RelicState, usize)>,
 ) -> String {
     let base = all_relic_defs()
         .iter()
@@ -513,12 +515,12 @@ pub fn relic_description_live(
             format!("{base} [{remaining} chips left]")
         }
         RelicId::Taotie => {
-            // Counter stores accumulated chips (20 per devoured honor); the
+            // Counter stores accumulated chips (20 per destroyed honor); the
             // honor count is the counter divided by that rate. Both numbers
             // are useful — count is the flavor read, chips is the math.
             let chips = counters.get(&RelicId::Taotie).copied().unwrap_or(0);
             let devoured = chips / 20;
-            format!("{base} [{devoured} honors devoured, +{chips} chips]")
+            format!("{base} [{devoured} honors destroyed, +{chips} chips]")
         }
         RelicId::SilkThread => {
             let thread = counters.get(&RelicId::SilkThread).copied().unwrap_or(40);
@@ -581,6 +583,40 @@ pub fn relic_description_live(
         RelicId::Kintsugi => {
             let broken = counters.get(&RelicId::Kintsugi).copied().unwrap_or(0);
             format!("{base} [+{broken} mult]")
+        }
+        RelicId::RiverRunner => {
+            let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);
+            format!("{base} [+{chips} chips]")
+        }
+        RelicId::LotusBloom => {
+            let blooms = counters.get(&RelicId::LotusBloom).copied().unwrap_or(0);
+            format!(
+                "{base} [{blooms} flower{}, +{:.1} mult]",
+                if blooms == 1 { "" } else { "s" },
+                0.5 * blooms as f64
+            )
+        }
+        RelicId::MirrorTile => {
+            let mut s = base.to_string();
+            if let Some((relics, slot)) = inventory_focus {
+                let extra = format_mirror_tile_inventory_help(relics, slot);
+                if !extra.is_empty() {
+                    s.push_str("\n\n");
+                    s.push_str(&extra);
+                }
+            }
+            s
+        }
+        RelicId::ShadowHand => {
+            let mut s = base.to_string();
+            if let Some((relics, slot)) = inventory_focus {
+                let extra = format_shadow_hand_inventory_help(relics, slot);
+                if !extra.is_empty() {
+                    s.push_str("\n\n");
+                    s.push_str(&extra);
+                }
+            }
+            s
         }
         _ => base.to_string(),
     }
@@ -687,6 +723,185 @@ impl RelicState {
     }
 }
 
+#[inline]
+fn relic_display_name(id: RelicId) -> String {
+    all_relic_defs()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.name.to_string())
+        .unwrap_or_else(|| format!("{id:?}"))
+}
+
+/// Tooltip helper: explain Mirror Tile's neighbor, scoring driver slot,
+/// and rough compatibility with the copied relic.
+pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize) -> String {
+    let active = &relics.active;
+    if active.get(mirror_slot) != Some(&RelicId::MirrorTile) {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if relics.is_debuffed(RelicId::MirrorTile) {
+        parts.push("Debuffed: Mirror Tile does nothing while suppressed.".to_string());
+    }
+
+    let first_mirror_slot = active.iter().position(|&r| r == RelicId::MirrorTile);
+    let neighbor = active.get(mirror_slot + 1).copied();
+
+    match neighbor {
+        Some(tid) => {
+            let name = relic_display_name(tid);
+            let mut line = format!("Copying: {name}.");
+            if relics.is_debuffed(tid) {
+                line.push_str(
+                    " That relic is debuffed, but Mirror Tile still duplicates its scoring bonuses.",
+                );
+            }
+            parts.push(line);
+            if relic_scoring_copy_dup_is_compatible(tid) {
+                parts.push(
+                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
+                        .to_string(),
+                );
+            }
+        }
+        None => {
+            parts.push(
+                "No relic to the right — reorder so another relic sits after this Mirror Tile."
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(fm) = first_mirror_slot {
+        if fm != mirror_slot {
+            let tgt = active.get(fm + 1).copied().map(relic_display_name);
+            let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
+            parts.push(format!(
+                "Scoring only uses the leftmost Mirror Tile (slot {} from the left). That one copies: {tgt_s}.",
+                fm + 1
+            ));
+        } else {
+            parts.push("This Mirror Tile is the one scoring checks use.".to_string());
+        }
+    }
+
+    parts.join("\n")
+}
+
+/// Tooltip helper: explain Shadow Hand's copy target (always the leftmost relic
+/// slot when that relic isn't Shadow Hand) and compatibility.
+pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize) -> String {
+    let active = &relics.active;
+    if active.get(shadow_slot) != Some(&RelicId::ShadowHand) {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if relics.is_debuffed(RelicId::ShadowHand) {
+        parts.push("Debuffed: Shadow Hand does nothing while suppressed.".to_string());
+    }
+
+    match active.first().copied() {
+        None => parts.push("No relics to copy.".to_string()),
+        Some(RelicId::ShadowHand) => {
+            parts.push(
+                "Leftmost slot is Shadow Hand — move it right so another relic occupies the first slot; that relic is what gets copied."
+                    .to_string(),
+            );
+        }
+        Some(tid) => {
+            let name = relic_display_name(tid);
+            let mut line = format!("Copying: {name} (leftmost relic).");
+            if relics.is_debuffed(tid) {
+                line.push_str(
+                    " That relic is debuffed, but Shadow Hand still duplicates its scoring bonuses.",
+                );
+            }
+            parts.push(line);
+            if relic_scoring_copy_dup_is_compatible(tid) {
+                parts.push(
+                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    parts.join("\n")
+}
+
+/// True when Mirror Tile / Shadow Hand duplication routes through the scoring
+/// pipeline's `has` / `count` closure for this relic. Anything checked only with
+/// raw `ctx.relics.has` there (e.g. Strength in Numbers overflow) is excluded.
+fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
+    matches!(
+        target,
+        RelicId::TripletBoost
+            | RelicId::SequenceSurge
+            | RelicId::PairPower
+            | RelicId::HonorFury
+            | RelicId::KongsBlessing
+            | RelicId::JadeSerpent
+            | RelicId::RedSerpent
+            | RelicId::BlueSerpent
+            | RelicId::EdgeRunner
+            | RelicId::LowTide
+            | RelicId::HighTide
+            | RelicId::TilePolisher
+            | RelicId::LastBreath
+            | RelicId::Geese
+            | RelicId::VoiceOfThePeople
+            | RelicId::VoiceOfTheElite
+            | RelicId::TeaCeremony
+            | RelicId::GhostHand
+            | RelicId::RiverRunner
+            | RelicId::MeltingIce
+            | RelicId::Taotie
+            | RelicId::GardenKeeper
+            | RelicId::Hanami
+            | RelicId::DragonEcho
+            | RelicId::DoraCrown
+            | RelicId::RedDragonRage
+            | RelicId::WhiteDragonsHush
+            | RelicId::KanDrum
+            | RelicId::RoundCompass
+            | RelicId::Ikebana
+            | RelicId::LuckySeven
+            | RelicId::PaperLantern
+            | RelicId::MultiplierMaster
+            | RelicId::ChainReaction
+            | RelicId::ClosedGate
+            | RelicId::GoldenEngine
+            | RelicId::Snowball
+            | RelicId::Momentum
+            | RelicId::Minimalist
+            | RelicId::TurtleShell
+            | RelicId::SilkThread
+            | RelicId::SilkMoth
+            | RelicId::Humility
+            | RelicId::Obsession
+            | RelicId::Bonfire
+            | RelicId::Kintsugi
+            | RelicId::SolitarySage
+            | RelicId::CurioCabinet
+            | RelicId::LotusBloom
+            | RelicId::WallWeaver
+            | RelicId::Heirloom
+            | RelicId::Tourist
+            | RelicId::CrackedTile
+            | RelicId::HungryGhost
+            | RelicId::WayOfPurity
+            | RelicId::WayOfPairs
+            | RelicId::WayOfTriplets
+            | RelicId::WayOfSequences
+            | RelicId::SilverFiligreeLantern
+            | RelicId::GlassCannon
+    )
+}
+
 /// Scoring context for relic hooks.
 pub struct ScoreContext<'a> {
     pub relics: &'a RelicState,
@@ -700,19 +915,9 @@ pub struct ScoreContext<'a> {
     /// Current ante's round wind (1=East, 2=South, 3=West, 4=North) — drives
     /// the round-wind branch of the Yakuhai yaku. `None` outside a run.
     pub round_wind: Option<u8>,
-    /// True if this play would be the *first* FullHand of the round. The
-    /// scoring cascade fires the Tenpai Bonus only when this is true and the
-    /// hand actually completes as a FullHand. The bonus's chip pile scales
-    /// down as `plays_used` grows.
-    pub first_full_hand_of_round: bool,
     /// Plays already consumed this round at the moment of scoring (so the
-    /// current play is `plays_used + 1`-th). Used to scale the Tenpai Bonus.
+    /// current play is `plays_used + 1`-th). Used by relics such as Momentum.
     pub plays_used: u32,
-    /// True if the player has declared riichi this round and this hand
-    /// completes the wait. When set and the play scores a FullHand, the
-    /// Phase 6.5 hook applies a 2× mult. Riichi UI is Patch E; the field
-    /// exists now so the scoring spine is ready.
-    pub riichi_active: bool,
     /// Per-yaku level (Zodiac-card-driven). `None` falls back to all level 1
     /// — used by tests and the bot.
     pub yaku_levels: Option<crate::core::zodiac::YakuLevels>,
@@ -733,21 +938,16 @@ pub struct ScoreContext<'a> {
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     /// Number of hand tiles NOT in the scored sets (for Ghost Hand).
     pub unscored_hand_tiles: usize,
-    /// When set, this score is from **structure trigger** (not a direct hand play).
-    ///
-    /// **Structure migration:** relics that used to fire on every "scoring play" may need a
-    /// split: effects that should happen when melds **land** (`RunState::commit_selection_to_structure`)
-    /// vs when the player **cashes in** (`trigger_structure`). Examples wired today: MeltingIce /
+    /// When set, this score is from **structure cash-in** (`trigger_structure`), not from a
+    /// direct hand play. Relic hooks attach either when melds **land**
+    /// (`commit_selection_to_structure`) or when the player **cashes in** — e.g. MeltingIce /
     /// Tea / Humility on commit; TilePolisher / River Runner / Star Tile / KanDrum / scoring
-    /// cascades on trigger. Audit new "per play" relics against this split.
+    /// cascades on trigger. New "per play" relics should hook the correct side.
     pub structure: Option<crate::core::structure::StructureTriggerMeta>,
 }
 
-// All scoring effects now live in `core::scoring::score_sets` directly,
-// reading relic ids off the `ScoreContext`. The chip/mult model made the
-// per-relic helper layer redundant — each relic is one match arm in
-// `score_sets`, which is easier to read end-to-end than a chain of
-// `*_multiplier` accessors.
+// Scoring applies relic effects in `core::scoring::score_sets` via `ScoreContext` — one match
+// arm per relic.
 
 #[cfg(test)]
 mod tests {

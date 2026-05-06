@@ -106,6 +106,7 @@ pub enum MaterialKind {
     /// than `Metal` and a touch more diffuse retained, so brass fittings
     /// read as bright polished metal in overhead light without going
     /// near-black off-axis. Use for hanging brass props (bells, rails).
+    #[allow(dead_code)]
     Brass = 17,
     /// Bookbinding leather — warm dielectric with procedural grain,
     /// broad soft sheen (no tight pinpoint), subtle Fresnel rim, and a
@@ -603,7 +604,8 @@ pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
 }
 
 /// Frame-shared shadow sampling uniform consumed by lit_mesh.wgsl /
-/// tile_3d.wgsl / tile_outline.wgsl in the main pass via group 2.
+/// tile_3d.wgsl in the main pass via group 2. (`tile_outline` binds the
+/// same group for layout compatibility but does not sample the map.)
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
@@ -664,15 +666,22 @@ pub struct SsrGlobals {
     pub params: [f32; 4],
     /// x = felt procedural LOD (`EffectsQuality::felt_shader_lod`): 0 =
     /// minimal (effects Off), 1 = Low, 2 = Medium/High full detail.
+    /// y = ACES HDR path (`shop_glb` / `tile_3d` match) when **1** (shop, gameplay, collection, …).
+    /// z = linear exposure before ACES (shop env tuning).
+    /// w = hemispheric ambient scale (shop env tuning).
     pub felt: [f32; 4],
+    /// x = `1/shop_env_world_scale` for shop glTF punctual attenuation (document-space distance);
+    /// **0** = use world-space distance (gameplay). yzw unused.
+    pub shop_punctual: [f32; 4],
 }
 
-/// Bind-group layout for the lit_mesh SSR group (group 3): SSR globals
-/// uniform + previous-frame scene colour + scene depth + a filtering
-/// sampler shared by both textures.
-pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+/// Bind-group layout for lit_mesh group 3: spotlights (binding 0, same
+/// uniform as `tile_3d.wgsl` / the tile pipeline) plus SSR
+/// globals + history textures (bindings 1–4). Merged so the lit_mesh
+/// pipeline stays within WebGPU's four bind-group limit.
+pub fn create_lit_mesh_spot_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("lit-mesh-ssr-layout"),
+        label: Some("lit-mesh-spot-ssr-layout"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -687,10 +696,10 @@ pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
                 count: None,
             },
@@ -700,12 +709,22 @@ pub fn create_lit_mesh_ssr_layout(device: &wgpu::Device) -> wgpu::BindGroupLayou
                 ty: wgpu::BindingType::Texture {
                     multisampled: false,
                     view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Depth,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
                 },
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Depth,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
@@ -768,6 +787,9 @@ pub fn push_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, aabb: A
                 position: *corner,
                 normal: *normal,
                 uv: *uv,
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -800,6 +822,9 @@ pub fn push_cylinder_y(
             position: [cx + radius * ct, y0, cz + radius * st],
             normal: [ct, 0.0, st],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     let barrel_top = vertices.len() as u32;
@@ -810,6 +835,9 @@ pub fn push_cylinder_y(
             position: [cx + radius * ct, y1, cz + radius * st],
             normal: [ct, 0.0, st],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -828,6 +856,9 @@ pub fn push_cylinder_y(
         position: [cx, y0, cz],
         normal: [0.0, -1.0, 0.0],
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let ring_bot = vertices.len() as u32;
     for i in 0..n {
@@ -837,6 +868,9 @@ pub fn push_cylinder_y(
             position: [cx + radius * ct, y0, cz + radius * st],
             normal: [0.0, -1.0, 0.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -851,6 +885,9 @@ pub fn push_cylinder_y(
         position: [cx, y1, cz],
         normal: [0.0, 1.0, 0.0],
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let ring_top = vertices.len() as u32;
     for i in 0..n {
@@ -860,6 +897,9 @@ pub fn push_cylinder_y(
             position: [cx + radius * ct, y1, cz + radius * st],
             normal: [0.0, 1.0, 0.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -894,6 +934,9 @@ pub fn push_cylinder_z(
             position: [cx + radius * ct, cy + radius * st, z0],
             normal: [ct, st, 0.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     let barrel_top = vertices.len() as u32;
@@ -904,6 +947,9 @@ pub fn push_cylinder_z(
             position: [cx + radius * ct, cy + radius * st, z1],
             normal: [ct, st, 0.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -922,6 +968,9 @@ pub fn push_cylinder_z(
         position: [cx, cy, z0],
         normal: [0.0, 0.0, -1.0],
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let ring_bot = vertices.len() as u32;
     for i in 0..n {
@@ -931,6 +980,9 @@ pub fn push_cylinder_z(
             position: [cx + radius * ct, cy + radius * st, z0],
             normal: [0.0, 0.0, -1.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -945,6 +997,9 @@ pub fn push_cylinder_z(
         position: [cx, cy, z1],
         normal: [0.0, 0.0, 1.0],
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let ring_top = vertices.len() as u32;
     for i in 0..n {
@@ -954,6 +1009,9 @@ pub fn push_cylinder_z(
             position: [cx + radius * ct, cy + radius * st, z1],
             normal: [0.0, 0.0, 1.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -985,6 +1043,9 @@ pub fn push_quad(
             position: pos,
             normal,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

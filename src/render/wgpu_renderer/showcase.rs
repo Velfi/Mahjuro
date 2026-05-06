@@ -6,7 +6,6 @@ pub(super) struct ShowcaseTileCtx<'a> {
     pub(super) layout: &'a wgpu::BindGroupLayout,
     pub(super) shadow_caster_layout: &'a wgpu::BindGroupLayout,
     pub(super) primitives: &'a [TilePrimitiveGpu],
-    pub(super) sampler: &'a wgpu::Sampler,
     pub(super) decal_atlas: &'a crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu,
 }
 
@@ -20,7 +19,6 @@ pub(super) fn make_showcase_tile_gpu(
         layout,
         shadow_caster_layout,
         primitives,
-        sampler,
         decal_atlas,
     } = *ctx;
     let key = (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual);
@@ -40,6 +38,7 @@ pub(super) fn make_showcase_tile_gpu(
             cam_pos: [0.0; 3],
             tile_seed: 0.0,
             decal_atlas_uv,
+            hdr_tonemap: [0.0; 4],
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -61,11 +60,27 @@ pub(super) fn make_showcase_tile_gpu(
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(sampler),
+                        resource: wgpu::BindingResource::Sampler(&prim.sampler),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::TextureView(decal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&prim.normal_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: prim.pbr_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&prim.metallic_roughness_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&prim.emissive_view),
                     },
                 ],
             })
@@ -73,46 +88,6 @@ pub(super) fn make_showcase_tile_gpu(
         .collect();
 
     // Outline shell — always allocated so the bind group is stable.
-    let outline_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("showcase-tile-outline-cam"),
-        contents: bytemuck::bytes_of(&CameraUniform {
-            view_proj: identity.to_cols_array(),
-            model: identity.to_cols_array(),
-            base_color_factor,
-            cam_pos: [0.0; 3],
-            tile_seed: 0.0,
-            decal_atlas_uv,
-        }),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let outline_bind_groups: Vec<wgpu::BindGroup> = primitives
-        .iter()
-        .map(|prim| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("showcase-tile-outline-bg"),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: outline_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&prim.albedo_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(decal_view),
-                    },
-                ],
-            })
-        })
-        .collect();
-
     let initial_shadow = ShadowCasterUniform {
         light_view_proj: identity.to_cols_array(),
         model: identity.to_cols_array(),
@@ -135,8 +110,6 @@ pub(super) fn make_showcase_tile_gpu(
         decal_atlas_uv,
         uniform_buffer,
         bind_groups,
-        outline_uniform_buffer,
-        outline_bind_groups,
         shadow_uniform_buffer,
         shadow_bind_group,
         cached_shadow_caster: initial_shadow,
@@ -208,6 +181,36 @@ pub(crate) fn make_debuff_marker_overlay_gpu(
         _texture: texture,
         bind_group,
     }
+}
+
+pub(super) fn make_prompt_icon_overlay_gpu(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    asset_rel_path: &'static str,
+) -> Option<TileFaceOverlayGpu> {
+    let (rgba, w, h) = crate::render::kenney_svg::rasterize_embedded_svg_rgba(asset_rel_path)?;
+    let (texture, view) =
+        upload_rgba_texture(device, queue, "kenney-prompt-icon", &rgba, w, h);
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("kenney-prompt-icon-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    Some(TileFaceOverlayGpu {
+        _texture: texture,
+        bind_group,
+    })
 }
 
 // ---------------------------------------------------------------------------

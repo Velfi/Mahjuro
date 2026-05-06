@@ -14,7 +14,7 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,7 +196,7 @@ impl SceneBehavior for GameOverScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             let settings = persistence::load_settings();
             GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
-            return Some(Scene::StartScreen(StartScreenScene::new()));
+            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
         }
         None
     }
@@ -255,7 +255,7 @@ impl SceneBehavior for GameOverScene {
         // Thin rule sits right on the panel top edge.
         let rule_rect = [panel_x, panel_y - 2.0, panel_w, 2.0];
 
-        // Border rim — 1-px TWILIGHT strip around the panel.
+        // Border rim — 1-px WALNUT_BRIGHT strip around the panel.
         let border_rect = [
             panel_rect[0] + 2.0,
             panel_rect[1] + 2.0,
@@ -280,23 +280,25 @@ impl SceneBehavior for GameOverScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
-        if self.won {
-            frame.moonlit_water();
-        } else {
-            frame.sunlit_water();
+        if ctx.effect_layers.fullscreen_water_backdrop {
+            if self.won {
+                frame.moonlit_water();
+            } else {
+                frame.sunlit_water();
+            }
         }
 
         // Panel body — slightly deeper than before so it reads as a card.
         frame.quad(GpuInstance {
             rect: panel_rect,
-            color: color::alpha(color::MIDNIGHT, 0.88),
+            color: color::alpha(color::WALNUT_DEEP, 0.88),
         });
-        // 1-px border in TWILIGHT gives the card a crisp edge.
+        // 1-px border in WALNUT_BRIGHT gives the card a crisp edge.
         frame.quad(GpuInstance {
             rect: border_rect,
-            color: color::alpha(color::TWILIGHT, 0.60),
+            color: color::alpha(color::WALNUT_BRIGHT, 0.60),
         });
         // Overprint the interior so the border is just the thin rim.
         frame.quad(GpuInstance {
@@ -306,7 +308,7 @@ impl SceneBehavior for GameOverScene {
                 panel_rect[2] - 6.0,
                 panel_rect[3] - 6.0,
             ],
-            color: color::alpha(color::MIDNIGHT, 0.88),
+            color: color::alpha(color::WALNUT_DEEP, 0.88),
         });
 
         let text_align = if self.won {
@@ -387,7 +389,7 @@ impl SceneBehavior for GameOverScene {
             if idx % 2 == 0 {
                 frame.quad(GpuInstance {
                     rect: [panel_rect[0] + 3.0, y, panel_rect[2] - 6.0, row_h],
-                    color: color::alpha(color::INDIGO, 0.25),
+                    color: color::alpha(color::WALNUT_RAISED, 0.25),
                 });
             }
 
@@ -395,7 +397,7 @@ impl SceneBehavior for GameOverScene {
             frame.text(TextLabel {
                 rect: [inner_x, text_y, inner_w * 0.48, text_h],
                 text: label.clone(),
-                color: color::MIST,
+                color: color::STONE,
                 font_px: Some(row_font_px),
                 align: TextAlign::Left,
                 ..Default::default()

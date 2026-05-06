@@ -92,6 +92,9 @@ fn build_revolved_mesh(profile: &[ProfilePoint], drip_amplitude: f32) -> MeshCpu
                 position: [x, y, z],
                 normal,
                 uv: [u, v],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -119,6 +122,9 @@ fn build_revolved_mesh(profile: &[ProfilePoint], drip_amplitude: f32) -> MeshCpu
         position: [0.0, 0.0, 0.0],
         normal: [0.0, -1.0, 0.0],
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     // Use the second profile row (pi=1, full base radius) for the cap edge so
     // the cap is flush with the cylindrical base.
@@ -160,12 +166,18 @@ pub fn build_candle_wick_mesh() -> MeshCpu {
             position: [r * nx, y0, r * nz],
             normal: [nx, 0.0, nz],
             uv: [(ri as f32) / (n_radial as f32), 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         // Top ring.
         vertices.push(Vertex3dTex {
             position: [r * nx, y1, r * nz],
             normal: [nx, 0.0, nz],
             uv: [(ri as f32) / (n_radial as f32), 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for ri in 0..n_radial {
@@ -186,6 +198,9 @@ pub fn build_candle_wick_mesh() -> MeshCpu {
         position: [0.0, y1, 0.0],
         normal: [0.0, 1.0, 0.0],
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     for ri in 0..n_radial {
         let a = (ri * 2 + 1) as u32;

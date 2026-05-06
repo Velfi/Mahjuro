@@ -12,7 +12,7 @@ ending in `.md`:
 ```
 .changes/fix-dora-indicator.md
 .changes/add-walk-mode.md
-.changes/bump-riichi-score.md
+.changes/balance-second-wind.md
 ```
 
 The file has YAML frontmatter and a one-paragraph body:

@@ -25,17 +25,7 @@ impl WgpuRenderer {
             .last_debug_pickables
             .iter()
             .find(|(n, _, _, _)| n == &ov.name)
-            .map(|(_, m, h, o)| (*m, *h, *o))
-            .or_else(|| {
-                self.last_debug_trimesh_pickables
-                    .iter()
-                    .find(|(n, _, _)| n == &ov.name)
-                    .map(|(_, m, mesh)| match mesh {
-                        TrimeshRef::LampBody => {
-                            (*m, self.lamp_body_local_half, self.lamp_body_local_center_y)
-                        }
-                    })
-            });
+            .map(|(_, m, h, o)| (*m, *h, *o));
         if let Some((model, half, center_y)) = aabb {
             let [rx, ry, rw, rh] =
                 camera.project_aabb_rect(model, [half.x, half.y, half.z], center_y);

@@ -6,10 +6,11 @@
 
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, SmokeDebugOverlay, TuningOverlay,
-    VolumetricDebugOverlay,
+    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay,
+    TuningOverlay, VolumetricDebugOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
+use crate::render::shop_glb::ShopEnvLightingTune;
 
 /// State for the arrange-mode debug feature. Activated via Debug > Arrange
 /// Mode. The user clicks an object to select it, then uses WASD to nudge
@@ -64,7 +65,7 @@ pub struct DebugState {
     pub tuning_overlay: Option<TuningOverlay>,
     pub sfx_test_overlay: Option<SfxTestOverlay>,
     pub camera_debug_overlay: Option<CameraDebugOverlay>,
-    pub smoke_debug_overlay: Option<SmokeDebugOverlay>,
+    pub shop_env_debug_overlay: Option<ShopEnvDebugOverlay>,
     pub volumetric_debug_overlay: Option<VolumetricDebugOverlay>,
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
@@ -80,6 +81,10 @@ pub struct DebugState {
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
+    /// `Shop.glb` room scale multiplier (`window_h *` this). Debug overlay can edit live.
+    pub shop_env_height_scale: f32,
+    /// glTF punctual + `shop_glb` tonemap tuning. Debug overlay edits live.
+    pub shop_env_lighting: ShopEnvLightingTune,
 }
 
 impl DebugState {
@@ -97,11 +102,13 @@ impl DebugState {
             tuning_overlay: None,
             sfx_test_overlay: None,
             camera_debug_overlay: None,
-            smoke_debug_overlay: None,
+            shop_env_debug_overlay: None,
             volumetric_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
+            shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            shop_env_lighting: ShopEnvLightingTune::SOURCE_DEFAULTS,
         }
     }
 
@@ -110,8 +117,8 @@ impl DebugState {
         self.tuning_overlay.is_some()
             || self.sfx_test_overlay.is_some()
             || self.camera_debug_overlay.is_some()
+            || self.shop_env_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
-            || self.smoke_debug_overlay.is_some()
             || self.volumetric_debug_overlay.is_some()
     }
 }

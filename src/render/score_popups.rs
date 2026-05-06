@@ -1,5 +1,9 @@
-//! Floating 3D score popups used for short-lived textual beats such as
-//! zodiac level-ups or generic structure-growth callouts.
+//! Floating score popups used for short-lived textual beats such as zodiac
+//! level-ups or generic structure-growth callouts.
+//!
+//! [`ScorePopupSystem::placements`] feeds extruded 3D glyphs (gameplay). The
+//! shop uses [`ScorePopupSystem::overlay_text_labels`] so celebrations draw in
+//! the text-overlay pass above the 3D scene.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,6 +12,7 @@ use rand::RngExt;
 
 use crate::core::scoring::StepKind;
 use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
+use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 
 /// Total lifetime of a popup from spawn to despawn (seconds).
 const LIFETIME: f32 = 1.1;
@@ -154,6 +159,39 @@ impl ScorePopupSystem {
         !self.popups.is_empty()
     }
 
+    /// Screen-space labels with the same timing as [`Self::placements`], for
+    /// the text-overlay pass (depth test Always) so shop celebrations read
+    /// above counter geometry.
+    pub fn overlay_text_labels(
+        &self,
+        now: Instant,
+        w: f32,
+        h: f32,
+        screen_scale: f32,
+    ) -> Vec<TextLabel> {
+        self.popups
+            .iter()
+            .map(|p| {
+                let (_px, py, _lift_z, scale_mul, alpha, _emissive) = popup_frame_sample(p, now);
+                let mut color = p.color;
+                color[3] *= alpha;
+                let font_px =
+                    (p.base_scale * scale_mul * screen_scale * 0.38).clamp(22.0, h * 0.14);
+                let line_h = font_px * 1.35;
+                let top = (py - line_h * 0.5).clamp(0.0, (h - line_h).max(0.0));
+                TextLabel {
+                    text: p.label.to_string(),
+                    rect: [0.0, top, w, line_h],
+                    color,
+                    font_px: Some(font_px),
+                    align: TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+
     /// Build the per-frame placement list the renderer consumes.
     ///
     /// `screen_scale` multiplies each popup's world-units scale so they stay
@@ -164,14 +202,7 @@ impl ScorePopupSystem {
         self.popups
             .iter()
             .map(|p| {
-                let age = now.saturating_duration_since(p.born_at).as_secs_f32();
-                let t = (age / LIFETIME).clamp(0.0, 1.0);
-
-                let (px, py, lift_z, scale_mul, alpha, emissive) = match p.motion {
-                    PopupMotion::Stream => stream_sample(p, t),
-                    PopupMotion::Settle => settle_sample(p, t),
-                    PopupMotion::Shake => shake_sample(p, t),
-                };
+                let (px, py, lift_z, scale_mul, alpha, emissive) = popup_frame_sample(p, now);
 
                 let mut color = p.color;
                 color[3] *= alpha;
@@ -179,7 +210,7 @@ impl ScorePopupSystem {
                 Object3d {
                     pos: [px, py, lift_z],
                     extents: [1.0, 1.0, 1.0],
-                    rotation: glam::Mat4::IDENTITY,
+                    rotation: [0.0, 0.0, 0.0],
                     color,
                     kind: Object3dKind::ExtrudedGlyph {
                         scale: p.base_scale * scale_mul * screen_scale,
@@ -196,6 +227,16 @@ impl ScorePopupSystem {
                 }
             })
             .collect()
+    }
+}
+
+fn popup_frame_sample(p: &ScorePopup, now: Instant) -> (f32, f32, f32, f32, f32, f32) {
+    let age = now.saturating_duration_since(p.born_at).as_secs_f32();
+    let t = (age / LIFETIME).clamp(0.0, 1.0);
+    match p.motion {
+        PopupMotion::Stream => stream_sample(p, t),
+        PopupMotion::Settle => settle_sample(p, t),
+        PopupMotion::Shake => shake_sample(p, t),
     }
 }
 

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3548"/>
+      <stop offset="0.55" stop-color="#1c2433"/>
+      <stop offset="1" stop-color="#141a26"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b4a38"/>
+      <stop offset="1" stop-color="#3d261c"/>
+    </linearGradient>
+  </defs>
+
+  <rect fill="url(#bg)" stroke="#4a5568" stroke-width="2" x="1" y="1" width="998" height="558" rx="6"/>
+
+  <text fill="#f0f4f8" font-family="sans-serif" font-size="15" font-weight="bold" x="24" y="28">Shop (from screenshot)</text>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="10" x="24" y="46">Headless capture: round 3, rich stock; mountain haze + smoke behind counter</text>
+
+  <!-- Ceiling / upper props (matches shop draw: reroll abacus left, lamp center, leave bell right) -->
+  <rect fill="#3d4d63" fill-opacity="0.55" stroke="#647896" stroke-width="1" x="72" y="38" width="118" height="72" rx="4"/>
+  <text fill="#cbd5e1" font-family="sans-serif" font-size="9" x="82" y="62">Restock</text>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="8" x="82" y="76">abacus prop</text>
+
+  <rect fill="#e8ecf4" fill-opacity="0.92" stroke="#b8c0d4" stroke-width="1" x="210" y="48" width="228" height="34" rx="3"/>
+  <text fill="#1e293b" font-family="sans-serif" font-size="10" x="220" y="70">Shop / Round / Gold (HUD plaque)</text>
+
+  <ellipse fill="#8b7355" fill-opacity="0.5" stroke="#c4a882" stroke-width="1" cx="500" cy="52" rx="52" ry="22"/>
+  <text fill="#cbd5e1" font-family="sans-serif" font-size="9" x="500" y="56" text-anchor="middle">Lamp</text>
+
+  <ellipse fill="#c9a227" fill-opacity="0.35" stroke="#e8d48b" stroke-width="1" cx="862" cy="58" rx="28" ry="36"/>
+  <text fill="#cbd5e1" font-family="sans-serif" font-size="9" x="862" y="62" text-anchor="middle">Bell</text>
+  <text fill="#647896" font-family="sans-serif" font-size="8" x="898" y="42">fans</text>
+
+  <!-- Main counter slab (wide, shallow band - dominates mid-frame in shot) -->
+  <path fill="url(#wood)" stroke="#2d1810" stroke-width="2"
+        d="M 72 175 L 928 158 L 942 268 L 58 292 Z"/>
+  <text fill="#f1f5f9" font-family="sans-serif" font-size="11" x="90" y="188">Counter (perspective)</text>
+
+  <!-- Eight for-sale cells across top of counter (rich stock mix: relics, packs, tokens) -->
+  <g fill="#334155" stroke="#64748b" stroke-width="1">
+    <rect x="118" y="198" width="72" height="56" rx="3"/><rect x="212" y="192" width="72" height="56" rx="3"/>
+    <rect x="306" y="188" width="72" height="56" rx="3"/><rect x="400" y="185" width="72" height="56" rx="3"/>
+    <rect x="494" y="183" width="72" height="56" rx="3"/><rect x="588" y="185" width="72" height="56" rx="3"/>
+    <rect x="682" y="188" width="72" height="56" rx="3"/><rect x="776" y="193" width="72" height="56" rx="3"/>
+  </g>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="9" x="500" y="258" text-anchor="middle">8 shop slots (niches + packs + consumables)</text>
+
+  <!-- Foreground shelf row: sell centered; owned trays spread; journal far right -->
+  <rect fill="#1e293b" fill-opacity="0.65" stroke="#475569" stroke-width="1" x="180" y="318" width="640" height="14" rx="2"/>
+  <text fill="#64748b" font-family="sans-serif" font-size="8" x="500" y="329" text-anchor="middle">dark pad under sell</text>
+
+  <ellipse fill="#d4c4a8" fill-opacity="0.85" stroke="#a89878" stroke-width="1.5" cx="500" cy="382" rx="88" ry="36"/>
+  <rect fill="#f8fafc" fill-opacity="0.9" x="468" y="368" width="64" height="22" rx="2"/>
+  <text fill="#0f172a" font-family="sans-serif" font-size="9" font-weight="bold" x="500" y="383" text-anchor="middle">SELL</text>
+
+  <g fill="#94a3b8" stroke="#64748b" stroke-width="1">
+    <rect x="108" y="408" width="56" height="40" rx="2"/><rect x="172" y="408" width="56" height="40" rx="2"/><rect x="236" y="408" width="56" height="40" rx="2"/>
+  </g>
+  <text fill="#94a3b8" font-family="sans-serif" font-size="8" x="108" y="462">foreground slabs</text>
+  <text fill="#64748b" font-family="sans-serif" font-size="7" x="108" y="472">(pack faces / chrome)</text>
+
+  <ellipse fill="#f1f5f9" fill-opacity="0.75" stroke="#cbd5e1" stroke-width="1" cx="668" cy="428" rx="42" ry="22"/>
+  <text fill="#475569" font-family="sans-serif" font-size="8" x="668" y="432" text-anchor="middle">coins</text>
+
+  <rect fill="#5c3d2e" stroke="#8b6914" stroke-width="1.5" x="805" y="368" width="52" height="140" rx="2"/>
+  <text fill="#f8fafc" font-family="sans-serif" font-size="8" x="831" y="438" text-anchor="middle" transform="rotate(-90 831 438)">Journal</text>
+
+  <!-- Code anchor hints (layout.rs / ShopPositions), not drawn to scale in 2D -->
+  <text fill="#64748b" font-family="sans-serif" font-size="9" x="24" y="528">Also: owned dishes along shelf (relic / talisman / ribbon / coin nx remapped to frustum); gold plaque on counter near coins.</text>
+</svg>

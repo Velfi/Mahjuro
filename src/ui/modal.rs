@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
-use crate::render::table_transform::rot_rx_ry_rz_deg;
+use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::input::UiAction;
@@ -50,36 +50,40 @@ pub struct UnlockPage {
 pub enum ModalTheme {
     /// Gold/warm — level up, round win.
     Success,
-    /// Cool indigo — informational (e.g. update available).
+    /// Dark walnut panel — informational (e.g. update available).
     Info,
 }
 
 impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
+        use crate::render::theme::color;
         match self {
             ModalTheme::Success => [0.12, 0.14, 0.08, 0.95],
-            ModalTheme::Info => [0.08, 0.10, 0.18, 0.95],
+            ModalTheme::Info => color::alpha(color::WALNUT_DEEP, 0.95),
         }
     }
 
     fn border_color(&self) -> [f32; 4] {
+        use crate::render::theme::color;
         match self {
             ModalTheme::Success => [0.85, 0.75, 0.2, 0.9],
-            ModalTheme::Info => [0.4, 0.5, 0.85, 0.9],
+            ModalTheme::Info => color::alpha(color::BRASS, 0.9),
         }
     }
 
     fn title_color(&self) -> [f32; 4] {
+        use crate::render::theme::color;
         match self {
             ModalTheme::Success => [1.0, 0.92, 0.4, 1.0],
-            ModalTheme::Info => [0.7, 0.8, 1.0, 1.0],
+            ModalTheme::Info => color::CHAMPAGNE,
         }
     }
 
     fn body_color(&self) -> [f32; 4] {
+        use crate::render::theme::color;
         match self {
             ModalTheme::Success => [0.9, 0.88, 0.7, 1.0],
-            ModalTheme::Info => [0.85, 0.88, 0.95, 1.0],
+            ModalTheme::Info => color::PARCHMENT,
         }
     }
 }
@@ -430,8 +434,8 @@ impl ModalQueue {
         let mut relic_objects: Vec<Object3d> = Vec::new();
         let mut gradient_quads: Vec<GradientQuadInstance> = Vec::new();
 
-        // Dim overlay behind the modal — Midnight Gold deep indigo, not pure black.
-        let [or_, og, ob, _] = crate::render::theme::color::OBSIDIAN;
+        // Dim overlay behind the modal — WALNUT_INK (near-black walnut base).
+        let [or_, og, ob, _] = crate::render::theme::color::WALNUT_INK;
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
             color: [or_, og, ob, 0.65 * alpha],
@@ -570,7 +574,7 @@ impl ModalQueue {
             ],
             text: "Press Enter to continue".into(),
             color: {
-                let [r, g, b, a] = crate::render::theme::color::SLATE;
+                let [r, g, b, a] = crate::render::theme::color::UMBER;
                 [r, g, b, a * 0.8 * alpha]
             },
             font_px: Some((14.0 * scale).max(12.0)),
@@ -612,7 +616,7 @@ impl ModalQueue {
         // top-and-bottom only reads as a clean letterbox at TV
         // distance. The relic-name + description column stays
         // unaffected.
-        let [vr, vg, vb, _] = crate::render::theme::color::OBSIDIAN;
+        let [vr, vg, vb, _] = crate::render::theme::color::WALNUT_INK;
         let layers = 24;
         let strip_h = window_h * 0.30 / layers as f32;
         for i in 0..layers {
@@ -687,7 +691,7 @@ impl ModalQueue {
             relic_objects.push(Object3d {
                 pos: [center_x, window_h * 0.5, window_h * 0.5 - icon_center_y],
                 extents: [face_size, thick, face_size],
-                rotation: rot_rx_ry_rz_deg(180.0, 0.0, 0.0),
+                rotation: euler_xyz_rad_from_deg(180.0, 0.0, 0.0),
                 color: page.accent_color,
                 kind: Object3dKind::Relic {
                     relic_id,
@@ -721,7 +725,7 @@ impl ModalQueue {
             rect: [0.0, category_y, window_w, category_font * 1.4],
             text: page.category.to_uppercase(),
             color: {
-                let [r, g, b, _] = crate::render::theme::color::MIST;
+                let [r, g, b, _] = crate::render::theme::color::STONE;
                 [r, g, b, 0.85 * alpha]
             },
             font_px: Some(category_font),
@@ -770,7 +774,7 @@ impl ModalQueue {
             rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
             text: nav_text,
             color: {
-                let [r, g, b, _] = crate::render::theme::color::MIST;
+                let [r, g, b, _] = crate::render::theme::color::STONE;
                 [r, g, b, 0.7 * alpha]
             },
             font_px: Some(nav_font),

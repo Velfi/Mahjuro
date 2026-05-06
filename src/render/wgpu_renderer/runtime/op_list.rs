@@ -17,7 +17,11 @@ pub(super) struct TextDraw {
 /// `render()` builds a parallel ordered list of these; the encoder loop
 /// later dispatches each to the appropriate pipeline / pass.
 pub(super) enum RenderOp {
-    Background(BackgroundId),
+    /// Per-draw GPU instance buffer index into `ProcessOpCtx::bg_inst_buffers`.
+    Background {
+        id: BackgroundId,
+        buf_idx: usize,
+    },
     Starfield,
     EmberDrift,
     GoldenDust,
@@ -26,15 +30,33 @@ pub(super) enum RenderOp {
     MountainHaze,
     ShootingStarCascade,
     Table,
-    QuadBatch { buf_idx: usize, count: u32 },
-    GradientQuadBatch { buf_idx: usize, count: u32 },
-    FlameBatch { buf_idx: usize, count: u32 },
+    QuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
+    GradientQuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
+    FlameBatch {
+        buf_idx: usize,
+        count: u32,
+    },
     TextDraw(usize),
     TileFaceQuad(usize),
-    FluidSmoke,
+    PromptIconQuad(usize),
+    /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
+    ShopEnvironment,
+    /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
+    /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
+    /// through [`super::process_op::WgpuRenderer::process_op`].
+    ClearSceneDepth,
     // Skeuomorphic gameplay HUD (phase 1).
     ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
-    Object3dBatch { start: usize, end: usize }, // range into `object3d_draw_list`
+    Object3dBatch {
+        start: usize,
+        end: usize,
+    }, // range into `object3d_draw_list`
 }
 
 /// Discriminator for the Object3d pre-pass / dispatch loop. Each kind
@@ -52,12 +74,11 @@ pub(super) enum DrawKind {
     Ribbon,
     Talisman,
     Shrine,
-    SellTray,
-    LampBody,
-    LampBulb,
     BugBody,
     BugWingL,
+    BugWingR,
     BugWingBlurL,
+    BugWingBlurR,
     Orb,
     DoraPlinth,
     Bowl,
@@ -68,7 +89,5 @@ pub(super) enum DrawKind {
     CandleWick,
     CascadeToken,
     ExtrudedGlyph,
-    BugWingR,
-    BugWingBlurR,
     Primitive(crate::render::primitive::MeshId),
 }

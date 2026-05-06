@@ -291,9 +291,7 @@ fn ctx_for_merged_commit<'a>(
         dora_faces: run.wall.dora_faces(),
         available_yaku: run.available_yaku.clone(),
         round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
-        first_full_hand_of_round: !run.full_hand_played_this_round,
         plays_used: plays_used_after,
-        riichi_active: false,
         yaku_levels: Some(
             yaku_levels
                 .cloned()

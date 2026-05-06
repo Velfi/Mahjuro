@@ -96,8 +96,8 @@ pub fn compute_action_bar(
     let btn_h = (32.0 * layout_scale).max(20.0);
     let btn_gap = 12.0 * layout_scale;
     let container_w = (btn_w * 4.0 + btn_gap * 3.0).min(layout.window_w * 0.92);
-    // Anchor container left edge to hand strip left (same 22% inset) so sort
-    // tablets, structure, and hand all share the same left margin.
+    // Anchor container left edge to hand strip left (HAND_X_PAD_RATIO = 16%) so sort
+    // tablets, structure, and hand share the same left margin.
     let container_x = layout.hand_strip.x;
     let btn_y = layout.window_h
         - btn_h

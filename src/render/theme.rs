@@ -6,11 +6,11 @@
 //!
 //! ## Palette philosophy
 //!
-//! Cool indigo background tones with sparing gold accents. Gold is precious —
+//! Dark walnut panel tones with sparing gold accents. Gold is precious —
 //! reserve it for headers, score numerals, selected-tile rims, currency, and
 //! relic borders. Body text is `PARCHMENT`, never pure white. Think
 //! "lacquered rosewood box with brass fittings under candlelight," not
-//! "purple wizard tower."
+//! flat UI gray.
 //!
 //! ## Conversions
 //!
@@ -22,17 +22,17 @@
 
 /// Named color tokens. Pull from here in scenes via `theme::color::GOLD` etc.
 pub mod color {
-    // ── Indigos: dark → light, used for backgrounds, panels, modals ──────
-    /// `#0A0E1F` — deepest base, almost black with a blue tilt.
-    pub const OBSIDIAN: [f32; 4] = [0.039, 0.055, 0.122, 1.0];
-    /// `#121835` — primary modal/panel background.
-    pub const MIDNIGHT: [f32; 4] = [0.071, 0.094, 0.208, 1.0];
-    /// `#1B2347` — raised panel background (one step lighter than MIDNIGHT).
-    pub const INDIGO: [f32; 4] = [0.106, 0.137, 0.278, 1.0];
-    /// `#2A3463` — hovered/selected panel background, button rest state.
-    pub const DUSK: [f32; 4] = [0.165, 0.204, 0.388, 1.0];
-    /// `#3D4A82` — strongest indigo, button hover state.
-    pub const TWILIGHT: [f32; 4] = [0.239, 0.290, 0.510, 1.0];
+    // ── Walnut ladder: dark → light, backgrounds, panels, modals, tooltips ─
+    /// `#0A0806` — deepest base, near-black brown.
+    pub const WALNUT_INK: [f32; 4] = [0.040, 0.031, 0.024, 1.0];
+    /// `#120E0B` — primary modal/panel background and tooltip fill.
+    pub const WALNUT_DEEP: [f32; 4] = [0.071, 0.055, 0.043, 1.0];
+    /// `#1C1611` — raised panel background (one step lighter than WALNUT_DEEP).
+    pub const WALNUT_RAISED: [f32; 4] = [0.110, 0.086, 0.067, 1.0];
+    /// `#2A211A` — hovered/selected panel background, button rest state.
+    pub const WALNUT_SOFT: [f32; 4] = [0.165, 0.129, 0.102, 1.0];
+    /// `#362A21` — strongest panel tone, primary button rest / highlights.
+    pub const WALNUT_BRIGHT: [f32; 4] = [0.212, 0.165, 0.129, 1.0];
 
     // ── Golds: use sparingly, hierarchy of warmth ─────────────────────────
     /// `#F5C674` — palest gold, hero score numerals & selected-tile rims.
@@ -44,15 +44,15 @@ pub mod color {
     /// `#8A5E14` — deepest gold, almost bronze, used for shadow lines.
     pub const ANTIQUE: [f32; 4] = [0.541, 0.369, 0.078, 1.0];
 
-    // ── Neutrals: text + dividers ─────────────────────────────────────────
+    // ── Neutrals: text + dividers (warm stone — reads on walnut panels) ──
     /// `#F4F1E8` — body text. Warm off-white. NEVER use pure white.
     pub const PARCHMENT: [f32; 4] = [0.957, 0.945, 0.910, 1.0];
-    /// `#B8BED6` — secondary text, captions, inactive labels.
-    pub const MIST: [f32; 4] = [0.722, 0.745, 0.839, 1.0];
-    /// `#6B7299` — tertiary text, disabled state, dividers.
-    pub const SLATE: [f32; 4] = [0.420, 0.447, 0.600, 1.0];
+    /// `#B8AEA2` — secondary text, captions, inactive labels.
+    pub const STONE: [f32; 4] = [0.722, 0.682, 0.635, 1.0];
+    /// `#635C52` — tertiary text, disabled state, dividers.
+    pub const UMBER: [f32; 4] = [0.388, 0.361, 0.322, 1.0];
 
-    // ── Semantic colors (desaturated to fit the cool palette) ─────────────
+    // ── Semantic colors (desaturated to sit on warm wood panels) ──────────
     /// `#5FD4A8` — success / target met / positive.
     pub const JADE: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
     /// `#E85A6B` — danger / exit / negative.
@@ -91,10 +91,10 @@ pub mod color {
     /// `tier` is 0..=3: common, uncommon, rare, legendary.
     pub fn rarity(tier: u8) -> [f32; 4] {
         match tier {
-            0 => MIST,      // common — neutral
-            1 => JADE,      // uncommon — green
-            2 => TWILIGHT,  // rare — bright indigo
-            _ => CHAMPAGNE, // legendary — gold
+            0 => STONE,         // common — neutral
+            1 => JADE,          // uncommon — green
+            2 => WALNUT_BRIGHT, // rare — lighter walnut highlight
+            _ => CHAMPAGNE,     // legendary — gold
         }
     }
 }
@@ -161,7 +161,7 @@ pub mod metrics {
 /// Visual variant for a button — drives which color set it draws with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonVariant {
-    /// Default neutral indigo button.
+    /// Default neutral walnut-toned button.
     Default,
     /// Affirmative action: continue, resume, confirm.
     Primary,
@@ -195,10 +195,10 @@ pub fn button_colors(variant: ButtonVariant, state: ButtonState) -> ButtonColors
     use color::*;
     // Base background per variant at rest. Hover lightens, press darkens.
     let (bg_rest, border_rest, text_rest) = match variant {
-        ButtonVariant::Default => (DUSK, BRASS, PARCHMENT),
-        ButtonVariant::Primary => (TWILIGHT, GOLD, CHAMPAGNE),
-        ButtonVariant::Danger => (INDIGO, RUBY, alpha(RUBY, 1.0)),
-        ButtonVariant::Subtle => (MIDNIGHT, SLATE, MIST),
+        ButtonVariant::Default => (WALNUT_SOFT, BRASS, PARCHMENT),
+        ButtonVariant::Primary => (WALNUT_BRIGHT, GOLD, CHAMPAGNE),
+        ButtonVariant::Danger => (WALNUT_RAISED, RUBY, alpha(RUBY, 1.0)),
+        ButtonVariant::Subtle => (WALNUT_DEEP, UMBER, STONE),
     };
 
     let (bg, border, text) = match state {
@@ -208,9 +208,10 @@ pub fn button_colors(variant: ButtonVariant, state: ButtonState) -> ButtonColors
         ButtonState::Disabled => (
             darken(bg_rest, 0.35),
             darken(border_rest, 0.4),
-            alpha(SLATE, 0.6),
+            alpha(UMBER, 0.6),
         ),
     };
 
     ButtonColors { bg, border, text }
 }
+

@@ -195,11 +195,11 @@ pub fn hand_tile_keyword_lines(
 
     match tile.suit {
         Suit::Flower => {
-            lines.push(("Flower · wildcard in one meld".into(), color::MIST));
-            lines.push(("Face · no base chips".into(), color::SLATE));
+            lines.push(("Flower · wildcard in one meld".into(), color::STONE));
+            lines.push(("Face · no base chips".into(), color::UMBER));
         }
         Suit::Season => {
-            lines.push(("Season · bonus tile".into(), color::MIST));
+            lines.push(("Season · bonus tile".into(), color::STONE));
         }
         _ => {
             lines.push((
@@ -219,7 +219,9 @@ pub fn hand_tile_keyword_lines(
             TileEnhancement::Jade => ("Stamp · Jade +20/meld".into(), color::JADE),
             TileEnhancement::Pearl => ("Stamp · Pearl +25".into(), color::JADE),
             TileEnhancement::Gilded => ("Stamp · Gilded +$1/meld".into(), color::GOLD),
-            TileEnhancement::Polychrome => ("Stamp · Polychrome ×1.2/meld".into(), color::TWILIGHT),
+            TileEnhancement::Polychrome => {
+                ("Stamp · Polychrome ×1.2/meld".into(), color::WALNUT_BRIGHT)
+            }
         });
     }
 

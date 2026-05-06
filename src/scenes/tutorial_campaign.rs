@@ -13,7 +13,7 @@ use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
 };
-use crate::render::table_transform::rot_rx_ry_rz_deg;
+use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
@@ -88,7 +88,7 @@ struct TutorialPage {
 const PART1_SUITS_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Bamboos",
-        accent: color::TWILIGHT,
+        accent: color::WALNUT_BRIGHT,
         tiles: &[(Suit::Bamboos, 2), (Suit::Bamboos, 5), (Suit::Bamboos, 8)],
         rows: &[],
         layout: TileGroupLayout::Flat,
@@ -104,7 +104,7 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Characters",
-        accent: color::MIST,
+        accent: color::STONE,
         tiles: &[
             (Suit::Characters, 1),
             (Suit::Characters, 5),
@@ -120,7 +120,7 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
 const PART1_NUMBER_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Simples",
-        accent: color::TWILIGHT,
+        accent: color::WALNUT_BRIGHT,
         tiles: &[(Suit::Bamboos, 3), (Suit::Bamboos, 5), (Suit::Bamboos, 7)],
         rows: &[],
         layout: TileGroupLayout::Flat,
@@ -144,7 +144,7 @@ const PART1_NUMBER_GROUPS: &[TileGroup] = &[
 const PART1_HONOR_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Winds",
-        accent: color::MIST,
+        accent: color::STONE,
         tiles: &[
             (Suit::Wind, 1),
             (Suit::Wind, 2),
@@ -294,7 +294,7 @@ const PART1_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Chiitoitsu",
-        accent: color::MIST,
+        accent: color::STONE,
         tiles: &[],
         rows: CHIITOITSU_ROWS,
         layout: TileGroupLayout::Pairs,
@@ -313,7 +313,7 @@ const PART2_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Chiitoitsu",
-        accent: color::MIST,
+        accent: color::STONE,
         tiles: &[],
         rows: CHIITOITSU_ROWS,
         layout: TileGroupLayout::Pairs,
@@ -357,7 +357,7 @@ const PART4_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Zodiac ribbon",
-        accent: color::TWILIGHT,
+        accent: color::WALNUT_BRIGHT,
         tiles: &[
             (Suit::Characters, 1),
             (Suit::Characters, 9),
@@ -369,7 +369,7 @@ const PART4_GROUPS: &[TileGroup] = &[
     },
     TileGroup {
         label: "Talisman",
-        accent: color::MIST,
+        accent: color::STONE,
         tiles: &[(Suit::Dragon, 1), (Suit::Dragon, 1), (Suit::Bamboos, 6)],
         rows: &[],
         layout: TileGroupLayout::Flat,
@@ -393,7 +393,7 @@ const PART4_GROUPS: &[TileGroup] = &[
 const PART5_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Boss-safe Full Hand",
-        accent: color::TWILIGHT,
+        accent: color::WALNUT_BRIGHT,
         tiles: &[],
         rows: BOSS_SAFE_FULL_HAND_ROWS,
         layout: TileGroupLayout::FullHand,
@@ -611,7 +611,7 @@ impl TutorialCampaignScene {
         Object3d {
             pos: [center_x, item_y + 2.0 * scale, h * 0.18],
             extents: [width, length, width * 0.15],
-            rotation: glam::Mat4::IDENTITY,
+            rotation: [0.0, 0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::ZodiacRibbon {
                 kind: Some(ZodiacKind::Dragon),
@@ -627,7 +627,7 @@ impl TutorialCampaignScene {
             pos: [center_x, item_y + 22.0 * scale, h * 0.13],
             extents: [22.0 * scale, 32.0 * scale, 4.5 * scale],
             // Match the normal shop's upright wall display pose.
-            rotation: glam::Mat4::IDENTITY,
+            rotation: [0.0, 0.0, 0.0],
             color: [0.42, 0.82, 0.55, 1.0],
             kind: Object3dKind::Talisman {
                 kind: TalismanKind::Jade,
@@ -643,7 +643,7 @@ impl TutorialCampaignScene {
             pos: [center_x, item_y + 24.0 * scale, h * 0.14],
             extents: [36.0 * scale, 48.0 * scale, 11.0 * scale],
             // Match the normal shop's gentle shelf lean.
-            rotation: crate::render::table_transform::rot_ry_rx_deg(-5.0, 0.0),
+            rotation: euler_xyz_rad_from_deg(-5.0, 0.0, 0.0),
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Pack {
                 kind: TilePackKind::CoinCache,
@@ -913,8 +913,12 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut mirror_placement: Option<Object3d> = None;
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        frame.starfield();
-        frame.golden_dust();
+        if ctx.effect_layers.starfield {
+            frame.starfield();
+        }
+        if ctx.effect_layers.golden_dust {
+            frame.golden_dust();
+        }
         let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
             eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
@@ -929,7 +933,7 @@ impl SceneBehavior for TutorialCampaignScene {
         let panel_h = h * 0.84;
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::MIDNIGHT,
+            color: color::WALNUT_DEEP,
         });
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, (2.0 * scale).max(1.0)],
@@ -1034,7 +1038,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     relic_size * 0.35 + ctx.layout.mm(rp.lift_mm),
                 ],
                 extents: [face_size, thick, face_size],
-                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 30.0, 0.0),
+                rotation: euler_xyz_rad_from_deg(90.0 + visual.ui_tilt_x_deg, 30.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
                 kind: Object3dKind::Relic {
                     relic_id,
@@ -1082,7 +1086,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     relic_size * 0.38 + ctx.layout.mm(rp.lift_mm),
                 ],
                 extents: [face_size, thick, face_size],
-                rotation: rot_rx_ry_rz_deg(90.0 + visual.ui_tilt_x_deg, 24.0, 0.0),
+                rotation: euler_xyz_rad_from_deg(90.0 + visual.ui_tilt_x_deg, 24.0, 0.0),
                 color: crate::render::theme::color::rarity(0),
                 kind: Object3dKind::Relic {
                     relic_id,
@@ -1138,7 +1142,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     mirror_pos[2] + ctx.layout.mm(mp.lift_mm),
                 ],
                 extents: [mirror_diam, mirror_diam, mirror_diam],
-                rotation: glam::Mat4::IDENTITY,
+                rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Mirror {
                     rotation_x_deg: 36.0,
@@ -1166,7 +1170,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     (layout.trigger_rect[3] * 0.35).max(8.0),
                     layout.trigger_rect[3],
                 ],
-                rotation: glam::Mat4::IDENTITY,
+                rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
                     label: std::borrow::Cow::Borrowed("Trigger"),
@@ -1280,7 +1284,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 term,
                 TextStyle {
                     tier: typography::CAPTION,
-                    color: color::MIST,
+                    color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
@@ -1308,7 +1312,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 .max(112.0 * scale);
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, callout_w, callout_h],
-                color: color::alpha(color::OBSIDIAN, 0.85),
+                color: color::alpha(color::WALNUT_INK, 0.85),
             });
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, 4.0 * scale, callout_h],

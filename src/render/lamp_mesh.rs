@@ -21,6 +21,8 @@
 //! * [`build_bug_wing_mesh`]       — flat moth-shape wing, flapped per-frame (`Glass`).
 //! * [`build_bug_wing_blur_mesh`]  — swept-fan motion-blur surrogate for the flapping wing (`Glass`).
 
+#![allow(dead_code)]
+
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
@@ -52,7 +54,6 @@ pub fn shade_exclusion_radius(local_z: f32) -> f32 {
     if local_z >= SHADE_APEX_Z {
         return 0.0;
     }
-    // Clamp to the shade z-range.
     let t = (local_z / SHADE_RIM_Z).clamp(0.0, 1.0); // 0 at apex, 1 at rim
     SHADE_APEX_R + t * (SHADE_RIM_R - SHADE_APEX_R)
 }
@@ -90,11 +91,17 @@ fn add_cylinder_wall(
             position: [r * c, r * s, z0],
             normal: [c, s, 0.0],
             uv: [u, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         verts.push(Vertex3dTex {
             position: [r * c, r * s, z1],
             normal: [c, s, 0.0],
             uv: [u, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for si in 0..segs {
@@ -143,11 +150,17 @@ fn add_frustum_wall(verts: &mut Vec<Vertex3dTex>, idxs: &mut Vec<u32>, wall: Fru
             position: [r0 * c, r0 * s, z0],
             normal: [ns * nr * c, ns * nr * s, ns * nz],
             uv: [u, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         verts.push(Vertex3dTex {
             position: [r1 * c, r1 * s, z1],
             normal: [ns * nr * c, ns * nr * s, ns * nz],
             uv: [u, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for si in 0..segs {
@@ -175,6 +188,9 @@ fn add_disc(
         position: [0.0, 0.0, z],
         normal: [0.0, 0.0, nz],
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let rim = verts.len() as u32;
     for si in 0..segs {
@@ -184,6 +200,9 @@ fn add_disc(
             position: [r * c, r * s, z],
             normal: [0.0, 0.0, nz],
             uv: [0.5 + 0.5 * c, 0.5 + 0.5 * s],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for si in 0..segs {
@@ -254,11 +273,17 @@ pub fn build_lamp_body_mesh() -> MeshCpu {
                 position: [r_out * c, r_out * s, z],
                 normal: [0.0, 0.0, -1.0],
                 uv: [u, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             verts.push(Vertex3dTex {
                 position: [r_in * c, r_in * s, z],
                 normal: [0.0, 0.0, -1.0],
                 uv: [u, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for si in 0..segs {
@@ -312,6 +337,9 @@ pub fn build_lamp_bulb_mesh() -> MeshCpu {
                 position: [x, y, z],
                 normal: [nx / nlen, ny / nlen, nz / nlen],
                 uv: [lon as f32 / BULB_SEGS as f32, lat as f32 / BULB_LAT as f32],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -396,6 +424,9 @@ pub fn build_bug_body_mesh() -> MeshCpu {
                     lon as f32 / BUG_BODY_SEGS as f32,
                     lat as f32 / BUG_BODY_LAT as f32,
                 ],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -496,6 +527,9 @@ pub fn build_bug_wing_mesh() -> MeshCpu {
             position: [anchor[0], anchor[1], 0.0],
             normal: [0.0, 0.0, nz],
             uv: [0.5, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         // Outline vertices (indices 1..=outline.len() relative to base).
         for p in outline {
@@ -504,6 +538,9 @@ pub fn build_bug_wing_mesh() -> MeshCpu {
                 position: [p[0], p[1], 0.0],
                 normal: [0.0, 0.0, nz],
                 uv: [(p[0] + 0.41) / 1.02, p[1] / 1.13],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         // Fan triangles. Winding flips between top and bottom faces so
@@ -601,6 +638,9 @@ pub fn build_bug_wing_blur_mesh() -> MeshCpu {
                 position: [x, y, z],
                 normal,
                 uv: [u, v],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }

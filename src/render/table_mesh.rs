@@ -30,6 +30,9 @@ pub fn build_table_mesh() -> MeshCpu {
                 position: [x, y, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [u, v],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }

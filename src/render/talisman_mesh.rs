@@ -51,6 +51,9 @@ pub fn build_talisman_mesh() -> MeshCpu {
         position: [0.0, 0.0, front_z],
         normal: front_normal,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let front_ring_start = vertices.len() as u32;
     for &(x, y) in rim.iter() {
@@ -58,6 +61,9 @@ pub fn build_talisman_mesh() -> MeshCpu {
             position: [x, y, front_z],
             normal: front_normal,
             uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -74,6 +80,9 @@ pub fn build_talisman_mesh() -> MeshCpu {
         position: [0.0, 0.0, back_z],
         normal: back_normal,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let back_ring_start = vertices.len() as u32;
     for &(x, y) in rim.iter() {
@@ -81,6 +90,9 @@ pub fn build_talisman_mesh() -> MeshCpu {
             position: [x, y, back_z],
             normal: back_normal,
             uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -103,21 +115,33 @@ pub fn build_talisman_mesh() -> MeshCpu {
             position: [x0, y0, front_z],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, y1, front_z],
             normal: n,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, y1, back_z],
             normal: n,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x0, y0, back_z],
             normal: n,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

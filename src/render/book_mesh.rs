@@ -101,6 +101,9 @@ pub fn build_book_body_mesh() -> MeshCpu {
             position: *pos,
             normal: [0.0, 1.0, 0.0],
             uv: [PAGE_CONTENT_UV_X + uv[0], uv[1]],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     indices.extend_from_slice(&[

@@ -34,6 +34,9 @@ fn push_sphere(
                 ],
                 normal: [nx, ny, nz],
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -95,6 +98,9 @@ pub fn build_bell_tassel_mesh() -> MeshCpu {
                 position: *corner,
                 normal: n,
                 uv: *uv,
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

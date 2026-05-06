@@ -1,9 +1,13 @@
 ; Mahjuro NSIS installer script.
 ;
 ; Expects the following /D defines passed on the makensis command line:
-;   /DVERSION=x.y.z       Display version (no leading "v")
-;   /DSOURCE_DIR=path     Directory containing mahjuro.exe and icon.ico
-;   /DOUTFILE=path        Output installer .exe path
+;   /DVERSION=x.y.z[-pre]  Display version (no leading "v"; may include semver pre-release)
+;   /DVI_PRODUCT_VERSION=a.b.c.d
+;                          Windows binary version resource (four dot-separated integers only).
+;                          For prereleases, pass the core triad + 0 (e.g. VERSION=0.5.0-0 →
+;                          VI_PRODUCT_VERSION=0.5.0.0).
+;   /DSOURCE_DIR=path      Directory containing mahjuro.exe and icon.ico
+;   /DOUTFILE=path         Output installer .exe path
 
 !include "MUI2.nsh"
 
@@ -16,7 +20,7 @@ RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\Mahjuro"
 InstallDirRegKey HKCU "Software\Mahjuro" "InstallDir"
 
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${VI_PRODUCT_VERSION}"
 VIAddVersionKey "ProductName" "Mahjuro"
 VIAddVersionKey "FileDescription" "Mahjuro"
 VIAddVersionKey "FileVersion" "${VERSION}"

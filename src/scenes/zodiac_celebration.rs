@@ -1,11 +1,12 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
-use crate::render::table_transform::rot_rz_ry_rx_deg;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::render::table_transform::rot_fixed_axes_deg_matrix;
+use crate::render::wgpu_renderer::PointLight;
+use crate::scenes::celebration_overlay;
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
 use crate::ui::scene_layout::load_shop_positions;
@@ -18,7 +19,11 @@ pub struct ZodiacCelebrationScene {
     kind: ZodiacKind,
     yaku_name: &'static str,
     new_level: u32,
+    /// Ribbon sway / entrance timing (independent of [`CelebrationStarShowerIntro`]).
     started_at: Instant,
+    intro: celebration_overlay::CelebrationStarShowerIntro,
+    /// Wall-clock start of the post-intro dismiss grace window.
+    intro_grace_start: Option<Instant>,
     dismissed: bool,
 }
 
@@ -29,6 +34,8 @@ impl ZodiacCelebrationScene {
             yaku_name,
             new_level,
             started_at: Instant::now(),
+            intro: celebration_overlay::CelebrationStarShowerIntro::new(),
+            intro_grace_start: None,
             dismissed: false,
         }
     }
@@ -46,16 +53,32 @@ impl SceneBehavior for ZodiacCelebrationScene {
     }
 
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        self.intro
+            .tick_audio(ctx.bus, ctx.headless, &ctx.effect_layers);
         if ctx.headless {
-            self.started_at = Instant::now() - std::time::Duration::from_secs(1);
+            self.intro.jump_to_done();
+            self.intro_grace_start = Some(Instant::now() - Duration::from_secs_f32(1.0));
+            self.started_at = Instant::now() - Duration::from_secs_f32(2.0);
         }
+        if self.intro.is_done_for(&ctx.effect_layers) && self.intro_grace_start.is_none() {
+            self.intro_grace_start = Some(Instant::now());
+        }
+        let grace_ok = self
+            .intro_grace_start
+            .map(|t| {
+                Instant::now()
+                    .saturating_duration_since(t)
+                    .as_secs_f32()
+                    >= DISMISS_GRACE
+            })
+            .unwrap_or(false);
         let has_input = ctx.actions.iter().any(|a| {
             matches!(
                 a,
                 UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
             )
         }) || !ctx.button_clicks.is_empty();
-        if has_input && self.elapsed() >= DISMISS_GRACE {
+        if has_input && self.intro.is_done_for(&ctx.effect_layers) && grace_ok {
             self.dismissed = true;
         }
         if self.dismissed {
@@ -72,12 +95,11 @@ impl SceneBehavior for ZodiacCelebrationScene {
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
 
-        // Semi-transparent dimmer.
-        frame.quad(GpuInstance {
-            rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 0.72],
-        });
-        frame.starfield();
+        let intro_a = self.intro.content_alpha_for(&ctx.effect_layers);
+        celebration_overlay::CelebrationOverlayScratch::new(w, h)
+            .push_dimmer_scaled(&mut frame, intro_a)
+            .push_starfield_if(&mut frame, ctx.effect_layers.starfield)
+            .push_depth_reset_for_celebration_mesh(&mut frame);
 
         let t = self.elapsed();
         let ribbon_w = h * 0.12;
@@ -88,9 +110,16 @@ impl SceneBehavior for ZodiacCelebrationScene {
         // Base 90° pitch matches the shop's wall-hung pose so the ribbon
         // drapes along -Z; the small sin() wobble adds a gentle sway.
         let tilt = 90.0 + (t * 1.2).sin() * 3.0;
-        let alpha = (t / 0.3).clamp(0.0, 1.0);
+        let alpha = (t / 0.3).clamp(0.0, 1.0) * intro_a;
 
-        let base_rotation = rot_rz_ry_rx_deg(tilt, sway_yaw, sway_roll);
+        let rx = tilt.to_radians();
+        let ry = sway_yaw.to_radians();
+        let rz = sway_roll.to_radians();
+        let base_rotation = rot_fixed_axes_deg_matrix(
+            glam::Mat4::from_rotation_z(rz)
+                * glam::Mat4::from_rotation_y(ry)
+                * glam::Mat4::from_rotation_x(rx),
+        );
         // Re-read every frame so arrange-mode commits (which write to
         // shop.json immediately) take effect during a live celebration.
         let positions = load_shop_positions();
@@ -132,7 +161,7 @@ impl SceneBehavior for ZodiacCelebrationScene {
         frame.object3d_batch(vec![Object3d {
             pos: anchor.pos,
             extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
-            rotation: anchor.rotation,
+            rotation: anchor.object3d_rotation(),
             color: [1.0, 1.0, 1.0, alpha],
             kind: Object3dKind::ZodiacRibbon {
                 kind: Some(self.kind),
@@ -142,31 +171,21 @@ impl SceneBehavior for ZodiacCelebrationScene {
             arrange_name: Some(anchor.arrange_name),
         }]);
 
-        let title_font = (h * 0.04).max(24.0);
-        let title_y = h * 0.10;
-        frame.text(TextLabel {
-            text: format!("{} Lvl.{}", self.yaku_name, self.new_level),
-            rect: [0.0, title_y, w, title_font * 1.5],
-            font_px: Some(title_font),
-            color: [0.95, 0.78, 0.25, alpha],
-            align: TextAlign::Center,
-            ..Default::default()
-        });
+        frame.text(celebration_overlay::label_zodiac_level_title(
+            h,
+            w,
+            format!("{} Lvl.{}", self.yaku_name, self.new_level),
+            alpha,
+        ));
+        frame.text(celebration_overlay::label_confirm_to_continue(h, w, t, alpha));
 
-        let prompt_font = (h * 0.028).max(18.0);
-        let prompt_y = h * 0.88;
-        let pulse_alpha = alpha * (0.5 + 0.5 * (t * 3.0).sin());
-        frame.text(TextLabel {
-            text: "Click or press confirm to continue".to_string(),
-            rect: [0.0, prompt_y, w, prompt_font * 1.5],
-            font_px: Some(prompt_font),
-            color: [1.0, 1.0, 1.0, pulse_alpha],
-            align: TextAlign::Center,
-            ..Default::default()
-        });
-
-        frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
+        if self.intro.is_done_for(&ctx.effect_layers) {
+            frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
+        }
         frame.window_title = "Mahjuro".to_string();
+
+        self.intro
+            .push_shooting_star_cascade_if_active(&mut frame, &ctx.effect_layers);
 
         frame
     }

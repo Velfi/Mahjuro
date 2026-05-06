@@ -147,6 +147,11 @@ impl WgpuRenderer {
             });
     }
 
+    /// Returns whether a screenshot path is still queued for the next frame
+    /// after calling `queue_screenshot`. Peeks without consuming the queue
+    /// (`Cell::take` + restore) so the next `render` can still fulfill it.
+    /// Used by the headless screenshot harness to detect a dropped draw where
+    /// the capture never ran.
     pub fn screenshot_pending(&self) -> bool {
         let p = self.pending_screenshot.take();
         let pending = p.is_some();
@@ -160,6 +165,7 @@ impl WgpuRenderer {
         if new_size.width == 0 || new_size.height == 0 {
             return;
         }
+        let new_size = super::super::clamp_render_physical_size(new_size);
         self.size = new_size;
         self.config.width = new_size.width;
         self.config.height = new_size.height;
@@ -177,10 +183,6 @@ impl WgpuRenderer {
         let (dt, dv) = create_depth(&self.device, new_size.width, new_size.height);
         self.depth_texture = dt;
         self.depth_view = dv;
-        self.depth_copy_texture.destroy();
-        let (dct, dcv) = create_depth_copy(&self.device, new_size.width, new_size.height);
-        self.depth_copy_texture = dct;
-        self.depth_copy_view = dcv;
         self.ssr_prev_depth_texture.destroy();
         let (sdt, sdv) = create_depth_copy(&self.device, new_size.width, new_size.height);
         self.ssr_prev_depth_texture = sdt;
@@ -277,24 +279,28 @@ impl WgpuRenderer {
         );
         self.bloom_pong_texture = bot;
         self.bloom_pong_view = bov;
-        self.lit_mesh_ssr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("lit-mesh-ssr-bg"),
-            layout: &self.lit_mesh_ssr_layout,
+        self.lit_mesh_spot_ssr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lit-mesh-spot-ssr-bg"),
+            layout: &self.lit_mesh_spot_ssr_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.lit_mesh_ssr_buffer.as_entire_binding(),
+                    resource: self.spot_lights_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.scene_prev_view),
+                    resource: self.lit_mesh_ssr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
+                    resource: wgpu::BindingResource::TextureView(&self.scene_prev_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: wgpu::BindingResource::Sampler(&self.lit_mesh_ssr_sampler),
                 },
             ],
@@ -305,7 +311,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_extract_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -323,7 +329,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_blur_h_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -341,7 +347,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_blur_v_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -360,7 +366,7 @@ impl WgpuRenderer {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: self.bloom_params_buffer.as_entire_binding(),
+                        resource: self.bloom_composite_params_buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -377,6 +383,25 @@ impl WgpuRenderer {
                 ],
             });
 
+        self.tonemap_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-bg"),
+            layout: &self.tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.tonemap_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+
         self.queue.write_buffer(
             &self.globals_buffer,
             0,
@@ -392,20 +417,41 @@ impl WgpuRenderer {
                 _globals_pad: [0.0; 3],
             }),
         );
+        let inv_bw = 1.0 / bloom_w as f32;
+        let inv_bh = 1.0 / bloom_h as f32;
+        let data0 = [1.1_f32, 0.0, inv_bw, inv_bh];
         self.queue.write_buffer(
-            &self.bloom_params_buffer,
+            &self.bloom_extract_params_buffer,
             0,
             bytemuck::bytes_of(&BloomParams {
-                data0: [1.1, 0.0, 1.0 / bloom_w as f32, 1.0 / bloom_h as f32],
+                data0,
+                data1: [0.0; 4],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_blur_h_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
                 data1: [1.0, 0.0, 0.0, 0.0],
             }),
         );
+        self.queue.write_buffer(
+            &self.bloom_blur_v_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
+                data1: [0.0, 1.0, 0.0, 0.0],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_composite_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
+                data1: [0.0; 4],
+            }),
+        );
 
-        if let Some(ref mut fluid) = self.fluid {
-            fluid.update_screen_size(new_size.width as f32, new_size.height as f32);
-        }
-        // Depth view was just recreated — the volumetric smoke pass needs a
-        // fresh bind group that points at the new view.
-        self.fluid_render_bg_dirty = true;
     }
 }

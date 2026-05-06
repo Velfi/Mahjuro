@@ -223,9 +223,9 @@ impl TutorialOverlay {
         quads.push(GpuInstance {
             rect: [banner_x, banner_y, banner_w, banner_h],
             color: [
-                color::MIDNIGHT[0],
-                color::MIDNIGHT[1],
-                color::MIDNIGHT[2],
+                color::WALNUT_DEEP[0],
+                color::WALNUT_DEEP[1],
+                color::WALNUT_DEEP[2],
                 0.88 * alpha,
             ],
         });

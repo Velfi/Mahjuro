@@ -59,24 +59,6 @@ impl RunState {
                 }
                 "No zodiac"
             }
-            TagKind::RelicOffering => {
-                use crate::core::relic::all_relic_defs;
-                use rand::seq::SliceRandom;
-
-                let defs = all_relic_defs();
-                let mut pool: Vec<_> = defs
-                    .iter()
-                    .filter(|d| self.available_relics.contains(&d.id) && !self.relics.owns(d.id))
-                    .collect();
-                if pool.is_empty() || self.relics.is_full() {
-                    self.gold = self.gold.saturating_add(6);
-                    return "+6 gold (full)";
-                }
-                let mut rng = rand::rng();
-                pool.shuffle(&mut rng);
-                self.relics.active.push(pool[0].id);
-                "Relic gained"
-            }
             TagKind::BonusPlay => {
                 self.tag_bonus_plays += 1;
                 "+1 play"

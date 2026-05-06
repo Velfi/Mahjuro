@@ -2,10 +2,11 @@ use super::*;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
 use crate::core::relic::{all_relic_defs, relic_description_live};
+use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
+use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::tutorial_overlay::TutorialOverlay;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
-use crate::render::theme::color;
 use crate::ui::inspect_plaque::{
     dora_focus_tooltip_strings, gameplay_consumable_description_full, hand_tile_inspect_lines,
     push_focus_tooltip_panel_2d,
@@ -13,7 +14,7 @@ use crate::ui::inspect_plaque::{
 
 impl SceneBehavior for GameplayScene {
     /// Borrow the in-pause-menu options overlay, if the player has opened it.
-    /// Used by the main loop to sync settings (volume, smoke, tile preset)
+    /// Used by the main loop to sync settings (volume, tile preset)
     /// the same way it does for the standalone `OptionsScene`.
     fn pause_options_overlay(&self) -> Option<&options::OptionsScene> {
         self.pause_menu.options_overlay()
@@ -70,7 +71,6 @@ impl SceneBehavior for GameplayScene {
 
         animation_state::tick_wind_and_deal_detection(self, &mut ctx, now);
         animation_state::tick_gold_change_coins(self, &mut ctx);
-        animation_state::tick_initial_smoke_fill(self, now);
         animation_state::tick_candle_and_light_ramp(self, now, dt);
 
         // Deferred round start: fire `apply_blind` once the opening candle
@@ -78,11 +78,11 @@ impl SceneBehavior for GameplayScene {
         // rules, and on-round-start relic triggers (Sweepstakes coin shower,
         // DoraCrown extra dora, future hooks) all happen now instead of
         // before the scene rendered — the player sees them unfold as the
-        // smoke curtain clears. The post-deal wind gust that follows the
+        // transition clears. The post-deal wind gust that follows the
         // deal is what sweeps the remaining curtain away, so timing-wise
         // this lands at the end of the fade-in.
         if let Some(blind) = self.pending_blind {
-            // Keep the felt empty behind the opening smoke curtain. Paths
+            // Keep the felt empty behind the opening transition. Paths
             // that land here may have left a stale hand on the run state
             // (first-round `RunState::new` pre-draws, tutorial retry re-deals
             // before transitioning), and `apply_blind` will do the real
@@ -98,7 +98,7 @@ impl SceneBehavior for GameplayScene {
         // Scene transition in progress — keep animations running but block
         // all input so the player can't alter game state during the fade-out.
         // Also block while `pending_blind` is set: the scene is rendering the
-        // previous round's state behind the opening smoke curtain, and any
+        // previous round's state behind the opening transition, and any
         // input would act on that stale state instead of the round that's
         // about to start.
         if ctx.transitioning || self.pending_blind.is_some() {
@@ -163,11 +163,9 @@ impl SceneBehavior for GameplayScene {
                 .push(crate::game::event_bus::GameEvent::RelicActivated(rid));
         }
 
-        // Zodiac inventory clicks (Patch B finishing): the player can use a
-        // Zodiac card between plays to permanently level its yaku for the
-        // run. Click ids are `ZODIAC_USE_BASE + slot_idx`. Only allowed when
-        // no cascade is mid-flight, which the early return above already
-        // guarantees.
+        // Zodiac inventory: use a card between plays to raise its yaku level for
+        // the run. Click ids are `ZODIAC_USE_BASE + slot_idx`. Blocked while a
+        // cascade is running (handled by the early return above).
         for &cid in ctx.button_clicks {
             if (ZODIAC_USE_BASE..ZODIAC_USE_BASE + 16).contains(&cid) {
                 let idx = (cid - ZODIAC_USE_BASE) as usize;
@@ -209,6 +207,11 @@ impl SceneBehavior for GameplayScene {
                         }
                     }
                     _ => {}
+                }
+                if outcome.rejection.is_none()
+                    && matches!(outcome.data, CommandData::UseConsumable { .. })
+                {
+                    self.clear_discard_undo();
                 }
             }
         }
@@ -396,7 +399,7 @@ impl SceneBehavior for GameplayScene {
                 cascade_token_placements.push(Object3d {
                     pos: [center.0, center.1, 24.0],
                     extents,
-                    rotation: glam::Mat4::IDENTITY,
+                    rotation: [0.0, 0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::CascadeToken {
                         kind: token_kind,
@@ -411,9 +414,8 @@ impl SceneBehavior for GameplayScene {
             let _ = &frame.latest_step;
         }
 
-        // The 2D relic strip is replaced by physical 3D relic boxes sitting
-        // on a dish on the table (built later in this function). No 2D
-        // relic row is rendered in the gameplay scene anymore.
+        // Active relics are 3D medallions in a horizontal tray (`build_relic_tray_and_wind`).
+        // No 2D relic badge strip here — `RelicIcon` GPU path stays empty.
         let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
         // Bottom button bar: sort tablets, discard bowl, bronze mirror — see
@@ -498,7 +500,7 @@ impl SceneBehavior for GameplayScene {
             yaku_tablet_placements,
             structure_showcase: yaku_structure_showcase,
             structure_pile_tokens: yaku_structure_pile_tokens,
-            cam_rot,
+            cam_euler,
         } = input_handler::build_yaku_panel_and_tablets(
             self,
             layout,
@@ -526,6 +528,25 @@ impl SceneBehavior for GameplayScene {
         structure_pile_tokens.extend(yaku_structure_pile_tokens);
 
         let paused = self.pause_menu.paused;
+        let discard_undo_rect: Option<[f32; 4]> = if !paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+            && self.journal_transition.is_none()
+            && crate::persistence::load_settings().discard_undo_enabled
+            && self.discard_undo.is_some()
+            && self.pending_refill.is_none()
+            && let Some(bowl_rect) = ctx.proj.bowl_rect
+        {
+            let zscale = (layout.window_w.min(layout.window_h)) / 600.0 * ctx.ui_scale;
+            let gap = (6.0 * zscale).max(4.0);
+            let btn_h = (28.0 * zscale).max(22.0);
+            let btn_w = (88.0 * zscale).max(72.0);
+            let bx = bowl_rect[0];
+            let by = bowl_rect[1] + bowl_rect[3] + gap;
+            Some([bx, by, btn_w, btn_h])
+        } else {
+            None
+        };
         let btn_rects = [
             suit_btn_rect,
             rank_btn_rect,
@@ -552,7 +573,7 @@ impl SceneBehavior for GameplayScene {
             journal_btn_w,
             action_world_z_py,
             action_hud_table_lift,
-            cam_rot,
+            cam_euler,
             has_structure,
             play_enabled,
             discard_enabled,
@@ -783,10 +804,13 @@ impl SceneBehavior for GameplayScene {
             frame.camera_override = Some(camera);
         }
         frame.background(BackgroundId::Black);
+        // Procedural fog wall (mountain haze): always on during gameplay.
+        // Arrange mode edits `gameplay.fog_wall`; `App::draw` folds preview deltas.
         frame.mountain_haze();
-        // Committed horizon only — interactive `App::draw` overwrites with the
+        // Committed placement only — interactive `App::draw` overwrites with the
         // full arrange preview so `set_haze_tuning` matches `DrawCtx::arrange_preview`.
         frame.gameplay_fog_wall_horizon_y = Some(self.positions.fog_wall.ny.clamp(0.0, 1.0));
+        frame.gameplay_fog_wall_center_x = Some(self.positions.fog_wall.nx.clamp(0.0, 1.0));
         frame.table();
 
         // Build hand tile placements for the showcase pipeline.
@@ -909,7 +933,10 @@ impl SceneBehavior for GameplayScene {
                     plaque_lift,
                 ],
                 extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
-                rotation: glam::Mat4::from_rotation_x((-65.0_f32).to_radians()) * cam_rot,
+                rotation: mat4_to_euler_xyz_rad(
+                    glam::Mat4::from_rotation_x((-65.0_f32).to_radians())
+                        * rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]),
+                ),
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::BeveledSlab,
@@ -976,7 +1003,7 @@ impl SceneBehavior for GameplayScene {
                 extents: [ofuda_w, ofuda_h, layout.mm(3.0)],
                 // Placement rotation applied centrally via
                 // `committed_arrange_rotations`.
-                rotation: cam_rot,
+                rotation: cam_euler,
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::Ofuda,
@@ -1023,7 +1050,7 @@ impl SceneBehavior for GameplayScene {
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
-                    rotation: glam::Mat4::IDENTITY,
+                    rotation: [0.0, 0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::TallyFan {
                         stick_len,
@@ -1049,7 +1076,7 @@ impl SceneBehavior for GameplayScene {
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
-                    rotation: glam::Mat4::IDENTITY,
+                    rotation: [0.0, 0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::TallyFan {
                         stick_len,
@@ -1088,10 +1115,7 @@ impl SceneBehavior for GameplayScene {
             // reel a quarter-height above center lines it up with the
             // vacated top band instead of painting over the bottom line.
             let reel_py = sp.y + sp.h * 0.25;
-            // Extract the yaw component from cam_rot for the reel's rotation_y.
-            // cam_rot is Rx(pitch); its (0,2) entry encodes the x-component of
-            // the rotated Z column, which we use as a proxy yaw. For the plaque
-            // the rotation is purely Rx so yaw is 0 — pass 0.0 directly.
+            // Reel uses world-yaw 0 here; plaque tilt is handled on the plaque mesh.
             let reel_placements = self.score_reel.placements(
                 now,
                 crate::render::world_space::PlacementAnchor {
@@ -1167,6 +1191,22 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
+        if let Some(undo_rect) = discard_undo_rect {
+            let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
+            let bg = if is_focus {
+                color::WALNUT_SOFT
+            } else {
+                color::WALNUT_RAISED
+            };
+            hud_quads.push(GpuInstance {
+                rect: undo_rect,
+                color: bg,
+            });
+            buttons.push(ButtonDef::scene(
+                (undo_rect[0], undo_rect[1], undo_rect[2], undo_rect[3]),
+                super::UNDO_DISCARD_CLICK_ID,
+            ));
+        }
         frame.quads(hud_quads);
         // Committed structure melds + tier tokens: inserted before the hand
         // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
@@ -1207,7 +1247,7 @@ impl SceneBehavior for GameplayScene {
                     layout.mm(18.0),
                     sh + dish_pad_y * 2.0,
                 ],
-                rotation: glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                rotation: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
                 // Aged cream — same tint as the gold dish so the two
                 // ceramic surfaces read as a matched set across the table.
                 color: [0.88, 0.84, 0.78, 1.0],
@@ -1285,10 +1325,7 @@ impl SceneBehavior for GameplayScene {
                 if rect[2] <= 1.0 || rect[3] <= 1.0 {
                     return;
                 }
-                let fs = body_px
-                    .min(rect[3] * 0.24)
-                    .min(rect[2] * 0.14)
-                    .max(10.0);
+                let fs = body_px.min(rect[3] * 0.24).min(rect[2] * 0.14).max(10.0);
                 out.push(TextLabel {
                     rect,
                     text: copy.into(),
@@ -1305,9 +1342,30 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = ctx.proj.mirror_rect {
                 push_centered(&mut hud_text, rect, "Score hand");
             }
+            if let Some(undo_rect) = discard_undo_rect {
+                let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
+                let fs = body_px.min(undo_rect[3] * 0.55).max(10.0);
+                hud_text.push(TextLabel {
+                    rect: undo_rect,
+                    text: "Undo".into(),
+                    color: if is_focus {
+                        color::CHAMPAGNE
+                    } else {
+                        color::STONE
+                    },
+                    font_px: Some(fs),
+                    align: crate::render::wgpu_renderer::TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                });
+            }
         }
 
         frame.texts(hud_text);
+
+        if let Some(undo_rect) = discard_undo_rect {
+            focus_rect_graph.push((FocusTarget::DiscardUndo, undo_rect));
+        }
 
         // Append the deferred focus rect entries (hand tiles, relics,
         // pegs, gold) before the centralized focus ring so the lookup
@@ -1384,6 +1442,7 @@ impl SceneBehavior for GameplayScene {
                                     rid,
                                     &run.relic_counters,
                                     run.total_score_earned,
+                                    Some((&run.relics, i)),
                                 );
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
@@ -1395,7 +1454,7 @@ impl SceneBehavior for GameplayScene {
                                     &name,
                                     &desc,
                                     &format!("Tier · {rare}"),
-                                    color::MIST,
+                                    color::STONE,
                                     false,
                                     false,
                                 );
@@ -1434,10 +1493,8 @@ impl SceneBehavior for GameplayScene {
                                     &run.tile_debuffs,
                                     interaction.selected.get(i).copied().unwrap_or(false),
                                 );
-                                let title = lines
-                                    .first()
-                                    .map(|(s, _)| s.as_str())
-                                    .unwrap_or("Tile");
+                                let title =
+                                    lines.first().map(|(s, _)| s.as_str()).unwrap_or("Tile");
                                 let desc = lines
                                     .iter()
                                     .skip(1)
@@ -1476,6 +1533,22 @@ impl SceneBehavior for GameplayScene {
                                 &desc,
                                 &cta,
                                 color::GOLD,
+                                false,
+                                false,
+                            );
+                        }
+                        FocusTarget::DiscardUndo => {
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                layout.window_w,
+                                layout.window_h,
+                                ctx.ui_scale,
+                                Some(rect),
+                                "Undo discard",
+                                "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
+                                "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
+                                color::CHAMPAGNE,
                                 false,
                                 false,
                             );

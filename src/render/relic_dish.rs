@@ -92,6 +92,9 @@ pub fn build_pack_mesh() -> MeshCpu {
         position: [0.0, -0.5, 0.0],
         normal: [0.0, -1.0, 0.0],
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let front_ring_start = vertices.len() as u32;
     for p in silhouette.iter() {
@@ -99,6 +102,9 @@ pub fn build_pack_mesh() -> MeshCpu {
             position: [p[0], -0.5, p[1]],
             normal: [0.0, -1.0, 0.0],
             uv: uv_of(*p),
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     let n = silhouette.len() as u32;
@@ -118,6 +124,9 @@ pub fn build_pack_mesh() -> MeshCpu {
         position: [0.0, 0.5, 0.0],
         normal: [0.0, 1.0, 0.0],
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let back_ring_start = vertices.len() as u32;
     for p in silhouette.iter() {
@@ -126,6 +135,9 @@ pub fn build_pack_mesh() -> MeshCpu {
             normal: [0.0, 1.0, 0.0],
             // Mirror U so the back reads upright when rotated 180° about Z.
             uv: [1.0 - (p[0] + 0.5), 0.5 - p[1]],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..n {
@@ -169,11 +181,17 @@ pub fn build_pack_mesh() -> MeshCpu {
                 position: [p[0], -0.5, p[1]],
                 normal: n,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [p[0], 0.5, p[1]],
                 normal: n,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -428,6 +446,9 @@ pub fn build_dish_mesh() -> MeshCpu {
                 position: *corner,
                 normal: *normal,
                 uv: *uv,
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -484,6 +505,9 @@ pub fn build_round_dish_mesh() -> MeshCpu {
             position: [0.0, BOTTOM, 0.0],
             normal: [0.0, -1.0, 0.0],
             uv: [0.5, 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         for i in 0..SEGS {
             let a = angle(i);
@@ -491,6 +515,9 @@ pub fn build_round_dish_mesh() -> MeshCpu {
                 position: [BASE_R * a.cos(), BOTTOM, BASE_R * a.sin()],
                 normal: [0.0, -1.0, 0.0],
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for i in 0..SEGS {
@@ -527,21 +554,33 @@ pub fn build_round_dish_mesh() -> MeshCpu {
                 position: [bx0, BOTTOM, bz0],
                 normal: n0,
                 uv: [0.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [bx1, BOTTOM, bz1],
                 normal: n1,
                 uv: [1.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [tx1, RIM_TOP, tz1],
                 normal: n1,
                 uv: [1.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [tx0, RIM_TOP, tz0],
                 normal: n0,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
@@ -561,21 +600,33 @@ pub fn build_round_dish_mesh() -> MeshCpu {
             position: [ix0, RIM_TOP, iz0],
             normal: n,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ox0, RIM_TOP, oz0],
             normal: n,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ox1, RIM_TOP, oz1],
             normal: n,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix1, RIM_TOP, iz1],
             normal: n,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -604,21 +655,33 @@ pub fn build_round_dish_mesh() -> MeshCpu {
                 position: [bx1, RECESS_FLOOR, bz1],
                 normal: n1,
                 uv: [0.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [bx0, RECESS_FLOOR, bz0],
                 normal: n0,
                 uv: [1.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [tx0, RIM_TOP, tz0],
                 normal: n0,
                 uv: [1.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [tx1, RIM_TOP, tz1],
                 normal: n1,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
@@ -631,6 +694,9 @@ pub fn build_round_dish_mesh() -> MeshCpu {
             position: [0.0, RECESS_FLOOR, 0.0],
             normal: [0.0, 1.0, 0.0],
             uv: [0.5, 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         for i in 0..SEGS {
             let a = angle(i);
@@ -638,6 +704,9 @@ pub fn build_round_dish_mesh() -> MeshCpu {
                 position: [INNER_BASE_R * a.cos(), RECESS_FLOOR, INNER_BASE_R * a.sin()],
                 normal: [0.0, 1.0, 0.0],
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for i in 0..SEGS {
@@ -794,6 +863,9 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
                 position: [rr * cx, y, rr * cz],
                 normal: [nr * cx, ny, nr * cz],
                 uv: [(i as f32) / (SEGS as f32), (y + 0.5)],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -821,6 +893,9 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
             position: [0.0, bottom_y, 0.0],
             normal: [0.0, -1.0, 0.0],
             uv: [0.5, 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         for i in 0..SEGS {
             let a = angle(i);
@@ -830,6 +905,9 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
                 position: [rr * a.cos(), bottom_y, rr * a.sin()],
                 normal: [0.0, -1.0, 0.0],
                 uv: [0.5 + 0.5 * a.cos(), 0.5 + 0.5 * a.sin()],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for i in 0..SEGS {
@@ -866,21 +944,33 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
                 position: [or0 * a0.cos(), oy, or0 * a0.sin()],
                 normal: n,
                 uv: [0.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [or1 * a1.cos(), oy, or1 * a1.sin()],
                 normal: n,
                 uv: [1.0, 0.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [ir1 * a1.cos(), iy, ir1 * a1.sin()],
                 normal: n,
                 uv: [1.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             vertices.push(Vertex3dTex {
                 position: [ir0 * a0.cos(), iy, ir0 * a0.sin()],
                 normal: n,
                 uv: [0.0, 1.0],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
             // CCW from above.
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -903,6 +993,9 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
                 position: [rr * cx, y, rr * cz],
                 normal: [nr * cx, ny, nr * cz],
                 uv: [(i as f32) / (SEGS as f32), 1.0 - (y + 0.5)],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }
@@ -929,119 +1022,6 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
     }
 }
 
-/// Folded "tent card" mesh: two flat quads meeting at a top crease along the
-/// +Z axis, sitting on the XZ plane. Local extents -0.5..0.5 on X, 0..0.5 on
-/// Y (bottom edges rest at y=0), -0.5..0.5 on Z. Each face has UV (0,0) at
-/// the bottom-left so a portrait-oriented decal reads upright on each side.
-///
-/// Triangles are emitted for both faces of each side (4 triangles total) so
-/// the card reads from any angle without backface-culling concerns.
-pub fn build_tent_card_mesh() -> MeshCpu {
-    let mut vertices: Vec<Vertex3dTex> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
-    // Side A: from (-x, 0, +z) at the bottom-front to the crease at (0, +y, 0).
-    // Slanted plane facing roughly -X / +Z.
-    // Side B: mirror facing +X / -Z.
-    let half = 0.5_f32;
-    let top = 0.5_f32;
-
-    // Compute side-A normal: plane spanned by (bottom edge along Z) and
-    // (slope from bottom-front to crease). Bottom edge: (-half,0,-half) →
-    // (-half,0,+half). Slope at the front: (-half,0,+half) → (0,+top,0).
-    // Cross product gives outward normal.
-    let na = {
-        let e1 = [0.0, 0.0, 1.0];
-        let e2 = [half, top, -half];
-        let n = [
-            e1[1] * e2[2] - e1[2] * e2[1],
-            e1[2] * e2[0] - e1[0] * e2[2],
-            e1[0] * e2[1] - e1[1] * e2[0],
-        ];
-        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
-        [n[0] / len, n[1] / len, n[2] / len]
-    };
-    let nb = [-na[0], na[1], -na[2]];
-
-    // Side A: outward face (front-left).
-    {
-        let base = vertices.len() as u32;
-        let n = na;
-        // Bottom-back, bottom-front, top-front (crease back), top-back (crease front)
-        // Quad corners CCW viewed along -na:
-        //   bot-left  = (-half, 0, -half)
-        //   bot-right = (-half, 0,  half)
-        //   top-right = (0, top,  half)
-        //   top-left  = (0, top, -half)
-        let corners = [
-            ([-half, 0.0, -half], [0.0, 1.0]),
-            ([-half, 0.0, half], [1.0, 1.0]),
-            ([0.0, top, half], [1.0, 0.0]),
-            ([0.0, top, -half], [0.0, 0.0]),
-        ];
-        for (p, uv) in corners.iter() {
-            vertices.push(Vertex3dTex {
-                position: *p,
-                normal: n,
-                uv: *uv,
-            });
-        }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-        // Backside of side A (so the quad reads from the inner fold too).
-        let base2 = vertices.len() as u32;
-        let n_back = [-n[0], -n[1], -n[2]];
-        for (p, uv) in corners.iter() {
-            vertices.push(Vertex3dTex {
-                position: *p,
-                normal: n_back,
-                uv: *uv,
-            });
-        }
-        indices.extend_from_slice(&[base2, base2 + 2, base2 + 1, base2, base2 + 3, base2 + 2]);
-    }
-
-    // Side B: mirror of side A (front-right).
-    {
-        let base = vertices.len() as u32;
-        let n = nb;
-        let corners = [
-            ([half, 0.0, half], [0.0, 1.0]),
-            ([half, 0.0, -half], [1.0, 1.0]),
-            ([0.0, top, -half], [1.0, 0.0]),
-            ([0.0, top, half], [0.0, 0.0]),
-        ];
-        for (p, uv) in corners.iter() {
-            vertices.push(Vertex3dTex {
-                position: *p,
-                normal: n,
-                uv: *uv,
-            });
-        }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-        let base2 = vertices.len() as u32;
-        let n_back = [-n[0], -n[1], -n[2]];
-        for (p, uv) in corners.iter() {
-            vertices.push(Vertex3dTex {
-                position: *p,
-                normal: n_back,
-                uv: *uv,
-            });
-        }
-        indices.extend_from_slice(&[base2, base2 + 2, base2 + 1, base2, base2 + 3, base2 + 2]);
-    }
-
-    MeshCpu {
-        vertices,
-        indices,
-        default_material: MaterialParams {
-            kind: MaterialKind::Plain,
-            base_color: [0.96, 0.93, 0.84, 1.0],
-            specular_strength: 0.10,
-            specular_power: 8.0,
-        },
-    }
-}
-
 /// Build a small octagonal relic body for both in-world props and UI turntable
 /// viewers. The broad front/back faces read well with generated object art
 /// textures, while the beveled outline catches highlights more like a keepsake
@@ -1063,6 +1043,9 @@ pub fn build_relic_mesh() -> MeshCpu {
                 position: *corner,
                 normal,
                 uv: *uv,
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -1089,12 +1072,18 @@ pub fn build_relic_mesh() -> MeshCpu {
         position: [0.0, HALF_Y, 0.0],
         normal: [0.0, 1.0, 0.0],
         uv: UV_CENTER,
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     for p in &ring {
         vertices.push(Vertex3dTex {
             position: [p[0], HALF_Y, p[2]],
             normal: [0.0, 1.0, 0.0],
             uv: [0.5 + p[0], 0.5 + p[2]],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -1109,12 +1098,18 @@ pub fn build_relic_mesh() -> MeshCpu {
         position: [0.0, -HALF_Y, 0.0],
         normal: [0.0, -1.0, 0.0],
         uv: UV_CENTER,
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     for p in &ring {
         vertices.push(Vertex3dTex {
             position: [p[0], -HALF_Y, p[2]],
             normal: [0.0, -1.0, 0.0],
             uv: [0.5 + p[0], 0.5 + p[2]],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -1272,6 +1267,9 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
                 position: [lx, HALF_Y, lz],
                 normal: [0.0, 1.0, 0.0],
                 uv: to_uv(x, y),
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for tri in buffers.indices.chunks_exact(3) {
@@ -1291,6 +1289,9 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
                 position: [lx, -HALF_Y, lz],
                 normal: [0.0, -1.0, 0.0],
                 uv: to_uv(x, y),
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
         for tri in buffers.indices.chunks_exact(3) {
@@ -1330,21 +1331,33 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
                     position: [lx0, -HALF_Y, lz0],
                     normal: [normal.x, normal.y, normal.z],
                     uv: uv0,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
                 });
                 vertices.push(Vertex3dTex {
                     position: [lx1, -HALF_Y, lz1],
                     normal: [normal.x, normal.y, normal.z],
                     uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
                 });
                 vertices.push(Vertex3dTex {
                     position: [lx1, HALF_Y, lz1],
                     normal: [normal.x, normal.y, normal.z],
                     uv: uv1,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
                 });
                 vertices.push(Vertex3dTex {
                     position: [lx0, HALF_Y, lz0],
                     normal: [normal.x, normal.y, normal.z],
                     uv: uv0,
+                    tangent: Vertex3dTex::DEFAULT_TANGENT,
+                    uv_emr: [0.0, 0.0],
+                    color: [1.0, 1.0, 1.0, 1.0],
                 });
                 indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
             }

@@ -36,6 +36,9 @@ pub fn build_coin_mesh() -> MeshCpu {
         position: [0.0, top_y, 0.0],
         normal: top_normal,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let top_ring_start = vertices.len() as u32;
     for &(x, z) in ring.iter() {
@@ -43,6 +46,9 @@ pub fn build_coin_mesh() -> MeshCpu {
             position: [x, top_y, z],
             normal: top_normal,
             uv: [x + 0.5, z + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -59,6 +65,9 @@ pub fn build_coin_mesh() -> MeshCpu {
         position: [0.0, bot_y, 0.0],
         normal: bot_normal,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let bot_ring_start = vertices.len() as u32;
     for &(x, z) in ring.iter() {
@@ -66,6 +75,9 @@ pub fn build_coin_mesh() -> MeshCpu {
             position: [x, bot_y, z],
             normal: bot_normal,
             uv: [x + 0.5, z + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -85,6 +97,9 @@ pub fn build_coin_mesh() -> MeshCpu {
             position: [x, top_y, z],
             normal: n,
             uv: [u, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     let rim_bot_start = vertices.len() as u32;
@@ -96,6 +111,9 @@ pub fn build_coin_mesh() -> MeshCpu {
             position: [x, bot_y, z],
             normal: n,
             uv: [u, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {

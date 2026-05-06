@@ -42,21 +42,33 @@ pub fn build_ribbon_mesh() -> MeshCpu {
             position: [-0.5, y0, HALF_THICKNESS],
             normal: front_normal,
             uv: [0.0, v0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [0.5, y0, HALF_THICKNESS],
             normal: front_normal,
             uv: [1.0, v0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [0.5, y1, HALF_THICKNESS],
             normal: front_normal,
             uv: [1.0, v1],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [-0.5, y1, HALF_THICKNESS],
             normal: front_normal,
             uv: [0.0, v1],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         push_quad(&mut indices, base);
     }
@@ -68,21 +80,33 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         position: [0.5, 0.0, -HALF_THICKNESS],
         normal: back_normal,
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [-0.5, 0.0, -HALF_THICKNESS],
         normal: back_normal,
         uv: [1.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [-0.5, -1.0, -HALF_THICKNESS],
         normal: back_normal,
         uv: [1.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [0.5, -1.0, -HALF_THICKNESS],
         normal: back_normal,
         uv: [0.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     push_quad(&mut indices, base);
 
@@ -93,21 +117,33 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         position: [-0.5, 0.0, -HALF_THICKNESS],
         normal: left_normal,
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [-0.5, 0.0, HALF_THICKNESS],
         normal: left_normal,
         uv: [1.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [-0.5, -1.0, HALF_THICKNESS],
         normal: left_normal,
         uv: [1.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [-0.5, -1.0, -HALF_THICKNESS],
         normal: left_normal,
         uv: [0.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     push_quad(&mut indices, base);
 
@@ -118,21 +154,33 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         position: [0.5, 0.0, HALF_THICKNESS],
         normal: right_normal,
         uv: [0.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [0.5, 0.0, -HALF_THICKNESS],
         normal: right_normal,
         uv: [1.0, 0.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [0.5, -1.0, -HALF_THICKNESS],
         normal: right_normal,
         uv: [1.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
         position: [0.5, -1.0, HALF_THICKNESS],
         normal: right_normal,
         uv: [0.0, 1.0],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     push_quad(&mut indices, base);
 

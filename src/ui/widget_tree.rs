@@ -587,10 +587,8 @@ impl TreeState {
         buttons: &mut Vec<ButtonDef>,
     ) {
         for it in items {
-            let mut def = ButtonDef::scene(
-                (it.rect[0], it.rect[1], it.rect[2], it.rect[3]),
-                it.id.0,
-            );
+            let mut def =
+                ButtonDef::scene((it.rect[0], it.rect[1], it.rect[2], it.rect[3]), it.id.0);
             if let Some(ref t) = it.tooltip {
                 def = def.with_hover_label(t.clone());
             }
@@ -1501,7 +1499,7 @@ fn draw_slider_row(
     // Track background.
     frame.instances.push(GpuInstance {
         rect: [track_x, track_y, track_w, track_h],
-        color: color::OBSIDIAN,
+        color: color::WALNUT_INK,
     });
     // Filled portion.
     let t = ((value - range.0) / (range.1 - range.0)).clamp(0.0, 1.0);

@@ -80,7 +80,7 @@ impl TalismanKind {
             TalismanKind::Pearl => "Pearl Talisman",
             TalismanKind::Gilded => "Gilded Talisman",
             TalismanKind::Polychrome => "Polychrome Talisman",
-            TalismanKind::Kiln => "Kiln",
+            TalismanKind::Kiln => "Kiln Talisman",
             TalismanKind::Bamboo => "Bamboo Talisman",
             TalismanKind::Dots => "Dots Talisman",
             TalismanKind::Characters => "Characters Talisman",

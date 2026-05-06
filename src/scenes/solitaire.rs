@@ -12,7 +12,7 @@ use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFr
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Layout definition ──────────────────────────────────────────────
@@ -259,7 +259,7 @@ impl SceneBehavior for SolitaireScene {
             if id == CLICK_NEW_GAME {
                 self.deal();
             } else if id == CLICK_BACK {
-                return Some(Scene::StartScreen(StartScreenScene::new()));
+                return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
             } else if (id as usize) < self.slots.len() {
                 self.try_match(id as usize);
             }
@@ -267,7 +267,7 @@ impl SceneBehavior for SolitaireScene {
         for a in ctx.actions {
             match a {
                 UiAction::Cancel | UiAction::Pause => {
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
+                    return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
                 }
                 _ => {}
             }

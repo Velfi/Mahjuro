@@ -13,8 +13,9 @@
 //! 1. Scenes push one `DrawCmd::Flame` per candle (as before); the
 //!    gameplay draw loop projects each candle's wick tip into world space
 //!    and supplies that as the emitter anchor.
-//! 2. The renderer calls [`FlameParticleSystem::step`] with the list of
-//!    emitters and a frame delta. The pool ages/spawns/despawns particles.
+//! 2. The renderer calls [`FlameParticleSystem::step`] with emitters,
+//!    frame delta, and a monotonic time (seconds) for shared flicker/curl.
+//!    The pool ages/spawns/despawns particles.
 //! 3. The renderer uploads the live particle array into a per-frame
 //!    instance buffer and dispatches the 3D flame pipeline once.
 //!
@@ -100,8 +101,9 @@ pub struct GpuFlameParticle {
     /// Brightness multiplier inherited from the emitter at spawn time +
     /// live-updated each frame; drives an emission scalar in the frag.
     pub brightness: f32,
-    /// Pad to 32-byte alignment (nice for GPU cache lines).
-    pub _pad: f32,
+    /// 0 = camera-facing billboard plane; 1 = second plane rotated 90°
+    /// around world +Z (cross billboards) so the plume reads volumetric.
+    pub cross_slice: f32,
 }
 
 /// Maximum live particles across *all* candles. 7 candles × ~24 particles
@@ -133,6 +135,11 @@ const RISE_SPEED: f32 = 34.0;
 /// also bends per-pixel (for silhouette deformation); this is the
 /// bulk-motion component that makes the whole plume lean.
 const WIND_ACCEL: f32 = 22.0;
+
+/// Lateral curl / flicker in world XY — uses wall-clock time + emitter
+/// phase so neighbouring candles stay decorrelated but each plume wobbles
+/// coherently.
+const CURL_ACCEL: f32 = 26.0;
 
 pub struct FlameParticleSystem {
     particles: Vec<Particle>,
@@ -183,7 +190,7 @@ impl FlameParticleSystem {
     ///
     /// Returns the number of live particles after the step (bounded by
     /// [`MAX_PARTICLES`]).
-    pub fn step(&mut self, emitters: &[FlameEmitter], dt: f32) -> usize {
+    pub fn step(&mut self, emitters: &[FlameEmitter], dt: f32, time_s: f32) -> usize {
         if dt <= 0.0 {
             return self.live_count();
         }
@@ -218,8 +225,20 @@ impl FlameParticleSystem {
             if let Some(e) = emitters.get(p.emitter as usize) {
                 p.vel.x += e.wind.x * WIND_ACCEL * dt;
                 p.vel.y += 0.0; // wind.y is a visual squash handled in shader
+                // Candle-like lateral wobble: slow envelope + faster ripples.
+                let ep = e.phase * std::f32::consts::TAU;
+                let wob = ep + time_s * 3.15;
+                let slow = time_s * 1.65 + ep;
+                let curl_x =
+                    (wob.sin() * 0.55 + (slow + p.phase * 2.1).sin() * 0.38) * CURL_ACCEL * dt;
+                let curl_y =
+                    (wob.cos() * 0.52 + (slow * 1.12 + p.phase).cos() * 0.34) * CURL_ACCEL * dt;
+                p.vel.x += curl_x;
+                p.vel.y += curl_y;
                 // Mild horizontal damping so particles don't runaway sideways.
-                p.vel.x *= (1.0 - 1.8 * dt).max(0.0);
+                let damp = (1.0 - 1.85 * dt).max(0.0);
+                p.vel.x *= damp;
+                p.vel.y *= damp;
             }
             p.pos += p.vel * dt;
         }
@@ -282,10 +301,12 @@ impl FlameParticleSystem {
     /// Write every live particle into the caller-supplied GPU-staging
     /// buffer. Emitter-derived brightness is refreshed on each write so
     /// the flame ramp tracks the current frame's value, not whatever was
-    /// live at spawn time. Returns the number of instances written.
+    /// live at spawn time. Emits two GPU instances per live particle
+    /// (cross billboards). Returns the number of instances written.
     pub fn fill_gpu_instances(
         &self,
         emitters: &[FlameEmitter],
+        time_s: f32,
         out: &mut Vec<GpuFlameParticle>,
     ) -> usize {
         out.clear();
@@ -294,18 +315,25 @@ impl FlameParticleSystem {
                 continue;
             }
             let normalized_age = (p.age / p.lifetime.max(1e-3)).clamp(0.0, 1.0);
-            let brightness = emitters
+            let (base_b, emit_phase) = emitters
                 .get(p.emitter as usize)
-                .map(|e| e.brightness)
-                .unwrap_or(1.0);
-            out.push(GpuFlameParticle {
-                pos: p.pos.to_array(),
-                age: normalized_age,
-                scale: p.scale,
-                phase: p.phase,
-                brightness,
-                _pad: 0.0,
-            });
+                .map(|e| (e.brightness, e.phase))
+                .unwrap_or((1.0, 0.0));
+            let ep = emit_phase * std::f32::consts::TAU;
+            // Shared low-frequency flicker per candle (phase keeps neighbours apart).
+            let flick = 1.0
+                + 0.085 * (ep + time_s * 6.9).sin() * (time_s * 11.5 + emit_phase * 4.3).sin();
+            let brightness = (base_b * flick).clamp(0.0, 1.38);
+            for cross_slice in [0.0_f32, 1.0_f32] {
+                out.push(GpuFlameParticle {
+                    pos: p.pos.to_array(),
+                    age: normalized_age,
+                    scale: p.scale,
+                    phase: p.phase,
+                    brightness,
+                    cross_slice,
+                });
+            }
         }
         out.len()
     }
@@ -330,8 +358,8 @@ mod tests {
         let mut sys = FlameParticleSystem::new();
         let e = [emitter()];
         // Run several seconds of 60Hz ticks; pool should saturate near the cap.
-        for _ in 0..180 {
-            sys.step(&e, 1.0 / 60.0);
+        for i in 0..180 {
+            sys.step(&e, 1.0 / 60.0, i as f32 / 60.0);
         }
         let n = sys.live_count();
         assert!(
@@ -345,8 +373,8 @@ mod tests {
         let mut sys = FlameParticleSystem::new();
         let e = [emitter()];
         // Settle.
-        for _ in 0..120 {
-            sys.step(&e, 1.0 / 60.0);
+        for i in 0..120 {
+            sys.step(&e, 1.0 / 60.0, i as f32 / 60.0);
         }
         // Every live particle should be above the wick; their z velocity is positive.
         for p in sys.particles.iter().filter(|p| !p.dead) {
@@ -361,13 +389,13 @@ mod tests {
     fn fill_emits_bytes_per_live_particle() {
         let mut sys = FlameParticleSystem::new();
         let e = [emitter()];
-        for _ in 0..120 {
-            sys.step(&e, 1.0 / 60.0);
+        for i in 0..120 {
+            sys.step(&e, 1.0 / 60.0, i as f32 / 60.0);
         }
         let live = sys.live_count();
         let mut out = Vec::new();
-        let n = sys.fill_gpu_instances(&e, &mut out);
-        assert_eq!(n, live);
-        assert_eq!(out.len(), live);
+        let n = sys.fill_gpu_instances(&e, 0.0, &mut out);
+        assert_eq!(n, live * 2);
+        assert_eq!(out.len(), live * 2);
     }
 }

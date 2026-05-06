@@ -13,7 +13,7 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const CLICK_BACK: u32 = 0xE001;
@@ -34,7 +34,7 @@ impl MaterialViewerScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::StartScreen(StartScreenScene::new()))
+            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
         }
     }
 }
@@ -130,7 +130,7 @@ impl SceneBehavior for MaterialViewerScene {
             orbs.push(Object3d {
                 pos: [cx, orb_cy, 0.0],
                 extents: [orb_diameter, orb_diameter, orb_diameter],
-                rotation: glam::Mat4::IDENTITY,
+                rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::MaterialOrb {
                     material: entry.material,
@@ -161,7 +161,7 @@ impl SceneBehavior for MaterialViewerScene {
         let btn_x = (w - btn_w) * 0.5;
         frame.quad(GpuInstance {
             rect: [btn_x, btn_y, btn_w, btn_h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
         frame.text(TextLabel {
             rect: [btn_x, btn_y, btn_w, btn_h],

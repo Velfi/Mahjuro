@@ -1,10 +1,11 @@
 // Fullscreen pass: linear HDR scene+bloom → display encoding.
-// SDR (sRGB swapchain): exposure × ACES fitted curve → linear out (surface applies sRGB encode).
-// HDR / journal Rgba16Float: exposure scale only — leaves headroom for OS/display mapping.
+// SDR (sRGB swapchain): exposure × ACES fitted → linear out (surface applies sRGB encode).
+// HDR swapchain (Rgba16Float): same ACES fitted as SDR (linear out; OS maps extended range).
+// Journal prepass (mode=1): linear × exposure into offscreen float for book mesh sampling.
 
 struct TonemapParams {
     exposure: f32,
-    /// 0 = ACES tonemap for SDR surfaces; 1 = linear × exposure only (HDR float output).
+    /// 0 = ACES tonemap (swapchain SDR or HDR); 1 = linear × exposure (journal prepass only).
     mode: f32,
     _pad: vec2<f32>,
 }
@@ -32,7 +33,6 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VsOut {
     return out;
 }
 
-// Stephen Hill / Narkowicz ACES fitted — compact, neutral.
 fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     let a = 2.51;
     let b = 0.03;

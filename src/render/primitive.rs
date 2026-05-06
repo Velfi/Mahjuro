@@ -127,17 +127,6 @@ impl MaterialSpec {
         }
     }
 
-    /// Polished brass — wider rim halo and more diffuse retention than
-    /// `metal()`, so hanging brass props stay legible in overhead light.
-    pub fn brass() -> Self {
-        Self {
-            kind: MaterialKind::Brass,
-            specular_strength: 1.0,
-            specular_power: 256.0,
-            decal: None,
-        }
-    }
-
     /// Glazed porcelain — cool-white dielectric with a tight pinpoint
     /// highlight, broad wet-glaze lobe, Fresnel rim, and warm wrap-SSS.
     /// The shader also drives crazing (the spider-web of fine cracks
@@ -149,18 +138,6 @@ impl MaterialSpec {
             kind: MaterialKind::Porcelain,
             specular_strength: 0.7,
             specular_power: 128.0,
-            decal: None,
-        }
-    }
-
-    /// Porcelain for **small** props (shop abacus beads, etc.): same glaze
-    /// model as [`Self::porcelain`], but lower spec energy so rims and
-    /// wet-glaze lobes do not read emissive next to dark wood.
-    pub fn porcelain_prop() -> Self {
-        Self {
-            kind: MaterialKind::Porcelain,
-            specular_strength: 0.32,
-            specular_power: 72.0,
             decal: None,
         }
     }
