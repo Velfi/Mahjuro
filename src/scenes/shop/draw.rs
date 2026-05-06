@@ -3,6 +3,7 @@ use super::*;
 use glam::Mat4;
 
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
+use crate::scenes::celebration_overlay;
 
 impl ShopScene {
     /// Tile-pack opening celebration — dimmer, title, pack mesh / reveal tiles.
@@ -18,21 +19,12 @@ impl ShopScene {
             return;
         };
         let n = celeb.tiles.len();
-        frame.quad(GpuInstance {
-            rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 0.72],
-        });
-
-        let title_font = (h * 0.045).max(28.0);
-        let title_y = h * 0.18;
-        frame.text(TextLabel {
-            text: celeb.pack_name.to_string(),
-            rect: [0.0, title_y, w, title_font * 1.5],
-            font_px: Some(title_font),
-            color: color::CHAMPAGNE,
-            align: TextAlign::Center,
-            ..Default::default()
-        });
+        celebration_overlay::CelebrationOverlayScratch::new(w, h).push_dimmer_then_depth_reset(frame);
+        frame.text(celebration_overlay::label_pack_title(
+            h,
+            w,
+            celeb.pack_name.to_string(),
+        ));
 
         match celeb.phase {
             CelebPhase::Closeup => {
@@ -65,17 +57,7 @@ impl ShopScene {
                     arrange_name: Some("shop.celebrations.pack_closeup"),
                 }]);
 
-                let prompt_font = (h * 0.028).max(18.0);
-                let prompt_y = h * 0.88;
-                let pulse_alpha = 0.5 + 0.5 * (t * 3.0).sin();
-                frame.text(TextLabel {
-                    text: "Click or press confirm to open".to_string(),
-                    rect: [0.0, prompt_y, w, prompt_font * 1.5],
-                    font_px: Some(prompt_font),
-                    color: [1.0, 1.0, 1.0, pulse_alpha],
-                    align: TextAlign::Center,
-                    ..Default::default()
-                });
+                frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
             }
             CelebPhase::Reveal => {
                 let tile_size = h * 0.13;
@@ -127,17 +109,10 @@ impl ShopScene {
                     ));
 
                 if celeb.fully_settled() {
-                    let prompt_font = (h * 0.028).max(18.0);
-                    let prompt_y = h * 0.88;
-                    let pulse_alpha = 0.5 + 0.5 * ((celeb.elapsed() * 3.0).sin());
-                    frame.text(TextLabel {
-                        text: "Click or press confirm to continue".to_string(),
-                        rect: [0.0, prompt_y, w, prompt_font * 1.5],
-                        font_px: Some(prompt_font),
-                        color: [1.0, 1.0, 1.0, pulse_alpha],
-                        align: TextAlign::Center,
-                        ..Default::default()
-                    });
+                    let elapsed = celeb.elapsed();
+                    frame.text(celebration_overlay::label_confirm_to_continue(
+                        h, w, elapsed, 1.0,
+                    ));
                 }
             }
         }

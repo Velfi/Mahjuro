@@ -1,9 +1,10 @@
-// Shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES.
+// Shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES (fitted).
 // Separate from `tile_3d.wgsl` (candle pools + artistic lambert floor).
 //
 // Uniform hacks (same `CameraUniform` layout as tiles; shop writer only):
 // - `tile_seed`     = linear HDR exposure multiplier before tonemap
 // - `decal_atlas_uv.x` = ambient scale (0 = punctual-only interior)
+// - `decal_atlas_uv.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -97,6 +98,15 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
     return sum / 9.0;
 }
 
+/// Khronos `KHR_lights_punctual` reference angular falloff (linear ramp in cosine, then squared).
+fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
+    let den = max(cos_inner - cos_outer, 1e-3);
+    let scale = 1.0 / den;
+    let offset = -cos_outer * scale;
+    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
+    return angular * angular;
+}
+
 /// `KHR_lights_punctual` distance attenuation (inverse square × smooth range window).
 fn punctual_attenuation(distance: f32, range_max: f32) -> f32 {
     let d = max(distance, 1e-4);
@@ -109,6 +119,14 @@ fn punctual_attenuation(distance: f32, range_max: f32) -> f32 {
     return att;
 }
 
+fn punctual_attenuation_shop(dist_world: f32, range_world: f32) -> f32 {
+    let inv = cam.decal_atlas_uv.y;
+    let d = select(dist_world, dist_world * inv, inv > 1e-8);
+    let r = select(range_world, range_world * inv, inv > 1e-8);
+    return punctual_attenuation(d, r);
+}
+
+/// Stephen Hill / Narkowicz ACES fitted — stable across all scenes (shared with `tile_3d` / `lit_mesh`).
 fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     let a = 2.51;
     let b = 0.03;
@@ -229,7 +247,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let to_light = light_pos - in.world_pos;
         let dist = length(to_light);
         let L = to_light / max(dist, 1e-4);
-        let atten = punctual_attenuation(dist, range_w);
+        let atten = punctual_attenuation_shop(dist, range_w);
         let radiance = pl.color.rgb * pl.color.a * atten;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0 || length(radiance) <= 0.0) {
@@ -259,7 +277,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let to_frag = in.world_pos - s.pos.xyz;
         let dist = length(to_frag);
         let range_spot = s.pos.w;
-        let atten_spot = punctual_attenuation(dist, range_spot);
+        let atten_spot = punctual_attenuation_shop(dist, range_spot);
         if (atten_spot <= 0.0) {
             continue;
         }
@@ -268,7 +286,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let cos_a = dot(frag_dir, s.dir.xyz);
         let cos_outer = s.dir.w;
         let cos_inner = s.params.x;
-        let spot_factor = smoothstep(cos_outer, cos_inner, cos_a);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, cos_inner, cos_outer);
         if (spot_factor <= 0.0) {
             continue;
         }

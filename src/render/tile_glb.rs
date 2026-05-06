@@ -75,16 +75,101 @@ pub struct LoadedPrimitive {
     pub sampler: GltfSamplerCpu,
 }
 
+/// Drop mesh and decoded texture blobs after GPU upload; keeps factors, alpha, sampler, etc.
+pub(crate) fn release_loaded_primitive_gpu_source_buffers(prim: &mut LoadedPrimitive) {
+    prim.vertices = Vec::new();
+    prim.indices = Vec::new();
+    prim.albedo_rgba = None;
+    prim.normal_rgba = None;
+    prim.metallic_roughness_rgba = None;
+    prim.emissive_rgba = None;
+}
+
 /// All decoded primitives from the default scene (order: depth-first scene traversal).
 pub struct LoadedTile {
     pub primitives: Vec<LoadedPrimitive>,
 }
 
+/// Longest edge (width or height) allowed for glTF-decoded textures. Larger images are
+/// downsampled with a 2×2 box filter (repeat halving) before GPU upload — cheap, chunky, PS2-ish.
+pub const GLTF_TEXTURE_MAX_DIMENSION: u32 = 256;
+
+fn box_downsample_half_rgba8(src: &[u8], w: u32, h: u32) -> (Vec<u8>, u32, u32) {
+    let w_us = w as usize;
+    let h_us = h as usize;
+    let ow = ((w_us + 1) / 2) as u32;
+    let oh = ((h_us + 1) / 2) as u32;
+    let ow_us = ow as usize;
+    let oh_us = oh as usize;
+    let mut dst = vec![0u8; ow_us.saturating_mul(oh_us).saturating_mul(4)];
+    for oy in 0..oh_us {
+        for ox in 0..ow_us {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for dy in 0..2 {
+                let y = oy * 2 + dy;
+                if y >= h_us {
+                    continue;
+                }
+                for dx in 0..2 {
+                    let x = ox * 2 + dx;
+                    if x >= w_us {
+                        continue;
+                    }
+                    let i = (y * w_us + x) * 4;
+                    acc[0] += src[i] as u32;
+                    acc[1] += src[i + 1] as u32;
+                    acc[2] += src[i + 2] as u32;
+                    acc[3] += src[i + 3] as u32;
+                    n += 1;
+                }
+            }
+            let oi = (oy * ow_us + ox) * 4;
+            if n > 0 {
+                dst[oi] = (acc[0] / n) as u8;
+                dst[oi + 1] = (acc[1] / n) as u8;
+                dst[oi + 2] = (acc[2] / n) as u8;
+                dst[oi + 3] = (acc[3] / n) as u8;
+            }
+        }
+    }
+    (dst, ow, oh)
+}
+
+#[inline]
+pub fn clamp_gltf_rgba8_max_dimension(mut pixels: Vec<u8>, mut w: u32, mut h: u32) -> (Vec<u8>, u32, u32) {
+    let cap = GLTF_TEXTURE_MAX_DIMENSION;
+    if cap == 0 || (w <= cap && h <= cap) {
+        return (pixels, w, h);
+    }
+    while w > cap || h > cap {
+        let (next, nw, nh) = box_downsample_half_rgba8(&pixels, w, h);
+        pixels = next;
+        w = nw;
+        h = nh;
+    }
+    (pixels, w, h)
+}
+
+#[inline]
+fn scale_u16_to_u8(v: u16) -> u8 {
+    ((v as u32 * 255 + 32767) / 65535).min(255) as u8
+}
+
+#[inline]
+fn scale_f32_to_u8(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
 /// Convert imported glTF image to RGBA8 for GPU upload.
+///
+/// Decoded images larger than [`GLTF_TEXTURE_MAX_DIMENSION`] on either axis are halved with a 2×2
+/// box filter until both dimensions fit (preserves aspect ratio in a mip-like way).
 pub fn gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32)> {
     let w = img.width;
     let h = img.height;
-    match img.format {
+    let px = w as usize * h as usize;
+    let decoded = match img.format {
         Format::R8G8B8A8 => Some((img.pixels.clone(), w, h)),
         Format::R8G8B8 => {
             let mut v = Vec::with_capacity((w * h * 4) as usize);
@@ -111,14 +196,91 @@ pub fn gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32
             }
             Some((v, w, h))
         }
-        _ => {
-            log::warn!(
-                "unsupported glTF image format {:?}; use a PNG/JPEG base color or RGBA8",
-                img.format
-            );
-            None
+        Format::R16 => {
+            if img.pixels.len() != px * 2 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(2) {
+                    let g = scale_u16_to_u8(u16::from_ne_bytes([ch[0], ch[1]]));
+                    v.extend_from_slice(&[g, g, g, 255]);
+                }
+                Some((v, w, h))
+            }
         }
-    }
+        Format::R16G16 => {
+            if img.pixels.len() != px * 4 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(4) {
+                    let r = scale_u16_to_u8(u16::from_ne_bytes([ch[0], ch[1]]));
+                    let g = scale_u16_to_u8(u16::from_ne_bytes([ch[2], ch[3]]));
+                    v.extend_from_slice(&[r, g, 0, 255]);
+                }
+                Some((v, w, h))
+            }
+        }
+        Format::R16G16B16 => {
+            if img.pixels.len() != px * 6 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(6) {
+                    let r = scale_u16_to_u8(u16::from_ne_bytes([ch[0], ch[1]]));
+                    let g = scale_u16_to_u8(u16::from_ne_bytes([ch[2], ch[3]]));
+                    let b = scale_u16_to_u8(u16::from_ne_bytes([ch[4], ch[5]]));
+                    v.extend_from_slice(&[r, g, b, 255]);
+                }
+                Some((v, w, h))
+            }
+        }
+        Format::R16G16B16A16 => {
+            if img.pixels.len() != px * 8 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(8) {
+                    let r = scale_u16_to_u8(u16::from_ne_bytes([ch[0], ch[1]]));
+                    let g = scale_u16_to_u8(u16::from_ne_bytes([ch[2], ch[3]]));
+                    let b = scale_u16_to_u8(u16::from_ne_bytes([ch[4], ch[5]]));
+                    let a = scale_u16_to_u8(u16::from_ne_bytes([ch[6], ch[7]]));
+                    v.extend_from_slice(&[r, g, b, a]);
+                }
+                Some((v, w, h))
+            }
+        }
+        Format::R32G32B32FLOAT => {
+            if img.pixels.len() != px * 12 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(12) {
+                    let r = scale_f32_to_u8(f32::from_ne_bytes([ch[0], ch[1], ch[2], ch[3]]));
+                    let g = scale_f32_to_u8(f32::from_ne_bytes([ch[4], ch[5], ch[6], ch[7]]));
+                    let b = scale_f32_to_u8(f32::from_ne_bytes([ch[8], ch[9], ch[10], ch[11]]));
+                    v.extend_from_slice(&[r, g, b, 255]);
+                }
+                Some((v, w, h))
+            }
+        }
+        Format::R32G32B32A32FLOAT => {
+            if img.pixels.len() != px * 16 {
+                None
+            } else {
+                let mut v = Vec::with_capacity(px * 4);
+                for ch in img.pixels.chunks_exact(16) {
+                    let r = scale_f32_to_u8(f32::from_ne_bytes([ch[0], ch[1], ch[2], ch[3]]));
+                    let g = scale_f32_to_u8(f32::from_ne_bytes([ch[4], ch[5], ch[6], ch[7]]));
+                    let b = scale_f32_to_u8(f32::from_ne_bytes([ch[8], ch[9], ch[10], ch[11]]));
+                    let a = scale_f32_to_u8(f32::from_ne_bytes([ch[12], ch[13], ch[14], ch[15]]));
+                    v.extend_from_slice(&[r, g, b, a]);
+                }
+                Some((v, w, h))
+            }
+        }
+    };
+    decoded.map(|(p, ww, hh)| clamp_gltf_rgba8_max_dimension(p, ww, hh))
 }
 
 #[inline]

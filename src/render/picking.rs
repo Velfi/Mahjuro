@@ -13,7 +13,7 @@ use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
 use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
 };
-use crate::render::shop_glb::{SHOP_GLTF_PICK_LEAVE_PROP, SHOP_GLTF_PICK_REROLL_PROP};
+use crate::scenes::shop::pick_ids::{PICK_LEAVE_PROP, PICK_REROLL_PROP};
 use crate::render::talisman_mesh::TALISMAN_LOCAL_HALF;
 use crate::render::wgpu_renderer::{
     GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
@@ -24,8 +24,8 @@ use crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
 fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
     match node_name {
         "journal_btn" => Some(ShopHit::Dish(YAKU_JOURNAL_BOOK_PICK_ID)),
-        "restock_btn" => Some(ShopHit::Dish(SHOP_GLTF_PICK_REROLL_PROP)),
-        "exit_btn" => Some(ShopHit::Dish(SHOP_GLTF_PICK_LEAVE_PROP)),
+        "restock_btn" => Some(ShopHit::Dish(PICK_REROLL_PROP)),
+        "exit_btn" => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
         _ if node_name.starts_with("shop_spawn_relic_") => {
             let n = node_name.strip_prefix("shop_spawn_relic_")?;
             let slot: usize = n.parse().ok()?;
@@ -384,7 +384,16 @@ impl WgpuRenderer {
             cam.viewport_h,
             self.shop_env_height_scale(),
         );
-        let env_model = Mat4::from_scale(Vec3::splat(env_s));
+        let env_model = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                    cam.viewport_h,
+                    self.shop_env_height_scale(),
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| Mat4::from_scale(Vec3::splat(env_s)));
         for mesh in &self.shop_env_collision_meshes {
             let Some(hit) = shop_env_collision_node_to_hit(mesh.node_name.as_str()) else {
                 continue;

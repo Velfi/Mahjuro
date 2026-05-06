@@ -11,6 +11,10 @@
 //! For packaged builds (Mahjuro.app, .deb, .msi) the platform packaging
 //! script is responsible for placing the dylib alongside the binary in
 //! the bundle layout — see `scripts/package-macos.sh`.
+//!
+//! Linux does not search the executable directory for shared libraries by
+//! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` can live next
+//! to `mahjuro` (same layout as Steam depots and GitHub release tarballs).
 
 use std::env;
 use std::fs;
@@ -28,52 +32,49 @@ fn main() {
         println!("cargo:rustc-link-lib=delayimp");
     }
 
+    if target.contains("linux") && !target.contains("android") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+    }
+
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let Some(sdk) = env::var_os("STEAM_SDK_LOCATION").map(PathBuf::from) else {
-        // No SDK set — `steamworks-sys` will fall back to its bundled
-        // path or fail with its own clear error. Nothing to copy.
+    copy_steam_redistributable_next_to_binary();
+}
+
+fn copy_steam_redistributable_next_to_binary() {
+    let out_dir = match env::var_os("OUT_DIR") {
+        Some(p) => PathBuf::from(p),
+        None => return,
+    };
+    let Some(profile_dir) = profile_dir(&out_dir) else {
         return;
     };
 
     let target = env::var("TARGET").unwrap_or_default();
-    let (subdir, file) = if target.contains("darwin") {
-        ("osx", "libsteam_api.dylib")
-    } else if target.contains("linux") {
-        let arch = if target.contains("aarch64") {
-            "linuxarm64"
-        } else if target.contains("i686") {
-            "linux32"
-        } else {
-            "linux64"
-        };
-        (arch, "libsteam_api.so")
-    } else if target.contains("windows") {
-        let arch = if target.contains("i686") { "" } else { "win64" };
-        (arch, "steam_api64.dll")
-    } else {
+    let Some((subdir, file)) = steam_redist_names(&target) else {
         return;
     };
 
-    let src = sdk.join("redistributable_bin").join(subdir).join(file);
-    if !src.exists() {
-        // Don't hard-fail: a contributor without the SDK should still be
-        // able to `cargo check` the crate. `steamworks-sys`'s own build
-        // script will surface a real error if linking fails.
-        println!(
-            "cargo:warning=Steam dylib not found at {} — skipping copy",
-            src.display(),
-        );
-        return;
-    }
+    let sdk = env::var_os("STEAM_SDK_LOCATION").map(PathBuf::from);
+    let had_sdk_env = sdk.is_some();
+    let from_sdk = sdk.map(|s| s.join("redistributable_bin").join(subdir).join(file));
 
-    // OUT_DIR is `target/<profile>/build/<crate>-<hash>/out`. Walk up to
-    // the profile dir so the dylib lands next to the final binary.
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let Some(profile_dir) = profile_dir(&out_dir) else {
+    let src = from_sdk
+        .filter(|p| p.exists())
+        .or_else(|| steamworks_sys_out_redist(&out_dir, file));
+
+    let Some(src) = src else {
+        if had_sdk_env {
+            println!(
+                "cargo:warning=Steam redistributable not under STEAM_SDK_LOCATION — \
+                 expected next to the binary for packaged builds; skipping copy of {}",
+                file,
+            );
+        }
         return;
     };
+
     let dst = profile_dir.join(file);
     if let Err(e) = fs::copy(&src, &dst) {
         println!(
@@ -83,6 +84,53 @@ fn main() {
             e,
         );
     }
+}
+
+fn steam_redist_names(target: &str) -> Option<(&'static str, &'static str)> {
+    if target.contains("darwin") {
+        Some(("osx", "libsteam_api.dylib"))
+    } else if target.contains("linux") && !target.contains("android") {
+        let subdir = if target.contains("aarch64") {
+            "linuxarm64"
+        } else if target.contains("i686") {
+            "linux32"
+        } else {
+            "linux64"
+        };
+        Some((subdir, "libsteam_api.so"))
+    } else if target.contains("windows") {
+        let subdir = if target.contains("i686") { "" } else { "win64" };
+        let file = if target.contains("i686") {
+            "steam_api.dll"
+        } else {
+            "steam_api64.dll"
+        };
+        Some((subdir, file))
+    } else {
+        None
+    }
+}
+
+/// After `steamworks-sys` builds, its copy of the Steam API library lives in
+/// `target/.../build/steamworks-sys-<hash>/out/`. Reuse that when
+/// `STEAM_SDK_LOCATION` is unset (crates.io `steamworks-sys` vendors the
+/// redistributable under `lib/steam/`).
+fn steamworks_sys_out_redist(mahjuro_out_dir: &Path, file: &str) -> Option<PathBuf> {
+    let build_dir = mahjuro_out_dir.parent()?.parent()?;
+    let entries = fs::read_dir(build_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(prefix) = name.to_str() else {
+            continue;
+        };
+        if prefix.starts_with("steamworks-sys-") {
+            let candidate = entry.path().join("out").join(file);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// Enable the `debug_menu_enabled` cfg whenever the debug menubar should be

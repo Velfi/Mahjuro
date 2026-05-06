@@ -629,6 +629,11 @@ pub enum DrawCmd {
     /// dish.
     /// Imported `Shop.glb` room mesh (tile-textured pipeline, world-space vertices).
     ShopEnvironment,
+    /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
+    /// draws (same camera) composite by depth among themselves but no longer test
+    /// against geometry drawn before this marker — e.g. pack celebration meshes over
+    /// the shop room without hiding the room in color.
+    ClearSceneDepth,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
@@ -791,6 +796,10 @@ impl UiFrame {
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }
+    /// See [`DrawCmd::ClearSceneDepth`].
+    pub fn clear_scene_depth(&mut self) {
+        self.cmds.push(DrawCmd::ClearSceneDepth);
+    }
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
     }
@@ -879,6 +888,7 @@ impl UiFrame {
                 | DrawCmd::SunlitWater
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::ShopEnvironment
+                | DrawCmd::ClearSceneDepth
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)

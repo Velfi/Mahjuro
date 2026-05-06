@@ -152,10 +152,7 @@ impl App {
                 } else if !self.run.tutorial_shop_enabled() {
                     Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
-                    Scene::Shop(crate::scenes::ShopScene::new(
-                        self.run.run_number,
-                        &mut self.run,
-                    ))
+                    Scene::Shop(crate::scenes::ShopScene::new(&mut self.run))
                 });
                 self.transition_alpha = 1.0;
             }
@@ -805,6 +802,8 @@ impl App {
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
+            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::Solitaire(_) => Some("solitaire"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
@@ -819,8 +818,6 @@ impl App {
         renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
         let sl = self.debug.shop_env_lighting;
         renderer.set_shop_env_render_tune(sl.linear_exposure, sl.ambient_scale, sl.lit_mesh_gltf_punctual_scale);
-        let gl = self.debug.gameplay_lit_rendering;
-        renderer.set_gameplay_lit_render_tune(gl.linear_exposure, gl.ambient_scale);
         // Push mountain-haze art-direction knobs into the haze shader's
         // uniform — lets the Volumetric debug overlay drive density,
         // colour, horizon band, and wind speed live.

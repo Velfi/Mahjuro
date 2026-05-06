@@ -9,7 +9,32 @@ struct CameraUniform {
     tile_seed: f32,
     // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
     decal_atlas_uv: vec4<f32>,
+    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08); w = unused.
+    hdr_tonemap: vec4<f32>,
 };
+
+/// Khronos `KHR_lights_punctual` reference spotlight angular falloff.
+fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
+    let den = max(cos_inner - cos_outer, 1e-3);
+    let scale = 1.0 / den;
+    let offset = -cos_outer * scale;
+    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
+    return angular * angular;
+}
+
+/// Same ACES fit as `shop_glb.wgsl` / `lit_mesh.wgsl`.
+fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp(
+        (color * (a * color + b)) / (color * (c * color + d) + e),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
 @group(0) @binding(1) var base_color: texture_2d<f32>;
@@ -45,7 +70,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma exponent; rest reserved.
+    // extras.x = display gamma; extras.w unused on tiles (lit_mesh shop buffer uses it).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -59,11 +84,11 @@ struct PointLights {
 struct SpotLight {
     // xyz = world-space position, w = falloff radius.
     pos: vec4<f32>,
-    // xyz = normalized direction (light → surface), w = cos(outer half-angle).
+    // xyz = normalized direction (light → fragment), w = cos(outer half-angle).
     dir: vec4<f32>,
     // rgb = linear colour, a = intensity.
     color: vec4<f32>,
-    // x = cos(inner half-angle); fully lit inside inner, smoothstep between inner and outer.
+    // x = cos(inner half-angle); Khronos angular falloff (linear in cos² then square).
     params: vec4<f32>,
 };
 struct SpotLights {
@@ -552,8 +577,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // ── Spotlights ───────────────────────────────────────────────────────
-    // Same distance falloff as point lights, plus an angular mask that
-    // smoothsteps between the inner and outer cosines. Spotlights fold
+    // Same distance falloff as point lights, plus Khronos `KHR_lights_punctual`
+    // angular attenuation. Spotlights fold
     // into `point_contrib` so downstream material composition (blocked-
     // tile dim, hover fresnel) treats them the same as candle light.
     let spot_count = spot_lights.count.x;
@@ -572,7 +597,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let cos_a = dot(frag_dir, s.dir.xyz);
         let cos_outer = s.dir.w;
         let cos_inner = s.params.x;
-        let spot_factor = smoothstep(cos_outer, cos_inner, cos_a);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, cos_inner, cos_outer);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -672,6 +697,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    let out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
+    var out_rgb: vec3<f32>;
+    if (cam.hdr_tonemap.x > 0.5) {
+        var hdr = lit_rgb + cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
+        hdr = hdr * cam.hdr_tonemap.y;
+        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+    } else {
+        out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
+    }
     return vec4<f32>(out_rgb, out_alpha);
 }

@@ -53,6 +53,9 @@ impl WgpuRenderer {
         let relic_debuff_buffer = ctx.relic_debuff_buffer;
         let scene_hdr_attachment = ctx.scene_hdr_attachment;
         match op {
+            RenderOp::ClearSceneDepth => {
+                // Marker only: Pass A is split into subpasses at this op; never drawn here.
+            }
             RenderOp::Background { id, buf_idx } => {
                 if let (Some(bg_tex), Some(inst_buf)) = (
                     self.background_textures.get(id),
@@ -423,38 +426,24 @@ impl WgpuRenderer {
                             pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
                         }
 
-                        // Pass A: gold outline shells for tiles with outline=true.
-                        let has_outline = batch.iter().any(|p| p.outline);
-                        if has_outline {
+                        // Pass A: gold outline shells — one instanced draw per batch.
+                        if let Some(&(base, cnt)) = self.tile_outline_batch_ranges.get(*batch_idx)
+                            && cnt > 0
+                            && self.tile_outline_index_count > 0
+                        {
                             pass.set_pipeline(&self.tile_outline_pipeline);
-                            let mut outline_last_pi: Option<usize> = None;
-                            for (i, p) in batch.iter().enumerate() {
-                                if !p.outline {
-                                    continue;
-                                }
-                                let slot_i = start_slot + i;
-                                if slot_i >= MAX_SHOWCASE_TILE_SLOTS {
-                                    break;
-                                }
-                                let Some(stg) = self.showcase_tiles.get(slot_i) else {
-                                    break;
-                                };
-                                for (pi, prim) in self.tile_primitives.iter().enumerate() {
-                                    if outline_last_pi != Some(pi) {
-                                        pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                                        pass.set_index_buffer(
-                                            prim.index_buffer.slice(..),
-                                            wgpu::IndexFormat::Uint32,
-                                        );
-                                        outline_last_pi = Some(pi);
-                                    }
-                                    let Some(bg) = stg.outline_bind_groups.get(pi) else {
-                                        continue;
-                                    };
-                                    pass.set_bind_group(0, bg, &[]);
-                                    pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                                }
-                            }
+                            pass.set_bind_group(0, &self.tile_outline_frame_bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.tile_outline_vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, self.tile_outline_instance_buffer.slice(..));
+                            pass.set_index_buffer(
+                                self.tile_outline_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(
+                                0..self.tile_outline_index_count,
+                                0,
+                                base..base + cnt,
+                            );
                         }
 
                         // Pass B: regular textured tile meshes (opaque before blend).

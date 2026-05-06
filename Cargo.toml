@@ -46,6 +46,11 @@ rayon = "1.11.0"
 human_format = "1.2.1"
 steamworks = "0.13"
 
+# Patched wgpu-hal: clear stale Metal vertex buffer slots when switching pipelines
+# (fixes Metal validation "unused binding at Buffer index …"). See vendor/wgpu-hal.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = [

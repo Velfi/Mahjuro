@@ -244,9 +244,9 @@ fn default_tile_material() -> TileMaterial {
 )]
 pub enum SurfaceKind {
     /// Lacquered walnut — original surface, glossy clearcoat + SSR.
+    #[default]
     Walnut,
     /// Mahjong-parlor green felt — broad soft sheen, no clearcoat, no SSR.
-    #[default]
     GreenFelt,
 }
 
@@ -274,7 +274,7 @@ impl SurfaceKind {
 }
 
 fn default_surface_kind() -> SurfaceKind {
-    SurfaceKind::GreenFelt
+    SurfaceKind::Walnut
 }
 
 fn default_tileset_name() -> String {
@@ -356,7 +356,7 @@ impl Default for AppSettings {
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
-            surface_kind: SurfaceKind::GreenFelt,
+            surface_kind: SurfaceKind::Walnut,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
             shadows_enabled: true,

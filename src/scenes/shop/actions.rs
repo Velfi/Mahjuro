@@ -185,16 +185,15 @@ fn tutorial_shop_stock(
 }
 
 impl ShopScene {
-    pub fn new(came_from_round: u32, run: &mut crate::game::run::RunState) -> Self {
-        Self::new_with_mode(came_from_round, run, ShopMode::Standard)
+    pub fn new(run: &mut crate::game::run::RunState) -> Self {
+        Self::new_with_mode(run, ShopMode::Standard)
     }
 
     pub fn new_tutorial(run: &mut crate::game::run::RunState) -> Self {
-        Self::new_with_mode(GameEngine::current_run_number(run), run, ShopMode::Tutorial)
+        Self::new_with_mode(run, ShopMode::Tutorial)
     }
 
     fn new_with_mode(
-        came_from_round: u32,
         run: &mut crate::game::run::RunState,
         mode: ShopMode,
     ) -> Self {
@@ -236,7 +235,6 @@ impl ShopScene {
         };
 
         Self {
-            came_from_round,
             mode,
             items,
             zodiac_items,

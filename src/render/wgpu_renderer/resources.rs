@@ -359,8 +359,9 @@ pub(super) fn load_metal_heightmap(
         "mirror-heightmap" => "mirror-heightmap-flat",
         _ => "metal-heightmap-flat",
     };
-    let bytes = match crate::asset_path::get(path) {
-        Some(file) => file.data.to_vec(),
+    let bytes_opt = crate::asset_path::get(path);
+    let bytes = match &bytes_opt {
+        Some(file) => file.data.as_ref(),
         None => {
             log::warn!("{label} asset missing at {path} - using flat fallback");
             return upload_rgba_texture_linear(
@@ -373,7 +374,7 @@ pub(super) fn load_metal_heightmap(
             );
         }
     };
-    match image::load_from_memory(&bytes) {
+    match image::load_from_memory(bytes) {
         Ok(img) => {
             let rgba = img.into_rgba8();
             let (w, h) = rgba.dimensions();

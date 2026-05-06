@@ -1,15 +1,32 @@
 use super::*;
 
-/// HDR scene buffer clear — matches [`crate::render::theme::color::WALNUT_INK`].
+/// HDR scene buffer clear — uniform void behind the table / props.
 #[inline]
 fn scene_viewport_clear() -> wgpu::Color {
-    let c = crate::render::theme::color::WALNUT_INK;
     wgpu::Color {
-        r: f64::from(c[0]),
-        g: f64::from(c[1]),
-        b: f64::from(c[2]),
-        a: f64::from(c[3]),
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
     }
+}
+
+/// Split [`RenderOp`]s at [`RenderOp::ClearSceneDepth`] markers (markers omitted).
+fn split_render_ops_by_clear_depth(ops: &[RenderOp]) -> Vec<&[RenderOp]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, op) in ops.iter().enumerate() {
+        if matches!(op, RenderOp::ClearSceneDepth) {
+            if start < i {
+                out.push(&ops[start..i]);
+            }
+            start = i + 1;
+        }
+    }
+    if start < ops.len() {
+        out.push(&ops[start..]);
+    }
+    out.into_iter().filter(|c| !c.is_empty()).collect()
 }
 
 impl WgpuRenderer {
@@ -518,15 +535,15 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::MoonlitWater => {
-                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
-                        ops.push(RenderOp::MoonlitWater);
-                    }
+                    // Not gated on `effects_quality`: `EffectLayers::BASELINE` forces the
+                    // renderer tier to `Off` for procedural surfaces, but game-over still
+                    // pushes this when `fullscreen_water_backdrop` is on (see
+                    // `effect_layers.rs`).
+                    ops.push(RenderOp::MoonlitWater);
                     i += 1;
                 }
                 DrawCmd::SunlitWater => {
-                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
-                        ops.push(RenderOp::SunlitWater);
-                    }
+                    ops.push(RenderOp::SunlitWater);
                     i += 1;
                 }
                 DrawCmd::MountainHaze => {
@@ -545,6 +562,10 @@ impl WgpuRenderer {
                 }
                 DrawCmd::ShopEnvironment => {
                     ops.push(RenderOp::ShopEnvironment);
+                    i += 1;
+                }
+                DrawCmd::ClearSceneDepth => {
+                    ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
                 }
                 DrawCmd::Quad(_) => {
@@ -1013,6 +1034,7 @@ impl WgpuRenderer {
         );
 
         self.run_showcase_tiles_placement(
+            frame,
             &camera,
             tile_basis,
             tile_preset,
@@ -1026,7 +1048,7 @@ impl WgpuRenderer {
         );
 
         if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
-            self.write_shop_environment_uniforms(&camera, frame.shop_env_gltf_punctual);
+            self.write_shop_environment_uniforms(frame, &camera, frame.shop_env_gltf_punctual);
         }
 
         let mut encoder = self
@@ -1139,6 +1161,11 @@ impl WgpuRenderer {
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
+            let mut pass_a_chunks = split_render_ops_by_clear_depth(&ops);
+            if pass_a_chunks.is_empty() && !ops.is_empty() {
+                pass_a_chunks.push(ops.as_slice());
+            }
+
             macro_rules! pass_a_draw_loop {
                 ($pass:expr, $skip_table:expr, $only_table:expr) => {{
                     for op in &ops {
@@ -1159,6 +1186,44 @@ impl WgpuRenderer {
                             continue;
                         }
                         self.process_op(&mut $pass, op, &process_ctx_scene);
+                    }
+                }};
+            }
+
+            macro_rules! pass_a_draw_chunk {
+                ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
+                    for op in $chunk.iter() {
+                        if matches!(op, RenderOp::TextDraw(_)) {
+                            continue;
+                        }
+                        let is_table = matches!(op, RenderOp::Table);
+                        if $only_table && !is_table {
+                            continue;
+                        }
+                        if $skip_table && is_table {
+                            continue;
+                        }
+                        self.process_op(&mut $pass, op, &process_ctx_scene);
+                    }
+                }};
+            }
+
+            macro_rules! pass_a_debug_axes {
+                ($pass:expr) => {{
+                    if frame.debug_axes {
+                        $pass.set_pipeline(&self.lit_mesh_pipeline);
+                        $pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+                        $pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        $pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                        $pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                        $pass.set_index_buffer(
+                            self.relic_box_mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        for inst in self.debug_axes_instances.iter() {
+                            $pass.set_bind_group(0, &inst.bind_group, &[]);
+                            $pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                        }
                     }
                 }};
             }
@@ -1193,89 +1258,92 @@ impl WgpuRenderer {
                 pass_a_draw_loop!(pass, false, true);
                 drop(pass);
 
-                let ts_scene = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainScene);
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main-pass-scene"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_color_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    occlusion_query_set: None,
-                    timestamp_writes: ts_scene,
-                    multiview_mask: None,
-                });
-                pass_a_draw_loop!(pass, true, false);
-                if frame.debug_axes {
-                    pass.set_pipeline(&self.lit_mesh_pipeline);
-                    pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
-                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        self.relic_box_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for inst in self.debug_axes_instances.iter() {
-                        pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                if !pass_a_chunks.is_empty() {
+                    let n_scene_chunks = pass_a_chunks.len();
+                    for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        let depth_load = if ci == 0 {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(1.0)
+                        };
+                        let is_last_scene_chunk = ci + 1 == n_scene_chunks;
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("main-pass-scene"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &self.scene_color_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            })],
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: depth_load,
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            }),
+                            occlusion_query_set: None,
+                            timestamp_writes: if ci == 0 {
+                                self.gpu_profiler
+                                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainScene)
+                            } else {
+                                None
+                            },
+                            multiview_mask: None,
+                        });
+                        pass_a_draw_chunk!(pass, chunk, true, false);
+                        if is_last_scene_chunk {
+                            pass_a_debug_axes!(pass);
+                        }
                     }
                 }
             } else {
-                let main_ts = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_color_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(scene_viewport_clear()),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    occlusion_query_set: None,
-                    timestamp_writes: main_ts,
-                    multiview_mask: None,
-                });
-                pass_a_draw_loop!(pass, false, false);
-                if frame.debug_axes {
-                    pass.set_pipeline(&self.lit_mesh_pipeline);
-                    pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
-                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        self.relic_box_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for inst in self.debug_axes_instances.iter() {
-                        pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                if !pass_a_chunks.is_empty() {
+                    let n_chunks = pass_a_chunks.len();
+                    for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        let color_load = if ci == 0 {
+                            wgpu::LoadOp::Clear(scene_viewport_clear())
+                        } else {
+                            wgpu::LoadOp::Load
+                        };
+                        let depth_load = wgpu::LoadOp::Clear(1.0);
+                        let is_last_chunk = ci + 1 == n_chunks;
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("main-pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &self.scene_color_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: color_load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            })],
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: depth_load,
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            }),
+                            occlusion_query_set: None,
+                            timestamp_writes: if ci == 0 {
+                                self.gpu_profiler
+                                    .pass_writes(crate::render::gpu_profiler::PassSlot::Main)
+                            } else {
+                                None
+                            },
+                            multiview_mask: None,
+                        });
+                        pass_a_draw_chunk!(pass, chunk, false, false);
+                        if is_last_chunk {
+                            pass_a_debug_axes!(pass);
+                        }
                     }
                 }
             }
@@ -1531,12 +1599,10 @@ impl WgpuRenderer {
             pass.draw(0..3, 0..1);
         }
 
-        let tonemap_mode =
-            if is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float) {
-                1.0f32
-            } else {
-                0.0f32
-            };
+        // Journal prepass writes bloom composite into `journal_scene_texture` for the
+        // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
+        // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
+        let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
         let tonemap_params_buf =
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {

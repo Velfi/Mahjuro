@@ -160,6 +160,7 @@ impl WgpuRenderer {
         if new_size.width == 0 || new_size.height == 0 {
             return;
         }
+        let new_size = super::super::clamp_render_physical_size(new_size);
         self.size = new_size;
         self.config.width = new_size.width;
         self.config.height = new_size.height;

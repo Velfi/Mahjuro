@@ -426,6 +426,7 @@ jobs:
 
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$APPDIR/usr/bin/mahjuro"
           chmod +x "$APPDIR/usr/bin/mahjuro"
+          cp "target/${{ matrix.target }}/release/libsteam_api.so" "$APPDIR/usr/bin/"
 
           cp packaging/AppRun "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
@@ -469,7 +470,8 @@ jobs:
         id: update_archive_linux
         run: |
           ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
-          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" mahjuro
+          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" \
+            mahjuro libsteam_api.so
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Set update archive name

@@ -1,6 +1,7 @@
 //! Scene system: each screen in the game is a `Scene` variant.
 //! Scenes transition by returning `Some(Scene)` from `update()`.
 
+pub mod celebration_overlay;
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
@@ -196,6 +197,8 @@ pub struct UpdateCtx<'a> {
     /// a one-shot capture renders the scene as the player would see it
     /// after settling, not as a dark mid-fade-in.
     pub headless: bool,
+    /// Layer toggles (must match [`DrawCtx::effect_layers`] for the same frame).
+    pub effect_layers: EffectLayers,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this

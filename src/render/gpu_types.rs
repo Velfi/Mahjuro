@@ -251,14 +251,6 @@ pub(crate) struct HandTileGpu {
     /// One bind group per tile-mesh primitive.  Each binds the per-tile uniform
     /// + per-tile decal + that primitive's own albedo texture.
     pub bind_groups: Vec<wgpu::BindGroup>,
-    /// Companion uniform buffer for the gold-metal outline shell. Written
-    /// every frame the tile is *selected* with an inflated model matrix
-    /// (uniform 1.06× scale around the tile center). Always allocated so
-    /// the bind group can stay constant for the lifetime of the tile.
-    pub outline_uniform_buffer: wgpu::Buffer,
-    /// Bind groups that point at `outline_uniform_buffer` instead of the
-    /// regular one. Same layout as `bind_groups`.
-    pub outline_bind_groups: Vec<wgpu::BindGroup>,
     /// Per-tile shadow caster uniform (light_view_proj * model). Written
     /// every frame in lockstep with `uniform_buffer` and consumed by the
     /// shadow pre-pass via `shadow_bind_group`.

@@ -218,20 +218,18 @@ impl WgpuRenderer {
             // walk the main pass uses, but only the position attribute is
             // read by the shadow shader so the bind group is the per-tile
             // shadow uniform, not the multi-prim main bind group.
-            if !self.tile_primitives.is_empty() {
+            if !self.tile_primitives.is_empty() && self.tile_outline_index_count > 0 {
+                shadow_pass.set_vertex_buffer(0, self.tile_outline_vertex_buffer.slice(..));
+                shadow_pass.set_index_buffer(
+                    self.tile_outline_index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
                 for (i, _) in tile_3d_rects.iter() {
                     let Some(htg) = self.hand_tiles.get(*i) else {
                         continue;
                     };
                     shadow_pass.set_bind_group(0, &htg.shadow_bind_group, &[]);
-                    for prim in &self.tile_primitives {
-                        shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                        shadow_pass.set_index_buffer(
-                            prim.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        shadow_pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                    }
+                    shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
                 }
 
                 // Showcase tiles — same mesh, separate GPU resource pool.
@@ -245,14 +243,7 @@ impl WgpuRenderer {
                         break;
                     };
                     shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
-                    for prim in &self.tile_primitives {
-                        shadow_pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                        shadow_pass.set_index_buffer(
-                            prim.index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        shadow_pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                    }
+                    shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
                 }
             }
         }

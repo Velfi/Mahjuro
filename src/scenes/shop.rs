@@ -5,12 +5,18 @@
 mod actions;
 mod draw;
 mod layout;
+pub(crate) mod pick_ids;
 mod shared;
 mod update;
 mod view;
 
 use self::layout::*;
 use self::shared::*;
+
+pub(super) use self::pick_ids::{
+    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_RELIC_DISH,
+    PICK_REROLL_PROP, PICK_SELL_TRAY, PICK_TILE_PACK_BASE,
+};
 
 use rand::RngExt;
 use rand::seq::SliceRandom;
@@ -40,7 +46,6 @@ use super::pick_blind::PickBlindScene;
 pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
-    pub came_from_round: u32,
     mode: ShopMode,
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
@@ -165,29 +170,6 @@ const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// How much the reroll cost increases per use within a single shop visit.
 const REROLL_COST_INCREMENT: u32 = 5;
-/// Pick id for the foreground relic dish.
-const PICK_RELIC_DISH: u32 = 1;
-/// Pick id for the coin dish.
-const PICK_COIN_DISH: u32 = 2;
-/// Pick id for the Yaku Journal book on the shop counter. Reuses the
-/// existing `DishExplicit` + `ShopHit::Dish(u32)` pick path so the shop
-/// can offer the journal without renderer changes — the silhouette is
-/// dish-shaped until proper book art lands, but the click target is
-/// what matters here.
-const PICK_JOURNAL_BOOK: u32 = super::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
-/// Base pick id for the for-sale tile packs on the shop shelf.
-/// Two packs are offered, using ids `PICK_TILE_PACK_BASE` and
-/// `PICK_TILE_PACK_BASE + 1`. Id `6` is reserved for `PICK_LEAVE_PROP`,
-/// so only 2 ids are reserved here.
-const PICK_TILE_PACK_BASE: u32 = 4;
-/// Number of tile packs offered per shop visit.
-const N_TILE_PACKS: usize = 2;
-/// Pick id for the Leave action prop (counter right end).
-const PICK_LEAVE_PROP: u32 = crate::render::shop_glb::SHOP_GLTF_PICK_LEAVE_PROP;
-/// Pick id for the Reroll action prop (counter left end).
-const PICK_REROLL_PROP: u32 = crate::render::shop_glb::SHOP_GLTF_PICK_REROLL_PROP;
-/// Pick id for the sell-return tray (inventory row far left).
-const PICK_SELL_TRAY: u32 = 8;
 
 /// Max for-sale relic slots on the kiosk (must match stock generation).
 const KIOSK_RELIC_SLOTS: usize = 3;
@@ -283,7 +265,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_patron_gift = true;
 
-        let shop = ShopScene::new(1, &mut run);
+        let shop = ShopScene::new(&mut run);
 
         assert!(!shop.items.is_empty());
         assert!(shop.items.iter().any(|item| item.price == 0));
@@ -295,7 +277,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_rich_stock = true;
 
-        let shop = ShopScene::new(1, &mut run);
+        let shop = ShopScene::new(&mut run);
 
         assert!(shop.items.len() >= 2);
         assert!(!run.tag_rich_stock);

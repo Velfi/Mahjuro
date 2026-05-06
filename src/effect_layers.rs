@@ -8,11 +8,10 @@
 //! 1. `procedural_surface_quality` — felt shells + global effects-quality tier
 //! 2. `shadows` — directional shadow map
 //! 3. `ssr` — lacquered-table reflections
-//! 4. `mountain_haze` — currently unused (gameplay draws its fog wall unconditionally)
-//! 5. `starfield`, `golden_dust`, `ember_drift` — fullscreen particle backdrops
-//! 6. `fullscreen_water_backdrop` — game-over moonlit / sunlit water (enabled in [`BASELINE`])
-//! 7. `transition_fullscreen_fx` — dramatic scene transitions
-//! 8. `hdr` — HDR swapchain path (still respects Options when layers allow)
+//! 4. `starfield`, `golden_dust`, `ember_drift` — fullscreen particle backdrops
+//! 5. `fullscreen_water_backdrop` — game-over moonlit / sunlit water (enabled in [`BASELINE`])
+//! 6. `transition_fullscreen_fx` — dramatic scene transitions
+//! 7. `hdr` — HDR swapchain path (still respects Options when layers allow)
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
 use crate::persistence::EffectsQuality;
@@ -24,7 +23,6 @@ pub struct EffectLayers {
     pub ssr: bool,
     /// Felt fluff / `EffectsQuality` tier (also scales procedural vignette layers).
     pub procedural_surface_quality: bool,
-    pub mountain_haze: bool,
     pub starfield: bool,
     pub golden_dust: bool,
     pub ember_drift: bool,
@@ -38,7 +36,6 @@ impl EffectLayers {
         shadows: false,
         ssr: false,
         procedural_surface_quality: false,
-        mountain_haze: false,
         starfield: false,
         golden_dust: false,
         ember_drift: false,
@@ -51,7 +48,6 @@ impl EffectLayers {
         shadows: true,
         ssr: true,
         procedural_surface_quality: true,
-        mountain_haze: true,
         starfield: true,
         golden_dust: true,
         ember_drift: true,

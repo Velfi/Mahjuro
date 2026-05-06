@@ -264,10 +264,7 @@ impl TileSelectScene {
                 progress,
                 &settings,
             );
-            Some(Scene::Shop(ShopScene::new(
-                GameEngine::current_run_number(run),
-                run,
-            )))
+            Some(Scene::Shop(ShopScene::new(run)))
         }
     }
 }
@@ -408,10 +405,7 @@ impl SceneBehavior for TileSelectScene {
                     ctx.progress,
                     &settings,
                 );
-                Some(Scene::Shop(ShopScene::new(
-                    GameEngine::current_run_number(ctx.run),
-                    ctx.run,
-                )))
+                Some(Scene::Shop(ShopScene::new(ctx.run)))
             }
             Some(ModalAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));

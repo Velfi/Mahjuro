@@ -46,6 +46,10 @@ pub(super) enum RenderOp {
     TileFaceQuad(usize),
     /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
+    /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
+    /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
+    /// through [`super::process_op::WgpuRenderer::process_op`].
+    ClearSceneDepth,
     // Skeuomorphic gameplay HUD (phase 1).
     ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
     Object3dBatch {

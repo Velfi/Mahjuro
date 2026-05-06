@@ -45,7 +45,7 @@ struct PointLights {
     // extras.y = wall-clock time in seconds (used by the water material
     //            branch to scroll the surface and animate foam crests).
     // extras.z = candle flame height (lightbake).
-    // extras.w = gameplay punctual scale in binding 0; shop glTF punctual scale in binding 2.
+    // extras.w = `1` on gameplay binding 0; shop glTF punctual scale on binding 2.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -73,6 +73,15 @@ struct TileOccluders {
 };
 @group(1) @binding(1) var<uniform> occluders: TileOccluders;
 
+/// Khronos `KHR_lights_punctual` reference angular falloff (see `shop_glb.wgsl`).
+fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
+    let den = max(cos_inner - cos_outer, 1e-3);
+    let scale = 1.0 / den;
+    let offset = -cos_outer * scale;
+    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
+    return angular * angular;
+}
+
 /// Same as `shop_glb.wgsl` / glTF recommended punctual attenuation.
 fn punctual_attenuation_gltf(distance: f32, range_max: f32) -> f32 {
     let d = max(distance, 1e-4);
@@ -85,8 +94,16 @@ fn punctual_attenuation_gltf(distance: f32, range_max: f32) -> f32 {
     return att;
 }
 
-/// Same ACES tonemap as `shop_glb.wgsl` — shop `lit_mesh` uses this when
-/// `ssr_globals.felt.y` flags unified HDR output.
+/// Shop room scales glTF geometry by `window_h`; inverse-square in world space would need
+/// intensities ~scale². Use document-space distance when `shop_punctual.x` is set instead.
+fn punctual_attenuation_gltf_shop(dist_world: f32, range_world: f32) -> f32 {
+    let inv = ssr_globals.shop_punctual.x;
+    let d = select(dist_world, dist_world * inv, inv > 1e-8);
+    let r = select(range_world, range_world * inv, inv > 1e-8);
+    return punctual_attenuation_gltf(d, r);
+}
+
+/// Same ACES fit as `shop_glb.wgsl` — physical HDR path (`ssr_globals.felt.y` = 1).
 fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     let a = 2.51;
     let b = 0.03;
@@ -201,6 +218,8 @@ struct SsrGlobals {
     // x = felt procedural LOD (0..2); y = physical HDR (glTF punctual + ACES); z = linear exposure;
     // w = ambient hemispheric scale (see `upload_camera_uniforms`).
     felt: vec4<f32>,
+    // x = 1/shop_env_world_scale for shop glTF punctual (document-space falloff); 0 = world units.
+    shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
 @group(3) @binding(2) var ssr_scene_prev: texture_2d<f32>;
@@ -893,16 +912,17 @@ fn shade_felt_shell(
         }
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        let atten_shop = punctual_attenuation_gltf(dist, range_w);
         var atten: f32;
         if (is_sg) {
-            atten = atten_shop;
+            // Shop `KHR_lights_punctual` — inverse-square with document-space option.
+            atten = punctual_attenuation_gltf_shop(dist, range_w);
         } else {
-            let atten_game = pow(
+            // Gameplay / `UiFrame::point_lights`: authored for smooth radius falloff,
+            // not glTF punctual (zodiac celebration, candles, modal relic rig, etc.).
+            atten = pow(
                 clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0),
                 2.0,
             );
-            atten = mix(atten_game, atten_shop, phys_hdr);
         }
         if (atten < 0.001) {
             continue;
@@ -932,15 +952,13 @@ fn shade_felt_shell(
         let dist = length(to_frag);
         let radius = max(s.pos.w, 1.0);
         let t = clamp(1.0 - dist / radius, 0.0, 1.0);
-        let atten_game = t * t;
-        let atten_shop = punctual_attenuation_gltf(dist, s.pos.w);
-        let atten = mix(atten_game, atten_shop, phys_hdr);
+        let atten = t * t;
         if (atten <= 0.0) {
             continue;
         }
         let frag_dir = to_frag / max(dist, 0.0001);
         let cos_a = dot(frag_dir, s.dir.xyz);
-        let spot_factor = smoothstep(s.dir.w, s.params.x, cos_a);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -1177,7 +1195,16 @@ fn fs_main(
         // orients the mesh in world space (collection uses a Y-up
         // overhead camera; shop/gameplay use the Z-up table camera).
         let cap_mask = smoothstep(0.55, 0.82, abs(in.local_n.y));
-        albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
+        // Shop GLB vitrine: caps used `tex_rgb` alone — under punctual + key shadow,
+        // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
+        // by `base_color` like the sides so material + rarity survive.
+        let shop_vitrine_albedo = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+        if (shop_vitrine_albedo) {
+            let tinted = mesh.base_color.rgb * tex_rgb;
+            albedo = mix(mesh.base_color.rgb, tinted, cap_mask);
+        } else {
+            albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
+        }
     }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
@@ -1616,7 +1643,7 @@ fn fs_main(
             let dist = length(to_light);
             var atten: f32;
             if (is_sg) {
-                atten = punctual_attenuation_gltf(dist, range_w);
+                atten = punctual_attenuation_gltf_shop(dist, range_w);
             } else {
                 let t = clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0);
                 atten = t * t;
@@ -1648,7 +1675,7 @@ fn fs_main(
             }
             let frag_dir = to_frag / max(dist, 0.0001);
             let cos_a = dot(frag_dir, s.dir.xyz);
-            let spot_factor = smoothstep(s.dir.w, s.params.x, cos_a);
+            let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
             if (spot_factor <= 0.0) {
                 continue;
             }
@@ -1982,16 +2009,14 @@ fn fs_main(
         }
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        let atten_shop_pt = punctual_attenuation_gltf(dist, range_w);
         var atten: f32;
         if (is_sg) {
-            atten = atten_shop_pt;
+            atten = punctual_attenuation_gltf_shop(dist, range_w);
         } else {
-            let atten_game = pow(
+            atten = pow(
                 clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0),
                 2.0,
             );
-            atten = mix(atten_game, atten_shop_pt, phys_hdr);
         }
         // Skip lights whose attenuation has fallen to zero — no point
         // computing occlusion, diffuse, specular, or SSS for a light
@@ -2386,15 +2411,13 @@ fn fs_main(
         let dist = length(to_frag);
         let radius = max(s.pos.w, 1.0);
         let t_sp = clamp(1.0 - dist / radius, 0.0, 1.0);
-        let atten_game_sp = t_sp * t_sp;
-        let atten_shop_sp = punctual_attenuation_gltf(dist, s.pos.w);
-        let atten_sp = mix(atten_game_sp, atten_shop_sp, phys_hdr);
+        let atten_sp = t_sp * t_sp;
         if (atten_sp <= 0.0) {
             continue;
         }
         let frag_dir = to_frag / max(dist, 0.0001);
         let cos_a = dot(frag_dir, s.dir.xyz);
-        let spot_factor = smoothstep(s.dir.w, s.params.x, cos_a);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -2500,6 +2523,13 @@ fn fs_main(
     if (decal_metallic > 0.001) {
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
+    let shop_vitrine_d = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    if (shop_vitrine_d && is_foil) {
+        diffuse_scale = diffuse_scale * 0.58;
+    }
+    if (shop_vitrine_d && is_talisman) {
+        diffuse_scale = diffuse_scale * 0.62;
+    }
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
         diffuse_scale = 1.0 - f_view * 0.6;
@@ -2511,6 +2541,22 @@ fn fs_main(
         // glossy coat instead. Reinhard-style soft knee preserves the
         // ratio between channels so the chroma stays warm.
         lit = lit / (vec3<f32>(1.0) + lit * 0.55);
+    }
+    // Shop vitrine enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
+    // skip extra `lit` knee so relics don't fall to black next to spec-heavy props.
+    // Conductors: soften only extreme hot spec (metal props), not enough to kill readable highlights.
+    if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8 && is_conductor) {
+        spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
+    }
+    // Vitrine: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
+    // enamel (diffuse-led) isn't the only thing that looks under-lit.
+    let shop_vitrine = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    if (shop_vitrine && is_foil) {
+        spec_acc = spec_acc * 0.22;
+        sheen_acc = sheen_acc * 0.22;
+    } else if (shop_vitrine && is_talisman) {
+        spec_acc = spec_acc * 0.26;
+        sheen_acc = sheen_acc * 0.26;
     }
     // ── Talisman Fresnel albedo tint ───────────────────────────────
     // View-dependent color shift baked into the surface albedo so it
@@ -2567,6 +2613,9 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
+        if (shop_vitrine) {
+            albedo = albedo * 0.86;
+        }
     }
     if (is_enamel) {
         let rim_gold = mix(vec3<f32>(0.92, 0.76, 0.28), mesh.base_color.rgb, 0.35);
@@ -2595,6 +2644,9 @@ fn fs_main(
         // on shadowed edges, which the per-light spec can't deliver.
         let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
         albedo = rim_gain;
+        if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8) {
+            albedo = albedo * 0.84;
+        }
     }
     if (is_glass) {
         let edge = 1.0 - ndv_view;
@@ -2638,7 +2690,19 @@ fn fs_main(
     // Directional shadow map (mesh casters): PCF visibility in key-light
     // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
     // each wick; this adds contact shadows from tall geometry onto the felt.
-    let lit_shadowed = lit * sample_shadow_visibility(in.world_pos);
+    let shop_vitrine_shadow = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    var lit_vitrine = lit;
+    if (shop_vitrine_shadow && is_foil) {
+        lit_vitrine = lit_vitrine * 0.40;
+    }
+    if (shop_vitrine_shadow && is_talisman) {
+        lit_vitrine = lit_vitrine * 0.45;
+    }
+    var shadow_vis = sample_shadow_visibility(in.world_pos);
+    if (shop_vitrine_shadow && is_enamel) {
+        shadow_vis = max(shadow_vis, 0.58);
+    }
+    let lit_shadowed = lit_vitrine * shadow_vis;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee
@@ -2762,7 +2826,11 @@ fn fs_main(
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
     if (phys_hdr > 0.5) {
-        var hdr = rgb + ssr_globals.felt.w * albedo * vec3<f32>(0.08) * diffuse_scale;
+        var amb = ssr_globals.felt.w * 0.08;
+        if (ssr_globals.shop_punctual.x > 1e-8 && is_enamel) {
+            amb = ssr_globals.felt.w * 0.20;
+        }
+        var hdr = rgb + albedo * vec3<f32>(amb) * diffuse_scale;
         hdr = hdr * ssr_globals.felt.z;
         out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
     } else {
