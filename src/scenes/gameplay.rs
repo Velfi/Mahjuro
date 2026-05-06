@@ -17,6 +17,7 @@ use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
 use crate::game::cascade::ScoringCascade;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
+use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::draw_cmd::{DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame};
 use crate::render::flying_coins::FlyingCoinSystem;
@@ -223,6 +224,9 @@ pub struct GameplayScene {
     /// Normalized screen-relative positions for the gameplay scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::GameplayPositions,
+    /// When set, the player can undo the last discard (accessibility option)
+    /// until any other gameplay action invalidates it.
+    pub(super) discard_undo: Option<DiscardUndoSnapshot>,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -259,6 +263,9 @@ const HELP_BADGE_ID: u32 = 0x9100;
 /// help badge) are pushed earlier and win the first-hit search in
 /// `main.rs`'s `MouseInput` handler.
 const GAMEPLAY_3D_HIT_ID: u32 = 0x9200;
+
+/// Click id for the optional post-discard Undo control (2D HUD button).
+const UNDO_DISCARD_CLICK_ID: u32 = 0x9280;
 
 impl GameplayScene {
     pub(super) fn display_tile(
@@ -440,7 +447,12 @@ impl GameplayScene {
             journal_open_target: 0.0,
             journal_was_open: false,
             positions: crate::ui::scene_layout::load_gameplay_positions(),
+            discard_undo: None,
         }
+    }
+
+    pub(super) fn clear_discard_undo(&mut self) {
+        self.discard_undo = None;
     }
 
     /// Enter the gameplay scene for a round that has not yet been applied to

@@ -1,6 +1,10 @@
+use super::view::snap_focus_after_shop_purchase;
 use super::*;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
-use crate::scenes::{MeldGuideScene, OverlayRequest, YakuJournalScene, options};
+use crate::scenes::{
+    ItemInspectHost, ItemInspectScene, MeldGuideScene, OverlayRequest, Scene, YakuJournalScene,
+    options,
+};
 
 impl ShopScene {
     pub(super) fn pause_options_overlay_impl(&self) -> Option<&options::OptionsScene> {
@@ -8,7 +12,7 @@ impl ShopScene {
     }
 
     pub(super) fn has_blocking_overlay_impl(&self) -> bool {
-        self.pause_menu.paused || self.pack_celebration.is_some()
+        self.pause_menu.paused
     }
 
     /// Mouse pick dispatch for shop hits (3D props + screen-space UI buttons).
@@ -64,6 +68,7 @@ impl ShopScene {
                     ctx.bus,
                     ctx.cursor_pos,
                     ctx.overlay_request,
+                    (ctx.layout.window_w, ctx.layout.window_h),
                 );
             }
             return None;
@@ -88,6 +93,7 @@ impl ShopScene {
                 ctx.bus,
                 ctx.cursor_pos,
                 ctx.overlay_request,
+                (ctx.layout.window_w, ctx.layout.window_h),
             );
         }
         None
@@ -99,6 +105,11 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        if std::mem::take(&mut ctx.run.pending_shop_focus_snap_after_pack_celebration) {
+            let w = ctx.layout.window_w;
+            let h = ctx.layout.window_h;
+            snap_focus_after_shop_purchase(self, self.focus, w, h, ctx.run);
+        }
         // Leave bell wobble — ease toward 1 while cursor/focus is on the bell
         // (same hit sources as draw; bypass `live_shop_hit` so Dish props like
         // `PICK_LEAVE_PROP` stay eligible).
@@ -253,48 +264,6 @@ impl ShopScene {
             return None;
         }
 
-        // Tile-pack opening celebration - swallow all input until
-        // the player dismisses it with Confirm or any click.
-        if let Some(ref mut celeb) = self.pack_celebration {
-            let has_input = ctx.actions.iter().any(|a| {
-                matches!(
-                    a,
-                    UiAction::Confirm | UiAction::Cancel | UiAction::CommitDiscard
-                )
-            }) || !ctx.button_clicks.is_empty();
-
-            match celeb.phase {
-                CelebPhase::Closeup => {
-                    // Wait for player click/confirm to tear open the pack.
-                    if has_input {
-                        celeb.phase = CelebPhase::Reveal;
-                        celeb.started_at = Instant::now();
-                        ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
-                    }
-                }
-                CelebPhase::Reveal => {
-                    // Fire a sound event for each newly-revealed tile.
-                    let n = celeb.tiles.len();
-                    while celeb.revealed_count < n
-                        && celeb.tile_progress(celeb.revealed_count) > 0.0
-                    {
-                        ctx.bus
-                            .push(crate::game::event_bus::GameEvent::PackTileRevealed);
-                        celeb.revealed_count += 1;
-                    }
-                    let dominated = celeb.fully_settled() || celeb.dismissed;
-                    if dominated && has_input {
-                        self.pack_celebration = None;
-                        // Deferred from `apply_buy_action` while the celebration
-                        // dimmer hid the HUD — snap to Leave now that it’s visible.
-                        self.focus = Some(ShopFocus::NextRound);
-                        return None;
-                    }
-                }
-            }
-            return None;
-        }
-
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
             // Drain a meld guide request from the pause menu.
@@ -338,7 +307,65 @@ impl ShopScene {
                 .find_map(|(t2, r)| (*t2 == t).then_some(*r))
         });
 
+        let w = ctx.layout.window_w;
+        let h = ctx.layout.window_h;
+
         for &a in ctx.actions {
+            if matches!(a, UiAction::ShopItemInspectToggle) {
+                if let Some(f) = self.focus {
+                    if super::shared::shop_focus_inspectable(f) {
+                        let env_h = self.drawn_env_height_scale.get();
+                        if let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
+                            self, w, h, env_h, &shop, f,
+                        ) {
+                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                                Scene::ItemInspect(ItemInspectScene::new(ItemInspectHost::Shop, orbit)),
+                            )));
+                        }
+                    }
+                }
+                continue;
+            }
+            if matches!(a, UiAction::ShopSellHoldPress) {
+                if focused_sell_action(
+                    self.focus,
+                    self.items.len(),
+                    &self.zodiac_items,
+                    &self.talisman_items,
+                    &shop,
+                )
+                .is_some()
+                    && self.north_sell_hold_started.is_none()
+                {
+                    self.north_sell_hold_started = Some(now);
+                }
+                continue;
+            }
+            if matches!(a, UiAction::ShopSellHoldRelease) {
+                if let Some(start) = self.north_sell_hold_started.take() {
+                    let hold = super::SHOP_SELL_HOLD_SECONDS;
+                    if now.saturating_duration_since(start).as_secs_f32() >= hold {
+                        if let Some(action) = focused_sell_action(
+                            self.focus,
+                            self.items.len(),
+                            &self.zodiac_items,
+                            &self.talisman_items,
+                            &shop,
+                        ) {
+                            self.apply_sell_action(
+                                action,
+                                ctx.run,
+                                ctx.bus,
+                                ctx.cursor_pos,
+                                ctx.overlay_request,
+                                (w, h),
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+
             let dir: Option<FocusDir> = match a {
                 UiAction::FocusUp => Some(FocusDir::Up),
                 UiAction::FocusDown => Some(FocusDir::Down),
@@ -380,6 +407,7 @@ impl ShopScene {
                                     ctx.bus,
                                     ctx.cursor_pos,
                                     ctx.overlay_request,
+                                    (w, h),
                                 );
                             }
                             continue;
@@ -394,6 +422,7 @@ impl ShopScene {
                                     ctx.bus,
                                     ctx.cursor_pos,
                                     ctx.overlay_request,
+                                    (w, h),
                                 );
                             }
                             continue;
@@ -408,6 +437,7 @@ impl ShopScene {
                                     ctx.bus,
                                     ctx.cursor_pos,
                                     ctx.overlay_request,
+                                    (w, h),
                                 );
                             }
                             continue;
@@ -486,6 +516,7 @@ impl ShopScene {
                                 ctx.bus,
                                 ctx.cursor_pos,
                                 ctx.overlay_request,
+                                (w, h),
                             );
                         } else if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
                             // Click-to-open: start the journal transition
@@ -516,6 +547,7 @@ impl ShopScene {
                         ctx.bus,
                         ctx.cursor_pos,
                         ctx.overlay_request,
+                        (w, h),
                     );
                 }
                 continue;
@@ -524,6 +556,7 @@ impl ShopScene {
             if matches!(a, UiAction::Cancel) {
                 self.held_item_drag = None;
                 self.mouse_drag = None;
+                self.north_sell_hold_started = None;
                 self.focus = Some(ShopFocus::NextRound);
                 continue;
             }
@@ -543,6 +576,7 @@ impl ShopScene {
                     ctx.bus,
                     ctx.cursor_pos,
                     ctx.overlay_request,
+                    (w, h),
                 );
                 return None;
             }
@@ -554,6 +588,7 @@ impl ShopScene {
                     ctx.bus,
                     ctx.cursor_pos,
                     ctx.overlay_request,
+                    (w, h),
                 );
                 return None;
             }
@@ -582,6 +617,7 @@ impl ShopScene {
                     ctx.bus,
                     ctx.cursor_pos,
                     ctx.overlay_request,
+                    (w, h),
                 );
             }
             return None;

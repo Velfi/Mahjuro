@@ -43,7 +43,6 @@ mod steam;
 mod ui;
 mod update_check;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -65,6 +64,7 @@ use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabe
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
+use scenes::rumble_lab::RumbleLabScene;
 use scenes::shop::SHOP_DRAG_DROP_ID;
 use scenes::splash::SplashScene;
 use scenes::transition_playground::TransitionPlaygroundScene;
@@ -179,32 +179,12 @@ struct App {
     /// if the cursor moves far enough and is over the sell tray on mouse-up,
     /// a `SHOP_DRAG_DROP_ID` click is injected.
     shop_drag_start: Option<(crate::render::wgpu_renderer::ShopHit, (f32, f32))>,
-    /// When `Some`, the app boots into a single-scene capture mode: hidden
-    /// window, jump to the requested scene, render `warmup_frames`, write a
-    /// PNG, exit. Set by the `screenshot` CLI subcommand.
-    headless_screenshot: Option<HeadlessScreenshot>,
     /// Steamworks integration. Either `Connected` (initialized successfully
     /// and the user is signed into Steam) or `Disabled` (init failed,
     /// Steam isn't running, or `--no-steam` was passed). Every method on
     /// `SteamClient` is safe to call in either state — `Disabled` is a
     /// logged no-op — so no `Option` wrapping is needed at call sites.
     steam: steam::SteamClient,
-}
-
-/// Configuration for one-shot screenshot capture (see `Command::Screenshot`).
-#[derive(Debug, Clone)]
-struct HeadlessScreenshot {
-    output: PathBuf,
-    width: u32,
-    height: u32,
-    /// Counts down on each `RedrawRequested`. When it reaches 0, the next
-    /// frame is captured and the app exits.
-    frames_remaining: u32,
-    /// Number of capture-frame retries used so far. The renderer's
-    /// `draw()` early-returns when the swapchain is Outdated/Lost and
-    /// silently drops the queued screenshot; when that happens we tick
-    /// another frame and retry, bounded by ~30 attempts.
-    retries: u32,
 }
 
 impl App {
@@ -372,7 +352,6 @@ impl App {
                 .flatten(),
             modifiers: ModifiersState::default(),
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
-            headless_screenshot: None,
             steam,
         }
     }

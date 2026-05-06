@@ -45,6 +45,7 @@ self_update = { version = "0.42", features = [
 rayon = "1.11.0"
 human_format = "1.2.1"
 steamworks = "0.13"
+resvg = "0.44"
 
 # Patched wgpu-hal: clear stale Metal vertex buffer slots when switching pipelines
 # (fixes Metal validation "unused binding at Buffer index …"). See vendor/wgpu-hal.

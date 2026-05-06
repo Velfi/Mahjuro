@@ -208,6 +208,11 @@ impl SceneBehavior for GameplayScene {
                     }
                     _ => {}
                 }
+                if outcome.rejection.is_none()
+                    && matches!(outcome.data, CommandData::UseConsumable { .. })
+                {
+                    self.clear_discard_undo();
+                }
             }
         }
 
@@ -523,6 +528,25 @@ impl SceneBehavior for GameplayScene {
         structure_pile_tokens.extend(yaku_structure_pile_tokens);
 
         let paused = self.pause_menu.paused;
+        let discard_undo_rect: Option<[f32; 4]> = if !paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+            && self.journal_transition.is_none()
+            && crate::persistence::load_settings().discard_undo_enabled
+            && self.discard_undo.is_some()
+            && self.pending_refill.is_none()
+            && let Some(bowl_rect) = ctx.proj.bowl_rect
+        {
+            let zscale = (layout.window_w.min(layout.window_h)) / 600.0 * ctx.ui_scale;
+            let gap = (6.0 * zscale).max(4.0);
+            let btn_h = (28.0 * zscale).max(22.0);
+            let btn_w = (88.0 * zscale).max(72.0);
+            let bx = bowl_rect[0];
+            let by = bowl_rect[1] + bowl_rect[3] + gap;
+            Some([bx, by, btn_w, btn_h])
+        } else {
+            None
+        };
         let btn_rects = [
             suit_btn_rect,
             rank_btn_rect,
@@ -1167,6 +1191,22 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
+        if let Some(undo_rect) = discard_undo_rect {
+            let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
+            let bg = if is_focus {
+                color::WALNUT_SOFT
+            } else {
+                color::WALNUT_RAISED
+            };
+            hud_quads.push(GpuInstance {
+                rect: undo_rect,
+                color: bg,
+            });
+            buttons.push(ButtonDef::scene(
+                (undo_rect[0], undo_rect[1], undo_rect[2], undo_rect[3]),
+                super::UNDO_DISCARD_CLICK_ID,
+            ));
+        }
         frame.quads(hud_quads);
         // Committed structure melds + tier tokens: inserted before the hand
         // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
@@ -1302,9 +1342,30 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = ctx.proj.mirror_rect {
                 push_centered(&mut hud_text, rect, "Score hand");
             }
+            if let Some(undo_rect) = discard_undo_rect {
+                let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
+                let fs = body_px.min(undo_rect[3] * 0.55).max(10.0);
+                hud_text.push(TextLabel {
+                    rect: undo_rect,
+                    text: "Undo".into(),
+                    color: if is_focus {
+                        color::CHAMPAGNE
+                    } else {
+                        color::STONE
+                    },
+                    font_px: Some(fs),
+                    align: crate::render::wgpu_renderer::TextAlign::Center,
+                    no_glossary: true,
+                    ..Default::default()
+                });
+            }
         }
 
         frame.texts(hud_text);
+
+        if let Some(undo_rect) = discard_undo_rect {
+            focus_rect_graph.push((FocusTarget::DiscardUndo, undo_rect));
+        }
 
         // Append the deferred focus rect entries (hand tiles, relics,
         // pegs, gold) before the centralized focus ring so the lookup
@@ -1381,6 +1442,7 @@ impl SceneBehavior for GameplayScene {
                                     rid,
                                     &run.relic_counters,
                                     run.total_score_earned,
+                                    Some((&run.relics, i)),
                                 );
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
@@ -1471,6 +1533,22 @@ impl SceneBehavior for GameplayScene {
                                 &desc,
                                 &cta,
                                 color::GOLD,
+                                false,
+                                false,
+                            );
+                        }
+                        FocusTarget::DiscardUndo => {
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                layout.window_w,
+                                layout.window_h,
+                                ctx.ui_scale,
+                                Some(rect),
+                                "Undo discard",
+                                "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
+                                "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
+                                color::CHAMPAGNE,
                                 false,
                                 false,
                             );

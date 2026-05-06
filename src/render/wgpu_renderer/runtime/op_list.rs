@@ -44,6 +44,7 @@ pub(super) enum RenderOp {
     },
     TextDraw(usize),
     TileFaceQuad(usize),
+    PromptIconQuad(usize),
     /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).

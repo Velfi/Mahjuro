@@ -147,6 +147,11 @@ impl WgpuRenderer {
             });
     }
 
+    /// Returns whether a screenshot path is still queued for the next frame
+    /// after calling `queue_screenshot`. Peeks without consuming the queue
+    /// (`Cell::take` + restore) so the next `render` can still fulfill it.
+    /// Used by the headless screenshot harness to detect a dropped draw where
+    /// the capture never ran.
     pub fn screenshot_pending(&self) -> bool {
         let p = self.pending_screenshot.take();
         let pending = p.is_some();

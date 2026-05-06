@@ -1,3 +1,6 @@
+pub mod button_prompts;
+pub mod kenney_prompt_paths;
+pub mod prompt_hold_ring;
 pub mod focus_nav;
 pub mod input;
 pub mod inspect_plaque;

@@ -110,17 +110,35 @@ impl CameraFrame {
 impl WgpuRenderer {
     /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
     /// and `lit_mesh` (`SsrGlobals.felt`). Same `ShopEnvLightingTune` as the room.
-    pub(super) fn tile_hdr_tonemap(&self, _frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
+    pub(super) fn tile_hdr_tonemap(&self, frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
+        use crate::render::draw_cmd::DrawCmd;
         let k = self.active_scene_key;
         let table_like = matches!(
             k,
             Some("gameplay")
                 | Some("tutorial")
                 | Some("pick_blind")
-                | Some("solitaire")
                 | Some("collection")
         );
         let shop_scene = k == Some("shop");
+        // Shop applies a heavy linear HDR divisor so bright `Shop.glb` fills land in
+        // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
+        // use ordinary tile shading — same /512 crush makes them vanish.
+        let shop_showcase_without_env = shop_scene
+            && frame.cmds.iter().any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
+            && !frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::ShopEnvironment));
+        if shop_showcase_without_env {
+            let linear_hdr = self.shop_env_linear_exposure;
+            return [
+                1.0,
+                linear_hdr,
+                self.shop_env_ambient_scale,
+                0.0,
+            ];
+        }
         if !(shop_scene || table_like) {
             return [0.0; 4];
         }

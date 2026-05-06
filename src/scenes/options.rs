@@ -1,10 +1,10 @@
-//! Options scene — volume sliders, visual settings, and rendering options.
+//! Options scene — volume sliders, visual settings, rendering, and accessibility.
 //!
-//! Layout: a table-of-contents (TOC) column on the left links to three
-//! sections (Audio, Visual, Rendering) in a scrollable content pane on
-//! the right.  Entry-based scroll stepping (same pattern as the glossary)
-//! keeps every visible row fully on-screen — the renderer has no scissor
-//! support.
+//! Layout: a table-of-contents (TOC) column on the left links to
+//! sections (Audio, Visual, Rendering, Accessibility, Controls) in a
+//! scrollable content pane on the right.  Entry-based scroll stepping (same
+//! pattern as the glossary) keeps every visible row fully on-screen — the
+//! renderer has no scissor support.
 
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
@@ -39,6 +39,7 @@ enum Section {
     Audio,
     Visual,
     Rendering,
+    Accessibility,
     Controls,
 }
 
@@ -48,6 +49,7 @@ impl Section {
             Section::Audio => "Audio",
             Section::Visual => "Visual",
             Section::Rendering => "Rendering",
+            Section::Accessibility => "Accessibility",
             Section::Controls => "Controls",
         }
     }
@@ -57,6 +59,7 @@ const SECTIONS: &[Section] = &[
     Section::Audio,
     Section::Visual,
     Section::Rendering,
+    Section::Accessibility,
     Section::Controls,
 ];
 
@@ -77,8 +80,10 @@ enum Row {
     Shadows,
     Ssr,
     Hdr,
+    UndoDiscard,
     SwapAb,
     XyQuickAction,
+    HoldToSellRumble,
     AutoCashInOnFullStructure,
     Hints,
 }
@@ -115,8 +120,10 @@ const ROWS: &[Row] = &[
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
+    Row::UndoDiscard,
     Row::SwapAb,
     Row::XyQuickAction,
+    Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
 ];
@@ -146,9 +153,12 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
     ContentSlot::Row(Row::Hdr),
+    ContentSlot::Header(Section::Accessibility),
+    ContentSlot::Row(Row::UndoDiscard),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
     ContentSlot::Row(Row::XyQuickAction),
+    ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
 ];
@@ -301,8 +311,10 @@ pub struct OptionsScene {
     pub hdr_enabled: bool,
     pub swap_ab: bool,
     pub xy_quick_action: bool,
+    pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
     pub hints_enabled: bool,
+    pub discard_undo_enabled: bool,
     pub ui_scale: f32,
 }
 
@@ -342,8 +354,10 @@ impl OptionsScene {
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
             xy_quick_action: settings.xy_quick_action,
+            hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             hints_enabled: settings.hints_enabled,
+            discard_undo_enabled: settings.discard_undo_enabled,
             ui_scale: settings.ui_scale,
         }
     }
@@ -386,8 +400,10 @@ impl OptionsScene {
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
         settings.xy_quick_action = self.xy_quick_action;
+        settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.hints_enabled = self.hints_enabled;
+        settings.discard_undo_enabled = self.discard_undo_enabled;
         settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
     }
@@ -496,10 +512,12 @@ impl OptionsScene {
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
+            Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             _ => return,
         }
         self.save_settings();
@@ -523,10 +541,12 @@ impl OptionsScene {
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
+            Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             _ => return,
         }
         self.save_settings();
@@ -588,12 +608,20 @@ impl OptionsScene {
                 self.xy_quick_action = !self.xy_quick_action;
                 self.save_settings();
             }
+            Row::HoldToSellRumble => {
+                self.hold_to_sell_rumble = !self.hold_to_sell_rumble;
+                self.save_settings();
+            }
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
                 self.save_settings();
             }
             Row::Hints => {
                 self.hints_enabled = !self.hints_enabled;
+                self.save_settings();
+            }
+            Row::UndoDiscard => {
+                self.discard_undo_enabled = !self.discard_undo_enabled;
                 self.save_settings();
             }
         }
@@ -1064,6 +1092,10 @@ impl OptionsScene {
                         "X and Y Quick Action: {}",
                         if self.xy_quick_action { "ON" } else { "OFF" }
                     ),
+                    Row::HoldToSellRumble => format!(
+                        "Controller rumble: {}",
+                        if self.hold_to_sell_rumble { "ON" } else { "OFF" }
+                    ),
                     Row::AutoCashInOnFullStructure => format!(
                         "Auto Cash-In on Full Structure: {}",
                         if self.auto_cash_in_on_full_structure {
@@ -1075,6 +1107,10 @@ impl OptionsScene {
                     Row::Hints => {
                         format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
                     }
+                    Row::UndoDiscard => format!(
+                        "Discard undo: {}",
+                        if self.discard_undo_enabled { "ON" } else { "OFF" }
+                    ),
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {

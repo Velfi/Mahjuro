@@ -494,10 +494,15 @@ pub fn relic_sell_price_live(
 
 /// Return a live description for relics whose counters change their tooltip.
 /// Falls back to the static `RelicDef::description` when no counter applies.
+///
+/// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
+/// Shadow Hand append which relic they copy and a compatibility line (ordering
+/// matches gameplay).
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
     total_score: u64,
+    inventory_focus: Option<(&RelicState, usize)>,
 ) -> String {
     let base = all_relic_defs()
         .iter()
@@ -590,6 +595,28 @@ pub fn relic_description_live(
                 if blooms == 1 { "" } else { "s" },
                 0.5 * blooms as f64
             )
+        }
+        RelicId::MirrorTile => {
+            let mut s = base.to_string();
+            if let Some((relics, slot)) = inventory_focus {
+                let extra = format_mirror_tile_inventory_help(relics, slot);
+                if !extra.is_empty() {
+                    s.push_str("\n\n");
+                    s.push_str(&extra);
+                }
+            }
+            s
+        }
+        RelicId::ShadowHand => {
+            let mut s = base.to_string();
+            if let Some((relics, slot)) = inventory_focus {
+                let extra = format_shadow_hand_inventory_help(relics, slot);
+                if !extra.is_empty() {
+                    s.push_str("\n\n");
+                    s.push_str(&extra);
+                }
+            }
+            s
         }
         _ => base.to_string(),
     }
@@ -694,6 +721,185 @@ impl RelicState {
         let pos = self.active.iter().position(|&r| r == id)?;
         self.active.get(pos + 1).copied()
     }
+}
+
+#[inline]
+fn relic_display_name(id: RelicId) -> String {
+    all_relic_defs()
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.name.to_string())
+        .unwrap_or_else(|| format!("{id:?}"))
+}
+
+/// Tooltip helper: explain Mirror Tile's neighbor, scoring driver slot,
+/// and rough compatibility with the copied relic.
+pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize) -> String {
+    let active = &relics.active;
+    if active.get(mirror_slot) != Some(&RelicId::MirrorTile) {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if relics.is_debuffed(RelicId::MirrorTile) {
+        parts.push("Debuffed: Mirror Tile does nothing while suppressed.".to_string());
+    }
+
+    let first_mirror_slot = active.iter().position(|&r| r == RelicId::MirrorTile);
+    let neighbor = active.get(mirror_slot + 1).copied();
+
+    match neighbor {
+        Some(tid) => {
+            let name = relic_display_name(tid);
+            let mut line = format!("Copying: {name}.");
+            if relics.is_debuffed(tid) {
+                line.push_str(
+                    " That relic is debuffed, but Mirror Tile still duplicates its scoring bonuses.",
+                );
+            }
+            parts.push(line);
+            if relic_scoring_copy_dup_is_compatible(tid) {
+                parts.push(
+                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
+                        .to_string(),
+                );
+            }
+        }
+        None => {
+            parts.push(
+                "No relic to the right — reorder so another relic sits after this Mirror Tile."
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(fm) = first_mirror_slot {
+        if fm != mirror_slot {
+            let tgt = active.get(fm + 1).copied().map(relic_display_name);
+            let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
+            parts.push(format!(
+                "Scoring only uses the leftmost Mirror Tile (slot {} from the left). That one copies: {tgt_s}.",
+                fm + 1
+            ));
+        } else {
+            parts.push("This Mirror Tile is the one scoring checks use.".to_string());
+        }
+    }
+
+    parts.join("\n")
+}
+
+/// Tooltip helper: explain Shadow Hand's copy target (always the leftmost relic
+/// slot when that relic isn't Shadow Hand) and compatibility.
+pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize) -> String {
+    let active = &relics.active;
+    if active.get(shadow_slot) != Some(&RelicId::ShadowHand) {
+        return String::new();
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+
+    if relics.is_debuffed(RelicId::ShadowHand) {
+        parts.push("Debuffed: Shadow Hand does nothing while suppressed.".to_string());
+    }
+
+    match active.first().copied() {
+        None => parts.push("No relics to copy.".to_string()),
+        Some(RelicId::ShadowHand) => {
+            parts.push(
+                "Leftmost slot is Shadow Hand — move it right so another relic occupies the first slot; that relic is what gets copied."
+                    .to_string(),
+            );
+        }
+        Some(tid) => {
+            let name = relic_display_name(tid);
+            let mut line = format!("Copying: {name} (leftmost relic).");
+            if relics.is_debuffed(tid) {
+                line.push_str(
+                    " That relic is debuffed, but Shadow Hand still duplicates its scoring bonuses.",
+                );
+            }
+            parts.push(line);
+            if relic_scoring_copy_dup_is_compatible(tid) {
+                parts.push(
+                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    parts.join("\n")
+}
+
+/// True when Mirror Tile / Shadow Hand duplication routes through the scoring
+/// pipeline's `has` / `count` closure for this relic. Anything checked only with
+/// raw `ctx.relics.has` there (e.g. Strength in Numbers overflow) is excluded.
+fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
+    matches!(
+        target,
+        RelicId::TripletBoost
+            | RelicId::SequenceSurge
+            | RelicId::PairPower
+            | RelicId::HonorFury
+            | RelicId::KongsBlessing
+            | RelicId::JadeSerpent
+            | RelicId::RedSerpent
+            | RelicId::BlueSerpent
+            | RelicId::EdgeRunner
+            | RelicId::LowTide
+            | RelicId::HighTide
+            | RelicId::TilePolisher
+            | RelicId::LastBreath
+            | RelicId::Geese
+            | RelicId::VoiceOfThePeople
+            | RelicId::VoiceOfTheElite
+            | RelicId::TeaCeremony
+            | RelicId::GhostHand
+            | RelicId::RiverRunner
+            | RelicId::MeltingIce
+            | RelicId::Taotie
+            | RelicId::GardenKeeper
+            | RelicId::Hanami
+            | RelicId::DragonEcho
+            | RelicId::DoraCrown
+            | RelicId::RedDragonRage
+            | RelicId::WhiteDragonsHush
+            | RelicId::KanDrum
+            | RelicId::RoundCompass
+            | RelicId::Ikebana
+            | RelicId::LuckySeven
+            | RelicId::PaperLantern
+            | RelicId::MultiplierMaster
+            | RelicId::ChainReaction
+            | RelicId::ClosedGate
+            | RelicId::GoldenEngine
+            | RelicId::Snowball
+            | RelicId::Momentum
+            | RelicId::Minimalist
+            | RelicId::TurtleShell
+            | RelicId::SilkThread
+            | RelicId::SilkMoth
+            | RelicId::Humility
+            | RelicId::Obsession
+            | RelicId::Bonfire
+            | RelicId::Kintsugi
+            | RelicId::SolitarySage
+            | RelicId::CurioCabinet
+            | RelicId::LotusBloom
+            | RelicId::WallWeaver
+            | RelicId::Heirloom
+            | RelicId::Tourist
+            | RelicId::CrackedTile
+            | RelicId::HungryGhost
+            | RelicId::WayOfPurity
+            | RelicId::WayOfPairs
+            | RelicId::WayOfTriplets
+            | RelicId::WayOfSequences
+            | RelicId::SilverFiligreeLantern
+            | RelicId::GlassCannon
+    )
 }
 
 /// Scoring context for relic hooks.

@@ -11,6 +11,8 @@ pub(super) struct ProcessOpCtx<'a> {
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],
     pub tile_face_quads: &'a [TileFaceQuad],
+    pub prompt_icon_inst_buffers: &'a [wgpu::Buffer],
+    pub prompt_icon_quads: &'a [crate::render::draw_cmd::PromptIconQuad],
     pub object3d_draw_list: &'a [(DrawKind, usize)],
     pub showcase_tile_batches: &'a [&'a [ShowcaseTilePlacement]],
     pub tile_glows: &'a [GpuInstance],
@@ -43,6 +45,8 @@ impl WgpuRenderer {
         let text_draws = ctx.text_draws;
         let tile_face_inst_buffers = ctx.tile_face_inst_buffers;
         let tile_face_quads = ctx.tile_face_quads;
+        let prompt_icon_inst_buffers = ctx.prompt_icon_inst_buffers;
+        let prompt_icon_quads = ctx.prompt_icon_quads;
         let object3d_draw_list = ctx.object3d_draw_list;
         let showcase_tile_batches = ctx.showcase_tile_batches;
         let tile_glows = ctx.tile_glows;
@@ -546,6 +550,22 @@ impl WgpuRenderer {
                     pass.set_bind_group(1, &gpu.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, tile_face_inst_buffers[*idx].slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
+            }
+            RenderOp::PromptIconQuad(idx) => {
+                let icon = &prompt_icon_quads[*idx];
+                if let Some(gpu) = self.prompt_icon_overlays.get(icon.asset_rel_path) {
+                    pass.set_pipeline(if scene_hdr_attachment {
+                        &self.image_pipeline_scene_hdr
+                    } else {
+                        &self.image_pipeline
+                    });
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &gpu.bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, prompt_icon_inst_buffers[*idx].slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }

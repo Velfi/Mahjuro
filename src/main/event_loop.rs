@@ -12,16 +12,7 @@ impl ApplicationHandler for App {
 
         let mut attrs = Window::default_attributes();
         attrs.title = "Mahjuro".to_string();
-        if let Some(ref shot) = self.headless_screenshot {
-            attrs.inner_size = Some(PhysicalSize::new(shot.width, shot.height).into());
-            // Note: leaving the window visible during screenshot capture.
-            // macOS appears to mark fully-hidden windows as Occluded which
-            // makes wgpu's swapchain skip presenting frames, so the
-            // capture path never runs. Visible window costs nothing for
-            // a one-shot CLI run.
-        } else {
-            attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
-        }
+        attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
 
         let t0 = Instant::now();
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
@@ -102,6 +93,9 @@ impl ApplicationHandler for App {
                 // same frame roll out as a staggered sequence rather than
                 // stacking on the same tick.
                 let mut yaku_stinger_index: u32 = 0;
+                if let Some(input) = self.input.as_mut() {
+                    input.tick_scoring_rumble_keepalive(now);
+                }
                 for ev in self.bus.drain() {
                     match ev {
                         GameEvent::TileDrawn => {
@@ -121,8 +115,15 @@ impl ApplicationHandler for App {
                             // wired into the game.
                             self.audio.play_score_tick(index);
                             self.audio.play_sfx(audio::SfxId::ScoreStep);
+                            if let Some(input) = self.input.as_mut() {
+                                if input.mode == crate::ui::input::InputMode::Controller
+                                    && input.hold_to_sell_rumble_enabled
+                                {
+                                    input.play_scoring_cascade_step_rumble(now);
+                                }
+                            }
                         }
-                        GameEvent::ScoreCascadeFinal => {
+                        GameEvent::ScoreCascadeFinal { earned } => {
                             // Crescendo: brassy hit jingle layered over the
                             // existing confirmation sting so the closing
                             // beat lands with weight.
@@ -130,6 +131,13 @@ impl ApplicationHandler for App {
                             self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
                             self.steam
                                 .unlock_achievement(crate::steam::Achievement::FirstStructure);
+                            if let Some(input) = self.input.as_mut() {
+                                if input.mode == crate::ui::input::InputMode::Controller
+                                    && input.hold_to_sell_rumble_enabled
+                                {
+                                    input.play_scoring_cascade_final_rumble(now, earned);
+                                }
+                            }
                         }
                         GameEvent::GoldChanged { .. } => {
                             self.audio.play_sfx(audio::SfxId::CoinDrop);
@@ -359,7 +367,20 @@ impl ApplicationHandler for App {
                 button_clicks.append(&mut self.mouse_button_clicks);
                 let mut hide_cursor = false;
                 if let Some(input) = self.input.as_mut() {
-                    if input.poll_gamepads(&mut actions) {
+                    let shop_face = matches!(&self.scene, Scene::Shop(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let collection_inspect_north = matches!(&self.scene, Scene::Collection(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let shop_inspect =
+                        matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
+                    let gp_ctx = crate::ui::input::GamepadPollCtx {
+                        shop_face_buttons: shop_face,
+                        collection_inspect_north,
+                        shop_item_inspect: shop_inspect,
+                    };
+                    if input.poll_gamepads(&mut actions, gp_ctx) {
                         hide_cursor = true;
                     }
                     actions.append(&mut self.mouse_actions);
@@ -643,6 +664,7 @@ impl ApplicationHandler for App {
                     .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
                 let scroll_lines = std::mem::take(&mut self.scroll_delta);
                 let mut overlay_request: Option<scenes::OverlayRequest> = None;
+                let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -678,6 +700,17 @@ impl ApplicationHandler for App {
                     overlay_request: &mut overlay_request,
                     headless: false,
                     effect_layers: self.effect_layers,
+                    shop_inspect_orbit_stick: self
+                        .input
+                        .as_ref()
+                        .map(|i| i.shop_inspect_orbit_stick)
+                        .unwrap_or((0.0, 0.0)),
+                    shop_inspect_zoom_triggers: self
+                        .input
+                        .as_ref()
+                        .map(|i| i.shop_inspect_zoom_triggers)
+                        .unwrap_or(0.0),
+                    rumble_lab_ops: &mut rumble_lab_ops,
                 };
                 let updated_overlay = !self.overlay_stack.is_empty();
                 let update_result = if let Some(top) = self.overlay_stack.last_mut() {
@@ -695,6 +728,25 @@ impl ApplicationHandler for App {
                         let _ = self.overlay_stack.pop();
                     }
                     None => {}
+                }
+                if let Some(input) = self.input.as_mut() {
+                    input.apply_rumble_lab_ops(now, rumble_lab_ops);
+                    let shop_ready = matches!(&self.scene, Scene::Shop(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let hold = shop_ready
+                        && matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
+                    let progress = match &self.scene {
+                        Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),
+                        _ => 0.0,
+                    };
+                    let controller = input.mode == crate::ui::input::InputMode::Controller;
+                    input.sync_shop_sell_hold_rumble(
+                        hold,
+                        controller,
+                        input.hold_to_sell_rumble_enabled,
+                        progress,
+                    );
                 }
                 if let Some(next_scene) = update_result {
                     // Choose transition style: dramatic cascade for
@@ -806,6 +858,7 @@ impl ApplicationHandler for App {
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
                         input.xy_quick_action = opts.xy_quick_action;
+                        input.hold_to_sell_rumble_enabled = opts.hold_to_sell_rumble;
                     }
                 }
 
@@ -946,63 +999,7 @@ impl ApplicationHandler for App {
                     self.quit_requested = true;
                 }
 
-                // Headless screenshot tick. We render `warmup_frames + 1`
-                // total frames: warmup frames let async loaders settle, then
-                // the final draw is the one captured. The renderer writes
-                // the PNG synchronously during that draw (between submit
-                // and present). After it returns, the file is on disk.
-                let mut should_capture_this_frame = false;
-                if let Some(shot) = self.headless_screenshot.as_ref()
-                    && shot.frames_remaining == 0
-                {
-                    should_capture_this_frame = true;
-                    let path = shot.output.clone();
-                    if let Some(r) = self.renderer.as_ref() {
-                        r.queue_screenshot(path);
-                    }
-                }
-
                 self.draw();
-
-                if let Some(shot) = self.headless_screenshot.as_mut() {
-                    if should_capture_this_frame {
-                        // Verify the renderer actually consumed the
-                        // queued screenshot — when the swapchain returns
-                        // Outdated/Lost the draw early-returns and the
-                        // queued path is left untouched. In that case,
-                        // tick to the next frame instead of exiting
-                        // with no file written. Bounded by `retries` so
-                        // a permanently-broken swapchain doesn't loop.
-                        let still_pending = self
-                            .renderer
-                            .as_ref()
-                            .map(|r| r.screenshot_pending())
-                            .unwrap_or(false);
-                        if still_pending && shot.retries < 30 {
-                            shot.retries += 1;
-                            log::warn!("screenshot: capture frame dropped, retry {}", shot.retries);
-                            if let Some(w) = self.window.as_ref() {
-                                w.request_redraw();
-                            }
-                        } else {
-                            if still_pending {
-                                log::error!(
-                                    "screenshot: still pending after {} retries, exiting anyway",
-                                    shot.retries
-                                );
-                            } else {
-                                log::info!("screenshot saved → {}", shot.output.display());
-                            }
-                            self.headless_screenshot = None;
-                            event_loop.exit();
-                        }
-                    } else {
-                        shot.frames_remaining = shot.frames_remaining.saturating_sub(1);
-                        if let Some(w) = self.window.as_ref() {
-                            w.request_redraw();
-                        }
-                    }
-                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
@@ -1672,6 +1669,26 @@ impl ApplicationHandler for App {
                             self.overlay_stack
                                 .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
                             log::info!("[Debug] Opened material viewer (keyboard shortcut)");
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                        }
+                        return;
+                    }
+
+                    if let PhysicalKey::Code(code) = event.physical_key
+                        && code == KeyCode::KeyH
+                        && self.modifiers.shift_key()
+                        && (self.modifiers.control_key() || self.modifiers.super_key())
+                    {
+                        if !self
+                            .overlay_stack
+                            .iter()
+                            .any(|s| matches!(s, Scene::RumbleLab(_)))
+                        {
+                            self.overlay_stack
+                                .push(Scene::RumbleLab(RumbleLabScene::new(true)));
+                            log::info!("[Debug] Opened rumble lab (keyboard shortcut)");
                             if let Some(w) = self.window.as_ref() {
                                 w.request_redraw();
                             }

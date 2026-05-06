@@ -61,6 +61,8 @@ pub(super) enum FocusTarget {
     YakuTablet(usize),
     /// The brass dora indicator stand at the back-right of the table.
     Dora,
+    /// Optional post-discard undo control (accessibility).
+    DiscardUndo,
 }
 
 pub(super) const ALL_BUTTONS: [GameplayButton; 5] = [
@@ -161,6 +163,7 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Gold => Some(FocusKind::Gold),
         FocusTarget::YakuTablet(_) => Some(FocusKind::YakuTablet),
         FocusTarget::Dora => Some(FocusKind::Dora),
+        FocusTarget::DiscardUndo => Some(FocusKind::Button),
     }
 }
 

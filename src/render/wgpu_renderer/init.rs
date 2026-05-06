@@ -3512,6 +3512,7 @@ impl WgpuRenderer {
             hand_tiles: Vec::new(),
             showcase_tiles: Vec::new(),
             tile_face_overlays: HashMap::new(),
+            prompt_icon_overlays: HashMap::new(),
             debuff_marker_overlay: None,
             text_label_cache: HashMap::new(),
             text_cache_frame: 0,
