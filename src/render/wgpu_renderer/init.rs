@@ -1651,11 +1651,8 @@ impl WgpuRenderer {
             size.width.max(1),
             size.height.max(1),
         );
-        // Journal page target — the shop's open-book mesh samples this
-        // as the page-spread albedo so the embedded yaku-journal scene
-        // appears painted on the open pages.
-        let journal_page_texture = create_journal_page(&device, format);
-        // Fullscreen offscreen for the live yaku-journal GPU render.
+        // Fullscreen offscreen for the live yaku-journal GPU render (book
+        // page surface samples this in screen space; see `lit_mesh.wgsl`).
         let (journal_scene_texture, journal_scene_view) = create_journal_scene(
             &device,
             scene_hdr_format,
@@ -1688,14 +1685,18 @@ impl WgpuRenderer {
             create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-ping");
         let (bloom_pong_texture, bloom_pong_view) =
             create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-pong");
-        let bloom_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bloom-params"),
-            contents: bytemuck::bytes_of(&BloomParams {
-                data0: [1.1, 0.0, 1.0 / bloom_w as f32, 1.0 / bloom_h as f32],
-                data1: [1.0, 0.0, 0.0, 0.0],
-            }),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let bloom_ub = |label: &'static str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: std::mem::size_of::<BloomParams>() as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let bloom_extract_params_buffer = bloom_ub("bloom-extract-params");
+        let bloom_blur_h_params_buffer = bloom_ub("bloom-blur-h-params");
+        let bloom_blur_v_params_buffer = bloom_ub("bloom-blur-v-params");
+        let bloom_composite_params_buffer = bloom_ub("bloom-composite-params");
         let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bloom-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -2385,13 +2386,38 @@ impl WgpuRenderer {
         let tonemap_rgba16f_pipeline =
             make_tonemap_pipe("tonemap-rgba16f-pipeline", wgpu::TextureFormat::Rgba16Float);
 
+        let tonemap_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tonemap-params"),
+            size: std::mem::size_of::<TonemapParams>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tonemap_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-bg"),
+            layout: &tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: tonemap_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&post_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+            ],
+        });
+
         let bloom_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bloom-scene-bg"),
             layout: &bloom_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: bloom_params_buffer.as_entire_binding(),
+                    resource: bloom_extract_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -2409,7 +2435,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: bloom_params_buffer.as_entire_binding(),
+                    resource: bloom_blur_h_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -2427,7 +2453,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: bloom_params_buffer.as_entire_binding(),
+                    resource: bloom_blur_v_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -2445,7 +2471,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: bloom_params_buffer.as_entire_binding(),
+                    resource: bloom_composite_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -3363,6 +3389,51 @@ impl WgpuRenderer {
 
         log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
+        let inv_bw = 1.0 / bloom_w as f32;
+        let inv_bh = 1.0 / bloom_h as f32;
+        let bloom_data0 = [1.1_f32, 0.0, inv_bw, inv_bh];
+        queue.write_buffer(
+            &bloom_extract_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0: bloom_data0,
+                data1: [0.0; 4],
+            }),
+        );
+        queue.write_buffer(
+            &bloom_blur_h_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0: bloom_data0,
+                data1: [1.0, 0.0, 0.0, 0.0],
+            }),
+        );
+        queue.write_buffer(
+            &bloom_blur_v_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0: bloom_data0,
+                data1: [0.0, 1.0, 0.0, 0.0],
+            }),
+        );
+        queue.write_buffer(
+            &bloom_composite_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0: bloom_data0,
+                data1: [0.0; 4],
+            }),
+        );
+        queue.write_buffer(
+            &tonemap_params_buffer,
+            0,
+            bytemuck::bytes_of(&TonemapParams {
+                exposure: 1.0,
+                mode: 0.0,
+                _pad: [0.0; 2],
+            }),
+        );
+
         Ok(Self {
             target,
             device,
@@ -3556,7 +3627,6 @@ impl WgpuRenderer {
             scene_prev_view,
             scene_color_texture,
             scene_color_view,
-            journal_page_texture,
             journal_scene_texture,
             journal_scene_view,
             journal_scene_view_generation: 0,
@@ -3565,7 +3635,10 @@ impl WgpuRenderer {
             bloom_composite_pipeline,
             bloom_bind_group_layout,
             bloom_composite_bind_group_layout,
-            bloom_params_buffer,
+            bloom_extract_params_buffer,
+            bloom_blur_h_params_buffer,
+            bloom_blur_v_params_buffer,
+            bloom_composite_params_buffer,
             bloom_sampler,
             bloom_scene_bind_group,
             bloom_ping_bind_group,
@@ -3580,6 +3653,8 @@ impl WgpuRenderer {
             tonemap_pipeline,
             tonemap_rgba16f_pipeline,
             tonemap_bind_group_layout,
+            tonemap_params_buffer,
+            tonemap_bind_group,
             tonemap_shader_module,
             tonemap_pipeline_layout,
             swapchain_sdr_format,

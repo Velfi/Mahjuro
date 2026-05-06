@@ -1057,15 +1057,6 @@ impl WgpuRenderer {
                 label: Some("frame"),
             });
 
-        // Paint the open-book's page-spread albedo. CPU-rasterised
-        // each frame and uploaded via `queue.write_texture` — the
-        // alternative GPU side-pipeline path was abandoned because the
-        // refactor needed to share `make_text_draw` etc. with the main
-        // render loop carried too much risk for the gameplay path. At
-        // 1024×1024 RGBA the upload is well under any plausible
-        // bandwidth budget on modern hardware.
-        self.upload_journal_page_content();
-
         self.render_shadow_pre_pass(
             &mut encoder,
             frame,
@@ -1401,35 +1392,6 @@ impl WgpuRenderer {
         let bloom_h = (self.size.height.max(1) / 2).max(1);
         let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
         let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
-        let make_bloom_bg =
-            |label: &'static str, params: BloomParams, texture_view: &wgpu::TextureView| {
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(label),
-                        contents: bytemuck::bytes_of(&params),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(label),
-                    layout: &self.bloom_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(texture_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                        },
-                    ],
-                });
-                (buffer, bind_group)
-            };
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,
@@ -1472,44 +1434,26 @@ impl WgpuRenderer {
             ],
             data1: [fisheye_strength, vignette_strength, 0.0, 0.0],
         };
-        let (_extract_params_buf, bloom_scene_bg) = make_bloom_bg(
-            "bloom-scene-pass-bg",
-            extract_params,
-            &self.scene_color_view,
+        self.queue.write_buffer(
+            &self.bloom_extract_params_buffer,
+            0,
+            bytemuck::bytes_of(&extract_params),
         );
-        let (_blur_h_params_buf, bloom_ping_bg) =
-            make_bloom_bg("bloom-ping-pass-bg", blur_h_params, &self.bloom_ping_view);
-        let (_blur_v_params_buf, bloom_pong_bg) =
-            make_bloom_bg("bloom-pong-pass-bg", blur_v_params, &self.bloom_pong_view);
-        let composite_params_buf =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("bloom-composite-params"),
-                    contents: bytemuck::bytes_of(&composite_params),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let bloom_composite_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bloom-composite-pass-bg"),
-            layout: &self.bloom_composite_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: composite_params_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                },
-            ],
-        });
+        self.queue.write_buffer(
+            &self.bloom_blur_h_params_buffer,
+            0,
+            bytemuck::bytes_of(&blur_h_params),
+        );
+        self.queue.write_buffer(
+            &self.bloom_blur_v_params_buffer,
+            0,
+            bytemuck::bytes_of(&blur_v_params),
+        );
+        self.queue.write_buffer(
+            &self.bloom_composite_params_buffer,
+            0,
+            bytemuck::bytes_of(&composite_params),
+        );
 
         if bloom_active {
             {
@@ -1530,7 +1474,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_extract_pipeline);
-                pass.set_bind_group(0, &bloom_scene_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_scene_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             {
@@ -1551,7 +1495,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
-                pass.set_bind_group(0, &bloom_ping_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_ping_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             {
@@ -1572,7 +1516,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
-                pass.set_bind_group(0, &bloom_pong_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_pong_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
         }
@@ -1595,7 +1539,7 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
-            pass.set_bind_group(0, &bloom_composite_bg, &[]);
+            pass.set_bind_group(0, &self.bloom_composite_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
@@ -1603,35 +1547,15 @@ impl WgpuRenderer {
         // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
         // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
         let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
-        let tonemap_params_buf =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tonemap-params"),
-                    contents: bytemuck::bytes_of(&TonemapParams {
-                        exposure: self.tonemap_exposure,
-                        mode: tonemap_mode,
-                        _pad: [0.0; 2],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let tonemap_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tonemap-pass-bg"),
-            layout: &self.tonemap_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: tonemap_params_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                },
-            ],
-        });
+        self.queue.write_buffer(
+            &self.tonemap_params_buffer,
+            0,
+            bytemuck::bytes_of(&TonemapParams {
+                exposure: self.tonemap_exposure,
+                mode: tonemap_mode,
+                _pad: [0.0; 2],
+            }),
+        );
         let tonemap_pipe = if is_prepass {
             &self.tonemap_rgba16f_pipeline
         } else {
@@ -1655,7 +1579,7 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(tonemap_pipe);
-            pass.set_bind_group(0, &tonemap_bg, &[]);
+            pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 

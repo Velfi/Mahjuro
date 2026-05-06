@@ -55,7 +55,7 @@
   { "id": "bonfire", "name": "Bonfire", "description": "+0.4 mult per relic sold this run", "rarity": "uncommon" },
   { "id": "river_runner", "name": "River Runner", "description": "+20 chips permanently each time you score a sequence", "rarity": "rare" },
   { "id": "melting_ice", "name": "Melting Ice", "description": "+80 chips, loses 8 per play. Transforms at 0.", "rarity": "common" },
-  { "id": "taotie", "name": "Taotie", "description": "+80 chips. Devours scored honor tiles at cash-in: each grants +20 chips permanently and is destroyed.", "rarity": "rare" },
+  { "id": "taotie", "name": "Taotie", "description": "+80 chips. At cash-in, each scored honor tile is destroyed. Each adds +20 chips permanently to this relic.", "rarity": "rare" },
   { "id": "silk_thread", "name": "Silk Thread", "description": "+4 mult, loses 0.3 per discard. Transforms at 0.", "rarity": "uncommon" },
   { "id": "silk_moth", "name": "Silk Moth", "description": "+2 mult and +$1 every discard", "rarity": "rare" },
   { "id": "shadow_hand", "name": "Shadow Hand", "description": "Copies the effect of your first relic", "rarity": "legendary" },

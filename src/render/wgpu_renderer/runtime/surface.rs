@@ -306,7 +306,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_extract_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -324,7 +324,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_blur_h_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -342,7 +342,7 @@ impl WgpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.bloom_params_buffer.as_entire_binding(),
+                    resource: self.bloom_blur_v_params_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -361,7 +361,7 @@ impl WgpuRenderer {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: self.bloom_params_buffer.as_entire_binding(),
+                        resource: self.bloom_composite_params_buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -378,6 +378,25 @@ impl WgpuRenderer {
                 ],
             });
 
+        self.tonemap_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-bg"),
+            layout: &self.tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.tonemap_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+
         self.queue.write_buffer(
             &self.globals_buffer,
             0,
@@ -393,12 +412,39 @@ impl WgpuRenderer {
                 _globals_pad: [0.0; 3],
             }),
         );
+        let inv_bw = 1.0 / bloom_w as f32;
+        let inv_bh = 1.0 / bloom_h as f32;
+        let data0 = [1.1_f32, 0.0, inv_bw, inv_bh];
         self.queue.write_buffer(
-            &self.bloom_params_buffer,
+            &self.bloom_extract_params_buffer,
             0,
             bytemuck::bytes_of(&BloomParams {
-                data0: [1.1, 0.0, 1.0 / bloom_w as f32, 1.0 / bloom_h as f32],
+                data0,
+                data1: [0.0; 4],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_blur_h_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
                 data1: [1.0, 0.0, 0.0, 0.0],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_blur_v_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
+                data1: [0.0, 1.0, 0.0, 0.0],
+            }),
+        );
+        self.queue.write_buffer(
+            &self.bloom_composite_params_buffer,
+            0,
+            bytemuck::bytes_of(&BloomParams {
+                data0,
+                data1: [0.0; 4],
             }),
         );
 
