@@ -16,7 +16,7 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Page indices ──────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ impl MeldGuideScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::StartScreen(StartScreenScene::new()))
+            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
         }
     }
 }
@@ -234,7 +234,7 @@ impl SceneBehavior for MeldGuideScene {
         frame.text(TextLabel {
             rect: [0.0, page_y, w, page_h],
             text: format!("{} / {}", self.page + 1, pages),
-            color: color::SLATE,
+            color: color::UMBER,
             align: TextAlign::Center,
             font_px: Some(page_font),
             ..Default::default()
@@ -253,7 +253,7 @@ impl SceneBehavior for MeldGuideScene {
         let prev_x = btn_start_x;
         let prev_enabled = self.page > 0;
         let prev_color = if prev_enabled {
-            color::OBSIDIAN
+            color::WALNUT_INK
         } else {
             [0.15, 0.15, 0.18, 0.5]
         };
@@ -267,7 +267,7 @@ impl SceneBehavior for MeldGuideScene {
             color: if prev_enabled {
                 color::CHAMPAGNE
             } else {
-                color::SLATE
+                color::UMBER
             },
             align: TextAlign::Center,
             font_px: Some(btn_font),
@@ -283,7 +283,7 @@ impl SceneBehavior for MeldGuideScene {
         let back_x = prev_x + btn_w + btn_gap;
         frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
@@ -301,7 +301,7 @@ impl SceneBehavior for MeldGuideScene {
         let next_x = back_x + btn_w + btn_gap;
         let next_enabled = self.page + 1 < pages;
         let next_color = if next_enabled {
-            color::OBSIDIAN
+            color::WALNUT_INK
         } else {
             [0.15, 0.15, 0.18, 0.5]
         };
@@ -315,7 +315,7 @@ impl SceneBehavior for MeldGuideScene {
             color: if next_enabled {
                 color::CHAMPAGNE
             } else {
-                color::SLATE
+                color::UMBER
             },
             align: TextAlign::Center,
             font_px: Some(btn_font),
@@ -534,7 +534,13 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     &[9, 9, 9],
                     trip_color,
                 ),
-                ("Triplet", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
+                (
+                    "Triplet",
+                    SetKind::Triplet,
+                    Suit::Wind,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Circles, &[1, 1], pair_color),
             ]),
         ),
@@ -724,7 +730,13 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     &[6, 7, 8],
                     seq_color,
                 ),
-                ("Triplet", SetKind::Triplet, Suit::Wind, &[1, 1, 1], trip_color),
+                (
+                    "Triplet",
+                    SetKind::Triplet,
+                    Suit::Wind,
+                    &[1, 1, 1],
+                    trip_color,
+                ),
                 ("Pair", SetKind::Pair, Suit::Bamboos, &[9, 9], pair_color),
             ]),
         ),

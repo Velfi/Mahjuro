@@ -10,7 +10,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const MIN_DURATION_SECS: f32 = 0.25;
@@ -140,7 +140,7 @@ impl TransitionPlaygroundScene {
             *overlay_request = Some(super::OverlayRequest::Pop);
             None
         } else {
-            Some(Scene::StartScreen(StartScreenScene::new()))
+            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
         }
     }
 
@@ -486,7 +486,7 @@ impl SceneBehavior for TransitionPlaygroundScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
 
         for (scene, pose) in self.poses(layout.viewport) {
@@ -529,7 +529,7 @@ impl SceneBehavior for TransitionPlaygroundScene {
         push_panel(
             &mut frame,
             layout.panel,
-            color::alpha(color::MIDNIGHT, 0.94),
+            color::alpha(color::WALNUT_DEEP, 0.94),
             color::BRASS,
         );
         draw_controls(
@@ -573,7 +573,7 @@ fn draw_top_banner(
     push_panel(
         frame,
         badge,
-        color::alpha(color::MIDNIGHT, 0.9),
+        color::alpha(color::WALNUT_DEEP, 0.9),
         color::GOLD,
     );
     frame.text(TextLabel {
@@ -602,7 +602,7 @@ fn draw_top_banner(
             badge[3] * 0.28,
         ],
         text: "Scene A lives at t=0. Scene B lives at t=1. Click the bars to scrub.".into(),
-        color: color::MIST,
+        color: color::STONE,
         font_px: Some(typography::size(typography::CAPTION, viewport[3], ui_scale)),
         ..Default::default()
     });
@@ -658,7 +658,7 @@ fn draw_controls(
             layout.panel[3] * 0.12,
         ],
         text: "Progress".into(),
-        color: color::MIST,
+        color: color::STONE,
         font_px: Some(typography::size(
             typography::CAPTION,
             layout.panel[3],
@@ -674,7 +674,7 @@ fn draw_controls(
             layout.panel[3] * 0.12,
         ],
         text: "Duration".into(),
-        color: color::MIST,
+        color: color::STONE,
         font_px: Some(typography::size(
             typography::CAPTION,
             layout.panel[3],
@@ -819,7 +819,7 @@ fn draw_controls(
             layout.panel[3] * 0.16,
         ],
         text: format!("{}x", (1.0 / duration_secs).max(0.1) * 1.1),
-        color: color::SLATE,
+        color: color::UMBER,
         align: TextAlign::Right,
         font_px: Some(typography::size(
             typography::MICRO,
@@ -836,7 +836,7 @@ fn draw_controls(
             layout.panel[2] - 28.0 * scale,
             1.0,
         ],
-        color: color::alpha(color::SLATE, 0.45),
+        color: color::alpha(color::UMBER, 0.45),
     });
 }
 
@@ -894,7 +894,7 @@ fn draw_bar(
             rect[2] - inset * 2.0,
             rect[3] - inset * 2.0,
         ],
-        color: color::alpha(color::OBSIDIAN, 0.95),
+        color: color::alpha(color::WALNUT_INK, 0.95),
     });
     frame.quad(GpuInstance {
         rect: [
@@ -1021,7 +1021,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         [0.67, 0.54, 0.18, 0.05],
         "Status",
         LabelStyle {
-            color_rgba: color::MIST,
+            color_rgba: color::STONE,
             font_px: typography::size(typography::CAPTION, viewport[3], ui_scale),
             align: TextAlign::Center,
         },
@@ -1093,7 +1093,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         [0.45, 0.36, 0.39, 0.10],
         "Cool hues, offset cards, and animated rows help reveal sliding transforms.",
         LabelStyle {
-            color_rgba: color::MIST,
+            color_rgba: color::STONE,
             font_px: typography::size(typography::BODY, viewport[3], ui_scale),
             align: TextAlign::Left,
         },

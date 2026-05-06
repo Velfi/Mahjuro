@@ -227,11 +227,17 @@ fn push_water_ribbon(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
             position: [x, WATER_Y, cz - hw],
             normal: n,
             uv: [u, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x, WATER_Y, cz + hw],
             normal: n,
             uv: [u, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     // Two triangles per quad between consecutive slices.

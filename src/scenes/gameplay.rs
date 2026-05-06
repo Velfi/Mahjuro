@@ -17,6 +17,7 @@ use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
 use crate::game::cascade::ScoringCascade;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
+use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::render::draw_cmd::{DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame};
 use crate::render::flying_coins::FlyingCoinSystem;
@@ -25,6 +26,7 @@ use crate::render::score_popups::ScorePopupSystem;
 use crate::render::score_reel::ScoreReel;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
+use crate::ui::scene_layout::GameplayPositions;
 
 use super::journal_transition::JournalTransition;
 use super::pause_menu::PauseMenu;
@@ -160,28 +162,20 @@ pub struct GameplayScene {
     /// wind gust at every candle position for `DEBUG_WIND_DURATION` so the
     /// flame's wind response is visible on demand. Triggered by `B`.
     debug_wind_at: Option<Instant>,
-    /// True until the opening blind transition has finished. While set, the
-    /// draw step floods the smoke grid with positive-density impulses across
-    /// the table during the `wind_delay_secs` window after the first deal,
-    /// so the player enters the round inside a curtain of smoke that the
-    /// existing post-deal wind sweep then blows away. Cleared once that
-    /// sweep completes so subsequent post-discard refills don't re-fill
-    /// the screen.
-    initial_smoke_fill_active: bool,
     /// Lights-out transition: ramps from 0.0 (dark) to 1.0 (full brightness)
     /// after the opening deal lands. Multiplied into candle intensity, flame
     /// alpha, and point-light brightness so the scene fades in via the
     /// candles "sparking on" rather than a smoke curtain.
     light_ramp: f32,
     /// Wall time of the deal that started the ramp. Kept until `light_ramp`
-    /// reaches 1.0 so clearing `last_deal_at` after the opening wind (smoke)
+    /// reaches 1.0 so clearing `last_deal_at` after the opening wind
     /// cannot strand the ramp mid-way when wind ends before ~1.1s.
     light_ramp_anchor: Option<Instant>,
     /// Blind to apply to the run once the opening light-ramp completes. Set
     /// by callers that enter the gameplay scene from pick-blind / onboarding
     /// / retry paths; consumed by `update()` when `light_ramp >= 1.0`. While
     /// `Some`, the scene renders the *previous* round's state behind the
-    /// opening smoke curtain — the player doesn't see the round's hand,
+    /// opening transition — the player doesn't see the round's hand,
     /// target, or on-start relic triggers until the fade-in finishes, so
     /// Sweepstakes coin showers / DoraCrown reveals / future on-round-start
     /// effects are visible rather than hidden by the dark transition.
@@ -230,17 +224,13 @@ pub struct GameplayScene {
     /// Normalized screen-relative positions for the gameplay scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::GameplayPositions,
+    /// When set, the player can undo the last discard (accessibility option)
+    /// until any other gameplay action invalidates it.
+    pub(super) discard_undo: Option<DiscardUndoSnapshot>,
 }
 
 /// How long the debug `B` gust stays active after a press.
 const DEBUG_WIND_DURATION: f32 = 0.9;
-
-/// Wind-delay override used for the *first* deal of the scene only. The
-/// gameplay scene opens behind a fullscreen smoke curtain (a 2D dark
-/// overlay backed by positive-density fluid impulses); after this delay
-/// the existing post-deal wind sweep fires and blows the curtain off,
-/// fading the overlay out in lockstep so the game becomes visible.
-const OPENING_WIND_DELAY_SECS: f32 = 1.0;
 
 /// How long after the opening deal before the candles begin sparking on.
 const LIGHT_RAMP_DELAY_SECS: f32 = 0.3;
@@ -273,6 +263,9 @@ const HELP_BADGE_ID: u32 = 0x9100;
 /// help badge) are pushed earlier and win the first-hit search in
 /// `main.rs`'s `MouseInput` handler.
 const GAMEPLAY_3D_HIT_ID: u32 = 0x9200;
+
+/// Click id for the optional post-discard Undo control (2D HUD button).
+const UNDO_DISCARD_CLICK_ID: u32 = 0x9280;
 
 impl GameplayScene {
     pub(super) fn display_tile(
@@ -432,7 +425,6 @@ impl GameplayScene {
             wind_delay_secs: 3.0,
             wind_duration_secs: 1.4,
             debug_wind_at: None,
-            initial_smoke_fill_active: true,
             light_ramp: 0.0,
             // Start the candle light-ramp immediately on scene entry so the
             // fade-in isn't gated on the first deal. With `pending_blind`,
@@ -455,7 +447,12 @@ impl GameplayScene {
             journal_open_target: 0.0,
             journal_was_open: false,
             positions: crate::ui::scene_layout::load_gameplay_positions(),
+            discard_undo: None,
         }
+    }
+
+    pub(super) fn clear_discard_undo(&mut self) {
+        self.discard_undo = None;
     }
 
     /// Enter the gameplay scene for a round that has not yet been applied to
@@ -605,6 +602,7 @@ impl GameplayScene {
         layout: &crate::ui::layout::LayoutResult,
         run: &crate::game::run::RunState,
         cascade_showcase: Option<&CascadeShowcase>,
+        gameplay_positions: &GameplayPositions,
     ) -> (f32, f32) {
         if step.kind == StepKind::Final {
             let sp = layout.score_panel;
@@ -612,7 +610,7 @@ impl GameplayScene {
         }
 
         if let Some(rid) = crate::core::relic::relic_by_name(&step.source)
-            && let Some(center) = Self::relic_popup_center(layout, run, rid)
+            && let Some(center) = Self::relic_popup_center(layout, run, rid, gameplay_positions)
         {
             return center;
         }
@@ -648,24 +646,11 @@ impl GameplayScene {
         layout: &crate::ui::layout::LayoutResult,
         run: &crate::game::run::RunState,
         rid: crate::core::relic::RelicId,
+        gameplay_positions: &GameplayPositions,
     ) -> Option<(f32, f32)> {
         let active_ids = GameEngine::active_relics(run);
         let idx = active_ids.iter().position(|&id| id == rid)?;
-        if active_ids.is_empty() {
-            return None;
-        }
-
-        // Mirror the vertical left-column layout from draw_frame.
-        let col_x = layout.window_w * 0.10;
-        let col_top_y = layout.window_h * 0.20;
-        let col_bottom_y = layout.window_h * 0.60;
-        let cell_h = layout.mm(45.0);
-        let col_span = col_bottom_y - col_top_y;
-        let n = active_ids.len() as f32;
-        let total_h = cell_h * n;
-        let start_y =
-            (col_top_y + (col_span - total_h) * 0.5 + cell_h * 0.5).clamp(col_top_y, col_bottom_y);
-        Some((col_x, start_y + idx as f32 * cell_h))
+        input_handler::relic_tray_screen_center_xy(gameplay_positions, layout, run, idx)
     }
 
     fn yaku_popup_center(

@@ -7,6 +7,7 @@
 #
 # Example:
 #   scripts/release.sh 0.2.0
+#   scripts/release.sh 0.5.0-0
 #
 # This will:
 #   1. Verify the working tree is clean and on `main`

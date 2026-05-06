@@ -1,9 +1,13 @@
 /target
 /.claude
-.DS_Store
+/.DS_Store
 /.pycache
 */__pycache__
 /.venv
-/vendor
+/vendor/*
+!/vendor/wgpu-hal/
+!/vendor/wgpu-hal/**
 /steam_sdk
 /build-staging
+.env
+*.blend1

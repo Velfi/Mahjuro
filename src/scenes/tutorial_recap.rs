@@ -63,10 +63,7 @@ impl SceneBehavior for TutorialRecapScene {
         if action.is_some() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             return Some(if self.shop_follows {
-                Scene::Shop(ShopScene::new(
-                    GameEngine::current_run_number(ctx.run),
-                    ctx.run,
-                ))
+                Scene::Shop(ShopScene::new(ctx.run))
             } else {
                 Scene::Gameplay(GameplayScene::with_pending_blind(
                     GameEngine::current_upcoming_blind(ctx.run),
@@ -90,8 +87,12 @@ impl SceneBehavior for TutorialRecapScene {
             rect: [0.0, 0.0, w, h],
             color: [0.0, 0.0, 0.0, 1.0],
         });
-        frame.starfield();
-        frame.golden_dust();
+        if ctx.effect_layers.starfield {
+            frame.starfield();
+        }
+        if ctx.effect_layers.golden_dust {
+            frame.golden_dust();
+        }
 
         // ── Central card ─────────────────────────────────────────
         let card_w = (500.0 * scale).min(w * 0.85);
@@ -100,7 +101,7 @@ impl SceneBehavior for TutorialRecapScene {
         let cy = (h - card_h) * 0.5 - 10.0 * scale;
         frame.quad(GpuInstance {
             rect: [cx, cy, card_w, card_h],
-            color: color::MIDNIGHT,
+            color: color::WALNUT_DEEP,
         });
 
         // Thin gold border around card.
@@ -131,7 +132,7 @@ impl SceneBehavior for TutorialRecapScene {
         frame.text(TextLabel {
             rect: [cx, cy + 16.0 * scale, card_w, lesson_num_h],
             text: format!("Lesson {} / {}", self.completed_lesson, LESSON_COUNT),
-            color: color::SLATE,
+            color: color::UMBER,
             font_px: Some(lesson_num_h * 0.7),
             align: TextAlign::Center,
             ..Default::default()
@@ -231,7 +232,7 @@ impl SceneBehavior for TutorialRecapScene {
                     intro_h,
                 ],
                 text: wrapped,
-                color: color::MIST,
+                color: color::STONE,
                 font_px: Some(intro_font),
                 align: TextAlign::Center,
                 ..Default::default()
@@ -243,7 +244,7 @@ impl SceneBehavior for TutorialRecapScene {
         frame.text(TextLabel {
             rect: [cx, flavor_y, card_w, 20.0 * scale],
             text: format!("\u{201c}{}\u{201d}", lesson.flavor_text),
-            color: color::alpha(color::MIST, 0.6),
+            color: color::alpha(color::STONE, 0.6),
             font_px: Some(13.0 * scale),
             align: TextAlign::Center,
             ..Default::default()
@@ -254,7 +255,7 @@ impl SceneBehavior for TutorialRecapScene {
         frame.text(TextLabel {
             rect: [0.0, hint_y, w, 22.0 * scale],
             text: "Press Enter to continue".to_string(),
-            color: color::MIST,
+            color: color::STONE,
             font_px: Some(16.0 * scale),
             align: TextAlign::Center,
             ..Default::default()

@@ -226,6 +226,9 @@ fn emit_ring(vertices: &mut Vec<Vertex3dTex>, ring: &[RingSample], layer: &Profi
             position: [x, layer.y, z],
             normal: [nx / len, ny / len, nz / len],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
 }
@@ -296,6 +299,9 @@ fn emit_cap(
         position: [0.0, layer.y, 0.0],
         normal: centre_normal,
         uv: if up { [0.5, 0.5] } else { [0.0, 0.0] },
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
 
     let rim_base = vertices.len() as u32;
@@ -311,6 +317,9 @@ fn emit_cap(
             position: [x, layer.y, z],
             normal: [nx / len, ny / len, nz / len],
             uv,
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
 

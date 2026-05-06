@@ -4,6 +4,10 @@ use crate::ui::placement::{ArrangeTarget, Node, Placement};
 
 use super::fs::{load_positions, sanitize_placements, save_positions};
 
+/// Horizontal half-extent of the gameplay procedural fog slab in normalized UV.
+/// `0` in the shader means full-screen width (non-gameplay / legacy wash).
+pub const GAMEPLAY_FOG_WALL_HALF_WIDTH_UV: f32 = 0.44;
+
 fn default_fog_wall_placement() -> Placement {
     // Match `VolumetricTuning::legacy_default().haze_horizon_y` (0.55) so the
     // band stays visible; `Placement::default()` is all-zero which pins the
@@ -41,9 +45,9 @@ pub struct GameplayPositions {
     pub camera_target_y_mul: f32,
     pub camera_target_z_mul: f32,
     pub camera_fovy_deg: f32,
-    /// Vertical band position for the procedural mountain-haze fog wash (`ny`:
-    /// 0 = top, 1 = bottom). Only `ny` affects rendering; other placement
-    /// fields are unused but kept so arrange mode stores one consistent struct.
+    /// Procedural fog-wall slab: `ny` is band height (0 = top, 1 = bottom),
+    /// `nx` is horizontal center (0 = left, 1 = right). Other fields are unused
+    /// but kept so arrange mode stores one consistent struct.
     #[serde(default = "default_fog_wall_placement")]
     pub fog_wall: Placement,
 }
@@ -235,7 +239,7 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
         },
         Node::Leaf {
             name: "gameplay.relic_col",
-            label: "Relic sidebar",
+            label: "Relic tray (horizontal)",
         },
         Node::Leaf {
             name: "gameplay.dora",
@@ -251,7 +255,7 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
         },
         Node::Leaf {
             name: "gameplay.fog_wall",
-            label: "Fog wall (mountain haze)",
+            label: "Fog wall",
         },
     ],
 }];

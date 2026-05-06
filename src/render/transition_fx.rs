@@ -16,7 +16,13 @@ fn grid_overlay_tile_short_px(w: f32, divisor: f32, min_px: f32, max_frac_w: f32
 
 /// Fixed-layout transitions at reference resolution use `base_at_ref` tiles; scales with
 /// window area (capped) so density stays similar from laptop to 4K.
-fn scaled_overlay_tile_count(base_at_ref: f32, w: f32, h: f32, min_c: usize, max_c: usize) -> usize {
+fn scaled_overlay_tile_count(
+    base_at_ref: f32,
+    w: f32,
+    h: f32,
+    min_c: usize,
+    max_c: usize,
+) -> usize {
     let n = (base_at_ref * w * h / TRANSITION_REF_AREA).round() as i32;
     n.max(min_c as i32).min(max_c as i32) as usize
 }
@@ -57,7 +63,7 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.14 + cover * 0.36),
+        color: color::alpha(color::WALNUT_INK, 0.14 + cover * 0.36),
     });
 
     let tile_size = grid_overlay_tile_short_px(w, 18.5, 30.0, 0.056);
@@ -146,7 +152,7 @@ fn push_forest_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.12 + cover * 0.42),
+        color: color::alpha(color::WALNUT_INK, 0.12 + cover * 0.42),
     });
 
     let tile_w = grid_overlay_tile_short_px(w, 17.0, 30.0, 0.062);
@@ -205,7 +211,7 @@ fn push_maelstrom(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.16 + cover * 0.46),
+        color: color::alpha(color::WALNUT_INK, 0.16 + cover * 0.46),
     });
 
     let seq = tile_sequence();
@@ -258,7 +264,7 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.18 + cover * 0.44),
+        color: color::alpha(color::WALNUT_INK, 0.18 + cover * 0.44),
     });
 
     let cx = w * 0.50;
@@ -346,7 +352,7 @@ fn push_tile_waterfall(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.10 + cover * 0.38),
+        color: color::alpha(color::WALNUT_INK, 0.10 + cover * 0.38),
     });
 
     let tile_w = grid_overlay_tile_short_px(w, 19.0, 28.0, 0.058);
@@ -403,7 +409,7 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::OBSIDIAN, 0.13 + cover * 0.40),
+        color: color::alpha(color::WALNUT_INK, 0.13 + cover * 0.40),
     });
 
     let seq = tile_sequence();
@@ -516,7 +522,7 @@ fn push_flat_tile(
             tile_w,
             tile_h,
         ],
-        color: color::alpha(color::OBSIDIAN, shadow_alpha.clamp(0.0, 1.0)),
+        color: color::alpha(color::WALNUT_INK, shadow_alpha.clamp(0.0, 1.0)),
     });
     quads.push(GpuInstance { rect, color: fill });
     quads.push(GpuInstance {

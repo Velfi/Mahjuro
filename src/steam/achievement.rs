@@ -13,9 +13,9 @@
 pub enum Achievement {
     /// Finished the tutorial. Confirms onboarding actually completes.
     TutorialComplete,
-    /// Scored their first hand. The earliest signal that the core
+    /// Scored their first structure. The earliest signal that the core
     /// scoring loop "clicked" for the player.
-    FirstHand,
+    FirstStructure,
     /// Beat round 1. Confirms one full round of the loop.
     FirstBlindCleared,
     /// Beat their first boss blind. First real difficulty checkpoint.
@@ -42,7 +42,7 @@ impl Achievement {
     pub fn api_name(self) -> &'static str {
         match self {
             Self::TutorialComplete => "TUTORIAL_COMPLETE",
-            Self::FirstHand => "FIRST_HAND",
+            Self::FirstStructure => "FIRST_STRUCTURE",
             Self::FirstBlindCleared => "FIRST_BLIND_CLEARED",
             Self::FirstBossDefeated => "FIRST_BOSS_DEFEATED",
             Self::FirstRunCompleted => "FIRST_RUN_COMPLETED",

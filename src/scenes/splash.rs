@@ -7,7 +7,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const MIN_DISPLAY_SECS: f32 = 0.5;
@@ -40,7 +40,7 @@ impl SceneBehavior for SplashScene {
         if ctx.loading_done && elapsed >= MIN_DISPLAY_SECS {
             self.done = true;
             log::info!("splash: transitioning to start screen after {elapsed:.2}s");
-            return Some(Scene::StartScreen(StartScreenScene::new()));
+            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
         }
 
         None
@@ -64,7 +64,7 @@ impl SceneBehavior for SplashScene {
             frame.text(TextLabel {
                 rect: [0.0, label_y, w, label_h],
                 text: "loading...".into(),
-                color: color::MIST,
+                color: color::STONE,
                 ..Default::default()
             });
         }

@@ -1,3 +1,7 @@
+use crate::core::tile_pack::TilePackKind;
+use crate::scenes::TilePackCelebrationScene;
+
+use super::view::snap_focus_after_shop_purchase;
 use super::*;
 use crate::scenes::{GameplayScene, OverlayRequest, ZodiacCelebrationScene};
 
@@ -185,16 +189,15 @@ fn tutorial_shop_stock(
 }
 
 impl ShopScene {
-    pub fn new(came_from_round: u32, run: &mut crate::game::run::RunState) -> Self {
-        Self::new_with_mode(came_from_round, run, ShopMode::Standard)
+    pub fn new(run: &mut crate::game::run::RunState) -> Self {
+        Self::new_with_mode(run, ShopMode::Standard)
     }
 
     pub fn new_tutorial(run: &mut crate::game::run::RunState) -> Self {
-        Self::new_with_mode(GameEngine::current_run_number(run), run, ShopMode::Tutorial)
+        Self::new_with_mode(run, ShopMode::Tutorial)
     }
 
     fn new_with_mode(
-        came_from_round: u32,
         run: &mut crate::game::run::RunState,
         mode: ShopMode,
     ) -> Self {
@@ -236,7 +239,6 @@ impl ShopScene {
         };
 
         Self {
-            came_from_round,
             mode,
             items,
             zodiac_items,
@@ -246,7 +248,6 @@ impl ShopScene {
             pause_menu: PauseMenu::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
-            pack_celebration: None,
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
             last_frame: Instant::now(),
@@ -269,6 +270,10 @@ impl ShopScene {
             positions: crate::ui::scene_layout::load_shop_positions(),
             held_item_drag: None,
             mouse_drag: None,
+            drawn_env_height_scale: std::cell::Cell::new(
+                crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            ),
+            north_sell_hold_started: None,
         }
     }
 
@@ -283,9 +288,9 @@ impl ShopScene {
         }
     }
 
-    /// Apply a purchase / use-consumable action and snap focus to the
-    /// "move on" bell on success, so the player isn't left hovering the
-    /// now-empty slot.
+    /// Apply a purchase / use-consumable action; on success, move focus to the
+    /// nearest remaining purchasable item, or the leave bell when nothing is
+    /// left to buy.
     pub(super) fn apply_buy_action(
         &mut self,
         action: ShopAction,
@@ -293,7 +298,10 @@ impl ShopScene {
         bus: &mut crate::game::event_bus::EventBus,
         cursor_pos: (f32, f32),
         overlay_request: &mut Option<OverlayRequest>,
+        window_wh: (f32, f32),
     ) {
+        self.north_sell_hold_started = None;
+        let prev_focus = self.focus;
         let before = (
             self.items.len(),
             self.zodiac_items.len(),
@@ -319,14 +327,14 @@ impl ShopScene {
             self.talisman_items.len(),
             self.pack_items.iter().filter(|p| p.sold).count(),
         );
-        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
+        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request, run);
         if before != after && !defer_focus_snap {
-            self.focus = Some(ShopFocus::NextRound);
+            snap_focus_after_shop_purchase(self, prev_focus, window_wh.0, window_wh.1, run);
         }
     }
 
-    /// Apply a sell action and snap focus to the "move on" bell so the
-    /// player isn't left hovering an empty slot.
+    /// Apply a sell action; on success, move focus like [`Self::apply_buy_action`]
+    /// (nearest purchasable, or leave when the shelf is cleared).
     pub(super) fn apply_sell_action(
         &mut self,
         action: ShopAction,
@@ -334,7 +342,16 @@ impl ShopScene {
         bus: &mut crate::game::event_bus::EventBus,
         cursor_pos: (f32, f32),
         overlay_request: &mut Option<OverlayRequest>,
+        window_wh: (f32, f32),
     ) {
+        self.north_sell_hold_started = None;
+        let prev_focus = self.focus;
+        let shop_before = GameEngine::read_shop(run);
+        let before_owned = (
+            shop_before.owned_relics.len(),
+            shop_before.owned_zodiacs.len(),
+            shop_before.owned_talismans.len(),
+        );
         let result = apply_shop_action(
             action,
             &mut self.items,
@@ -344,8 +361,16 @@ impl ShopScene {
             run,
             bus,
         );
-        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request);
-        self.focus = Some(ShopFocus::NextRound);
+        self.handle_shop_action_result(result, cursor_pos, bus, overlay_request, run);
+        let shop_after = GameEngine::read_shop(run);
+        let after_owned = (
+            shop_after.owned_relics.len(),
+            shop_after.owned_zodiacs.len(),
+            shop_after.owned_talismans.len(),
+        );
+        if before_owned != after_owned {
+            snap_focus_after_shop_purchase(self, prev_focus, window_wh.0, window_wh.1, run);
+        }
     }
 
     /// Route a `ShopActionResult` to the appropriate visual feedback.
@@ -355,11 +380,21 @@ impl ShopScene {
         _cursor_pos: (f32, f32),
         bus: &mut crate::game::event_bus::EventBus,
         overlay_request: &mut Option<OverlayRequest>,
+        run: &crate::game::run::RunState,
     ) {
         match result {
             ShopActionResult::None => {}
             ShopActionResult::PackCelebration(celeb) => {
-                self.pack_celebration = Some(celeb);
+                let shop_rm = GameEngine::read_shop(run);
+                let inventory = ShopInventoryCounts {
+                    n_for_sale: self.items.len(),
+                    n_for_sale_zodiacs: self.zodiac_items.len(),
+                    n_for_sale_talismans: self.talisman_items.len(),
+                    n_owned_relics: shop_rm.owned_relics.len(),
+                };
+                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::TilePackCelebration(
+                    TilePackCelebrationScene::new(celeb, inventory),
+                ))));
             }
             ShopActionResult::ZodiacApplied {
                 zodiac_kind,
@@ -386,6 +421,7 @@ impl ShopScene {
         if outcome.rejection.is_some() {
             return;
         }
+        self.north_sell_hold_started = None;
         self.reroll_cost += REROLL_COST_INCREMENT;
         let shop = GameEngine::read_shop(run);
         let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
@@ -419,14 +455,4 @@ impl ShopScene {
         self.focus = None;
     }
 
-    /// Debug-only: open a random tile pack celebration without purchasing.
-    pub fn debug_open_pack(&mut self, run: &mut crate::game::run::RunState) {
-        use crate::core::tile_pack::TilePackKind;
-
-        let mut rng = rand::rng();
-        let all = TilePackKind::all();
-        let kind = all[rand::RngExt::random_range(&mut rng, 0..all.len())];
-        let tiles = GameEngine::debug_add_pack(run, kind);
-        self.pack_celebration = Some(PackCelebration::new(tiles, kind.name(), kind));
-    }
 }

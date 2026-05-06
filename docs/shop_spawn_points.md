@@ -25,8 +25,8 @@ environment geometry (counter, walls, shelves, etc.) and replace the hardcoded
 | **Game world** | Scene origin | X right, Y depth (into screen), Z up | `pixel_to_world()` output |
 
 Blender's GLB exporter emits a root node with a −90° X rotation to convert
-Z-up → Y-up. `tile_glb.rs::find_node_transform()` already accumulates this
-transform when loading mesh vertices, so it bakes out automatically. Spawn point
+Z-up → Y-up. `tile_glb.rs` walks the default scene and accumulates node
+transforms when loading mesh vertices, so it bakes out automatically. Spawn point
 positions read from the node graph must go through the **same accumulated
 parent transform** so they land in game-world space.
 

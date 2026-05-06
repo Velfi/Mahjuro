@@ -260,7 +260,7 @@ impl FlyingCoinSystem {
                 Object3d {
                     pos: [c.px, c.py, c.world_y],
                     extents: [c.radius * 2.0, c.thickness, c.radius * 2.0],
-                    rotation: glam::Mat4::from_rotation_y(c.rot_y),
+                    rotation: [0.0, c.rot_y, 0.0],
                     color: [1.00, 0.78, 0.30, alpha],
                     kind: Object3dKind::Primitive {
                         shape: crate::render::primitive::MeshId::Cylinder,

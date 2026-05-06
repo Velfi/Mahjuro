@@ -1,24 +1,12 @@
-//! Tunable parameters for global volumetric effects (ambient dust, etc.).
+//! Tunable parameters for fullscreen atmosphere (mountain haze / fog wall).
 //!
-//! These values live on top of the fluid simulation: `dust_strength`
-//! seeds a low, FBM-modulated density floor across the whole grid so
-//! lamp light catches motes as god-ray shafts without any explicit
-//! emitter. Live-edited via the debug menu's "Volumetric..." overlay
-//! and can be promoted to a persistent override via `persistence`.
-//!
-//! The `haze_*` fields drive the procedural mountain-haze shader (a
-//! screen-space FBM fog, independent of the fluid sim) — also live-edited
-//! from the same overlay so art direction and volumetric motion can be
-//! tuned side-by-side.
+//! Live-edited via the debug menu's "Volumetric..." overlay and can be
+//! promoted to a persistent override via `persistence`.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct VolumetricTuning {
-    /// Ambient dust density floor written into the fluid grid every inject
-    /// pass. 0.0 disables; typical useful range 0.002..0.03.
-    pub dust_strength: f32,
-
     /// Overall density multiplier for the procedural mountain haze shader.
     /// 0.0 disables the haze; 1.0 is the default look.
     pub haze_density: f32,
@@ -38,7 +26,6 @@ pub struct VolumetricTuning {
 impl VolumetricTuning {
     pub const fn legacy_default() -> Self {
         Self {
-            dust_strength: 0.0,
             haze_density: 1.0,
             haze_color_r: 0.080,
             haze_color_g: 0.105,

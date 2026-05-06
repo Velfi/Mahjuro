@@ -152,7 +152,7 @@ impl App {
                 } else if !self.run.tutorial_shop_enabled() {
                     Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
-                    Scene::Shop(ShopScene::new(self.run.run_number, &mut self.run))
+                    Scene::Shop(crate::scenes::ShopScene::new(&mut self.run))
                 });
                 self.transition_alpha = 1.0;
             }
@@ -272,7 +272,7 @@ impl App {
             || self.debug.tuning_overlay.is_some()
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
-            || self.debug.smoke_debug_overlay.is_some()
+            || self.debug.shop_env_debug_overlay.is_some()
             || self.debug.volumetric_debug_overlay.is_some();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -285,6 +285,19 @@ impl App {
         let layout = self
             .layout_engine
             .solve(size.width as f32, size.height as f32);
+
+        let item_inspect_top = matches!(
+            self.overlay_stack.last(),
+            Some(crate::scenes::Scene::ItemInspect(_))
+        );
+        let suspended_shop = match (&self.scene, item_inspect_top) {
+            (crate::scenes::Scene::Shop(s), true) => Some(s),
+            _ => None,
+        };
+        let suspended_collection = match (&self.scene, item_inspect_top) {
+            (crate::scenes::Scene::Collection(c), true) => Some(c),
+            _ => None,
+        };
 
         let ctx = DrawCtx {
             layout: &layout,
@@ -327,7 +340,27 @@ impl App {
             } else {
                 None
             },
-            shop_smoke_tuning: &self.shop_smoke_tuning,
+            shop_env_height_scale: self.debug.shop_env_height_scale,
+            shop_env_lighting: self.debug.shop_env_lighting,
+            effect_layers: self.effect_layers,
+            cursor_pos: self
+                .input
+                .as_ref()
+                .map(|i| i.last_cursor)
+                .unwrap_or((0.0, 0.0)),
+            input_mode: self
+                .input
+                .as_ref()
+                .map(|i| i.mode)
+                .unwrap_or(crate::ui::input::InputMode::Cursor),
+            gamepad_swap_ab: self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
+            gamepad_style: self
+                .input
+                .as_ref()
+                .map(|i| i.gamepad_style)
+                .unwrap_or_default(),
+            suspended_shop,
+            suspended_collection,
         };
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -346,12 +379,14 @@ impl App {
             if let Scene::Gameplay(ref gp) = self.scene {
                 let ww = size.width as f32;
                 let wh = size.height as f32;
-                frame.gameplay_fog_wall_horizon_y = Some(gameplay_fog_wall_horizon_y_for_tune(
+                let fog = gameplay_fog_wall_placement_for_tune(
                     &gp.positions.fog_wall,
                     &self.debug.arrange_mode,
                     ww,
                     wh,
-                ));
+                );
+                frame.gameplay_fog_wall_horizon_y = Some(fog.ny.clamp(0.0, 1.0));
+                frame.gameplay_fog_wall_center_x = Some(fog.nx.clamp(0.0, 1.0));
             }
         }
 
@@ -372,8 +407,7 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Forward the cursor position so the renderer can project it onto
-        // the table plane and feed it into the volumetric smoke sim.
+        // Forward the cursor for scenes that need screen-space hit tests or layout.
         frame.cursor_pos = self.input.as_ref().map(|i| i.last_cursor);
 
         // Apply transition alpha to everything that's part of the scene
@@ -385,7 +419,7 @@ impl App {
         // Overlay the shooting-star cascade effect during dramatic transitions.
         let size = win.inner_size();
 
-        if self.transition_timer > 0.0 {
+        if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx {
             match self.transition_kind {
                 TransitionKind::ShootingStarCascade => {
                     frame.transition_progress = self.transition_timer;
@@ -473,6 +507,7 @@ impl App {
                             | DrawCmd::Object3dBatch(_)
                             | DrawCmd::ShowcaseTileBatch(_)
                             | DrawCmd::TileFaceQuad(_)
+                            | DrawCmd::ShopEnvironment
                             | DrawCmd::Table
                     )
                 });
@@ -561,8 +596,8 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Debug visibility overlay — on top of modals.
-        if let Some(ref overlay) = self.debug.visibility_overlay {
+        // Shop env scale debug overlay — on top of modals.
+        if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
             frame.quads(insts);
@@ -570,8 +605,8 @@ impl App {
             self.active_buttons.clear();
         }
 
-        // Shop smoke tuning overlay — on top of modals.
-        if let Some(ref overlay) = self.debug.smoke_debug_overlay {
+        // Debug visibility overlay — on top of modals.
+        if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
             frame.quads(insts);
@@ -784,11 +819,13 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names for arrange mode.
-        let active_scene_key: Option<&'static str> = match &self.scene {
-            Scene::Shop(_) => Some("shop"),
+        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
+        let active_scene_key: Option<&'static str> = match scene_for_renderer {
+            Scene::Shop(_) | Scene::TilePackCelebration(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
-            Scene::StartScreen(_) => Some("start_screen"),
+            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
         };
@@ -797,18 +834,26 @@ impl App {
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
-        renderer.set_committed_arrange_rotations(collect_committed_rotations(&self.scene));
+        renderer.set_committed_arrange_rotations(collect_committed_rotations(scene_for_renderer));
 
-        // Push the volumetric dust-floor density so the fluid sim's inject
-        // pass seeds an ambient baseline. Cheap each frame; the renderer
-        // no-ops if the fluid sim isn't active.
-        renderer.set_dust_strength(self.volumetric_tuning.dust_strength);
+        renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
+        let sl = self.debug.shop_env_lighting;
+        renderer.set_shop_env_render_tune(sl.linear_exposure, sl.ambient_scale, sl.lit_mesh_gltf_punctual_scale);
         // Push mountain-haze art-direction knobs into the haze shader's
         // uniform — lets the Volumetric debug overlay drive density,
         // colour, horizon band, and wind speed live.
         let haze_horizon_y = frame
             .gameplay_fog_wall_horizon_y
             .unwrap_or(self.volumetric_tuning.haze_horizon_y);
+        let wall_center_x = frame
+            .gameplay_fog_wall_center_x
+            .unwrap_or(0.5)
+            .clamp(0.0, 1.0);
+        let wall_half_width_uv = if frame.gameplay_fog_wall_horizon_y.is_some() {
+            crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV
+        } else {
+            0.0
+        };
         renderer.set_haze_tuning(
             self.volumetric_tuning.haze_density,
             self.volumetric_tuning.haze_color_r,
@@ -816,6 +861,8 @@ impl App {
             self.volumetric_tuning.haze_color_b,
             haze_horizon_y,
             self.volumetric_tuning.haze_drift_speed,
+            wall_center_x,
+            wall_half_width_uv,
         );
 
         // Push arrange-mode override so the renderer draws the selected object
@@ -834,22 +881,18 @@ impl App {
             None
         });
 
-        let render_settings = crate::render::wgpu_renderer::RenderSettings {
-            smoke_quality: self.gfx.smoke_quality,
-            smoke_amount: self.gfx.smoke_amount,
-            effects_quality: self.gfx.effects_quality,
-            tile_preset: self.gfx.tile_preset,
-            tile_material: active_material,
-            surface_kind: self.gfx.surface_kind,
-            tileset_name: self.gfx.tileset_name.clone(),
+        let active_tileset_name = self.gfx.tileset_name.clone();
+        let render_settings = self.effect_layers.wgpu_render_settings(
+            &self.gfx,
+            self.gfx.tile_preset,
+            active_material,
+            self.gfx.surface_kind,
+            active_tileset_name,
             draw_settle_speed,
             sort_settle_speed,
-            gamma: self.gfx.gamma,
-            shadows_enabled: self.gfx.shadows_enabled,
-            ssr_enabled: self.gfx.ssr_enabled,
-        };
+        );
 
-        renderer.set_hdr_enabled(self.gfx.hdr_enabled);
+        renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));
 
         // Journal pre-pass: when the shop set `journal_prepass_frame`,
         // render that frame to the offscreen `journal_scene_texture`
@@ -925,16 +968,16 @@ pub(super) fn build_level_up_modal(
     )
 }
 
-/// Effective mountain-haze horizon for gameplay: committed [`Placement::ny`]
-/// plus staged arrange deltas when the selection includes [`gameplay.fog_wall`].
-fn gameplay_fog_wall_horizon_y_for_tune(
+/// Effective [`gameplay.fog_wall`] placement: committed layout plus staged
+/// arrange deltas when that leaf is selected.
+fn gameplay_fog_wall_placement_for_tune(
     fog_wall: &crate::ui::placement::Placement,
     arrange_mode: &Option<Option<crate::main_debug_state::ArrangeModeState>>,
     ww: f32,
     wh: f32,
-) -> f32 {
+) -> crate::ui::placement::Placement {
     let base = *fog_wall;
-    let merged = match arrange_mode {
+    match arrange_mode {
         Some(Some(st)) => {
             let ap = crate::ui::placement::ArrangePreview {
                 name: st.object_name.clone(),
@@ -953,6 +996,5 @@ fn gameplay_fog_wall_horizon_y_for_tune(
             )
         }
         _ => base,
-    };
-    merged.ny.clamp(0.0, 1.0)
+    }
 }

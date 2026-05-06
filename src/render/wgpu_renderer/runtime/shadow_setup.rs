@@ -47,7 +47,11 @@ impl WgpuRenderer {
         );
         let light_view_proj = shadow_proj * shadow_view;
         let light_view_proj_arr = light_view_proj.to_cols_array();
-        let shadow_enabled_flag = if shadows_enabled { 1.0_f32 } else { 0.0 };
+        // Shop props share `lit_mesh` + the table key-light shadow map; frustum is fit to mahjong
+        // scale near the origin while shop geometry uses `window_h` world extent — PCF zeros relics.
+        let shop_suppresses_shadow = self.active_scene_key.as_deref() == Some("shop");
+        let shadow_enabled_flag =
+            if shadows_enabled && !shop_suppresses_shadow { 1.0_f32 } else { 0.0 };
         self.queue.write_buffer(
             &self.shadow_globals_buffer,
             0,
@@ -182,47 +186,41 @@ impl WgpuRenderer {
                         let eff_w = o.extents[0];
                         let eff_l = o.extents[1];
                         let depth = o.extents[2];
-                        let base_transform =
-                            translate_rot_scale(anchor, o.rotation, glam::Vec3::splat(1.0));
+                        let base_transform = translate_rot_scale(
+                            anchor,
+                            o.rotation_matrix(),
+                            glam::Vec3::splat(1.0),
+                        );
                         if kind.is_some() {
-                            let nominal_cap = eff_w * 0.33;
-                            let cap_h = if eff_l < 2.0 * nominal_cap {
-                                eff_l / 2.0
-                            } else {
-                                nominal_cap
-                            };
-                            let mid_h = (eff_l - 2.0 * cap_h).max(0.0);
-                            let slots_needed = if mid_h > 0.0 { 3 } else { 2 };
+                            let seg_h = eff_l / 3.0;
+                            let slots_needed = 3;
                             if ribbon_shadow_cursor + slots_needed > MAX_RIBBON_SLOTS {
                                 break;
                             }
                             let top_model = ribbon_submesh(
                                 base_transform,
                                 0.0,
-                                glam::Vec3::new(eff_w, cap_h, depth),
+                                glam::Vec3::new(eff_w, seg_h, depth),
                             );
                             *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
                                 .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
                             ribbon_shadow_cursor += 1;
-                            if mid_h > 0.0 {
-                                let mid_model = ribbon_submesh(
-                                    base_transform,
-                                    -cap_h,
-                                    glam::Vec3::new(eff_w, mid_h, depth),
+                            let mid_model = ribbon_submesh(
+                                base_transform,
+                                -seg_h,
+                                glam::Vec3::new(eff_w, seg_h, depth),
+                            );
+                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                                .write_shadow_uniform(
+                                    &self.queue,
+                                    light_view_proj_arr,
+                                    mid_model,
                                 );
-                                *shadow_uniforms_changed |= self.ribbon_instances
-                                    [ribbon_shadow_cursor]
-                                    .write_shadow_uniform(
-                                        &self.queue,
-                                        light_view_proj_arr,
-                                        mid_model,
-                                    );
-                                ribbon_shadow_cursor += 1;
-                            }
+                            ribbon_shadow_cursor += 1;
                             let bot_model = ribbon_submesh(
                                 base_transform,
-                                -(cap_h + mid_h),
-                                glam::Vec3::new(eff_w, cap_h, depth),
+                                -(2.0 * seg_h),
+                                glam::Vec3::new(eff_w, seg_h, depth),
                             );
                             *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
                                 .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);
@@ -262,8 +260,11 @@ impl WgpuRenderer {
                         let sx = o.extents[0] / (TALISMAN_LOCAL_HALF[0] * 2.0);
                         let sy = o.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                         let sz = o.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
-                        let model =
-                            translate_rot_scale(center, o.rotation, glam::Vec3::new(sx, sy, sz));
+                        let model = translate_rot_scale(
+                            center,
+                            o.rotation_matrix(),
+                            glam::Vec3::new(sx, sy, sz),
+                        );
                         *shadow_uniforms_changed |= self.talisman_instances[talisman_shadow_cursor]
                             .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
                         talisman_shadow_cursor += 1;
@@ -303,7 +304,7 @@ impl WgpuRenderer {
                             let orient = shape_orientation(*shape);
                             let model = translate_rot_scale(
                                 center,
-                                o.rotation * orient,
+                                o.rotation_matrix() * orient,
                                 glam::Vec3::from(o.extents),
                             );
                             if let Some(pool) = self.primitive_instances.get_mut(shape)

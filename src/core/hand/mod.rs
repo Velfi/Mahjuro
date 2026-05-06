@@ -17,8 +17,7 @@ pub enum SetKind {
     Triplet,
     Sequence,
     /// Four of a kind (mahjong "kan"). Counts as a triplet for yaku and meld
-    /// detection but scores larger and can flip an extra dora indicator at the
-    /// run-state level.
+    /// detection but uses a higher base chip table entry than a triplet.
     Kong,
 }
 

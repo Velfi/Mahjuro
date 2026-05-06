@@ -29,6 +29,9 @@ pub fn build_orb_mesh() -> MeshCpu {
                 position: [x, y, z],
                 normal: [sin_phi * cos_t, sin_phi * sin_t, cos_phi],
                 uv: [lon as f32 / LON_SEGS as f32, lat as f32 / LAT_RINGS as f32],
+                tangent: Vertex3dTex::DEFAULT_TANGENT,
+                uv_emr: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             });
         }
     }

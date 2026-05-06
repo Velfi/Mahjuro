@@ -105,7 +105,7 @@ impl WgpuRenderer {
         let orient = shape_orientation(*shape);
         let model = translate_rot_scale(
             pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]),
-            obj.rotation * orient,
+            obj.rotation_matrix() * orient,
             glam::Vec3::from(obj.extents),
         );
         // Arrange-name compat shim: for BeveledSlab

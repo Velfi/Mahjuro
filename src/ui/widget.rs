@@ -76,7 +76,7 @@ pub fn push_inset_border(
 
 /// Draw a one-pixel raised-panel bevel just inside the inset border.
 ///
-/// The top and left inner edges get a subtle highlight (lighter indigo) and
+/// The top and left inner edges get a subtle highlight (lighter walnut) and
 /// the bottom and right inner edges get a shadow (near-black), making the
 /// panel read as physically raised out of the background.
 ///
@@ -87,8 +87,8 @@ fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
     let [x, y, w, h] = rect;
     let o = border_t; // offset: bevel sits just inside the border
     let bw = 1.0_f32; // bevel strip width (1 px looks crisp at all scales)
-    let hi = alpha(TWILIGHT, 0.55); // top-left highlight — lighter indigo
-    let sh = alpha(OBSIDIAN, 0.70); // bottom-right shadow — near-black
+    let hi = alpha(WALNUT_BRIGHT, 0.55); // top-left highlight — lighter walnut
+    let sh = alpha(WALNUT_INK, 0.70); // bottom-right shadow — near-black
 
     // Highlight: top inner edge
     out.push(GpuInstance {

@@ -1,12 +1,15 @@
-//! Unified scene-placement primitives.
+//! Unified scene-placement primitives (saved layout + arrange mode).
+//!
+//! **Holistic picture** — screen space vs world vs rotation vs arrange:
+//! see [`docs/agents/scene-placement.md`](../../../docs/agents/scene-placement.md).
 //!
 //! Every manually-placeable object in a scene is described by a [`Placement`]:
-//! normalized screen fractions for horizontal/vertical position, a physical
-//! lift in millimeters, and three rotation angles in degrees (Z→Y→X order).
+//! normalized screen fractions for horizontal/vertical position, physical lift
+//! in millimeters, and three rotation angles in **degrees** persisted to JSON.
 //!
 //! Scenes compose their placements into a struct (e.g. `ShopPositions`,
 //! `GameplayPositions`). Arrange-mode discovers placements by name via the
-//! [`ArrangeTarget`] trait, so a single generic `apply_arrange` handler works
+//! [`ArrangeTarget`] trait, so a single generic [`apply_arrange`] handler works
 //! for every scene without bespoke match statements.
 //!
 //! ## Responsiveness
@@ -18,7 +21,12 @@
 //! - `lift_mm` is physical millimeters above the felt, converted to world
 //!   units through [`crate::ui::layout::LayoutResult::mm`] so physical object
 //!   sizes stay consistent across resolutions.
-//! - Rotations are coordinate-free degrees, composed Z→Y→X.
+//! - `rx_deg` / `ry_deg` / `rz_deg` are summed with arrange deltas and applied
+//!   in the renderer as **`Rz * Ry * Rx`** on the mesh model basis (see
+//!   `apply_arrange_override` in `wgpu_renderer.rs`). For mesh-local euler
+//!   triples in **radians**, use [`crate::render::draw_cmd::Object3d`] and
+//!   [`PlacementAnchor::object3d_rotation`]; do not bake placement degrees into
+//!   `Object3d.rotation` when `arrange_name` is set (double-apply bug).
 //!
 //! Anchor-relative placements (hand strip, yaku tablet row, action-bar-
 //! relative bowl/mirror, score-panel-relative plaque/coin pile) use the same
@@ -31,8 +39,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// `nx` / `ny` are normalized window fractions (0–1, may go outside for
 /// off-screen placements). `lift_mm` is physical millimeters above the felt.
-/// Rotations are degrees; the renderer applies them in **Z → Y → X** order
-/// (matches the existing hand-strip / yaku-tablet convention).
+/// Rotation degrees are folded into the renderer arrange path as **`Rz * Ry * Rx`**
+/// after summing committed + staged deltas (see `wgpu_renderer.rs`).
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Placement {
     /// 0 = left edge, 1 = right edge.
@@ -113,6 +121,19 @@ impl Placement {
         self.ry_deg += d_ry_deg;
         self.rz_deg += d_rz_deg;
     }
+
+    /// Euler **XYZ** radians matching [`crate::render::table_transform::euler_xyz_rad_from_deg`]
+    /// — comparable to [`crate::render::draw_cmd::Object3d::rotation`] units for debugging;
+    /// the runtime arrange path still consumes degrees via `committed_arrange_rotations`.
+    #[allow(dead_code)] // Tooling / future HUD; unit-tested only in `cfg(test)`.
+    #[inline]
+    pub fn rotation_xyz_rad(&self) -> [f32; 3] {
+        crate::render::table_transform::euler_xyz_rad_from_deg(
+            self.rx_deg,
+            self.ry_deg,
+            self.rz_deg,
+        )
+    }
 }
 
 /// Anchor derived from a [`Placement`] for constructing an `Object3d` that
@@ -138,7 +159,7 @@ impl Placement {
 /// );
 /// Object3d {
 ///     pos: anchor.pos,
-///     rotation: anchor.rotation,
+///     rotation: anchor.object3d_rotation(),
 ///     arrange_name: Some(anchor.arrange_name),
 ///     // ...
 /// }
@@ -151,6 +172,12 @@ pub struct PlacementAnchor {
 }
 
 impl PlacementAnchor {
+    /// [`crate::render::draw_cmd::Object3d::rotation`] euler triple matching `self.rotation`.
+    #[inline]
+    pub fn object3d_rotation(&self) -> [f32; 3] {
+        crate::render::table_transform::mat4_to_euler_xyz_rad(self.rotation)
+    }
+
     /// Build a `PlacementAnchor` by folding a scene `Placement` into a
     /// draw-site anchor. See the type docs for contract details.
     pub fn new(
@@ -406,6 +433,20 @@ mod tests {
         assert!(approx(p.ny, 0.0));
         assert!(approx(p.lift_mm, 0.0));
         assert!(approx(p.rx_deg, 0.0));
+    }
+
+    #[test]
+    fn placement_rotation_xyz_rad_matches_degrees() {
+        let p = Placement {
+            rx_deg: 90.0,
+            ry_deg: -45.0,
+            rz_deg: 0.0,
+            ..Placement::default()
+        };
+        let r = p.rotation_xyz_rad();
+        assert!(approx(r[0], std::f32::consts::FRAC_PI_2));
+        assert!(approx(r[1], -std::f32::consts::FRAC_PI_4));
+        assert!(approx(r[2], 0.0));
     }
 
     #[test]

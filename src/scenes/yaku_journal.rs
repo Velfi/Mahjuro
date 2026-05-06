@@ -440,7 +440,7 @@ fn draw_sealed_slab(
     // Inked rim + deep-lacquer card face — darker than parchment so the
     // seal reads as a *locked chapter* rather than a waiting page, and
     // darker than the wood table so it stands apart from the background.
-    // Color below is roughly darkened OBSIDIAN with a warm lift, chosen
+    // Color below is roughly darkened WALNUT_INK with a warm lift, chosen
     // by eye to contrast against both PARCHMENT and the wood grain.
     frame.quad(GpuInstance {
         rect: [x, y, w, h],
@@ -683,7 +683,7 @@ fn draw_plaque(
     let pill_y = header_y + title_h * 0.94;
     // Ink on metal badges: near-black so thin caption glyphs stay legible on
     // bright brass/gold (WCAG-style contrast on TV/couch viewing).
-    let badge_ink = color::darken(color::OBSIDIAN, 0.12);
+    let badge_ink = color::darken(color::WALNUT_INK, 0.12);
     let (pill_bg, pill_fg) = match state {
         ProgressionState::Leveled => (color::darken(color::GOLD, 0.06), badge_ink),
         ProgressionState::Unseen => (color::darken(bamboo_face, 0.28), label_champagne_soft),

@@ -128,9 +128,7 @@ impl ZodiacKind {
         Self::all().iter().copied().find(|z| z.yaku() == yaku)
     }
 
-    /// Shop price in gold for buying this zodiac as a single. Constant across
-    /// zodiacs in Patch B; the per-zodiac variation can come later if balance
-    /// demands it.
+    /// Shop price in gold for buying one copy of any zodiac (same for all kinds).
     pub fn shop_price() -> u32 {
         6
     }

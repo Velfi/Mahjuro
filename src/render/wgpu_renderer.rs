@@ -2,8 +2,6 @@
 
 #[path = "wgpu_renderer/init.rs"]
 mod init;
-#[path = "wgpu_renderer/journal_target.rs"]
-mod journal_target;
 #[path = "wgpu_renderer/resources.rs"]
 pub(crate) mod resources;
 #[path = "wgpu_renderer/runtime.rs"]
@@ -47,16 +45,12 @@ use crate::render::draw_cmd::{
     UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
-use crate::render::lamp_mesh::{
-    build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh, build_lamp_body_mesh,
-    build_lamp_bulb_mesh,
-};
 use crate::render::lit_mesh::Aabb;
 use crate::render::lit_mesh::MeshCpu;
 use crate::render::lit_mesh::push_box;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
-    SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_ssr_layout,
+    SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
     create_shadow_caster_layout, create_shadow_sample_layout,
 };
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
@@ -67,7 +61,6 @@ use crate::render::primitive::MeshId;
 use crate::render::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
     build_relic_mesh_from_rgba, build_round_dish_mesh, build_shop_action_prop_mesh,
-    build_tent_card_mesh,
 };
 use crate::render::relic_pipeline::spawn_relic_loader;
 use crate::render::ribbon_mesh::build_ribbon_mesh;
@@ -79,8 +72,9 @@ use crate::render::shop_bell_mesh::build_shop_bell_mesh;
 use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad, rot_rz_rx_deg,
-    score_popup_glyph_rot_rad, table_mesh_lay_flat, tile_mesh_local_to_world, translate_rot_scale,
+    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad,
+    rot_fixed_axes_deg_matrix, score_popup_glyph_rot_rad, table_mesh_lay_flat,
+    tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
@@ -89,6 +83,28 @@ use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_m
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::world_space::pixel_to_world;
 use crate::scenes::BackgroundId;
+
+/// Maximum width/height for window-backed surfaces and derived HDR targets.
+/// Caps bogus platform `Resized` values that can otherwise allocate tens of GB.
+pub(crate) const MAX_RENDER_DIMENSION: u32 = 8192;
+
+pub(crate) fn clamp_render_physical_size(
+    size: winit::dpi::PhysicalSize<u32>,
+) -> winit::dpi::PhysicalSize<u32> {
+    let w = size.width.clamp(1, MAX_RENDER_DIMENSION);
+    let h = size.height.clamp(1, MAX_RENDER_DIMENSION);
+    if w != size.width || h != size.height {
+        log::warn!(
+            "clamping render size {}×{} to {}×{} (MAX_RENDER_DIMENSION={})",
+            size.width,
+            size.height,
+            w,
+            h,
+            MAX_RENDER_DIMENSION
+        );
+    }
+    winit::dpi::PhysicalSize::new(w, h)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -112,7 +128,8 @@ struct Globals {
 struct HazeUniform {
     /// RGB haze colour (linear) + density multiplier in the alpha slot.
     color_density: [f32; 4],
-    /// `x` = horizon y (0..1), `y` = drift-speed multiplier, `z`/`w` reserved.
+    /// `x` = horizon y (0..1), `y` = drift-speed multiplier,
+    /// `z` = fog-wall center x (0..1), `w` = wall half-width in UV (0 = full width).
     params: [f32; 4],
 }
 
@@ -127,7 +144,7 @@ struct BloomParams {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct TonemapParams {
     exposure: f32,
-    /// 0 = ACES + SDR swapchain; 1 = linear exposure only (HDR surface / journal float target).
+    /// 0 = ACES fitted (SDR or HDR swapchain); 1 = linear × exposure (journal prepass float target).
     mode: f32,
     _pad: [f32; 2],
 }
@@ -146,6 +163,25 @@ struct CameraUniform {
     tile_seed: f32,
     /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
     decal_atlas_uv: [f32; 4],
+    /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
+    /// w = unused. Matches `SsrGlobals.felt.yzw` on `lit_mesh` for the same frame.
+    hdr_tonemap: [f32; 4],
+}
+
+/// Per-frame data for `tile_outline.wgsl` group 0 binding 0.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TileOutlineFrameUniform {
+    view_proj: [f32; 16],
+    hdr_tonemap: [f32; 4],
+}
+
+/// One outlined tile instance for `tile_outline.wgsl` storage buffer (binding 1).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct TileOutlineInstance {
+    model: [f32; 16],
+    base_color_factor: [f32; 4],
 }
 
 #[repr(C)]
@@ -161,8 +197,6 @@ pub struct GpuInstance {
 /// value instead of ten individual params.
 #[derive(Clone)]
 pub struct RenderSettings {
-    pub smoke_quality: crate::persistence::SmokeQuality,
-    pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
@@ -208,9 +242,8 @@ pub struct GradientQuadInstance {
 pub const MAX_POINT_LIGHTS: usize = 16;
 
 /// Maximum number of spotlights uploaded each frame. Must match the array
-/// length in tile_3d.wgsl. Spotlights are only sampled by the tile pipeline
-/// (not lit_mesh / smoke lightbake) — they're a narrow tool for drawing
-/// focused pools onto tile faces (e.g. hint indicators).
+/// length in `tile_3d.wgsl` and `lit_mesh.wgsl`. Bound as render pipeline
+/// group 3 for tiles and lit meshes (table / Object3d).
 pub const MAX_SPOT_LIGHTS: usize = 8;
 
 /// Cheap deterministic hash of `(label, width, height)` used as the cache
@@ -255,34 +288,6 @@ struct TileOccludersBuf {
     /// `count.x` = number of active occluders; rest is std140 padding.
     count: [u32; 4],
     boxes: [TileOccluderGpu; MAX_TILE_OCCLUDERS],
-}
-
-/// World-space AABB covering every candle flame currently in the frame.
-/// Returns `None` if there are no candles. Used by the fluid scissor so
-/// the flame sub-march in the volume shader isn't scissored out when
-/// the smoke field is empty. Padding is `flame_height_world` on every
-/// axis — generous enough to cover either axis convention for "which
-/// way the flame points" (shader is Y-up, world is Z-up) and the
-/// bounding sphere the shader itself uses for ray-flame intersection.
-fn compute_flame_world_aabb(
-    candles: &[PointLight],
-    flame_height_world: f32,
-    screen_w: f32,
-    screen_h: f32,
-) -> Option<(glam::Vec3, glam::Vec3)> {
-    if candles.is_empty() || flame_height_world <= 0.0 {
-        return None;
-    }
-    let pad = flame_height_world.max(4.0);
-    let pad_v = glam::Vec3::splat(pad);
-    let mut mn = glam::Vec3::splat(f32::INFINITY);
-    let mut mx = glam::Vec3::splat(f32::NEG_INFINITY);
-    for l in candles {
-        let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
-        mn = mn.min(p - pad_v);
-        mx = mx.max(p + pad_v);
-    }
-    Some((mn, mx))
 }
 
 fn current_moon_phase() -> f32 {
@@ -346,9 +351,9 @@ struct PointLightsBuf {
     /// that don't have access to the screen-space `Globals` uniform).
     /// `extras.y` = wall-clock time in seconds (used by `MaterialKind::Water`
     /// to scroll the river surface and animate foam crests).
-    /// `extras.z` = candle flame height in world units (for the volumetric
-    /// lightbake flame emission envelope).
-    /// `extras.w` reserved.
+    /// `extras.z` = candle flame height in world units (for shaders that
+    /// key flame envelope size off the shared point-light buffer).
+    /// `extras.w` = shop `KHR_lights_punctual` scale (`lit_mesh` binding 2); binding 0 uses `1`.
     extras: [f32; 4],
     lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
@@ -358,9 +363,8 @@ struct PointLightsBuf {
 /// radiating omnidirectionally. Used to draw focused visual-highlight pools
 /// on specific tiles (hint indicators). Scenes push these into
 /// [`crate::render::draw_cmd::UiFrame::spot_lights`]; the renderer translates
-/// them into [`SpotLightGpu`] each frame. Only the tile pipeline samples the
-/// spotlight buffer — table / candles / smoke do not receive spotlight
-/// contribution.
+/// them into [`SpotLightGpu`] each frame. Sampled by the tile pipeline and
+/// `lit_mesh`.
 #[derive(Clone, Copy, Debug)]
 pub struct SpotLight {
     /// Pixel-space position (same convention as `PointLight`). `z` is the
@@ -455,6 +459,50 @@ impl SpotLightsBuf {
 }
 
 impl PointLightsBuf {
+    /// Same as [`Self::from_lights`] but positions each light via the shop camera ray /
+    /// horizontal-plane hit used by perspective-correct `Object3d` placement.
+    fn from_lights_shop_camera(
+        src: &[PointLight],
+        cam: &crate::render::draw_cmd::CameraParams,
+        candle_count: u32,
+        flame_height_world: f32,
+        lit_mesh_punctual_intensity_scale: f32,
+        screen_w: f32,
+        screen_h: f32,
+        gamma: f32,
+        time: f32,
+    ) -> Self {
+        let mut lights = [PointLightGpu {
+            pos: [0.0; 4],
+            color: [0.0; 4],
+        }; MAX_POINT_LIGHTS];
+        let n = src.len().min(MAX_POINT_LIGHTS);
+        for (i, l) in src.iter().take(n).enumerate() {
+            let p = crate::render::world_space::world_on_camera_ray_plane_z(
+                screen_w,
+                screen_h,
+                cam,
+                l.pos[0],
+                l.pos[1],
+                l.pos[2],
+            );
+            lights[i] = PointLightGpu {
+                pos: [p.x, p.y, p.z, l.radius],
+                color: [l.color[0], l.color[1], l.color[2], l.intensity],
+            };
+        }
+        Self {
+            count: [n as u32, candle_count.min(n as u32), 0, 0],
+            extras: [
+                gamma.max(0.01),
+                time,
+                flame_height_world,
+                lit_mesh_punctual_intensity_scale,
+            ],
+            lights,
+        }
+    }
+
     /// Build the std140 light buffer, mapping each light's pixel-space
     /// `(x, y)` onto the table-plane world (`world_x = x - w/2`,
     /// `world_y = y - h/2`). The third position component is **+Z** lift above the felt.
@@ -462,6 +510,7 @@ impl PointLightsBuf {
         src: &[PointLight],
         candle_count: u32,
         flame_height_world: f32,
+        lit_mesh_punctual_intensity_scale: f32,
         screen_w: f32,
         screen_h: f32,
         gamma: f32,
@@ -481,9 +530,42 @@ impl PointLightsBuf {
         }
         Self {
             count: [n as u32, candle_count.min(n as u32), 0, 0],
-            extras: [gamma.max(0.01), time, flame_height_world, 0.0],
+            extras: [
+                gamma.max(0.01),
+                time,
+                flame_height_world,
+                lit_mesh_punctual_intensity_scale,
+            ],
             lights,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TileGlbPipelineKey {
+    /// Not selected by [`Self::from_loaded_primitive`]; pipelines kept for symmetry.
+    #[allow(dead_code)]
+    OpaqueDoubleSided,
+    OpaqueCullBack,
+    BlendDoubleSided,
+    BlendCullBack,
+}
+
+impl TileGlbPipelineKey {
+    pub(super) fn from_loaded_primitive(lp: &crate::render::tile_glb::LoadedPrimitive) -> Self {
+        use crate::render::tile_glb::GltfAlphaMode::*;
+        // glTF `doubleSided` on opaque/mask solids (e.g. mahjong tiles) makes interior
+        // back-faces visible on thin-walled geometry; only honor it for blend materials.
+        match lp.alpha_mode {
+            Blend if lp.double_sided => Self::BlendDoubleSided,
+            Blend => Self::BlendCullBack,
+            Opaque | Mask => Self::OpaqueCullBack,
+        }
+    }
+
+    #[inline]
+    pub(super) fn is_blend(self) -> bool {
+        matches!(self, Self::BlendDoubleSided | Self::BlendCullBack)
     }
 }
 
@@ -495,6 +577,13 @@ struct TilePrimitiveGpu {
     index_buffer: wgpu::Buffer,
     index_count: u32,
     albedo_view: wgpu::TextureView,
+    /// Tangent-space normal map (`Rgba8Unorm`); flat `(128,128,255)` when unused.
+    normal_view: wgpu::TextureView,
+    metallic_roughness_view: wgpu::TextureView,
+    emissive_view: wgpu::TextureView,
+    pbr_uniform_buffer: wgpu::Buffer,
+    sampler: wgpu::Sampler,
+    pipeline_key: TileGlbPipelineKey,
 }
 
 /// A relic icon to draw as a textured quad at a screen-space rect.
@@ -607,11 +696,6 @@ const TEXT_CACHE_TTL_FRAMES: u64 = 120;
 struct HandTileGpu {
     /// Written every frame with view_proj + model + base_color_factor.
     uniform_buffer: wgpu::Buffer,
-    /// Companion uniform buffer for the gold-metal outline shell. Written
-    /// every frame the tile is *selected* with an inflated model matrix
-    /// (uniform 1.06× scale around the tile center). Always allocated so
-    /// the bind group can stay constant for the lifetime of the tile.
-    outline_uniform_buffer: wgpu::Buffer,
     /// Per-tile shadow caster uniform (light_view_proj * model). Written
     /// every frame in lockstep with `uniform_buffer` and consumed by the
     /// shadow pre-pass via `shadow_bind_group`.
@@ -627,16 +711,19 @@ struct ShowcaseTileGpu {
     decal_atlas_uv: [f32; 4],
     uniform_buffer: wgpu::Buffer,
     bind_groups: Vec<wgpu::BindGroup>,
-    /// Outline shell uniform + bind groups — always allocated so the bind
-    /// group can stay constant; only written when `p.outline` is true.
-    outline_uniform_buffer: wgpu::Buffer,
-    outline_bind_groups: Vec<wgpu::BindGroup>,
     shadow_uniform_buffer: wgpu::Buffer,
     shadow_bind_group: wgpu::BindGroup,
     /// Last-uploaded shadow caster uniform — skips writes + shadow depth pass when static.
     cached_shadow_caster: crate::render::lit_mesh::ShadowCasterUniform,
     /// Cache key to skip re-rasterisation when the tile hasn't changed.
     tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
+}
+
+/// GPU uniforms + bind groups for the imported [`Shop.glb`](../../assets/Shop.glb) environment mesh.
+/// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
+struct ShopEnvironmentGpu {
+    uniform_buffer: wgpu::Buffer,
+    bind_groups: Vec<wgpu::BindGroup>,
 }
 
 struct TileFaceOverlayGpu {
@@ -721,15 +808,6 @@ pub struct ProjectionCache {
     pub dora_plinth_rect: Option<[f32; 4]>,
 }
 
-/// Tag identifying which cached triangle list backs a trimesh pickable.
-/// The slab-test is sometimes a bad silhouette proxy (hanging lamp has a
-/// narrow cord above a wide shade), so we ray-cast against the real mesh
-/// for those objects. Add a variant here when adding a new trimesh pick.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum TrimeshRef {
-    LampBody,
-}
-
 /// Active arrange-mode override for the renderer. When set, the matching
 /// object's model matrix is rebuilt each frame using these values instead of
 /// the placement data from the scene's draw commands.
@@ -789,24 +867,14 @@ pub struct WgpuRenderer {
     config: wgpu::SurfaceConfiguration,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    /// Snapshot of the scene depth, copied between the pre-smoke and
-    /// post-smoke render passes so the volumetric smoke can sample depth
-    /// without aliasing the live depth attachment.
-    depth_copy_texture: wgpu::Texture,
-    depth_copy_view: wgpu::TextureView,
-    /// Snapshot of the scene depth taken at the *end of pass A1* (before
-    /// the hanging plaques are drawn). The lacquered-table SSR group
-    /// samples this view so the table never reflects the plaques' engraved
-    /// text — keeping the plaque + decal out of the SSR depth and the
-    /// matching `scene_prev_texture` colour snapshot prevents the ghost
-    /// text artefact that would otherwise appear in the table reflection
-    /// directly below the plaque.
+    /// Previous-frame depth snapshot copied after Pass A for lacquered-table SSR
+    /// (paired with `scene_prev_texture`). See the SSR snapshot block in
+    /// `runtime/render.rs`.
     ssr_prev_depth_texture: wgpu::Texture,
     ssr_prev_depth_view: wgpu::TextureView,
     quad_pipeline: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
-    /// 3D billboarded flame particle pipeline (replaces the legacy 2D
-    /// additive-quad flame when smoke is Off). See
+    /// 3D billboarded flame particle pipeline. See
     /// [`crate::render::flame_particles`] and `shaders/flame.wgsl`.
     flame_pipeline: wgpu::RenderPipeline,
     /// Per-frame camera matrices uploaded for the flame vertex shader.
@@ -841,12 +909,17 @@ pub struct WgpuRenderer {
     cascade_offscreen_texture: wgpu::Texture,
     cascade_offscreen_view: wgpu::TextureView,
     cascade_composite_bind_group: wgpu::BindGroup,
-    tile_pipeline: wgpu::RenderPipeline,
-    /// Gold-metal "shell" pipeline used to draw a 3D outline behind each
-    /// selected hand tile. Same vertex layout / bind group layout as
-    /// `tile_pipeline`, but with front-face culling so only the back of
-    /// the inflated shell shows around the tile silhouette, and a fragment
-    /// shader that outputs polished gold lit by the candle point lights.
+    tile_pipeline_opaque_double: wgpu::RenderPipeline,
+    tile_pipeline_opaque_cull: wgpu::RenderPipeline,
+    tile_pipeline_blend_double: wgpu::RenderPipeline,
+    tile_pipeline_blend_cull: wgpu::RenderPipeline,
+    /// Shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
+    shop_pipeline_opaque_double: wgpu::RenderPipeline,
+    shop_pipeline_opaque_cull: wgpu::RenderPipeline,
+    shop_pipeline_blend_double: wgpu::RenderPipeline,
+    shop_pipeline_blend_cull: wgpu::RenderPipeline,
+    /// Gold-metal shell behind outlined showcase tiles: merged mesh + instance
+    /// vertex stream (model columns + rim factor), one draw per batch.
     tile_outline_pipeline: wgpu::RenderPipeline,
     /// Additive radial glow drawn behind selected tiles. A soft elliptical
     /// halo in warm gold that spills out past the tile silhouette and
@@ -855,18 +928,53 @@ pub struct WgpuRenderer {
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     tile_material_layout: wgpu::BindGroupLayout,
-    /// Per-frame point-light array uploaded to the tile pipeline (group 1).
+    /// Group 0 for `tile_outline_pipeline`: frame uniform (instances are VB slot 1).
+    tile_outline_frame_uniform_buffer: wgpu::Buffer,
+    tile_outline_instance_buffer: wgpu::Buffer,
+    tile_outline_frame_bind_group: wgpu::BindGroup,
+    /// Built in `run_showcase_tiles_placement`, consumed by outline instanced draw.
+    tile_outline_instances_staging: Vec<TileOutlineInstance>,
+    /// Per `ShowcaseTileBatch` render op: `(first_instance, instance_count)` into staging / GPU buffer.
+    tile_outline_batch_ranges: Vec<(u32, u32)>,
+    /// Per-frame point-light array — gameplay / artist falloff (group 1 for tiles + lit_mesh).
     point_lights_buffer: wgpu::Buffer,
     tile_occluders_buffer: wgpu::Buffer,
     point_lights_bind_group: wgpu::BindGroup,
-    /// Per-frame spotlight array uploaded to the tile pipeline (group 3).
-    /// Only the tile pipeline binds this — lit_mesh / smoke do not.
+    /// Shop embedded `KHR_lights_punctual` points — group 1 binding 0 for `shop_glb.wgsl` when punctual;
+    /// binding 2 for `lit_mesh` (inverse-square in shader). Same layout as gameplay lights + occluders.
+    shop_gltf_point_lights_buffer: wgpu::Buffer,
+    shop_gltf_point_lights_scene_bind_group: wgpu::BindGroup,
+    /// Per-frame spotlight buffer (`SpotLightsBuf`). Tile pipeline and
+    /// lit_mesh bind it as group 3.
     spot_lights_buffer: wgpu::Buffer,
     spot_lights_bind_group: wgpu::BindGroup,
     tile_sampler: wgpu::Sampler,
+    /// Keeps default normal-map texture alive for [`TilePrimitiveGpu::normal_view`] clones.
+    _tile_default_normal_texture: wgpu::Texture,
+    _tile_glb_default_mr_texture: wgpu::Texture,
+    _tile_glb_default_emissive_texture: wgpu::Texture,
     /// Per-primitive GPU resources for the tile mesh (one entry per glTF
     /// primitive, e.g. ivory face + bamboo body).
     tile_primitives: Vec<TilePrimitiveGpu>,
+    /// All tile primitives concatenated — used for outline shell draws only.
+    tile_outline_vertex_buffer: wgpu::Buffer,
+    tile_outline_index_buffer: wgpu::Buffer,
+    tile_outline_index_count: u32,
+    /// [`Shop.glb`](../../assets/Shop.glb) environment primitives (tile vertex layout + materials).
+    shop_env_primitives: Vec<TilePrimitiveGpu>,
+    shop_environment: Option<ShopEnvironmentGpu>,
+    /// Multiplier for `Shop.glb` environment scale (`window_h *` this). Set each frame from the app
+    /// (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
+    shop_env_height_scale: f32,
+    /// Debug HDR multiplier; shop applies [`crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
+    /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
+    shop_env_linear_exposure: f32,
+    /// Hemispheric ambient scale (`CameraUniform.decal_atlas_uv.x`).
+    shop_env_ambient_scale: f32,
+    /// Scales embedded glTF punctual contribution in `lit_mesh` only (`shop_gltf` buffer `extras.w`).
+    shop_lit_mesh_gltf_punctual_scale: f32,
+    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/Shop.glb).
+    pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
@@ -881,6 +989,8 @@ pub struct WgpuRenderer {
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
         HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+    /// Cached Kenney SVG prompts keyed by `assets/` relative path (`&'static str` from scene code).
+    prompt_icon_overlays: HashMap<&'static str, TileFaceOverlayGpu>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -964,22 +1074,9 @@ pub struct WgpuRenderer {
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// Wall-clock start of the background load pipeline (spawn → last GPU upload).
     background_load_start: Option<Instant>,
-    /// GPU fluid simulation for atmospheric smoke effects (None if compute unsupported).
-    pub fluid: Option<super::fluid::FluidSim>,
-    /// Whether the fluid sim's render bind group must be (re)built before the
-    /// next draw — set true at startup and on every depth-texture recreation.
-    fluid_render_bg_dirty: bool,
-    /// Per-hand-tile last-known world position keyed by tile uid. Used to
-    /// compute per-frame velocity → smoke impulse so moving tiles disturb
-    /// the volumetric smoke.
+    /// Per-hand-tile last-known world position keyed by tile uid (hand tiles
+    /// with pick ids). Used for motion-aware effects and projection caching.
     prev_tile_world: HashMap<u32, glam::Vec3>,
-    /// Last cursor world position (table-plane intersection) for cursor-driven
-    /// smoke wind impulses.
-    prev_cursor_world: Option<glam::Vec3>,
-    /// Last cursor screen position. Used to gate smoke emission on actual
-    /// pointer motion — otherwise a static cursor over an orbiting/swaying
-    /// camera would emit continuous puffs as the unprojected world hit drifts.
-    prev_cursor_screen: Option<(f32, f32)>,
     /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
     prev_frame_shadows_enabled: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
@@ -990,15 +1087,13 @@ pub struct WgpuRenderer {
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
     lit_mesh_material_layout: wgpu::BindGroupLayout,
-    /// Bind-group layout for the lit-mesh SSR group (group 3): scene
-    /// colour history + depth + SSR globals uniform.
-    lit_mesh_ssr_layout: wgpu::BindGroupLayout,
+    /// Bind-group layout for lit_mesh group 3: spotlights + SSR history.
+    lit_mesh_spot_ssr_layout: wgpu::BindGroupLayout,
     /// Frame-shared SSR uniform (camera matrices + toggle + tuning).
     lit_mesh_ssr_buffer: wgpu::Buffer,
-    /// Frame-shared SSR bind group bound as group 3 on every lit_mesh
-    /// draw. Recreated on resize whenever the scene-history texture or
-    /// depth-copy texture is reallocated.
-    lit_mesh_ssr_bind_group: wgpu::BindGroup,
+    /// Spotlights + SSR resources bound as lit_mesh group 3. Recreated on
+    /// resize whenever the scene-history texture or SSR depth snapshot is reallocated.
+    lit_mesh_spot_ssr_bind_group: wgpu::BindGroup,
     /// Sampler used by the SSR pass for both the scene-history colour
     /// texture and the depth snapshot.
     lit_mesh_ssr_sampler: wgpu::Sampler,
@@ -1010,14 +1105,6 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
-    /// Offscreen color texture that the embedded yaku-journal scene
-    /// renders into. The shop's open-book mesh samples this view as
-    /// the page-spread albedo, so the journal content appears literally
-    /// painted on the open pages. 1024×1024, RGBA8 sRGB. Cleared each
-    /// frame the journal is being shown; the leather shader's page
-    /// sentinel branch reads `albedo_tex` for fragments where
-    /// `uv.x > 1.5` (page faces tagged in `book_mesh.rs`).
-    pub(crate) journal_page_texture: wgpu::Texture,
     /// Fullscreen offscreen target for the live GPU render of the
     /// yaku-journal scene. The book mesh's leather shader samples this
     /// in screen space (not UV) so the rendered scene reads as a window
@@ -1036,7 +1123,11 @@ pub struct WgpuRenderer {
     bloom_composite_pipeline: wgpu::RenderPipeline,
     bloom_bind_group_layout: wgpu::BindGroupLayout,
     bloom_composite_bind_group_layout: wgpu::BindGroupLayout,
-    bloom_params_buffer: wgpu::Buffer,
+    /// Per-pass bloom uniforms (extract / blur axis / composite differ in `data1`).
+    bloom_extract_params_buffer: wgpu::Buffer,
+    bloom_blur_h_params_buffer: wgpu::Buffer,
+    bloom_blur_v_params_buffer: wgpu::Buffer,
+    bloom_composite_params_buffer: wgpu::Buffer,
     bloom_sampler: wgpu::Sampler,
     bloom_scene_bind_group: wgpu::BindGroup,
     bloom_ping_bind_group: wgpu::BindGroup,
@@ -1052,6 +1143,8 @@ pub struct WgpuRenderer {
     tonemap_pipeline: wgpu::RenderPipeline,
     tonemap_rgba16f_pipeline: wgpu::RenderPipeline,
     tonemap_bind_group_layout: wgpu::BindGroupLayout,
+    tonemap_params_buffer: wgpu::Buffer,
+    tonemap_bind_group: wgpu::BindGroup,
     tonemap_shader_module: wgpu::ShaderModule,
     tonemap_pipeline_layout: wgpu::PipelineLayout,
     /// Surface format used when HDR is off (or unavailable).
@@ -1088,14 +1181,6 @@ pub struct WgpuRenderer {
     candle_wax_mesh: LitMeshGpu,
     candle_wick_mesh: LitMeshGpu,
     table_mesh: LitMeshGpu,
-    /// Round dish mesh — retained while the sell tray still lives on a
-    /// bespoke `LitMeshGpu` rather than the primitive registry. Drop
-    /// this field once `Object3dKind::SellTray` migrates to
-    /// `Primitive { shape: DiscRound, … }`.
-    round_dish_mesh: LitMeshGpu,
-    /// Folded "tent card" mesh sat on the sell-tray floor when focused; carries
-    /// a "SELL" decal on each side via `sell_card_instance`.
-    sell_card_mesh: LitMeshGpu,
     relic_box_mesh: LitMeshGpu,
     /// Unit box for tile booster packs (correct UVs per face; avoids the relic
     /// cylinder's repeated side strips).
@@ -1171,35 +1256,6 @@ pub struct WgpuRenderer {
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
     talisman_instances: Vec<LitMeshInstance>,
-    /// Single instance for SellTray.
-    sell_tray_instance: LitMeshInstance,
-    /// Single instance for the folded "SELL" tent card; only drawn when the
-    /// sell tray is focused.
-    sell_card_instance: LitMeshInstance,
-    /// Whether the SELL decal texture has been rasterized + uploaded.
-    sell_card_decal_ready: bool,
-    /// Last-frame model matrix for the SELL card; `Some` triggers the draw.
-    /// Cleared each frame and re-set by the `SellTray` Object3d branch when
-    /// the tray is focused.
-    last_sell_card_model: Option<Mat4>,
-    /// Brass pole + conical shade mesh for the shop lamp (Metal material).
-    lamp_body_mesh: LitMeshGpu,
-    /// CPU-side triangle list for the lamp body, reused for trimesh-accurate
-    /// arrange-mode picking so the hit region traces the cord + shade cone
-    /// instead of the full [lamp_w, lamp_h, lamp_w] bounding box.
-    pub(super) lamp_body_tris: Vec<[glam::Vec3; 3]>,
-    /// Tight local-space AABB half-extents + center-Y offset for the lamp
-    /// body trimesh. Used by name-lookup consumers (arrange wireframe,
-    /// `debug_object_origin`) that still want a boxy approximation for
-    /// visualization or anchor-point queries.
-    lamp_body_local_half: glam::Vec3,
-    lamp_body_local_center_y: f32,
-    /// Glass bulb mesh for the shop lamp (Glass material).
-    lamp_bulb_mesh: LitMeshGpu,
-    /// Single instance for the lamp body.
-    lamp_body_instance: LitMeshInstance,
-    /// Single instance for the lamp bulb.
-    lamp_bulb_instance: LitMeshInstance,
     /// Chitin ellipsoid body mesh for hovering insects near the lamp.
     bug_body_mesh: LitMeshGpu,
     /// Flat wing-pair mesh for hovering insects.
@@ -1238,8 +1294,6 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Sell tray model + pick_id, one-frame-stale.
-    pub(super) last_sell_tray_model: Option<(Mat4, u32)>,
     /// Per-shrine instances (pick-blind scene). Indexed sequentially by
     /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
     shrine_instances: Vec<LitMeshInstance>,
@@ -1253,7 +1307,7 @@ pub struct WgpuRenderer {
     /// `ZodiacBatch` cmds). Used by the shadow pass.
     last_ribbon_slot_count: usize,
     /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
-    /// is how many draw-slots that batch consumed (2-3 per textured ribbon,
+    /// is how many draw-slots that batch consumed (3 per textured ribbon,
     /// 1 per untextured).
     last_ribbon_batch_slot_counts: Vec<usize>,
     /// Per-talisman world-space model matrices for `pick_shop_object`.
@@ -1347,12 +1401,7 @@ pub struct WgpuRenderer {
     /// Latest gameplay fog-wall horizon (normalized screen Y). Used for arrange-mode
     /// screen-band picking when the cursor ray misses the invisible pick slab.
     pub(super) last_gameplay_fog_wall_horizon_y: Option<f32>,
-    /// Trimesh pickables for objects whose tight silhouette differs enough
-    /// from an AABB that the box feels wrong (lamp cord + cone shade).
-    /// `(name, model, triangle_list_ref)` — triangles are stored per mesh
-    /// in dedicated renderer fields (e.g. `lamp_body_tris`) and referenced
-    /// here by index to avoid per-frame allocation.
-    pub(super) last_debug_trimesh_pickables: Vec<(String, Mat4, TrimeshRef)>,
+    pub(super) last_gameplay_fog_wall_center_x: Option<f32>,
     /// Canonical scene-path prefix for the currently active scene — e.g.
     /// `"shop"` or `"gameplay"`. Set per-frame by `App` so the renderer can
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
@@ -1420,6 +1469,37 @@ pub enum ShopHit {
     /// Index into the most recent flat list of `TilePackPlacement`s pushed
     /// this frame (across all `TilePackBatch` cmds).
     TilePack(u32),
+    /// Shop.glb trimesh hit on `shop_spawn_relic_{slot:02}` — resolve via
+    /// [`crate::scenes::shop::layout::live_shop_hit`] before using as a relic index.
+    EnvSpawnSlot(usize),
+    /// Shop.glb trimesh hit on `shop_player_relic_{slot:02}` — inventory bar index.
+    EnvInvSlot(usize),
+    /// Shop.glb trimesh hit on `shop_player_consumable_{ord:02}` consumable marker ordinal.
+    EnvConsumableOrd(usize),
+}
+
+/// Reserved primitive pick ids on the diegetic main menu exterior scene.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MainMenuPick {
+    Play,
+    Options,
+    Quit,
+}
+
+pub const MAIN_MENU_PICK_PLAY: u32 = 240;
+pub const MAIN_MENU_PICK_OPTIONS: u32 = 241;
+pub const MAIN_MENU_PICK_QUIT: u32 = 242;
+
+impl MainMenuPick {
+    #[inline]
+    pub fn from_pick_id(id: u32) -> Option<Self> {
+        match id {
+            MAIN_MENU_PICK_PLAY => Some(Self::Play),
+            MAIN_MENU_PICK_OPTIONS => Some(Self::Options),
+            MAIN_MENU_PICK_QUIT => Some(Self::Quit),
+            _ => None,
+        }
+    }
 }
 
 /// What 3D gameplay-scene object the cursor is over this frame.
@@ -1444,6 +1524,8 @@ pub enum GameplayPick {
     DiscardBowl,
     /// The bronze mirror. Click target = play the selected hand.
     BronzeMirror,
+    /// Main menu exterior: doorway, regulations sign, or bicycle hit proxy.
+    MainMenu(MainMenuPick),
 }
 
 /// Maximum number of physical relic placeholders rendered in one batch. Must
@@ -1503,20 +1585,34 @@ pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 80;
 /// resources. Grouped so callers can pass one `&ShowcaseTileCtx` instead
 /// of threading 9 separate handles through the call site.
 impl WgpuRenderer {
-    /// Queue a screenshot of the next presented frame. The renderer copies
-    /// the surface texture into a staging buffer between `submit` and
-    /// `present`, then maps + PNG-encodes it synchronously. Intended for
-    /// the `screenshot` CLI subcommand; not for hot paths (the synchronous
-    /// readback stalls the GPU pipeline).
+    #[inline]
+    pub(super) fn tile_glb_pipeline(&self, key: TileGlbPipelineKey) -> &wgpu::RenderPipeline {
+        match key {
+            TileGlbPipelineKey::OpaqueDoubleSided => &self.tile_pipeline_opaque_double,
+            TileGlbPipelineKey::OpaqueCullBack => &self.tile_pipeline_opaque_cull,
+            TileGlbPipelineKey::BlendDoubleSided => &self.tile_pipeline_blend_double,
+            TileGlbPipelineKey::BlendCullBack => &self.tile_pipeline_blend_cull,
+        }
+    }
+
+    #[inline]
+    pub(super) fn shop_env_pipeline(&self, key: TileGlbPipelineKey) -> &wgpu::RenderPipeline {
+        match key {
+            TileGlbPipelineKey::OpaqueDoubleSided => &self.shop_pipeline_opaque_double,
+            TileGlbPipelineKey::OpaqueCullBack => &self.shop_pipeline_opaque_cull,
+            TileGlbPipelineKey::BlendDoubleSided => &self.shop_pipeline_blend_double,
+            TileGlbPipelineKey::BlendCullBack => &self.shop_pipeline_blend_cull,
+        }
+    }
+
+    /// Queue a screenshot of the next fully rendered frame. The renderer
+    /// copies the presented color target (swapchain or headless render
+    /// texture) into a staging buffer, then maps + PNG-encodes it
+    /// synchronously. Intended for the `screenshot` CLI subcommand; not for
+    /// hot paths (the synchronous readback stalls the GPU pipeline).
     pub fn queue_screenshot(&self, path: std::path::PathBuf) {
         self.pending_screenshot.set(Some(path));
     }
-
-    /// `true` while a screenshot is queued and waiting for a draw call
-    /// to fulfill it. The capture-frame path in `App` polls this so it
-    /// keeps requesting redraws (instead of exiting early) when the
-    /// swapchain returns Outdated/Lost on the warmup frames and the
-    /// draw early-returns before the screenshot block.
 
     /// Begin a GPU pass timing capture for the next `frames` frames. The
     /// debug menu binds this to the "Profile GPU…" entry. Results are
@@ -1747,18 +1843,35 @@ impl WgpuRenderer {
         self.debug_arrange_override = ov;
     }
 
-    /// Set the ambient-dust floor density on the fluid sim, if present.
-    /// 0.0 disables. See `FluidSim::set_dust_strength`.
-    pub fn set_dust_strength(&mut self, v: f32) {
-        if let Some(fluid) = self.fluid.as_mut() {
-            fluid.set_dust_strength(v);
-        }
+    /// Scale factor for embedded `Shop.glb` room geometry vs window height. Must match shop marker math.
+    pub fn set_shop_env_height_scale(&mut self, v: f32) {
+        self.shop_env_height_scale = v;
+    }
+
+    /// Shop room tonemap + `lit_mesh` glTF punctual scale. Set each frame from app debug tuning.
+    pub fn set_shop_env_render_tune(
+        &mut self,
+        linear_exposure: f32,
+        ambient_scale: f32,
+        lit_mesh_gltf_punctual_scale: f32,
+    ) {
+        self.shop_env_linear_exposure = linear_exposure;
+        self.shop_env_ambient_scale = ambient_scale;
+        self.shop_lit_mesh_gltf_punctual_scale = lit_mesh_gltf_punctual_scale;
+    }
+
+    #[inline]
+    pub(crate) fn shop_env_height_scale(&self) -> f32 {
+        self.shop_env_height_scale
     }
 
     /// Push art-direction knobs for the procedural mountain-haze shader
     /// into its uniform buffer. Called once per frame from `main.rs` so
-    /// debug-overlay edits take effect immediately. The tuple is
-    /// `(density, r, g, b, horizon_y, drift_speed)`.
+    /// debug-overlay edits take effect immediately.
+    ///
+    /// When `wall_half_width_uv` is `0`, fog spans the full screen horizontally
+    /// (legacy horizon wash). Gameplay passes a positive half-width for a
+    /// vertical fog slab centered at `wall_center_x`.
     pub fn set_haze_tuning(
         &self,
         density: f32,
@@ -1767,10 +1880,17 @@ impl WgpuRenderer {
         b: f32,
         horizon_y: f32,
         drift_speed: f32,
+        wall_center_x: f32,
+        wall_half_width_uv: f32,
     ) {
         let uniform = HazeUniform {
             color_density: [r, g, b, density.max(0.0)],
-            params: [horizon_y.clamp(0.0, 1.0), drift_speed.max(0.0), 0.0, 0.0],
+            params: [
+                horizon_y.clamp(0.0, 1.0),
+                drift_speed.max(0.0),
+                wall_center_x.clamp(0.0, 1.0),
+                wall_half_width_uv.max(0.0),
+            ],
         };
         self.queue
             .write_buffer(&self.haze_uniform_buffer, 0, bytemuck::bytes_of(&uniform));
@@ -1855,44 +1975,15 @@ impl WgpuRenderer {
         model
     }
 
-    /// Like [`Self::pick_debug_object`] but also returns the world-space model
-    /// matrix of the closest hit. Used by arrange mode to seed the initial
-    /// World-space translation of the pickable registered under `name` in
-    /// the most recent frame. `None` if the name isn't currently pickable.
-    pub fn debug_object_origin(&self, name: &str) -> Option<glam::Vec3> {
-        if let Some((_, m, _, _)) = self
-            .last_debug_pickables
-            .iter()
-            .find(|(n, _, _, _)| n == name)
-        {
-            return Some(m.transform_point3(glam::Vec3::ZERO));
-        }
-        self.last_debug_trimesh_pickables
-            .iter()
-            .find(|(n, _, _)| n == name)
-            .map(|(_, m, _)| m.transform_point3(glam::Vec3::ZERO))
-    }
-
-    /// Clear the volumetric smoke field and reset per-tile velocity tracking
-    /// so the next scene starts with a clean atmosphere.
+    /// Reset per-hand-tile world tracking (e.g. when switching scenes) so
+    /// motion-dependent state does not carry stale tile identities.
     pub fn clear_smoke(&mut self) {
-        if let Some(ref mut fluid) = self.fluid {
-            fluid.clear();
-        }
         self.prev_tile_world.clear();
-        self.prev_cursor_world = None;
-        self.prev_cursor_screen = None;
     }
 
-    /// Render one frame.
-    ///
-    /// `frame.cmds` is walked in order — earlier cmds render under later ones.
-    /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
-    /// draw, which is invisible to scenes and preserves ordering.
-
-    /// Encode a copy of the swapchain texture into a freshly-allocated
-    /// staging buffer using the active encoder. Returns the buffer + the
-    /// dimensions/padded-bytes-per-row needed to decode it.
+    /// Encode a copy of the active color target (swapchain or headless
+    /// render texture) into a freshly-allocated staging buffer using the
+    /// active encoder. Returns the buffer plus dimensions / padded row stride.
     fn encode_screenshot_copy(
         &self,
         encoder: &mut wgpu::CommandEncoder,

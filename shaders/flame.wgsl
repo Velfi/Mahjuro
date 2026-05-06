@@ -13,7 +13,7 @@
 //   inst_params.x     — particle half-extent in world units (billboard size)
 //   inst_params.y     — per-particle random phase in [0, 2π]
 //   inst_params.z     — brightness multiplier [0, 1+]
-//   inst_params.w     — unused / pad
+//   inst_params.w     — cross_slice: 0 / 1 — second vertical plane 90° in XY
 //
 // The vertex buffer is a [0..1]² unit quad (the same four verts the 2D
 // UI uses). We recentre to [-0.5..0.5] for the billboard-X axis (so the
@@ -50,6 +50,7 @@ struct VsOut {
     @location(1) age: f32,
     @location(2) phase: f32,
     @location(3) brightness: f32,
+    @location(4) cross_slice: f32,
 };
 
 @vertex
@@ -65,6 +66,7 @@ fn vs_main(
     let half_extent = inst_params.x;
     let phase = inst_params.y;
     let brightness = inst_params.z;
+    let cross_slice = inst_params.w;
 
     // Build camera-aligned billboard axes from the view matrix (Z-up
     // world space). `cam_forward` is -Z in view space, which we pull
@@ -95,6 +97,12 @@ fn vs_main(
     } else {
         right = right / right_len;
     }
+    // Second instance: same vertical axis, horizontal billboard axis
+    // rotated 90° in the world XY plane → cross-shaped slices read as
+    // volumetric from the gameplay camera without a full 3D fluid solve.
+    if (cross_slice >= 0.5) {
+        right = normalize(cross(world_up, right));
+    }
     // Force billboard up to world +Z (stretch the flame vertically).
     let up = world_up;
 
@@ -121,6 +129,7 @@ fn vs_main(
     out.age = age;
     out.phase = phase;
     out.brightness = brightness;
+    out.cross_slice = cross_slice;
     return out;
 }
 
@@ -160,6 +169,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // hot bottom and y≈1 is the cool fading tip.
     let u = in.uv.x;
     let v = in.uv.y;
+    // De-correlate procedural noise between the two cross planes.
+    let slice_phase = in.phase + in.cross_slice * 1.57079632679;
 
     // ── Particle silhouette ─────────────────────────────────────────
     // Asymmetric teardrop — wide at the base, tapers to the top. Two
@@ -187,16 +198,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let t = globals.time;
     // Distortion field — scrolls upward with time + per-particle phase.
     let dist_uv = vec2<f32>(
-        u * 0.8 + sin(in.phase + t * 0.3) * 0.05,
-        v * 0.7 - t * 0.9 + in.phase * 0.15,
+        u * 0.8 + sin(slice_phase + t * 0.3) * 0.05,
+        v * 0.7 - t * 0.9 + slice_phase * 0.15,
     );
     let dist = fbm(dist_uv) - 0.5;
     let distortion = vec2<f32>(dist * 0.14, dist * 0.22);
 
     // Dissolve field — finer + faster scroll.
     let dissolve_uv = vec2<f32>(
-        u * 1.8 + distortion.x + cos(in.phase * 1.7 + t * 0.5) * 0.04,
-        v * 2.1 + distortion.y - t * 1.4 + in.phase * 0.25,
+        u * 1.8 + distortion.x + cos(slice_phase * 1.7 + t * 0.5) * 0.04,
+        v * 2.1 + distortion.y - t * 1.4 + slice_phase * 0.25,
     );
     let dissolve = fbm(dissolve_uv);
 
@@ -213,6 +224,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // looks like volumetric light, not discrete blobs.
     var alpha = shape * dissolve_mask;
     alpha = pow(alpha, 0.7);
+    // Two orthogonal slices per particle — scale so stacked brightness
+    // stays close to the old single-plane look.
+    alpha = alpha * 0.64;
     if (alpha < 0.005) {
         discard;
     }
@@ -263,7 +277,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Height ramp: the body of the flame is brighter than the tip; the
     // outer wisps are visibly cooler in a real flame.
     let height_warmth = 1.0 - height_t * 0.55;
-    let emission = 1.35 * age_warmth * height_warmth * in.brightness;
+    // Fast sub-flicker on top of the CPU-driven per-emitter envelope.
+    let hf_flicker = 1.0
+        + 0.065 * sin(t * 12.8 + slice_phase * 1.1) * sin(t * 5.05 + in.phase * 0.8);
+    let emission = 1.35 * age_warmth * height_warmth * in.brightness * hf_flicker;
 
     // ── Hot dissolve edge ───────────────────────────────────────────
     // The dissolving frontier (noise ≈ threshold) is hotter than the

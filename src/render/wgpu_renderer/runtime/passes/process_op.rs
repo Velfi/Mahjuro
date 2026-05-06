@@ -4,13 +4,15 @@ use super::*;
 /// Built fresh inside `render()` and passed to each pass that dispatches ops.
 pub(super) struct ProcessOpCtx<'a> {
     pub frame: &'a UiFrame,
-    pub bg_inst_buf: &'a wgpu::Buffer,
+    pub bg_inst_buffers: &'a [wgpu::Buffer],
     pub quad_buffers: &'a [wgpu::Buffer],
     pub gradient_quad_buffers: &'a [wgpu::Buffer],
     pub flame_buffers: &'a [wgpu::Buffer],
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],
     pub tile_face_quads: &'a [TileFaceQuad],
+    pub prompt_icon_inst_buffers: &'a [wgpu::Buffer],
+    pub prompt_icon_quads: &'a [crate::render::draw_cmd::PromptIconQuad],
     pub object3d_draw_list: &'a [(DrawKind, usize)],
     pub showcase_tile_batches: &'a [&'a [ShowcaseTilePlacement]],
     pub tile_glows: &'a [GpuInstance],
@@ -19,16 +21,15 @@ pub(super) struct ProcessOpCtx<'a> {
     pub relic_glow_buffer: Option<&'a wgpu::Buffer>,
     pub relic_debuff_markers: &'a [GpuInstance],
     pub relic_debuff_buffer: Option<&'a wgpu::Buffer>,
-    pub smoke_quality: crate::persistence::SmokeQuality,
     /// True when the active render pass color attachment is linear HDR
-    /// (`Rgba16Float`): Pass A / post-smoke (`scene_color_view`), journal
-    /// scene, or HDR swapchain text overlay.
+    /// (`Rgba16Float`): Pass A (`scene_color_view`), journal scene, or HDR
+    /// swapchain text overlay.
     pub scene_hdr_attachment: bool,
 }
 
 impl WgpuRenderer {
     /// Dispatch a single render op into a render pass. Used by every
-    /// scene-rendering pass (Pass A, Pass B, smoke offscreen) so they all
+    /// scene-rendering pass (Pass A) so they all
     /// share the same op-dispatch table.
     pub(super) fn process_op<'a>(
         &'a self,
@@ -37,13 +38,15 @@ impl WgpuRenderer {
         ctx: &ProcessOpCtx<'a>,
     ) {
         let frame = ctx.frame;
-        let bg_inst_buf = ctx.bg_inst_buf;
+        let bg_inst_buffers = ctx.bg_inst_buffers;
         let quad_buffers = ctx.quad_buffers;
         let gradient_quad_buffers = ctx.gradient_quad_buffers;
         let flame_buffers = ctx.flame_buffers;
         let text_draws = ctx.text_draws;
         let tile_face_inst_buffers = ctx.tile_face_inst_buffers;
         let tile_face_quads = ctx.tile_face_quads;
+        let prompt_icon_inst_buffers = ctx.prompt_icon_inst_buffers;
+        let prompt_icon_quads = ctx.prompt_icon_quads;
         let object3d_draw_list = ctx.object3d_draw_list;
         let showcase_tile_batches = ctx.showcase_tile_batches;
         let tile_glows = ctx.tile_glows;
@@ -52,11 +55,16 @@ impl WgpuRenderer {
         let relic_glow_buffer = ctx.relic_glow_buffer;
         let relic_debuff_markers = ctx.relic_debuff_markers;
         let relic_debuff_buffer = ctx.relic_debuff_buffer;
-        let smoke_quality = ctx.smoke_quality;
         let scene_hdr_attachment = ctx.scene_hdr_attachment;
         match op {
-            RenderOp::Background(id) => {
-                if let Some(bg_tex) = self.background_textures.get(id) {
+            RenderOp::ClearSceneDepth => {
+                // Marker only: Pass A is split into subpasses at this op; never drawn here.
+            }
+            RenderOp::Background { id, buf_idx } => {
+                if let (Some(bg_tex), Some(inst_buf)) = (
+                    self.background_textures.get(id),
+                    bg_inst_buffers.get(*buf_idx),
+                ) {
                     pass.set_pipeline(if scene_hdr_attachment {
                         &self.image_pipeline_scene_hdr
                     } else {
@@ -65,7 +73,7 @@ impl WgpuRenderer {
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_bind_group(1, &bg_tex.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, bg_inst_buf.slice(..));
+                    pass.set_vertex_buffer(1, inst_buf.slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
@@ -112,7 +120,7 @@ impl WgpuRenderer {
             }
             RenderOp::Table => {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
-                pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                 pass.set_bind_group(0, &self.table_instance.bind_group, &[]);
                 pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                 pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
@@ -145,15 +153,11 @@ impl WgpuRenderer {
             }
             RenderOp::Object3dBatch { start, end } => {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
-                pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
+                pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
                 pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                 pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
                 let mut current_blended = false;
                 for &(kind, slot_i) in &object3d_draw_list[*start..*end] {
-                    // Live wings carry per-frame `live_wing_alpha` tinting
-                    // (crisp at turnarounds, faded at mid-stroke) and the
-                    // blur fans carry `blur_alpha` (inverse). Both need the
-                    // alpha-blended pipeline now that they're tinted.
                     let want_blended = matches!(
                         kind,
                         DrawKind::BugWingL
@@ -263,15 +267,6 @@ impl WgpuRenderer {
                             (&self.talisman_mesh, self.talisman_instances.get(slot_i))
                         }
                         DrawKind::Shrine => (&self.shrine_mesh, self.shrine_instances.get(slot_i)),
-                        DrawKind::SellTray => {
-                            (&self.round_dish_mesh, Some(&self.sell_tray_instance))
-                        }
-                        DrawKind::LampBody => {
-                            (&self.lamp_body_mesh, Some(&self.lamp_body_instance))
-                        }
-                        DrawKind::LampBulb => {
-                            (&self.lamp_bulb_mesh, Some(&self.lamp_bulb_instance))
-                        }
                         DrawKind::BugBody => {
                             (&self.bug_body_mesh, self.bug_body_instances.get(slot_i))
                         }
@@ -332,20 +327,6 @@ impl WgpuRenderer {
                     pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.index_count, 0, 0..1);
                 }
-                // Sell-tray "SELL" tent card — drawn last in the same
-                // pipeline state when the tray was focused this frame.
-                if self.last_sell_card_model.is_some() && self.sell_card_decal_ready {
-                    if current_blended {
-                        pass.set_pipeline(&self.lit_mesh_pipeline);
-                    }
-                    pass.set_bind_group(0, &self.sell_card_instance.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.sell_card_mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        self.sell_card_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    pass.draw_indexed(0..self.sell_card_mesh.index_count, 0, 0..1);
-                }
                 // Relic activation halos — additive bloom rects drawn
                 // after the relic meshes so the falloff spills past the
                 // silhouette. Fires whenever any relic in the scene this
@@ -375,6 +356,53 @@ impl WgpuRenderer {
                     pass.draw_indexed(0..6, 0, 0..relic_debuff_markers.len() as u32);
                 }
             }
+            RenderOp::ShopEnvironment => {
+                if let Some(ref gpu) = self.shop_environment {
+                    if self.shop_env_primitives.is_empty() {
+                        // GPU upload skipped — asset missing or markers-only GLB.
+                    } else {
+                        if frame.shop_env_gltf_punctual {
+                            pass.set_bind_group(1, &self.shop_gltf_point_lights_scene_bind_group, &[]);
+                        } else {
+                            pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        }
+                        pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+                        // Opaque/mask first, then alpha-blended primitives (same depth target).
+                        for blend_phase in [false, true] {
+                            let mut last_pi: Option<usize> = None;
+                            let mut last_key: Option<TileGlbPipelineKey> = None;
+                            for (pi, prim) in self.shop_env_primitives.iter().enumerate() {
+                                if prim.pipeline_key.is_blend() != blend_phase {
+                                    continue;
+                                }
+                                if last_key != Some(prim.pipeline_key) {
+                                    let pipe = if frame.shop_env_gltf_punctual {
+                                        self.shop_env_pipeline(prim.pipeline_key)
+                                    } else {
+                                        self.tile_glb_pipeline(prim.pipeline_key)
+                                    };
+                                    pass.set_pipeline(pipe);
+                                    last_key = Some(prim.pipeline_key);
+                                }
+                                if last_pi != Some(pi) {
+                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+                                    pass.set_index_buffer(
+                                        prim.index_buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    last_pi = Some(pi);
+                                }
+                                let Some(bg) = gpu.bind_groups.get(pi) else {
+                                    continue;
+                                };
+                                pass.set_bind_group(0, bg, &[]);
+                                pass.draw_indexed(0..prim.index_count, 0, 0..1);
+                            }
+                        }
+                    }
+                }
+            }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
                 if !self.tile_primitives.is_empty() {
                     let batch = showcase_tile_batches[*batch_idx];
@@ -402,15 +430,31 @@ impl WgpuRenderer {
                             pass.draw_indexed(0..6, 0, 0..tile_glows.len() as u32);
                         }
 
-                        // Pass A: gold outline shells for tiles with outline=true.
-                        let has_outline = batch.iter().any(|p| p.outline);
-                        if has_outline {
+                        // Pass A: gold outline shells — one instanced draw per batch.
+                        if let Some(&(base, cnt)) = self.tile_outline_batch_ranges.get(*batch_idx)
+                            && cnt > 0
+                            && self.tile_outline_index_count > 0
+                        {
                             pass.set_pipeline(&self.tile_outline_pipeline);
-                            let mut outline_last_pi: Option<usize> = None;
-                            for (i, p) in batch.iter().enumerate() {
-                                if !p.outline {
-                                    continue;
-                                }
+                            pass.set_bind_group(0, &self.tile_outline_frame_bind_group, &[]);
+                            pass.set_vertex_buffer(0, self.tile_outline_vertex_buffer.slice(..));
+                            pass.set_vertex_buffer(1, self.tile_outline_instance_buffer.slice(..));
+                            pass.set_index_buffer(
+                                self.tile_outline_index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(
+                                0..self.tile_outline_index_count,
+                                0,
+                                base..base + cnt,
+                            );
+                        }
+
+                        // Pass B: regular textured tile meshes (opaque before blend).
+                        for blend_phase in [false, true] {
+                            let mut textured_last_pi: Option<usize> = None;
+                            let mut textured_last_key: Option<TileGlbPipelineKey> = None;
+                            for (i, _) in batch.iter().enumerate() {
                                 let slot_i = start_slot + i;
                                 if slot_i >= MAX_SHOWCASE_TILE_SLOTS {
                                     break;
@@ -419,15 +463,24 @@ impl WgpuRenderer {
                                     break;
                                 };
                                 for (pi, prim) in self.tile_primitives.iter().enumerate() {
-                                    if outline_last_pi != Some(pi) {
+                                    if prim.pipeline_key.is_blend() != blend_phase {
+                                        continue;
+                                    }
+                                    if textured_last_key != Some(prim.pipeline_key) {
+                                        pass.set_pipeline(
+                                            self.tile_glb_pipeline(prim.pipeline_key),
+                                        );
+                                        textured_last_key = Some(prim.pipeline_key);
+                                    }
+                                    if textured_last_pi != Some(pi) {
                                         pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
                                         pass.set_index_buffer(
                                             prim.index_buffer.slice(..),
                                             wgpu::IndexFormat::Uint32,
                                         );
-                                        outline_last_pi = Some(pi);
+                                        textured_last_pi = Some(pi);
                                     }
-                                    let Some(bg) = stg.outline_bind_groups.get(pi) else {
+                                    let Some(bg) = stg.bind_groups.get(pi) else {
                                         continue;
                                     };
                                     pass.set_bind_group(0, bg, &[]);
@@ -435,46 +488,7 @@ impl WgpuRenderer {
                                 }
                             }
                         }
-
-                        // Pass B: regular textured tile meshes.
-                        pass.set_pipeline(&self.tile_pipeline);
-                        let mut textured_last_pi: Option<usize> = None;
-                        for (i, _) in batch.iter().enumerate() {
-                            let slot_i = start_slot + i;
-                            if slot_i >= MAX_SHOWCASE_TILE_SLOTS {
-                                break;
-                            }
-                            let Some(stg) = self.showcase_tiles.get(slot_i) else {
-                                break;
-                            };
-                            for (pi, prim) in self.tile_primitives.iter().enumerate() {
-                                if textured_last_pi != Some(pi) {
-                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        prim.index_buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    textured_last_pi = Some(pi);
-                                }
-                                let Some(bg) = stg.bind_groups.get(pi) else {
-                                    continue;
-                                };
-                                pass.set_bind_group(0, bg, &[]);
-                                pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                            }
-                        }
                     }
-                }
-            }
-            RenderOp::FluidSmoke => {
-                if smoke_quality != crate::persistence::SmokeQuality::Off
-                    && let Some(ref fluid) = self.fluid
-                {
-                    // Composite the offscreen smoke target onto the
-                    // swap chain. The actual raymarch ran earlier in
-                    // its own offscreen pass; this is just a
-                    // bilinear sample + premultiplied blend.
-                    fluid.draw_composite(pass);
                 }
             }
             RenderOp::QuadBatch { buf_idx, count } => {
@@ -494,16 +508,7 @@ impl WgpuRenderer {
                 pass.draw_indexed(0..6, 0, 0..*count);
             }
             RenderOp::FlameBatch { buf_idx, count } => {
-                // When the volumetric smoke sim is active, candle flames
-                // are rendered as 3D emission inside the volume lightbake
-                // pass — skip the particle billboards so we don't
-                // double-draw. With smoke Off, the fluid sim doesn't
-                // step and volumetric flames wouldn't appear, so we
-                // drive the 3D particle system instead.
-                if smoke_quality == crate::persistence::SmokeQuality::Off
-                    && *count > 0
-                    && *buf_idx != usize::MAX
-                {
+                if *count > 0 && *buf_idx != usize::MAX {
                     pass.set_pipeline(&self.flame_pipeline);
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_bind_group(1, &self.flame_view_bind_group, &[]);
@@ -545,6 +550,22 @@ impl WgpuRenderer {
                     pass.set_bind_group(1, &gpu.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, tile_face_inst_buffers[*idx].slice(..));
+                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    pass.draw_indexed(0..6, 0, 0..1);
+                }
+            }
+            RenderOp::PromptIconQuad(idx) => {
+                let icon = &prompt_icon_quads[*idx];
+                if let Some(gpu) = self.prompt_icon_overlays.get(icon.asset_rel_path) {
+                    pass.set_pipeline(if scene_hdr_attachment {
+                        &self.image_pipeline_scene_hdr
+                    } else {
+                        &self.image_pipeline
+                    });
+                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &gpu.bind_group, &[]);
+                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(1, prompt_icon_inst_buffers[*idx].slice(..));
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }

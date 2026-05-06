@@ -44,12 +44,17 @@ struct PointLights {
     // extras.x = display gamma exponent.
     // extras.y = wall-clock time in seconds (used by the water material
     //            branch to scroll the surface and animate foam crests).
-    // extras.z/.w reserved.
+    // extras.z = candle flame height (lightbake).
+    // extras.w = `1` on gameplay binding 0; shop glTF punctual scale on binding 2.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
 
 @group(1) @binding(0) var<uniform> lights: PointLights;
+/// Shop `KHR_lights_punctual` uploads — inverse-square in the point loop (`punctual_attenuation_gltf`).
+/// Same group as gameplay lights (WebGPU `max_bind_groups` = 4 on Metal).
+/// `extras.w` = optional scale for shop `KHR_lights_punctual` on this buffer only (`shop_glb` ignores it).
+@group(1) @binding(2) var<uniform> shop_gltf_point_lights: PointLights;
 
 // ── Tile occluders (analytic AABB shadows for the candle pools) ──────
 // Each entry is one hand tile's world-space AABB. The fragment shader
@@ -67,6 +72,50 @@ struct TileOccluders {
     boxes: array<TileOccluder, 16>,
 };
 @group(1) @binding(1) var<uniform> occluders: TileOccluders;
+
+/// Khronos `KHR_lights_punctual` reference angular falloff (see `shop_glb.wgsl`).
+fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
+    let den = max(cos_inner - cos_outer, 1e-3);
+    let scale = 1.0 / den;
+    let offset = -cos_outer * scale;
+    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
+    return angular * angular;
+}
+
+/// Same as `shop_glb.wgsl` / glTF recommended punctual attenuation.
+fn punctual_attenuation_gltf(distance: f32, range_max: f32) -> f32 {
+    let d = max(distance, 1e-4);
+    var att = 1.0 / (d * d);
+    if (range_max > 1e-5) {
+        let x = min(d / range_max, 1.0);
+        let window = max(1.0 - pow(x, 4.0), 0.0);
+        att = att * window;
+    }
+    return att;
+}
+
+/// Shop room scales glTF geometry by `window_h`; inverse-square in world space would need
+/// intensities ~scale². Use document-space distance when `shop_punctual.x` is set instead.
+fn punctual_attenuation_gltf_shop(dist_world: f32, range_world: f32) -> f32 {
+    let inv = ssr_globals.shop_punctual.x;
+    let d = select(dist_world, dist_world * inv, inv > 1e-8);
+    let r = select(range_world, range_world * inv, inv > 1e-8);
+    return punctual_attenuation_gltf(d, r);
+}
+
+/// Same ACES fit as `shop_glb.wgsl` — physical HDR path (`ssr_globals.felt.y` = 1).
+fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp(
+        (color * (a * color + b)) / (color * (c * color + d) + e),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
 
 // Jorge Jimenez's interleaved gradient noise. Cheap, low-discrepancy,
 // stable in screen space — perfect for jittering shadow taps without
@@ -139,7 +188,22 @@ struct ShadowGlobals {
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
 @group(2) @binding(2) var shadow_samp: sampler_comparison;
 
-// ── SSR globals (group 3, shared frame-wide) ─────────────────────────
+// Spotlights — same `SpotLights` buffer / layout as `tile_3d.wgsl` (group 3).
+struct SpotLight {
+    pos: vec4<f32>,
+    dir: vec4<f32>,
+    color: vec4<f32>,
+    params: vec4<f32>,
+}
+struct SpotLights {
+    count: vec4<u32>,
+    lights: array<SpotLight, 8>,
+}
+@group(3) @binding(0) var<uniform> spot_lights: SpotLights;
+
+// ── SSR globals (group 3, bindings 1–4; spotlights occupy binding 0) ──
+// WebGPU allows only four bind groups (0..3). SSR shares group 3 with
+// `spot_lights` so lit_mesh stays within the limit.
 // The lacquered-floor branch marches reflection rays in screen space
 // against the previous frame's composited colour + depth. The camera
 // is fixed in this game, so a one-frame stale snapshot is effectively
@@ -151,13 +215,16 @@ struct SsrGlobals {
     // x = enabled (0/1), y = max_distance (world units),
     // z = stride (world units / step), w = max_steps
     params: vec4<f32>,
-    // x = felt procedural LOD (0..2), yzw unused
+    // x = felt procedural LOD (0..2); y = physical HDR (glTF punctual + ACES); z = linear exposure;
+    // w = ambient hemispheric scale (see `upload_camera_uniforms`).
     felt: vec4<f32>,
+    // x = 1/shop_env_world_scale for shop glTF punctual (document-space falloff); 0 = world units.
+    shop_punctual: vec4<f32>,
 };
-@group(3) @binding(0) var<uniform> ssr_globals: SsrGlobals;
-@group(3) @binding(1) var ssr_scene_prev: texture_2d<f32>;
-@group(3) @binding(2) var ssr_depth: texture_depth_2d;
-@group(3) @binding(3) var ssr_samp: sampler;
+@group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
+@group(3) @binding(2) var ssr_scene_prev: texture_2d<f32>;
+@group(3) @binding(3) var ssr_depth: texture_depth_2d;
+@group(3) @binding(4) var ssr_samp: sampler;
 
 // Project a world-space point to screen-space UV (0..1, top-left origin
 // to match wgpu/webgpu texture sampling) plus its NDC z. Returns w<0 if
@@ -207,7 +274,9 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
             sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, depth_ref);
         }
     }
-    return sum / 9.0;
+    let gs = sum / 9.0;
+    let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
+    return mix(gs, 1.0, phys_hdr);
 }
 
 struct VsOut {
@@ -226,6 +295,7 @@ fn vs_main(
     @location(0) pos: vec3<f32>,
     @location(1) n: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    @location(3) _tangent_pad: vec4<f32>,
 ) -> VsOut {
     var world_normal = normalize((mesh.model * vec4<f32>(n, 0.0)).xyz);
     var world_pos_out = (mesh.model * vec4<f32>(pos, 1.0)).xyz;
@@ -288,6 +358,7 @@ fn vs_felt_shell_instanced(
     @location(0) pos: vec3<f32>,
     @location(1) n: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    @location(3) _tangent_pad: vec4<f32>,
     @builtin(instance_index) instance_index: u32,
 ) -> VsOut {
     var world_normal = normalize((mesh.model * vec4<f32>(n, 0.0)).xyz);
@@ -596,10 +667,6 @@ struct FeltSample {
     n: vec3<f32>,
 };
 
-// World-space frequency of the felt fiber field. Tuned so the grain
-// reads at table-tile scale rather than dissolving into a flat colour.
-const FELT_SCALE: f32 = 0.18;
-
 // Sample the procedural felt field. `micro_strength` controls how much
 // of the high-frequency microfiber normal perturbation to apply — call
 // sites fade this out at distance so the sub-mm fibers don't alias
@@ -626,6 +693,9 @@ fn felt_sample_world(
         return s;
     }
 
+    // World-space frequency of the felt fiber field (after early-out so
+    // Metal doesn't emit an unused module constant on the uniform path).
+    const FELT_SCALE: f32 = 0.18;
     let p = world_xy * FELT_SCALE;
 
     // ── Screen-space derivative for noise filtering ─────────────────
@@ -712,7 +782,7 @@ fn felt_sample_world(
 fn felt_contact_field(world_xy: vec2<f32>, cell_size: f32, density: f32, max_r: f32) -> f32 {
     let g = world_xy / cell_size;
     let cell = floor(g);
-    let local = g - cell;
+    let g_frac = g - cell;
     var acc = 0.0;
     // 3x3 neighbourhood lookup — handles circles that span cell boundaries.
     for (var dx = -1; dx <= 1; dx = dx + 1) {
@@ -727,9 +797,9 @@ fn felt_contact_field(world_xy: vec2<f32>, cell_size: f32, density: f32, max_r: 
             let h2 = hash21(neighbour + vec2<f32>(0.0, 23.7));
             let h3 = hash21(neighbour + vec2<f32>(91.1, 41.5));
             // Centre offset within the cell + radius scale.
-            let centre = neighbour + vec2<f32>(h1, h2);
+            let centre_off = vec2<f32>(f32(dx), f32(dy)) + vec2<f32>(h1, h2);
             let r = mix(0.18, max_r, h3);
-            let d = length(g - centre);
+            let d = length(g_frac - centre_off);
             // Soft falloff — fades to zero at the radius.
             let m = 1.0 - smoothstep(r * 0.4, r, d);
             acc = max(acc, m);
@@ -788,6 +858,146 @@ fn felt_apply_wear_dust(base: vec3<f32>, world_xy: vec2<f32>, lod: f32) -> vec3<
     return max(c, vec3<f32>(0.0));
 }
 
+/// Instanced felt fluff shells only (`felt_shell_layer > 0`). Skips the
+/// heavyweight `fs_main` path (decals, full `felt_sample_world` ×2,
+/// anisotropic sheen, retroreflective rim, wood SSR, etc.). Shells are
+/// sparse alpha fuzz — diffuse + the same wrap-SSS as base felt is enough.
+fn shade_felt_shell(
+    in: VsOut,
+    felt_lod: f32,
+    front_facing: bool,
+    dens: f32,
+) -> vec4<f32> {
+    let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
+    let shell_index = in.felt_shell_layer;
+
+    let mid_c = vec3<f32>(0.038, 0.135, 0.058);
+    var albedo = mid_c;
+    if (felt_lod >= 0.5) {
+        albedo = mid_c * (0.88 + 0.28 * dens);
+    }
+
+    var n = normalize(in.world_n);
+    if (!front_facing) {
+        n = -n;
+    }
+
+    // Match base felt wrap-SSS tunables (`is_felt` branch in fs_main).
+    let wrap = 0.22;
+    let sss_strength = 0.14;
+    let sss_tint = vec3<f32>(0.10, 0.18, 0.08);
+
+    var lit = vec3<f32>(0.06);
+    var sss_acc = vec3<f32>(0.0);
+    let gp_n = lights.count.x;
+    let sg_n = shop_gltf_point_lights.count.x;
+    let pt_total = gp_n + sg_n;
+    for (var ii: u32 = 0u; ii < pt_total; ii = ii + 1u) {
+        let is_sg = ii >= gp_n;
+        let i = select(ii, ii - gp_n, is_sg);
+        var lp: vec3<f32>;
+        var range_w: f32;
+        var lc: vec3<f32>;
+        var intensity: f32;
+        if (!is_sg) {
+            lp = lights.lights[i].pos.xyz;
+            range_w = lights.lights[i].pos.w;
+            lc = lights.lights[i].color.rgb;
+            intensity = lights.lights[i].color.a * lights.extras.w;
+        } else {
+            lp = shop_gltf_point_lights.lights[i].pos.xyz;
+            range_w = shop_gltf_point_lights.lights[i].pos.w;
+            lc = shop_gltf_point_lights.lights[i].color.rgb;
+            intensity = shop_gltf_point_lights.lights[i].color.a * shop_gltf_point_lights.extras.w;
+        }
+        let to_light = lp - in.world_pos;
+        let dist = length(to_light);
+        var atten: f32;
+        if (is_sg) {
+            // Shop `KHR_lights_punctual` — inverse-square with document-space option.
+            atten = punctual_attenuation_gltf_shop(dist, range_w);
+        } else {
+            // Gameplay / `UiFrame::point_lights`: authored for smooth radius falloff,
+            // not glTF punctual (zodiac celebration, candles, modal relic rig, etc.).
+            atten = pow(
+                clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0),
+                2.0,
+            );
+        }
+        if (atten < 0.001) {
+            continue;
+        }
+        let l_dir = to_light / max(dist, 0.0001);
+        let ndl_raw = dot(n, l_dir);
+        let nl = max(ndl_raw, 0.0);
+        let lambert = 0.35 + 0.65 * nl;
+        let cand_vis = mix(
+            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
+            1.0,
+            phys_hdr,
+        );
+        lit = lit + lc * intensity * atten * lambert * cand_vis;
+
+        let wrapped = max((ndl_raw + wrap) / (1.0 + wrap), 0.0);
+        let sss_band = max(wrapped - nl, 0.0);
+        sss_acc = sss_acc + lc * intensity * atten * sss_band * sss_strength * cand_vis;
+    }
+
+    let spot_count_shell = spot_lights.count.x;
+    let lm_scale_shell = select(lights.extras.w * shop_gltf_point_lights.extras.w, 1.0, phys_hdr > 0.5);
+    for (var si: u32 = 0u; si < spot_count_shell; si = si + 1u) {
+        let s = spot_lights.lights[si];
+        let lp = s.pos.xyz;
+        let to_frag = in.world_pos - lp;
+        let dist = length(to_frag);
+        let radius = max(s.pos.w, 1.0);
+        let t = clamp(1.0 - dist / radius, 0.0, 1.0);
+        let atten = t * t;
+        if (atten <= 0.0) {
+            continue;
+        }
+        let frag_dir = to_frag / max(dist, 0.0001);
+        let cos_a = dot(frag_dir, s.dir.xyz);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
+        if (spot_factor <= 0.0) {
+            continue;
+        }
+        let l_dir = -frag_dir;
+        let ndl_raw = dot(n, l_dir);
+        let nl = max(ndl_raw, 0.0);
+        let lambert = 0.35 + 0.65 * nl;
+        let cand_vis = mix(
+            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
+            1.0,
+            phys_hdr,
+        );
+        let sc_base = s.color.rgb * s.color.a * atten * spot_factor * lm_scale_shell;
+        lit = lit + sc_base * lambert * cand_vis;
+
+        let wrapped = max((ndl_raw + wrap) / (1.0 + wrap), 0.0);
+        let sss_band = max(wrapped - nl, 0.0);
+        sss_acc = sss_acc + sc_base * sss_band * sss_strength * cand_vis;
+    }
+
+    let lit_shadowed = lit * sample_shadow_visibility(in.world_pos);
+    let rgb = albedo * lit_shadowed + sss_acc * sss_tint;
+
+    let inv_g = 1.0 / max(lights.extras.x, 0.01);
+    var out_rgb: vec3<f32>;
+    if (phys_hdr > 0.5) {
+        var hdr = rgb + ssr_globals.felt.w * albedo * vec3<f32>(0.08);
+        hdr = hdr * ssr_globals.felt.z;
+        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+    } else {
+        out_rgb = pow(rgb, vec3<f32>(inv_g));
+    }
+
+    let max_shells = 10.0;
+    let t_shell = clamp(shell_index / max_shells, 0.0, 1.0);
+    let out_alpha = mesh.base_color.a * (1.0 - t_shell * 0.4);
+    return vec4<f32>(out_rgb, out_alpha);
+}
+
 @fragment
 fn fs_main(
     in: VsOut,
@@ -807,6 +1017,7 @@ fn fs_main(
     //   15 = Polychrome, 16 = Porcelain, 17 = Brass, 18 = Leather,
     //   19 = FeltGreen
     let is_wax       = (kind > 0.5 && kind < 1.5);
+    let is_wick      = (kind > 1.5 && kind < 2.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
     let is_water_mat = (kind > 5.5 && kind < 6.5);
@@ -823,6 +1034,7 @@ fn fs_main(
     let is_leather   = (kind > 17.5 && kind < 18.5);
     let is_felt      = (kind > 18.5 && kind < 19.5);
     let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
+    let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
 
     // ── Felt shell early discard (perf) ─────────────────────────────
     // Felt fluff layers (shell index > 0 in material_params.w) discard
@@ -833,7 +1045,7 @@ fn fs_main(
     // block.
     if (is_felt && in.felt_shell_layer > 0.5) {
         let shell_index = in.felt_shell_layer;
-        let p = in.world_pos.xy * FELT_SCALE * vec2<f32>(38.0, 14.0);
+        let p = in.world_pos.xy * 0.18 * vec2<f32>(38.0, 14.0);
         let dens = vnoise2(p) * 0.7 + vnoise2(p * 2.3 + 1.7) * 0.3;
         let max_shells = 10.0;
         let t = clamp(shell_index / max_shells, 0.0, 1.0);
@@ -841,6 +1053,7 @@ fn fs_main(
         if (dens < threshold) {
             discard;
         }
+        return shade_felt_shell(in, felt_lod, front_facing, dens);
     }
     // Brass is a conductor too; group with metal for the per-light
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
@@ -863,7 +1076,7 @@ fn fs_main(
     // the per-kind heightmap index used by the relief sampling (no per-kind
     // shader branching keys off it any more — each MaterialKind has its own
     // dedicated branch).
-    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel && !is_felt;
+    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel && !is_felt && !is_wick;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -982,7 +1195,16 @@ fn fs_main(
         // orients the mesh in world space (collection uses a Y-up
         // overhead camera; shop/gameplay use the Z-up table camera).
         let cap_mask = smoothstep(0.55, 0.82, abs(in.local_n.y));
-        albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
+        // Shop GLB vitrine: caps used `tex_rgb` alone — under punctual + key shadow,
+        // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
+        // by `base_color` like the sides so material + rarity survive.
+        let shop_vitrine_albedo = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+        if (shop_vitrine_albedo) {
+            let tinted = mesh.base_color.rgb * tex_rgb;
+            albedo = mix(mesh.base_color.rgb, tinted, cap_mask);
+        } else {
+            albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
+        }
     }
     var wood_grain = 0.0;
     var wood_pore = 0.0;
@@ -1157,10 +1379,9 @@ fn fs_main(
         decal_f0 = tex_rgb * vec3<f32>(1.05, 0.92, 0.65);
     }
 
-    // Candle-only lighting: there is no ambient floor and no directional
-    // key light. Every photon on the table comes from a wick PointLight
-    // accumulated in the per-light loop below. `rgb` therefore starts at
-    // pure black; fragments outside any candle pool stay dark.
+    // Candle-keyed lighting: no directional sun; wick PointLights drive the
+    // per-light loop below. `rgb` starts at black; fragments outside candle
+    // pools stay dark.
     var n = normalize(in.world_n);
     if (!front_facing) {
         n = -n;
@@ -1397,16 +1618,36 @@ fn fs_main(
         var spec_water = vec3<f32>(0.0);
         let cam_pos_w = ssr_globals.view_pos.xyz;
         let view_dir_w = normalize(cam_pos_w - in.world_pos);
-        let count_w = lights.count.x;
-        for (var i: u32 = 0u; i < count_w; i = i + 1u) {
-            let lp = lights.lights[i].pos.xyz;
-            let radius = lights.lights[i].pos.w;
-            let lc = lights.lights[i].color.rgb;
-            let intensity = lights.lights[i].color.a;
+        let gp_n_w = lights.count.x;
+        let sg_n_w = shop_gltf_point_lights.count.x;
+        let pt_total_w = gp_n_w + sg_n_w;
+        for (var ii: u32 = 0u; ii < pt_total_w; ii = ii + 1u) {
+            let is_sg = ii >= gp_n_w;
+            let i = select(ii, ii - gp_n_w, is_sg);
+            var lp: vec3<f32>;
+            var range_w: f32;
+            var lc: vec3<f32>;
+            var intensity: f32;
+            if (!is_sg) {
+                lp = lights.lights[i].pos.xyz;
+                range_w = lights.lights[i].pos.w;
+                lc = lights.lights[i].color.rgb;
+                intensity = lights.lights[i].color.a;
+            } else {
+                lp = shop_gltf_point_lights.lights[i].pos.xyz;
+                range_w = shop_gltf_point_lights.lights[i].pos.w;
+                lc = shop_gltf_point_lights.lights[i].color.rgb;
+                intensity = shop_gltf_point_lights.lights[i].color.a * shop_gltf_point_lights.extras.w;
+            }
             let to_light = lp - in.world_pos;
             let dist = length(to_light);
-            let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
-            let atten = t * t;
+            var atten: f32;
+            if (is_sg) {
+                atten = punctual_attenuation_gltf_shop(dist, range_w);
+            } else {
+                let t = clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0);
+                atten = t * t;
+            }
             let l_dir = to_light / max(dist, 0.0001);
             let nl = max(dot(water_n, l_dir), 0.0);
             // Lift the ambient floor on water so the trough silhouette
@@ -1419,6 +1660,36 @@ fn fs_main(
                 let nh = max(dot(water_n, h), 0.0);
                 let s = pow(nh, water_spec_power) * water_spec_strength;
                 spec_water = spec_water + lc * intensity * atten * s;
+            }
+        }
+        let spot_count_w = spot_lights.count.x;
+        for (var si: u32 = 0u; si < spot_count_w; si = si + 1u) {
+            let s = spot_lights.lights[si];
+            let to_frag = in.world_pos - s.pos.xyz;
+            let dist = length(to_frag);
+            let radius = max(s.pos.w, 1.0);
+            let t_sp = clamp(1.0 - dist / radius, 0.0, 1.0);
+            let atten_sp = t_sp * t_sp;
+            if (atten_sp <= 0.0) {
+                continue;
+            }
+            let frag_dir = to_frag / max(dist, 0.0001);
+            let cos_a = dot(frag_dir, s.dir.xyz);
+            let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
+            if (spot_factor <= 0.0) {
+                continue;
+            }
+            let to_light = -frag_dir;
+            let nl = max(dot(water_n, to_light), 0.0);
+            let lambert_sp = select(0.30, 0.45, is_water) + 0.55 * nl;
+            let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * lights.extras.w;
+            lit_water = lit_water + sc * lambert_sp;
+
+            if (water_spec_strength > 0.001) {
+                let h = normalize(to_light + view_dir_w);
+                let nh = max(dot(water_n, h), 0.0);
+                let sp = pow(nh, water_spec_power) * water_spec_strength;
+                spec_water = spec_water + sc * sp;
             }
         }
         // A constant cool ambient term so the river is visible across the
@@ -1538,9 +1809,12 @@ fn fs_main(
             }
             // Screen-space derivative tangent basis: works for any
             // orientation without needing explicit tangent attributes.
-            let dp_dx = dpdx(in.world_pos);
-            let dp_dy = dpdy(in.world_pos);
-            let tangent = normalize(dp_dx);
+            // Per-component dpdx avoids naga emitting an unused df_dy(vec3).
+            let tangent = normalize(vec3<f32>(
+                dpdx(in.world_pos.x),
+                dpdx(in.world_pos.y),
+                dpdx(in.world_pos.z),
+            ));
             let bitangent = normalize(cross(n, tangent));
             let perturbed = normalize(n + tangent * dhdu + bitangent * dhdv);
             n = perturbed;
@@ -1712,16 +1986,38 @@ fn fs_main(
     let coat_power = 380.0;
     let coat_f0 = 0.04;
 
-    let count = lights.count.x;
-    for (var i: u32 = 0u; i < count; i = i + 1u) {
-        let lp = lights.lights[i].pos.xyz;
-        let radius = lights.lights[i].pos.w;
-        let lc = lights.lights[i].color.rgb;
-        let intensity = lights.lights[i].color.a;
+    let gp_count = lights.count.x;
+    let sg_count = shop_gltf_point_lights.count.x;
+    let pt_total_main = gp_count + sg_count;
+    for (var ii: u32 = 0u; ii < pt_total_main; ii = ii + 1u) {
+        let is_sg = ii >= gp_count;
+        let i = select(ii, ii - gp_count, is_sg);
+        var lp: vec3<f32>;
+        var range_w: f32;
+        var lc: vec3<f32>;
+        var intensity: f32;
+        if (!is_sg) {
+            lp = lights.lights[i].pos.xyz;
+            range_w = lights.lights[i].pos.w;
+            lc = lights.lights[i].color.rgb;
+            intensity = lights.lights[i].color.a * lights.extras.w;
+        } else {
+            lp = shop_gltf_point_lights.lights[i].pos.xyz;
+            range_w = shop_gltf_point_lights.lights[i].pos.w;
+            lc = shop_gltf_point_lights.lights[i].color.rgb;
+            intensity = shop_gltf_point_lights.lights[i].color.a * shop_gltf_point_lights.extras.w;
+        }
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
-        let atten = t * t;
+        var atten: f32;
+        if (is_sg) {
+            atten = punctual_attenuation_gltf_shop(dist, range_w);
+        } else {
+            atten = pow(
+                clamp(1.0 - dist / max(range_w, 1.0), 0.0, 1.0),
+                2.0,
+            );
+        }
         // Skip lights whose attenuation has fallen to zero — no point
         // computing occlusion, diffuse, specular, or SSS for a light
         // that contributes nothing.
@@ -1736,7 +2032,11 @@ fn fs_main(
         // fragment block the light's diffuse + specular contribution.
         // Floor at 0.18 so shadowed regions still pick up a soft bounce
         // term — fully black shadows look painted on.
-        let cand_vis = mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy));
+        let cand_vis = mix(
+            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
+            1.0,
+            phys_hdr,
+        );
         lit = lit + lc * intensity * atten * lambert * cand_vis;
 
         // Wrap-diffuse SSS: pushes the terminator past 90° so the
@@ -2095,6 +2395,88 @@ fn fs_main(
         }
     }
 
+    // ── Spotlights (same cone + falloff as `tile_3d.wgsl`) ─────────────
+    // Unified shop path matches `shop_glb.wgsl` punctual attenuation and omits
+    // the dual-buffer intensity product.
+    let lm_punctual_scale = select(
+        lights.extras.w * shop_gltf_point_lights.extras.w,
+        1.0,
+        phys_hdr > 0.5,
+    );
+    let spot_count_fs = spot_lights.count.x;
+    for (var si: u32 = 0u; si < spot_count_fs; si = si + 1u) {
+        let s = spot_lights.lights[si];
+        let lp = s.pos.xyz;
+        let to_frag = in.world_pos - lp;
+        let dist = length(to_frag);
+        let radius = max(s.pos.w, 1.0);
+        let t_sp = clamp(1.0 - dist / radius, 0.0, 1.0);
+        let atten_sp = t_sp * t_sp;
+        if (atten_sp <= 0.0) {
+            continue;
+        }
+        let frag_dir = to_frag / max(dist, 0.0001);
+        let cos_a = dot(frag_dir, s.dir.xyz);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, s.params.x, s.dir.w);
+        if (spot_factor <= 0.0) {
+            continue;
+        }
+        let l_dir = -frag_dir;
+        let ndl_raw = dot(n, l_dir);
+        let nl = max(ndl_raw, 0.0);
+        let lambert_sp = 0.35 + 0.65 * nl;
+        let cand_vis_sp = mix(
+            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
+            1.0,
+            phys_hdr,
+        );
+        let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * cand_vis_sp * lm_punctual_scale;
+        lit = lit + sc * lambert_sp;
+
+        if (sss_strength > 0.001) {
+            let wrapped_sp = max((ndl_raw + wrap) / (1.0 + wrap), 0.0);
+            let sss_band_sp = max(wrapped_sp - nl, 0.0);
+            let sss_mask_sp = select(1.0, 1.0 - wood_pore * 0.7, is_wood);
+            sss_acc = sss_acc + sc * sss_band_sp * sss_strength * sss_mask_sp;
+        }
+
+        if (back_scale > 0.001) {
+            let lt_sp = normalize(l_dir + n * back_distortion);
+            let back_sp = pow(max(dot(view_dir, -lt_sp), 0.0), back_power);
+            back_acc = back_acc + sc * back_sp * back_thinness * back_scale;
+        }
+
+        if (spec_strength > 0.001) {
+            let h_sp = normalize(l_dir + view_dir);
+            let nh_sp = max(dot(n, h_sp), 0.0);
+            let sharp_sp = pow(nh_sp, spec_power);
+            let soft_sp = pow(nh_sp, max(spec_power * 0.5, 1.0)) * 0.10;
+            var s_bl_sp = (sharp_sp + soft_sp) * spec_strength;
+            if (is_wood) {
+                s_bl_sp = s_bl_sp * mix(0.55, 1.15, wood_grain) * (1.0 - wood_pore * 0.85);
+            }
+            if (is_conductor) {
+                let vdh_sp = max(dot(view_dir, h_sp), 0.0);
+                let f0_sp = mesh.base_color.rgb;
+                let f_metal_sp = f0_sp + (vec3<f32>(1.0) - f0_sp) * pow(1.0 - vdh_sp, 5.0);
+                let conductor_scale_sp = select(1.0, 0.85, is_brass);
+                spec_acc = spec_acc + sc * s_bl_sp * f_metal_sp * conductor_scale_sp;
+            } else if (!is_felt) {
+                spec_acc = spec_acc + sc * s_bl_sp;
+            }
+        }
+
+        if (coat_strength > 0.001) {
+            let h_ct = normalize(l_dir + view_dir);
+            let nh_ct = max(dot(n, h_ct), 0.0);
+            let vdh_ct = max(dot(view_dir, h_ct), 0.0);
+            let f_schlick_ct = coat_f0 + (1.0 - coat_f0) * pow(1.0 - vdh_ct, 5.0);
+            let d_ct = pow(nh_ct, coat_power) * (coat_power + 2.0) / 8.0;
+            let coat_sp = d_ct * f_schlick_ct * coat_strength * (1.0 - wood_pore * 0.6);
+            coat_acc = coat_acc + sc * coat_sp;
+        }
+    }
+
     // Compose: diffuse light multiplies albedo; sss adds a tinted glow;
     // base specular and clearcoat add on top. For wood we Fresnel-fade
     // the diffuse so energy flows into the coat at glancing angles.
@@ -2141,6 +2523,13 @@ fn fs_main(
     if (decal_metallic > 0.001) {
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
+    let shop_vitrine_d = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    if (shop_vitrine_d && is_foil) {
+        diffuse_scale = diffuse_scale * 0.58;
+    }
+    if (shop_vitrine_d && is_talisman) {
+        diffuse_scale = diffuse_scale * 0.62;
+    }
     if (is_wood) {
         let f_view = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv_view, 5.0);
         diffuse_scale = 1.0 - f_view * 0.6;
@@ -2152,6 +2541,22 @@ fn fs_main(
         // glossy coat instead. Reinhard-style soft knee preserves the
         // ratio between channels so the chroma stays warm.
         lit = lit / (vec3<f32>(1.0) + lit * 0.55);
+    }
+    // Shop vitrine enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
+    // skip extra `lit` knee so relics don't fall to black next to spec-heavy props.
+    // Conductors: soften only extreme hot spec (metal props), not enough to kill readable highlights.
+    if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8 && is_conductor) {
+        spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
+    }
+    // Vitrine: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
+    // enamel (diffuse-led) isn't the only thing that looks under-lit.
+    let shop_vitrine = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    if (shop_vitrine && is_foil) {
+        spec_acc = spec_acc * 0.22;
+        sheen_acc = sheen_acc * 0.22;
+    } else if (shop_vitrine && is_talisman) {
+        spec_acc = spec_acc * 0.26;
+        sheen_acc = sheen_acc * 0.26;
     }
     // ── Talisman Fresnel albedo tint ───────────────────────────────
     // View-dependent color shift baked into the surface albedo so it
@@ -2208,6 +2613,9 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
+        if (shop_vitrine) {
+            albedo = albedo * 0.86;
+        }
     }
     if (is_enamel) {
         let rim_gold = mix(vec3<f32>(0.92, 0.76, 0.28), mesh.base_color.rgb, 0.35);
@@ -2236,6 +2644,9 @@ fn fs_main(
         // on shadowed edges, which the per-light spec can't deliver.
         let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
         albedo = rim_gain;
+        if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8) {
+            albedo = albedo * 0.84;
+        }
     }
     if (is_glass) {
         let edge = 1.0 - ndv_view;
@@ -2276,10 +2687,22 @@ fn fs_main(
         albedo = mix(albedo, warm_edge, rim);
     }
 
-    // No directional shadow gating now that there's no directional light;
-    // analytic candle AABB occlusion (`cand_vis` above) already darkens
-    // fragments shadowed from the wicks themselves.
-    let lit_shadowed = lit;
+    // Directional shadow map (mesh casters): PCF visibility in key-light
+    // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
+    // each wick; this adds contact shadows from tall geometry onto the felt.
+    let shop_vitrine_shadow = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    var lit_vitrine = lit;
+    if (shop_vitrine_shadow && is_foil) {
+        lit_vitrine = lit_vitrine * 0.40;
+    }
+    if (shop_vitrine_shadow && is_talisman) {
+        lit_vitrine = lit_vitrine * 0.45;
+    }
+    var shadow_vis = sample_shadow_visibility(in.world_pos);
+    if (shop_vitrine_shadow && is_enamel) {
+        shadow_vis = max(shadow_vis, 0.58);
+    }
+    let lit_shadowed = lit_vitrine * shadow_vis;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee
@@ -2401,7 +2824,18 @@ fn fs_main(
         + emissive;
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    let out_rgb = pow(rgb, vec3<f32>(inv_g));
+    var out_rgb: vec3<f32>;
+    if (phys_hdr > 0.5) {
+        var amb = ssr_globals.felt.w * 0.08;
+        if (ssr_globals.shop_punctual.x > 1e-8 && is_enamel) {
+            amb = ssr_globals.felt.w * 0.20;
+        }
+        var hdr = rgb + albedo * vec3<f32>(amb) * diffuse_scale;
+        hdr = hdr * ssr_globals.felt.z;
+        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+    } else {
+        out_rgb = pow(rgb, vec3<f32>(inv_g));
+    }
 
     // Felt shells fade their alpha slightly at the top (the early
     // discard above already culled most pixels; surviving shell tips

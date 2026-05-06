@@ -11,6 +11,7 @@ pub type ShowcaseDecalKey = (Suit, u8, Option<TileEnhancement>, bool);
 const DECAL_W: u32 = 192;
 const DECAL_H: u32 = 256;
 const ATLAS_COLS: u32 = 21;
+/// Base faces: 42 tile types × 5 enhancements × 2 debuff states = 420 cells (21×20).
 const ATLAS_ROWS: u32 = 20;
 
 fn all_base_faces() -> Vec<(Suit, u8)> {

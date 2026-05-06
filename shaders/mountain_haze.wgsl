@@ -21,7 +21,8 @@ struct Globals {
 struct HazeParams {
     // xyz = colour, w = density multiplier
     color_density: vec4<f32>,
-    // x = horizon y (0..1), y = drift-speed multiplier
+    // x = horizon y (0..1), y = drift-speed multiplier,
+    // z = vertical-wall center x (0..1), w = wall half-width in UV (0 = full-width)
     params: vec4<f32>,
 };
 
@@ -115,10 +116,23 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let band = 1.0 - smoothstep(0.0, 0.45, abs(uv.y - horizon_y));
     let vertical_profile = 0.45 + band * 0.90;
 
+    // ── Optional vertical fog slab (gameplay fog wall) ───────────────
+    let wall_cx = haze.params.z;
+    let wall_hw = haze.params.w;
+    var horizontal_profile = 1.0;
+    if (wall_hw > 1e-4) {
+        let dx = abs(uv.x - wall_cx);
+        horizontal_profile = 1.0 - smoothstep(wall_hw * 0.55, wall_hw * 1.15, dx);
+    }
+
     // ── Breathing ────────────────────────────────────────────────────
     let breathe = 0.92 + 0.08 * sin(globals.time * 0.28);
 
-    let density = clamp(pow(fog, 1.3) * vertical_profile * breathe * density_mul, 0.0, 1.0);
+    let density = clamp(
+        pow(fog, 1.3) * vertical_profile * horizontal_profile * breathe * density_mul,
+        0.0,
+        1.0,
+    );
 
     // ── Colour grading ───────────────────────────────────────────────
     // Base colour from the uniform; horizon gets a faintly warmer lift so

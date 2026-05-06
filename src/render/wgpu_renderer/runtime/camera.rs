@@ -108,7 +108,72 @@ impl CameraFrame {
 }
 
 impl WgpuRenderer {
-    pub(super) fn upload_camera_uniforms(&self, cam: &CameraFrame, ssr_enabled: bool) {
+    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
+    /// and `lit_mesh` (`SsrGlobals.felt`). Same `ShopEnvLightingTune` as the room.
+    pub(super) fn tile_hdr_tonemap(&self, frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
+        use crate::render::draw_cmd::DrawCmd;
+        let k = self.active_scene_key;
+        let table_like = matches!(
+            k,
+            Some("gameplay")
+                | Some("tutorial")
+                | Some("pick_blind")
+                | Some("collection")
+        );
+        let shop_scene = k == Some("shop");
+        // Shop applies a heavy linear HDR divisor so bright `Shop.glb` fills land in
+        // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
+        // use ordinary tile shading — same /512 crush makes them vanish.
+        let shop_showcase_without_env = shop_scene
+            && frame.cmds.iter().any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
+            && !frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::ShopEnvironment));
+        if shop_showcase_without_env {
+            let linear_hdr = self.shop_env_linear_exposure;
+            return [
+                1.0,
+                linear_hdr,
+                self.shop_env_ambient_scale,
+                0.0,
+            ];
+        }
+        if !(shop_scene || table_like) {
+            return [0.0; 4];
+        }
+        let linear_hdr = self.shop_env_linear_exposure
+            * if shop_scene {
+                crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE
+            } else {
+                1.0
+            };
+        [
+            1.0,
+            linear_hdr,
+            self.shop_env_ambient_scale,
+            0.0,
+        ]
+    }
+
+    pub(super) fn upload_camera_uniforms(
+        &self,
+        cam: &CameraFrame,
+        ssr_enabled: bool,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) {
+        let tm = self.tile_hdr_tonemap(frame);
+        let felt_y = tm[0];
+        let felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
+        let felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+        // Document-space punctual attenuation for shop glTF only.
+        let shop_lit_hdr = self.active_scene_key == Some("shop") && frame.shop_env_gltf_punctual;
+        let shop_punctual_inv_doc = if shop_lit_hdr {
+            let s = crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
+            1.0 / s.max(1e-6)
+        } else {
+            0.0
+        };
         // SSR globals — lit_mesh.wgsl unprojects screen-space depth taps and
         // marches reflection rays in world space.
         let ssr_max_distance = cam.h * 2.0;
@@ -127,7 +192,8 @@ impl WgpuRenderer {
                     ssr_stride,
                     ssr_max_steps,
                 ],
-                felt: [self.felt_shader_lod, 0.0, 0.0, 0.0],
+                felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
+                shop_punctual: [shop_punctual_inv_doc, 0.0, 0.0, 0.0],
             }),
         );
 

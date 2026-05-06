@@ -160,6 +160,7 @@ pub(super) fn tick_active_cascade(
                         ctx.layout,
                         ctx.run,
                         cascade_showcase.as_ref(),
+                        &scene.positions,
                     );
                     let sp = ctx.layout.score_panel;
                     // Chips popups stream into the left accumulator
@@ -225,8 +226,9 @@ pub(super) fn tick_active_cascade(
         // *bigger* than small ones.
         if cascade.is_in_total() && !scene.cascade_final_emitted {
             scene.cascade_final_emitted = true;
-            ctx.bus
-                .push(crate::game::event_bus::GameEvent::ScoreCascadeFinal);
+            ctx.bus.push(crate::game::event_bus::GameEvent::ScoreCascadeFinal {
+                earned: cascade.earned,
+            });
             // Screen shake amplitude scales with the magnitude of this
             // hand — log curve so a 200-point hand still gets a tiny
             // kick and a 50,000-point hand really thumps.

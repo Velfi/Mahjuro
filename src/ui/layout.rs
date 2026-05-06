@@ -1,9 +1,10 @@
 //! Cassowary layout: root window → score, modifier strip, hand strip + slots.
 //!
-//! Relics are no longer a horizontal strip in this layout. They are placed as a
-//! left-sidebar column in 3D world space (see `gameplay.rs` relic placement block).
-//! The `relic_strip` field was removed; `hand_top` is now anchored directly below
-//! the modifier strip, reclaiming ~12% vertical height for the hand area.
+//! Active relics are **not** Cassowary rects: they render as a **horizontal 3D tray**
+//! across the upper screen (`build_relic_tray_and_wind` in `gameplay/input_handler.rs`),
+//! centered/clamped via [`crate::ui::scene_layout::GameplayPositions`] (`relic_col`, …).
+//! The old `relic_strip` layout field is gone; `hand_top` sits directly below the
+//! modifier strip.
 
 use cassowary::WeightedRelation::*;
 use cassowary::strength::{REQUIRED, STRONG};
@@ -46,8 +47,8 @@ pub struct LayoutResult {
 /// the anchor for the [`LayoutResult::mm`] / [`LayoutResult::m`] real-unit
 /// helpers — every other physical object in the scene (coins, candles,
 /// dishes, …) can be expressed in true mm/m and we'll convert to world
-/// units via the current hand-slot width. 25mm is roughly a riichi
-/// "small" tile; full-sized tiles are ~26mm but 25 keeps the math clean.
+/// units via the current hand-slot width. 25mm is near the short edge of a
+/// common Japanese tile; full-sized tiles are ~26mm but 25 keeps the math clean.
 pub const TILE_WIDTH_MM: f32 = 25.0;
 
 /// Window-width fraction occupied by a single hand-tile slot. Falls out
@@ -75,13 +76,11 @@ impl LayoutResult {
 }
 
 /// Score panel and modifier strip are proportional to window height.
-/// Relics live in a left-sidebar 3D column — not a layout strip.
+/// Relic medallions are separate 3D placement (horizontal tray), not these rects.
 const SCORE_H_RATIO: f64 = 0.09; //  9% of window height (54px at 600px)
 const MOD_H_RATIO: f64 = 0.05; //  5% of window height (30px at 600px)
 /// Horizontal inset (per side) of the hand strip relative to the window.
-/// Reduced from 22% → 16% to widen the tile rack. The relic sidebar column
-/// is centered at ~10% so 16% still clears it; the perspective camera spreads
-/// edge-tile silhouettes outward so a small margin remains necessary.
+/// Reduced from 22% → 16% to widen the tile rack; leaves margin for table framing.
 const HAND_X_PAD_RATIO: f64 = 0.16;
 
 /// Where the **3D hand tile mesh** is anchored vertically within each tall slot (fraction from top).

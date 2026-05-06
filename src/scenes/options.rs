@@ -1,10 +1,10 @@
-//! Options scene — volume sliders, visual settings, and rendering options.
+//! Options scene — volume sliders, visual settings, rendering, and accessibility.
 //!
-//! Layout: a table-of-contents (TOC) column on the left links to three
-//! sections (Audio, Visual, Rendering) in a scrollable content pane on
-//! the right.  Entry-based scroll stepping (same pattern as the glossary)
-//! keeps every visible row fully on-screen — the renderer has no scissor
-//! support.
+//! Layout: a table-of-contents (TOC) column on the left links to
+//! sections (Audio, Visual, Rendering, Accessibility, Controls) in a
+//! scrollable content pane on the right.  Entry-based scroll stepping (same
+//! pattern as the glossary) keeps every visible row fully on-screen — the
+//! renderer has no scissor support.
 
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
@@ -15,7 +15,7 @@ use crate::ui::smooth_scroll::SmoothScroll;
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -39,6 +39,7 @@ enum Section {
     Audio,
     Visual,
     Rendering,
+    Accessibility,
     Controls,
 }
 
@@ -48,6 +49,7 @@ impl Section {
             Section::Audio => "Audio",
             Section::Visual => "Visual",
             Section::Rendering => "Rendering",
+            Section::Accessibility => "Accessibility",
             Section::Controls => "Controls",
         }
     }
@@ -57,6 +59,7 @@ const SECTIONS: &[Section] = &[
     Section::Audio,
     Section::Visual,
     Section::Rendering,
+    Section::Accessibility,
     Section::Controls,
 ];
 
@@ -69,8 +72,6 @@ enum Row {
     Sfx,
     SfxToggle,
     Gamma,
-    SmokeQuality,
-    SmokeAmount,
     Effects,
     Tile,
     Tileset,
@@ -79,8 +80,10 @@ enum Row {
     Shadows,
     Ssr,
     Hdr,
+    UndoDiscard,
     SwapAb,
     XyQuickAction,
+    HoldToSellRumble,
     AutoCashInOnFullStructure,
     Hints,
 }
@@ -109,8 +112,6 @@ const ROWS: &[Row] = &[
     Row::Sfx,
     Row::SfxToggle,
     Row::Gamma,
-    Row::SmokeQuality,
-    Row::SmokeAmount,
     Row::Effects,
     Row::Tile,
     Row::Tileset,
@@ -119,8 +120,10 @@ const ROWS: &[Row] = &[
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
+    Row::UndoDiscard,
     Row::SwapAb,
     Row::XyQuickAction,
+    Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
 ];
@@ -141,8 +144,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::SfxToggle),
     ContentSlot::Header(Section::Visual),
     ContentSlot::Row(Row::Gamma),
-    ContentSlot::Row(Row::SmokeQuality),
-    ContentSlot::Row(Row::SmokeAmount),
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
@@ -152,9 +153,12 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
     ContentSlot::Row(Row::Hdr),
+    ContentSlot::Header(Section::Accessibility),
+    ContentSlot::Row(Row::UndoDiscard),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
     ContentSlot::Row(Row::XyQuickAction),
+    ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
 ];
@@ -296,8 +300,6 @@ pub struct OptionsScene {
     pub sfx_volume: f32,
     pub music_volume: f32,
     pub sfx_enabled: bool,
-    pub smoke_quality: crate::persistence::SmokeQuality,
-    pub smoke_amount: crate::persistence::SmokeAmount,
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tileset_name: String,
@@ -309,15 +311,17 @@ pub struct OptionsScene {
     pub hdr_enabled: bool,
     pub swap_ab: bool,
     pub xy_quick_action: bool,
+    pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
     pub hints_enabled: bool,
+    pub discard_undo_enabled: bool,
     pub ui_scale: f32,
 }
 
 impl OptionsScene {
     pub fn new() -> Self {
         let settings = crate::persistence::load_settings();
-        let mut available_tilesets = crate::asset_path::list_tilesets();
+        let mut available_tilesets = crate::asset_path::list_player_tilesets();
         if available_tilesets.is_empty() {
             available_tilesets.push("original".to_string());
         }
@@ -339,8 +343,6 @@ impl OptionsScene {
             sfx_volume: settings.sfx_volume,
             music_volume: settings.music_volume,
             sfx_enabled: settings.sfx_enabled,
-            smoke_quality: settings.smoke_quality,
-            smoke_amount: settings.smoke_amount,
             effects_quality: settings.effects_quality,
             tile_preset: settings.tile_preset,
             tileset_name,
@@ -352,8 +354,10 @@ impl OptionsScene {
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
             xy_quick_action: settings.xy_quick_action,
+            hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             hints_enabled: settings.hints_enabled,
+            discard_undo_enabled: settings.discard_undo_enabled,
             ui_scale: settings.ui_scale,
         }
     }
@@ -386,8 +390,6 @@ impl OptionsScene {
         settings.sfx_volume = self.sfx_volume;
         settings.music_volume = self.music_volume;
         settings.sfx_enabled = self.sfx_enabled;
-        settings.smoke_quality = self.smoke_quality;
-        settings.smoke_amount = self.smoke_amount;
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
@@ -398,8 +400,10 @@ impl OptionsScene {
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
         settings.xy_quick_action = self.xy_quick_action;
+        settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.hints_enabled = self.hints_enabled;
+        settings.discard_undo_enabled = self.discard_undo_enabled;
         settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
     }
@@ -499,8 +503,6 @@ impl OptionsScene {
         }
         match focused {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
-            Row::SmokeQuality => self.smoke_quality = self.smoke_quality.next(),
-            Row::SmokeAmount => self.smoke_amount = self.smoke_amount.next(),
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
@@ -510,10 +512,12 @@ impl OptionsScene {
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
+            Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             _ => return,
         }
         self.save_settings();
@@ -528,8 +532,6 @@ impl OptionsScene {
         }
         match focused {
             Row::SfxToggle => self.sfx_enabled = !self.sfx_enabled,
-            Row::SmokeQuality => self.smoke_quality = self.smoke_quality.prev(),
-            Row::SmokeAmount => self.smoke_amount = self.smoke_amount.prev(),
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
@@ -539,10 +541,12 @@ impl OptionsScene {
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
+            Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             _ => return,
         }
         self.save_settings();
@@ -566,14 +570,6 @@ impl OptionsScene {
             }
             Row::SfxToggle => {
                 self.sfx_enabled = !self.sfx_enabled;
-                self.save_settings();
-            }
-            Row::SmokeQuality => {
-                self.smoke_quality = self.smoke_quality.next();
-                self.save_settings();
-            }
-            Row::SmokeAmount => {
-                self.smoke_amount = self.smoke_amount.next();
                 self.save_settings();
             }
             Row::Effects => {
@@ -612,12 +608,20 @@ impl OptionsScene {
                 self.xy_quick_action = !self.xy_quick_action;
                 self.save_settings();
             }
+            Row::HoldToSellRumble => {
+                self.hold_to_sell_rumble = !self.hold_to_sell_rumble;
+                self.save_settings();
+            }
             Row::AutoCashInOnFullStructure => {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure;
                 self.save_settings();
             }
             Row::Hints => {
                 self.hints_enabled = !self.hints_enabled;
+                self.save_settings();
+            }
+            Row::UndoDiscard => {
+                self.discard_undo_enabled = !self.discard_undo_enabled;
                 self.save_settings();
             }
         }
@@ -809,14 +813,14 @@ impl OptionsScene {
             if is_active {
                 instances.push(GpuInstance {
                     rect: [layout.toc_x, y, layout.toc_w, layout.toc_item_h],
-                    color: color::DUSK,
+                    color: color::WALNUT_SOFT,
                 });
             }
 
             let text_color = if is_active {
                 color::CHAMPAGNE
             } else {
-                color::MIST
+                color::STONE
             };
             text_labels.push(TextLabel {
                 rect: [
@@ -874,7 +878,7 @@ impl OptionsScene {
                             layout.content_w,
                             (2.0 * layout.scale).max(1.0),
                         ],
-                        color: color::DUSK,
+                        color: color::WALNUT_SOFT,
                     });
                 }
                 ContentSlot::Row(row) => {
@@ -906,7 +910,7 @@ impl OptionsScene {
             let indicator_h = layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap);
             instances.push(GpuInstance {
                 rect: [indicator_x, indicator_y, indicator_w, indicator_h],
-                color: color::OBSIDIAN,
+                color: color::WALNUT_INK,
             });
             let thumb_h = (indicator_h * (layout.visible_slots as f32 / CONTENT.len() as f32))
                 .max(12.0 * layout.scale);
@@ -919,9 +923,9 @@ impl OptionsScene {
 
         // ── Back button ────────────────────────────────────────────────
         let back_bg = if self.back_focused {
-            color::TWILIGHT
+            color::WALNUT_BRIGHT
         } else {
-            color::INDIGO
+            color::WALNUT_RAISED
         };
         instances.push(GpuInstance {
             rect: [layout.back_x, layout.back_y, layout.back_w, layout.back_h],
@@ -930,7 +934,7 @@ impl OptionsScene {
         let back_text = if self.back_focused {
             color::CHAMPAGNE
         } else {
-            color::MIST
+            color::STONE
         };
         text_labels.push(TextLabel {
             rect: [layout.back_x, layout.back_y, layout.back_w, layout.back_h],
@@ -947,7 +951,7 @@ impl OptionsScene {
         text_labels.push(TextLabel {
             rect: [0.0, layout.hint_y, w, layout.hint_h],
             text: "Up/Down: navigate   Left/Right: adjust   Space: toggle/select".into(),
-            color: color::SLATE,
+            color: color::UMBER,
             ..Default::default()
         });
     }
@@ -1011,7 +1015,7 @@ impl OptionsScene {
                 let track_y = row_y + (row_h - track_h) * 0.5;
                 instances.push(GpuInstance {
                     rect: [slider_x, track_y, slider_w, track_h],
-                    color: color::OBSIDIAN,
+                    color: color::WALNUT_INK,
                 });
                 let fill_w = slider_w * fill_ratio;
                 let fill_color = if is_focused {
@@ -1050,9 +1054,9 @@ impl OptionsScene {
             _ => {
                 // Toggle / cycle rows share the same visual pattern.
                 let bg_color = if is_focused {
-                    color::DUSK
+                    color::WALNUT_SOFT
                 } else {
-                    color::INDIGO
+                    color::WALNUT_RAISED
                 };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
@@ -1061,19 +1065,13 @@ impl OptionsScene {
                 let text_color = if is_focused {
                     color::CHAMPAGNE
                 } else {
-                    color::MIST
+                    color::STONE
                 };
                 let text = match row {
                     Row::SfxToggle => format!(
                         "Sound Effects: {}",
                         if self.sfx_enabled { "ON" } else { "OFF" }
                     ),
-                    Row::SmokeQuality => {
-                        format!("Smoke Quality: {}", self.smoke_quality.label())
-                    }
-                    Row::SmokeAmount => {
-                        format!("Smoke Amount: {}", self.smoke_amount.label())
-                    }
                     Row::Effects => {
                         format!("Effects: {}", self.effects_quality.label())
                     }
@@ -1094,6 +1092,10 @@ impl OptionsScene {
                         "X and Y Quick Action: {}",
                         if self.xy_quick_action { "ON" } else { "OFF" }
                     ),
+                    Row::HoldToSellRumble => format!(
+                        "Controller rumble: {}",
+                        if self.hold_to_sell_rumble { "ON" } else { "OFF" }
+                    ),
                     Row::AutoCashInOnFullStructure => format!(
                         "Auto Cash-In on Full Structure: {}",
                         if self.auto_cash_in_on_full_structure {
@@ -1105,6 +1107,10 @@ impl OptionsScene {
                     Row::Hints => {
                         format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
                     }
+                    Row::UndoDiscard => format!(
+                        "Discard undo: {}",
+                        if self.discard_undo_enabled { "ON" } else { "OFF" }
+                    ),
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {
@@ -1133,7 +1139,7 @@ impl SceneBehavior for OptionsScene {
             if self.take_cancel_requested() {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
             }
-            return Some(Scene::StartScreen(StartScreenScene::new()));
+            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
         }
         if self.take_focus_changed() {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
@@ -1150,7 +1156,7 @@ impl SceneBehavior for OptionsScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         }];
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();

@@ -31,9 +31,13 @@ impl WgpuRenderer {
         tileset_name: &str,
     ) {
         self.ensure_showcase_decal_atlas(tileset_name);
-        // Encode the tile material choice into base_color_factor.w so the
-        // tile_3d shader can branch on it (0 = bamboo, 1 = plastic, ...).
-        self.tile_base_color_factor[3] = tile_material.shader_id();
+        // `tile_3d.wgsl` reads `base_color_factor.w`: procedural kinds 0–2, shop env 4,
+        // imported Tile.glb (per-primitive albedo + face decal) 5 — see `tile_body.rs`.
+        self.tile_base_color_factor[3] = if self.tile_primitives.is_empty() {
+            crate::render::tile_body::TileBodyShaderKind::resolve(tile_material).id()
+        } else {
+            crate::render::tile_body::TEXTURED_TILE_GAMEPLAY_BODY_KIND
+        };
 
         // Pick which procedural surface the table mesh routes through. The
         // shader branch is selected by `material_params.x` (the kind), so
@@ -86,14 +90,11 @@ impl WgpuRenderer {
     }
 
     pub(super) fn bloom_is_active(frame: &UiFrame) -> bool {
-        use crate::render::draw_cmd::Object3dKind;
-        frame.cmds.iter().any(|cmd| match cmd {
-            DrawCmd::MoonlitWater => true,
-            DrawCmd::Object3d(obj) => matches!(obj.kind, Object3dKind::ShopLamp { .. }),
-            DrawCmd::Object3dBatch(objs) => objs
-                .iter()
-                .any(|o| matches!(o.kind, Object3dKind::ShopLamp { .. })),
-            _ => false,
+        frame.cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                DrawCmd::MoonlitWater | DrawCmd::ShopEnvironment | DrawCmd::EmberDrift
+            )
         })
     }
 
@@ -158,28 +159,76 @@ impl WgpuRenderer {
             }),
         );
 
-        // Upload point lights for the tile shader (group 1). Scenes push
-        // candle/spot lights into `frame.point_lights` in pixel-layout
-        // coordinates; we map them onto the table-plane world for upload.
+        // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
-        self.queue.write_buffer(
-            &self.point_lights_buffer,
-            0,
-            bytemuck::bytes_of(&PointLightsBuf::from_lights(
+        let time_s = self.creation_time.elapsed().as_secs_f32();
+        let point_lights_buf = match (
+            self.active_scene_key.as_deref(),
+            frame.camera_override.as_ref(),
+        ) {
+            (Some("shop"), Some(cam))
+                if frame.cmds.iter().any(|c| {
+                    matches!(
+                        c,
+                        crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)
+                    )
+                }) =>
+            {
+                PointLightsBuf::from_lights_shop_camera(
+                    &frame.point_lights,
+                    cam,
+                    frame.candle_light_count,
+                    frame.flame_height_world,
+                    1.0,
+                    pl_w,
+                    pl_h,
+                    gamma,
+                    time_s,
+                )
+            }
+            _ => PointLightsBuf::from_lights(
                 &frame.point_lights,
                 frame.candle_light_count,
                 frame.flame_height_world,
+                1.0,
                 pl_w,
                 pl_h,
                 gamma,
-                self.creation_time.elapsed().as_secs_f32(),
+                time_s,
+            ),
+        };
+        self.queue.write_buffer(
+            &self.point_lights_buffer,
+            0,
+            bytemuck::bytes_of(&point_lights_buf),
+        );
+
+        // Shop `KHR_lights_punctual` uploads — `shop_glb` binding 0 / `lit_mesh` binding 2, inverse-square.
+        // `extras.w` dims `lit_mesh` props only; `shop_glb.wgsl` does not read it.
+        let shop_gltf_lit_mesh_scale = if frame.shop_env_gltf_punctual {
+            self.shop_lit_mesh_gltf_punctual_scale
+        } else {
+            1.0
+        };
+        self.queue.write_buffer(
+            &self.shop_gltf_point_lights_buffer,
+            0,
+            bytemuck::bytes_of(&PointLightsBuf::from_lights(
+                &frame.shop_gltf_point_lights,
+                0,
+                frame.flame_height_world,
+                shop_gltf_lit_mesh_scale,
+                pl_w,
+                pl_h,
+                gamma,
+                time_s,
             )),
         );
 
         // Upload spotlights for the tile shader (group 3). Scenes push
         // directional cone lights into `frame.spot_lights`; only the tile
-        // pipeline samples them (lit_mesh and the smoke lightbake don't).
+        // pipeline samples them (not `lit_mesh`).
         self.queue.write_buffer(
             &self.spot_lights_buffer,
             0,

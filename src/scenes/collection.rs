@@ -13,14 +13,17 @@ use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
-use crate::render::table_transform::rot_rx_ry_rz_deg;
+use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::start_screen::StartScreenScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::main_menu_exterior::MainMenuExteriorScene;
+use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use crate::scenes::item_inspect::{
+    inspect_orbit_camera, ItemInspectHost, ItemInspectOrbitState, ItemInspectScene,
+};
 
 /// One catalog section. Each tab drives a separate grid of artifacts.
 /// Yaku entries carry their matching Zodiac ribbon as the 3D prop — the
@@ -326,6 +329,86 @@ impl CollectionScene {
         items
     }
 
+    /// World-space pedestal anchor for [`ItemInspectScene`] orbit (matches HUD close-up).
+    fn collection_inspect_target_world(
+        &self,
+        w: f32,
+        h: f32,
+        bosses: &[Artifact],
+        layout: &crate::ui::layout::LayoutResult,
+    ) -> Option<[f32; 3]> {
+        if bosses.is_empty() {
+            return None;
+        }
+        let cell = (w * 0.12).min(h * 0.18);
+        let cell_gap = cell * 0.22;
+        let cell_pitch = cell + cell_gap;
+        let cab_px_x = w * 0.5;
+        let cab_px_y = h * 0.5;
+        let cols: i32 = 6;
+        let total_cells = bosses.len() as i32;
+        let default_focus = total_cells.min(2);
+        let focus_flat = self
+            .focused_row
+            .map(|i| i as i32)
+            .unwrap_or(default_focus)
+            .clamp(0, total_cells.saturating_sub(1).max(0));
+        let focus_col = focus_flat % cols;
+        let focus_row = focus_flat / cols;
+        let (cam_col, cam_row) = self.tick_cam_focus(focus_col as f32, focus_row as f32);
+        let cam_world_x = (cam_col - (cols as f32 - 1.0) * 0.5) * cell_pitch;
+        let cam_world_z = -(cam_row * cell_pitch);
+        let hud_world_y_offset = -h * 0.45;
+        let hud_py = cab_px_y - hud_world_y_offset;
+        let closeup_wx = cam_world_x - h * 0.22;
+        let hud_wz = cam_world_z - h * 0.18;
+        let closeup_px = cab_px_x + closeup_wx;
+        let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
+            [closeup_px, hud_py, hud_wz],
+            rot_fixed_axes_deg(90.0, 0.0, 0.0),
+            &self.positions.featured_artifact,
+            "collection.featured_artifact",
+            layout,
+        );
+        let v = pixel_to_world_xy(
+            w,
+            h,
+            closeup_anchor.pos[0],
+            closeup_anchor.pos[1],
+            closeup_anchor.pos[2],
+        );
+        Some(v.to_array())
+    }
+
+    fn collection_inspect_orbit_for_focus(
+        &self,
+        w: f32,
+        h: f32,
+        bosses: &[Artifact],
+        layout: &crate::ui::layout::LayoutResult,
+    ) -> Option<ItemInspectOrbitState> {
+        let tw = self.collection_inspect_target_world(w, h, bosses, layout)?;
+        Some(ItemInspectOrbitState {
+            target_world: tw,
+            yaw: 0.0,
+            pitch: 0.0,
+            zoom: 1.0,
+        })
+    }
+
+    /// Headless screenshot: orbit for pushdown [`ItemInspectScene`] from the
+    /// active tab and current grid focus (same math as the in-game overlay).
+    pub fn item_inspect_orbit_for_screenshot(
+        &self,
+        w: f32,
+        h: f32,
+        layout: &crate::ui::layout::LayoutResult,
+        progress: &crate::core::progression::PlayerProgress,
+    ) -> Option<ItemInspectOrbitState> {
+        let bosses = tab_artifacts(self.active_tab, progress);
+        self.collection_inspect_orbit_for_focus(w, h, &bosses, layout)
+    }
+
     /// Build the draw frame for the Bosses tab — a procedural infinite
     /// corridor in place of the vitrine+grid shelf. Each bay holds one
     /// boss nameplate between two lacquered uprights; extra bays loop
@@ -341,6 +424,7 @@ impl CollectionScene {
         text_labels: Vec<TextLabel>,
         bosses: &[Artifact],
         ctx: DrawCtx<'_>,
+        inspect: Option<&ItemInspectOrbitState>,
     ) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
@@ -419,12 +503,17 @@ impl CollectionScene {
         let (cam_col, cam_row) = self.tick_cam_focus(focus_col as f32, focus_row as f32);
         let cam_world_x = (cam_col - (cols as f32 - 1.0) * 0.5) * cell_pitch;
         let cam_world_z = -(cam_row * cell_pitch);
-        frame.camera_override = Some(CameraParams {
+        let base_cam = CameraParams {
             eye: [cam_world_x, cam_world_y, cam_world_z],
             target: [cam_world_x, 0.0, cam_world_z],
             up: [0.0, 0.0, 1.0],
             fovy_deg: 48.0,
-        });
+        };
+        frame.camera_override = Some(
+            inspect
+                .map(|ins| inspect_orbit_camera(&base_cam, ins))
+                .unwrap_or(base_cam),
+        );
 
         frame.fisheye_strength = 0.0;
 
@@ -492,7 +581,7 @@ impl CollectionScene {
             // pixel_y = cab_px_y - cell*0.5 → world Y = +0.5*cell (behind plane).
             pos: [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
             extents: [backing_w, backing_h, cell * 0.1],
-            rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
             color: [0.10, 0.07, 0.04, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::BeveledSlab,
@@ -606,7 +695,11 @@ impl CollectionScene {
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [face, thick, face],
-                            rotation: rot_rx_ry_rz_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
+                            rotation: euler_xyz_rad_from_deg(
+                                180.0 + visual.ui_tilt_x_deg,
+                                0.0,
+                                0.0,
+                            ),
                             color,
                             kind: Object3dKind::Relic {
                                 relic_id: *relic_id,
@@ -630,7 +723,7 @@ impl CollectionScene {
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [plate_w * 0.70, plate_w, plate_w * 0.18],
-                            rotation: rot_rx_ry_rz_deg(-90.0, 14.0, 0.0),
+                            rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
                             color: bright,
                             kind: Object3dKind::Talisman { kind: *tk },
                             hover_target: if is_focus { 1.0 } else { 0.0 },
@@ -645,7 +738,7 @@ impl CollectionScene {
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [rib_w, plate_w, rib_w * 0.15],
-                            rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                             color: [1.0, 1.0, 1.0, 1.0],
                             kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
                             hover_target: if is_focus { 1.0 } else { 0.0 },
@@ -660,7 +753,7 @@ impl CollectionScene {
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [plate_w, plate_h, plate_thick],
-                            rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                             color: bright,
                             kind: Object3dKind::Primitive {
                                 shape: MeshId::BeveledSlab,
@@ -728,7 +821,7 @@ impl CollectionScene {
             let closeup_px = cab_px_x + closeup_wx;
             let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
                 [closeup_px, hud_py, hud_wz],
-                rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+                rot_fixed_axes_deg(90.0, 0.0, 0.0),
                 &self.positions.featured_artifact,
                 "collection.featured_artifact",
                 ctx.layout,
@@ -761,7 +854,7 @@ impl CollectionScene {
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [face, thick, face],
-                        rotation: rot_rx_ry_rz_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
+                        rotation: euler_xyz_rad_from_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
                         color,
                         kind: Object3dKind::Relic {
                             relic_id: *relic_id,
@@ -782,7 +875,7 @@ impl CollectionScene {
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size * 0.70, closeup_size, closeup_size * 0.18],
-                        rotation: rot_rx_ry_rz_deg(-90.0, 14.0, 0.0),
+                        rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
                         color: closeup_bright,
                         kind: Object3dKind::Talisman { kind: *tk },
                         hover_target: 1.0,
@@ -795,7 +888,7 @@ impl CollectionScene {
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [rib_w, closeup_size, rib_w * 0.15],
-                        rotation: closeup_anchor.rotation,
+                        rotation: closeup_anchor.object3d_rotation(),
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
                         hover_target: 1.0,
@@ -819,9 +912,7 @@ impl CollectionScene {
                             1.0,
                         ]
                     };
-                    use crate::render::primitive::{
-                        DecalLayout, DecalSpec, MaterialSpec, MeshId,
-                    };
+                    use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
                     let closeup_silhouette = !boss.unlocked;
                     let closeup_material = if closeup_silhouette {
                         // Silhouette overrides decal anyway, but keep
@@ -838,7 +929,7 @@ impl CollectionScene {
                     hud_plaques.push(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size, closeup_size, closeup_size * 0.1],
-                        rotation: closeup_anchor.rotation,
+                        rotation: closeup_anchor.object3d_rotation(),
                         color,
                         kind: Object3dKind::Primitive {
                             shape: MeshId::BeveledSlab,
@@ -866,19 +957,17 @@ impl CollectionScene {
             };
             let anchor = crate::ui::placement::PlacementAnchor::new(
                 [card_px, hud_py, hud_wz],
-                rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+                rot_fixed_axes_deg(90.0, 0.0, 0.0),
                 &self.positions.focus_card,
                 "collection.focus_card",
                 ctx.layout,
             );
             {
-                use crate::render::primitive::{
-                    DecalLayout, DecalSpec, MaterialSpec, MeshId,
-                };
+                use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
                 hud_plaques.push(Object3d {
                     pos: anchor.pos,
                     extents: [card_w, card_h, card_h * 0.06],
-                    rotation: anchor.rotation,
+                    rotation: anchor.object3d_rotation(),
                     color: [0.94, 0.86, 0.56, 1.0],
                     kind: Object3dKind::Primitive {
                         shape: MeshId::BeveledSlab,
@@ -907,13 +996,11 @@ impl CollectionScene {
             if !stats_text.is_empty() {
                 let stats_h = h * 0.08;
                 let stats_wz = hud_wz - card_h * 0.65 - stats_h * 0.55;
-                use crate::render::primitive::{
-                    DecalLayout, DecalSpec, MaterialSpec, MeshId,
-                };
+                use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
                 hud_plaques.push(Object3d {
                     pos: [card_px, hud_py, stats_wz],
                     extents: [card_w, stats_h, stats_h * 0.06],
-                    rotation: rot_rx_ry_rz_deg(90.0, 0.0, 0.0),
+                    rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                     color: [0.26, 0.22, 0.16, 1.0],
                     kind: Object3dKind::Primitive {
                         shape: MeshId::BeveledSlab,
@@ -995,14 +1082,132 @@ impl CollectionScene {
         }
         frame.texts(text_labels);
 
-        // Hit rects for 2D chrome only — the corridor itself is inert
-        // for now (clicks/cycling come from the footer arrows & tab
-        // chord). Future: hit-test nameplates via world→screen.
-        let items = self.flat_items(w, h, ctx.ui_scale, ctx.progress);
-        self.tree.register_flat_buttons(&items, &mut frame.buttons);
+        // Hit rects for 2D chrome — skipped while [`ItemInspectScene`] owns input.
+        if inspect.is_none() {
+            let items = self.flat_items(w, h, ctx.ui_scale, ctx.progress);
+            self.tree.register_flat_buttons(&items, &mut frame.buttons);
+        }
 
         frame.window_title = format!("Mahjuro — Collection ({})", self.active_tab.label());
         frame
+    }
+
+    pub(crate) fn draw_collection_frame(
+        &self,
+        ctx: DrawCtx<'_>,
+        inspect: Option<&ItemInspectOrbitState>,
+    ) -> UiFrame {
+        let w = ctx.layout.window_w;
+        let h = ctx.layout.window_h;
+        let ui_scale = ctx.ui_scale;
+        let scale = (w.min(h)) / 600.0 * ui_scale;
+
+        let frame = UiFrame::new();
+
+        let mut quads: Vec<GpuInstance> = Vec::new();
+        let mut text_labels: Vec<TextLabel> = Vec::new();
+
+        // Title — currently shows the active tab's category name so the
+        // player has a non-3D anchor for "where am I in the cabinet".
+        let title_font = (24.0 * scale).max(14.0);
+        let title_h = (title_font / 0.55).ceil();
+        let title_y = h * 0.02;
+        text_labels.push(TextLabel {
+            rect: [0.0, title_y, w, title_h],
+            text: format!("Collection — {}", self.active_tab.label()),
+            color: color::CHAMPAGNE,
+            ..Default::default()
+        });
+
+        // Back button.
+        let margin_x = w * 0.04;
+        let back_w = (70.0 * scale).max(48.0);
+        let back_h = (24.0 * scale).max(18.0);
+        quads.push(GpuInstance {
+            rect: [margin_x, title_y, back_w, back_h],
+            color: [0.18, 0.20, 0.30, 0.92],
+        });
+        text_labels.push(TextLabel {
+            rect: [margin_x, title_y, back_w, back_h],
+            text: "< Back".into(),
+            color: [0.85, 0.85, 0.95, 1.0],
+            ..Default::default()
+        });
+
+        // Footer Prev/Next tab arrows. Match the rects from `flat_items`
+        // so the click hit-testing and the visual button line up.
+        let arrow_w = (40.0 * scale).max(28.0);
+        let arrow_h = back_h;
+        let arrow_y = h - arrow_h - h * 0.02;
+        let prev_x = w * 0.5 - arrow_w * 1.5;
+        let next_x = w * 0.5 + arrow_w * 0.5;
+        for (x, sym) in [(prev_x, "<"), (next_x, ">")] {
+            quads.push(GpuInstance {
+                rect: [x, arrow_y, arrow_w, arrow_h],
+                color: [0.18, 0.20, 0.30, 0.92],
+            });
+            text_labels.push(TextLabel {
+                rect: [x, arrow_y, arrow_w, arrow_h],
+                text: sym.into(),
+                color: [0.85, 0.85, 0.95, 1.0],
+                ..Default::default()
+            });
+        }
+
+        // Control hints — sits just above the tab arrows so keyboard /
+        // controller bindings are discoverable without a separate help
+        // overlay. The grid scroll affordance only mentions PgUp/PgDn
+        // when the active tab actually has rows beyond the viewport;
+        // otherwise the arrow-only hint is enough.
+        let all_count_hint = tab_artifacts(self.active_tab, ctx.progress).len();
+        let tab_scrollable = (total_rows_for(all_count_hint) as usize) > 0 && {
+            let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
+            (probe.grid_rows as usize) > probe.visible_rows as usize
+        };
+        // Couch-readable hint: CAPTION tier scales with window height
+        // and respects the player's UI scale preference, so it stays
+        // legible at TV viewing distance instead of vanishing into a
+        // 12pt micro-label.
+        let hint_font = typography::size(typography::CAPTION, h, ui_scale);
+        let hint_h = (hint_font / 0.55).ceil();
+        let hint_y = arrow_y - hint_h - h * 0.010;
+        let hint_text = if inspect.is_some() {
+            "Right stick: orbit   Triggers / scroll: zoom   E / North: close inspect   Esc: back to menu"
+        } else if tab_scrollable {
+            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Wheel/PgUp/PgDn: scroll   Enter: pedestal   E / North: inspect   Esc: back"
+        } else {
+            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Enter: pedestal   E / North: inspect   Esc: back"
+        };
+        text_labels.push(TextLabel {
+            rect: [0.0, hint_y, w, hint_h],
+            text: hint_text.into(),
+            color: [0.70, 0.72, 0.82, 0.85],
+            ..Default::default()
+        });
+
+        // Stake ladder readout: highest stake cleared per tile material.
+        // Uses the same caption size as the hint line and sits just above
+        // it. Materials the player has never cleared even Spring on are
+        // omitted — the line is decorative, not a checklist.
+        let ladder_line = stake_ladder_summary(ctx.progress);
+        if !ladder_line.is_empty() {
+            let ladder_y = hint_y - hint_h - h * 0.006;
+            text_labels.push(TextLabel {
+                rect: [0.0, ladder_y, w, hint_h],
+                text: ladder_line.into(),
+                color: [0.82, 0.72, 0.46, 0.90],
+                ..Default::default()
+            });
+        }
+
+        // Gather active-tab artifacts once — feeds the grid layout, the
+        // pedestal featured item, and the description plaque.
+        let all_artifacts = tab_artifacts(self.active_tab, ctx.progress);
+
+        // Infinite curio corridor: every tab renders as a procedural
+        // cabinet grid with a tinted-accent nameplate per entry and a
+        // description card floating in front of the focused cell.
+        self.build_corridor_frame(frame, quads, text_labels, &all_artifacts, ctx, inspect)
     }
 }
 
@@ -1109,7 +1314,7 @@ impl SceneBehavior for CollectionScene {
             match a {
                 UiAction::Cancel | UiAction::Pause | UiAction::CommitDiscard => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
+                    return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
                 }
                 UiAction::TabNext => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1201,6 +1406,24 @@ impl SceneBehavior for CollectionScene {
                         push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, i);
                     }
                 }
+                UiAction::ShopItemInspectToggle => {
+                    let w = ctx.layout.window_w;
+                    let h = ctx.layout.window_h;
+                    let bosses = tab_artifacts(self.active_tab, ctx.progress);
+                    if bosses.is_empty() {
+                        continue;
+                    }
+                    if let Some(orbit) =
+                        self.collection_inspect_orbit_for_focus(w, h, &bosses, ctx.layout)
+                    {
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            Scene::ItemInspect(ItemInspectScene::new(
+                                ItemInspectHost::Collection,
+                                orbit,
+                            )),
+                        )));
+                    }
+                }
                 _ => {}
             }
         }
@@ -1208,7 +1431,7 @@ impl SceneBehavior for CollectionScene {
         match action {
             Some(CollectionAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return Some(Scene::StartScreen(StartScreenScene::new()));
+                return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
             }
             Some(CollectionAction::PrevTab) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1250,115 +1473,7 @@ impl SceneBehavior for CollectionScene {
     }
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
-        let w = ctx.layout.window_w;
-        let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let scale = (w.min(h)) / 600.0 * ui_scale;
-
-        let frame = UiFrame::new();
-
-        let mut quads: Vec<GpuInstance> = Vec::new();
-        let mut text_labels: Vec<TextLabel> = Vec::new();
-
-        // Title — currently shows the active tab's category name so the
-        // player has a non-3D anchor for "where am I in the cabinet".
-        let title_font = (24.0 * scale).max(14.0);
-        let title_h = (title_font / 0.55).ceil();
-        let title_y = h * 0.02;
-        text_labels.push(TextLabel {
-            rect: [0.0, title_y, w, title_h],
-            text: format!("Collection — {}", self.active_tab.label()),
-            color: color::CHAMPAGNE,
-            ..Default::default()
-        });
-
-        // Back button.
-        let margin_x = w * 0.04;
-        let back_w = (70.0 * scale).max(48.0);
-        let back_h = (24.0 * scale).max(18.0);
-        quads.push(GpuInstance {
-            rect: [margin_x, title_y, back_w, back_h],
-            color: [0.18, 0.20, 0.30, 0.92],
-        });
-        text_labels.push(TextLabel {
-            rect: [margin_x, title_y, back_w, back_h],
-            text: "< Back".into(),
-            color: [0.85, 0.85, 0.95, 1.0],
-            ..Default::default()
-        });
-
-        // Footer Prev/Next tab arrows. Match the rects from `flat_items`
-        // so the click hit-testing and the visual button line up.
-        let arrow_w = (40.0 * scale).max(28.0);
-        let arrow_h = back_h;
-        let arrow_y = h - arrow_h - h * 0.02;
-        let prev_x = w * 0.5 - arrow_w * 1.5;
-        let next_x = w * 0.5 + arrow_w * 0.5;
-        for (x, sym) in [(prev_x, "<"), (next_x, ">")] {
-            quads.push(GpuInstance {
-                rect: [x, arrow_y, arrow_w, arrow_h],
-                color: [0.18, 0.20, 0.30, 0.92],
-            });
-            text_labels.push(TextLabel {
-                rect: [x, arrow_y, arrow_w, arrow_h],
-                text: sym.into(),
-                color: [0.85, 0.85, 0.95, 1.0],
-                ..Default::default()
-            });
-        }
-
-        // Control hints — sits just above the tab arrows so keyboard /
-        // controller bindings are discoverable without a separate help
-        // overlay. The grid scroll affordance only mentions PgUp/PgDn
-        // when the active tab actually has rows beyond the viewport;
-        // otherwise the arrow-only hint is enough.
-        let all_count_hint = tab_artifacts(self.active_tab, ctx.progress).len();
-        let tab_scrollable = (total_rows_for(all_count_hint) as usize) > 0 && {
-            let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
-            (probe.grid_rows as usize) > probe.visible_rows as usize
-        };
-        // Couch-readable hint: CAPTION tier scales with window height
-        // and respects the player's UI scale preference, so it stays
-        // legible at TV viewing distance instead of vanishing into a
-        // 12pt micro-label.
-        let hint_font = typography::size(typography::CAPTION, h, ui_scale);
-        let hint_h = (hint_font / 0.55).ceil();
-        let hint_y = arrow_y - hint_h - h * 0.010;
-        let hint_text = if tab_scrollable {
-            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Wheel/PgUp/PgDn: scroll   Enter: inspect   Esc: back"
-        } else {
-            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Enter: inspect   Esc: back"
-        };
-        text_labels.push(TextLabel {
-            rect: [0.0, hint_y, w, hint_h],
-            text: hint_text.into(),
-            color: [0.70, 0.72, 0.82, 0.85],
-            ..Default::default()
-        });
-
-        // Stake ladder readout: highest stake cleared per tile material.
-        // Uses the same caption size as the hint line and sits just above
-        // it. Materials the player has never cleared even Spring on are
-        // omitted — the line is decorative, not a checklist.
-        let ladder_line = stake_ladder_summary(ctx.progress);
-        if !ladder_line.is_empty() {
-            let ladder_y = hint_y - hint_h - h * 0.006;
-            text_labels.push(TextLabel {
-                rect: [0.0, ladder_y, w, hint_h],
-                text: ladder_line.into(),
-                color: [0.82, 0.72, 0.46, 0.90],
-                ..Default::default()
-            });
-        }
-
-        // Gather active-tab artifacts once — feeds the grid layout, the
-        // pedestal featured item, and the description plaque.
-        let all_artifacts = tab_artifacts(self.active_tab, ctx.progress);
-
-        // Infinite curio corridor: every tab renders as a procedural
-        // cabinet grid with a tinted-accent nameplate per entry and a
-        // description card floating in front of the focused cell.
-        self.build_corridor_frame(frame, quads, text_labels, &all_artifacts, ctx)
+        self.draw_collection_frame(ctx, None)
     }
 }
 
@@ -1484,6 +1599,7 @@ fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
             *id,
             &run.relic_counters,
             run.total_score_earned,
+            None,
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::Zodiac(kind) => format!(

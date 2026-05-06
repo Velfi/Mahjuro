@@ -63,8 +63,12 @@ impl SceneBehavior for TileLiteracyScene {
             rect: [0.0, 0.0, w, h],
             color: [0.0, 0.0, 0.0, 1.0],
         });
-        frame.starfield();
-        frame.golden_dust();
+        if ctx.effect_layers.starfield {
+            frame.starfield();
+        }
+        if ctx.effect_layers.golden_dust {
+            frame.golden_dust();
+        }
 
         // ── Central card ────────────────────────────────────────
         let card_w = (540.0 * scale).min(w * 0.88);
@@ -73,7 +77,7 @@ impl SceneBehavior for TileLiteracyScene {
         let cy = (h - card_h) * 0.5 - 10.0 * scale;
         frame.quad(GpuInstance {
             rect: [cx, cy, card_w, card_h],
-            color: color::MIDNIGHT,
+            color: color::WALNUT_DEEP,
         });
 
         // Gold border.
@@ -177,7 +181,7 @@ impl SceneBehavior for TileLiteracyScene {
         frame.text(TextLabel {
             rect: [0.0, hint_y, w, 22.0 * scale],
             text: "Press Enter to start".to_string(),
-            color: color::MIST,
+            color: color::STONE,
             font_px: Some(16.0 * scale),
             align: TextAlign::Center,
             ..Default::default()

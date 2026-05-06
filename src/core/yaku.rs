@@ -96,8 +96,8 @@ impl YakuKind {
     /// this yaku fires. These are tuned so that stacking 2-3 yaku on a real
     /// hand pushes mult into the ×8-15 range — that's where the chip pile
     /// turns into "explosive" final scores.
-    /// Base mult bonus at yaku level 1. Use `mult_bonus_at(level)` for the
-    /// leveled value (Zodiac cards level yaku in Patch B finishing).
+    /// Base mult bonus at yaku level 1. Use `mult_bonus_at(level)` when zodiac
+    /// leveling applies for this run.
     pub fn mult_bonus(self) -> f64 {
         self.base_mult_bonus()
     }
@@ -107,8 +107,7 @@ impl YakuKind {
     }
 
     /// Base chip bonus added when this yaku fires (separate from the mult
-    /// axis). Existing yaku stay at 0 chips so prior balance is preserved;
-    /// new Patch B yaku contribute on both axes per the plan.
+    /// axis). Some patterns grant chips only, mult only, or both (see `yaku.json`).
     pub fn chip_bonus(self) -> i32 {
         self.base_chip_bonus()
     }
@@ -117,10 +116,9 @@ impl YakuKind {
         yaku_def(self).chip_bonus
     }
 
-    /// Leveled mult bonus: `base + 0.5 × (level - 1)`. `level` is 1 by default;
-    /// each Zodiac card use increments it. Used by `score_sets` in Patch B
-    /// finishing — for now nothing wires a level above 1, so callers can use
-    /// the simpler `mult_bonus()`.
+    /// Leveled mult bonus: `base + 0.5 × (level - 1)`. Level starts at 1 and rises
+    /// when the player uses the zodiac card bound to this yaku. `score_sets`
+    /// passes the effective level; use `mult_bonus()` when level is always 1.
     pub fn mult_bonus_at(self, level: u32) -> f64 {
         let base = self.base_mult_bonus();
         if level <= 1 {

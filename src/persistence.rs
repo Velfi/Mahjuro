@@ -40,129 +40,6 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Smoke simulation quality. Bundles grid resolution, raymarch step floor,
-/// and offscreen-target downsampling into a single perf knob. `Off`
-/// short-circuits the simulation entirely.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SmokeQuality {
-    Off,
-    Low,
-    Medium,
-    High,
-    Ultra,
-}
-
-impl SmokeQuality {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::Low,
-            Self::Low => Self::Medium,
-            Self::Medium => Self::High,
-            Self::High => Self::Ultra,
-            Self::Ultra => Self::Off,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Off => Self::Ultra,
-            Self::Low => Self::Off,
-            Self::Medium => Self::Low,
-            Self::High => Self::Medium,
-            Self::Ultra => Self::High,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-            Self::Ultra => "Ultra",
-        }
-    }
-
-    /// Linear divisor for the offscreen raymarch target. Smoke is a
-    /// low-frequency field — the bilateral composite upsample hides the
-    /// divisor cleanly, and the raymarch is fullscreen-fragment-bound, so
-    /// halving the target is a ~4× win. Temporal reprojection in the
-    /// raymarch reconstructs detail across frames. High runs at /3 (the
-    /// perf-tuned default for retina) while Ultra stays at /2 for
-    /// users who want the fidelity-preserved tuning.
-    pub fn target_divisor(self) -> u32 {
-        match self {
-            Self::Off => 1,
-            Self::Low => 4,
-            Self::Medium => 2,
-            Self::High => 3,
-            Self::Ultra => 2,
-        }
-    }
-}
-
-fn default_smoke_quality() -> SmokeQuality {
-    SmokeQuality::High
-}
-
-/// How much smoke the cursor injects per puff. Pure look knob — doesn't
-/// touch sim cost.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SmokeAmount {
-    Light,
-    Medium,
-    Heavy,
-}
-
-impl SmokeAmount {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Light => Self::Medium,
-            Self::Medium => Self::Heavy,
-            Self::Heavy => Self::Light,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Light => Self::Heavy,
-            Self::Medium => Self::Light,
-            Self::Heavy => Self::Medium,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Light => "Light",
-            Self::Medium => "Medium",
-            Self::Heavy => "Heavy",
-        }
-    }
-
-    /// Multiplier applied to per-puff injection density.
-    pub fn density_mul(self) -> f32 {
-        match self {
-            Self::Light => 0.55,
-            Self::Medium => 1.0,
-            Self::Heavy => 1.6,
-        }
-    }
-
-    /// Maximum alpha the volumetric composite is allowed to reach. Heavier
-    /// amounts let dense plumes silhouette properly.
-    pub fn max_alpha(self) -> f32 {
-        match self {
-            Self::Light => 0.50,
-            Self::Medium => 0.70,
-            Self::Heavy => 0.88,
-        }
-    }
-}
-
-fn default_smoke_amount() -> SmokeAmount {
-    SmokeAmount::Medium
-}
-
 /// Controls the quality of fullscreen vignette effects (starfield, ember
 /// drift, golden dust, shooting-star cascade). Lower levels reduce or skip
 /// procedural layers to save GPU ALU on weaker hardware.
@@ -252,7 +129,7 @@ fn default_effects_quality() -> EffectsQuality {
 pub enum TilePreset {
     /// Chinese standard, ~30 × 20 × 15 mm.
     Chinese,
-    /// Japanese riichi, ~26 × 19 × 16 mm — chunkier and squarer.
+    /// Japanese-style proportions, ~26 × 19 × 16 mm — chunkier and squarer.
     Japanese,
     /// American mah jongg, ~32 × 25 × 19 mm — largest.
     American,
@@ -353,16 +230,6 @@ impl TileMaterial {
             Self::TortoiseShell => "+$10 starting gold",
         }
     }
-
-    /// Material ID passed to the tile shader via `base_color_factor.w`.
-    /// 0.0 = bamboo/ivory (default), 1.0 = plastic, 2.0 = tortoise shell.
-    pub fn shader_id(self) -> f32 {
-        match self {
-            Self::Bamboo => 0.0,
-            Self::Plastic => 1.0,
-            Self::TortoiseShell => 2.0,
-        }
-    }
 }
 
 fn default_tile_material() -> TileMaterial {
@@ -377,9 +244,9 @@ fn default_tile_material() -> TileMaterial {
 )]
 pub enum SurfaceKind {
     /// Lacquered walnut — original surface, glossy clearcoat + SSR.
+    #[default]
     Walnut,
     /// Mahjong-parlor green felt — broad soft sheen, no clearcoat, no SSR.
-    #[default]
     GreenFelt,
 }
 
@@ -407,7 +274,7 @@ impl SurfaceKind {
 }
 
 fn default_surface_kind() -> SurfaceKind {
-    SurfaceKind::GreenFelt
+    SurfaceKind::Walnut
 }
 
 fn default_tileset_name() -> String {
@@ -427,10 +294,6 @@ pub struct AppSettings {
     pub music_volume: f32,
     #[serde(default = "default_true")]
     pub sfx_enabled: bool,
-    #[serde(default = "default_smoke_quality")]
-    pub smoke_quality: SmokeQuality,
-    #[serde(default = "default_smoke_amount")]
-    pub smoke_amount: SmokeAmount,
     #[serde(default = "default_effects_quality")]
     pub effects_quality: EffectsQuality,
     #[serde(default = "default_tile_preset")]
@@ -453,10 +316,16 @@ pub struct AppSettings {
     pub swap_ab: bool,
     #[serde(default = "default_true")]
     pub xy_quick_action: bool,
+    /// Controller vibration (shop hold-to-sell, scoring cascade, etc.). Default on.
+    #[serde(default = "default_true")]
+    pub hold_to_sell_rumble: bool,
     #[serde(default = "default_true")]
     pub auto_cash_in_on_full_structure: bool,
     #[serde(default)]
     pub hints_enabled: bool,
+    /// After a discard, offer a one-step undo until any other action.
+    #[serde(default)]
+    pub discard_undo_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
 }
@@ -490,12 +359,10 @@ impl Default for AppSettings {
             sfx_volume: 0.7,
             music_volume: 0.7,
             sfx_enabled: true,
-            smoke_quality: SmokeQuality::High,
-            smoke_amount: SmokeAmount::Medium,
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
-            surface_kind: SurfaceKind::GreenFelt,
+            surface_kind: SurfaceKind::Walnut,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
             shadows_enabled: true,
@@ -503,8 +370,10 @@ impl Default for AppSettings {
             hdr_enabled: false,
             swap_ab: false,
             xy_quick_action: true,
+            hold_to_sell_rumble: true,
             auto_cash_in_on_full_structure: true,
             hints_enabled: false,
+            discard_undo_enabled: false,
             ui_scale: 1.0,
         }
     }
@@ -525,6 +394,9 @@ pub fn load_settings() -> AppSettings {
     };
     let mut settings: AppSettings = serde_json::from_str(&data).unwrap_or_default();
     settings.active_profile = settings.active_profile.min(MAX_PROFILES - 1);
+    if crate::asset_path::is_internal_only_tileset(&settings.tileset_name) {
+        settings.tileset_name = default_tileset_name();
+    }
     settings
 }
 

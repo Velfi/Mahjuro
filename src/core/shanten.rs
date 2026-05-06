@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 //! Shanten ("tiles away from a complete hand") for the gameplay HUD.
 //!
-//! Real riichi shanten counting is a few hundred lines of careful enumeration.
+//! Full rules-accurate shanten counting is a few hundred lines of careful enumeration.
 //! For Mahjuro's arcade UX we only need to *distinguish* the meaningful states:
 //!
 //!   * `Complete` — the hand currently scores as a 14-tile FullHand.
@@ -9,8 +9,8 @@
 //!   * `N >= 2`   — a heuristic estimate for "you're far away".
 //!
 //! Tenpai is detected exactly (brute-force swap-by-1 over all 34 tile faces).
-//! The ≥2 case uses a fast meld-counting heuristic and is approximate. The
-//! Tenpai Bonus in `scoring.rs` reads only the `Complete` axis, so the
+//! The ≥2 case uses a fast meld-counting heuristic and is approximate; only
+//! `Complete` vs `Tenpai` matter for coarse HUD messaging, so the
 //! approximation is purely a UI hint.
 
 use crate::core::hand::{SetKind, find_pairs_and_triplets, validate_selection};

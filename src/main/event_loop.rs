@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::scenes::shop::pick_ids::PICK_SELL_TRAY;
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -10,16 +12,7 @@ impl ApplicationHandler for App {
 
         let mut attrs = Window::default_attributes();
         attrs.title = "Mahjuro".to_string();
-        if let Some(ref shot) = self.headless_screenshot {
-            attrs.inner_size = Some(PhysicalSize::new(shot.width, shot.height).into());
-            // Note: leaving the window visible during screenshot capture.
-            // macOS appears to mark fully-hidden windows as Occluded which
-            // makes wgpu's swapchain skip presenting frames, so the
-            // capture path never runs. Visible window costs nothing for
-            // a one-shot CLI run.
-        } else {
-            attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
-        }
+        attrs.inner_size = Some(PhysicalSize::new(1920, 1080).into());
 
         let t0 = Instant::now();
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
@@ -100,6 +93,9 @@ impl ApplicationHandler for App {
                 // same frame roll out as a staggered sequence rather than
                 // stacking on the same tick.
                 let mut yaku_stinger_index: u32 = 0;
+                if let Some(input) = self.input.as_mut() {
+                    input.tick_scoring_rumble_keepalive(now);
+                }
                 for ev in self.bus.drain() {
                     match ev {
                         GameEvent::TileDrawn => {
@@ -119,15 +115,29 @@ impl ApplicationHandler for App {
                             // wired into the game.
                             self.audio.play_score_tick(index);
                             self.audio.play_sfx(audio::SfxId::ScoreStep);
+                            if let Some(input) = self.input.as_mut() {
+                                if input.mode == crate::ui::input::InputMode::Controller
+                                    && input.hold_to_sell_rumble_enabled
+                                {
+                                    input.play_scoring_cascade_step_rumble(now);
+                                }
+                            }
                         }
-                        GameEvent::ScoreCascadeFinal => {
+                        GameEvent::ScoreCascadeFinal { earned } => {
                             // Crescendo: brassy hit jingle layered over the
                             // existing confirmation sting so the closing
                             // beat lands with weight.
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                             self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
                             self.steam
-                                .unlock_achievement(crate::steam::Achievement::FirstHand);
+                                .unlock_achievement(crate::steam::Achievement::FirstStructure);
+                            if let Some(input) = self.input.as_mut() {
+                                if input.mode == crate::ui::input::InputMode::Controller
+                                    && input.hold_to_sell_rumble_enabled
+                                {
+                                    input.play_scoring_cascade_final_rumble(now, earned);
+                                }
+                            }
                         }
                         GameEvent::GoldChanged { .. } => {
                             self.audio.play_sfx(audio::SfxId::CoinDrop);
@@ -357,7 +367,20 @@ impl ApplicationHandler for App {
                 button_clicks.append(&mut self.mouse_button_clicks);
                 let mut hide_cursor = false;
                 if let Some(input) = self.input.as_mut() {
-                    if input.poll_gamepads(&mut actions) {
+                    let shop_face = matches!(&self.scene, Scene::Shop(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let collection_inspect_north = matches!(&self.scene, Scene::Collection(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let shop_inspect =
+                        matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
+                    let gp_ctx = crate::ui::input::GamepadPollCtx {
+                        shop_face_buttons: shop_face,
+                        collection_inspect_north,
+                        shop_item_inspect: shop_inspect,
+                    };
+                    if input.poll_gamepads(&mut actions, gp_ctx) {
                         hide_cursor = true;
                     }
                     actions.append(&mut self.mouse_actions);
@@ -473,6 +496,37 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
+                // Shop env + lighting overlay (sliders, value typing, Ctrl+C copy).
+                if let Some(mut overlay) = self.debug.shop_env_debug_overlay.take() {
+                    let (ww, wh) = self
+                        .window
+                        .as_ref()
+                        .map(|w| {
+                            let s = w.inner_size();
+                            (s.width as f32, s.height as f32)
+                        })
+                        .unwrap_or((1280.0, 720.0));
+                    let mouse = self.input.as_ref().map(|i| {
+                        (
+                            i.last_cursor.0,
+                            i.last_cursor.1,
+                            self.mouse_clicked,
+                            self.mouse_left_down,
+                        )
+                    });
+                    let close = overlay.update(&actions, mouse, ww, wh, self.gfx.ui_scale);
+                    self.mouse_clicked = false;
+                    self.debug.shop_env_height_scale = overlay.height_scale;
+                    self.debug.shop_env_lighting = overlay.lighting;
+                    if !close {
+                        self.debug.shop_env_debug_overlay = Some(overlay);
+                    } else {
+                        log::info!("[Debug] Closed shop env & lighting debug overlay");
+                    }
+                    actions.clear();
+                    button_clicks.clear();
+                }
+
                 // 3b''. If the debug visibility overlay is open, intercept
                 // input. Mirror the toggle state back to App fields each
                 // frame so the gameplay scene + retain filter pick up live
@@ -493,52 +547,8 @@ impl ApplicationHandler for App {
                     button_clicks.clear();
                 }
 
-                // 3b''''. If the shop smoke debug overlay is open, intercept
-                // input. Live-copy the overlay's tuning into the App each
-                // frame so the shop scene's next draw picks up edits.
-                if let Some(ref mut overlay) = self.debug.smoke_debug_overlay {
-                    match overlay.update(&actions) {
-                        SmokeDebugResult::Stay => {
-                            self.shop_smoke_tuning = overlay.tuning.clone();
-                        }
-                        SmokeDebugResult::Reset => {
-                            overlay.tuning = ShopSmokeTuning::default();
-                            self.shop_smoke_tuning = overlay.tuning.clone();
-                            // Clearing the override means the code default
-                            // takes over on next launch. Logs go to stderr
-                            // so tuning sessions leave a paper trail.
-                            match persistence::clear_tuning_override("ShopSmokeTuning") {
-                                Ok(()) => log::info!("[Debug] Cleared ShopSmokeTuning override"),
-                                Err(e) => log::warn!(
-                                    "[Debug] Failed to clear ShopSmokeTuning override: {e}"
-                                ),
-                            }
-                        }
-                        SmokeDebugResult::SaveAsDefault => {
-                            self.shop_smoke_tuning = overlay.tuning.clone();
-                            match persistence::save_tuning_override(
-                                "ShopSmokeTuning",
-                                &overlay.tuning,
-                            ) {
-                                Ok(()) => log::info!("[Debug] Saved ShopSmokeTuning override"),
-                                Err(e) => log::warn!(
-                                    "[Debug] Failed to save ShopSmokeTuning override: {e}"
-                                ),
-                            }
-                        }
-                        SmokeDebugResult::Close => {
-                            self.shop_smoke_tuning = overlay.tuning.clone();
-                            self.debug.smoke_debug_overlay = None;
-                            log::info!("[Debug] Closed shop smoke debug overlay");
-                        }
-                    }
-                    actions.clear();
-                    button_clicks.clear();
-                }
-
-                // 3b'''''. Volumetric tuning overlay — same pattern as smoke.
-                // Live-copy so `renderer.set_dust_strength` picks up edits
-                // on the next frame.
+                // 3b'''''. Volumetric tuning overlay (haze / fog wall)
+                // Live-copy so `renderer.set_haze_tuning` picks up edits on the next frame.
                 if let Some(ref mut overlay) = self.debug.volumetric_debug_overlay {
                     match overlay.update(&actions) {
                         VolumetricDebugResult::Stay => {
@@ -654,6 +664,7 @@ impl ApplicationHandler for App {
                     .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
                 let scroll_lines = std::mem::take(&mut self.scroll_delta);
                 let mut overlay_request: Option<scenes::OverlayRequest> = None;
+                let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
                 let ctx = UpdateCtx {
                     actions: &actions,
                     button_clicks: &button_clicks,
@@ -688,6 +699,18 @@ impl ApplicationHandler for App {
                     transitioning: self.pending_scene.is_some(),
                     overlay_request: &mut overlay_request,
                     headless: false,
+                    effect_layers: self.effect_layers,
+                    shop_inspect_orbit_stick: self
+                        .input
+                        .as_ref()
+                        .map(|i| i.shop_inspect_orbit_stick)
+                        .unwrap_or((0.0, 0.0)),
+                    shop_inspect_zoom_triggers: self
+                        .input
+                        .as_ref()
+                        .map(|i| i.shop_inspect_zoom_triggers)
+                        .unwrap_or(0.0),
+                    rumble_lab_ops: &mut rumble_lab_ops,
                 };
                 let updated_overlay = !self.overlay_stack.is_empty();
                 let update_result = if let Some(top) = self.overlay_stack.last_mut() {
@@ -706,20 +729,39 @@ impl ApplicationHandler for App {
                     }
                     None => {}
                 }
+                if let Some(input) = self.input.as_mut() {
+                    input.apply_rumble_lab_ops(now, rumble_lab_ops);
+                    let shop_ready = matches!(&self.scene, Scene::Shop(_))
+                        && self.overlay_stack.is_empty()
+                        && !self.scene.has_blocking_overlay();
+                    let hold = shop_ready
+                        && matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
+                    let progress = match &self.scene {
+                        Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),
+                        _ => 0.0,
+                    };
+                    let controller = input.mode == crate::ui::input::InputMode::Controller;
+                    input.sync_shop_sell_hold_rumble(
+                        hold,
+                        controller,
+                        input.hold_to_sell_rumble_enabled,
+                        progress,
+                    );
+                }
                 if let Some(next_scene) = update_result {
                     // Choose transition style: dramatic cascade for
                     // new-game flows, quick fade for everything else.
                     let use_cascade = matches!(
                         (&self.scene, &next_scene),
-                        (Scene::StartScreen(_), Scene::TileSelect(_))
-                            | (Scene::StartScreen(_), Scene::Shop(_))
+                        (Scene::MainMenuExterior(_), Scene::TileSelect(_))
+                            | (Scene::MainMenuExterior(_), Scene::Shop(_))
                             | (Scene::TileSelect(_), Scene::Shop(_))
                             | (Scene::TileSelect(_), Scene::TutorialCampaign(_))
                     );
                     let use_tile_teeth = matches!(
                         (&self.scene, &next_scene),
-                        (Scene::StartScreen(_), Scene::Collection(_))
-                            | (Scene::Collection(_), Scene::StartScreen(_))
+                        (Scene::MainMenuExterior(_), Scene::Collection(_))
+                            | (Scene::Collection(_), Scene::MainMenuExterior(_))
                     );
                     let use_galaxy = matches!(
                         (&self.scene, &next_scene),
@@ -728,26 +770,24 @@ impl ApplicationHandler for App {
                     );
                     let use_maelstrom = matches!(
                         (&self.scene, &next_scene),
-                        (Scene::StartScreen(_), Scene::Options(_))
-                            | (Scene::Options(_), Scene::StartScreen(_))
+                        (Scene::MainMenuExterior(_), Scene::Options(_))
+                            | (Scene::Options(_), Scene::MainMenuExterior(_))
                     );
                     let use_waterfall = matches!(
                         (&self.scene, &next_scene),
-                        (Scene::StartScreen(_), Scene::TileLiteracy(_))
-                            | (Scene::TileLiteracy(_), Scene::StartScreen(_))
+                        (Scene::MainMenuExterior(_), Scene::TileLiteracy(_))
+                            | (Scene::TileLiteracy(_), Scene::MainMenuExterior(_))
                     );
                     let use_shuffling_fan = matches!(
                         (&self.scene, &next_scene),
-                        (Scene::StartScreen(_), Scene::ProfileSelect(_))
-                            | (Scene::ProfileSelect(_), Scene::StartScreen(_))
+                        (Scene::MainMenuExterior(_), Scene::ProfileSelect(_))
+                            | (Scene::ProfileSelect(_), Scene::MainMenuExterior(_))
                     );
                     // Restart from the pause menu is the only path from
                     // Gameplay straight back to Shop; give it a deliberate
                     // fade-to-black instead of the snappy default.
-                    let slow_fade = matches!(
-                        (&self.scene, &next_scene),
-                        (Scene::Gameplay(_), Scene::Shop(_))
-                    );
+                    let slow_fade =
+                        matches!((&self.scene, &next_scene), (Scene::Gameplay(_), Scene::Shop(_)));
                     if use_cascade {
                         self.transition_kind = TransitionKind::ShootingStarCascade;
                         self.transition_speed = 0.012;
@@ -803,8 +843,6 @@ impl ApplicationHandler for App {
                     self.audio.set_sfx_volume(opts.sfx_volume);
                     self.audio.set_music_volume(opts.music_volume);
                     self.audio.set_enabled(opts.sfx_enabled);
-                    self.gfx.smoke_quality = opts.smoke_quality;
-                    self.gfx.smoke_amount = opts.smoke_amount;
                     self.gfx.effects_quality = opts.effects_quality;
                     self.gfx.tile_preset = opts.tile_preset;
                     self.gfx.tileset_name = opts.tileset_name.clone();
@@ -820,6 +858,7 @@ impl ApplicationHandler for App {
                     if let Some(ref mut input) = self.input {
                         input.swap_ab = opts.swap_ab;
                         input.xy_quick_action = opts.xy_quick_action;
+                        input.hold_to_sell_rumble_enabled = opts.hold_to_sell_rumble;
                     }
                 }
 
@@ -894,9 +933,8 @@ impl ApplicationHandler for App {
                                     self.modals.push(modal);
                                 }
                             }
-                            // Clear residual smoke when entering the shop
-                            // or the shrine-select screen so the new scene
-                            // starts with a clean atmosphere.
+                            // Reset hand-tile world tracking on some scene
+                            // transitions so motion caches do not leak across.
                             let clear_smoke = matches!(
                                 (&self.scene, &next),
                                 (Scene::TileSelect(_), Scene::Shop(_))
@@ -908,7 +946,7 @@ impl ApplicationHandler for App {
                             // on top now — overlays may have been pushed
                             // mid-fade (e.g. a zodiac celebration after a
                             // skip) and must not clobber them.
-                            let entering_main_menu = matches!(next, Scene::StartScreen(_));
+                            let entering_main_menu = matches!(next, Scene::MainMenuExterior(_));
                             if self.pending_scene_targets_overlay {
                                 if let Some(top) = self.overlay_stack.last_mut() {
                                     *top = next;
@@ -961,66 +999,7 @@ impl ApplicationHandler for App {
                     self.quit_requested = true;
                 }
 
-                // Headless screenshot tick. We render `warmup_frames + 1`
-                // total frames: warmup frames let async loaders settle, then
-                // the final draw is the one captured. The renderer writes
-                // the PNG synchronously during that draw (between submit
-                // and present). After it returns, the file is on disk.
-                let mut should_capture_this_frame = false;
-                if let Some(shot) = self.headless_screenshot.as_ref()
-                    && shot.frames_remaining == 0
-                {
-                    should_capture_this_frame = true;
-                    let path = shot.output.clone();
-                    if let Some(r) = self.renderer.as_ref() {
-                        r.queue_screenshot(path);
-                    }
-                }
-
-                // Cursor → smoke impulses are now injected by the renderer
-                // itself (it has the gameplay camera matrices required to
-                // unproject the cursor onto the table plane).
                 self.draw();
-
-                if let Some(shot) = self.headless_screenshot.as_mut() {
-                    if should_capture_this_frame {
-                        // Verify the renderer actually consumed the
-                        // queued screenshot — when the swapchain returns
-                        // Outdated/Lost the draw early-returns and the
-                        // queued path is left untouched. In that case,
-                        // tick to the next frame instead of exiting
-                        // with no file written. Bounded by `retries` so
-                        // a permanently-broken swapchain doesn't loop.
-                        let still_pending = self
-                            .renderer
-                            .as_ref()
-                            .map(|r| r.screenshot_pending())
-                            .unwrap_or(false);
-                        if still_pending && shot.retries < 30 {
-                            shot.retries += 1;
-                            log::warn!("screenshot: capture frame dropped, retry {}", shot.retries);
-                            if let Some(w) = self.window.as_ref() {
-                                w.request_redraw();
-                            }
-                        } else {
-                            if still_pending {
-                                log::error!(
-                                    "screenshot: still pending after {} retries, exiting anyway",
-                                    shot.retries
-                                );
-                            } else {
-                                log::info!("screenshot saved → {}", shot.output.display());
-                            }
-                            self.headless_screenshot = None;
-                            event_loop.exit();
-                        }
-                    } else {
-                        shot.frames_remaining = shot.frames_remaining.saturating_sub(1);
-                        if let Some(w) = self.window.as_ref() {
-                            w.request_redraw();
-                        }
-                    }
-                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
@@ -1031,6 +1010,7 @@ impl ApplicationHandler for App {
                         .unwrap_or((0.0, 0.0));
 
                     if state == ElementState::Pressed {
+                        self.mouse_left_down = true;
                         self.mouse_clicked = true;
                         if let Some(input) = self.input.as_mut() {
                             input.mode = InputMode::Cursor;
@@ -1219,6 +1199,7 @@ impl ApplicationHandler for App {
                             }
                         }
                     } else if state == ElementState::Released {
+                        self.mouse_left_down = false;
                         // Shop drag-to-sell: if a drag started on an owned item and the
                         // cursor moved far enough and is now over the sell tray, inject
                         // a drop event so the shop can complete the sale.
@@ -1231,10 +1212,9 @@ impl ApplicationHandler for App {
                             if dist > 10.0
                                 && let Some(renderer) = self.renderer.as_ref()
                             {
-                                const SELL_TRAY_PICK: u32 = 8; // PICK_SELL_TRAY
                                 let over_sell_tray = matches!(
                                     renderer.pick_shop_object(cursor.0, cursor.1),
-                                    Some(ShopHit::Dish(id)) if id == SELL_TRAY_PICK
+                                    Some(ShopHit::Dish(id)) if id == PICK_SELL_TRAY
                                 );
                                 if over_sell_tray {
                                     self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
@@ -1351,6 +1331,16 @@ impl ApplicationHandler for App {
                         w.request_redraw();
                     }
                 } else if event.state == ElementState::Pressed {
+                    if let Some(ref mut o) = self.debug.shop_env_debug_overlay {
+                        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+                        if o.feed_key_event(&event, ctrl) {
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+                    }
+
                     // Arrange mode: Escape while waiting for a click exits the
                     // mode entirely.
                     if matches!(self.debug.arrange_mode, Some(None))
@@ -1389,14 +1379,9 @@ impl ApplicationHandler for App {
                                 (Some(i), true) => (i + flat.len() - 1) % flat.len(),
                             };
                             let entry = &flat[next_idx];
-                            let origin = self
-                                .renderer
-                                .as_ref()
-                                .and_then(|r| r.debug_object_origin(entry.name))
-                                .unwrap_or(glam::Vec3::ZERO);
                             self.debug.arrange_mode = Some(Some(ArrangeModeState {
                                 object_name: entry.name.to_string(),
-                                selected_world_origin: origin,
+                                selected_world_origin: glam::Vec3::ZERO,
                                 delta_px: 0.0,
                                 delta_py: 0.0,
                                 delta_lift: 0.0,
@@ -1684,6 +1669,26 @@ impl ApplicationHandler for App {
                             self.overlay_stack
                                 .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
                             log::info!("[Debug] Opened material viewer (keyboard shortcut)");
+                            if let Some(w) = self.window.as_ref() {
+                                w.request_redraw();
+                            }
+                        }
+                        return;
+                    }
+
+                    if let PhysicalKey::Code(code) = event.physical_key
+                        && code == KeyCode::KeyH
+                        && self.modifiers.shift_key()
+                        && (self.modifiers.control_key() || self.modifiers.super_key())
+                    {
+                        if !self
+                            .overlay_stack
+                            .iter()
+                            .any(|s| matches!(s, Scene::RumbleLab(_)))
+                        {
+                            self.overlay_stack
+                                .push(Scene::RumbleLab(RumbleLabScene::new(true)));
+                            log::info!("[Debug] Opened rumble lab (keyboard shortcut)");
                             if let Some(w) = self.window.as_ref() {
                                 w.request_redraw();
                             }

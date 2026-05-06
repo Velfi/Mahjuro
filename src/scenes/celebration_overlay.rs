@@ -1,0 +1,271 @@
+//! Fullscreen celebration backdrop: dimmer quad, depth reset for 3D, and
+//! shared bottom prompt copy. Used by the shop tile-pack flow and
+//! [`super::zodiac_celebration::ZodiacCelebrationScene`].
+//!
+//! Prefer [`CelebrationOverlayScratch`] so fullscreen passes stay in the right
+//! order: **dimmer → optional starfield → depth reset → celebration 3D**.
+//!
+//! [`CelebrationStarShowerIntro`] drives the same shooting-star wipe as dramatic
+//! scene transitions (`TransitionKind::ShootingStarCascade`), gated by
+//! [`EffectLayers::transition_fullscreen_fx`].
+
+use std::time::{Duration, Instant};
+
+use crate::audio::SfxId;
+use crate::effect_layers::EffectLayers;
+use crate::game::event_bus::{EventBus, GameEvent};
+use crate::render::draw_cmd::UiFrame;
+use crate::render::theme::color;
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+
+/// Semi-transparent black dimmer (shop pack + zodiac overlay).
+pub const DIMMER_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 0.72];
+
+/// Sequences celebration fullscreen layers in a safe order.
+///
+/// 1. [`Self::push_dimmer`] — darkens the scene (or replaces clear for overlay scenes).
+/// 2. [`AfterCelebrationDimmer::push_starfield_if`] — optional mid-layer (zodiac).
+/// 3. [`AfterCelebrationDimmer::push_depth_reset_for_celebration_mesh`] — required
+///    before any celebration `Object3d` / showcase tiles.
+///
+/// Shop tile-pack skips the mid-layer; use [`Self::push_dimmer_then_depth_reset`].
+#[derive(Clone, Copy, Debug)]
+pub struct CelebrationOverlayScratch {
+    w: f32,
+    h: f32,
+}
+
+/// Proof that the celebration dimmer ran — call depth reset (and optionally starfield) before 3D.
+#[must_use = "call push_starfield_if and push_depth_reset_for_celebration_mesh (or chain them) before celebration 3D"]
+#[derive(Clone, Copy, Debug)]
+pub struct AfterCelebrationDimmer;
+
+impl CelebrationOverlayScratch {
+    #[inline]
+    pub fn new(w: f32, h: f32) -> Self {
+        Self { w, h }
+    }
+
+    /// Dimmer with overall opacity multiplier (0 = invisible, 1 = full [`DIMMER_RGBA`] alpha).
+    #[inline]
+    pub fn push_dimmer_scaled(self, frame: &mut UiFrame, dimmer_alpha_mul: f32) -> AfterCelebrationDimmer {
+        push_dimmer_quad_scaled(frame, self.w, self.h, dimmer_alpha_mul);
+        AfterCelebrationDimmer
+    }
+
+    /// Dimmer → depth reset with no mid-layer (shop tile-pack over the live shop).
+    #[inline]
+    pub fn push_dimmer_then_depth_reset(self, frame: &mut UiFrame) {
+        push_dimmer_quad(frame, self.w, self.h);
+        apply_depth_reset_for_celebration_mesh(frame);
+    }
+}
+
+impl AfterCelebrationDimmer {
+    /// Optional fullscreen effect between dimmer and depth reset (e.g. zodiac starfield).
+    #[inline]
+    pub fn push_starfield_if(self, frame: &mut UiFrame, enabled: bool) -> Self {
+        if enabled {
+            frame.starfield();
+        }
+        self
+    }
+
+    /// Always call this before celebration 3D meshes.
+    #[inline]
+    pub fn push_depth_reset_for_celebration_mesh(self, frame: &mut UiFrame) {
+        apply_depth_reset_for_celebration_mesh(frame);
+    }
+}
+
+#[inline]
+fn push_dimmer_quad(frame: &mut UiFrame, w: f32, h: f32) {
+    frame.quad(GpuInstance {
+        rect: [0.0, 0.0, w, h],
+        color: DIMMER_RGBA,
+    });
+}
+
+#[inline]
+fn push_dimmer_quad_scaled(frame: &mut UiFrame, w: f32, h: f32, dimmer_alpha_mul: f32) {
+    let m = dimmer_alpha_mul.clamp(0.0, 1.0);
+    let mut c = DIMMER_RGBA;
+    c[3] *= m;
+    frame.quad(GpuInstance {
+        rect: [0.0, 0.0, w, h],
+        color: c,
+    });
+}
+
+#[inline]
+fn apply_depth_reset_for_celebration_mesh(frame: &mut UiFrame) {
+    frame.clear_scene_depth();
+}
+
+/// Pulse factor for bottom prompts (`t` in seconds).
+#[inline]
+pub fn prompt_pulse_alpha(t_secs: f32) -> f32 {
+    0.5 + 0.5 * (t_secs * 3.0).sin()
+}
+
+const PROMPT_FONT_SCALE: f32 = 0.028;
+const PROMPT_MIN_PX: f32 = 18.0;
+const PROMPT_NY: f32 = 0.88;
+
+fn bottom_prompt_label(h: f32, w: f32, text: impl Into<String>, alpha: f32) -> TextLabel {
+    let prompt_font = (h * PROMPT_FONT_SCALE).max(PROMPT_MIN_PX);
+    let prompt_y = h * PROMPT_NY;
+    TextLabel {
+        text: text.into(),
+        rect: [0.0, prompt_y, w, prompt_font * 1.5],
+        font_px: Some(prompt_font),
+        color: [1.0, 1.0, 1.0, alpha],
+        align: TextAlign::Center,
+        ..Default::default()
+    }
+}
+
+pub fn label_confirm_to_continue(h: f32, w: f32, t_secs: f32, overall_alpha: f32) -> TextLabel {
+    bottom_prompt_label(
+        h,
+        w,
+        "Click or press confirm to continue",
+        overall_alpha * prompt_pulse_alpha(t_secs),
+    )
+}
+
+pub fn label_confirm_to_open(h: f32, w: f32, t_secs: f32) -> TextLabel {
+    bottom_prompt_label(
+        h,
+        w,
+        "Click or press confirm to open",
+        prompt_pulse_alpha(t_secs),
+    )
+}
+
+/// Tile-pack celebration header (champagne, upper band).
+pub fn label_pack_title(h: f32, w: f32, title: String) -> TextLabel {
+    let title_font = (h * 0.045).max(28.0);
+    let title_y = h * 0.18;
+    TextLabel {
+        text: title,
+        rect: [0.0, title_y, w, title_font * 1.5],
+        font_px: Some(title_font),
+        color: color::CHAMPAGNE,
+        align: TextAlign::Center,
+        ..Default::default()
+    }
+}
+
+/// Zodiac level-up header (warm gold, fades with `alpha`).
+pub fn label_zodiac_level_title(h: f32, w: f32, text: String, alpha: f32) -> TextLabel {
+    let title_font = (h * 0.04).max(24.0);
+    let title_y = h * 0.10;
+    TextLabel {
+        text,
+        rect: [0.0, title_y, w, title_font * 1.5],
+        font_px: Some(title_font),
+        color: [0.95, 0.78, 0.25, alpha],
+        align: TextAlign::Center,
+        ..Default::default()
+    }
+}
+
+#[inline]
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0).max(1e-6)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Wall-clock intro that pairs a shooting-star cascade wipe with fading-in celebration content.
+///
+/// Append [`Self::push_shooting_star_cascade_if_active`] **last** in the frame so the wipe
+/// composites over celebration geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct CelebrationStarShowerIntro {
+    started_at: Instant,
+    sound_emitted: bool,
+}
+
+impl CelebrationStarShowerIntro {
+    /// Total wipe duration (matches typical app transition timing).
+    pub const DURATION_SECS: f32 = 1.7;
+    const CONTENT_FADE_START: f32 = 0.42;
+    const CONTENT_FADE_END: f32 = 0.92;
+
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            sound_emitted: false,
+        }
+    }
+
+    /// Headless / fast-forward: treat the wipe as finished and skip audio.
+    #[inline]
+    pub fn jump_to_done(&mut self) {
+        self.started_at = Instant::now() - Duration::from_secs_f32(Self::DURATION_SECS + 1.0);
+        self.sound_emitted = true;
+    }
+
+    #[inline]
+    fn norm_t(&self) -> f32 {
+        (Instant::now()
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32()
+            / Self::DURATION_SECS)
+            .clamp(0.0, 1.0)
+    }
+
+    /// Shader progress for [`DrawCmd::ShootingStarCascade`].
+    #[inline]
+    pub fn transition_progress(&self) -> f32 {
+        self.norm_t()
+    }
+
+    #[inline]
+    pub fn is_complete(&self) -> bool {
+        self.norm_t() >= 1.0
+    }
+
+    /// When `transition_fullscreen_fx` is off, there is no wipe — content is fully visible immediately.
+    #[inline]
+    pub fn is_done_for(&self, layers: &EffectLayers) -> bool {
+        !layers.transition_fullscreen_fx || self.is_complete()
+    }
+
+    /// Fade factor for ribbon, text, and dimmer during the wipe.
+    #[inline]
+    pub fn content_alpha_for(&self, layers: &EffectLayers) -> f32 {
+        if !layers.transition_fullscreen_fx {
+            return 1.0;
+        }
+        let t = self.transition_progress();
+        smoothstep(Self::CONTENT_FADE_START, Self::CONTENT_FADE_END, t)
+    }
+
+    #[inline]
+    pub fn tick_audio(&mut self, bus: &mut EventBus, headless: bool, layers: &EffectLayers) {
+        if headless || !layers.transition_fullscreen_fx || self.sound_emitted {
+            return;
+        }
+        bus.push(GameEvent::UiSound(SfxId::StarShimmer));
+        self.sound_emitted = true;
+    }
+
+    /// Sets [`UiFrame::transition_progress`] and queues the cascade pass (no-op when inactive).
+    #[inline]
+    pub fn push_shooting_star_cascade_if_active(&self, frame: &mut UiFrame, layers: &EffectLayers) {
+        if !layers.transition_fullscreen_fx || self.is_complete() {
+            return;
+        }
+        frame.transition_progress = self.transition_progress();
+        frame.shooting_star_cascade();
+    }
+}
+
+impl Default for CelebrationStarShowerIntro {
+    fn default() -> Self {
+        Self::new()
+    }
+}

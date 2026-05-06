@@ -1,6 +1,40 @@
 use super::*;
 
+/// HDR scene buffer clear — uniform void behind the table / props.
+#[inline]
+fn scene_viewport_clear() -> wgpu::Color {
+    wgpu::Color {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    }
+}
+
+/// Split [`RenderOp`]s at [`RenderOp::ClearSceneDepth`] markers (markers omitted).
+fn split_render_ops_by_clear_depth(ops: &[RenderOp]) -> Vec<&[RenderOp]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (i, op) in ops.iter().enumerate() {
+        if matches!(op, RenderOp::ClearSceneDepth) {
+            if start < i {
+                out.push(&ops[start..i]);
+            }
+            start = i + 1;
+        }
+    }
+    if start < ops.len() {
+        out.push(&ops[start..]);
+    }
+    out.into_iter().filter(|c| !c.is_empty()).collect()
+}
+
 impl WgpuRenderer {
+    /// Render one frame.
+    ///
+    /// `frame.cmds` is walked in order — earlier cmds render under later ones.
+    /// Contiguous runs of `DrawCmd::Quad` are batched into a single instanced
+    /// draw, which is invisible to scenes and preserves ordering.
     pub fn render(&mut self, frame: &UiFrame, settings: RenderSettings) -> anyhow::Result<()> {
         self.render_to(frame, settings, None)
     }
@@ -44,8 +78,6 @@ impl WgpuRenderer {
         output_override: Option<&wgpu::TextureView>,
     ) -> anyhow::Result<()> {
         let RenderSettings {
-            smoke_quality,
-            smoke_amount,
             effects_quality,
             tile_preset,
             tile_material,
@@ -147,9 +179,8 @@ impl WgpuRenderer {
         // pixel-orthographic quad pipeline and float over the 3D scene as
         // a HUD.
         let camera = CameraFrame::build(frame, self.size);
-        self.upload_camera_uniforms(&camera, ssr_enabled);
+        self.upload_camera_uniforms(&camera, ssr_enabled, frame);
         let look_target = camera.look_target;
-        let view_proj = camera.view_proj;
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
@@ -455,6 +486,8 @@ impl WgpuRenderer {
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
+        let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         // Skeuomorphic gameplay HUD cmd buffers (phase 1).
         // Dead empty vecs — kept so existing shadow/draw loops that still iterate
         // these compile; scenes no longer push to these variants.
@@ -466,12 +499,28 @@ impl WgpuRenderer {
         // Flat draw list built during the Object3d pre-pass: (DrawKind, slot_i).
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
+        let mut bg_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
 
         let mut i = 0;
         while i < frame.cmds.len() {
             match &frame.cmds[i] {
                 DrawCmd::Background(id) => {
-                    ops.push(RenderOp::Background(*id));
+                    let ww = self.size.width.max(1) as f32;
+                    let wh = self.size.height.max(1) as f32;
+                    let bg_inst = GpuInstance {
+                        rect: [0.0, 0.0, ww, wh],
+                        color: id.image_vertex_color(),
+                    };
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("bg-inst"),
+                            contents: bytemuck::cast_slice(&[bg_inst]),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = bg_inst_buffers.len();
+                    bg_inst_buffers.push(buf);
+                    ops.push(RenderOp::Background { id: *id, buf_idx });
                     i += 1;
                 }
                 DrawCmd::Starfield => {
@@ -493,15 +542,15 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::MoonlitWater => {
-                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
-                        ops.push(RenderOp::MoonlitWater);
-                    }
+                    // Not gated on `effects_quality`: `EffectLayers::BASELINE` forces the
+                    // renderer tier to `Off` for procedural surfaces, but game-over still
+                    // pushes this when `fullscreen_water_backdrop` is on (see
+                    // `effect_layers.rs`).
+                    ops.push(RenderOp::MoonlitWater);
                     i += 1;
                 }
                 DrawCmd::SunlitWater => {
-                    if effects_quality >= crate::persistence::EffectsQuality::Medium {
-                        ops.push(RenderOp::SunlitWater);
-                    }
+                    ops.push(RenderOp::SunlitWater);
                     i += 1;
                 }
                 DrawCmd::MountainHaze => {
@@ -518,8 +567,12 @@ impl WgpuRenderer {
                     ops.push(RenderOp::Table);
                     i += 1;
                 }
-                DrawCmd::FluidSmoke => {
-                    ops.push(RenderOp::FluidSmoke);
+                DrawCmd::ShopEnvironment => {
+                    ops.push(RenderOp::ShopEnvironment);
+                    i += 1;
+                }
+                DrawCmd::ClearSceneDepth => {
+                    ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
                 }
                 DrawCmd::Quad(_) => {
@@ -574,14 +627,14 @@ impl WgpuRenderer {
                     }
                     // Step the particle system once per frame and upload
                     // the live particles into a fresh instance buffer.
-                    // Smoke-on paths skip the actual draw (see the
-                    // `FlameBatch` branch below), but we still step so
-                    // smoke → no-smoke toggles mid-game don't suddenly
-                    // drop an empty pool into view.
-                    self.flame_particles.step(&flame_emitters, self.frame_dt);
-                    let count = self
-                        .flame_particles
-                        .fill_gpu_instances(&flame_emitters, &mut self.flame_particle_staging);
+                    let flame_time_s = self.creation_time.elapsed().as_secs_f32();
+                    self.flame_particles
+                        .step(&flame_emitters, self.frame_dt, flame_time_s);
+                    let count = self.flame_particles.fill_gpu_instances(
+                        &flame_emitters,
+                        flame_time_s,
+                        &mut self.flame_particle_staging,
+                    );
                     if count == 0 {
                         // Nothing to draw yet (first frame, or all
                         // particles expired during a pause). Still push
@@ -659,6 +712,43 @@ impl WgpuRenderer {
                     tile_face_quads.push(*face);
                     tile_face_inst_buffers.push(buf);
                     ops.push(RenderOp::TileFaceQuad(idx));
+                    i += 1;
+                }
+                DrawCmd::PromptIconQuad(icon) => {
+                    if !self
+                        .prompt_icon_overlays
+                        .contains_key(icon.asset_rel_path)
+                    {
+                        match make_prompt_icon_overlay_gpu(
+                            &self.device,
+                            &self.queue,
+                            &self.text_bind_group_layout,
+                            &self.tile_sampler,
+                            icon.asset_rel_path,
+                        ) {
+                            Some(gpu) => {
+                                self.prompt_icon_overlays
+                                    .insert(icon.asset_rel_path, gpu);
+                            }
+                            None => {
+                                log::warn!(
+                                    "Kenney prompt SVG missing or invalid: {}",
+                                    icon.asset_rel_path
+                                );
+                            }
+                        }
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("prompt-icon-quad"),
+                            contents: bytemuck::cast_slice(&[icon.inst]),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let idx = prompt_icon_quads.len();
+                    prompt_icon_quads.push(*icon);
+                    prompt_icon_inst_buffers.push(buf);
+                    ops.push(RenderOp::PromptIconQuad(idx));
                     i += 1;
                 }
                 DrawCmd::ShowcaseTileBatch(placements) => {
@@ -769,11 +859,16 @@ impl WgpuRenderer {
         // loop below appends entries it wants to expose to
         // `pick_debug_object`.
         self.last_debug_pickables.clear();
-        self.last_debug_trimesh_pickables.clear();
         self.last_gameplay_fog_wall_horizon_y = frame.gameplay_fog_wall_horizon_y;
+        self.last_gameplay_fog_wall_center_x = frame.gameplay_fog_wall_center_x;
         if let Some(hy) = frame.gameplay_fog_wall_horizon_y {
             let py = hy.clamp(0.0, 1.0) * h;
-            let center = pixel_to_world(w, h, w * 0.5, py, 720.0);
+            let cx_px = frame
+                .gameplay_fog_wall_center_x
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0)
+                * w;
+            let center = pixel_to_world(w, h, cx_px, py, 720.0);
             let model = translate_rot_scale(
                 center,
                 Mat4::IDENTITY,
@@ -907,9 +1002,6 @@ impl WgpuRenderer {
         // Coins migrated to Object3dKind::Coin.
 
         // ── Reset per-frame singletons owned by Object3d handlers ──────
-        self.last_sell_tray_model = None;
-        self.last_sell_card_model = None;
-
         self.write_gameplay_hud_uniforms(&camera, &yaku_tablet_batches);
 
         // Wood tablets migrated to Object3dKind::WoodTablet.
@@ -966,18 +1058,7 @@ impl WgpuRenderer {
             )
         };
 
-        // ── Volumetric smoke setup (camera, bounds, cursor) ─────────────
-        // Done before the encoder is created so the per-tile impulses
-        // queued during the tile-loop above are still pending.
-        self.upload_fluid_frame(frame, &camera, dt, smoke_quality, smoke_amount);
-
-        // Garbage-collect stale per-tile world cache entries — drop any uid
-        // that wasn't seen in `tile_uids` this frame so the HashMap doesn't
-        // grow unbounded across runs.
-        if !self.prev_tile_world.is_empty() {
-            let live: std::collections::HashSet<u32> = self.tile_uids.iter().copied().collect();
-            self.prev_tile_world.retain(|k, _| live.contains(k));
-        }
+        self.garbage_collect_prev_tile_world();
 
         // ── Shadow map setup ────────────────────────────────────────────
         let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled);
@@ -997,6 +1078,7 @@ impl WgpuRenderer {
         );
 
         self.run_showcase_tiles_placement(
+            frame,
             &camera,
             tile_basis,
             tile_preset,
@@ -1009,38 +1091,15 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
+        if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+            self.write_shop_environment_uniforms(frame, &camera, frame.shop_env_gltf_punctual);
+        }
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-
-        // Paint the open-book's page-spread albedo. CPU-rasterised
-        // each frame and uploaded via `queue.write_texture` — the
-        // alternative GPU side-pipeline path was abandoned because the
-        // refactor needed to share `make_text_draw` etc. with the main
-        // render loop carried too much risk for the gameplay path. At
-        // 1024×1024 RGBA the upload is well under any plausible
-        // bandwidth budget on modern hardware.
-        self.upload_journal_page_content();
-
-        // Run fluid simulation compute passes (before render pass).
-        //
-        // Use the real inter-frame `dt` captured at the top of `render()`.
-        // The previous `self.last_frame.elapsed()` here was a bug: by this
-        // point we've already reassigned `self.last_frame = now`, so the
-        // elapsed value is just the time spent on render work earlier in
-        // this same function — typically 5–15 ms regardless of FPS. That
-        // made the sim advance only ~0.5–0.9 seconds of simulated time per
-        // wall second, so the post-deal wind sweep (1.4s wall) only got
-        // ~0.7s of advection and intermittently failed to push the opening
-        // smoke curtain off-grid before the overlay finished fading.
-        // `dt` is already capped at 50 ms above, which is plenty of
-        // headroom for the semi-Lagrangian step to stay stable.
-        if let Some(ref mut fluid) = self.fluid {
-            let step_dt = dt.max(1.0 / 120.0);
-            fluid.step(&mut encoder, &self.queue, step_dt, smoke_quality);
-        }
 
         self.render_shadow_pre_pass(
             &mut encoder,
@@ -1052,45 +1111,21 @@ impl WgpuRenderer {
             &tile_3d_rects,
         );
 
-        // Pre-create background image instance buffer (must outlive render pass).
-        let bg_inst = GpuInstance {
-            rect: [
-                0.0,
-                0.0,
-                self.size.width.max(1) as f32,
-                self.size.height.max(1) as f32,
-            ],
-            color: [1.0, 1.0, 1.0, 1.0],
-        };
-        let bg_inst_buf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("bg-inst"),
-                contents: bytemuck::cast_slice(&[bg_inst]),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-        // Find the FluidSmoke marker so we can split the render pass: the
-        // smoke fragment shader samples the depth buffer, which can't alias
-        // the live depth attachment, so we end pass A right before the
-        // smoke draw, copy depth → depth_copy, then start pass B (loading
-        // color & depth) with the smoke as its first draw.
-        let split_idx = ops.iter().position(|o| matches!(o, RenderOp::FluidSmoke));
-        let split_end = split_idx.unwrap_or(ops.len());
-
-        // Pass A / post-smoke always render into `scene_color_view`
+        // Pass A renders into `scene_color_view`
         // (`Rgba16Float`). Do not key this on `is_prepass`: the journal
         // pre-pass still draws the 3D scene into that HDR buffer before
         // tonemapping to the journal target.
         let process_ctx_scene = ProcessOpCtx {
             frame,
-            bg_inst_buf: &bg_inst_buf,
+            bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
+            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
+            prompt_icon_quads: &prompt_icon_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1099,7 +1134,6 @@ impl WgpuRenderer {
             relic_glow_buffer: relic_glow_buffer.as_ref(),
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
-            smoke_quality,
             scene_hdr_attachment: true,
         };
         // Text overlay loads the final `view` (swapchain or journal), not
@@ -1108,13 +1142,15 @@ impl WgpuRenderer {
             is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float);
         let process_ctx_overlay = ProcessOpCtx {
             frame,
-            bg_inst_buf: &bg_inst_buf,
+            bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
+            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
+            prompt_icon_quads: &prompt_icon_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1123,7 +1159,6 @@ impl WgpuRenderer {
             relic_glow_buffer: relic_glow_buffer.as_ref(),
             relic_debuff_markers: &relic_debuff_markers,
             relic_debuff_buffer: relic_debuff_buffer.as_ref(),
-            smoke_quality,
             scene_hdr_attachment: overlay_hdr,
         };
 
@@ -1157,35 +1192,32 @@ impl WgpuRenderer {
             pass.draw(0..3, 0..1);
         }
 
-        // ── Pass A: clear + draw everything that lives behind the smoke ──
+        // ── Pass A: clear + draw main scene ───────────────────────────────
         {
             #[cfg(debug_assertions)]
             let split_main_for_profile = self.gpu_profiler.is_sampling()
-                && ops[..split_end]
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::Table));
+                && ops.iter().any(|o| matches!(o, RenderOp::Table));
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
+            let mut pass_a_chunks = split_render_ops_by_clear_depth(&ops);
+            if pass_a_chunks.is_empty() && !ops.is_empty() {
+                pass_a_chunks.push(ops.as_slice());
+            }
+
             macro_rules! pass_a_draw_loop {
                 ($pass:expr, $skip_table:expr, $only_table:expr) => {{
-                    for op in &ops[..split_end] {
-                        // 2D HUD text labels are drawn into the swapchain in a
-                        // separate overlay pass after the SSR snapshot, so they
-                        // don't end up in `scene_prev_texture` and get reflected by
-                        // the lacquered table. See the overlay pass below the
-                        // end-of-frame copies.
-                        //
-                        // `Plaque` ops are also held back: the score plaque now
-                        // carries an engraved decal texture (the score header
-                        // text) baked onto its +Z face, and if it were drawn here
-                        // the lacquered-table SSR would reflect that engraved
-                        // text into the table — recreating the exact ghost-text
-                        // artefact the overlay pass was originally introduced to
-                        // avoid. We snapshot `scene_prev` + `ssr_prev_depth`
-                        // immediately after this loop and *then* draw the plaques
-                        // in a sibling pass that loads the swapchain.
-                        if matches!(op, RenderOp::TextDraw(_)) {
+                    for op in &ops {
+                        // 2D HUD text labels are drawn in a later overlay pass
+                        // (Load on the tonemapped target) so they are not stored
+                        // in `scene_prev_texture` and do not appear in the
+                        // lacquered-table SSR sample. Gameplay plaques are
+                        // `Object3d` meshes (engraved decal on the mesh); they
+                        // render here in Pass A like other lit meshes.
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                        ) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1200,6 +1232,47 @@ impl WgpuRenderer {
                 }};
             }
 
+            macro_rules! pass_a_draw_chunk {
+                ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
+                    for op in $chunk.iter() {
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                        ) {
+                            continue;
+                        }
+                        let is_table = matches!(op, RenderOp::Table);
+                        if $only_table && !is_table {
+                            continue;
+                        }
+                        if $skip_table && is_table {
+                            continue;
+                        }
+                        self.process_op(&mut $pass, op, &process_ctx_scene);
+                    }
+                }};
+            }
+
+            macro_rules! pass_a_debug_axes {
+                ($pass:expr) => {{
+                    if frame.debug_axes {
+                        $pass.set_pipeline(&self.lit_mesh_pipeline);
+                        $pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
+                        $pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
+                        $pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+                        $pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
+                        $pass.set_index_buffer(
+                            self.relic_box_mesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
+                        for inst in self.debug_axes_instances.iter() {
+                            $pass.set_bind_group(0, &inst.bind_group, &[]);
+                            $pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                        }
+                    }
+                }};
+            }
+
             if split_main_for_profile {
                 let ts_table = self
                     .gpu_profiler
@@ -1210,7 +1283,7 @@ impl WgpuRenderer {
                         view: &self.scene_color_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            load: wgpu::LoadOp::Clear(scene_viewport_clear()),
                             store: wgpu::StoreOp::Store,
                         },
                         depth_slice: None,
@@ -1230,111 +1303,105 @@ impl WgpuRenderer {
                 pass_a_draw_loop!(pass, false, true);
                 drop(pass);
 
-                let ts_scene = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainScene);
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main-pass-scene"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_color_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    occlusion_query_set: None,
-                    timestamp_writes: ts_scene,
-                    multiview_mask: None,
-                });
-                pass_a_draw_loop!(pass, true, false);
-                if frame.debug_axes {
-                    pass.set_pipeline(&self.lit_mesh_pipeline);
-                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
-                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        self.relic_box_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for inst in self.debug_axes_instances.iter() {
-                        pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                if !pass_a_chunks.is_empty() {
+                    let n_scene_chunks = pass_a_chunks.len();
+                    for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        let depth_load = if ci == 0 {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(1.0)
+                        };
+                        let is_last_scene_chunk = ci + 1 == n_scene_chunks;
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("main-pass-scene"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &self.scene_color_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            })],
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: depth_load,
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            }),
+                            occlusion_query_set: None,
+                            timestamp_writes: if ci == 0 {
+                                self.gpu_profiler
+                                    .pass_writes(crate::render::gpu_profiler::PassSlot::MainScene)
+                            } else {
+                                None
+                            },
+                            multiview_mask: None,
+                        });
+                        pass_a_draw_chunk!(pass, chunk, true, false);
+                        if is_last_scene_chunk {
+                            pass_a_debug_axes!(pass);
+                        }
                     }
                 }
             } else {
-                let main_ts = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::Main);
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.scene_color_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    occlusion_query_set: None,
-                    timestamp_writes: main_ts,
-                    multiview_mask: None,
-                });
-                pass_a_draw_loop!(pass, false, false);
-                if frame.debug_axes {
-                    pass.set_pipeline(&self.lit_mesh_pipeline);
-                    pass.set_bind_group(3, &self.lit_mesh_ssr_bind_group, &[]);
-                    pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                    pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.relic_box_mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(
-                        self.relic_box_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for inst in self.debug_axes_instances.iter() {
-                        pass.set_bind_group(0, &inst.bind_group, &[]);
-                        pass.draw_indexed(0..self.relic_box_mesh.index_count, 0, 0..1);
+                if !pass_a_chunks.is_empty() {
+                    let n_chunks = pass_a_chunks.len();
+                    for (ci, chunk) in pass_a_chunks.iter().enumerate() {
+                        let color_load = if ci == 0 {
+                            wgpu::LoadOp::Clear(scene_viewport_clear())
+                        } else {
+                            wgpu::LoadOp::Load
+                        };
+                        let depth_load = wgpu::LoadOp::Clear(1.0);
+                        let is_last_chunk = ci + 1 == n_chunks;
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("main-pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &self.scene_color_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: color_load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            })],
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &self.depth_view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: depth_load,
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            }),
+                            occlusion_query_set: None,
+                            timestamp_writes: if ci == 0 {
+                                self.gpu_profiler
+                                    .pass_writes(crate::render::gpu_profiler::PassSlot::Main)
+                            } else {
+                                None
+                            },
+                            multiview_mask: None,
+                        });
+                        pass_a_draw_chunk!(pass, chunk, false, false);
+                        if is_last_chunk {
+                            pass_a_debug_axes!(pass);
+                        }
                     }
                 }
             }
         }
 
         // ── SSR snapshot ────────────────────────────────────────────────
-        // Capture scene colour + depth into temporal SSR inputs BEFORE the
-        // hanging plaques. Lacquered surfaces sample `scene_prev_texture` /
-        // `ssr_prev_depth_texture` next frame; only the primary swapchain
-        // pass may publish them — not `output_override` prepasses (e.g.
-        // shop journal → book texture), which would stomp history with the
-        // wrong scene.
+        // After full Pass A, copy linear HDR colour + depth into
+        // `scene_prev_texture` / `ssr_prev_depth_texture` for next frame's
+        // lacquered-table SSR. Only the primary visible pass updates history —
+        // not `output_override` prepasses (e.g. shop journal → book texture).
         //
-        // Skipped when `is_prepass`: plaques/smoke ordering below still
-        // applies only to the visible frame path.
+        // Skipped when `is_prepass`.
         if !is_prepass {
-            // Capture the swapchain colour and depth buffers BEFORE the
-            // hanging plaques are drawn. The lacquered-table SSR samples
-            // these textures next frame, so plaques (and the engraved score
-            // text decal on their +Z face) never end up in the table's
-            // reflection. The smoke pass below still gets a fresh, full
-            // (with-plaques) depth via its own `depth_copy_texture` copy.
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.scene_color_texture,
@@ -1375,174 +1442,10 @@ impl WgpuRenderer {
             );
         }
 
-        // ── Pass B: only created when there's a FluidSmoke marker. The
-        // ── live depth buffer is copied into a sibling texture so the
-        // ── smoke fragment shader can sample it without aliasing the
-        // ── still-bound depth attachment.
-        if let Some(split) = split_idx {
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.depth_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::DepthOnly,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.depth_copy_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::DepthOnly,
-                },
-                wgpu::Extent3d {
-                    width: self.size.width.max(1),
-                    height: self.size.height.max(1),
-                    depth_or_array_layers: 1,
-                },
-            );
-
-            // ── Smoke-only timing pass (debug profiling only) ────────
-            // When a GPU profile session is active, render smoke with
-            // flames disabled into the offscreen target first. The real
-            // smoke-offscreen pass below overwrites the target with the
-            // correct smoke+flames result, so this has no visual effect.
-            // Placed here (before smoke-offscreen) so multiple subsequent
-            // render passes flush the end-of-pass timestamp on Metal.
-            #[cfg(debug_assertions)]
-            if self.gpu_profiler.is_sampling()
-                && smoke_quality != crate::persistence::SmokeQuality::Off
-                && let Some(ref fluid) = self.fluid
-            {
-                fluid.set_render_mode_encoder(&mut encoder, true);
-                // Smoke-only timing: no flame AABB needed
-                // because the shader skips flames in this mode.
-                let scissor = fluid.screen_aabb_rect(view_proj, None);
-                let smoke_only_ts = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOnly);
-                fluid.render_offscreen(
-                    &mut encoder,
-                    &self.globals_bind_group,
-                    scissor,
-                    smoke_only_ts,
-                );
-                fluid.set_render_mode_encoder(&mut encoder, false);
-            }
-
-            // ── Offscreen smoke raymarch pass ──────────────────────────
-            // Run the volumetric ray-march into the (reduced-resolution)
-            // smoke target BEFORE the swap-chain pass-B begins. The depth
-            // copy above means the shader can sample scene depth without
-            // aliasing the live depth attachment, and rendering offscreen
-            // means the next pass-B can simply sample + bilinear-upsample
-            // the result instead of paying for full-screen ray-marching.
-            //
-            // Skipped entirely when smoke is disabled — the post-smoke
-            // pass below still runs so any UI/text ops queued after the
-            // FluidSmoke marker draw correctly.
-            if smoke_quality != crate::persistence::SmokeQuality::Off
-                && let Some(ref fluid) = self.fluid
-            {
-                // Flame AABB: the raymarch runs its per-candle SDF
-                // sub-march inside the same pass, so we have to
-                // include the flame bounding spheres in the scissor
-                // or flames disappear when the smoke field is empty.
-                let flame_aabb = compute_flame_world_aabb(
-                    &frame.point_lights[..frame
-                        .candle_light_count
-                        .min(frame.point_lights.len() as u32)
-                        as usize],
-                    frame.flame_height_world,
-                    self.size.width.max(1) as f32,
-                    self.size.height.max(1) as f32,
-                );
-                let scissor = fluid.screen_aabb_rect(view_proj, flame_aabb);
-                let smoke_ts = self
-                    .gpu_profiler
-                    .pass_writes(crate::render::gpu_profiler::PassSlot::SmokeOffscreen);
-                // `None` means both smoke and flames contribute
-                // nothing — clear the offscreen target and skip the
-                // raymarch. The composite still runs (sampling a
-                // transparent texture) so queued ops after the
-                // FluidSmoke marker draw correctly.
-                if scissor.is_some() {
-                    fluid.render_offscreen(
-                        &mut encoder,
-                        &self.globals_bind_group,
-                        scissor,
-                        smoke_ts,
-                    );
-                } else {
-                    fluid.clear_offscreen(&mut encoder, smoke_ts);
-                }
-            }
-
-            let post_smoke_ts = self
-                .gpu_profiler
-                .pass_writes(crate::render::gpu_profiler::PassSlot::PostSmoke);
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("post-smoke-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.scene_color_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                occlusion_query_set: None,
-                timestamp_writes: post_smoke_ts,
-                multiview_mask: None,
-            });
-            for op in &ops[split..] {
-                if matches!(op, RenderOp::TextDraw(_)) {
-                    continue;
-                }
-                self.process_op(&mut pass, op, &process_ctx_scene);
-            }
-        }
-
         let bloom_w = (self.size.width.max(1) / 2).max(1);
         let bloom_h = (self.size.height.max(1) / 2).max(1);
         let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
         let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
-        let make_bloom_bg =
-            |label: &'static str, params: BloomParams, texture_view: &wgpu::TextureView| {
-                let buffer = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(label),
-                        contents: bytemuck::bytes_of(&params),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(label),
-                    layout: &self.bloom_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(texture_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                        },
-                    ],
-                });
-                (buffer, bind_group)
-            };
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,
@@ -1585,44 +1488,26 @@ impl WgpuRenderer {
             ],
             data1: [fisheye_strength, vignette_strength, 0.0, 0.0],
         };
-        let (_extract_params_buf, bloom_scene_bg) = make_bloom_bg(
-            "bloom-scene-pass-bg",
-            extract_params,
-            &self.scene_color_view,
+        self.queue.write_buffer(
+            &self.bloom_extract_params_buffer,
+            0,
+            bytemuck::bytes_of(&extract_params),
         );
-        let (_blur_h_params_buf, bloom_ping_bg) =
-            make_bloom_bg("bloom-ping-pass-bg", blur_h_params, &self.bloom_ping_view);
-        let (_blur_v_params_buf, bloom_pong_bg) =
-            make_bloom_bg("bloom-pong-pass-bg", blur_v_params, &self.bloom_pong_view);
-        let composite_params_buf =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("bloom-composite-params"),
-                    contents: bytemuck::bytes_of(&composite_params),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let bloom_composite_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bloom-composite-pass-bg"),
-            layout: &self.bloom_composite_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: composite_params_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.bloom_ping_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                },
-            ],
-        });
+        self.queue.write_buffer(
+            &self.bloom_blur_h_params_buffer,
+            0,
+            bytemuck::bytes_of(&blur_h_params),
+        );
+        self.queue.write_buffer(
+            &self.bloom_blur_v_params_buffer,
+            0,
+            bytemuck::bytes_of(&blur_v_params),
+        );
+        self.queue.write_buffer(
+            &self.bloom_composite_params_buffer,
+            0,
+            bytemuck::bytes_of(&composite_params),
+        );
 
         if bloom_active {
             {
@@ -1643,7 +1528,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_extract_pipeline);
-                pass.set_bind_group(0, &bloom_scene_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_scene_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             {
@@ -1664,7 +1549,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
-                pass.set_bind_group(0, &bloom_ping_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_ping_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             {
@@ -1685,7 +1570,7 @@ impl WgpuRenderer {
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
-                pass.set_bind_group(0, &bloom_pong_bg, &[]);
+                pass.set_bind_group(0, &self.bloom_pong_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
         }
@@ -1708,45 +1593,23 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
-            pass.set_bind_group(0, &bloom_composite_bg, &[]);
+            pass.set_bind_group(0, &self.bloom_composite_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
-        let tonemap_mode =
-            if is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float) {
-                1.0f32
-            } else {
-                0.0f32
-            };
-        let tonemap_params_buf =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tonemap-params"),
-                    contents: bytemuck::bytes_of(&TonemapParams {
-                        exposure: self.tonemap_exposure,
-                        mode: tonemap_mode,
-                        _pad: [0.0; 2],
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let tonemap_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tonemap-pass-bg"),
-            layout: &self.tonemap_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: tonemap_params_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                },
-            ],
-        });
+        // Journal prepass writes bloom composite into `journal_scene_texture` for the
+        // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
+        // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
+        let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
+        self.queue.write_buffer(
+            &self.tonemap_params_buffer,
+            0,
+            bytemuck::bytes_of(&TonemapParams {
+                exposure: self.tonemap_exposure,
+                mode: tonemap_mode,
+                _pad: [0.0; 2],
+            }),
+        );
         let tonemap_pipe = if is_prepass {
             &self.tonemap_rgba16f_pipeline
         } else {
@@ -1770,27 +1633,19 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(tonemap_pipe);
-            pass.set_bind_group(0, &tonemap_bg, &[]);
+            pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 
-        // (The SSR colour + depth snapshots that used to live here have
-        // moved up to between pass A and the new plaque pass — see the
-        // "SSR snapshot" block above. The smoke pass already maintains
-        // its own `depth_copy_texture` copy, so nothing else needs the
-        // end-of-frame depth dump.)
-
         // ── Overlay pass: 2D HUD text labels ────────────────────────────
-        // Drawn AFTER the end-of-frame swapchain → scene_prev snapshot so
-        // the text doesn't end up in next frame's SSR reflection sample.
-        // The lacquered table reflects whatever's in scene_prev, and a
-        // text label rasterised onto the plaque's screen rect would
-        // otherwise appear as a phantom duplicate in the table reflection
-        // immediately below the plaque (text doesn't write depth, so the
-        // SSR ray hits the plaque's depth and samples the colour buffer
-        // there — which has the text on top). Loading the swapchain (no
-        // clear) lets us composite text on top of the just-finished scene.
-        if ops.iter().any(|o| matches!(o, RenderOp::TextDraw(_))) {
+        // After tonemap, Load the final target so labels are not in the linear
+        // HDR `scene_prev_texture` used for lacquered-table SSR.
+        if ops.iter().any(|o| {
+            matches!(
+                o,
+                RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+            )
+        }) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1815,20 +1670,13 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             for op in &ops {
-                if matches!(op, RenderOp::TextDraw(_)) {
+                if matches!(
+                    op,
+                    RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
+                ) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
                 }
             }
-        }
-
-        // Flip the smoke TAA ping-pong for next frame — the slot we
-        // just rendered into (and the composite just read) becomes
-        // next frame's history input. Skipped when smoke is Off so we
-        // don't mark undefined texture contents as valid history.
-        if smoke_quality != crate::persistence::SmokeQuality::Off
-            && let Some(fluid) = self.fluid.as_mut()
-        {
-            fluid.advance_taa_frame();
         }
 
         // GPU profiler: resolve query set + stage readback before submit,
@@ -1850,7 +1698,7 @@ impl WgpuRenderer {
         };
         let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
             (Some(path), Some(ft)) => {
-                log::info!("screenshot: encoding capture for {}", path.display());
+                log::debug!("screenshot: encoding capture for {}", path.display());
                 Some(self.encode_screenshot_copy(&mut encoder, ft, path))
             }
             _ => None,
@@ -1860,7 +1708,7 @@ impl WgpuRenderer {
 
         if let (Some(path), Some(staging)) = (screenshot_path, screenshot_staging) {
             match self.finalize_screenshot(staging, &path) {
-                Ok(()) => log::info!("screenshot: wrote {}", path.display()),
+                Ok(()) => log::info!("screenshot saved → {}", path.display()),
                 Err(e) => log::error!("screenshot finalize failed: {e:?}"),
             }
         }
@@ -1870,5 +1718,14 @@ impl WgpuRenderer {
         }
         self.gpu_profiler.after_submit(&self.device);
         Ok(())
+    }
+
+    /// Drop `prev_tile_world` entries for tile uids not present this frame.
+    fn garbage_collect_prev_tile_world(&mut self) {
+        if self.prev_tile_world.is_empty() {
+            return;
+        }
+        let live: std::collections::HashSet<u32> = self.tile_uids.iter().copied().collect();
+        self.prev_tile_world.retain(|k, _| live.contains(k));
     }
 }

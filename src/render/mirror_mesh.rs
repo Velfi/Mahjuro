@@ -75,21 +75,33 @@ pub fn build_mirror_mesh() -> MeshCpu {
             position: [x0, TOP_Y, z0],
             normal: n0,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, TOP_Y, z1],
             normal: n1,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, BOT_Y, z1],
             normal: n1,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x0, BOT_Y, z0],
             normal: n0,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -116,21 +128,33 @@ pub fn build_mirror_mesh() -> MeshCpu {
             position: [ox0, TOP_Y, oz0],
             normal: up,
             uv: [ox0 + 0.5, oz0 + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ox1, TOP_Y, oz1],
             normal: up,
             uv: [ox1 + 0.5, oz1 + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix1, TOP_Y, iz1],
             normal: up,
             uv: [ix1 + 0.5, iz1 + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix0, TOP_Y, iz0],
             normal: up,
             uv: [ix0 + 0.5, iz0 + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -158,21 +182,33 @@ pub fn build_mirror_mesh() -> MeshCpu {
             position: [ix0, TOP_Y, iz0],
             normal: n0,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix1, TOP_Y, iz1],
             normal: n1,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix1, FACE_Y, iz1],
             normal: n1,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [ix0, FACE_Y, iz0],
             normal: n0,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -183,6 +219,9 @@ pub fn build_mirror_mesh() -> MeshCpu {
         position: [0.0, FACE_Y, 0.0],
         normal: up,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let face_ring_start = vertices.len() as u32;
     for &(x, z) in inner.iter() {
@@ -190,6 +229,9 @@ pub fn build_mirror_mesh() -> MeshCpu {
             position: [x, FACE_Y, z],
             normal: up,
             uv: [x + 0.5, z + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {
@@ -205,6 +247,9 @@ pub fn build_mirror_mesh() -> MeshCpu {
         position: [0.0, BOT_Y, 0.0],
         normal: down,
         uv: [0.5, 0.5],
+        tangent: Vertex3dTex::DEFAULT_TANGENT,
+        uv_emr: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
     });
     let under_ring_start = vertices.len() as u32;
     for &(x, z) in outer.iter() {
@@ -212,6 +257,9 @@ pub fn build_mirror_mesh() -> MeshCpu {
             position: [x, BOT_Y, z],
             normal: down,
             uv: [x + 0.5, z + 0.5],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for i in 0..SIDES {

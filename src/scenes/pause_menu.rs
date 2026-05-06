@@ -13,7 +13,7 @@ use crate::ui::widget_tree::{
 
 use super::options::OptionsScene;
 use super::shop::ShopScene;
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,7 +98,7 @@ impl PauseMenu {
 
     /// True when the embedded options overlay is currently visible. Callers
     /// (e.g. main loop) use this to know when to sync `OptionsScene`-driven
-    /// settings (audio, smoke, tile preset) back to the live app state, the
+    /// settings (audio, tile preset, etc.) back to the live app state, the
     /// same way they do for the standalone options scene.
     pub fn options_overlay(&self) -> Option<&OptionsScene> {
         self.options_overlay.as_ref()
@@ -329,7 +329,9 @@ impl PauseMenu {
             }
             Some(PauseAction::MainMenu) => {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                PauseUpdate::Transition(Box::new(Some(Scene::StartScreen(StartScreenScene::new()))))
+                PauseUpdate::Transition(Box::new(Some(Scene::MainMenuExterior(
+                    MainMenuExteriorScene::new(),
+                ))))
             }
             Some(PauseAction::Exit) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -346,10 +348,7 @@ impl PauseMenu {
     ) -> PauseUpdate {
         let settings = crate::persistence::load_settings();
         GameEngine::reset_to_demo(run, progress, &settings);
-        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(
-            GameEngine::current_run_number(run),
-            run,
-        )))))
+        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(run)))))
     }
 
     /// Append pause-overlay draw elements to the given vectors.
@@ -370,10 +369,10 @@ impl PauseMenu {
             return;
         }
 
-        // Dim background — Midnight Gold theme: cool deep indigo, not pure black.
+        // Dim background — theme WALNUT_INK (deepest walnut base), not pure black.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: color::alpha(color::OBSIDIAN, 0.78),
+            color: color::alpha(color::WALNUT_INK, 0.78),
         });
 
         // If the options sub-overlay is open, draw it instead of the pause

@@ -13,6 +13,7 @@ use super::focus::{
 };
 use crate::core::scoring::StepKind;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
+use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
 use crate::scenes::journal_transition::{
     BOOK_SPINE_THICKNESS_MM, JournalDirection, JournalTransition, YAKU_JOURNAL_BOOK_PICK_ID,
@@ -21,6 +22,42 @@ use crate::scenes::journal_transition::{
 use crate::scenes::{OverlayRequest, Scene, SceneTransition, UpdateCtx, YakuJournalScene};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{UiAction, apply_ui_actions};
+use crate::ui::scene_layout::GameplayPositions;
+
+/// Screen-space center of the `idx`-th active relic in the horizontal tray.
+/// Must stay in sync with [`build_relic_tray_and_wind`] (stride / clamp math).
+pub(super) fn relic_tray_screen_center_xy(
+    positions: &GameplayPositions,
+    layout: &crate::ui::layout::LayoutResult,
+    run: &crate::game::run::RunState,
+    idx: usize,
+) -> Option<(f32, f32)> {
+    let active_ids = GameEngine::active_relics(run);
+    if idx >= active_ids.len() {
+        return None;
+    }
+    let gp = positions;
+    let w = layout.window_w;
+    let h = layout.window_h;
+    let tray_cx = gp.relic_col.nx * w;
+    let tray_cy = gp.relic_col.ny * h;
+    let tray_left = gp.relic_col_top_ny * w;
+    let tray_right = gp.relic_col_bottom_ny * w;
+    let face_base = layout.mm(gp.relic_cell_height_mm);
+    let n = active_ids.len() as f32;
+    let avail_w = (tray_right - tray_left).max(face_base);
+    let stride_ideal = face_base * 1.1;
+    let stride = if n * stride_ideal > avail_w {
+        (avail_w / n).max(face_base * 0.5)
+    } else {
+        stride_ideal
+    };
+    let total_w = stride * n;
+    let start_x = (tray_cx - total_w * 0.5 + stride * 0.5)
+        .clamp(tray_left + stride * 0.5, tray_right - stride * 0.5);
+    let x = start_x + idx as f32 * stride;
+    Some((x, tray_cy))
+}
 
 /// Advances journal cover-open + zoom; pushes [`YakuJournalScene`] when the
 /// forward animation completes. Returns `true` when the overlay was pushed
@@ -109,6 +146,11 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Gold
             | FocusTarget::YakuTablet(_)
             | FocusTarget::Dora => true,
+            FocusTarget::DiscardUndo => {
+                crate::persistence::load_settings().discard_undo_enabled
+                    && scene.discard_undo.is_some()
+                    && scene.pending_refill.is_none()
+            }
         };
         if !still_valid {
             scene.focus = None;
@@ -121,6 +163,14 @@ pub(super) fn process_focus_and_actions(
         let gameplay = GameEngine::read(ctx.run);
         let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
         if !has_structure {
+            scene.focus = None;
+        }
+    }
+    if matches!(scene.focus, Some(FocusTarget::DiscardUndo)) {
+        let ok = crate::persistence::load_settings().discard_undo_enabled
+            && scene.discard_undo.is_some()
+            && scene.pending_refill.is_none();
+        if !ok {
             scene.focus = None;
         }
     }
@@ -177,6 +227,15 @@ pub(super) fn process_focus_and_actions(
             _ => None,
         })
         .collect();
+    // `[` / `]` keyboard and LB / RB shoulder: cycle inventory + optional
+    // discard-undo anchor (Accessibility) without relying on spatial nav.
+    let undo_hud_eligible = crate::persistence::load_settings().discard_undo_enabled
+        && scene.discard_undo.is_some()
+        && scene.pending_refill.is_none();
+    let mut hud_cycle: Vec<FocusTarget> = consumable_targets.clone();
+    if undo_hud_eligible {
+        hud_cycle.push(FocusTarget::DiscardUndo);
+    }
 
     // Process actions. Directional input → spatial picker. Confirm →
     // route by self.focus variant. Cancel → clear focus AND fall
@@ -223,6 +282,20 @@ pub(super) fn process_focus_and_actions(
                             .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
                             .map(|(t, _)| *t)
                     }
+                    // DOWN from Discard (river) → Undo when the accessibility control is shown
+                    (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Down) => {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| matches!(t, FocusTarget::DiscardUndo))
+                            .map(|(t, _)| *t)
+                    }
+                    // UP from Undo → back to Discard
+                    (Some(FocusTarget::DiscardUndo), FocusDir::Up) => focus_rects
+                        .iter()
+                        .find(|(t, _)| {
+                            matches!(t, FocusTarget::Button(GameplayButton::Discard))
+                        })
+                        .map(|(t, _)| *t),
                     _ => None,
                 };
                 let hand_wrap = wrap_hand_tile_focus(scene.focus, dir, &focus_rects);
@@ -246,30 +319,30 @@ pub(super) fn process_focus_and_actions(
         }
 
         match a {
-            // Legacy "shoulder buttons cycle consumables" affordance.
-            // Steps through `Consumable` targets in order; wraps back
-            // to `None` after the last so the player can exit the
-            // strip without a separate keybind.
-            UiAction::NavigateHudNext if !consumable_targets.is_empty() => {
-                let cur_pos = consumable_targets
-                    .iter()
-                    .position(|t| Some(*t) == scene.focus);
-                scene.focus = match cur_pos {
-                    None => Some(consumable_targets[0]),
-                    Some(i) if i + 1 >= consumable_targets.len() => None,
-                    Some(i) => Some(consumable_targets[i + 1]),
-                };
-                continue;
-            }
-            UiAction::NavigateHudPrev => {
-                if !consumable_targets.is_empty() {
-                    let cur_pos = consumable_targets
+            // `[` / `]` (keyboard) and LB / RB (gamepad): cycle consumable
+            // slots, then the optional discard-undo control (Accessibility).
+            UiAction::NavigateHudNext => {
+                if !hud_cycle.is_empty() {
+                    let cur_pos = hud_cycle
                         .iter()
                         .position(|t| Some(*t) == scene.focus);
                     scene.focus = match cur_pos {
-                        None => Some(*consumable_targets.last().unwrap()),
+                        None => Some(hud_cycle[0]),
+                        Some(i) if i + 1 >= hud_cycle.len() => None,
+                        Some(i) => Some(hud_cycle[i + 1]),
+                    };
+                }
+                continue;
+            }
+            UiAction::NavigateHudPrev => {
+                if !hud_cycle.is_empty() {
+                    let cur_pos = hud_cycle
+                        .iter()
+                        .position(|t| Some(*t) == scene.focus);
+                    scene.focus = match cur_pos {
+                        None => Some(*hud_cycle.last().unwrap()),
                         Some(0) => None,
-                        Some(i) => Some(consumable_targets[i - 1]),
+                        Some(i) => Some(hud_cycle[i - 1]),
                     };
                 }
                 continue;
@@ -313,6 +386,10 @@ pub(super) fn process_focus_and_actions(
                             });
                         }
                         return Some(None);
+                    }
+                    Some(FocusTarget::DiscardUndo) => {
+                        actions_for_scene.push(UiAction::UndoDiscard);
+                        continue;
                     }
                     Some(FocusTarget::Button(b)) => {
                         if let Some(a) = b.ui_action() {
@@ -364,6 +441,11 @@ pub(super) fn process_focus_and_actions(
                                 }
                             }
                             _ => {}
+                        }
+                        if outcome.rejection.is_none()
+                            && matches!(outcome.data, CommandData::UseConsumable { .. })
+                        {
+                            scene.clear_discard_undo();
                         }
                         let remaining = GameEngine::read_interaction(ctx.run).consumable_count;
                         scene.focus = focus_after_consumable_use(i, remaining, &focus_rects);
@@ -422,6 +504,11 @@ pub(super) fn process_focus_and_actions(
                 }
                 continue;
             }
+            UiAction::ShopItemInspectToggle
+            | UiAction::ShopSellHoldPress
+            | UiAction::ShopSellHoldRelease => {
+                continue;
+            }
             _ => {}
         }
         actions_for_scene.push(a);
@@ -438,6 +525,15 @@ pub(super) fn process_focus_and_actions(
     // mouse and keyboard. Yaku tablets are hover-only and don't
     // contribute clicks.
     for &cid in ctx.button_clicks {
+        if cid == super::UNDO_DISCARD_CLICK_ID {
+            if crate::persistence::load_settings().discard_undo_enabled
+                && scene.discard_undo.is_some()
+                && scene.pending_refill.is_none()
+            {
+                actions_for_scene.push(UiAction::UndoDiscard);
+            }
+            continue;
+        }
         if cid != super::GAMEPLAY_3D_HIT_ID {
             continue;
         }
@@ -543,6 +639,9 @@ pub(super) fn process_focus_and_actions(
                     CommandData::PlaySelection { step } => step,
                     _ => 0,
                 };
+                if step > 0 {
+                    scene.clear_discard_undo();
+                }
                 let gained = outcome.after.round_score.saturating_sub(round_before);
                 log::info!(
                     "[score] Commit: step={} gained={} structure_bank={} breakdown_steps={} base_steps={}",
@@ -616,6 +715,9 @@ pub(super) fn process_focus_and_actions(
                         CommandData::TriggerStructure { earned } => earned,
                         _ => 0,
                     };
+                    if earned > 0 {
+                        scene.clear_discard_undo();
+                    }
                     let gained = outcome.after.round_score.saturating_sub(score_before);
                     log::info!(
                         "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
@@ -642,17 +744,31 @@ pub(super) fn process_focus_and_actions(
                 }
             }
             UiAction::SortBySuit => {
+                scene.clear_discard_undo();
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::SortHandBySuit);
                 ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::SortByRank => {
+                scene.clear_discard_undo();
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::SortHandByRank);
                 ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::CommitDiscard => {
                 let gameplay = GameEngine::read(ctx.run);
+                let settings_on = crate::persistence::load_settings().discard_undo_enabled;
+                if !settings_on {
+                    scene.discard_undo = None;
+                }
+                let snap_before = if settings_on
+                    && gameplay.selected_count > 0
+                    && gameplay.discards_remaining > 0
+                {
+                    Some(DiscardUndoSnapshot::capture(ctx.run))
+                } else {
+                    None
+                };
                 // Capture selected indices BEFORE discard so we can animate them departing.
                 if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
                     let selected_indices: Vec<usize> = ctx
@@ -676,10 +792,24 @@ pub(super) fn process_focus_and_actions(
                     _ => 0,
                 };
                 if discarded > 0 {
+                    if let Some(s) = snap_before {
+                        scene.discard_undo = Some(s);
+                    }
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                     let depart_lifetime =
                         std::time::Duration::from_millis(ctx.cascade_tuning.depart_lifetime_ms);
                     scene.pending_refill = Some(now + depart_lifetime);
+                }
+            }
+            UiAction::UndoDiscard => {
+                if crate::persistence::load_settings().discard_undo_enabled
+                    && scene.pending_refill.is_none()
+                    && let Some(snap) = scene.discard_undo.take()
+                {
+                    ctx.run.apply_discard_undo(snap);
+                    ctx.bus
+                        .push(crate::game::event_bus::GameEvent::UiSound(crate::audio::SfxId::TilePlace));
+                    ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }
             }
             _ => {}
@@ -689,13 +819,14 @@ pub(super) fn process_focus_and_actions(
     let non_handled: Vec<_> = actions_for_scene
         .iter()
         .filter(|a| {
-            !matches!(
+                !matches!(
                 a,
                 UiAction::ScoreHand
                     | UiAction::TriggerStructure
                     | UiAction::SortBySuit
                     | UiAction::SortByRank
                     | UiAction::CommitDiscard
+                    | UiAction::UndoDiscard
             )
         })
         .copied()
@@ -734,7 +865,7 @@ pub(super) fn build_relic_tray_and_wind(
     use super::RELIC_GLOW_LIFETIME;
     use crate::core::relic::relic_visual;
     use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
-    use crate::render::table_transform::rot_rx_ry_rz_deg;
+    use crate::render::table_transform::euler_xyz_rad_from_deg;
 
     // ── Relic tray (horizontal row across the top of the screen) ────
     // Each active relic renders as a face-on enamel medallion using the
@@ -839,7 +970,7 @@ pub(super) fn build_relic_tray_and_wind(
             relic_objects.push(Object3d {
                 pos: [px, tray_cy, face * 0.45],
                 extents: [face, thick, face],
-                rotation: rot_rx_ry_rz_deg(face_pitch_deg, wiggle_deg, 0.0),
+                rotation: euler_xyz_rad_from_deg(face_pitch_deg, wiggle_deg, 0.0),
                 color,
                 kind: Object3dKind::Relic {
                     relic_id: rid,
@@ -1233,7 +1364,7 @@ pub(super) fn build_consumable_dish(
                         ribbon_dish_placements.push(Object3d {
                             pos: [zx + slot_w * 0.5, zy, pendant_y],
                             extents: [ribbon_w, slot_h * 0.85, ribbon_w * 0.15],
-                            rotation: crate::render::table_transform::rot_rz_ry_rx_deg(
+                            rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
                                 -90.0, 0.0, 0.0,
                             ),
                             color: [1.0, 1.0, 1.0, 1.0],
@@ -1251,7 +1382,7 @@ pub(super) fn build_consumable_dish(
                                 zy + slot_h * 0.5,
                                 pendant_y + talisman_half_height,
                             ],
-                            crate::render::table_transform::rot_rz_ry_rx_deg(0.0, 0.0, 90.0),
+                            crate::render::table_transform::rot_fixed_axes_deg(0.0, 0.0, 90.0),
                             &scene.positions.consumable_dish_talisman,
                             "gameplay.consumable_dish.talisman",
                             layout,
@@ -1259,7 +1390,7 @@ pub(super) fn build_consumable_dish(
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
                             extents: [slot_h * 0.85, slot_h * 0.85 * 1.4, slot_h * 0.85 * 0.25],
-                            rotation: anchor.rotation,
+                            rotation: anchor.object3d_rotation(),
                             color: pendant_color,
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,
@@ -1309,7 +1440,7 @@ pub(super) fn build_action_row_and_journal(
     _journal_btn_w: f32,
     action_world_z_py: f32,
     action_hud_table_lift: f32,
-    cam_rot: glam::Mat4,
+    cam_euler: [f32; 3],
     has_structure: bool,
     play_enabled: bool,
     discard_enabled: bool,
@@ -1318,6 +1449,7 @@ pub(super) fn build_action_row_and_journal(
 ) -> ActionRowOutputs {
     use super::focus::ALL_BUTTONS;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
+    use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
     use crate::render::world_space::LayoutAnchorPx;
     // Phase 4: action row is now physical objects.
     //   - Sort by Suit / Sort by Rank → carved wood tablets
@@ -1431,7 +1563,7 @@ pub(super) fn build_action_row_and_journal(
                     extents: [bw, tablet_thickness, bh],
                     // Placement rotation applied centrally via
                     // `committed_arrange_rotations`.
-                    rotation: cam_rot,
+                    rotation: cam_euler,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::WoodTablet {
                         label: std::borrow::Cow::Borrowed(label),
@@ -1482,7 +1614,7 @@ pub(super) fn build_action_row_and_journal(
                 discard_bowl_placement = Some(Object3d {
                     pos,
                     extents: [river_len, diam, river_width],
-                    rotation: glam::Mat4::from_rotation_x(90.0_f32.to_radians()),
+                    rotation: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::Bowl,
                     hover_target: target,
@@ -1516,7 +1648,7 @@ pub(super) fn build_action_row_and_journal(
                 bronze_mirror_placement = Some(Object3d {
                     pos,
                     extents: [diam, diam, diam],
-                    rotation: glam::Mat4::IDENTITY,
+                    rotation: [0.0, 0.0, 0.0],
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::Mirror {
                         rotation_x_deg: 90.0,
@@ -1544,6 +1676,7 @@ pub(super) fn build_action_row_and_journal(
                 let wiggle = glam::Mat4::from_rotation_z(wiggle_deg.to_radians());
                 let tp = &scene.positions.tablet_cash_in;
                 let anchor = action_anchor.to_draw_cmd_triple();
+                let cam_m = rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]);
                 wood_tablet_placements.push(Object3d {
                     pos: [
                         anchor[0] + tp.nx * layout.window_w,
@@ -1553,7 +1686,7 @@ pub(super) fn build_action_row_and_journal(
                     extents: [bw, tablet_thickness, bh],
                     // Placement rotation applied centrally via
                     // `committed_arrange_rotations`.
-                    rotation: wiggle * cam_rot,
+                    rotation: mat4_to_euler_xyz_rad(wiggle * cam_m),
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::WoodTablet {
                         label: std::borrow::Cow::Borrowed("Cash in"),
@@ -1610,7 +1743,7 @@ pub(super) fn build_action_row_and_journal(
             layout.mm(BOOK_SPINE_THICKNESS_MM) * journal_zoom,
             face_h,
         ],
-        rotation: cam_rot,
+        rotation: cam_euler,
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Book {
             spine_label: std::borrow::Cow::Borrowed("Journal"),
@@ -1646,7 +1779,7 @@ pub(super) struct YakuPanelOutputs {
     pub(super) yaku_tablet_placements: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) structure_showcase: Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     pub(super) structure_pile_tokens: Vec<crate::render::draw_cmd::Object3d>,
-    pub(super) cam_rot: glam::Mat4,
+    pub(super) cam_euler: [f32; 3],
 }
 
 /// Build the yaku progress panel (previews, structure showcase tiles,
@@ -1679,7 +1812,7 @@ pub(super) fn build_yaku_panel_and_tablets(
     use crate::core::yaku::yaku_preview;
     use crate::render::draw_cmd::{
         CameraParams, CascadeTokenKind, Object3d, Object3dKind, ShowcaseTilePlacement,
-        camera_facing_rotation,
+        camera_facing_euler_xyz_rad,
     };
 
     // ── Yaku progress panel (above the bottom button bar) ────────────
@@ -1761,6 +1894,12 @@ pub(super) fn build_yaku_panel_and_tablets(
         })
     });
     if let Some(showcase) = showcase_data {
+        // Same pose as the hand strip: upright with face toward the camera.
+        const STRUCTURE_TILE_RX: f32 =
+            std::f32::consts::FRAC_PI_2 - 22.0_f32 * std::f32::consts::PI / 180.0;
+        const STRUCTURE_TILE_RZ: f32 = std::f32::consts::PI;
+        let structure_base_lift_mm = 15.0;
+
         let pad = (8.0 * layout_scale).max(6.0);
         // Reserve a gutter on the right for the structure cash-in
         // preview stacks only while the live structure is still present.
@@ -1820,8 +1959,8 @@ pub(super) fn build_yaku_panel_and_tablets(
                 lift += 6.0 * pulse;
                 structure_showcase.push(ShowcaseTilePlacement {
                     tile,
-                    center_pos: [px, center_py, 3.0 + lift],
-                    rotation: [0.0, 0.0, std::f32::consts::PI],
+                    center_pos: [px, center_py, layout.mm(structure_base_lift_mm + lift)],
+                    rotation: [STRUCTURE_TILE_RX, 0.0, STRUCTURE_TILE_RZ],
                     scale,
                     size_px: tile_size,
                     brightness,
@@ -1918,14 +2057,11 @@ pub(super) fn build_yaku_panel_and_tablets(
     // text labels stay as a screen-space overlay until the engraved
     // decal pass lands; hover tracking still uses the original screen
     // rect (the cards live in the same pixel region as before).
-    let cam_rot = {
+    let cam_euler = {
         let cam = CameraParams::default_table_camera(layout.window_h);
-        camera_facing_rotation(cam.eye, cam.target)
+        camera_facing_euler_xyz_rad(cam.eye, cam.target)
     };
-    // Yaku-tablet placement rotation (rx/ry/rz_deg) is applied centrally
-    // by the renderer via `committed_arrange_rotations`; only the
-    // camera-facing orientation is baked into the base matrix here.
-    let yaku_tablet_rot = cam_rot;
+    let yaku_tablet_rot = cam_euler;
     let yaku_tablet_px_dx = scene.positions.yaku_tablet.nx * layout.window_w;
     let yaku_tablet_px_dy = scene.positions.yaku_tablet.ny * layout.window_h;
     let yaku_tablet_lift_dz = layout.mm(scene.positions.yaku_tablet.lift_mm);
@@ -2023,6 +2159,6 @@ pub(super) fn build_yaku_panel_and_tablets(
         yaku_tablet_placements,
         structure_showcase,
         structure_pile_tokens,
-        cam_rot,
+        cam_euler,
     }
 }

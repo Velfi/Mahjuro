@@ -1,10 +1,6 @@
-//! Shared consumable inventory: holds both Zodiacs and Talismans in one
-//! capped slot list.
-//!
-//! Earlier patches gave Zodiacs their own [`crate::core::zodiac::ZodiacInventory`].
-//! Talismans share that slot space rather than getting a parallel inventory,
-//! so the player chooses how to spend a finite consumable budget each round.
-//! Capacity is set by the game mode (default 2, expandable via relics).
+//! Shared consumable inventory: zodiac cards and talismans in one capped slot
+//! list. The player trades slots between the two types each run. Capacity is
+//! set by the game mode (default 2, expandable via relics).
 
 use serde::{Deserialize, Serialize};
 

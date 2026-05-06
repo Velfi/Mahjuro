@@ -1,5 +1,7 @@
 //! Single-run state: wall, hand, score target, round modifiers.
 
+pub mod discard_undo;
+
 mod consumables;
 mod hand_ops;
 mod onboarding;
@@ -35,6 +37,7 @@ use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
+pub use discard_undo::DiscardUndoSnapshot;
 use crate::game::tutorial::TutorialState;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
@@ -554,8 +557,8 @@ pub struct RunState {
     pub quickdraw_uses_remaining: u8,
     /// Whether JokerTile was used this round.
     pub joker_used: bool,
-    /// Whether the player has scored a FullHand yaku this round. The Tenpai
-    /// Bonus (`scoring.rs` Phase 4.5) fires only on the *first* such play.
+    /// Whether the player has scored a FullHand yaku this round (e.g. Eight
+    /// Treasures triggers on the first FullHand of the round).
     pub full_hand_played_this_round: bool,
     /// Per-yaku level (default 1). Incremented by Zodiac card use.
     pub yaku_levels: crate::core::zodiac::YakuLevels,
@@ -673,6 +676,10 @@ pub struct RunState {
     /// underlying scene (shop) to spawn a score popup + particle burst.
     #[serde(skip)]
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
+    /// Set when the tile-pack celebration overlay pops; [`ShopScene`] consumes
+    /// it once to refocus the shelf (same as the old in-shop celebration path).
+    #[serde(skip)]
+    pub pending_shop_focus_snap_after_pack_celebration: bool,
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   Humility     → consecutive plays without honor tiles
@@ -864,6 +871,7 @@ impl RunState {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
+            pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: std::collections::BTreeMap::new(),
             tutorial: None,
             onboarding: None,
@@ -1059,6 +1067,7 @@ mod tests {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebration: None,
             finished_zodiac_celebration: None,
+            pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: BTreeMap::new(),
             tutorial: None,
             onboarding: None,
@@ -1473,9 +1482,7 @@ mod tests {
             dora_faces: run.wall.dora_faces(),
             available_yaku: run.available_yaku.clone(),
             round_wind: rw,
-            first_full_hand_of_round: !run.full_hand_played_this_round,
             plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
-            riichi_active: false,
             yaku_levels: Some(run.yaku_levels.clone()),
             played_yaku_this_round: run.played_yaku_this_round.clone(),
             gold: run.gold,

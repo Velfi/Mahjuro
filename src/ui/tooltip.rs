@@ -5,7 +5,7 @@
 //! | Layer | Role |
 //! |-------|------|
 //! | Outer rim | [`crate::render::theme::color::BRASS`] at [`RIM_ALPHA`] — thin brass frame |
-//! | Fill | [`crate::render::theme::color::MIDNIGHT`] at [`FILL_ALPHA`] — dark readable panel |
+//! | Fill | [`crate::render::theme::color::WALNUT_DEEP`] at [`FILL_ALPHA`] — dark walnut panel |
 //!
 //! **Content** — multi-line inspect uses [`crate::ui::inspect_plaque::push_focus_tooltip_panel_2d`]:
 //! title [`color::CHAMPAGNE`] (HEADING tier), optional accent line (price/tier — caller color),
@@ -20,13 +20,13 @@ use crate::render::wgpu_renderer::GpuInstance;
 /// Rim thickness in pixels (brass quad extends this far outside the inner fill rect).
 pub const FRAME_BORDER_PX: f32 = 2.0;
 
-/// Midnight fill opacity for standard tooltip panels.
+/// Panel fill opacity for standard tooltip frames (`WALNUT_DEEP` — dark walnut).
 pub const FILL_ALPHA: f32 = 0.92;
 
 /// Brass rim opacity for standard tooltip panels.
 pub const RIM_ALPHA: f32 = 0.45;
 
-/// Push brass rim + midnight fill. `(left, top)` is the **inner** fill origin; the rim draws outside it.
+/// Push brass rim + dark walnut fill. `(left, top)` is the **inner** fill origin; the rim draws outside it.
 pub fn push_tooltip_frame_quads(
     out: &mut Vec<GpuInstance>,
     left: f32,
@@ -42,9 +42,9 @@ pub fn push_tooltip_frame_quads(
     out.push(GpuInstance {
         rect: [left, top, inner_w, inner_h],
         color: [
-            color::MIDNIGHT[0],
-            color::MIDNIGHT[1],
-            color::MIDNIGHT[2],
+            color::WALNUT_DEEP[0],
+            color::WALNUT_DEEP[1],
+            color::WALNUT_DEEP[2],
             FILL_ALPHA,
         ],
     });

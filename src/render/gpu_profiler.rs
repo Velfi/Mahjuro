@@ -13,14 +13,13 @@
 //!
 //! Pass slots (each pair = begin/end timestamps):
 //!   shadow, main (single Pass A),
-//!   smoke-offscreen, post-smoke, smoke-only,
 //!   main-table, main-scene — last two are used only when Pass A is split
 //!   during a GPU profile session (table timed separately from the rest).
 
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
-const NUM_PASSES: usize = 7;
+const NUM_PASSES: usize = 4;
 const NUM_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
 const TIMESTAMP_BYTES: u64 = 8;
 const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
@@ -28,9 +27,6 @@ const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
 const PASS_LABELS: [&str; NUM_PASSES] = [
     "shadow",
     "main",
-    "smoke-offscreen",
-    "post-smoke",
-    "smoke-only",
     "main-table",
     "main-scene",
 ];
@@ -41,15 +37,11 @@ const PASS_LABELS: [&str; NUM_PASSES] = [
 pub enum PassSlot {
     Shadow = 0,
     Main = 1,
-    SmokeOffscreen = 2,
-    PostSmoke = 3,
-    /// Smoke-only (no flames) timing pass, used to derive flame cost.
-    SmokeOnly = 4,
     /// Pass A — table mesh (+ felt shells). Mutually exclusive timestamp with
     /// [`PassSlot::Main`] when the renderer splits Pass A for GPU profiling.
-    MainTable = 5,
+    MainTable = 2,
     /// Pass A — everything in Pass A except the table draw.
-    MainScene = 6,
+    MainScene = 3,
 }
 
 pub struct GpuProfiler {
@@ -73,8 +65,7 @@ pub struct GpuProfiler {
     /// Per-pass accumulated GPU time in milliseconds.
     accum_ms: [f64; NUM_PASSES],
     /// Number of frames each pass actually ran during the session (some
-    /// passes are conditional, e.g. post-smoke only fires when fluid smoke
-    /// is on screen).
+    /// passes are conditional, e.g. main-table only when Pass A is split).
     pass_frame_counts: [u32; NUM_PASSES],
     /// Which passes ran in the most recent frame, so the readback knows
     /// which slot pairs to trust. Written via `Cell` from `pass_writes`
@@ -293,22 +284,6 @@ impl GpuProfiler {
             let avg = self.accum_ms[i] / frames as f64;
             total += avg;
             log::info!("[GpuProfiler]   {label:<12} {avg:>7.3} ms  ({frames} frames)");
-        }
-        // Derive flame cost = smoke-offscreen (combined) − smoke-only.
-        let smoke_combined_frames = self.pass_frame_counts[PassSlot::SmokeOffscreen as usize];
-        let smoke_only_frames = self.pass_frame_counts[PassSlot::SmokeOnly as usize];
-        if smoke_combined_frames > 0 && smoke_only_frames > 0 {
-            let combined_avg =
-                self.accum_ms[PassSlot::SmokeOffscreen as usize] / smoke_combined_frames as f64;
-            let smoke_avg = self.accum_ms[PassSlot::SmokeOnly as usize] / smoke_only_frames as f64;
-            let flame_avg = (combined_avg - smoke_avg).max(0.0);
-            log::info!(
-                "[GpuProfiler]   {:<12} {:>7.3} ms  (derived: smoke-offscreen − smoke-only)",
-                "flames",
-                flame_avg
-            );
-            // Exclude smoke-only from the total — it's a redundant timing pass.
-            total -= self.accum_ms[PassSlot::SmokeOnly as usize] / smoke_only_frames as f64;
         }
         log::info!(
             "[GpuProfiler]   {:<12} {total:>7.3} ms (sum of averages)",

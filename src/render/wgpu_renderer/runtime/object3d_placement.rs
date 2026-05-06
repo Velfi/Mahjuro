@@ -71,7 +71,7 @@ impl WgpuRenderer {
                     let center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
                     let model = translate_rot_scale(
                         center,
-                        obj.rotation, // Mat4 set directly by the scene
+                        obj.rotation_matrix(),
                         glam::Vec3::from(obj.extents),
                     );
 
@@ -388,13 +388,17 @@ impl WgpuRenderer {
                             }
                             let slot_i = obj3d_relic_slot;
                             obj3d_relic_slot += 1;
-                            // Object3dKind::Relic fires for shop for-sale relics
-                            // (single column Placement) and gameplay relics
-                            // (single sidebar Placement).
-                            let relic_arr_name = match self.active_scene_key {
-                                Some("shop") => "shop.for_sale.relics".to_string(),
-                                Some("gameplay") => "gameplay.relic_col".to_string(),
-                                _ => format!("relic[{slot_i}]"),
+                            // Object3dKind::Relic: shop for-sale column vs gameplay tray
+                            // (horizontal row; arrange anchor `gameplay.relic_col`).
+                            // Callers may set `arrange_name` (e.g. shop inventory → `shop.shelf.relic_dish`).
+                            let relic_arr_name = if let Some(name) = obj.arrange_name {
+                                name.to_string()
+                            } else {
+                                match self.active_scene_key {
+                                    Some("shop") => "shop.for_sale.relics".to_string(),
+                                    Some("gameplay") => "gameplay.relic_col".to_string(),
+                                    _ => format!("relic[{slot_i}]"),
+                                }
                             };
                             let model = self.apply_arrange_override(&relic_arr_name, model);
                             // obj.rotation already encodes pitch/roll; extents are full.
@@ -689,7 +693,7 @@ impl WgpuRenderer {
                                 talisman_name,
                                 translate_rot_scale(
                                     center,
-                                    obj.rotation,
+                                    obj.rotation_matrix(),
                                     glam::Vec3::new(sx, sy, sz),
                                 ),
                             );
@@ -764,7 +768,7 @@ impl WgpuRenderer {
                             // stands upright rather than lying flat. Compose with any
                             // scene-level obj.rotation (e.g. arrange-mode overrides).
                             let shrine_rot =
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation;
+                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
                             let shrine_model = self.apply_arrange_override(
                                 shrine_name,
                                 translate_rot_scale(
@@ -852,7 +856,7 @@ impl WgpuRenderer {
                                 obj.pos[2] + obj.extents[1] * 0.5,
                             );
                             let plinth_rot =
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation;
+                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
                             let plinth_model = self.apply_arrange_override(
                                 plinth_name,
                                 translate_rot_scale(
@@ -921,177 +925,6 @@ impl WgpuRenderer {
                             ));
                             object3d_draw_list.push((DrawKind::DoraPlinth, slot_i));
                         }
-                        Object3dKind::SellTray { pick_id } => {
-                            // Round dish mesh is built Y-up; rotate local Y
-                            // into world Z so the rim sits flat on the table
-                            // and `extents[1]` (rim) becomes vertical
-                            // thickness. Compose with any scene rotation.
-                            let oriented = mesh_y_thickness_along_local_y_to_z_up() * obj.rotation;
-                            let model = translate_rot_scale(
-                                center,
-                                oriented,
-                                glam::Vec3::from(obj.extents),
-                            );
-                            let model = self.apply_arrange_override("shop.shelf.sell_tray", model);
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color: obj.color,
-                                specular_strength: 0.3,
-                                specular_power: 16.0,
-                            };
-                            self.sell_tray_instance.write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                            );
-                            if let Some(pid) = pick_id {
-                                self.last_sell_tray_model = Some((model, *pid));
-                            }
-                            // Folded "SELL" tent card sits in the recess when
-                            // the tray is focused (any control method). The
-                            // shop scene encodes focus state via hover_target
-                            // (≥0.5 = focused/hovered).
-                            if obj.hover_target >= 0.5 {
-                                if !self.sell_card_decal_ready {
-                                    let rgba = crate::render::decal::rasterize_tablet_label_decal(
-                                        "SELL",
-                                        self.ui_font.as_ref(),
-                                        self.emoji_font.as_ref(),
-                                        256,
-                                        128,
-                                        [0.62, 0.18, 0.14, 1.0],
-                                    );
-                                    self.sell_card_instance.set_decal(
-                                        crate::render::lit_mesh::DecalUploadCtx {
-                                            device: &self.device,
-                                            queue: &self.queue,
-                                            layout: &self.lit_mesh_material_layout,
-                                            sampler: &self.tile_sampler,
-                                            relief_view: &self.lit_mesh_relief_default_view,
-                                        },
-                                        &rgba,
-                                        256,
-                                        128,
-                                    );
-                                    self.sell_card_decal_ready = true;
-                                }
-                                // Build the card model matrix anchored to the
-                                // tray. Local card extents: x=-0.5..0.5,
-                                // y=0..0.5, z=-0.5..0.5. The tray is a unit
-                                // box with rim top at +0.5 and recess at +0.2;
-                                // we shrink the card to fit inside the rim and
-                                // sit on the recessed floor.
-                                let (scale, rot, trans) = model.to_scale_rotation_translation();
-                                // Card footprint: 60% of rim diameter, height
-                                // ~70% of rim depth.
-                                // Card height is decoupled from the (very
-                                // shallow) rim thickness so it stays readable
-                                // on the flat plate; sized off the plate
-                                // footprint instead.
-                                let footprint = scale.x.min(scale.z);
-                                let card_scale = glam::Vec3::new(
-                                    scale.x * 0.55,
-                                    footprint * 0.55,
-                                    scale.z * 0.55,
-                                );
-                                // Sit the card just above the rim top
-                                // (local y=+0.5) so it doesn't poke through
-                                // the shallow plate. Nudged back along local
-                                // -z (world +y, deeper into scene) so the
-                                // card stands toward the rear of the dish
-                                // instead of centered in the recess.
-                                let local_floor = glam::Vec3::new(0.0, 0.55, -0.15);
-                                let world_floor = trans + rot * (local_floor * scale);
-                                // Yaw the card 100° around world +Z so the
-                                // crease faces the camera at a slight angle.
-                                let yaw = glam::Quat::from_rotation_z(100.0_f32.to_radians());
-                                let card_rot = yaw * rot;
-                                let card_model = Mat4::from_scale_rotation_translation(
-                                    card_scale,
-                                    card_rot,
-                                    world_floor,
-                                );
-                                let card_material = MaterialParams {
-                                    kind: MaterialKind::Plain,
-                                    base_color: [0.96, 0.93, 0.84, 1.0],
-                                    specular_strength: 0.10,
-                                    specular_power: 8.0,
-                                };
-                                self.sell_card_instance.write_uniform_with_decal(
-                                    &self.queue,
-                                    view_proj_arr,
-                                    card_model,
-                                    card_material,
-                                    true,
-                                );
-                                self.last_sell_card_model = Some(card_model);
-                            }
-                            self.last_debug_pickables.push((
-                                "shop.shelf.sell_tray".to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::SellTray, 0));
-                        }
-                        Object3dKind::ShopLamp { glow } => {
-                            // Lamp mesh is in world-space Z-up convention: no corrective
-                            // rotation needed. pos is the apex/cord-attachment point (high Z).
-                            // The shade rim (wide, open end) hangs below at lower Z. ✓
-                            let lamp_center =
-                                pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
-                            let lamp_model = self.apply_arrange_override(
-                                "shop.props.lamp",
-                                translate_rot_scale(
-                                    lamp_center,
-                                    obj.rotation,
-                                    glam::Vec3::from(obj.extents),
-                                ),
-                            );
-                            // Body — brass Metal material.
-                            self.lamp_body_instance.write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                lamp_model,
-                                self.lamp_body_mesh.default_material,
-                            );
-                            object3d_draw_list.push((DrawKind::LampBody, 0));
-                            // Bulb — Glass material. Push brightness well above
-                            // 1.0 when glow is active so the HDR bulb color
-                            // crosses the bloom extract threshold and glares.
-                            let g = glow.clamp(0.0, 1.0);
-                            let dm = &self.lamp_bulb_mesh.default_material;
-                            let bulb_mat = MaterialParams {
-                                kind: crate::render::lit_mesh::MaterialKind::Glass,
-                                base_color: [
-                                    dm.base_color[0] * (1.0 + g * 1.4),
-                                    dm.base_color[1] * (1.0 + g * 1.0),
-                                    dm.base_color[2] * (1.0 + g * 0.5),
-                                    1.0,
-                                ],
-                                specular_strength: dm.specular_strength,
-                                specular_power: dm.specular_power,
-                            };
-                            self.lamp_bulb_instance.write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                lamp_model,
-                                bulb_mat,
-                            );
-                            object3d_draw_list.push((DrawKind::LampBulb, 0));
-                            // Trimesh pick: AABB of extents [w,h,w] is a bad
-                            // silhouette for a lamp (thin cord on top of a wide
-                            // shade) and invites accidental grabs on empty air
-                            // above the shade. Ray-cast against the actual cord
-                            // + cone triangles so the pick region matches what
-                            // the player sees.
-                            self.last_debug_trimesh_pickables.push((
-                                "shop.props.lamp".to_string(),
-                                lamp_model,
-                                TrimeshRef::LampBody,
-                            ));
-                        }
                         Object3dKind::Bug {
                             slot,
                             flap_rad,
@@ -1099,12 +932,12 @@ impl WgpuRenderer {
                             blur_alpha,
                         } => {
                             let slot = *slot;
-                            if slot >= MAX_BUG_SLOTS {
+                            if slot >= crate::render::wgpu_renderer::MAX_BUG_SLOTS {
                                 continue;
                             }
                             let bug_model = translate_rot_scale(
                                 center,
-                                obj.rotation,
+                                obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
                             self.bug_body_instances[slot].write_uniform(
@@ -1114,12 +947,6 @@ impl WgpuRenderer {
                                 self.bug_body_mesh.default_material,
                             );
                             object3d_draw_list.push((DrawKind::BugBody, slot));
-                            // Live wing model matrices: the mesh lives in +Y,
-                            // so the left wing is the identity and the
-                            // right wing flips Y (mirror across body).
-                            // Flap rotates about mesh +X, which is the
-                            // body axis — the right wing uses -flap so
-                            // the two counter-sweep like a moth's.
                             let flap_l = glam::Mat4::from_rotation_x(*flap_rad);
                             let flap_r = glam::Mat4::from_rotation_x(-*flap_rad)
                                 * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0));
@@ -1147,11 +974,6 @@ impl WgpuRenderer {
                                 live_tint,
                             );
                             object3d_draw_list.push((DrawKind::BugWingR, slot));
-                            // Blur fans — the swept-volume mesh is drawn once per
-                            // side with no flap rotation (the mesh itself is the
-                            // full sweep). The right side reuses the same mesh
-                            // with a Y-mirror transform, matching how the live
-                            // wing pair is built.
                             let blur_a = blur_alpha.clamp(0.0, 1.0);
                             let blur_mat = self.bug_wing_blur_mesh.default_material;
                             let blur_tint = [
@@ -1217,7 +1039,10 @@ impl WgpuRenderer {
                             );
                             let hover_model = translate_rot_scale(
                                 center,
-                                rot_rz_rx_deg(tilt_deg, *rotation_z_deg),
+                                rot_fixed_axes_deg_matrix(
+                                    Mat4::from_rotation_z((*rotation_z_deg).to_radians())
+                                        * Mat4::from_rotation_x(tilt_deg.to_radians()),
+                                ),
                                 glam::Vec3::from(obj.extents),
                             );
                             let hover_model = self
@@ -1527,7 +1352,7 @@ impl WgpuRenderer {
                             let anim = *e;
                             let lift = anim * obj.extents[1] * 0.15;
                             // Recompute model with hover lift + tilt baked in.
-                            // Scene passes rotation_x_deg via obj.rotation (Mat4::from_rotation_x).
+                            // Scene passes base euler in `obj.rotation`; hover adds pitch on the left.
                             let tilt = anim * 18.0_f32.to_radians();
                             let center = pixel_to_world(
                                 w,
@@ -1538,7 +1363,7 @@ impl WgpuRenderer {
                             );
                             let hover_model = translate_rot_scale(
                                 center,
-                                glam::Mat4::from_rotation_x(tilt) * obj.rotation,
+                                glam::Mat4::from_rotation_x(tilt) * obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
                             let hover_model = self

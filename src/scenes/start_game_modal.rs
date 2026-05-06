@@ -17,9 +17,12 @@ use crate::ui::widget_tree::{
     self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
 };
 
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::shop::ShopScene;
-use super::start_screen::StartScreenScene;
 use crate::render::draw_cmd::UiFrame;
+use crate::render::world_space::{
+    LayoutAnchorPx, layout_px_py_from_norm, layout_py_top_from_bottom_margin,
+};
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use std::borrow::Cow;
@@ -190,11 +193,7 @@ impl TileSelectScene {
                     // desaturation (handled by the theme) — no padlock glyph,
                     // the dimmed treatment is enough to read "locked".
                     let label = stake_glyph(s).to_string();
-                    let tooltip = Some(Cow::Owned(format!(
-                        "{} — {}",
-                        s.label(),
-                        s.description()
-                    )));
+                    let tooltip = Some(Cow::Owned(format!("{} — {}", s.label(), s.description())));
                     wt::Node::Item(wt::Item {
                         id: ModalAction::StakeSelect(s).id(),
                         size: wt::Size::Auto,
@@ -265,10 +264,7 @@ impl TileSelectScene {
                 progress,
                 &settings,
             );
-            Some(Scene::Shop(ShopScene::new(
-                GameEngine::current_run_number(run),
-                run,
-            )))
+            Some(Scene::Shop(ShopScene::new(run)))
         }
     }
 }
@@ -308,7 +304,20 @@ const GRID_ROWS: [(usize, usize); 5] = [
     (34, 4), // Flowers 1–4
 ];
 
-/// Compute 38 screen-space `(x, y, w, h)` slot rects for the tile preview grid.
+/// Tile-preview grid — responsive fractions of the window, converted to layout **`px`/`py`**
+/// (top-down, [`crate::render::world_space::pixel_to_world`] input) via [`layout_py_top_from_bottom_margin`].
+/// Horizontal: left edge and width. Vertical: height + bottom margin (larger margin ⇒ grid higher).
+const TILE_PREVIEW_GRID_LEFT_FRAC: f32 = 0.42 + 0.02;
+const TILE_PREVIEW_GRID_WIDTH_FRAC: f32 = 0.58 - 0.02 - 0.05;
+const TILE_PREVIEW_GRID_HEIGHT_FRAC: f32 = 0.76;
+const TILE_PREVIEW_GRID_MARGIN_BOTTOM_FRAC: f32 = 0.16;
+/// Key light: normalized screen → [`layout_px_py_from_norm`], packed via [`LayoutAnchorPx`].
+const TILE_PREVIEW_KEY_LIGHT_NX: f32 = 0.70;
+const TILE_PREVIEW_KEY_LIGHT_NY: f32 = 0.26;
+const TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H: f32 = 0.80;
+
+/// Compute 38 top-down pixel `(x, y, w, h)` slot rects (`y` increases downward; fed to
+/// [`crate::render::world_space::pixel_to_world`] via showcase draws).
 fn grid_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<(f32, f32, f32, f32)> {
     let cols = 9.0_f32;
     let rows = GRID_ROWS.len() as f32;
@@ -358,7 +367,7 @@ impl SceneBehavior for TileSelectScene {
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                    return Some(Scene::StartScreen(StartScreenScene::new()));
+                    return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
                 }
                 other => filtered.push(other),
             }
@@ -396,14 +405,11 @@ impl SceneBehavior for TileSelectScene {
                     ctx.progress,
                     &settings,
                 );
-                Some(Scene::Shop(ShopScene::new(
-                    GameEngine::current_run_number(ctx.run),
-                    ctx.run,
-                )))
+                Some(Scene::Shop(ShopScene::new(ctx.run)))
             }
             Some(ModalAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                Some(Scene::StartScreen(StartScreenScene::new()))
+                Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
             }
             Some(ModalAction::StakeSelect(s)) => {
                 // Locked stakes are non-focusable + disabled, so activation
@@ -482,7 +488,7 @@ impl SceneBehavior for TileSelectScene {
                 "A short guided campaign teaches melds, structure scoring, relics, bosses, and the shop before one final practice fight.",
                 TextStyle {
                     tier: typography::HEADING,
-                    color: color::MIST,
+                    color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
@@ -531,7 +537,7 @@ impl SceneBehavior for TileSelectScene {
             text_labels.push(TextLabel {
                 rect: [text_x, cursor_y, text_w, hint_h],
                 text: "STAKE".into(),
-                color: color::SLATE,
+                color: color::UMBER,
                 font_px: Some(hint_px),
                 ..Default::default()
             });
@@ -545,7 +551,7 @@ impl SceneBehavior for TileSelectScene {
                     self.stake.description()
                 )
                 .into(),
-                color: color::MIST,
+                color: color::STONE,
                 font_px: Some(body_px),
                 ..Default::default()
             });
@@ -562,7 +568,7 @@ impl SceneBehavior for TileSelectScene {
             } else {
                 "Esc to go back".into()
             },
-            color: color::SLATE,
+            color: color::UMBER,
             font_px: Some(hint_px),
             ..Default::default()
         });
@@ -578,16 +584,11 @@ impl SceneBehavior for TileSelectScene {
         self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
 
         // ── Tile preview grid on the right ─────────────────────────
-        // Shrunk horizontally + more right-margin: showcase tiles are 3D
-        // meshes whose projected extent exceeds the flat slot rect, so the
-        // nominal `size_px` needs breathing room on both sides to avoid
-        // clipping the rightmost column.
-        let grid_margin_l = w * 0.02;
-        let grid_margin_r = w * 0.05;
-        let grid_x = w * 0.42 + grid_margin_l;
-        let grid_y = h * 0.12;
-        let grid_w = w * 0.58 - grid_margin_l - grid_margin_r;
-        let grid_h = h * 0.76;
+        let grid_w = TILE_PREVIEW_GRID_WIDTH_FRAC * w;
+        let grid_h = TILE_PREVIEW_GRID_HEIGHT_FRAC * h;
+        let grid_x = TILE_PREVIEW_GRID_LEFT_FRAC * w;
+        let grid_y =
+            layout_py_top_from_bottom_margin(h, grid_h, TILE_PREVIEW_GRID_MARGIN_BOTTOM_FRAC * h);
         let hand_tiles = preview_tiles();
         let hand_slots = grid_slots(grid_x, grid_y, grid_w, grid_h);
 
@@ -642,13 +643,19 @@ impl SceneBehavior for TileSelectScene {
         // Key light positioned above the tile cluster so the warm specular
         // falls on the tiles themselves rather than puddling on the wood
         // floor in front. Intensity dialed back so the hero art reads clean.
+        let (key_px, key_py) =
+            layout_px_py_from_norm(w, h, TILE_PREVIEW_KEY_LIGHT_NX, TILE_PREVIEW_KEY_LIGHT_NY);
+        let key_light = LayoutAnchorPx {
+            px: key_px,
+            py: key_py,
+            lift_z: TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H * h,
+        };
         frame.point_lights = vec![PointLight {
-            pos: [w * 0.70, h * 0.30, h * 0.80],
+            pos: key_light.to_draw_cmd_triple(),
             radius: h * 1.80,
             color: [1.00, 0.88, 0.62],
             intensity: 1.05,
         }];
-        frame.fluid_smoke();
         frame.buttons = buttons;
         frame.window_title = if self.tutorial_mode {
             "Mahjuro — Tutorial Prompt".into()

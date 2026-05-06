@@ -451,7 +451,7 @@ fn make_placement(
     Object3d {
         pos: [col_px, anchor_py, lift + z_offset],
         extents: [1.0, 1.0, 1.0],
-        rotation: glam::Mat4::IDENTITY,
+        rotation: [0.0, 0.0, 0.0],
         color,
         kind: Object3dKind::ExtrudedGlyph {
             scale: digit_scale,

@@ -1,19 +1,32 @@
-//! Shop scene — between rounds; player can buy relics with gold.
+//! Shop scene — between rounds; player can buy relics with gold (`THEME.md` storeroom + `Shop.glb`).
 //!
-//! Renders as a night **mountain path kiosk**: a wide counter with four
-//! back-row stalls (relics, tile pack, talismans, ribbons), owned inventory
-//! in three bottom trays, and top chrome (path sign, lamp, leave). Hovering
-//! an object turns on a point-light spotlight; a 2D panel shows name,
-//! price, and description.
+//! **[`ShopScene`]** is the [`crate::scenes::Scene`] variant; rendering and hit layout live in the internal `view` module.
 
 mod actions;
 mod draw;
 mod layout;
+pub(crate) mod pick_ids;
 mod shared;
 mod update;
+mod view;
+
+use crate::render::draw_cmd::CameraParams;
+
+pub(crate) use self::layout::{ShopInventoryCounts, ShopLayout};
+pub(crate) use self::shared::{CelebPhase, PackCelebration};
+
+/// Perspective camera for tile-pack celebration overlay (not item-inspect orbit).
+pub(crate) fn shop_celebration_camera(w: f32, h: f32, env_h: f32) -> CameraParams {
+    view::shop_camera_base(w, h, env_h)
+}
 
 use self::layout::*;
 use self::shared::*;
+
+pub(super) use self::pick_ids::{
+    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_RELIC_DISH,
+    PICK_REROLL_PROP, PICK_SELL_TRAY, PICK_TILE_PACK_BASE,
+};
 
 use rand::RngExt;
 use rand::seq::SliceRandom;
@@ -21,39 +34,24 @@ use rand::seq::SliceRandom;
 use std::time::Instant;
 
 use crate::core::consumable::Consumable;
-use crate::core::relic::{
-    Rarity, RelicId, RelicState, all_relic_defs, relic_description_live, relic_sell_price_live,
-    relic_shop_price,
-};
+use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs, relic_shop_price};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
-use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::ZodiacKind;
-use crate::game::engine::{
-    GameEngine, ShopCommand, ShopCommandData, ShopReadModel, consumable_sell_price_for_mode,
-};
-use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame, camera_facing_rotation,
-};
-use crate::render::lamp_mesh::{BULB_Z as LAMP_BULB_LOCAL_Z, SHADE_RIM_R, shade_exclusion_radius};
+use crate::game::engine::{GameEngine, ShopCommand, ShopCommandData, ShopReadModel};
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
-use crate::render::table_transform::{rot_rx_rz_deg, rot_ry_rx_deg, rot_rz_ry_rx_deg, rot_z_rad};
-use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, ShopHit, TextAlign, TextLabel};
-use crate::ui::focus_nav::{
-    FocusDir, clamp_rect_to_viewport, focus_target_at_cursor, pick_neighbor, push_focus_ring,
-};
+use crate::render::theme::{color, typography};
+use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
+use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{InputMode, UiAction};
-use crate::ui::widget::{self, TextStyle};
 
 use super::journal_transition::{JournalDirection, JournalTransition};
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
-    pub came_from_round: u32,
     mode: ShopMode,
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
@@ -73,8 +71,6 @@ pub struct ShopScene {
     /// gameplay scene's identical mechanism. Wrapped in a `RefCell` because
     /// `draw_frame` takes `&self` but needs to update this stash.
     last_focus_rects: std::cell::RefCell<Vec<(ShopFocus, [f32; 4])>>,
-    /// Active tile-pack opening celebration, if any.
-    pack_celebration: Option<PackCelebration>,
     /// Floating 3D text popups for zodiac level-up feedback.
     score_popups: ScorePopupSystem,
     /// Particle burst effects for zodiac level-up feedback.
@@ -139,6 +135,10 @@ pub struct ShopScene {
     /// over an owned item; cleared when the button is released. If released
     /// over the sell tray, the item is sold.
     mouse_drag: Option<ShopDragSource>,
+    /// Last `DrawCtx::shop_env_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
+    drawn_env_height_scale: std::cell::Cell<f32>,
+    /// Gamepad North hold-to-sell: press time when a hold is in progress.
+    north_sell_hold_started: Option<std::time::Instant>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -146,10 +146,10 @@ const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 
 // ── Bug swarm constants ───────────────────────────────────────────────────────
 /// Number of 3D insects orbiting the lamp bulb (must be ≤ MAX_BUG_SLOTS).
-const BUG_COUNT: usize = 6;
+pub(super) const BUG_COUNT: usize = 6;
 /// Per-bug: (orbit_radius_frac, orbit_z_offset_frac, orbit_speed_rad_per_sec, body_size_frac)
 /// All fractions are relative to `lamp_h` (the lamp's Z scale).
-const BUG_PARAMS: [(f32, f32, f32, f32); BUG_COUNT] = [
+pub(super) const BUG_PARAMS: [(f32, f32, f32, f32); BUG_COUNT] = [
     (0.55, -0.10, 3.60, 0.90), // fast, close
     (0.80, -0.25, 2.25, 1.00), // medium
     (0.45, -0.05, 5.10, 0.75), // fast, tiny
@@ -164,6 +164,8 @@ pub const SHOP_3D_HIT_ID: u32 = 0x9200;
 /// shop item is released over the sell tray. The shop's update() sells the
 /// item referenced by `mouse_drag` when this fires.
 pub const SHOP_DRAG_DROP_ID: u32 = 0x9700;
+/// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
+pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 0.5;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
 const SHOP_NEXT_ROUND_ID: u32 = 0x9300;
 /// Click id for the Reroll 2D button (kept for focus-nav compat).
@@ -176,34 +178,11 @@ const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// How much the reroll cost increases per use within a single shop visit.
 const REROLL_COST_INCREMENT: u32 = 5;
-/// Pick id for the foreground relic dish.
-const PICK_RELIC_DISH: u32 = 1;
-/// Pick id for the coin dish.
-const PICK_COIN_DISH: u32 = 2;
-/// Pick id for the Yaku Journal book on the shop counter. Reuses the
-/// existing `DishExplicit` + `ShopHit::Dish(u32)` pick path so the shop
-/// can offer the journal without renderer changes — the silhouette is
-/// dish-shaped until proper book art lands, but the click target is
-/// what matters here.
-const PICK_JOURNAL_BOOK: u32 = super::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
-/// Base pick id for the for-sale tile packs on the shop shelf.
-/// Two packs are offered, using ids `PICK_TILE_PACK_BASE` and
-/// `PICK_TILE_PACK_BASE + 1`. Id `6` is reserved for `PICK_LEAVE_PROP`,
-/// so only 2 ids are reserved here.
-const PICK_TILE_PACK_BASE: u32 = 4;
-/// Number of tile packs offered per shop visit.
-const N_TILE_PACKS: usize = 2;
-/// Pick id for the Leave action prop (counter right end).
-const PICK_LEAVE_PROP: u32 = 6;
-/// Pick id for the Reroll action prop (counter left end).
-const PICK_REROLL_PROP: u32 = 7;
-/// Pick id for the sell-return tray (inventory row far left).
-const PICK_SELL_TRAY: u32 = 8;
 
 /// Max for-sale relic slots on the kiosk (must match stock generation).
 const KIOSK_RELIC_SLOTS: usize = 3;
 
-/// Pitch relic cuboids toward the camera (`rot_rx_rz_deg`).
+/// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
 /// (toward the camera). Camera is at (0, -0.72h, 0.34h); counter relics sit at
 /// world_y ≈ +0.19h, so the relic-to-camera vector is roughly [0, -0.95, 0.31].
@@ -214,6 +193,34 @@ const SHOP_RELIC_LEAN_COUNTER: f32 = 158.0;
 const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 
 impl ShopScene {
+    #[inline]
+    pub(crate) fn sell_hold_in_progress(&self) -> bool {
+        self.north_sell_hold_started.is_some()
+    }
+
+    /// Normalized hold progress for rumble / HUD ring (0..=1).
+    #[inline]
+    pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
+        self.north_sell_hold_started.map(|started| {
+            (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
+                .clamp(0.0, 1.0)
+        })
+    }
+
+    /// Inventory counts for [`ShopLayout::build`], e.g. tile-pack celebration overlay.
+    pub(crate) fn tile_pack_celeb_inventory_counts(
+        &self,
+        run: &crate::game::run::RunState,
+    ) -> ShopInventoryCounts {
+        let shop_rm = GameEngine::read_shop(run);
+        ShopInventoryCounts {
+            n_for_sale: self.items.len(),
+            n_for_sale_zodiacs: self.zodiac_items.len(),
+            n_for_sale_talismans: self.talisman_items.len(),
+            n_owned_relics: shop_rm.owned_relics.len(),
+        }
+    }
+
     /// Set focus from a stable slug — used by the screenshot CLI's
     /// `--shop-focus` flag so headless captures can preview hover-only
     /// chrome (focus rings, plaques, spotlights).
@@ -281,23 +288,23 @@ impl ShopScene {
             dir: JournalDirection::Opening,
         });
     }
-}
 
-impl SceneBehavior for ShopScene {
-    fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
-        self.pause_options_overlay_impl()
-    }
-
-    fn has_blocking_overlay(&self) -> bool {
-        self.has_blocking_overlay_impl()
-    }
-
-    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        self.update_impl(ctx)
-    }
-
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
-        self.draw_frame_impl(ctx)
+    /// Headless screenshot: initial orbit for [`crate::scenes::ItemInspectScene`]
+    /// from current focus and stock. Returns `None` when focus is missing,
+    /// not inspectable, or orbit math fails.
+    pub fn item_inspect_orbit_for_screenshot(
+        &self,
+        w: f32,
+        h: f32,
+        run: &crate::game::run::RunState,
+    ) -> Option<crate::scenes::item_inspect::ItemInspectOrbitState> {
+        let focus = self.focus?;
+        if !shop_focus_inspectable(focus) {
+            return None;
+        }
+        let env_h = self.drawn_env_height_scale.get();
+        let shop = GameEngine::read_shop(run);
+        view::shop_item_inspect_orbit_for_focus(self, w, h, env_h, &shop, focus)
     }
 }
 
@@ -312,7 +319,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_patron_gift = true;
 
-        let shop = ShopScene::new(1, &mut run);
+        let shop = ShopScene::new(&mut run);
 
         assert!(!shop.items.is_empty());
         assert!(shop.items.iter().any(|item| item.price == 0));
@@ -324,7 +331,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_rich_stock = true;
 
-        let shop = ShopScene::new(1, &mut run);
+        let shop = ShopScene::new(&mut run);
 
         assert!(shop.items.len() >= 2);
         assert!(!run.tag_rich_stock);

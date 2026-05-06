@@ -125,7 +125,8 @@ pub(crate) struct PointLightsBuf {
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for the volumetric
     /// lightbake flame emission envelope).
-    /// `extras.w` reserved.
+    /// `extras.w` = punctual intensity scale in **`lit_mesh.wgsl`**: gameplay lights (binding 0,
+    /// typically `1`), or shop glTF lights (binding 2; defaults to `1` so props match `shop_glb.wgsl`).
     pub extras: [f32; 4],
     pub lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
@@ -136,6 +137,7 @@ impl PointLightsBuf {
         src: &[PointLight],
         candle_count: u32,
         flame_height_world: f32,
+        lit_mesh_punctual_intensity_scale: f32,
         screen_w: f32,
         screen_h: f32,
         gamma: f32,
@@ -155,7 +157,12 @@ impl PointLightsBuf {
         }
         Self {
             count: [n as u32, candle_count.min(n as u32), 0, 0],
-            extras: [gamma.max(0.01), time, flame_height_world, 0.0],
+            extras: [
+                gamma.max(0.01),
+                time,
+                flame_height_world,
+                lit_mesh_punctual_intensity_scale,
+            ],
             lights,
         }
     }
@@ -244,14 +251,6 @@ pub(crate) struct HandTileGpu {
     /// One bind group per tile-mesh primitive.  Each binds the per-tile uniform
     /// + per-tile decal + that primitive's own albedo texture.
     pub bind_groups: Vec<wgpu::BindGroup>,
-    /// Companion uniform buffer for the gold-metal outline shell. Written
-    /// every frame the tile is *selected* with an inflated model matrix
-    /// (uniform 1.06× scale around the tile center). Always allocated so
-    /// the bind group can stay constant for the lifetime of the tile.
-    pub outline_uniform_buffer: wgpu::Buffer,
-    /// Bind groups that point at `outline_uniform_buffer` instead of the
-    /// regular one. Same layout as `bind_groups`.
-    pub outline_bind_groups: Vec<wgpu::BindGroup>,
     /// Per-tile shadow caster uniform (light_view_proj * model). Written
     /// every frame in lockstep with `uniform_buffer` and consumed by the
     /// shadow pre-pass via `shadow_bind_group`.
@@ -363,6 +362,9 @@ pub enum ShopHit {
     /// Index into the most recent flat list of `TilePackPlacement`s pushed
     /// this frame (across all `TilePackBatch` cmds).
     TilePack(u32),
+    EnvSpawnSlot(usize),
+    EnvInvSlot(usize),
+    EnvConsumableOrd(usize),
 }
 
 /// What 3D gameplay-scene object the cursor is over this frame.

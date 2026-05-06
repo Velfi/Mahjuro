@@ -11,7 +11,7 @@ use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::meld_guide::MeldGuideScene;
-use super::start_screen::StartScreenScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,7 +92,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 let settings = persistence::load_settings();
                 GameEngine::reset_to_demo(ctx.run, ctx.progress, &settings);
-                Some(Scene::StartScreen(StartScreenScene::new()))
+                Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
             }
             None => None,
         }
@@ -125,10 +125,12 @@ impl SceneBehavior for TutorialSummaryScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::OBSIDIAN,
+            color: color::WALNUT_INK,
         });
-        frame.starfield();
-        if self.won {
+        if ctx.effect_layers.starfield {
+            frame.starfield();
+        }
+        if self.won && ctx.effect_layers.golden_dust {
             frame.golden_dust();
         }
 
@@ -140,7 +142,7 @@ impl SceneBehavior for TutorialSummaryScene {
 
         frame.quad(GpuInstance {
             rect: [card_x, card_y, card_w, card_h],
-            color: color::MIDNIGHT,
+            color: color::WALNUT_DEEP,
         });
         frame.quad(GpuInstance {
             rect: [card_x, card_y, card_w, border],
@@ -206,7 +208,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 &bullet_text,
                 TextStyle {
                     tier: typography::BODY,
-                    color: color::MIST,
+                    color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
@@ -224,7 +226,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 26.0 * scale,
             ],
             text: "Meld Guide — full visual reference".to_string(),
-            color: color::MIST,
+            color: color::STONE,
             align: TextAlign::Center,
             font_px: Some(13.0 * scale),
             ..Default::default()

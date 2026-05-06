@@ -96,7 +96,7 @@ pub(super) fn push_structure_preview_pile(
         out.push(Object3d {
             pos: [center_x + lx, center_y + lz, world_y],
             extents,
-            rotation: glam::Mat4::IDENTITY,
+            rotation: [0.0, 0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::CascadeToken { kind, pulse },
             hover_target: 0.0,
@@ -308,7 +308,7 @@ fn make_extruded_glyph(
     Object3d {
         pos,
         extents: [1.0, 1.0, 1.0],
-        rotation: glam::Mat4::IDENTITY,
+        rotation: [0.0, 0.0, 0.0],
         color,
         kind: Object3dKind::ExtrudedGlyph {
             scale,

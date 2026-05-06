@@ -319,6 +319,9 @@ fn extrude_cap(cap: &GlyphCap, vertices: &mut Vec<Vertex3dTex>, indices: &mut Ve
             position: [x, y, DEPTH],
             normal: [0.0, 0.0, 1.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for tri in &inset_cap.triangles {
@@ -334,6 +337,9 @@ fn extrude_cap(cap: &GlyphCap, vertices: &mut Vec<Vertex3dTex>, indices: &mut Ve
             position: [x, y, -DEPTH],
             normal: [0.0, 0.0, -1.0],
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
     }
     for tri in &cap.triangles {
@@ -383,21 +389,33 @@ fn build_bevel(
             position: [p0.0, p0.1, DEPTH],
             normal,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [p1.0, p1.1, DEPTH],
             normal,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [q1.0, q1.1, DEPTH - BEVEL_DEPTH],
             normal,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [q0.0, q0.1, DEPTH - BEVEL_DEPTH],
             normal,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[
             base,
@@ -434,21 +452,33 @@ fn build_walls(pts: &[(f32, f32)], vertices: &mut Vec<Vertex3dTex>, indices: &mu
             position: [x0, y0, DEPTH - BEVEL_DEPTH],
             normal,
             uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, y1, DEPTH - BEVEL_DEPTH],
             normal,
             uv: [1.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x1, y1, -DEPTH],
             normal,
             uv: [1.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         vertices.push(Vertex3dTex {
             position: [x0, y0, -DEPTH],
             normal,
             uv: [0.0, 1.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
         });
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }

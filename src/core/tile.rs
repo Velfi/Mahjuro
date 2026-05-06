@@ -1,4 +1,4 @@
-//! Tile types for a riichi-style set (numbered suits + honors).
+//! Tile types for a standard mahjong set (numbered suits + honors).
 
 use serde::{Deserialize, Serialize};
 

@@ -574,13 +574,6 @@ fn score_sets_inner(
         }
     }
 
-    let scored_full_hand = detected_yaku.contains(&YakuKind::FullHand);
-    if scored_full_hand && ctx.first_full_hand_of_round {
-        let scale = (4i32 - ctx.plays_used as i32).max(1);
-        let bonus = 50 * scale;
-        push_chips!("Tenpai Bonus", bonus);
-    }
-
     if has(RelicId::RedDragonRage) {
         for s in sets {
             if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
@@ -942,11 +935,6 @@ fn score_sets_inner(
         if perm_mult > 0 {
             push_mult!("Hungry Ghost", perm_mult as f64 / 10.0);
         }
-    }
-
-    if ctx.riichi_active && scored_full_hand {
-        let delta = mult;
-        push_mult!("Riichi", delta);
     }
 
     if has(RelicId::WayOfPurity) {

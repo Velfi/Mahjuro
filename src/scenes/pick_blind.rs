@@ -22,7 +22,9 @@ use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
 };
-use crate::render::table_transform::{mesh_y_thickness_along_local_y_to_z_up, rot_z_rad};
+use crate::render::table_transform::{
+    mat4_to_euler_xyz_rad, mesh_y_thickness_along_local_y_to_z_up, rot_world_z_rad,
+};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
@@ -522,7 +524,9 @@ impl SceneBehavior for PickBlindScene {
         // layered dark indigo + vignettes, but the gamma-encoded linear
         // floor of even [0.002] reads as visible indigo on screen.)
         frame.background(BackgroundId::Black);
-        frame.ember_drift();
+        if ctx.effect_layers.ember_drift {
+            frame.ember_drift();
+        }
         frame.camera_override = Some(layout.camera);
 
         // ── 3D shrines ────────────────────────────────────────────────
@@ -574,7 +578,7 @@ impl SceneBehavior for PickBlindScene {
             shrine_objects.push(Object3d {
                 pos: [px, py, 0.0],
                 extents,
-                rotation: glam::Mat4::IDENTITY,
+                rotation: [0.0, 0.0, 0.0],
                 color: base_color,
                 kind: Object3dKind::Shrine { glow },
                 hover_target: 0.0,
@@ -593,7 +597,7 @@ impl SceneBehavior for PickBlindScene {
         frame.object3d(Object3d {
             pos: [fx, fy, layout.floor_extents[1] * 0.5],
             extents: layout.floor_extents,
-            rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            rotation: mat4_to_euler_xyz_rad(mesh_y_thickness_along_local_y_to_z_up()),
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::DiscSquare,
@@ -619,7 +623,7 @@ impl SceneBehavior for PickBlindScene {
         frame.object3d(Object3d {
             pos: [play_px, play_py, play_dext[1] * 0.5],
             extents: play_dext,
-            rotation: mesh_y_thickness_along_local_y_to_z_up(),
+            rotation: mat4_to_euler_xyz_rad(mesh_y_thickness_along_local_y_to_z_up()),
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::DiscSquare,
@@ -637,7 +641,7 @@ impl SceneBehavior for PickBlindScene {
         frame.object3d_batch(vec![Object3d {
             pos: [play_px, play_py, play_dish_top_y],
             extents: [14.0 * 2.0, 5.5, 14.0 * 2.0],
-            rotation: rot_z_rad(0.4),
+            rotation: mat4_to_euler_xyz_rad(rot_world_z_rad(0.4)),
             color: [1.00, 0.84, 0.30, 1.0],
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::Cylinder,
@@ -657,7 +661,7 @@ impl SceneBehavior for PickBlindScene {
             frame.object3d(Object3d {
                 pos: [skip_px, skip_py, skip_dext[1] * 0.5],
                 extents: skip_dext,
-                rotation: mesh_y_thickness_along_local_y_to_z_up(),
+                rotation: mat4_to_euler_xyz_rad(mesh_y_thickness_along_local_y_to_z_up()),
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::DiscSquare,
@@ -680,7 +684,7 @@ impl SceneBehavior for PickBlindScene {
             frame.object3d_batch(vec![Object3d {
                 pos: [skip_px, skip_py, dish_top_y],
                 extents: [12.0 * 2.0, 4.5, 12.0 * 2.0],
-                rotation: rot_z_rad(0.4),
+                rotation: mat4_to_euler_xyz_rad(rot_world_z_rad(0.4)),
                 color: tag_color,
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::Cylinder,
@@ -852,7 +856,7 @@ impl SceneBehavior for PickBlindScene {
         // The 3D shrines + spotlight do the heavy lifting; the only text
         // that still pulls weight is each shrine's name, its target chip
         // count, and (for the boss) the rule the player needs to read
-        // before committing. Everything else — score header, relic strip,
+        // before committing. Everything else — score header, relic HUD,
         // instruction strip, round-wind line, state stamps — has been
         // dropped to keep the eye on the shrines.
         let mut quads: Vec<GpuInstance> = Vec::new();
@@ -882,8 +886,8 @@ impl SceneBehavior for PickBlindScene {
             let state = shrine_state(i, upcoming_idx);
             let title_color = match state {
                 ShrineState::Upcoming => color::CHAMPAGNE,
-                ShrineState::Cleared => color::SLATE,
-                ShrineState::Future => color::MIST,
+                ShrineState::Cleared => color::UMBER,
+                ShrineState::Future => color::STONE,
             };
 
             let label_w = (w * 0.22).clamp(180.0, 320.0);
@@ -972,10 +976,11 @@ impl SceneBehavior for PickBlindScene {
 
             let cam_rot = glam::Mat4::from_rotation_x((-60.0_f32).to_radians())
                 * camera_facing_rotation(layout.camera.eye, layout.camera.target);
+            let plaque_rot = mat4_to_euler_xyz_rad(cam_rot);
             frame.object3d(Object3d {
                 pos: [plaque_px, plaque_py, plaque_world_y],
                 extents: [plaque_w, plaque_h, 10.0],
-                rotation: cam_rot,
+                rotation: plaque_rot,
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::BeveledSlab,
@@ -1035,7 +1040,7 @@ impl SceneBehavior for PickBlindScene {
                 frame.object3d(Object3d {
                     pos: [ofuda_px, ofuda_py, ofuda_world_y],
                     extents: [ofuda_w, ofuda_h, 3.0],
-                    rotation: cam_rot,
+                    rotation: plaque_rot,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::Primitive {
                         shape: crate::render::primitive::MeshId::Ofuda,
@@ -1128,7 +1133,7 @@ impl SceneBehavior for PickBlindScene {
             texts.push(TextLabel {
                 rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
                 text: caption.to_string(),
-                color: if focused { color::GOLD } else { color::MIST },
+                color: if focused { color::GOLD } else { color::STONE },
                 no_glossary,
                 ..Default::default()
             });
@@ -1174,7 +1179,7 @@ impl SceneBehavior for PickBlindScene {
                 let sub_color = if skip_focused_label {
                     color::GOLD
                 } else {
-                    color::MIST
+                    color::STONE
                 };
                 texts.push(TextLabel {
                     rect: [lx, ly, altar_label_w, altar_label_h],
@@ -1254,18 +1259,6 @@ impl SceneBehavior for PickBlindScene {
         if self.pause_menu.paused {
             buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         }
-
-        // Volumetric smoke pass — pushed unconditionally after every 3D
-        // scene object (shrines, dishes, coin piles) so the smoke draws
-        // *over* them, mirroring the shop scene. Previously the marker
-        // was only emitted inside the `transition_at` block below, which
-        // meant the renderer's pass split saw `split_idx = None` on every
-        // idle pick-blind frame and skipped the volume pass entirely —
-        // the fluid sim was still simmering full of density carried over
-        // from gameplay, but it was never drawn. The transition burst
-        // still works because it pumps wind impulses into the same
-        // marker; it just no longer has to push the marker itself.
-        frame.fluid_smoke();
 
         // Push 2D layers + metadata onto the frame.
         frame.quads(quads);

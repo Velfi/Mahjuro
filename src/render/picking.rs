@@ -7,16 +7,92 @@
 //! All methods here live in a second `impl WgpuRenderer` block — callers see
 //! them as regular `renderer.pick_*(...)` methods.
 
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
 use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
 };
+use crate::scenes::shop::pick_ids::{PICK_LEAVE_PROP, PICK_REROLL_PROP};
 use crate::render::talisman_mesh::TALISMAN_LOCAL_HALF;
 use crate::render::wgpu_renderer::{
-    GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, ShopHit, TrimeshRef, WgpuRenderer,
+    GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
+    MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MainMenuPick, ShopHit, WgpuRenderer,
 };
+use crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
+
+fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
+    match node_name {
+        "journal_btn" => Some(ShopHit::Dish(YAKU_JOURNAL_BOOK_PICK_ID)),
+        "restock_btn" => Some(ShopHit::Dish(PICK_REROLL_PROP)),
+        "exit_btn" => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
+        _ if node_name.starts_with("shop_spawn_relic_") => {
+            let n = node_name.strip_prefix("shop_spawn_relic_")?;
+            let slot: usize = n.parse().ok()?;
+            Some(ShopHit::EnvSpawnSlot(slot))
+        }
+        _ if node_name.starts_with("shop_player_relic_") => {
+            let n = node_name.strip_prefix("shop_player_relic_")?;
+            let slot: usize = n.parse().ok()?;
+            Some(ShopHit::EnvInvSlot(slot))
+        }
+        _ if node_name.starts_with("shop_player_consumable_") => {
+            let n = node_name.strip_prefix("shop_player_consumable_")?;
+            let ord: usize = n.parse().ok()?;
+            Some(ShopHit::EnvConsumableOrd(ord))
+        }
+        _ => None,
+    }
+}
+
+/// Möller–Trumbore against triangles in local mesh space; compares hits by world-space ray
+/// distance along `world_dir` (consistent with mixed pick candidates).
+fn trimesh_hit_world_t_tris(
+    tris: &[[Vec3; 3]],
+    model: Mat4,
+    world_origin: Vec3,
+    world_dir: Vec3,
+) -> Option<f32> {
+    let inv = model.inverse();
+    let lo = inv.transform_point3(world_origin);
+    let ld = inv.transform_vector3(world_dir);
+    const EPS: f32 = 1e-7;
+    let mut best_wt: Option<f32> = None;
+    for [a, b, c] in tris {
+        let e1 = *b - *a;
+        let e2 = *c - *a;
+        let p = ld.cross(e2);
+        let det = e1.dot(p);
+        if det.abs() < EPS {
+            continue;
+        }
+        let inv_det = 1.0 / det;
+        let s = lo - *a;
+        let u = s.dot(p) * inv_det;
+        if !(0.0..=1.0).contains(&u) {
+            continue;
+        }
+        let q = s.cross(e1);
+        let v = ld.dot(q) * inv_det;
+        if v < 0.0 || u + v > 1.0 {
+            continue;
+        }
+        let t_loc = e2.dot(q) * inv_det;
+        if t_loc <= EPS {
+            continue;
+        }
+        let local_hit = lo + ld * t_loc;
+        let world_hit = model.transform_point3(local_hit);
+        let wt = (world_hit - world_origin).dot(world_dir);
+        if wt > EPS {
+            best_wt = Some(match best_wt {
+                Some(b) if b <= wt => b,
+                _ => wt,
+            });
+        }
+    }
+    best_wt
+}
 
 impl WgpuRenderer {
     /// Cast a ray from the camera through the cursor (in physical pixels,
@@ -124,6 +200,7 @@ impl WgpuRenderer {
             && self.last_ribbon_models.is_empty()
             && self.last_talisman_models.is_empty()
             && self.proj.aux_dish_rects.is_empty()
+            && self.shop_env_collision_meshes.is_empty()
         {
             return None;
         }
@@ -194,7 +271,7 @@ impl WgpuRenderer {
         // mesh finishes loading). Picks the real outline, not a loose AABB.
         for (i, (model, rid)) in self.last_relic_models.iter().enumerate() {
             let tris = self.relic_tris(*rid);
-            if let Some(t) = Self::trimesh_hit_t_tris(tris, *model, world_origin, world_dir) {
+            if let Some(t) = trimesh_hit_world_t_tris(tris, *model, world_origin, world_dir) {
                 consider(ShopHit::Relic(i), t);
             }
         }
@@ -225,12 +302,6 @@ impl WgpuRenderer {
             if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
                 consider(ShopHit::Dish(*pid), t);
             }
-        }
-        // Sell tray.
-        if let Some((model, pid)) = self.last_sell_tray_model
-            && let Some(t) = slab_test(model, 0.5, 0.5, 0.5, 0.0)
-        {
-            consider(ShopHit::Dish(pid), t);
         }
         // Auxiliary dishes (world-space AABB picks).
         for (i, (id, _rect)) in self.proj.aux_dish_rects.iter().enumerate() {
@@ -308,6 +379,32 @@ impl WgpuRenderer {
             }
         }
 
+        // Shop.glb invisible marker colliders (spawn slots, inventory anchors, …).
+        let env_s = crate::render::shop_glb::shop_env_world_scale(
+            cam.viewport_h,
+            self.shop_env_height_scale(),
+        );
+        let env_model = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                    cam.viewport_h,
+                    self.shop_env_height_scale(),
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| Mat4::from_scale(Vec3::splat(env_s)));
+        for mesh in &self.shop_env_collision_meshes {
+            let Some(hit) = shop_env_collision_node_to_hit(mesh.node_name.as_str()) else {
+                continue;
+            };
+            if let Some(t_w) =
+                trimesh_hit_world_t_tris(&mesh.triangles, env_model, world_origin, world_dir)
+            {
+                consider(hit, t_w);
+            }
+        }
+
         best.map(|(h, _)| h)
     }
 
@@ -358,13 +455,22 @@ impl WgpuRenderer {
     /// projection in the hit-test path.
     pub fn pick_gameplay_object(&self, cursor_x: f32, cursor_y: f32) -> Option<GameplayPick> {
         let cam = self.last_pick_camera.as_ref()?;
+        let has_journal_book = self
+            .last_primitive_pick_models
+            .contains_key(&crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID);
+        let has_main_menu_pick = [
+            MAIN_MENU_PICK_PLAY,
+            MAIN_MENU_PICK_OPTIONS,
+            MAIN_MENU_PICK_QUIT,
+        ]
+        .into_iter()
+        .any(|id| self.last_primitive_pick_models.contains_key(&id));
         if self.last_yaku_tablet_models.is_empty()
             && self.last_wood_tablet_models.is_empty()
             && self.last_bowl_model.is_none()
             && self.last_mirror_model.is_none()
-            && !self
-                .last_primitive_pick_models
-                .contains_key(&crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID)
+            && !has_journal_book
+            && !has_main_menu_pick
         {
             return None;
         }
@@ -475,6 +581,18 @@ impl WgpuRenderer {
         {
             consider(GameplayPick::BronzeMirror, t);
         }
+        for &pid in &[
+            MAIN_MENU_PICK_PLAY,
+            MAIN_MENU_PICK_OPTIONS,
+            MAIN_MENU_PICK_QUIT,
+        ] {
+            if let Some(model) = self.last_primitive_pick_models.get(&pid)
+                && let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0)
+                && let Some(m) = MainMenuPick::from_pick_id(pid)
+            {
+                consider(GameplayPick::MainMenu(m), t);
+            }
+        }
 
         best.map(|(h, _)| h)
     }
@@ -489,66 +607,14 @@ impl WgpuRenderer {
             .unwrap_or(&self.relic_box_tris)
     }
 
-    /// Möller–Trumbore ray vs. triangle list, with tris supplied directly
-    /// rather than looked up via `TrimeshRef`. Used for relics where the
-    /// mesh varies per-ID — the `TrimeshRef` enum stays single-variant so
-    /// the debug arrange overlay doesn't need to know about relic dispatch.
+    /// Möller–Trumbore ray vs. triangle list, with tris supplied directly.
+    /// Used for relics where the mesh varies per-ID.
     pub(super) fn trimesh_hit_t_tris(
         tris: &[[glam::Vec3; 3]],
         model: glam::Mat4,
         world_origin: glam::Vec3,
         world_dir: glam::Vec3,
     ) -> Option<f32> {
-        let inv = model.inverse();
-        let lo = inv.transform_point3(world_origin);
-        let ld = inv.transform_vector3(world_dir);
-        const EPS: f32 = 1e-7;
-        let mut best: Option<f32> = None;
-        for [a, b, c] in tris {
-            let e1 = *b - *a;
-            let e2 = *c - *a;
-            let p = ld.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < EPS {
-                continue;
-            }
-            let inv_det = 1.0 / det;
-            let s = lo - *a;
-            let u = s.dot(p) * inv_det;
-            if !(0.0..=1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = ld.dot(q) * inv_det;
-            if v < 0.0 || u + v > 1.0 {
-                continue;
-            }
-            let t = e2.dot(q) * inv_det;
-            if t > EPS {
-                best = Some(match best {
-                    Some(bt) if bt <= t => bt,
-                    _ => t,
-                });
-            }
-        }
-        best
-    }
-
-    /// Möller–Trumbore ray vs. triangle list in the mesh's local space.
-    /// Returns the smallest positive ray-parameter `t` (distance in local
-    /// units — the caller's world-space distance differs by the model
-    /// matrix's scale, but that still preserves depth ordering across
-    /// other same-model hits, which is all the picker compares against).
-    fn trimesh_hit_t(
-        &self,
-        model: glam::Mat4,
-        mesh: TrimeshRef,
-        world_origin: glam::Vec3,
-        world_dir: glam::Vec3,
-    ) -> Option<f32> {
-        let tris: &[[glam::Vec3; 3]] = match mesh {
-            TrimeshRef::LampBody => &self.lamp_body_tris,
-        };
         let inv = model.inverse();
         let lo = inv.transform_point3(world_origin);
         let ld = inv.transform_vector3(world_dir);
@@ -600,7 +666,7 @@ impl WgpuRenderer {
 
         let mut best: Option<(&str, f32)> = None;
 
-        if !self.last_debug_pickables.is_empty() || !self.last_debug_trimesh_pickables.is_empty() {
+        if !self.last_debug_pickables.is_empty() {
             let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
             let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
             let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
@@ -659,15 +725,6 @@ impl WgpuRenderer {
                             }
                         }
                     }
-                    for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-                        if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir)
-                        {
-                            match best {
-                                Some((_, bt)) if t > bt => {}
-                                _ => best = Some((name.as_str(), t)),
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -677,8 +734,13 @@ impl WgpuRenderer {
         }
 
         if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
+            let cx = self
+                .last_gameplay_fog_wall_center_x
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0);
             let cy_frac = cursor_y / cam.viewport_h;
-            if (cy_frac - hy).abs() < 0.11 {
+            let cx_frac = cursor_x / cam.viewport_w;
+            if (cy_frac - hy).abs() < 0.11 && (cx_frac - cx).abs() < 0.09 {
                 return Some("gameplay.fog_wall".to_string());
             }
         }
@@ -690,7 +752,7 @@ impl WgpuRenderer {
     /// mode's click-to-move so teleport targets land on actual geometry.
     pub fn pick_debug_world_point(&self, cursor_x: f32, cursor_y: f32) -> Option<glam::Vec3> {
         let cam = self.last_pick_camera.as_ref()?;
-        if self.last_debug_pickables.is_empty() && self.last_debug_trimesh_pickables.is_empty() {
+        if self.last_debug_pickables.is_empty() {
             return None;
         }
         let ndc_x = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
@@ -757,14 +819,6 @@ impl WgpuRenderer {
                 }
             }
         }
-        for (_n, model, mesh) in &self.last_debug_trimesh_pickables {
-            if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir) {
-                match best_t {
-                    Some(bt) if t > bt => {}
-                    _ => best_t = Some(t),
-                }
-            }
-        }
         best_t.map(|t| world_origin + world_dir * t)
     }
 
@@ -793,7 +847,7 @@ impl WgpuRenderer {
 
         let mut best: Option<(&str, f32, Mat4)> = None;
 
-        if !self.last_debug_pickables.is_empty() || !self.last_debug_trimesh_pickables.is_empty() {
+        if !self.last_debug_pickables.is_empty() {
             let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
             let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
             let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
@@ -852,15 +906,6 @@ impl WgpuRenderer {
                             }
                         }
                     }
-                    for (name, model, mesh) in &self.last_debug_trimesh_pickables {
-                        if let Some(t) = self.trimesh_hit_t(*model, *mesh, world_origin, world_dir)
-                        {
-                            match best {
-                                Some((_, bt, _)) if t > bt => {}
-                                _ => best = Some((name.as_str(), t, *model)),
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -870,8 +915,13 @@ impl WgpuRenderer {
         }
 
         if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
+            let cx = self
+                .last_gameplay_fog_wall_center_x
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0);
             let cy_frac = cursor_y / cam.viewport_h;
-            if (cy_frac - hy).abs() < 0.11 {
+            let cx_frac = cursor_x / cam.viewport_w;
+            if (cy_frac - hy).abs() < 0.11 && (cx_frac - cx).abs() < 0.09 {
                 let model = self
                     .last_debug_pickables
                     .iter()

@@ -17,7 +17,8 @@ pub enum TagKind {
     // ── Shop modifiers (affect the next shop visit) ───────────────────
     /// Next shop's first reroll is free.
     FreeReroll,
-    /// One random relic in the next shop costs 0.
+    /// One random relic in the next shop costs 0 (lets you sell first if full).
+    #[serde(alias = "relic_offering")]
     PatronGift,
     /// Next shop stocks 2 extra relics.
     RichStock,
@@ -25,9 +26,6 @@ pub enum TagKind {
     // ── Instant item grants ───────────────────────────────────────────
     /// Gain a random Zodiac card. If inventory is full, gain +4 gold instead.
     ZodiacBlessing,
-    /// Gain a random unowned relic. If relic slots are full, gain +6 gold.
-    /// Only offered from ante 3 onwards.
-    RelicOffering,
 
     // ── Next-round gameplay bonuses ───────────────────────────────────
     /// +1 play next round.
@@ -64,7 +62,6 @@ impl TagKind {
             TagKind::PatronGift => "Patron's Gift",
             TagKind::RichStock => "Rich Stock",
             TagKind::ZodiacBlessing => "Zodiac Blessing",
-            TagKind::RelicOffering => "Relic Offering",
             TagKind::BonusPlay => "Bonus Play",
             TagKind::BonusDiscard => "Bonus Discard",
             TagKind::WideHand => "Wide Hand",
@@ -79,7 +76,6 @@ impl TagKind {
             TagKind::PatronGift => "One shop relic is free",
             TagKind::RichStock => "+2 relics in next shop",
             TagKind::ZodiacBlessing => "Gain a random Zodiac",
-            TagKind::RelicOffering => "Gain a random relic",
             TagKind::BonusPlay => "+1 play next round",
             TagKind::BonusDiscard => "+1 discard next round",
             TagKind::WideHand => "+2 hand size next round",
@@ -97,14 +93,13 @@ impl TagKind {
             TagKind::ZodiacBlessing => TagRarity::Uncommon,
             TagKind::WideHand => TagRarity::Uncommon,
             TagKind::TreasureChest => TagRarity::Rare,
-            TagKind::RelicOffering => TagRarity::Rare,
         }
     }
 
     /// Minimum ante required for this tag to appear in the pool.
     pub fn min_ante(self) -> u32 {
         match self {
-            TagKind::TreasureChest | TagKind::RelicOffering => 3,
+            TagKind::TreasureChest => 3,
             _ => 1,
         }
     }
@@ -118,7 +113,6 @@ impl TagKind {
             TagKind::PatronGift,
             TagKind::RichStock,
             TagKind::ZodiacBlessing,
-            TagKind::RelicOffering,
             TagKind::BonusPlay,
             TagKind::BonusDiscard,
             TagKind::WideHand,
@@ -134,7 +128,6 @@ impl TagKind {
             TagKind::PatronGift => 10,
             TagKind::RichStock => 6,
             TagKind::ZodiacBlessing => 6,
-            TagKind::RelicOffering => 12,
             TagKind::BonusPlay => 8,
             TagKind::BonusDiscard => 5,
             TagKind::WideHand => 7,

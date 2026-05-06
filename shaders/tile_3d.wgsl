@@ -9,12 +9,55 @@ struct CameraUniform {
     tile_seed: f32,
     // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
     decal_atlas_uv: vec4<f32>,
+    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08); w = unused.
+    hdr_tonemap: vec4<f32>,
 };
+
+/// Khronos `KHR_lights_punctual` reference spotlight angular falloff.
+fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
+    let den = max(cos_inner - cos_outer, 1e-3);
+    let scale = 1.0 / den;
+    let offset = -cos_outer * scale;
+    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
+    return angular * angular;
+}
+
+/// Same ACES fit as `shop_glb.wgsl` / `lit_mesh.wgsl`.
+fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp(
+        (color * (a * color + b)) / (color * (c * color + d) + e),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
 @group(0) @binding(1) var base_color: texture_2d<f32>;
 @group(0) @binding(2) var base_sampler: sampler;
 @group(0) @binding(3) var decal_tex: texture_2d<f32>;
+@group(0) @binding(4) var normal_tex: texture_2d<f32>;
+
+/// Mirrors `GltfPbrUniform` in `gltf_helpers.rs` (std140 layout).
+struct GltfPbrUniform {
+    metallic_factor: f32,
+    roughness_factor: f32,
+    alpha_cutoff: f32,
+    _pad0: f32,
+    emissive_factor: vec4<f32>,
+    alpha_mode: u32,
+    _pad1_0: u32,
+    _pad1_1: u32,
+    _pad1_2: u32,
+}
+
+@group(0) @binding(5) var<uniform> pbr: GltfPbrUniform;
+@group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
+@group(0) @binding(7) var emissive_tex: texture_2d<f32>;
 
 struct PointLight {
     // xyz = position in screen-pixel space (z is unused; we treat the table
@@ -27,7 +70,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma exponent; rest reserved.
+    // extras.x = display gamma; extras.w unused on tiles (lit_mesh shop buffer uses it).
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -41,11 +84,11 @@ struct PointLights {
 struct SpotLight {
     // xyz = world-space position, w = falloff radius.
     pos: vec4<f32>,
-    // xyz = normalized direction (light → surface), w = cos(outer half-angle).
+    // xyz = normalized direction (light → fragment), w = cos(outer half-angle).
     dir: vec4<f32>,
     // rgb = linear colour, a = intensity.
     color: vec4<f32>,
-    // x = cos(inner half-angle); fully lit inside inner, smoothstep between inner and outer.
+    // x = cos(inner half-angle); Khronos angular falloff (linear in cos² then square).
     params: vec4<f32>,
 };
 struct SpotLights {
@@ -163,43 +206,87 @@ fn bamboo_albedo(local_pos: vec3<f32>, local_n: vec3<f32>) -> vec3<f32> {
     return mix(side_rgb, end_rgb, end_grain);
 }
 
-// ── Procedural tortoise shell (blonde bekko) ───────────────────────────
-// Keratin has similar optics to amber/horn: warm honey-amber base with
-// irregular dark mahogany blotches, visibly translucent (darker patches
-// recolor transmitted light). We build the mottled pattern from two
-// octaves of `vnoise2` in local-XZ, sharpened with `pow()` so the dark
-// patches stay sparse rather than dominating the surface. Depth-driven
-// warming (more saturated honey at the bottom of the slab, paler amber
-// near the top) fakes light transmission through the thin upper cap.
-fn tortoise_albedo(local_pos: vec3<f32>, seed: f32) -> vec3<f32> {
-    let honey    = vec3<f32>(0.78, 0.48, 0.18);
-    let mahogany = vec3<f32>(0.28, 0.12, 0.05);
-
-    // Per-tile seed offset: two irrational-ish scales decorrelate the X
-    // and Z shifts so neighbouring slot indices land in completely
-    // different regions of the noise field (not just a diagonal slide).
+// ── Procedural tortoise shell (blonde bekko / hawksbill keratin) ───────
+// Real bekko: translucent golden-amber ground with irregular coffee-dark
+// “islands”, caramel halos where the horn thins at patch edges, fine growth
+// veins, and a wax-polished top. Domain-warped FBM breaks axis-aligned smears;
+// `local_n` adds subtle streak polish on upward-facing facets.
+fn tortoise_albedo(local_pos: vec3<f32>, seed: f32, local_n: vec3<f32>) -> vec3<f32> {
+    // Strong per-instance fingerprints — hash(seed) shifts thresholds and tone so
+    // neighbouring ids (and large preview ids) don't read as copy-paste slabs.
+    let seed_j = vec2<f32>(seed * 19.13, seed * 17.71);
+    let sh = hash21(seed_j);
+    let sh2 = hash21(seed_j + vec2<f32>(13.2, 8.9));
+    let sh3 = hash21(seed_j + vec2<f32>(2.1, 31.4));
     let seed_offset = vec2<f32>(seed * 17.37, seed * 11.91);
+    let p0 = vec2<f32>(local_pos.x, local_pos.z);
 
-    // Large-scale blotch shape + higher-frequency break-up so patches
-    // feel organic rather than regular. The two octaves use different
-    // XZ stretches so dark regions aren't axis-aligned.
-    let n_lo = vnoise2(vec2<f32>(local_pos.x * 5.0, local_pos.z * 6.5) + seed_offset);
-    let n_hi = vnoise2(vec2<f32>(local_pos.x * 14.0 + 5.1, local_pos.z * 17.0 - 2.3) + seed_offset);
-    let mottle = clamp(n_lo * 0.70 + n_hi * 0.30, 0.0, 1.0);
-    // Threshold + smoothstep so the dark blotches are sparse, well-
-    // defined, and reach full mahogany depth. Anything above 0.55 noise
-    // ramps toward a full dark blotch; below that stays pure honey.
-    let patch_mask = smoothstep(0.55, 0.82, mottle);
+    // Domain warp — blobby organic islands instead of rectangular noise cells.
+    let warp1 = vec2<f32>(
+        vnoise2(p0 * 2.9 + seed_offset),
+        vnoise2(p0 * 3.2 + seed_offset + vec2<f32>(41.2, 18.7)),
+    ) - vec2<f32>(0.5, 0.5);
+    let pw = p0 + warp1 * 0.12;
+    let warp2 = vec2<f32>(
+        vnoise2(pw * 6.0 + vec2<f32>(2.1, 9.4)),
+        vnoise2(pw * 5.8 + vec2<f32>(27.0, 3.3)),
+    ) - vec2<f32>(0.5, 0.5);
+    let pw2 = pw + warp2 * 0.048;
 
-    var rgb = mix(honey, mahogany, patch_mask);
+    // FBM on warped coords — large honey fields with medium-scale breakup.
+    let f1 = vnoise2(pw2 * vec2<f32>(4.2, 5.0));
+    let f2 = vnoise2(pw2 * vec2<f32>(10.5, 12.5) + vec2<f32>(8.3, 2.1));
+    let f3 = vnoise2(pw2 * vec2<f32>(22.0, 26.0) + vec2<f32>(1.7, 16.2));
+    let fbm = f1 * 0.48 + f2 * 0.38 + f3 * 0.14;
 
-    // Depth-driven translucency: honey saturates deeper in the slab, the
-    // top cap reads paler as if backlit. local_pos.y spans ~[-0.212, 0.212].
+    let macro_bias = vnoise2(p0 * 1.55 + seed_offset * 0.48);
+    var field = clamp(mix(fbm, fbm * 0.65 + macro_bias * 0.35, 0.28), 0.0, 1.0);
+    // Tile-unique low-frequency bias so blot layout isn't just a translated copy.
+    field = clamp(field + (sh - 0.5) * 0.22 + (sh2 - 0.5) * 0.14, 0.0, 1.0);
+
+    // Dark patch cores + softer outer rim (two thresholds).
+    let thr_j = (sh - 0.5) * 0.09 + (sh2 - 0.5) * 0.06;
+    let patch_soft = smoothstep(0.44 + thr_j, 0.76 + thr_j, field);
+    let patch_dark = smoothstep(0.56 + thr_j * 0.85, 0.88 + thr_j * 0.85, field);
+
+    // Amber ground (layered warm tones, not flat).
+    let honey_hi = vec3<f32>(0.86, 0.62, 0.24);
+    let honey_mid = vec3<f32>(0.72, 0.46, 0.16);
+    let honey_lo = vec3<f32>(0.58, 0.34, 0.11);
+    var rgb = mix(honey_lo, honey_hi, f1 * 0.55 + f2 * 0.35);
+    rgb = mix(rgb, honey_mid, f3 * 0.22);
+
+    let blot_outer = vec3<f32>(0.26, 0.11, 0.06);
+    let blot_core = vec3<f32>(0.11, 0.045, 0.025);
+    rgb = mix(rgb, blot_outer, patch_soft * 0.72);
+    rgb = mix(rgb, blot_core, patch_dark * 0.78);
+
+    // Per-tile amber cast — readable on the porcelain strip and top face.
+    let warm_t = 0.94 + sh3 * 0.12;
+    let cool_b = 1.02 - sh3 * 0.10;
+    rgb = rgb * vec3<f32>(warm_t, mix(1.0, 1.05, sh3), cool_b);
+
+    // Caramel “halos” at patch margins (thin horn reads lighter).
+    let halo_band = smoothstep(0.38, 0.52, field) * (1.0 - smoothstep(0.68, 0.86, field));
+    let halo_rgb = vec3<f32>(0.90, 0.64, 0.26);
+    rgb = mix(rgb, halo_rgb, halo_band * 0.42);
+
+    // Sparse fine veins / growth lines on top of the mottle.
+    let vein_n = vnoise2(pw2 * vec2<f32>(52.0, 56.0));
+    let veins = pow(clamp(vein_n, 0.0, 1.0), 11.0);
+    rgb = rgb * (1.0 - veins * 0.28) + blot_core * veins * 0.85;
+
+    // Through-thickness translucency: cap paler, base richer (local Y ~ slab thickness).
     let depth_t = smoothstep(-0.21, 0.17, local_pos.y);
-    let pale_amber = vec3<f32>(0.92, 0.70, 0.32);
-    rgb = mix(rgb, pale_amber, depth_t * 0.28);
+    let pale_cap = vec3<f32>(0.93, 0.74, 0.36);
+    rgb = mix(rgb, pale_cap, depth_t * 0.24);
 
-    return rgb;
+    // Subtle polish streaks on faces that face +Y (tile top / bevel flats).
+    let up_w = smoothstep(0.55, 0.95, local_n.y);
+    let streak = sin(dot(p0, vec2<f32>(19.2, 23.8)) + seed * 1.9) * 0.5 + 0.5;
+    rgb = mix(rgb, rgb * vec3<f32>(1.05, 1.03, 0.97), up_w * streak * 0.10);
+
+    return clamp(rgb, vec3<f32>(0.02), vec3<f32>(1.0));
 }
 
 struct VsOut {
@@ -209,6 +296,13 @@ struct VsOut {
     @location(2) local_pos: vec3<f32>,
     @location(3) local_n: vec3<f32>,
     @location(4) world_pos: vec3<f32>,
+    /// World-space tangent (orthogonalized to vertex normal).
+    @location(5) t_w: vec3<f32>,
+    /// World-space bitangent (`cross(N, T) * handedness`).
+    @location(6) b_w: vec3<f32>,
+    /// UV for normal / metallic-roughness / emissive (glTF secondary TEXCOORD when present).
+    @location(7) uv_emr: vec2<f32>,
+    @location(8) v_color: vec4<f32>,
 };
 
 @vertex
@@ -216,24 +310,34 @@ fn vs_main(
     @location(0) pos: vec3<f32>,
     @location(1) n: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec4<f32>,
+    @location(4) uv_emr_in: vec2<f32>,
+    @location(5) v_color_in: vec4<f32>,
 ) -> VsOut {
     let world = cam.model * vec4<f32>(pos, 1.0);
+    let N = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
+    let Tw = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
+    let Torth = normalize(Tw - N * dot(N, Tw));
+    let Borth = normalize(cross(N, Torth)) * tangent.w;
+
     var o: VsOut;
     o.clip_pos = cam.view_proj * world;
-    o.wn = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
+    o.wn = N;
     o.uv = uv;
     o.local_pos = pos;
     o.local_n = n;
     o.world_pos = world.xyz;
+    o.t_w = Torth;
+    o.b_w = Borth;
+    o.uv_emr = uv_emr_in;
+    o.v_color = v_color_in;
     return o;
 }
 
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    // Candle-only lighting: no ambient floor, no directional key. The
-    // tile's base albedo is preserved (not multiplied by any global
-    // shade) and the only illumination comes from the wick PointLights
-    // accumulated below. Fragments outside any candle pool stay black.
+    // Candle-keyed lighting: no directional sun; illumination comes from the
+    // wick PointLights below. Fragments outside any candle pool stay black.
 
     // Front face = vertices whose local normal's dominant component is +Y
     // (the tile's flat top face after Z-up→Y-up conversion).  Use a soft
@@ -242,122 +346,125 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         && in.local_n.y >= abs(in.local_n.x)
         && in.local_n.y >= abs(in.local_n.z);
 
-    // cam.base_color_factor.w encodes the material variant:
-    //   0 = bamboo & ivory (traditional)
-    //   1 = plastic (kelly-green body, bright white face)
-    //   2 = tortoise shell (blonde bekko — honey + mahogany mottle)
-    let mat_id = cam.base_color_factor.w;
-    let is_plastic = mat_id > 0.5 && mat_id < 1.5;
-    let is_tortoise = mat_id > 1.5;
+    // cam.base_color_factor.w — see `tile_body.rs`:
+    //   0–2 = procedural tile body (`TileBodyShaderKind`),
+    //   4 = sample bound base-color texture, no decal projection (shop room),
+    //   5 = sample bound base-color per primitive + mahjong decal on front (`Tile.glb`).
+    let body_kind = cam.base_color_factor.w;
+    let use_textured_env = body_kind > 3.5 && body_kind < 4.5;
+    let use_textured_tile_glb = body_kind > 4.5 && body_kind < 5.5;
+    let use_textured_albedo = use_textured_env || use_textured_tile_glb;
+    let is_plastic = !use_textured_albedo && body_kind > 0.5 && body_kind < 1.5;
+    let is_tortoise = !use_textured_albedo && body_kind > 1.5 && body_kind < 2.5;
 
-    // Real mahjong tiles are a thin ivory/bone face layer glued onto a
-    // bamboo body — the ivory wraps around the top of the side bevels
-    // for a couple of millimetres before the bamboo grain takes over.
-    // The mesh's local Y extent is ~[-0.212, 0.212] (≈ 16 mm of tile
-    // thickness), so a 0.040 ivory band represents ~3 mm of ivory.
-    // Sides that are above the threshold but not the +Y top face become
-    // ivory; everything below is bamboo. The bottom (-Y) face has
-    // local_n.y < 0 and is excluded so it stays bamboo.
-    // Plastic caps are 40% of the slab thickness (top 0.170 of the
-    // 0.424 Y extent → threshold at 0.042). Tortoise shell has no cap
-    // (cut from one slab), so reuse the thin ivory-band threshold as a
-    // purely polish hint — the face tint matches the body.
-    var ivory_layer_y: f32 = 0.172;
-    if (is_plastic) { ivory_layer_y = 0.042; }
-    if (is_tortoise) { ivory_layer_y = 0.172; }
     let ivory_band_softness: f32 = 0.012; // smooth transition (~1 mm)
-    let ivory_band = smoothstep(
-        ivory_layer_y - ivory_band_softness,
-        ivory_layer_y + ivory_band_softness,
-        in.local_pos.y,
-    ) * select(0.0, 1.0, in.local_n.y > -0.25);
 
-    // ── Bamboo & Ivory (mat 0) ──────────────────────────────────────────
-    let ivory = vec3<f32>(0.96, 0.93, 0.84);
-    let bamboo = bamboo_albedo(in.local_pos, normalize(in.local_n));
-    let bamboo_body = mix(bamboo, ivory, ivory_band);
-    let bamboo_rgb = select(bamboo_body, ivory, is_front);
+    var base_rgb: vec3<f32>;
+    /// Fragment alpha (blend mode only for textured glTF paths).
+    var out_alpha: f32 = 1.0;
+    if (use_textured_albedo) {
+        let base_s = textureSample(base_color, base_sampler, in.uv);
+        let tex_a = base_s.a * in.v_color.a;
+        // `GltfAlphaMode`: Opaque = 0, Mask = 1, Blend = 2.
+        if (pbr.alpha_mode == 1u) {
+            if (tex_a < pbr.alpha_cutoff) {
+                discard;
+            }
+        }
+        if (pbr.alpha_mode == 2u) {
+            out_alpha = tex_a;
+        }
+        base_rgb = base_s.rgb * in.v_color.rgb;
+    } else {
+        // Real mahjong tiles are a thin ivory/bone face layer glued onto a
+        // bamboo body — the ivory wraps around the top of the side bevels
+        // for a couple of millimetres before the bamboo grain takes over.
+        // Plastic caps are 40% of the slab thickness; tortoise shell has no cap.
+        var ivory_layer_y: f32 = 0.172;
+        if (is_plastic) { ivory_layer_y = 0.042; }
+        if (is_tortoise) { ivory_layer_y = 0.172; }
+        let ivory_band = smoothstep(
+            ivory_layer_y - ivory_band_softness,
+            ivory_layer_y + ivory_band_softness,
+            in.local_pos.y,
+        ) * select(0.0, 1.0, in.local_n.y > -0.25);
 
-    // ── Plastic (mat 1) ─────────────────────────────────────────────────
-    // Translucent kelly-green body with a bright white face cap.
-    // The body colour is saturated green; a depth-dependent lighten
-    // fakes the look of light passing through the translucent plastic,
-    // brighter near the top cap where the slab is thinnest.
-    let plastic_face = vec3<f32>(0.97, 0.97, 0.96);
-    let kelly = vec3<f32>(0.0, 0.35, 0.18);
-    // Depth-fade: fragments closer to the top (higher local_pos.y) are
-    // lighter, simulating light scattering through the translucent body.
-    let depth_t = smoothstep(-0.21, 0.17, in.local_pos.y);
-    let translucent_lighten = vec3<f32>(0.18, 0.22, 0.14) * depth_t;
-    let plastic_body_base = kelly + translucent_lighten;
-    // Faint mould-line variation so the sides aren't a solid slab of colour.
-    let pn = vnoise2(vec2<f32>(in.local_pos.x * 12.0, in.local_pos.z * 12.0));
-    let plastic_body = plastic_body_base * (0.96 + 0.08 * pn);
-    // White cap wraps around the top bevel.
-    let plastic_side = mix(plastic_body, plastic_face, ivory_band);
-    let plastic_rgb = select(plastic_side, plastic_face, is_front);
+        // ── Bamboo & Ivory (mat 0) ──────────────────────────────────────
+        let ivory = vec3<f32>(0.96, 0.93, 0.84);
+        let bamboo = bamboo_albedo(in.local_pos, normalize(in.local_n));
+        let bamboo_body = mix(bamboo, ivory, ivory_band);
+        let bamboo_rgb = select(bamboo_body, ivory, is_front);
 
-    // ── Tortoise shell (mat 2) ──────────────────────────────────────────
-    // Blonde bekko: honey-amber keratin with dark mahogany blotches.
-    // The whole tile is cut from one slab so the face and sides share
-    // the same procedural albedo — the face just reads as slightly
-    // polished (a touch lighter, with damped mottle contrast) so the
-    // decal remains legible.
-    let tortoise_body = tortoise_albedo(in.local_pos, cam.tile_seed);
-    // Polished face: the blotches are the whole point of the material,
-    // so the face shows them at nearly full intensity. A slight lift
-    // toward the honey mean keeps the decal readable over darker patches
-    // without washing the mottle out.
-    let honey_mean = vec3<f32>(0.68, 0.42, 0.16);
-    let tortoise_face = mix(tortoise_body, honey_mean, 0.20);
-    let tortoise_side = mix(tortoise_body, tortoise_face, ivory_band);
-    let tortoise_rgb = select(tortoise_side, tortoise_face, is_front);
+        // ── Plastic (mat 1) ─────────────────────────────────────────────
+        let plastic_face = vec3<f32>(0.97, 0.97, 0.96);
+        let kelly = vec3<f32>(0.0, 0.35, 0.18);
+        let depth_t = smoothstep(-0.21, 0.17, in.local_pos.y);
+        let translucent_lighten = vec3<f32>(0.18, 0.22, 0.14) * depth_t;
+        let plastic_body_base = kelly + translucent_lighten;
+        let pn = vnoise2(vec2<f32>(in.local_pos.x * 12.0, in.local_pos.z * 12.0));
+        let plastic_body = plastic_body_base * (0.96 + 0.08 * pn);
+        let plastic_side = mix(plastic_body, plastic_face, ivory_band);
+        let plastic_rgb = select(plastic_side, plastic_face, is_front);
 
-    // Select material.
-    var base_rgb = bamboo_rgb;
-    if (is_plastic) { base_rgb = plastic_rgb; }
-    if (is_tortoise) { base_rgb = tortoise_rgb; }
+        // ── Tortoise shell (mat 2) ──────────────────────────────────────
+        let tortoise_body = tortoise_albedo(in.local_pos, cam.tile_seed, normalize(in.local_n));
+        let honey_mean = vec3<f32>(0.72, 0.48, 0.18);
+        // Keep most of the shell mottle on the face — heavy flattening made every tile read identical.
+        let tortoise_face = mix(tortoise_body, honey_mean, 0.06);
+        let tortoise_side = mix(tortoise_body, tortoise_face, ivory_band);
+        let tortoise_rgb = select(tortoise_side, tortoise_face, is_front);
 
-    // Project decal UVs from model-space position onto the front face.
-    // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
-    // by the renderer); local Z is the short axis (extent 0.734, screen-horizontal).
-    // Decal U follows local Z (horizontal on the face) and V follows local X
-    // (vertical). Invert U only so atlas glyphs match left-to-right reading;
-    // full `(1-u, 1-v)` over-corrects and mirrors the face horizontally.
-    let raw_u = in.local_pos.z * 1.362 + 0.5;
-    let raw_v = in.local_pos.x + 0.5;
-    let decal_uv_face = vec2<f32>(1.0 - raw_u, raw_v);
-    let decal_uv = decal_uv_face * cam.decal_atlas_uv.zw + cam.decal_atlas_uv.xy;
-    let decal = textureSample(decal_tex, base_sampler, decal_uv);
-    let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
-    let decal_a = select(0.0, decal.a, is_front && in_uv);
-    let decal_rgb = decal.rgb;
-
-    // ── Carved-groove engraving (same technique as plaque text) ─────────
-    // Treat decal alpha as a heightmap: 0 = flush ivory/plastic surface,
-    // 1 = bottom of the carved channel. Finite-difference gradient gives
-    // groove-wall normals that catch candlelight from one side and shadow
-    // the other, exactly like CNC-routed tile faces.
-    var carve_dhdu = 0.0;
-    var carve_dhdv = 0.0;
-    if (is_front && in_uv) {
-        let dim_d = vec2<f32>(textureDimensions(decal_tex, 0));
-        let tx = vec2<f32>(1.0 / max(dim_d.x, 1.0), 1.0 / max(dim_d.y, 1.0));
-        let a_l = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(-tx.x, 0.0), 0.0).a;
-        let a_r = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>( tx.x, 0.0), 0.0).a;
-        let a_d = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0, -tx.y), 0.0).a;
-        let a_u = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0,  tx.y), 0.0).a;
-        let carve_bump = 3.0;
-        carve_dhdu = (a_r - a_l) * carve_bump;
-        carve_dhdv = (a_u - a_d) * carve_bump;
+        base_rgb = bamboo_rgb;
+        if (is_plastic) { base_rgb = plastic_rgb; }
+        if (is_tortoise) { base_rgb = tortoise_rgb; }
     }
 
-    // Groove-floor darkening: the carved recess is slightly shadowed by
-    // the groove walls before the paint/ink is laid in.
-    let groove = smoothstep(0.05, 0.35, decal_a);
-    var rgb = mix(base_rgb, base_rgb * 0.55, groove);
-    // Composite the decal colour on top of the darkened groove.
-    rgb = mix(rgb, decal_rgb, decal_a);
+    // Tile decal projection + groove normals — skipped for shop env (kind 4) only.
+    var carve_dhdu = 0.0;
+    var carve_dhdv = 0.0;
+    var rgb: vec3<f32>;
+    if (use_textured_env) {
+        rgb = base_rgb;
+    } else {
+        // Project decal UVs from model-space position onto the front face.
+        // The mesh's long face axis is local X (extent 1.0, mapped to screen-vertical
+        // by the renderer); local Z is the short axis (extent 0.734, screen-horizontal).
+        // Decal U follows local Z (horizontal on the face) and V follows local X
+        // (vertical). Invert U only so atlas glyphs match left-to-right reading;
+        // full `(1-u, 1-v)` over-corrects and mirrors the face horizontally.
+        let raw_u = in.local_pos.z * 1.362 + 0.5;
+        let raw_v = in.local_pos.x + 0.5;
+        let decal_uv_face = vec2<f32>(1.0 - raw_u, raw_v);
+        let decal_uv = decal_uv_face * cam.decal_atlas_uv.zw + cam.decal_atlas_uv.xy;
+        let decal = textureSample(decal_tex, base_sampler, decal_uv);
+        let in_uv = decal_uv_face.x >= 0.0 && decal_uv_face.x <= 1.0 && decal_uv_face.y >= 0.0 && decal_uv_face.y <= 1.0;
+        let decal_a = select(0.0, decal.a, is_front && in_uv);
+        let decal_rgb = decal.rgb;
+
+        // ── Carved-groove engraving (same technique as plaque text) ─────────
+        // Treat decal alpha as a heightmap: 0 = flush ivory/plastic surface,
+        // 1 = bottom of the carved channel. Finite-difference gradient gives
+        // groove-wall normals that catch candlelight from one side and shadow
+        // the other, exactly like CNC-routed tile faces.
+        if (is_front && in_uv) {
+            let dim_d = vec2<f32>(textureDimensions(decal_tex, 0));
+            let tx = vec2<f32>(1.0 / max(dim_d.x, 1.0), 1.0 / max(dim_d.y, 1.0));
+            let a_l = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(-tx.x, 0.0), 0.0).a;
+            let a_r = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>( tx.x, 0.0), 0.0).a;
+            let a_d = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0, -tx.y), 0.0).a;
+            let a_u = textureSampleLevel(decal_tex, base_sampler, decal_uv + vec2<f32>(0.0,  tx.y), 0.0).a;
+            let carve_bump = 3.0;
+            carve_dhdu = (a_r - a_l) * carve_bump;
+            carve_dhdv = (a_u - a_d) * carve_bump;
+        }
+
+        // Groove-floor darkening: the carved recess is slightly shadowed by
+        // the groove walls before the paint/ink is laid in.
+        let groove = smoothstep(0.05, 0.35, decal_a);
+        rgb = mix(base_rgb, base_rgb * 0.55, groove);
+        // Composite the decal colour on top of the darkened groove.
+        rgb = mix(rgb, decal_rgb, decal_a);
+    }
 
     // ── Point-light pass ────────────────────────────────────────────────
     // Accumulate candle / point-light contributions on top of the base
@@ -365,21 +472,30 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // term against the world-space normal so the side bevel facing a candle
     // gets the most warmth. Lighting tints existing colour (rgb * contrib)
     // instead of overwriting it, so the tile's albedo still reads through.
-    var n_world = normalize(in.wn);
-    if (!front_facing) {
-        n_world = -n_world;
-    }
-
-    // Apply carved-groove normal perturbation from the decal alpha gradient.
-    // The front face normal is +Y in local space, so the tangent basis is
-    // X/Z — the perturbation tilts the normal sideways along those axes so
-    // groove walls catch the candlelight.
-    let edge_mag = abs(carve_dhdu) + abs(carve_dhdv);
-    if (edge_mag > 0.001) {
-        let perturbed_local = normalize(vec3<f32>(-carve_dhdu, 1.0, -carve_dhdv));
-        let perturbed_world = normalize((cam.model * vec4<f32>(perturbed_local, 0.0)).xyz);
-        let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
-        n_world = normalize(mix(n_world, perturbed_world, blend_edge));
+    var n_world: vec3<f32>;
+    if (use_textured_albedo) {
+        // glTF / OpenGL tangent-space normal (+Y up in TS); RGB linear unpacked.
+        let nm = textureSample(normal_tex, base_sampler, in.uv_emr).rgb * 2.0 - 1.0;
+        var Ngeom = normalize(in.wn);
+        if (!front_facing) {
+            Ngeom = -Ngeom;
+        }
+        let T = normalize(in.t_w);
+        let B = normalize(in.b_w);
+        n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
+    } else {
+        n_world = normalize(in.wn);
+        if (!front_facing) {
+            n_world = -n_world;
+        }
+        // Carved-groove normal perturbation from decal alpha gradient.
+        let edge_mag = abs(carve_dhdu) + abs(carve_dhdv);
+        if (edge_mag > 0.001) {
+            let perturbed_local = normalize(vec3<f32>(-carve_dhdu, 1.0, -carve_dhdv));
+            let perturbed_world = normalize((cam.model * vec4<f32>(perturbed_local, 0.0)).xyz);
+            let blend_edge = clamp(edge_mag * 1.5, 0.0, 1.0);
+            n_world = normalize(mix(n_world, perturbed_world, blend_edge));
+        }
     }
 
     // Enhancement kind from base_color_factor.z:
@@ -461,8 +577,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // ── Spotlights ───────────────────────────────────────────────────────
-    // Same distance falloff as point lights, plus an angular mask that
-    // smoothsteps between the inner and outer cosines. Spotlights fold
+    // Same distance falloff as point lights, plus Khronos `KHR_lights_punctual`
+    // angular attenuation. Spotlights fold
     // into `point_contrib` so downstream material composition (blocked-
     // tile dim, hover fresnel) treats them the same as candle light.
     let spot_count = spot_lights.count.x;
@@ -481,7 +597,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let cos_a = dot(frag_dir, s.dir.xyz);
         let cos_outer = s.dir.w;
         let cos_inner = s.params.x;
-        let spot_factor = smoothstep(cos_outer, cos_inner, cos_a);
+        let spot_factor = khr_spot_angle_attenuation(cos_a, cos_inner, cos_outer);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -523,10 +639,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
     }
 
-    // Candle-only composition: tile albedo modulated purely by the
-    // accumulated point-light contribution. No directional shadow
-    // attenuation — the wicks are the only lights in the scene.
-    var lit_rgb = rgb * point_contrib + sheen_acc;
+    // Tile albedo × candle/spot contribution, modulated by the mesh shadow
+    // map so casters darken tiles on the table like the lit-mesh path.
+    // `use_textured_env` = imported shop room (`Shop.glb`): same table shadow map
+    // mismatch as `shop_glb.wgsl` — skip gameplay shadow for that path only.
+    let mesh_shadow_vis = sample_shadow_visibility(in.world_pos);
+    let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env);
+    var lit_rgb = (rgb * point_contrib + sheen_acc) * mesh_shadow;
 
     // Tortoise shell: warm amber Fresnel rim at grazing angles.
     // Scaled by the local candle contribution so the rim only blooms
@@ -535,7 +654,16 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let edge = 1.0 - ndv_global;
         let rim = pow(edge, 3.0) * 0.35;
         let rim_tint = vec3<f32>(0.95, 0.60, 0.22);
-        lit_rgb = lit_rgb + rim_tint * rim * point_contrib;
+        lit_rgb = lit_rgb + rim_tint * rim * point_contrib * mesh_shadow;
+    }
+
+    // glTF metallic–roughness + emissive (linear), sampled on `uv_emr`.
+    if (use_textured_albedo) {
+        let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
+        let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
+        let emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
+        lit_rgb = lit_rgb * (1.0 - metallic * 0.78);
+        lit_rgb = lit_rgb + emissive;
     }
 
     // ── Blocked-tile dimming (solitaire) ───────────────────────────
@@ -569,6 +697,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    let out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
-    return vec4<f32>(out_rgb, 1.0);
+    var out_rgb: vec3<f32>;
+    if (cam.hdr_tonemap.x > 0.5) {
+        var hdr = lit_rgb + cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
+        hdr = hdr * cam.hdr_tonemap.y;
+        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+    } else {
+        out_rgb = pow(lit_rgb, vec3<f32>(inv_g));
+    }
+    return vec4<f32>(out_rgb, out_alpha);
 }

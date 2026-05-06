@@ -10,13 +10,6 @@
 //!
 //! There are no stages, no z-indexes, no overlay-split indices. Modals,
 //! tooltips, and pause menus are just "more cmds pushed at the end."
-//!
-//! ## Markers
-//!
-//! `FluidSmoke` is a marker that the renderer expands into pipeline-specific
-//! draws. It obeys the same ordering rule: a marker draws *between* whatever
-//! was pushed before and after it. Scenes place it in declarative order
-//! alongside ordinary cmds.
 
 use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
@@ -101,21 +94,41 @@ impl CameraParams {
             fovy_deg: 55.0,
         }
     }
+
+    /// Project a world point to layout pixels (same contract as the internal render camera).
+    pub fn project_world_to_screen(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        world: glam::Vec3,
+    ) -> (f32, f32) {
+        let aspect = window_w / window_h.max(1e-6);
+        let eye = glam::Vec3::from_array(self.eye);
+        let target = glam::Vec3::from_array(self.target);
+        let up = glam::Vec3::from_array(self.up);
+        let view = glam::Mat4::look_at_rh(eye, target, up);
+        let proj =
+            glam::Mat4::perspective_rh(self.fovy_deg.to_radians(), aspect, 1.0, window_h * 12.0);
+        let view_proj = proj * view;
+        let clip = view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
+        let inv_w = 1.0 / clip.w.max(1e-6);
+        let nx = clip.x * inv_w;
+        let ny = clip.y * inv_w;
+        let sx = (nx * 0.5 + 0.5) * window_w;
+        let sy = (1.0 - (ny * 0.5 + 0.5)) * window_h;
+        (sx, sy)
+    }
 }
 
 /// Packs `(pixel_x, pixel_y, lift)` for a point in **world space** (`lift` is **+Z** above the felt).
 /// Consumed by [`crate::render::world_space::pixel_to_world`].
 pub type WorldSurfaceAnchor = [f32; 3];
 
-/// One soft wind impulse to inject into the volumetric smoke sim this frame.
+/// One soft wind impulse sampled by the procedural candle-flame particle system.
 ///
 /// Coordinates use the same `(pixel_x, pixel_y)` convention as the rest of the
-/// scene draw output: the renderer projects them onto the felt plane (`z ≈ 0`, with
-/// the optional `lift_px` height) using [`crate::render::world_space::pixel_to_world`] before
-/// queueing the impulse on the fluid sim. Velocity is in **world** units (same
-/// frame as [`crate::render::world_space`]): **+Z** is up from the felt; along the
-/// felt, larger layout **py** (nearer the player / bottom of screen) maps to more
-/// **negative world y** (see [`crate::render::world_space::pixel_to_world`]).
+/// scene draw output: [`crate::render::world_space::pixel_to_world`] maps the
+/// center to world space. Velocity is in **world** units (**+Z** up from the felt).
 #[derive(Clone, Copy, Debug)]
 pub struct WindGust {
     /// `(pixel_x, pixel_y)` center of the gust in layout-pixel space.
@@ -126,26 +139,9 @@ pub struct WindGust {
     pub velocity: [f32; 3],
     /// Impulse radius in world units.
     pub radius: f32,
-    /// Density delta to add at the impulse center. Negative values pull
-    /// existing smoke apart; small positive values trail a faint puff.
+    /// Gameplay still supplies this for scripted gusts; flame bending uses `velocity` only.
+    #[allow(dead_code)]
     pub density: f32,
-}
-
-/// Opaque occluder sampled by the smoke lightbake so the object casts a
-/// soft shadow through the volume. Positions are pixel-space (same
-/// convention as `WindGust`): the renderer maps pixel x/y to the felt
-/// plane and uses `lift` as world **+Z**. Only a handful are uploaded per
-/// frame, so the list is intentionally tiny.
-#[derive(Clone, Copy, Debug)]
-pub struct BugOccluder {
-    /// `(pixel_x, pixel_y)` of the occluder center.
-    pub center_px: (f32, f32),
-    /// Height in world **+Z** above the felt.
-    pub lift: f32,
-    /// Gaussian radius in world units — controls shadow softness.
-    pub radius: f32,
-    /// Strength multiplier (density-equivalent). Higher = darker shadow.
-    pub strength: f32,
 }
 
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
@@ -275,6 +271,14 @@ pub struct TileFaceQuad {
     pub inst: GpuInstance,
 }
 
+/// Kenney-style input prompt drawn as a tinted image quad (`shaders/image_quad.wgsl`).
+#[derive(Clone, Copy, Debug)]
+pub struct PromptIconQuad {
+    pub inst: GpuInstance,
+    /// Path relative to `assets/` (embedded); selects the cached raster.
+    pub asset_rel_path: &'static str,
+}
+
 /// One shrine placement (used by the pick-blind scene to draw the three
 /// blind shrines side by side, each scaled by `extents`). Geometry is the
 /// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
@@ -297,27 +301,25 @@ pub struct ShrinePlacement {
 
 // ── General-purpose 3D placement ─────────────────────────────────────────
 
-/// Rotation matrix for an [`Object3d`].  Scenes compose this directly using
-/// [`glam::Mat4`] rotation constructors — no implicit axis order is assumed.
-///
-/// ```no_run
-/// // Flat panel facing the camera (pitch only):
-/// use glam::Mat4;
-/// let pitch = camera_facing_rotation(cam.eye, cam.target);
-/// // Extra yaw: multiply on the left (applied after pitch).
-/// let rot = Mat4::from_rotation_z(yaw_rad) * pitch;
-/// ```
-pub type Rotation3d = glam::Mat4;
+/// Euler **XYZ** radians for [`Object3d::rotation`] — same convention as
+/// [`ShowcaseTilePlacement::rotation`] and [`crate::render::table_transform::rot_euler_xyz_rad`].
+pub type Object3dEuler = [f32; 3];
 
-/// Returns a rotation [`Mat4`] that pitches a +Z-normal flat mesh to face
-/// the given camera.  Equivalent to the formula wood tablets have always used.
-///
-/// Compose additional rotations by multiplying on the left:
-/// `extra_rot * camera_facing_rotation(eye, target)`.
-pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam::Mat4 {
+/// Pitch-only euler so a **+Z-normal** panel faces the camera (wood plaques, shop slabs, …).
+#[inline]
+pub fn camera_facing_euler_xyz_rad(cam_eye: [f32; 3], look_target: [f32; 3]) -> Object3dEuler {
     let look = glam::Vec3::from(look_target) - glam::Vec3::from(cam_eye);
-    let pitch_deg = look.z.atan2(look.y.abs()).to_degrees() + 180.0;
-    glam::Mat4::from_rotation_x(pitch_deg.to_radians())
+    let pitch = look.z.atan2(look.y.abs()) + std::f32::consts::PI;
+    [pitch, 0.0, 0.0]
+}
+
+/// [`Mat4`] view of [`camera_facing_euler_xyz_rad`] — for legacy compose-on-left math.
+///
+/// Prefer storing [`Object3dEuler`] via [`camera_facing_euler_xyz_rad`] on new code paths.
+#[inline]
+pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam::Mat4 {
+    let e = camera_facing_euler_xyz_rad(cam_eye, look_target);
+    glam::Mat4::from_rotation_x(e[0])
 }
 
 /// Mesh-specific data carried alongside the common [`Object3d`] fields.
@@ -438,15 +440,6 @@ pub enum Object3dKind {
     // (ShopActionProp is now modeled as `Primitive { shape:
     // ShopActionProp, material: Plain + GoldGilded Fixed decal }`.
     // Disabled callers pre-apply an alpha of 0.45 to `obj.color[3]`.)
-    /// Sell-return tray on the counter far-left end.
-    SellTray { pick_id: Option<u32> },
-    /// Overhead shop lamp — brass pole + conical shade (body mesh) plus a
-    /// glass bulb.  The scene should also push a warm `PointLight` at the
-    /// bulb position via `UiFrame::point_lights` (or `own_light`).
-    ///
-    /// `glow` drives the bulb brightness envelope \[0, 1\]; 1.0 = full lamp-on
-    /// emission boost on the glass material.
-    ShopLamp { glow: f32 },
     /// Floating 3D extruded-glyph score popup ("+50", "×3", "=12500"). The
     /// renderer lazily builds a per-string mesh on first use and reuses it
     /// on subsequent frames. `Object3d::pos` sets the popup center;
@@ -498,26 +491,11 @@ pub enum Object3dKind {
         /// Which counter this fan represents (drives arrange-name + peg_rects slot).
         kind: TallyFanKind,
     },
-    /// One hovering insect near the lamp.  The scene emits one `Bug` per bug
-    /// per frame, with `slot` ∈ `0..MAX_BUG_SLOTS` identifying the instance
-    /// buffer entry.  `rotation` orients the body so +X faces the orbit tangent.
-    /// Body and wings share the same `pos` / `extents` / `rotation`.
+    /// One hovering insect near a light source (e.g. shop lamp). The scene emits
+    /// one `Bug` per insect per frame, with `slot` ∈ `0..MAX_BUG_SLOTS`.
     ///
-    /// `flap_rad` is the per-frame wing flap angle in radians about the body's
-    /// local +X axis. The left wing rotates by `+flap_rad` and the right wing
-    /// (drawn from the same mesh with mirrored Y) by `-flap_rad`, so the two
-    /// counter-sweep like a real moth. Zero = wings horizontal.
-    ///
-    /// `live_wing_alpha` ∈ [0, 1] scales the crisp live-wing material alpha.
-    /// The scene drops this near mid-stroke (where the real wing would be a
-    /// blur on a 1/60 s exposure) and raises it at the turnarounds so the
-    /// sharp silhouette reads.
-    ///
-    /// `blur_alpha` ∈ [0, 1] scales the swept-fan blur-surrogate mesh's
-    /// material alpha. Peaks near mid-stroke (where the angular speed is
-    /// highest) and fades to 0 at the turnarounds, the visual inverse of
-    /// `live_wing_alpha`. Together they produce a moth that reads like a
-    /// photograph: a crisp body flanked by blurred wing fans.
+    /// `flap_rad` is the wing flap angle in radians about the body's local +X.
+    /// `live_wing_alpha` / `blur_alpha` cross-fade crisp wings vs motion-blur fans.
     Bug {
         slot: usize,
         flap_rad: f32,
@@ -555,8 +533,8 @@ pub enum Object3dKind {
 ///
 /// Replaces all individual `XxxPlacement` structs for objects rendered through
 /// the `lit_mesh_pipeline`.  Scenes set `pos`, `extents`, and `rotation`
-/// directly — use [`camera_facing_rotation`] when the face should track the
-/// active camera.
+/// as Euler **XYZ** radians — same as [`ShowcaseTilePlacement::rotation`].
+/// Use [`camera_facing_euler_xyz_rad`] when the face should track the camera.
 #[derive(Clone, Debug)]
 
 pub struct Object3d {
@@ -565,10 +543,9 @@ pub struct Object3d {
     pub pos: [f32; 3],
     /// Full extents `(width, height, depth)` in world units.
     pub extents: [f32; 3],
-    /// Rotation matrix. Build with [`glam::Mat4`] rotation constructors and
-    /// compose with `*`. Use [`camera_facing_rotation`] for camera-facing panels.
-    /// [`glam::Mat4::IDENTITY`] = no rotation.
-    pub rotation: Rotation3d,
+    /// Euler **XYZ** radians — [`crate::render::table_transform::rot_euler_xyz_rad`].
+    /// `[0.0, 0.0, 0.0]` = no rotation.
+    pub rotation: Object3dEuler,
     /// Base tint (linear RGBA). `[1.0, 1.0, 1.0, 1.0]` = mesh default color.
     pub color: [f32; 4],
     /// Which mesh + material to render, plus mesh-specific payload.
@@ -598,6 +575,18 @@ pub struct Object3d {
     ///
     /// `None` = object is not arrangeable via the debug picker.
     pub arrange_name: Option<&'static str>,
+}
+
+impl Object3d {
+    /// [`Mat4`] for this instance's euler triple (what the renderer multiplies into `translate_rot_scale`).
+    #[inline]
+    pub fn rotation_matrix(&self) -> glam::Mat4 {
+        crate::render::table_transform::rot_euler_xyz_rad(
+            self.rotation[0],
+            self.rotation[1],
+            self.rotation[2],
+        )
+    }
 }
 
 /// One drawable element in a `UiFrame`.
@@ -646,8 +635,13 @@ pub enum DrawCmd {
     /// instanced from the renderer's pre-allocated coin slot pool. Used by
     /// the shop scene to display the player's gold as a pile of coins in a
     /// dish.
-    /// Fluid smoke overlay. Renderer owns the simulation state.
-    FluidSmoke,
+    /// Imported `Shop.glb` room mesh (tile-textured pipeline, world-space vertices).
+    ShopEnvironment,
+    /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
+    /// draws (same camera) composite by depth among themselves but no longer test
+    /// against geometry drawn before this marker — e.g. pack celebration meshes over
+    /// the shop room without hiding the room in color.
+    ClearSceneDepth,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
@@ -665,6 +659,8 @@ pub enum DrawCmd {
     Flame(GpuInstance),
     /// Rasterized text label.
     Text(TextLabel),
+    /// Embedded SVG prompt icon (Kenney); rasterized once per `asset_rel_path`.
+    PromptIconQuad(PromptIconQuad),
     // ── Skeuomorphic gameplay HUD ──
     /// Batch of wood action tablets (sort suit / sort rank / play).
     /// Floating 3D extruded-glyph score popups. Each placement carries its
@@ -704,34 +700,25 @@ pub struct UiFrame {
     /// Drawn back-to-front in order. Push earlier = renders under.
     pub cmds: Vec<DrawCmd>,
 
-    /// Active point lights this frame. Uploaded to the tile pipeline so the
-    /// 3D hand-tile shader can apply candle / spot illumination.
+    /// Gameplay / artist-tuned point lights (smooth radius falloff in `lit_mesh`).
     pub point_lights: Vec<PointLight>,
-    /// Active spotlights this frame. Only sampled by the tile pipeline (not
-    /// the lit_mesh or smoke shaders). Use for focused visual highlights
+    /// Shop only: embedded `KHR_lights_punctual` points from `Shop.glb` — separate GPU buffer;
+    /// `lit_mesh` applies glTF inverse-square falloff. Empty outside shop glTF lighting.
+    pub shop_gltf_point_lights: Vec<PointLight>,
+    /// Active spotlights this frame. Sampled by the tile pipeline; not by
+    /// `lit_mesh`. Use for focused visual highlights
     /// on specific tiles — e.g. hint indicators pooling green on a tile face.
     pub spot_lights: Vec<SpotLight>,
     /// How many of the leading entries in `point_lights` are candle lights
-    /// (as opposed to hint lights, spot lights, etc.). The volumetric flame
-    /// emission in the lightbake shader only fires for the first
-    /// `candle_light_count` lights.
+    /// (as opposed to hint lights, spot lights, etc.).
     pub candle_light_count: u32,
     /// Candle flame height in world units (derived from mm via `Layout::mm`).
-    /// Passed to the volumetric lightbake shader so the analytic flame
-    /// envelope is physically sized.
     pub flame_height_world: f32,
     /// Mouse cursor position in pixel coordinates, if the scene tracks one.
-    /// The renderer projects this onto the table plane and feeds it into the
-    /// volumetric smoke sim as a continuous wind impulse.
     pub cursor_pos: Option<(f32, f32)>,
-    /// Discrete wind impulses to inject into the smoke sim this frame, on
-    /// top of the per-cursor wind. Used by gameplay to "blow" smoke off the
-    /// hand strip a few seconds after dealing.
+    /// Discrete wind impulses for candle flame particles (see [`WindGust`]).
+    /// Gameplay uses these for scripted "breath" across the table after dealing.
     pub wind_gusts: Vec<WindGust>,
-    /// Soft shadow casters for the smoke lightbake. Each entry Gaussian-
-    /// splats optical depth into the per-light shadow ray so the bug
-    /// (or whatever) darkens smoke behind it along the candle direction.
-    pub bug_occluders: Vec<BugOccluder>,
     /// Optional 3D camera override. When `Some`, the renderer uses this
     /// camera (eye/target/up/fovy) for all 3D draws this frame instead of
     /// the default "person at the table" gameplay camera. The shop scene
@@ -762,6 +749,10 @@ pub struct UiFrame {
     /// (0 = top, 1 = bottom). Overrides volumetric `haze_horizon_y` for this
     /// frame; sourced from gameplay scene layout `fog_wall.ny`.
     pub gameplay_fog_wall_horizon_y: Option<f32>,
+    /// Gameplay only: horizontal center of the fog slab in normalized screen X
+    /// (0 = left, 1 = right). From `fog_wall.nx`; drives `set_haze_tuning` with
+    /// [`GAMEPLAY_FOG_WALL_HALF_WIDTH_UV`](crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV).
+    pub gameplay_fog_wall_center_x: Option<f32>,
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
@@ -777,6 +768,8 @@ pub struct UiFrame {
     /// window cut through the page mesh into a live render of the
     /// post-transition scene.
     pub journal_prepass_frame: Option<Box<UiFrame>>,
+    /// Draw `Shop.glb` with `shop_glb.wgsl` (glTF punctual + ACES) instead of `tile_3d.wgsl`.
+    pub shop_env_gltf_punctual: bool,
 }
 
 impl UiFrame {
@@ -784,12 +777,12 @@ impl UiFrame {
         Self {
             cmds: Vec::new(),
             point_lights: Vec::new(),
+            shop_gltf_point_lights: Vec::new(),
             spot_lights: Vec::new(),
             candle_light_count: 0,
             flame_height_world: 0.0,
             cursor_pos: None,
             wind_gusts: Vec::new(),
-            bug_occluders: Vec::new(),
             camera_override: None,
             debug_axes: false,
             tile_material_override: None,
@@ -800,12 +793,22 @@ impl UiFrame {
             fisheye_strength: 0.0,
             journal_prepass_frame: None,
             gameplay_fog_wall_horizon_y: None,
+            gameplay_fog_wall_center_x: None,
+            shop_env_gltf_punctual: false,
         }
     }
 
     // ── Push helpers ────────────────────────────────────────────────────
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
+    }
+    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/Shop.glb). No-op if the asset failed to load.
+    pub fn shop_environment(&mut self) {
+        self.cmds.push(DrawCmd::ShopEnvironment);
+    }
+    /// See [`DrawCmd::ClearSceneDepth`].
+    pub fn clear_scene_depth(&mut self) {
+        self.cmds.push(DrawCmd::ClearSceneDepth);
     }
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
@@ -827,9 +830,6 @@ impl UiFrame {
     }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
-    }
-    pub fn fluid_smoke(&mut self) {
-        self.cmds.push(DrawCmd::FluidSmoke);
     }
     pub fn table(&mut self) {
         self.cmds.push(DrawCmd::Table);
@@ -874,6 +874,11 @@ impl UiFrame {
             .extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
     }
 
+    pub fn prompt_icon_quads<I: IntoIterator<Item = PromptIconQuad>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::PromptIconQuad));
+    }
+
     /// Apply a global alpha multiplier to every queued cmd's color.
     /// Used by the main loop for scene transition fades.
     pub fn apply_alpha(&mut self, alpha: f32) {
@@ -884,6 +889,7 @@ impl UiFrame {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
+                DrawCmd::PromptIconQuad(icon) => icon.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally
@@ -897,7 +903,8 @@ impl UiFrame {
                 | DrawCmd::MoonlitWater
                 | DrawCmd::SunlitWater
                 | DrawCmd::ShootingStarCascade
-                | DrawCmd::FluidSmoke
+                | DrawCmd::ShopEnvironment
+                | DrawCmd::ClearSceneDepth
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)

@@ -86,7 +86,10 @@ impl WgpuRenderer {
                 let tilt_deg = -25.0_f32;
                 let model = translate_rot_scale(
                     center,
-                    rot_rz_rx_deg(tilt_deg, t.rotation_z_deg),
+                    rot_fixed_axes_deg_matrix(
+                        Mat4::from_rotation_z(t.rotation_z_deg.to_radians())
+                            * Mat4::from_rotation_x(tilt_deg.to_radians()),
+                    ),
                     glam::Vec3::new(t.extents[0], t.extents[1], t.extents[2]),
                 );
                 let model = self.apply_arrange_override("gameplay.hand.yaku_tablet", model);
