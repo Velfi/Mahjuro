@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Extract the section for a given version from CHANGELOG.md.
 
-Used by the GitHub Actions release workflow to populate release body text.
+For a single section only. GitHub releases use `aggregate_release_notes.py`
+instead (notes since the last stable version).
 
 Usage:
     python3 scripts/extract_release_notes.py <version-or-tag>
 
-Accepts either a bare version (`0.3.3`) or a tag (`v0.3.3`). Prints the
+Accepts either a bare version (`0.3.3`, `0.5.0-0`) or a tag (`v0.3.3`). Prints the
 section body (everything under the matching `## <version> — ...` heading,
 up to the next `## ` line) to stdout. Exits 1 if not found.
 """
