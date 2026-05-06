@@ -13,11 +13,14 @@
 #   --branch NAME  Set the build live on this beta branch after upload.
 #                  Default: empty (build is uploaded but not promoted; use the
 #                  Steamworks partner UI to promote).
+#   --beta         Same as --branch, but the branch name defaults to "beta"
+#                  (or STEAM_BETA_BRANCH if set). For pushing public betas.
 #   --skip-login   Don't pass +login to steamcmd; assume an existing cached
 #                  session. Useful when re-running after a successful login.
 #
 # Example:
 #   STEAM_BUILD_USER=mahjuro_ci scripts/steam-upload.sh --preview 0.4.2
+#   STEAM_BUILD_USER=mahjuro_ci scripts/steam-upload.sh --beta 0.4.2
 #   STEAM_BUILD_USER=mahjuro_ci scripts/steam-upload.sh --branch internal 0.4.2
 #
 # Environment:
@@ -30,6 +33,8 @@
 #   STEAM_DEPOT_WINDOWS  Default: 4636491
 #   STEAM_DEPOT_MACOS    Default: 4636492
 #   STEAM_DEPOT_LINUX    Default: 4636493
+#   STEAM_BETA_BRANCH    Used with --beta when you want a default other than
+#                        the branch literally named "beta" (e.g. "publicbeta").
 
 set -euo pipefail
 
@@ -37,6 +42,7 @@ set -euo pipefail
 LOCAL=0
 PREVIEW=0
 SKIP_LOGIN=0
+BETA=0
 BRANCH=""
 VERSION=""
 
@@ -45,8 +51,9 @@ while [[ $# -gt 0 ]]; do
         --local)       LOCAL=1; shift ;;
         --preview)     PREVIEW=1; shift ;;
         --skip-login)  SKIP_LOGIN=1; shift ;;
+        --beta)        BETA=1; shift ;;
         --branch)      BRANCH="$2"; shift 2 ;;
-        -h|--help)     sed -n '3,32p' "$0"; exit 0 ;;
+        -h|--help)     sed -n '3,37p' "$0"; exit 0 ;;
         -*)            echo "unknown flag: $1" >&2; exit 1 ;;
         *)
             if [[ -n "$VERSION" ]]; then
@@ -56,6 +63,14 @@ while [[ $# -gt 0 ]]; do
             VERSION="$1"; shift ;;
     esac
 done
+
+if [[ $BETA -eq 1 ]]; then
+    if [[ -n "$BRANCH" ]]; then
+        echo "error: use either --beta or --branch, not both" >&2
+        exit 1
+    fi
+    BRANCH="${STEAM_BETA_BRANCH:-beta}"
+fi
 
 if [[ -z "$VERSION" ]]; then
     echo "error: version is required (e.g. 0.4.2)" >&2
@@ -129,7 +144,15 @@ stage_local () {
             fi
             cp "$bin" "$CONTENT/linux/mahjuro"
             chmod +x "$CONTENT/linux/mahjuro"
+            local so="$REPO_ROOT/target/release/libsteam_api.so"
+            if [[ ! -f "$so" ]]; then
+                echo "error: $so not found." >&2
+                echo "       Run a release build so build.rs copies the Steam redistributable next to the binary." >&2
+                exit 1
+            fi
+            cp "$so" "$CONTENT/linux/libsteam_api.so"
             echo "staged: linux/mahjuro (from $bin)"
+            echo "staged: linux/libsteam_api.so (from $so)"
             echo "warning: --local stages only the host platform; windows/ and macos/ are empty." >&2
             ;;
         *)
@@ -156,10 +179,11 @@ stage_release () {
     unzip -q "$DOWNLOADS/mahjuro-${TAG}-windows-x86_64.zip" -d "$CONTENT/windows/"
     echo "staged: windows/mahjuro.exe"
 
-    # Linux: tar.gz contains the bare binary.
+    # Linux: tar.gz contains mahjuro + libsteam_api.so (Steamworks redistributable).
     tar -xzf "$DOWNLOADS/mahjuro-${TAG}-linux-x86_64.tar.gz" -C "$CONTENT/linux/"
     chmod +x "$CONTENT/linux/mahjuro"
     echo "staged: linux/mahjuro"
+    echo "staged: linux/libsteam_api.so (from release tarball)"
 
     # macOS: mount the DMG and copy the .app out of it (signed + notarized + stapled).
     if [[ "$(uname)" != "Darwin" ]]; then

@@ -1,12 +1,106 @@
 //! Audio system: sound effects and background music.
 //!
 //! Uses rodio for playback. Gracefully degrades if audio device is unavailable.
+//! OGG files are decoded to PCM once at load time so the device thread never
+//! runs Vorbis.
 
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use rodio::source::SeekError;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+
+/// Decoded asset: interleaved `i16` samples (same layout as [`Decoder`]).
+struct PcmClip {
+    channels: u16,
+    sample_rate: u32,
+    samples: Vec<i16>,
+}
+
+/// Cheap playback handle: [`Arc`] to shared PCM plus a cursor (no buffer copy per play).
+struct SharedPcmSource {
+    clip: Arc<PcmClip>,
+    pos: usize,
+}
+
+impl SharedPcmSource {
+    fn new(clip: Arc<PcmClip>) -> Self {
+        Self { clip, pos: 0 }
+    }
+
+    fn duration(clip: &PcmClip) -> Duration {
+        let sample_rate = clip.sample_rate as u64;
+        let channels = clip.channels.max(1) as u64;
+        let ns = 1_000_000_000u64
+            .checked_mul(clip.samples.len() as u64)
+            .unwrap_or(0)
+            / sample_rate
+            / channels;
+        Duration::new(ns / 1_000_000_000, (ns % 1_000_000_000) as u32)
+    }
+}
+
+impl Iterator for SharedPcmSource {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<i16> {
+        let s = *self.clip.samples.get(self.pos)?;
+        self.pos += 1;
+        Some(s)
+    }
+}
+
+impl Source for SharedPcmSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.clip.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.clip.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Self::duration(&self.clip))
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        let ch = self.channels() as usize;
+        let curr_channel = self.pos % ch;
+        let new_pos = (pos.as_secs_f32() * self.sample_rate() as f32 * ch as f32) as usize;
+        let new_pos = new_pos.min(self.clip.samples.len());
+        let new_pos = new_pos.next_multiple_of(ch);
+        let new_pos = new_pos.saturating_sub(curr_channel);
+        self.pos = new_pos;
+        Ok(())
+    }
+}
+
+fn decode_ogg(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
+    let cursor = Cursor::new(bytes.to_vec());
+    let decoder = Decoder::new(cursor).ok()?;
+    let channels = decoder.channels();
+    let sample_rate = decoder.sample_rate();
+    if channels == 0 || sample_rate == 0 {
+        log::warn!("decode_ogg({label}): invalid ch={channels} rate={sample_rate}");
+        return None;
+    }
+    let samples: Vec<i16> = decoder.collect();
+    if samples.is_empty() {
+        log::warn!("decode_ogg({label}): empty");
+        return None;
+    }
+    Some(Arc::new(PcmClip {
+        channels,
+        sample_rate,
+        samples,
+    }))
+}
 
 /// Sound effect identifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -326,11 +420,11 @@ const SCORE_TICK_PITCHES: [f32; 8] = [
 pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
-    sfx_data: HashMap<SfxId, Vec<u8>>,
+    sfx_data: HashMap<SfxId, Arc<PcmClip>>,
     /// Per-relic trigger samples loaded from `assets/audio/relics/<slug>.ogg`
     /// at startup. Lookup is by `RelicId`; missing entries fall back to
     /// [`SfxId::ScoreStep`] in [`AudioManager::play_relic_trigger`].
-    relic_trigger_data: HashMap<crate::core::relic::RelicId, Vec<u8>>,
+    relic_trigger_data: HashMap<crate::core::relic::RelicId, Arc<PcmClip>>,
     /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
     /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
     active_sinks: Vec<Sink>,
@@ -359,7 +453,10 @@ impl AudioManager {
         for &sfx_id in all_sfx_ids() {
             let asset_path = format!("audio/{}", sfx_id.filename());
             if let Some(file) = crate::asset_path::get(&asset_path) {
-                sfx_data.insert(sfx_id, file.data.to_vec());
+                let label = format!("{asset_path} ({sfx_id:?})");
+                if let Some(clip) = decode_ogg(&label, file.data.as_ref()) {
+                    sfx_data.insert(sfx_id, clip);
+                }
             }
         }
 
@@ -374,7 +471,10 @@ impl AudioManager {
             let slug = def.id.asset_filename().trim_end_matches(".png");
             let asset_path = format!("audio/relics/{slug}.ogg");
             if let Some(file) = crate::asset_path::get(&asset_path) {
-                relic_trigger_data.insert(def.id, file.data.to_vec());
+                let label = asset_path.clone();
+                if let Some(clip) = decode_ogg(&label, file.data.as_ref()) {
+                    relic_trigger_data.insert(def.id, clip);
+                }
             }
         }
         if !relic_trigger_data.is_empty() {
@@ -427,11 +527,11 @@ impl AudioManager {
     }
 
     fn play_sfx_with_speed(&mut self, id: SfxId, speed: f32) {
-        let Some(data) = self.sfx_data.get(&id).cloned() else {
+        let Some(clip) = self.sfx_data.get(&id).cloned() else {
             log::debug!("play_sfx({id:?}): no data");
             return;
         };
-        self.play_raw(&format!("{id:?}"), data, speed);
+        self.play_clip(&format!("{id:?}"), clip, speed);
     }
 
     /// Play the per-relic trigger stinger for `rid`. Falls back to
@@ -439,29 +539,24 @@ impl AudioManager {
     /// this relic, so new relics get a reasonable default until bespoke
     /// audio is added.
     pub fn play_relic_trigger(&mut self, rid: crate::core::relic::RelicId) {
-        if let Some(data) = self.relic_trigger_data.get(&rid).cloned() {
-            self.play_raw(&format!("Relic({rid:?})"), data, 1.0);
+        if let Some(clip) = self.relic_trigger_data.get(&rid).cloned() {
+            self.play_clip(&format!("Relic({rid:?})"), clip, 1.0);
         } else {
             self.play_sfx(SfxId::ScoreStep);
         }
     }
 
-    fn play_raw(&mut self, tag: &str, data: Vec<u8>, speed: f32) {
+    fn play_clip(&mut self, tag: &str, clip: Arc<PcmClip>, speed: f32) {
         if !self.enabled {
-            log::debug!("play_raw({tag}): disabled");
+            log::debug!("play_clip({tag}): disabled");
             return;
         }
         let Some(handle) = &self.handle else {
-            log::debug!("play_raw({tag}): no handle");
-            return;
-        };
-        let cursor = Cursor::new(data);
-        let Ok(source) = Decoder::new(cursor) else {
-            log::warn!("play_raw({tag}): decoder failed");
+            log::debug!("play_clip({tag}): no handle");
             return;
         };
         let Ok(sink) = Sink::try_new(handle) else {
-            log::warn!("play_raw({tag}): sink creation failed");
+            log::warn!("play_clip({tag}): sink creation failed");
             return;
         };
 
@@ -469,7 +564,7 @@ impl AudioManager {
         if self.active_sinks.len() >= MAX_CONCURRENT_SFX {
             let dropped = self.active_sinks.remove(0);
             log::debug!(
-                "play_raw({tag}): concurrent cap hit, dropping oldest sink (live={})",
+                "play_clip({tag}): concurrent cap hit, dropping oldest sink (live={})",
                 self.active_sinks.len() + 1,
             );
             drop(dropped);
@@ -477,9 +572,10 @@ impl AudioManager {
 
         let effective_vol = self.master_volume * self.sfx_volume;
         log::debug!(
-            "play_raw({tag}): vol={effective_vol:.2} live={}",
+            "play_clip({tag}): vol={effective_vol:.2} live={}",
             self.active_sinks.len() + 1,
         );
+        let source = SharedPcmSource::new(clip);
         let amplified = source.speed(speed).amplify(effective_vol);
         sink.append(amplified);
         self.active_sinks.push(sink);

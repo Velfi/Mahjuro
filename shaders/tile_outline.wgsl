@@ -8,18 +8,25 @@
 // uses the same candle point-light buffer the tile shader uses, so the
 // outline visibly catches candlelight as candles flicker around the table.
 
-struct CameraUniform {
+struct OutlineFrame {
     view_proj: mat4x4<f32>,
-    model: mat4x4<f32>,
-    base_color_factor: vec4<f32>,
-    cam_pos: vec3<f32>,
-    tile_seed: f32,
-    decal_atlas_uv: vec4<f32>,
-};
+    hdr_tonemap: vec4<f32>,
+}
 
-@group(0) @binding(0) var<uniform> cam: CameraUniform;
-// bindings 1..3 (textures + sampler) exist on the shared layout but are
-// unused here — the outline is a flat-coloured metal, not a textured tile.
+fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp(
+        (color * (a * color + b)) / (color * (c * color + d) + e),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
+
+@group(0) @binding(0) var<uniform> outline_frame: OutlineFrame;
 
 struct PointLight {
     pos: vec4<f32>,
@@ -33,24 +40,12 @@ struct PointLights {
 };
 @group(1) @binding(0) var<uniform> lights: PointLights;
 
-// Group 2 (shadow sampling) bindings exist on the shared tile pipeline
-// layout. The outline shell is a thin gold rim drawn before the real
-// tile mesh — it doesn't sample the shadow map (the rim is mostly
-// occluded by the tile itself), but the bindings must be declared so
-// the pipeline layout matches.
-struct ShadowGlobals {
-    light_view_proj: mat4x4<f32>,
-    params: vec4<f32>,
-};
-@group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
-@group(2) @binding(1) var shadow_map: texture_depth_2d;
-@group(2) @binding(2) var shadow_samp: sampler_comparison;
-
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) wn: vec3<f32>,
     @location(1) world_pos: vec3<f32>,
     @location(2) local_n: vec3<f32>,
+    @location(3) sel_y: f32,
 };
 
 @vertex
@@ -61,13 +56,20 @@ fn vs_main(
     @location(3) _tangent_pad: vec4<f32>,
     @location(4) _uv_emr_pad: vec2<f32>,
     @location(5) _color_pad: vec4<f32>,
+    @location(6) model_c0: vec4<f32>,
+    @location(7) model_c1: vec4<f32>,
+    @location(8) model_c2: vec4<f32>,
+    @location(9) model_c3: vec4<f32>,
+    @location(10) inst_base_color_factor: vec4<f32>,
 ) -> VsOut {
-    let world = cam.model * vec4<f32>(pos, 1.0);
+    let model = mat4x4<f32>(model_c0, model_c1, model_c2, model_c3);
+    let world = model * vec4<f32>(pos, 1.0);
     var o: VsOut;
-    o.clip_pos = cam.view_proj * world;
-    o.wn = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
+    o.clip_pos = outline_frame.view_proj * world;
+    o.wn = normalize((model * vec4<f32>(n, 0.0)).xyz);
     o.world_pos = world.xyz;
     o.local_n = n;
+    o.sel_y = inst_base_color_factor.y;
     return o;
 }
 
@@ -76,7 +78,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // base_color_factor.y encodes hover/select state:
     //   >= 0.75 → selected (warm gold rim)
     //    < 0.75 → hovered  (cool blue-white rim)
-    let sel = cam.base_color_factor.y;
+    let sel = in.sel_y;
     let base_color = select(
         vec3<f32>(0.72, 0.88, 1.00),   // hovered: cool blue-white
         vec3<f32>(1.00, 0.78, 0.34),   // selected: polished champagne gold
@@ -115,16 +117,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         contrib = contrib + lc * intensity * atten * metal;
     }
 
-    // Reference shadow bindings so naga keeps the group 2 layout entries
-    // and the pipeline layout matches the lit-tile pipeline. The actual
-    // sample is force-mixed at zero strength so it never affects the
-    // outline color.
-    let shadow_uv = vec2<f32>(0.5, 0.5);
-    let shadow_dummy = textureSampleCompare(shadow_map, shadow_samp, shadow_uv, 1.0);
-    let shadow_keep = shadow_globals.params.x * 0.0 + shadow_dummy * 0.0;
-
-    let lit = base_color * base_shade + base_color * contrib;
+    var lit = base_color * base_shade + base_color * contrib;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    let out_rgb = pow(lit, vec3<f32>(inv_g)) + vec3<f32>(shadow_keep);
+    var out_rgb: vec3<f32>;
+    if (outline_frame.hdr_tonemap.x > 0.5) {
+        var hdr = lit + outline_frame.hdr_tonemap.z * base_color * vec3<f32>(0.08);
+        hdr = hdr * outline_frame.hdr_tonemap.y;
+        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+    } else {
+        out_rgb = pow(lit, vec3<f32>(inv_g));
+    }
     return vec4<f32>(out_rgb, 1.0);
 }

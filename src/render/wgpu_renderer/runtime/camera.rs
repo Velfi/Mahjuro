@@ -108,30 +108,51 @@ impl CameraFrame {
 }
 
 impl WgpuRenderer {
+    /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
+    /// and `lit_mesh` (`SsrGlobals.felt`). Same `ShopEnvLightingTune` as the room.
+    pub(super) fn tile_hdr_tonemap(&self, _frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
+        let k = self.active_scene_key;
+        let table_like = matches!(
+            k,
+            Some("gameplay")
+                | Some("tutorial")
+                | Some("pick_blind")
+                | Some("solitaire")
+                | Some("collection")
+        );
+        let shop_scene = k == Some("shop");
+        if !(shop_scene || table_like) {
+            return [0.0; 4];
+        }
+        let linear_hdr = self.shop_env_linear_exposure
+            * if shop_scene {
+                crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE
+            } else {
+                1.0
+            };
+        [
+            1.0,
+            linear_hdr,
+            self.shop_env_ambient_scale,
+            0.0,
+        ]
+    }
+
     pub(super) fn upload_camera_uniforms(
         &self,
         cam: &CameraFrame,
         ssr_enabled: bool,
         frame: &crate::render::draw_cmd::UiFrame,
     ) {
-        // `felt.yzw` — physical HDR path for `lit_mesh.wgsl` (glTF punctual,
-        // no tile candle occlusion / no gameplay shadow map on lit_mesh,
-        // exposure + optional ambient + ACES + gamma), matching `shop_glb.wgsl`.
+        let tm = self.tile_hdr_tonemap(frame);
+        let felt_y = tm[0];
+        let felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
+        let felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+        // Document-space punctual attenuation for shop glTF only.
         let shop_lit_hdr = self.active_scene_key == Some("shop") && frame.shop_env_gltf_punctual;
-        let gameplay_lit_hdr = self.active_scene_key == Some("gameplay");
-        let phys_hdr = shop_lit_hdr || gameplay_lit_hdr;
-        let felt_y = if phys_hdr { 1.0 } else { 0.0 };
-        let felt_z = if shop_lit_hdr {
-            self.shop_env_linear_exposure
-        } else if gameplay_lit_hdr {
-            self.gameplay_lit_linear_exposure
-        } else {
-            0.0
-        };
-        let felt_w = if shop_lit_hdr {
-            self.shop_env_ambient_scale
-        } else if gameplay_lit_hdr {
-            self.gameplay_lit_ambient_scale
+        let shop_punctual_inv_doc = if shop_lit_hdr {
+            let s = crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
+            1.0 / s.max(1e-6)
         } else {
             0.0
         };
@@ -154,6 +175,7 @@ impl WgpuRenderer {
                     ssr_max_steps,
                 ],
                 felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
+                shop_punctual: [shop_punctual_inv_doc, 0.0, 0.0, 0.0],
             }),
         );
 

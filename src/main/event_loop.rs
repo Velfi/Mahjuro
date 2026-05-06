@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::scenes::shop::pick_ids::PICK_SELL_TRAY;
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -127,7 +129,7 @@ impl ApplicationHandler for App {
                             self.audio.play_sfx(audio::SfxId::ScoreFinal);
                             self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
                             self.steam
-                                .unlock_achievement(crate::steam::Achievement::FirstHand);
+                                .unlock_achievement(crate::steam::Achievement::FirstStructure);
                         }
                         GameEvent::GoldChanged { .. } => {
                             self.audio.play_sfx(audio::SfxId::CoinDrop);
@@ -675,6 +677,7 @@ impl ApplicationHandler for App {
                     transitioning: self.pending_scene.is_some(),
                     overlay_request: &mut overlay_request,
                     headless: false,
+                    effect_layers: self.effect_layers,
                 };
                 let updated_overlay = !self.overlay_stack.is_empty();
                 let update_result = if let Some(top) = self.overlay_stack.last_mut() {
@@ -1212,10 +1215,9 @@ impl ApplicationHandler for App {
                             if dist > 10.0
                                 && let Some(renderer) = self.renderer.as_ref()
                             {
-                                const SELL_TRAY_PICK: u32 = 8; // PICK_SELL_TRAY
                                 let over_sell_tray = matches!(
                                     renderer.pick_shop_object(cursor.0, cursor.1),
-                                    Some(ShopHit::Dish(id)) if id == SELL_TRAY_PICK
+                                    Some(ShopHit::Dish(id)) if id == PICK_SELL_TRAY
                                 );
                                 if over_sell_tray {
                                     self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
@@ -1380,14 +1382,9 @@ impl ApplicationHandler for App {
                                 (Some(i), true) => (i + flat.len() - 1) % flat.len(),
                             };
                             let entry = &flat[next_idx];
-                            let origin = self
-                                .renderer
-                                .as_ref()
-                                .and_then(|r| r.debug_object_origin(entry.name))
-                                .unwrap_or(glam::Vec3::ZERO);
                             self.debug.arrange_mode = Some(Some(ArrangeModeState {
                                 object_name: entry.name.to_string(),
-                                selected_world_origin: origin,
+                                selected_world_origin: glam::Vec3::ZERO,
                                 delta_px: 0.0,
                                 delta_py: 0.0,
                                 delta_lift: 0.0,

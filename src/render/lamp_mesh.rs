@@ -21,6 +21,8 @@
 //! * [`build_bug_wing_mesh`]       — flat moth-shape wing, flapped per-frame (`Glass`).
 //! * [`build_bug_wing_blur_mesh`]  — swept-fan motion-blur surrogate for the flapping wing (`Glass`).
 
+#![allow(dead_code)]
+
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 

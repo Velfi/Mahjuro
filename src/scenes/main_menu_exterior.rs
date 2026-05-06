@@ -85,7 +85,7 @@ pub(crate) fn scene_from_resume(resume_scene: ResumeScene, run: &mut RunState) -
             if GameEngine::resumes_to_tutorial_shop(run) {
                 Scene::Shop(ShopScene::new_tutorial(run))
             } else {
-                Scene::Shop(ShopScene::new(GameEngine::current_run_number(run), run))
+                Scene::Shop(ShopScene::new(run))
             }
         }
         ResumeScene::PickBlind => Scene::PickBlind(super::pick_blind::PickBlindScene::new()),
@@ -221,10 +221,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                         ctx.progress,
                         &settings,
                     );
-                    return Some(Scene::Shop(ShopScene::new(
-                        GameEngine::current_run_number(ctx.run),
-                        ctx.run,
-                    )));
+                    return Some(Scene::Shop(ShopScene::new(ctx.run)));
                 }
                 Some(HubFocus::Solitaire) => return Some(Scene::Solitaire(SolitaireScene::new())),
                 Some(HubFocus::MeldGuide) => {

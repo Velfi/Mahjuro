@@ -17,12 +17,12 @@ use crate::game::run::RunState;
 use crate::render::draw_cmd::{
     camera_facing_euler_xyz_rad, CameraParams, Object3d, Object3dKind, UiFrame,
 };
-use crate::render::lamp_mesh::{shade_exclusion_radius, BULB_Z as LAMP_BULB_LOCAL_Z, SHADE_RIM_R};
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::shop_glb::{
-    ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
-    player_relic_marker_name, shop_camera_from_glb_if_present, shop_env_world_scale, shop_glb_cpu,
-    spawn_relic_marker_name,
+    ShopEnvLightingTune, PLAYER_GOLD_DISH_MARKER, marker_translation,
+    player_consumable_marker_name, player_relic_marker_name, shop_camera_fit_fovy_for_corners,
+    shop_camera_from_glb_if_present, shop_env_world_scale, shop_world_bounds_corners_centered,
+    spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{color, metrics, typography};
@@ -89,8 +89,10 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
 
 /// True when `Shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
 fn shop_glb_has_embedded_lights() -> bool {
-    shop_glb_cpu().is_some_and(|cpu| {
-        !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
+    with_shop_glb_cpu(|opt| {
+        opt.is_some_and(|cpu| {
+            !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
+        })
     })
 }
 
@@ -128,92 +130,116 @@ fn embedded_point_lights_runtime(
     env_h: f32,
     tune: &ShopEnvLightingTune,
 ) -> Vec<PointLight> {
-    let Some(cpu) = shop_glb_cpu() else {
-        return Vec::new();
-    };
-    if cpu.embedded_point_lights.is_empty() {
-        return Vec::new();
-    }
-    let s = shop_env_world_scale(h, env_h);
-    let budget = MAX_POINT_LIGHTS.saturating_sub(2);
-    if cpu.embedded_point_lights.len() > budget {
-        log::warn!(
-            "Shop.glb: {} point lights exceed usable budget ({}) — truncating",
-            cpu.embedded_point_lights.len(),
-            budget
-        );
-    }
-    cpu.embedded_point_lights
-        .iter()
-        .take(budget)
-        .map(|l| {
-            let world = l.pos_doc * s;
-            let radius = glb_punctual_radius_upload_world(h, env_h, s, l.range_doc);
-            PointLight {
-                pos: surface_anchor_from_world_xyz(w, h, world),
-                radius,
-                color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
-            }
-        })
-        .collect()
+    with_shop_glb_cpu(|opt| {
+        let Some(cpu) = opt else {
+            return Vec::new();
+        };
+        if cpu.embedded_point_lights.is_empty() {
+            return Vec::new();
+        }
+        let s = shop_env_world_scale(h, env_h);
+        let center_doc = cpu
+            .environment_bounds_doc
+            .map(|b| b.center())
+            .unwrap_or(glam::Vec3::ZERO);
+        let budget = MAX_POINT_LIGHTS.saturating_sub(2);
+        if cpu.embedded_point_lights.len() > budget {
+            log::warn!(
+                "Shop.glb: {} point lights exceed usable budget ({}) — truncating",
+                cpu.embedded_point_lights.len(),
+                budget
+            );
+        }
+        cpu.embedded_point_lights
+            .iter()
+            .take(budget)
+            .map(|l| {
+                let world = (l.pos_doc - center_doc) * s;
+                let radius = glb_punctual_radius_upload_world(h, env_h, s, l.range_doc);
+                PointLight {
+                    pos: surface_anchor_from_world_xyz(w, h, world),
+                    radius,
+                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
+                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
+                }
+            })
+            .collect()
+    })
 }
 
 fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) -> Vec<SpotLight> {
     if !shop_glb_has_embedded_lights() {
         return Vec::new();
     }
-    let Some(cpu) = shop_glb_cpu() else {
-        return Vec::new();
-    };
-    if cpu.embedded_spot_lights.is_empty() {
-        return Vec::new();
-    }
-    let s = shop_env_world_scale(h, env_h);
-    if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
-        log::warn!(
-            "Shop.glb: {} spot lights exceed {} — truncating",
-            cpu.embedded_spot_lights.len(),
-            MAX_SPOT_LIGHTS
-        );
-    }
-    cpu.embedded_spot_lights
-        .iter()
-        .take(MAX_SPOT_LIGHTS)
-        .filter_map(|l| {
-            let dir_w = l.dir_doc.normalize_or_zero();
-            if dir_w.length_squared() < 1e-12 {
-                return None;
-            }
-            let world = l.pos_doc * s;
-            let radius = glb_punctual_radius_upload_world(h, env_h, s, l.range_doc);
-            let cos_outer = l.outer_cone_rad.cos();
-            let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
-            Some(SpotLight {
-                pos: surface_anchor_from_world_xyz(w, h, world),
-                dir: dir_w.to_array(),
-                radius,
-                cos_outer,
-                cos_inner,
-                color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
+    with_shop_glb_cpu(|opt| {
+        let Some(cpu) = opt else {
+            return Vec::new();
+        };
+        if cpu.embedded_spot_lights.is_empty() {
+            return Vec::new();
+        }
+        let s = shop_env_world_scale(h, env_h);
+        let center_doc = cpu
+            .environment_bounds_doc
+            .map(|b| b.center())
+            .unwrap_or(glam::Vec3::ZERO);
+        if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
+            log::warn!(
+                "Shop.glb: {} spot lights exceed {} — truncating",
+                cpu.embedded_spot_lights.len(),
+                MAX_SPOT_LIGHTS
+            );
+        }
+        cpu.embedded_spot_lights
+            .iter()
+            .take(MAX_SPOT_LIGHTS)
+            .filter_map(|l| {
+                let dir_w = l.dir_doc.normalize_or_zero();
+                if dir_w.length_squared() < 1e-12 {
+                    return None;
+                }
+                let world = (l.pos_doc - center_doc) * s;
+                let radius = glb_punctual_radius_upload_world(h, env_h, s, l.range_doc);
+                let cos_outer = l.outer_cone_rad.cos();
+                let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
+                Some(SpotLight {
+                    pos: surface_anchor_from_world_xyz(w, h, world),
+                    dir: dir_w.to_array(),
+                    radius,
+                    cos_outer,
+                    cos_inner,
+                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
+                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
+                })
             })
-        })
-        .collect()
+            .collect()
+    })
 }
 
-fn shop_camera_params(_scene: &ShopScene, _w: f32, h: f32, env_h: f32) -> CameraParams {
-    if let Some(cam) = shop_camera_from_glb_if_present(h, env_h) {
-        return cam;
+fn shop_camera_params(_scene: &ShopScene, w: f32, h: f32, env_h: f32) -> CameraParams {
+    let from_glb = shop_camera_from_glb_if_present(h, env_h);
+    let cam = from_glb.unwrap_or_else(|| {
+        // ref_h: 1080 — fallback when Shop.glb has no usable perspective camera (room centered at origin).
+        let cs = h / 1080_f32;
+        CameraParams {
+            eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
+            target: [0.0, 0.0, 0.0],
+            up: [0.0, 0.0, 1.0],
+            fovy_deg: 58.0,
+        }
+    });
+    // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
+    if from_glb.is_none() {
+        return with_shop_glb_cpu(|opt| {
+            if let Some(cpu) = opt {
+                let corners = shop_world_bounds_corners_centered(h, env_h, cpu);
+                shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94)
+            } else {
+                cam
+            }
+        });
     }
-    // ref_h: 1080 — fallback when Shop.glb has no usable perspective camera
-    let cs = h / 1080_f32;
-    CameraParams {
-        eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
-        target: [0.0 * cs, 1614.4 * cs, 548.0 * cs],
-        up: [0.0, 0.0, 1.0],
-        fovy_deg: 58.0,
-    }
+    cam
 }
 
 fn marker_screen_rect(
@@ -225,10 +251,103 @@ fn marker_screen_rect(
     rh: f32,
     env_height_scale: f32,
 ) -> Option<[f32; 4]> {
-    let cpu = shop_glb_cpu()?;
-    let tw = marker_translation(cpu, node_name)? * shop_env_world_scale(win_h, env_height_scale);
-    let (cx, cy) = cam.project_world_to_screen(win_w, win_h, tw);
-    Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
+    with_shop_glb_cpu(|opt| {
+        let cpu = opt?;
+        let tw = marker_translation(cpu, node_name)? * shop_env_world_scale(win_h, env_height_scale);
+        let (cx, cy) = cam.project_world_to_screen(win_w, win_h, tw);
+        Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
+    })
+}
+
+/// [`Object3d::pos`] for the gameplay-style coin pile: [`PLAYER_GOLD_DISH_MARKER`] when the room
+/// loads, otherwise [`ShopLayout::coin_dish_center_px`] with a perspective-correct lift.
+fn player_gold_dish_object3d_anchor(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+    layout: &ShopLayout,
+) -> [f32; 3] {
+    let scale = shop_env_world_scale(h, env_h);
+    if let Some(tw) = with_shop_glb_cpu(|opt| {
+        opt.and_then(|cpu| marker_translation(cpu, PLAYER_GOLD_DISH_MARKER))
+    }) {
+        let world = tw * scale;
+        return surface_anchor_from_world_xyz(w, h, world);
+    }
+    let cx = layout.coin_dish_center_px.0;
+    let cy = layout.coin_dish_center_px.1;
+    let lift = layout.mm(10.0);
+    object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, lift)
+}
+
+/// Settled metal coin cylinders matching gameplay (`animation_state` pile), without a procedural
+/// dish mesh — the GLB supplies the tray.
+fn shop_gameplay_style_gold_pile(layout: &ShopLayout, gold: u32, anchor: [f32; 3]) -> Vec<Object3d> {
+    if gold == 0 {
+        return Vec::new();
+    }
+    let coin_count = (gold as usize).min(48);
+    let coin_radius = layout.mm(11.3);
+    let coin_thickness = layout.mm(3.5).max(2.0);
+    let scatter_half = coin_radius * 3.0;
+    let pile_cx = anchor[0];
+    let pile_cy = anchor[1];
+    // Nudge above the marker / dish interior so coins don’t sink into or z-fight the GLB mesh.
+    let dish_floor_z = anchor[2] + layout.mm(3.0);
+    let overlap_r = coin_radius * 2.0;
+    let overlap_r2 = overlap_r * overlap_r;
+    const CANDIDATES_PER_COIN: u32 = 12;
+
+    use rand::rngs::StdRng;
+    use rand::{RngExt, SeedableRng};
+
+    let mut rng = StdRng::seed_from_u64(0x5EED_E0D1_D151_0001);
+    let mut coins: Vec<Object3d> = Vec::with_capacity(coin_count);
+    let mut placed: Vec<(f32, f32, f32)> = Vec::with_capacity(coin_count);
+    for _ in 0..coin_count {
+        let mut best: Option<(f32, f32, f32, f32)> = None;
+        for _ in 0..CANDIDATES_PER_COIN {
+            let lx = rng.random_range(-scatter_half..scatter_half);
+            let lz = rng.random_range(-scatter_half..scatter_half);
+            let rot_y = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
+            let mut support_y = dish_floor_z;
+            for (ox, oz, top_y) in &placed {
+                let ddx = lx - ox;
+                let ddz = lz - oz;
+                if ddx * ddx + ddz * ddz < overlap_r2 && *top_y > support_y {
+                    support_y = *top_y;
+                }
+            }
+            match best {
+                None => best = Some((lx, lz, support_y, rot_y)),
+                Some((_, _, by, _)) if support_y < by => {
+                    best = Some((lx, lz, support_y, rot_y));
+                }
+                _ => {}
+            }
+        }
+        let (lx, lz, support_y, rot_y) = best.unwrap();
+        let world_y = support_y + coin_thickness * 0.5;
+        placed.push((lx, lz, world_y + coin_thickness * 0.5));
+        coins.push(Object3d {
+            pos: [pile_cx + lx, pile_cy + lz, world_y],
+            extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
+            rotation: [0.0, rot_y, 0.0],
+            color: [1.00, 0.78, 0.30, 1.0],
+            kind: Object3dKind::Primitive {
+                shape: crate::render::primitive::MeshId::Cylinder,
+                material: crate::render::primitive::MaterialSpec::metal(),
+                pick_id: None,
+                shadow_caster: true,
+                silhouette: false,
+            },
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("shop.shelf.coin_dish"),
+        });
+    }
+    coins
 }
 
 impl SceneBehavior for ShopScene {
@@ -280,7 +399,7 @@ impl ShopScene {
         let scale = metrics::scene_scale(w, h, ui_scale);
 
         let mut frame = UiFrame::new();
-        if shop_glb_cpu().is_some() {
+        if with_shop_glb_cpu(|opt| opt.is_some()) {
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
                 color: [0.04, 0.04, 0.055, 1.0],
@@ -304,14 +423,12 @@ impl ShopScene {
                 n_for_sale_zodiacs: self.zodiac_items.len(),
                 n_for_sale_talismans: self.talisman_items.len(),
                 n_owned_relics: shop_rm.owned_relics.len(),
-                n_owned_zodiacs: shop_rm.owned_zodiacs.len(),
-                n_owned_talismans: shop_rm.owned_talismans.len(),
             },
         );
+        let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, &layout);
 
         let lp = layout.lamp_center_px;
         let lamp_mesh_h = h * 0.30;
-        let lamp_bulb_pos = [lp.0, lp.1, lp.2 + LAMP_BULB_LOCAL_Z * lamp_mesh_h];
         let tf = self.age_secs;
         let flick_fast = (tf * 37.3).sin() * 0.04 + (tf * 61.7).sin() * 0.025;
         let flick_slow = (tf * 4.1).sin() * 0.06;
@@ -336,22 +453,6 @@ impl ShopScene {
                     radius: h * 1.15,
                     color: [0.86, 0.96, 0.98],
                     intensity: 2.15 * lamp_flicker,
-                },
-                PointLight {
-                    pos: lamp_bulb_pos,
-                    radius: h * 1.30,
-                    color: [0.82, 0.94, 1.00],
-                    intensity: 2.60 * lamp_flicker,
-                },
-                PointLight {
-                    pos: [
-                        lamp_bulb_pos[0],
-                        lamp_bulb_pos[1],
-                        lamp_bulb_pos[2] - h * 0.04,
-                    ],
-                    radius: h * 0.70,
-                    color: [0.72, 0.38, 1.00],
-                    intensity: 1.80 * lamp_flicker,
                 },
             ];
             v.extend(default_fill_point_lights(w, h));
@@ -378,6 +479,13 @@ impl ShopScene {
                 )
             });
 
+        // Hover fill: full-strength when we synthesize shop lighting; with embedded
+        // `KHR_lights_punctual`, use a ~10% pool so props stay readable (see focus ring below).
+        let (hover_i_mul, hover_r_mul) = if use_glb_lights {
+            (0.10_f32, 1.08_f32)
+        } else {
+            (1.0_f32, 1.0_f32)
+        };
         if let Some(hit) = hover {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
             let n_owned_relics = shop_rm.owned_relics.len();
@@ -406,9 +514,9 @@ impl ShopScene {
                     };
                     point_lights.push(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
-                        radius: h * 0.65,
+                        radius: h * 0.65 * hover_r_mul,
                         color: [1.00, 0.92, 0.70],
-                        intensity: 3.20,
+                        intensity: 3.20 * hover_i_mul,
                     });
                 }
                 ShopHit::Ribbon(_) | ShopHit::Talisman(_) => {
@@ -417,9 +525,9 @@ impl ShopScene {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
-                            radius: h * 0.72,
+                            radius: h * 0.72 * hover_r_mul,
                             color: [1.00, 0.92, 0.74],
-                            intensity: 3.00,
+                            intensity: 3.00 * hover_i_mul,
                         });
                     }
                 }
@@ -428,14 +536,20 @@ impl ShopScene {
                         layout.relic_dish_center_px
                     } else if id == super::PICK_JOURNAL_BOOK {
                         (journal_cx, journal_cy, journal_cz)
+                    } else if id == super::PICK_COIN_DISH {
+                        (
+                            gold_dish_anchor[0],
+                            gold_dish_anchor[1],
+                            gold_dish_anchor[2],
+                        )
                     } else {
                         layout.coin_dish_center_px
                     };
                     point_lights.push(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
-                        radius: h * 0.55,
+                        radius: h * 0.55 * hover_r_mul,
                         color: [1.00, 0.92, 0.70],
-                        intensity: 2.50,
+                        intensity: 2.50 * hover_i_mul,
                     });
                 }
                 ShopHit::TilePack(id) => {
@@ -444,9 +558,9 @@ impl ShopScene {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
-                            radius: h * 0.62,
+                            radius: h * 0.62 * hover_r_mul,
                             color: [1.00, 0.92, 0.70],
-                            intensity: 3.20,
+                            intensity: 3.20 * hover_i_mul,
                         });
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
                         let center = layout
@@ -456,9 +570,9 @@ impl ShopScene {
                             .unwrap_or(layout.pack_centers_px[0]);
                         point_lights.push(PointLight {
                             pos: [center.0, center.1 - 30.0, center.2 + 60.0],
-                            radius: h * 0.62,
+                            radius: h * 0.62 * hover_r_mul,
                             color: [1.00, 0.92, 0.70],
-                            intensity: 3.20,
+                            intensity: 3.20 * hover_i_mul,
                         });
                     }
                 }
@@ -476,16 +590,20 @@ impl ShopScene {
         if !stock.is_empty() {
             frame.object3d_batch(stock);
         }
+        let gold_pile = shop_gameplay_style_gold_pile(&layout, shop_rm.display_gold, gold_dish_anchor);
+        if !gold_pile.is_empty() {
+            frame.object3d_batch(gold_pile);
+        }
 
         // Moths orbiting the pendant lamp.
         {
             let lamp_w = h * 0.22;
             let lamp_h = lamp_mesh_h;
             let lamp_hang_z = lp.2;
+            let bulb_wz = lamp_hang_z * lamp_h;
             let t_now = self.age_secs;
             let bulb_wx = lp.0 - w * 0.5;
             let bulb_wy = h * 0.5 - lp.1;
-            let bulb_wz = lamp_hang_z + LAMP_BULB_LOCAL_Z * lamp_h;
             let bug_body_len = h * 0.022;
             let flap_hz: f32 = 25.0;
             let flap_amp: f32 = 1.1;
@@ -505,12 +623,8 @@ impl ShopScene {
                 let r_drift = (t * drift_freq + fi * 2.1).sin() * r_nom * 0.20;
                 let bug_wz = bulb_wz + lamp_h * z_frac + bob;
 
-                let local_z = (bug_wz - lamp_hang_z) / lamp_h;
-                let min_r_local = shade_exclusion_radius(local_z);
                 let wing_half_span = 1.13 * size_frac * bug_body_len;
-                let min_r_world =
-                    min_r_local * (lamp_w / SHADE_RIM_R) + bug_body_len * 0.6 + wing_half_span;
-                let orbit_r = (r_nom + r_drift).max(min_r_world);
+                let orbit_r = (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
 
                 let bug_wx = bulb_wx + orbit_r * phase.cos();
                 let bug_wy = bulb_wy + orbit_r * phase.sin();
@@ -583,7 +697,12 @@ impl ShopScene {
                 .and_then(|r| clamp_rect_to_viewport(r, w, h))
             {
                 let mut quads = Vec::new();
-                push_focus_ring(ring_rect, scale, w, h, &mut quads);
+                let ring_scale = if use_glb_lights {
+                    scale * 1.24
+                } else {
+                    scale
+                };
+                push_focus_ring(ring_rect, ring_scale, w, h, &mut quads);
                 frame.quads(quads);
             }
 
@@ -1260,8 +1379,9 @@ fn inv_marker_surface_anchor(
     cy: f32,
     cz_fallback: f32,
 ) -> [f32; 3] {
-    inv_slot_glb_marker_name(scene, shop, slot_i)
-        .and_then(|name| shop_glb_cpu().and_then(|cpu| marker_translation(cpu, &name)))
+    inv_slot_glb_marker_name(scene, shop, slot_i).and_then(|name| {
+        with_shop_glb_cpu(|opt| opt.and_then(|cpu| marker_translation(cpu, &name)))
+    })
         .map(|tw| surface_anchor_from_world_xyz(w, h, tw * shop_env_world_scale(h, env_h)))
         .unwrap_or_else(|| lit_anchor(cam, w, h, cx, cy, cz_fallback))
 }
@@ -1278,12 +1398,12 @@ fn sale_anchor_at_slot(
     cz_fallback: f32,
 ) -> [f32; 3] {
     let scale = shop_env_world_scale(h, env_h);
-    if let Some(cpu) = shop_glb_cpu() {
-        if let Some(tw) = marker_translation(cpu, &spawn_relic_marker_name(slot_i)) {
-            let scaled = tw * scale;
-            // Slot rect is centered on the niche; GLB empties can sit off-center — keep shelf Z, align XY to rect.
-            return object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, scaled.z);
-        }
+    if let Some(tw) = with_shop_glb_cpu(|opt| {
+        opt.and_then(|cpu| marker_translation(cpu, &spawn_relic_marker_name(slot_i)))
+    }) {
+        let scaled = tw * scale;
+        // Slot rect is centered on the niche; GLB empties can sit off-center — keep shelf Z, align XY to rect.
+        return object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, scaled.z);
     }
     lit_anchor(cam, w, h, cx, cy, cz_fallback)
 }

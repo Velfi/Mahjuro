@@ -8,6 +8,7 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run_showcase_tiles_placement(
         &mut self,
+        frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         tile_basis: Mat4,
         tile_preset: crate::persistence::TilePreset,
@@ -19,6 +20,17 @@ impl WgpuRenderer {
         tile_glows: &mut Vec<GpuInstance>,
         shadow_uniforms_changed: &mut bool,
     ) {
+        let hdr_tonemap = self.tile_hdr_tonemap(frame);
+        self.queue.write_buffer(
+            &self.tile_outline_frame_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&super::super::TileOutlineFrameUniform {
+                view_proj: camera.view_proj_arr,
+                hdr_tonemap,
+            }),
+        );
+        self.tile_outline_instances_staging.clear();
+        self.tile_outline_batch_ranges.clear();
         let cam_pos = camera.cam_pos;
         let view_proj = camera.view_proj;
         let view_proj_arr = camera.view_proj_arr;
@@ -124,6 +136,7 @@ impl WgpuRenderer {
 
             let mut slot_cursor = 0usize;
             for batch in showcase_tile_batches.iter() {
+                let outline_batch_start = self.tile_outline_instances_staging.len() as u32;
                 for p in batch.iter() {
                     if slot_cursor >= MAX_SHOWCASE_TILE_SLOTS {
                         break;
@@ -263,25 +276,18 @@ impl WgpuRenderer {
                             cam_pos: cam_pos.to_array(),
                             tile_seed,
                             decal_atlas_uv: stg.decal_atlas_uv,
+                            hdr_tonemap,
                         }),
                     );
-                    // Outline shell: write inflated model matrix when requested.
                     if p.outline {
                         const OUTLINE_GROW: f32 = 1.055;
                         let outline_scale = scale * OUTLINE_GROW;
                         let outline_model = translate_rot_scale(center, oriented, outline_scale);
-                        self.queue.write_buffer(
-                            &stg.outline_uniform_buffer,
-                            0,
-                            bytemuck::bytes_of(&CameraUniform {
-                                view_proj: view_proj_arr,
+                        self.tile_outline_instances_staging
+                            .push(super::super::TileOutlineInstance {
                                 model: outline_model.to_cols_array(),
                                 base_color_factor: sc_bcf,
-                                cam_pos: cam_pos.to_array(),
-                                tile_seed,
-                                decal_atlas_uv: stg.decal_atlas_uv,
-                            }),
-                        );
+                            });
                     }
                     let su = ShadowCasterUniform {
                         light_view_proj: light_view_proj_arr,
@@ -302,6 +308,17 @@ impl WgpuRenderer {
 
                     slot_cursor += 1;
                 }
+                let outline_n = self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
+                self.tile_outline_batch_ranges
+                    .push((outline_batch_start, outline_n));
+            }
+
+            if !self.tile_outline_instances_staging.is_empty() {
+                self.queue.write_buffer(
+                    &self.tile_outline_instance_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.tile_outline_instances_staging),
+                );
             }
 
             // Register the hand strip as a single debug-pickable so arrange

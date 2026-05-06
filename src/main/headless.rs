@@ -207,7 +207,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
         "shop" => {
             setup_shop_state(&mut run);
-            let mut shop = ShopScene::new(run.run_number, &mut run);
+            let mut shop = ShopScene::new(&mut run);
             if let Some(focus_slug) = s.shop_focus.as_deref() {
                 shop.set_focus_for_screenshot(focus_slug)
                     .map_err(anyhow::Error::msg)?;
@@ -548,6 +548,7 @@ impl HeadlessApp {
             transitioning: false,
             overlay_request: &mut overlay_request,
             headless: true,
+            effect_layers: self.effect_layers,
         };
         let _ = self.scene.update(update_ctx);
         let ctx = DrawCtx {
@@ -647,6 +648,8 @@ impl HeadlessApp {
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
+            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::Solitaire(_) => Some("solitaire"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
@@ -662,9 +665,6 @@ impl HeadlessApp {
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
         );
-        let gl = crate::render::lit_mesh::GameplayLitRenderingTune::SOURCE_DEFAULTS;
-        self.renderer
-            .set_gameplay_lit_render_tune(gl.linear_exposure, gl.ambient_scale);
         let haze_horizon_y = frame
             .gameplay_fog_wall_horizon_y
             .unwrap_or(self.volumetric_tuning.haze_horizon_y);

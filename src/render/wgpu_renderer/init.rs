@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
+use crate::render::lamp_mesh::{build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh};
 
 impl WgpuRenderer {
     pub fn new(target_init: TargetInit) -> anyhow::Result<Self> {
@@ -33,6 +34,8 @@ impl WgpuRenderer {
                 (None, size, *hdr_enabled)
             }
         };
+
+        let size = super::clamp_render_physical_size(size);
 
         let t0 = Instant::now();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -480,6 +483,24 @@ impl WgpuRenderer {
                 ],
             });
 
+        // Outline shell: frame uniform only — per-tile model/colour use a second
+        // vertex buffer (Instance step) so we never need storage buffers in VS
+        // (some adapters report `max_storage_buffers_per_shader_stage` = 0).
+        let tile_outline_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tile-outline-bind-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let loaded_glb = match crate::asset_path::get("Tile.glb") {
             Some(file) => load_glb_tile_from_bytes(&file.data),
             None => Err(anyhow::anyhow!("Tile.glb not found in embedded assets")),
@@ -661,6 +682,43 @@ impl WgpuRenderer {
                 Some(&spot_lights_layout),
             ],
             immediate_size: 0,
+        });
+
+        let tile_outline_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tile-outline-pl"),
+                bind_group_layouts: &[
+                    Some(&tile_outline_bind_group_layout),
+                    Some(&point_lights_layout),
+                    Some(&shadow_sample_layout),
+                    Some(&spot_lights_layout),
+                ],
+                immediate_size: 0,
+            });
+
+        let tile_outline_frame_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("tile-outline-frame"),
+                contents: bytemuck::bytes_of(&TileOutlineFrameUniform {
+                    view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+                    hdr_tonemap: [0.0_f32; 4],
+                }),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let tile_outline_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tile-outline-instances"),
+            size: (std::mem::size_of::<TileOutlineInstance>() as u64)
+                * (super::MAX_SHOWCASE_TILE_SLOTS as u64),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tile_outline_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tile-outline-frame-bg"),
+            layout: &tile_outline_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: tile_outline_frame_uniform_buffer.as_entire_binding(),
+            }],
         });
 
         let vertex_layout = wgpu::VertexBufferLayout {
@@ -1417,15 +1475,46 @@ impl WgpuRenderer {
                 include_str!("../../../shaders/tile_outline.wgsl").into(),
             ),
         });
+        let tile_outline_instance_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<TileOutlineInstance>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 16,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 32,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 48,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 64,
+                    shader_location: 10,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        };
         let tile_outline_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("tile-outline-pipeline"),
-                layout: Some(&tile_layout),
+                layout: Some(&tile_outline_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &tile_outline_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[tile_vertex_layout],
+                    buffers: &[tile_vertex_layout, tile_outline_instance_vertex_layout],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &tile_outline_shader,
@@ -1530,6 +1619,7 @@ impl WgpuRenderer {
                 view_pos: [0.0; 4],
                 params: [0.0; 4],
                 felt: [2.0, 0.0, 0.0, 0.0],
+                shop_punctual: [0.0; 4],
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -2410,10 +2500,17 @@ impl WgpuRenderer {
             default_emissive_map(&device, &queue);
 
         let t0 = Instant::now();
+        let mut tile_outline_merge_vertices: Vec<Vertex3dTex> = Vec::new();
+        let mut tile_outline_merge_indices: Vec<u32> = Vec::new();
         let tile_primitives: Vec<TilePrimitiveGpu> = match loaded_glb {
             Ok(mut mesh) => {
                 normalize_mesh(&mut mesh);
                 log::info!("Loaded 3D tile: {} primitive(s)", mesh.primitives.len());
+                for prim in mesh.primitives.iter() {
+                    let base = tile_outline_merge_vertices.len() as u32;
+                    tile_outline_merge_vertices.extend_from_slice(&prim.vertices);
+                    tile_outline_merge_indices.extend(prim.indices.iter().map(|&ix| ix + base));
+                }
                 let mut out = Vec::with_capacity(mesh.primitives.len());
                 for (i, prim) in mesh.primitives.iter().enumerate() {
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2530,12 +2627,50 @@ impl WgpuRenderer {
             }
         };
 
+        let dummy_outline_vertex = Vertex3dTex {
+            position: [0.0, 0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        let (tile_outline_vertex_buffer, tile_outline_index_buffer, tile_outline_index_count) =
+            if tile_outline_merge_indices.is_empty() {
+                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-verts-dummy"),
+                    contents: bytemuck::cast_slice(&[dummy_outline_vertex; 3]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-idx-dummy"),
+                    contents: bytemuck::cast_slice(&[0u32, 1, 2]),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (vb, ib, 0u32)
+            } else {
+                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-verts-merged"),
+                    contents: bytemuck::cast_slice(&tile_outline_merge_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-idx-merged"),
+                    contents: bytemuck::cast_slice(&tile_outline_merge_indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (vb, ib, tile_outline_merge_indices.len() as u32)
+            };
+
         log::info!("tile mesh loaded in {:?}", t0.elapsed());
 
-        let (shop_env_primitives, shop_environment) = {
+        let (shop_env_primitives, shop_environment) = crate::render::shop_glb::with_shop_glb_cpu(
+            |cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
-            if let Some(cpu) = crate::render::shop_glb::shop_glb_cpu() {
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap);
+            };
                 if !cpu.environment_primitives.is_empty() {
                     for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                         let prim = &env_prim.mesh;
@@ -2656,6 +2791,7 @@ impl WgpuRenderer {
                                 cam_pos: [0.0; 3],
                                 tile_seed: 0.0,
                                 decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                                hdr_tonemap: [0.0; 4],
                             }),
                             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                         });
@@ -2719,13 +2855,15 @@ impl WgpuRenderer {
                     });
                     log::info!("Shop.glb GPU: {} primitive draw(s)", prims.len());
                 }
-            }
             (prims, gpu_wrap)
-        };
+            },
+        );
 
-        let shop_env_collision_meshes = crate::render::shop_glb::shop_glb_cpu()
-            .map(|c| c.collision_meshes.clone())
-            .unwrap_or_default();
+        crate::render::shop_glb::release_shop_environment_cpu_sources_after_gpu_upload();
+
+        let shop_env_collision_meshes = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+            opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+        });
 
         // Kick off background relic image loading (non-blocking).
         let relic_load_start = Some(Instant::now());
@@ -2747,8 +2885,6 @@ impl WgpuRenderer {
         let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
         let candle_wick_mesh = LitMeshGpu::new(&device, &build_candle_wick_mesh(), "candle-wick");
         let table_mesh = LitMeshGpu::new(&device, &build_table_mesh(), "table");
-        let round_dish_mesh = LitMeshGpu::new(&device, &build_round_dish_mesh(), "round-dish");
-        let sell_card_mesh = LitMeshGpu::new(&device, &build_tent_card_mesh(), "sell-card");
         let relic_box_cpu = build_relic_mesh();
         let relic_box_tris: Vec<[glam::Vec3; 3]> = relic_box_cpu
             .indices
@@ -2770,36 +2906,10 @@ impl WgpuRenderer {
         let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
         let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
         let dora_plinth_mesh = LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
-        let lamp_body_cpu = build_lamp_body_mesh();
-        let lamp_body_tris: Vec<[glam::Vec3; 3]> = lamp_body_cpu
-            .indices
-            .chunks_exact(3)
-            .map(|c| {
-                let a = lamp_body_cpu.vertices[c[0] as usize].position;
-                let b = lamp_body_cpu.vertices[c[1] as usize].position;
-                let d = lamp_body_cpu.vertices[c[2] as usize].position;
-                [
-                    glam::Vec3::from(a),
-                    glam::Vec3::from(b),
-                    glam::Vec3::from(d),
-                ]
-            })
-            .collect();
-        let (lamp_body_local_half, lamp_body_local_center_y) = {
-            let mut lo = glam::Vec3::splat(f32::INFINITY);
-            let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
-            for tri in &lamp_body_tris {
-                for p in tri {
-                    lo = lo.min(*p);
-                    hi = hi.max(*p);
-                }
-            }
-            let half = (hi - lo) * 0.5;
-            let cy = (hi.y + lo.y) * 0.5;
-            (half, cy)
-        };
-        let lamp_body_mesh = LitMeshGpu::new(&device, &lamp_body_cpu, "lamp-body");
-        let lamp_bulb_mesh = LitMeshGpu::new(&device, &build_lamp_bulb_mesh(), "lamp-bulb");
+        let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
+        let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
+        let bug_wing_blur_mesh =
+            LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
         // Phase-1 primitive registry: parallel GPU copies of meshes
         // the generic `Object3dKind::Primitive` dispatch can reach by
         // `MeshId`. Legacy named fields above still own their own
@@ -3054,46 +3164,6 @@ impl WgpuRenderer {
                 lit_mesh_coin_height_view.clone(),
             ),
         );
-        // Single sell tray instance.
-        let sell_tray_instance = LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        );
-        // Folded "SELL" tent card sat in the sell tray when focused. The decal
-        // texture is rasterized lazily on first show and reused thereafter.
-        let sell_card_instance = LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        );
-        // Shop lamp — one instance for the brass body, one for the glass bulb.
-        let lamp_body_instance = LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        );
-        let lamp_bulb_instance = LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        );
-        let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
-        let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
-        let bug_wing_blur_mesh =
-            LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
         let mut bug_body_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
         let mut bug_wing_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
         let mut bug_wing_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
@@ -3338,6 +3408,11 @@ impl WgpuRenderer {
             globals_buffer,
             globals_bind_group,
             tile_material_layout,
+            tile_outline_frame_uniform_buffer,
+            tile_outline_instance_buffer,
+            tile_outline_frame_bind_group,
+            tile_outline_instances_staging: Vec::new(),
+            tile_outline_batch_ranges: Vec::new(),
             point_lights_buffer,
             tile_occluders_buffer,
             point_lights_bind_group,
@@ -3350,16 +3425,15 @@ impl WgpuRenderer {
             _tile_glb_default_mr_texture: _tile_glb_default_mr_tex,
             _tile_glb_default_emissive_texture: _tile_glb_default_emissive_tex,
             tile_primitives,
+            tile_outline_vertex_buffer,
+            tile_outline_index_buffer,
+            tile_outline_index_count,
             shop_env_primitives,
             shop_environment,
             shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             shop_env_linear_exposure: crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE,
             shop_env_ambient_scale: crate::render::shop_glb::SHOP_ENV_AMBIENT_SCALE,
             shop_lit_mesh_gltf_punctual_scale: crate::render::shop_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
-            gameplay_lit_linear_exposure: crate::render::lit_mesh::GameplayLitRenderingTune::SOURCE_DEFAULTS
-                .linear_exposure,
-            gameplay_lit_ambient_scale: crate::render::lit_mesh::GameplayLitRenderingTune::SOURCE_DEFAULTS
-                .ambient_scale,
             shop_env_collision_meshes,
             tile_base_color_factor,
             // Populated on first render() from RenderSettings.tileset_name.
@@ -3406,17 +3480,6 @@ impl WgpuRenderer {
             ribbon_slot_zodiac,
             ribbon_zodiac_tex,
             talisman_instances,
-            sell_tray_instance,
-            sell_card_instance,
-            sell_card_decal_ready: false,
-            last_sell_card_model: None,
-            lamp_body_mesh,
-            lamp_body_tris,
-            lamp_body_local_half,
-            lamp_body_local_center_y,
-            lamp_bulb_mesh,
-            lamp_body_instance,
-            lamp_bulb_instance,
             bug_body_mesh,
             bug_wing_mesh,
             bug_body_instances,
@@ -3427,7 +3490,6 @@ impl WgpuRenderer {
             bug_wing_blur_r_instances,
             orb_mesh,
             orb_instances,
-            last_sell_tray_model: None,
             shrine_instances,
             dora_plinth_instances,
             last_ribbon_models: Vec::new(),
@@ -3467,7 +3529,6 @@ impl WgpuRenderer {
             last_debug_pickables: Vec::new(),
             last_gameplay_fog_wall_horizon_y: None,
             last_gameplay_fog_wall_center_x: None,
-            last_debug_trimesh_pickables: Vec::new(),
             active_scene_key: None,
             debug_arrange_override: None,
             committed_arrange_rotations: std::collections::HashMap::new(),
@@ -3534,8 +3595,6 @@ impl WgpuRenderer {
             candle_wax_mesh,
             candle_wick_mesh,
             table_mesh,
-            round_dish_mesh,
-            sell_card_mesh,
             relic_box_mesh,
             relic_box_tris,
             relic_tri_lists: HashMap::new(),
@@ -3547,7 +3606,7 @@ impl WgpuRenderer {
             felt_shader_lod: 2.0,
             // Default to felt; `apply_render_settings` overwrites this each
             // frame once the user's persisted choice has been threaded in.
-            table_material: crate::render::lit_mesh::MaterialParams::felt_green(),
+            table_material: MaterialParams::lacquered_wood(),
             relic_instances,
             shadow_map_view,
             shadow_caster_layout,

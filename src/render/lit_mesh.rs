@@ -106,6 +106,7 @@ pub enum MaterialKind {
     /// than `Metal` and a touch more diffuse retained, so brass fittings
     /// read as bright polished metal in overhead light without going
     /// near-black off-axis. Use for hanging brass props (bells, rails).
+    #[allow(dead_code)]
     Brass = 17,
     /// Bookbinding leather — warm dielectric with procedural grain,
     /// broad soft sheen (no tight pinpoint), subtle Fresnel rim, and a
@@ -603,7 +604,8 @@ pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
 }
 
 /// Frame-shared shadow sampling uniform consumed by lit_mesh.wgsl /
-/// tile_3d.wgsl / tile_outline.wgsl in the main pass via group 2.
+/// tile_3d.wgsl in the main pass via group 2. (`tile_outline` binds the
+/// same group for layout compatibility but does not sample the map.)
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
@@ -649,31 +651,6 @@ pub fn create_shadow_sample_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
     })
 }
 
-/// Linear exposure + hemispheric ambient for **`lit_mesh`** when the active
-/// scene uses the physical punctual + ACES path (gameplay table/candles and
-/// shop with embedded glTF lights). The app uploads these each frame (debug
-/// state or defaults).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GameplayLitRenderingTune {
-    /// HDR multiplier before ACES (same role as shop `CameraUniform.tile_seed`).
-    pub linear_exposure: f32,
-    /// Scales `albedo * 0.08` hemispheric fill before tonemap (`0` = punctual-only).
-    pub ambient_scale: f32,
-}
-
-impl Default for GameplayLitRenderingTune {
-    fn default() -> Self {
-        Self::SOURCE_DEFAULTS
-    }
-}
-
-impl GameplayLitRenderingTune {
-    pub const SOURCE_DEFAULTS: Self = Self {
-        linear_exposure: 1.0,
-        ambient_scale: 0.0,
-    };
-}
-
 /// Frame-shared SSR globals consumed by `lit_mesh.wgsl` (group 3) for
 /// the lacquered-wood reflection march. The camera is fixed, so this is
 /// rewritten once per frame with the current view-projection inverse.
@@ -689,10 +666,13 @@ pub struct SsrGlobals {
     pub params: [f32; 4],
     /// x = felt procedural LOD (`EffectsQuality::felt_shader_lod`): 0 =
     /// minimal (effects Off), 1 = Low, 2 = Medium/High full detail.
-    /// y = physical HDR path (`shop_glb`-style glTF punctual + ACES + gamma) when 1.
-    /// z = linear exposure multiplier (same role as `CameraUniform.tile_seed` in `shop_glb.wgsl`).
-    /// w = hemispheric ambient scale (same role as `CameraUniform.decal_atlas_uv.x`).
+    /// y = ACES HDR path (`shop_glb` / `tile_3d` match) when **1** (shop, gameplay, collection, …).
+    /// z = linear exposure before ACES (shop env tuning).
+    /// w = hemispheric ambient scale (shop env tuning).
     pub felt: [f32; 4],
+    /// x = `1/shop_env_world_scale` for shop glTF punctual attenuation (document-space distance);
+    /// **0** = use world-space distance (gameplay). yzw unused.
+    pub shop_punctual: [f32; 4],
 }
 
 /// Bind-group layout for lit_mesh group 3: spotlights (binding 0, same

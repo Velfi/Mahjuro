@@ -10,7 +10,6 @@ use crate::debug_overlays::{
     TuningOverlay, VolumetricDebugOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
-use crate::render::lit_mesh::GameplayLitRenderingTune;
 use crate::render::shop_glb::ShopEnvLightingTune;
 
 /// State for the arrange-mode debug feature. Activated via Debug > Arrange
@@ -86,8 +85,6 @@ pub struct DebugState {
     pub shop_env_height_scale: f32,
     /// glTF punctual + `shop_glb` tonemap tuning. Debug overlay edits live.
     pub shop_env_lighting: ShopEnvLightingTune,
-    /// Gameplay `lit_mesh` exposure / ambient (physical punctual + ACES path).
-    pub gameplay_lit_rendering: GameplayLitRenderingTune,
 }
 
 impl DebugState {
@@ -112,7 +109,6 @@ impl DebugState {
             last_effective_camera: CameraParams::default_table_camera(800.0),
             shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             shop_env_lighting: ShopEnvLightingTune::SOURCE_DEFAULTS,
-            gameplay_lit_rendering: GameplayLitRenderingTune::SOURCE_DEFAULTS,
         }
     }
 

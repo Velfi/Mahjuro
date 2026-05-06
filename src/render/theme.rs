@@ -23,16 +23,16 @@
 /// Named color tokens. Pull from here in scenes via `theme::color::GOLD` etc.
 pub mod color {
     // ── Walnut ladder: dark → light, backgrounds, panels, modals, tooltips ─
-    /// `#0D0A08` — deepest base, near-black brown.
-    pub const WALNUT_INK: [f32; 4] = [0.051, 0.039, 0.031, 1.0];
-    /// `#1A1510` — primary modal/panel background and tooltip fill.
-    pub const WALNUT_DEEP: [f32; 4] = [0.102, 0.082, 0.063, 1.0];
-    /// `#2A221B` — raised panel background (one step lighter than WALNUT_DEEP).
-    pub const WALNUT_RAISED: [f32; 4] = [0.165, 0.133, 0.106, 1.0];
-    /// `#3D3228` — hovered/selected panel background, button rest state.
-    pub const WALNUT_SOFT: [f32; 4] = [0.239, 0.196, 0.157, 1.0];
-    /// `#524436` — strongest panel tone, primary button rest / highlights.
-    pub const WALNUT_BRIGHT: [f32; 4] = [0.322, 0.267, 0.212, 1.0];
+    /// `#0A0806` — deepest base, near-black brown.
+    pub const WALNUT_INK: [f32; 4] = [0.040, 0.031, 0.024, 1.0];
+    /// `#120E0B` — primary modal/panel background and tooltip fill.
+    pub const WALNUT_DEEP: [f32; 4] = [0.071, 0.055, 0.043, 1.0];
+    /// `#1C1611` — raised panel background (one step lighter than WALNUT_DEEP).
+    pub const WALNUT_RAISED: [f32; 4] = [0.110, 0.086, 0.067, 1.0];
+    /// `#2A211A` — hovered/selected panel background, button rest state.
+    pub const WALNUT_SOFT: [f32; 4] = [0.165, 0.129, 0.102, 1.0];
+    /// `#362A21` — strongest panel tone, primary button rest / highlights.
+    pub const WALNUT_BRIGHT: [f32; 4] = [0.212, 0.165, 0.129, 1.0];
 
     // ── Golds: use sparingly, hierarchy of warmth ─────────────────────────
     /// `#F5C674` — palest gold, hero score numerals & selected-tile rims.

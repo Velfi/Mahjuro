@@ -1018,14 +1018,14 @@ impl CameraDebugOverlay {
 // ── Shop environment + lighting debug (height scale + `shop_glb` tunables) ─
 
 const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 8] = [
-    ("Height scale", 0.001, 4.0, 0.02),
-    ("glTF light intensity", 0.0, 4.0, 0.02),
-    ("Linear exposure", 0.05, 4.0, 0.02),
-    ("Ambient scale", 0.0, 1.0, 0.01),
-    ("Lit-mesh glTF scale", 0.0, 2.0, 0.02),
-    ("Candle tint R", 0.0, 1.5, 0.01),
-    ("Candle tint G", 0.0, 1.5, 0.01),
-    ("Candle tint B", 0.0, 1.5, 0.01),
+    ("Height scale", 0.001, 40.0, 0.005),
+    ("glTF light intensity", 0.0, 40.0, 0.0025),
+    ("Linear exposure", 0.001, 40.0, 0.0025),
+    ("Ambient scale", 0.0, 10.0, 0.0025),
+    ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
+    ("Candle tint R", 0.0, 15.0, 0.0025),
+    ("Candle tint G", 0.0, 15.0, 0.0025),
+    ("Candle tint B", 0.0, 15.0, 0.0025),
 ];
 
 #[derive(Clone, Copy)]
@@ -1213,6 +1213,7 @@ impl ShopEnvDebugOverlay {
         let text = format!(
             concat!(
                 "pub const SHOP_ENV_HEIGHT_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = {:.6};\n",
                 "pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = {:.6};\n",
                 "pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = {:.6};\n",
                 "pub const SHOP_ENV_AMBIENT_SCALE: f32 = {:.6};\n",
@@ -1221,6 +1222,7 @@ impl ShopEnvDebugOverlay {
                 "[{:.6}, {:.6}, {:.6}];",
             ),
             self.height_scale,
+            crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
             l.gltf_light_intensity_scale,
             l.linear_exposure,
             l.ambient_scale,
