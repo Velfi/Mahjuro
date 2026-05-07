@@ -96,6 +96,19 @@ else
     exit 1
 fi
 
+# SDL3 (build-from-source): linked as @rpath/libSDL3.0.dylib; build.rs adds
+# -rpath @loader_path. Bundle the dylib and normalize its install name.
+SDL_DYLIB_DST="$APP/Contents/MacOS/libSDL3.0.dylib"
+if [[ $UNIVERSAL -eq 1 ]]; then
+    lipo -create \
+        target/aarch64-apple-darwin/release/libSDL3.0.dylib \
+        target/x86_64-apple-darwin/release/libSDL3.0.dylib \
+        -output "$SDL_DYLIB_DST"
+else
+    cp target/release/libSDL3.0.dylib "$SDL_DYLIB_DST"
+fi
+install_name_tool -id @loader_path/libSDL3.0.dylib "$SDL_DYLIB_DST"
+
 sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
 ICONSET="AppIcon.iconset"
