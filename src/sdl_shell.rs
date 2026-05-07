@@ -26,7 +26,8 @@ pub struct SdlShell {
 impl SdlShell {
     pub fn new(title: &str, width: u32, height: u32) -> anyhow::Result<Self> {
         let _sdl = sdl3::init().map_err(anyhow::Error::from)?;
-        let _ = sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
+        #[cfg(target_os = "macos")]
+        sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
 
         let _video = _sdl.video().map_err(anyhow::Error::from)?;
         let gamepad = _sdl.gamepad().map_err(anyhow::Error::from)?;
@@ -37,6 +38,7 @@ impl SdlShell {
 
         #[cfg(target_os = "macos")]
         {
+            use sdl3::video::WindowFlags;
             wb.set_flags(
                 WindowFlags::METAL | WindowFlags::RESIZABLE | WindowFlags::HIGH_PIXEL_DENSITY,
             );
@@ -104,19 +106,6 @@ impl SdlShell {
             }
             if !self.gamepad.is_gamepad(id) {
                 if !self.non_gamepad_logged.contains(&id) {
-                    if let Ok(name) = self.gamepad.name_for_id(id) {
-                        let lower = name.to_lowercase();
-                        if lower.contains("nintendo")
-                            || lower.contains("switch")
-                            || lower.contains("pro controller")
-                        {
-                            log::warn!(
-                                "SDL lists '{name}' (id={}) but is_gamepad=false — controller input is disabled. \
-                                 Re-pair the pad, update the game/SDL, or set SDL_GAMECONTROLLERCONFIG / SDL hints per SDL docs.",
-                                id.0
-                            );
-                        }
-                    }
                     self.non_gamepad_logged.insert(id);
                 }
                 continue;
