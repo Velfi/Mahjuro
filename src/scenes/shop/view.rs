@@ -31,7 +31,9 @@ use crate::render::wgpu_renderer::{
     PointLight, ShopHit, SpotLight, TextAlign, TextLabel, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS,
 };
 use crate::render::world_space::{object3d_pos_for_screen_at_world_z, surface_anchor_from_world_xyz};
-use crate::scenes::item_inspect::{inspect_orbit_camera, ItemInspectOrbitState};
+use crate::scenes::item_inspect::{
+    item_inspect_orbit_camera, item_inspect_point_lights, ItemInspectHost, ItemInspectOrbitState,
+};
 use crate::scenes::journal_transition;
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{
@@ -404,9 +406,8 @@ pub(super) fn shop_sync_item_inspect_orbit_target(
     }
     let shop_rm = GameEngine::read_shop(run);
     let env_h = scene.drawn_env_height_scale.get();
-    let base = shop_camera_base(w, h, env_h);
     for _ in 0..4 {
-        let cam_try = inspect_orbit_camera(&base, orbit);
+        let cam_try = item_inspect_orbit_camera(ItemInspectHost::Shop, h, orbit, Some(env_h));
         let Some(pivot) = shop_inspect_pivot_world(scene, &shop_rm, w, h, &cam_try, env_h, foc) else {
             break;
         };
@@ -585,18 +586,17 @@ impl ShopScene {
         } else {
             frame.background(BackgroundId::ShopStoreroom);
         }
-        frame.shop_env_gltf_punctual = shop_glb_has_embedded_lights();
 
         // Mesh anchors use ray/plane hits so props sit under vitrine pixels (plain
         // `pixel_to_world` drifts under perspective).
         let base = shop_camera_base(w, h, env_h);
-        let mut cam = base;
-        if let Some(ins) = inspect {
-            if let Some(foc) = self.focus {
+        let (cam, inspect_orbit_resolved) = if let Some(ins) = inspect {
+            let o = if let Some(foc) = self.focus {
                 let mut o = *ins;
                 // One frame may draw before `ItemInspectScene::update` runs (push ordering).
                 for _ in 0..2 {
-                    let cam_try = inspect_orbit_camera(&base, &o);
+                    let cam_try =
+                        item_inspect_orbit_camera(ItemInspectHost::Shop, h, &o, Some(env_h));
                     if let Some(pivot) =
                         shop_inspect_pivot_world(self, &shop_rm, w, h, &cam_try, env_h, foc)
                     {
@@ -605,12 +605,15 @@ impl ShopScene {
                         break;
                     }
                 }
-                cam = inspect_orbit_camera(&base, &o);
+                o
             } else {
-                cam = inspect_orbit_camera(&base, ins);
-            }
-            cam.fovy_deg = (cam.fovy_deg * 0.64).clamp(24.0, 50.0);
-        }
+                *ins
+            };
+            let cam = item_inspect_orbit_camera(ItemInspectHost::Shop, h, &o, Some(env_h));
+            (cam, Some(o))
+        } else {
+            (base, None)
+        };
         frame.camera_override = Some(cam);
 
         let layout = ShopLayout::build(
@@ -636,27 +639,6 @@ impl ShopScene {
         };
         let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.55, 1.12);
 
-        let use_glb_lights = shop_glb_has_embedded_lights();
-        let shop_gltf_point_lights: Vec<PointLight> = if use_glb_lights {
-            embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
-        } else {
-            Vec::new()
-        };
-        let mut point_lights: Vec<PointLight> = if use_glb_lights {
-            Vec::new()
-        } else {
-            let mut v = vec![
-                PointLight {
-                    pos: [lp.0, lp.1, lp.2],
-                    radius: h * 1.15,
-                    color: [0.86, 0.96, 0.98],
-                    intensity: 2.15 * lamp_flicker,
-                },
-            ];
-            v.extend(default_fill_point_lights(w, h));
-            v
-        };
-
         let journal_cx = self.positions.book.nx * w;
         let journal_cy = self.positions.book.ny * h;
         let journal_cz = ctx.layout.mm(self.positions.book.lift_mm);
@@ -677,17 +659,44 @@ impl ShopScene {
                 )
             });
 
-        // Hover fill: full-strength when we synthesize shop lighting; with embedded
-        // `KHR_lights_punctual`, use a ~10% pool so props stay readable (see focus ring below).
-        // Item inspect needs the same fill as procedural lighting so the prop reads as hero-lit.
-        let (hover_i_mul, hover_r_mul) = if inspect.is_some() {
-            (1.0_f32, 1.12_f32)
-        } else if use_glb_lights {
-            (0.10_f32, 1.08_f32)
+        let room_glb_lights = shop_glb_has_embedded_lights();
+        if let Some(orbit) = inspect_orbit_resolved {
+            frame.shop_env_gltf_punctual = false;
+            frame.point_lights =
+                item_inspect_point_lights(ItemInspectHost::Shop, w, h, &cam, orbit.target_world);
+            frame.shop_gltf_point_lights = Vec::new();
+            frame.spot_lights = Vec::new();
         } else {
-            (1.0_f32, 1.0_f32)
-        };
-        if let Some(hit) = hover {
+            frame.shop_env_gltf_punctual = room_glb_lights;
+            let use_glb_lights = room_glb_lights;
+            let shop_gltf_point_lights: Vec<PointLight> = if use_glb_lights {
+                embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
+            } else {
+                Vec::new()
+            };
+            let mut point_lights: Vec<PointLight> = if use_glb_lights {
+                Vec::new()
+            } else {
+                let mut v = vec![
+                    PointLight {
+                        pos: [lp.0, lp.1, lp.2],
+                        radius: h * 1.15,
+                        color: [0.86, 0.96, 0.98],
+                        intensity: 2.15 * lamp_flicker,
+                    },
+                ];
+                v.extend(default_fill_point_lights(w, h));
+                v
+            };
+
+            // Hover fill: full-strength when we synthesize shop lighting; with embedded
+            // `KHR_lights_punctual`, use a ~10% pool so props stay readable (see focus ring below).
+            let (hover_i_mul, hover_r_mul) = if use_glb_lights {
+                (0.10_f32, 1.08_f32)
+            } else {
+                (1.0_f32, 1.0_f32)
+            };
+            if let Some(hit) = hover {
             let n_for_sale_relics = self.items.len().min(layout.niche_count);
             let n_owned_relics = shop_rm.owned_relics.len();
             match hit {
@@ -781,11 +790,12 @@ impl ShopScene {
                 | ShopHit::EnvInvSlot(_)
                 | ShopHit::EnvConsumableOrd(_) => {}
             }
-        }
+            }
 
-        frame.point_lights = point_lights;
-        frame.shop_gltf_point_lights = shop_gltf_point_lights;
-        frame.spot_lights = spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
+            frame.point_lights = point_lights;
+            frame.shop_gltf_point_lights = shop_gltf_point_lights;
+            frame.spot_lights = spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
+        }
 
         let stock = push_stock_meshes(self, &shop_rm, w, h, &cam);
         if !stock.is_empty() {
@@ -796,8 +806,8 @@ impl ShopScene {
             frame.object3d_batch(gold_pile);
         }
 
-        // Moths orbiting the pendant lamp.
-        {
+        // Moths orbiting the pendant lamp (shop face only — not during item inspect).
+        if inspect_orbit_resolved.is_none() {
             let lamp_w = h * 0.22;
             let lamp_h = lamp_mesh_h;
             let lamp_hang_z = lp.2;
@@ -898,7 +908,7 @@ impl ShopScene {
                 .and_then(|r| clamp_rect_to_viewport(r, w, h))
             {
                 let mut quads = Vec::new();
-                let ring_scale = if use_glb_lights {
+                let ring_scale = if room_glb_lights && inspect_orbit_resolved.is_none() {
                     scale * 1.24
                 } else {
                     scale

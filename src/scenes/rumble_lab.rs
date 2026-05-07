@@ -242,9 +242,19 @@ impl SceneBehavior for RumbleLabScene {
             ..Default::default()
         });
 
+        #[cfg(target_os = "macos")]
+        let body_lines = "Fire preset patterns on connected FF-capable gamepads.\n\
+            macOS: Xbox/Series rumble usually needs Bluetooth; USB often exposes no rumble to apps (Gilrs/SDL). Check the log line SDL_PROP_GAMEPAD_CAP_RUMBLE when the pad connects.";
+        #[cfg(not(target_os = "macos"))]
+        let body_lines = "Fire preset patterns on connected FF-capable gamepads.";
+        #[cfg(target_os = "macos")]
+        let body_h = body_font * 2.85;
+        #[cfg(not(target_os = "macos"))]
+        let body_h = body_font * 1.45;
+
         frame.text(TextLabel {
-            rect: [w * 0.06, h * 0.03 + title_font * 1.55, w * 0.88, body_font * 1.45],
-            text: "Fire preset patterns on connected FF-capable gamepads.".into(),
+            rect: [w * 0.06, h * 0.03 + title_font * 1.55, w * 0.88, body_h],
+            text: body_lines.into(),
             color: color::PARCHMENT,
             align: TextAlign::Center,
             font_px: Some(body_font),
@@ -254,7 +264,7 @@ impl SceneBehavior for RumbleLabScene {
         frame.text(TextLabel {
             rect: [
                 w * 0.06,
-                h * 0.03 + title_font * 1.55 + body_font * 1.55,
+                h * 0.03 + title_font * 1.55 + body_h + body_font * 0.15,
                 w * 0.88,
                 hint_font * 2.2,
             ],

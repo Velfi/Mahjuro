@@ -305,8 +305,9 @@ impl InputState {
             return;
         }
         let g = gain.clamp(0.0, 1.0);
-        let low = ((weak as f32) * g).min(65535.0) as u16;
-        let high = ((strong as f32) * g).min(65535.0) as u16;
+        // SDL: `low_frequency_rumble` = heavy motor, `high_frequency` = light (typical Xbox layout).
+        let low = ((strong as f32) * g).min(65535.0) as u16;
+        let high = ((weak as f32) * g).min(65535.0) as u16;
         if low == 0 && high == 0 {
             return;
         }

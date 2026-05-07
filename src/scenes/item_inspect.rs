@@ -1,7 +1,7 @@
-//! Full-screen item inspect: orbit camera + zoom over a 3D target, as a
-//! pushdown overlay so the same mode can be entered from the shop, collection,
-//! or other parent scenes. The parent scene is suspended; drawing reuses its
-//! frame path via [`DrawCtx::suspended_shop`] or [`DrawCtx::suspended_collection`].
+//! Full-screen item inspect: dedicated orbit camera, zoom, and a three-point
+//! light rig (`item_inspect_point_lights`), as a pushdown overlay from shop or
+//! collection. The parent scene is suspended; mesh draws still reuse
+//! [`DrawCtx::suspended_shop`] / [`DrawCtx::suspended_collection`].
 
 use std::time::Instant;
 
@@ -47,16 +47,35 @@ impl ItemInspectScene {
     }
 }
 
-/// Apply orbit pitch/yaw and zoom around `ins.target_world`, starting from `base` eye/target.
-pub fn inspect_orbit_camera(base: &CameraParams, ins: &ItemInspectOrbitState) -> CameraParams {
+/// Close-up inspect rig: canonical offset from the pivot, then yaw (world +Z) / pitch / zoom.
+/// Does not inherit the parent scene wide-shot camera.
+pub fn item_inspect_orbit_camera(
+    host: ItemInspectHost,
+    window_h: f32,
+    ins: &ItemInspectOrbitState,
+    shop_env_height_scale: Option<f32>,
+) -> CameraParams {
     let target = Vec3::from_array(ins.target_world);
-    let eye0 = Vec3::from_array(base.eye);
-    let mut v = eye0 - target;
-    if v.length_squared() < 1e-4 {
-        let scale = eye0.y.abs().max(200.0);
-        v = Vec3::new(0.0, -scale * 0.9, scale * 0.38);
-    }
-    v *= ins.zoom;
+    let up = [0.0_f32, 0.0, 1.0];
+
+    let h = window_h.max(1.0);
+    let (dir0, base_dist, fovy_deg) = match host {
+        ItemInspectHost::Shop => {
+            let env_h =
+                shop_env_height_scale.unwrap_or(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
+            let s = crate::render::shop_glb::shop_env_world_scale(h, env_h);
+            let dir = Vec3::new(0.32_f32, -0.74, 0.59).normalize();
+            let dist = h * 0.52 * s;
+            (dir, dist, 32.0_f32)
+        }
+        ItemInspectHost::Collection => {
+            let dir = Vec3::new(0.0_f32, -0.90, 0.44).normalize();
+            let dist = h * 0.78;
+            (dir, dist, 38.0_f32)
+        }
+    };
+
+    let v = dir0 * base_dist * ins.zoom;
     let rot_z = Mat3::from_axis_angle(Vec3::Z, ins.yaw);
     let vp = rot_z * v;
     let horiz = Vec3::new(vp.x, vp.y, 0.0);
@@ -71,10 +90,77 @@ pub fn inspect_orbit_camera(base: &CameraParams, ins: &ItemInspectOrbitState) ->
     let new_eye = target + vf;
     CameraParams {
         eye: new_eye.to_array(),
-        target: target.to_array(),
-        up: base.up,
-        fovy_deg: base.fovy_deg,
+        target: ins.target_world,
+        up,
+        fovy_deg,
     }
+}
+
+#[inline]
+fn world_to_point_light_pos(window_w: f32, window_h: f32, world: Vec3) -> [f32; 3] {
+    [world.x + window_w * 0.5, window_h * 0.5 - world.y, world.z]
+}
+
+/// Key / fill / rim for inspect — not the shop lamp, GLB punctual, or collection corridor rig.
+pub fn item_inspect_point_lights(
+    host: ItemInspectHost,
+    window_w: f32,
+    window_h: f32,
+    cam: &CameraParams,
+    target_world: [f32; 3],
+) -> Vec<crate::render::wgpu_renderer::PointLight> {
+    use crate::render::wgpu_renderer::PointLight;
+
+    let target = Vec3::from_array(target_world);
+    let eye = Vec3::from_array(cam.eye);
+    let mut view_dir = eye - target;
+    if view_dir.length_squared() < 1e-8 {
+        view_dir = Vec3::new(0.0, -1.0, 0.2);
+    }
+    let view_dir = view_dir.normalize();
+    let mut up = Vec3::from_array(cam.up);
+    if up.length_squared() < 1e-8 {
+        up = Vec3::Z;
+    } else {
+        up = up.normalize();
+    }
+    let mut right = view_dir.cross(up);
+    if right.length_squared() < 1e-8 {
+        right = Vec3::X;
+    } else {
+        right = right.normalize();
+    }
+
+    let scale = window_h.max(120.0);
+    let key_world = eye - view_dir * (scale * 0.20);
+    let fill_world = target - right * (scale * 0.42) + up * (scale * 0.055);
+    let rim_world = target - view_dir * (scale * 0.52) + up * (scale * 0.065);
+
+    let (key_i, fill_i, rim_i, key_r, fill_r, rim_r) = match host {
+        ItemInspectHost::Shop => (5.5_f32, 2.6, 3.2, 1.1, 0.95, 0.58),
+        ItemInspectHost::Collection => (4.7_f32, 2.15, 2.75, 1.05, 0.9, 0.52),
+    };
+
+    vec![
+        PointLight {
+            pos: world_to_point_light_pos(window_w, window_h, key_world),
+            radius: scale * key_r,
+            color: [1.0, 0.94, 0.82],
+            intensity: key_i,
+        },
+        PointLight {
+            pos: world_to_point_light_pos(window_w, window_h, fill_world),
+            radius: scale * fill_r,
+            color: [0.75, 0.86, 1.0],
+            intensity: fill_i,
+        },
+        PointLight {
+            pos: world_to_point_light_pos(window_w, window_h, rim_world),
+            radius: scale * rim_r,
+            color: [1.0, 0.68, 0.5],
+            intensity: rim_i,
+        },
+    ]
 }
 
 impl SceneBehavior for ItemInspectScene {
@@ -103,8 +189,8 @@ impl SceneBehavior for ItemInspectScene {
         let (sx, sy) = ctx.shop_inspect_orbit_stick;
         self.orbit.yaw += sx * ORBIT * dt;
         self.orbit.pitch = (self.orbit.pitch + sy * ORBIT * dt).clamp(-P_LIM, P_LIM);
-        self.orbit.zoom = (self.orbit.zoom - ctx.shop_inspect_zoom_triggers * ZSPD * dt)
-            .clamp(ZMIN, ZMAX);
+        self.orbit.zoom =
+            (self.orbit.zoom - ctx.shop_inspect_zoom_triggers * ZSPD * dt).clamp(ZMIN, ZMAX);
         const WHEEL_ZOOM: f32 = 0.11;
         self.orbit.zoom = (self.orbit.zoom + ctx.scroll_lines * WHEEL_ZOOM).clamp(ZMIN, ZMAX);
 

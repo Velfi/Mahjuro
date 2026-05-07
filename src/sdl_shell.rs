@@ -21,8 +21,26 @@ pub struct SdlShell {
     pub(crate) rt_prev: HashMap<JoystickId, f32>,
 }
 
+fn apply_sdl_hints_before_init() {
+    // Hints that must be set before `SDL_Init` / opening joysticks (SDL wiki).
+    #[cfg(target_os = "macos")]
+    {
+        // Wired Xbox / Series controllers on macOS often bind to HIDAPI or GIP with
+        // **no rumble**; Bluetooth + GCController is the path that usually works.
+        // Gilrs hits the same IOKit / driver limits. Opt out with:
+        //   MAHJURO_SDL_XBOX_HIDAPI=1
+        if std::env::var("MAHJURO_SDL_XBOX_HIDAPI").ok().as_deref() != Some("1") {
+            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX", "0");
+            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX_ONE", "0");
+            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX_360", "0");
+            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_GIP", "0");
+        }
+    }
+}
+
 impl SdlShell {
     pub fn new(title: &str, width: u32, height: u32) -> anyhow::Result<Self> {
+        apply_sdl_hints_before_init();
         let _sdl = sdl3::init().map_err(anyhow::Error::from)?;
         let _ = sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
 
@@ -101,6 +119,17 @@ impl SdlShell {
             }
             match self.gamepad.open(id) {
                 Ok(gp) => {
+                    let name = gp.name().unwrap_or_else(|| "(unknown)".into());
+                    let rumble = unsafe { gp.has_rumble() };
+                    log::info!(
+                        "SDL gamepad opened: id={} name={name:?} SDL_PROP_GAMEPAD_CAP_RUMBLE={rumble}",
+                        id.0
+                    );
+                    if !rumble {
+                        log::warn!(
+                            "This gamepad reports no rumble to SDL — force feedback will not run (common on macOS USB Xbox; try Bluetooth, or MAHJURO_SDL_XBOX_HIDAPI=1)."
+                        );
+                    }
                     self.lt_prev.insert(id, 0.0);
                     self.rt_prev.insert(id, 0.0);
                     self.pads.insert(id, gp);
