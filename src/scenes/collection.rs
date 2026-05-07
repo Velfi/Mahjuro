@@ -22,7 +22,8 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::item_inspect::{
-    inspect_orbit_camera, ItemInspectHost, ItemInspectOrbitState, ItemInspectScene,
+    item_inspect_orbit_camera, item_inspect_point_lights, ItemInspectHost, ItemInspectOrbitState,
+    ItemInspectScene,
 };
 
 /// One catalog section. Each tab drives a separate grid of artifacts.
@@ -511,49 +512,56 @@ impl CollectionScene {
         };
         frame.camera_override = Some(
             inspect
-                .map(|ins| inspect_orbit_camera(&base_cam, ins))
+                .map(|ins| item_inspect_orbit_camera(ItemInspectHost::Collection, h, ins, None))
                 .unwrap_or(base_cam),
         );
 
         frame.fisheye_strength = 0.0;
 
-        // Three warm key-lights in front of the cabinet. Light `pos`
-        // is pixel-space (renderer converts via `pixel_to_world`), so
-        // pixel_x + pixel_y define the (X, Y) world position and the
-        // third coordinate is the world-Z lift directly.
-        // The main key sits in front of the camera, slightly above
-        // the focused cell, bathing the cabinet face in warm light.
         let focus_px_x = cab_px_x + focus_world_x;
         let focus_px_y = cab_px_y; // cabinet plane
         let focus_px_z = focus_world_z;
-        frame.point_lights = vec![
-            PointLight {
-                pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
-                radius: cell_pitch * 14.0,
-                color: [1.0, 0.88, 0.62],
-                intensity: 2.4,
-            },
-            PointLight {
-                pos: [
-                    focus_px_x - cell_pitch * 4.0,
-                    focus_px_y + h * 0.4,
-                    focus_px_z + cell_pitch * 3.0,
-                ],
-                radius: cell_pitch * 10.0,
-                color: [0.85, 0.70, 1.0],
-                intensity: 1.3,
-            },
-            PointLight {
-                pos: [
-                    focus_px_x + cell_pitch * 4.0,
-                    focus_px_y + h * 0.4,
-                    focus_px_z - cell_pitch * 3.0,
-                ],
-                radius: cell_pitch * 10.0,
-                color: [1.0, 0.65, 0.55],
-                intensity: 1.3,
-            },
-        ];
+
+        frame.point_lights = if let Some(ins) = inspect {
+            let cam = frame
+                .camera_override
+                .as_ref()
+                .expect("inspect sets camera_override above");
+            item_inspect_point_lights(ItemInspectHost::Collection, w, h, cam, ins.target_world)
+        } else {
+            // Three warm key-lights in front of the cabinet. Light `pos`
+            // is pixel-space (renderer converts via `pixel_to_world`), so
+            // pixel_x + pixel_y define the (X, Y) world position and the
+            // third coordinate is the world-Z lift directly.
+            vec![
+                PointLight {
+                    pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
+                    radius: cell_pitch * 14.0,
+                    color: [1.0, 0.88, 0.62],
+                    intensity: 2.4,
+                },
+                PointLight {
+                    pos: [
+                        focus_px_x - cell_pitch * 4.0,
+                        focus_px_y + h * 0.4,
+                        focus_px_z + cell_pitch * 3.0,
+                    ],
+                    radius: cell_pitch * 10.0,
+                    color: [0.85, 0.70, 1.0],
+                    intensity: 1.3,
+                },
+                PointLight {
+                    pos: [
+                        focus_px_x + cell_pitch * 4.0,
+                        focus_px_y + h * 0.4,
+                        focus_px_z - cell_pitch * 3.0,
+                    ],
+                    radius: cell_pitch * 10.0,
+                    color: [1.0, 0.65, 0.55],
+                    intensity: 1.3,
+                },
+            ]
+        };
 
         // Grid window size — how many cells we actually push as 3D
         // objects. Larger = more infinite-looking, slower to render.

@@ -166,7 +166,7 @@ pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
 /// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual`). Default `1` uses authored intensities.
-pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.4;
+pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 
 /// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
 /// Multiplied with [`ShopEnvLightingTune::linear_exposure`] and written to `shop_glb` / shop `lit_mesh` path.
