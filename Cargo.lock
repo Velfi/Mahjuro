@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "mahjuro"
-version = "0.5.0-1"
+version = "0.5.0-2"
 dependencies = [
  "anyhow",
  "arboard",
