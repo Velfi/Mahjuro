@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-1 — 2026-05-06
+
+### Changed
+- Windowing and input now run on SDL3 instead of the previous winit-based stack, with gamepads handled through SDL3’s controller APIs. On macOS, SDL hints are set so Xbox-style controllers are picked up more reliably.
+
 ## 0.5.0-0 — 2026-05-06
 
 ### Added
