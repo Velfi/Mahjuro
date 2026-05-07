@@ -915,6 +915,62 @@ impl UiFrame {
     }
 }
 
+/// Strip scene depth-writing 3D cmds and stage the relic celebration modal:
+/// orthographic-style camera, key/fill/rim lights, then the relic meshes.
+///
+/// Shared by the interactive `App::draw` path and headless screenshot capture
+/// so the two cannot drift.
+pub fn apply_modal_relic_staging(
+    frame: &mut UiFrame,
+    window_w: f32,
+    window_h: f32,
+    modal_relic_objects: Vec<Object3d>,
+) {
+    if modal_relic_objects.is_empty() {
+        return;
+    }
+    frame.cmds.retain(|cmd| {
+        !matches!(
+            cmd,
+            DrawCmd::Object3d(_)
+                | DrawCmd::Object3dBatch(_)
+                | DrawCmd::ShowcaseTileBatch(_)
+                | DrawCmd::TileFaceQuad(_)
+                | DrawCmd::ShopEnvironment
+                | DrawCmd::Table
+        )
+    });
+    let w = window_w;
+    let h = window_h;
+    frame.camera_override = Some(CameraParams {
+        eye: [0.0, -h * 3.0, 0.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+        fovy_deg: 20.0,
+    });
+    frame.point_lights = vec![
+        PointLight {
+            pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
+            radius: h * 1.6,
+            color: [1.00, 0.94, 0.82],
+            intensity: 2.0,
+        },
+        PointLight {
+            pos: [w * 0.5 - w * 0.22, h * 0.5 + h * 0.35, h * 0.30],
+            radius: h * 1.3,
+            color: [0.78, 0.86, 1.00],
+            intensity: 0.9,
+        },
+        PointLight {
+            pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
+            radius: h * 1.0,
+            color: [1.00, 0.78, 0.42],
+            intensity: 1.0,
+        },
+    ];
+    frame.object3d_batch(modal_relic_objects);
+}
+
 impl Default for UiFrame {
     fn default() -> Self {
         Self::new()

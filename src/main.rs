@@ -62,7 +62,7 @@ use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
 use game::volumetric_tuning::VolumetricTuning;
 use render::animation::AnimationController;
-use render::draw_cmd::{CameraParams, UiFrame};
+use render::draw_cmd::{apply_modal_relic_staging, CameraParams, UiFrame};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;

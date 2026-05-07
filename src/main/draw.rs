@@ -1,5 +1,17 @@
 use super::*;
 
+#[inline]
+fn append_fullscreen_debug_panel(
+    frame: &mut UiFrame,
+    active_buttons: &mut Vec<ButtonDef>,
+    insts: Vec<GpuInstance>,
+    labels: Vec<TextLabel>,
+) {
+    frame.quads(insts);
+    frame.texts(labels);
+    active_buttons.clear();
+}
+
 impl App {
     /// Process a `RoundComplete` or `GameOver` event that was held while the
     /// scoring cascade was still playing. Pushes celebration modals, plays the
@@ -300,29 +312,8 @@ impl App {
             _ => None,
         };
 
-        let ctx = DrawCtx {
-            layout: &layout,
-            anim: &self.anim,
-            run: &self.run,
-            progress: &self.progress,
-            active_profile: self.active_profile,
-            game_in_progress: self.run.is_in_progress(),
-            proj: renderer.projections(),
-            picked_gameplay_object: self
-                .input
-                .as_ref()
-                .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
-            picked_shop_object: self
-                .input
-                .as_ref()
-                .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
-            debug_visibility: scenes::DebugVisibility {
-                hide_candles: self.debug.hide_candles,
-                hide_blind_plaque: self.debug.hide_blind_plaque,
-            },
-            ui_scale: self.gfx.ui_scale,
-            modal_active,
-            arrange_preview: if let Some(Some(ref state)) = self.debug.arrange_mode {
+        let arrange_preview =
+            if let Some(Some(ref state)) = self.debug.arrange_mode {
                 let ww = size.width as f32;
                 let wh = size.height as f32;
                 Some(crate::ui::placement::ArrangePreview {
@@ -340,30 +331,48 @@ impl App {
                 })
             } else {
                 None
+            };
+        let ctx = DrawCtx::new(
+            &layout,
+            &self.anim,
+            &self.run,
+            &self.progress,
+            self.active_profile,
+            self.run.is_in_progress(),
+            renderer.projections(),
+            self.input.as_ref().and_then(|i| {
+                renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)
+            }),
+            self.input
+                .as_ref()
+                .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
+            scenes::DebugVisibility {
+                hide_candles: self.debug.hide_candles,
+                hide_blind_plaque: self.debug.hide_blind_plaque,
             },
-            shop_env_height_scale: self.debug.shop_env_height_scale,
-            shop_env_lighting: self.debug.shop_env_lighting,
-            effect_layers: self.effect_layers,
-            cursor_pos: self
-                .input
+            self.gfx.ui_scale,
+            modal_active,
+            arrange_preview,
+            self.debug.shop_env_height_scale,
+            self.debug.shop_env_lighting,
+            self.effect_layers,
+            self.input
                 .as_ref()
                 .map(|i| i.last_cursor)
                 .unwrap_or((0.0, 0.0)),
-            input_mode: self
-                .input
+            self.input
                 .as_ref()
                 .map(|i| i.mode)
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
-            gamepad_swap_ab: self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
-            gamepad_swap_xy: self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false),
-            gamepad_style: self
-                .input
+            self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
+            self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false),
+            self.input
                 .as_ref()
                 .map(|i| i.gamepad_style)
                 .unwrap_or_default(),
             suspended_shop,
             suspended_collection,
-        };
+        );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
         // for legacy scenes the default impl forwards through `draw()` +
@@ -485,84 +494,12 @@ impl App {
             if !modal_gradient_quads.is_empty() {
                 frame.gradient_quads(modal_gradient_quads);
             }
-            if !modal_relic_objects.is_empty() {
-                // Near-orthographic camera looking down -Y at the felt so
-                // pixel_to_world's (world_x, world_y, lift_z) maps cleanly
-                // to screen space with Z up — matches the scene-wide axis
-                // convention used by tutorial/collection relic cards.
-                //
-                // The underlying scene's 3D content is hidden by the
-                // modal card, but its meshes still wrote to the depth
-                // buffer using the scene's camera. Under our overridden
-                // modal camera those depth values are nonsense and end
-                // up cutting through the relic. Strip every scene 3D
-                // draw and lit-mesh op so the relic owns the depth
-                // buffer for its own pass. Quads and text don't write
-                // depth, so the modal card backdrop is unaffected.
-                use crate::render::draw_cmd::DrawCmd;
-                frame.cmds.retain(|cmd| {
-                    !matches!(
-                        cmd,
-                        DrawCmd::Object3d(_)
-                            | DrawCmd::Object3dBatch(_)
-                            | DrawCmd::ShowcaseTileBatch(_)
-                            | DrawCmd::TileFaceQuad(_)
-                            | DrawCmd::ShopEnvironment
-                            | DrawCmd::Table
-                    )
-                });
-                let w = size.width as f32;
-                let h = size.height as f32;
-                frame.camera_override = Some(CameraParams {
-                    eye: [0.0, -h * 3.0, 0.0],
-                    target: [0.0, 0.0, 0.0],
-                    up: [0.0, 0.0, 1.0],
-                    fovy_deg: 20.0,
-                });
-                // Reveal lighting rig: strong warm key from upper-
-                // right, cooler fill from upper-left, and a low warm
-                // rim from behind/below to lift the relic's bottom
-                // edge off the felt slab. The override camera looks
-                // along +Y at the world origin; pixel-space coords
-                // map to world via (world_x = px - w/2,
-                // world_y = h/2 - py, world_z = lift), so lights with
-                // py > h/2 sit in front of the relic (world -Y).
-                //
-                // Higher key intensity than the previous flat rig
-                // because the new staging has a felt slab, contact
-                // halo, and TV-distance viewing — the relic needs to
-                // *pop* off the stage rather than blend into it.
-                use crate::render::wgpu_renderer::PointLight;
-                frame.point_lights = vec![
-                    // Warm key, upper-right. Tuned softer than the
-                    // old rig so the textured relic face reads its
-                    // engraving instead of blooming to white.
-                    PointLight {
-                        pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
-                        radius: h * 1.6,
-                        color: [1.00, 0.94, 0.82],
-                        intensity: 2.0,
-                    },
-                    // Cool fill, upper-left — softens shadow side
-                    // without flattening the form.
-                    PointLight {
-                        pos: [w * 0.5 - w * 0.22, h * 0.5 + h * 0.35, h * 0.30],
-                        radius: h * 1.3,
-                        color: [0.78, 0.86, 1.00],
-                        intensity: 0.9,
-                    },
-                    // Warm low rim, behind the relic. Sits at
-                    // py < h/2 (world +Y, behind the relic), low Z so
-                    // it grazes the bottom edge of the disk.
-                    PointLight {
-                        pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
-                        radius: h * 1.0,
-                        color: [1.00, 0.78, 0.42],
-                        intensity: 1.0,
-                    },
-                ];
-                frame.object3d_batch(modal_relic_objects);
-            }
+            apply_modal_relic_staging(
+                &mut frame,
+                size.width as f32,
+                size.height as f32,
+                modal_relic_objects,
+            );
             // Replace scene buttons with modal buttons so only dismiss works.
             self.active_buttons = modal_buttons;
         }
@@ -571,56 +508,48 @@ impl App {
         if let Some(ref overlay) = self.debug.tuning_overlay {
             let (tuning_insts, tuning_labels) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(tuning_insts);
-            frame.texts(tuning_labels);
-            self.active_buttons.clear(); // Block scene buttons.
+            append_fullscreen_debug_panel(
+                &mut frame,
+                &mut self.active_buttons,
+                tuning_insts,
+                tuning_labels,
+            );
         }
 
         // SFX test overlay — on top of modals.
         if let Some(ref mut overlay) = self.debug.sfx_test_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(insts);
-            frame.texts(lbls);
-            self.active_buttons.clear();
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Camera debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.camera_debug_overlay {
-            // Override the scene's camera with the debug values.
             frame.camera_override = Some(overlay.to_camera_params());
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(insts);
-            frame.texts(lbls);
-            self.active_buttons.clear();
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Shop env scale debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(insts);
-            frame.texts(lbls);
-            self.active_buttons.clear();
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(insts);
-            frame.texts(lbls);
-            self.active_buttons.clear();
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Volumetric tuning overlay — on top of modals.
         if let Some(ref overlay) = self.debug.volumetric_debug_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
-            frame.quads(insts);
-            frame.texts(lbls);
-            self.active_buttons.clear();
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as

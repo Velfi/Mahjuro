@@ -193,12 +193,12 @@ fn analyze_hand_options(
 
         if run.uses_structure_bank() {
             let kongs_after = run
-                .structure_sets
+                .structure_sets()
                 .iter()
                 .chain(sets.iter())
                 .filter(|s| s.kind == SetKind::Kong)
                 .count();
-            if run.structure_tiles.len() + scoring_tiles.len()
+            if run.structure_tiles().len() + scoring_tiles.len()
                 > crate::game::run::HAND_SIZE + kongs_after
             {
                 continue;
@@ -206,9 +206,9 @@ fn analyze_hand_options(
         }
         analysis.committable_count += 1;
 
-        let mut merged_sets = run.structure_sets.clone();
+        let mut merged_sets = run.structure_sets().to_vec();
         merged_sets.extend(sets.iter().cloned());
-        let mut merged_tiles = run.structure_tiles.clone();
+        let mut merged_tiles = run.structure_tiles().to_vec();
         merged_tiles.extend(scoring_tiles.iter().copied());
         let ctx = ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
@@ -232,7 +232,7 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
             .or_insert(0) += 1;
     }
 
-    let analysis = analyze_hand_options(run, &run.hand, &run.round_rules);
+    let analysis = analyze_hand_options(run, &run.hand(), &run.round_rules);
     let issue_key = if analysis.valid_count == 0 {
         "no-valid".to_string()
     } else if analysis.valid_count == 1 && analysis.committable_count == 0 {
@@ -302,7 +302,7 @@ fn ctx_for_merged_commit<'a>(
         total_score: run.total_score_earned,
         is_final_play: plays_rem_after == 0,
         relic_counters: run.relic_counters.clone(),
-        unscored_hand_tiles: run.hand.len().saturating_sub(merged_tiles.len()),
+        unscored_hand_tiles: run.hand().len().saturating_sub(merged_tiles.len()),
         structure: Some(meta),
     }
 }
@@ -342,18 +342,19 @@ fn best_play_in_hand(
         };
         if run.uses_structure_bank() {
             let kongs_after = run
-                .structure_sets
+                .structure_sets()
                 .iter()
                 .chain(sets.iter())
                 .filter(|s| s.kind == SetKind::Kong)
                 .count();
-            if run.structure_tiles.len() + tiles.len() > crate::game::run::HAND_SIZE + kongs_after {
+            if run.structure_tiles().len() + tiles.len() > crate::game::run::HAND_SIZE + kongs_after
+            {
                 continue;
             }
         }
-        let mut merged_sets = run.structure_sets.clone();
+        let mut merged_sets = run.structure_sets().to_vec();
         merged_sets.extend(sets.iter().cloned());
-        let mut merged_tiles = run.structure_tiles.clone();
+        let mut merged_tiles = run.structure_tiles().to_vec();
         merged_tiles.extend(tiles.iter().copied());
         let ctx = ctx_for_merged_commit(
             run,
@@ -758,7 +759,7 @@ fn wrap_sequence_ranks(rank: u8) -> &'static [[u8; 2]] {
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
 pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
-    best_play_in_hand(run, &run.hand, &run.round_rules, None, None)
+    best_play_in_hand(run, &run.hand(), &run.round_rules, None, None)
 }
 
 /// Rate each tile by how many *potential* melds in the current hand it participates in.
@@ -805,7 +806,7 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 
     let k = discard_indices.len();
     let peeked = run.wall.peek_next(k);
     let mut new_hand: Vec<Tile> = run
-        .hand
+        .hand()
         .iter()
         .enumerate()
         .filter(|(i, _)| !drop_set.contains(i))
@@ -860,7 +861,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
             run.target_score,
             run.plays_remaining,
             run.discards_remaining,
-            run.hand.len(),
+            run.hand().len(),
             run.gold
         );
 
@@ -907,7 +908,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
         let can_discard = run.discards_remaining > 0 && run.plays_remaining > 1;
         let mut did_discard = false;
         if can_discard {
-            let candidates = discard_candidates(&run.hand, 5);
+            let candidates = discard_candidates(&run.hand(), 5);
             // Margin scales with how far we are from target — late in the round we
             // need bigger swings to be worth losing a play.
             let need = (run.target_score as u64).saturating_sub(run.round_score);
@@ -990,7 +991,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
             return false;
         }
         run.clear_selection();
-        let hand_n = run.hand.len();
+        let hand_n = run.hand().len();
         if hand_n == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::EmptyHand);
             bot_log!(log, "      action: hand empty, cannot continue");
@@ -1036,7 +1037,7 @@ mod tests {
             tile_count: usize,
         }
 
-        let n = run.hand.len();
+        let n = run.hand().len();
         let mut best: Option<(PlayRank, Vec<usize>)> = None;
         let limit: u32 = 1u32 << n;
         for mask in 1u32..limit {
@@ -1051,7 +1052,7 @@ mod tests {
             let mut tiles = Vec::with_capacity(count);
             for i in 0..n {
                 if mask & (1 << i) != 0 {
-                    tiles.push(run.hand[i]);
+                    tiles.push(run.hand()[i]);
                 }
             }
             let Some(sets) =
@@ -1061,20 +1062,20 @@ mod tests {
             };
             if run.uses_structure_bank() {
                 let kongs_after = run
-                    .structure_sets
+                    .structure_sets()
                     .iter()
                     .chain(sets.iter())
                     .filter(|s| s.kind == SetKind::Kong)
                     .count();
-                if run.structure_tiles.len() + tiles.len()
+                if run.structure_tiles().len() + tiles.len()
                     > crate::game::run::HAND_SIZE + kongs_after
                 {
                     continue;
                 }
             }
-            let mut merged_sets = run.structure_sets.clone();
+            let mut merged_sets = run.structure_sets().to_vec();
             merged_sets.extend(sets.iter().cloned());
-            let mut merged_tiles = run.structure_tiles.clone();
+            let mut merged_tiles = run.structure_tiles().to_vec();
             merged_tiles.extend(tiles.iter().copied());
             let ctx =
                 super::ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
@@ -1112,7 +1113,7 @@ mod tests {
 
     fn scoring_test_run() -> RunState {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             t(Suit::Characters, 3, 1),
             t(Suit::Characters, 3, 2),
             t(Suit::Characters, 3, 3),
@@ -1123,38 +1124,38 @@ mod tests {
             t(Suit::Circles, 3, 8),
             t(Suit::Circles, 4, 9),
         ];
-        run.hand.sort();
+        run.hand_mut().sort();
         run
     }
 
     #[test]
     fn bot_skips_structure_commits_that_overflow_the_bank() {
         let mut run = RunState::new_demo();
-        run.structure_tiles = run.hand.iter().take(12).copied().collect();
-        run.structure_sets = vec![
+        *run.structure_tiles_mut() = run.hand().iter().take(12).copied().collect();
+        *run.structure_sets_mut() = vec![
             DetectedSet {
                 kind: SetKind::Triplet,
-                tile_ids: run.structure_tiles[0..3].iter().map(|t| t.id).collect(),
+                tile_ids: run.structure_tiles()[0..3].iter().map(|t| t.id).collect(),
             },
             DetectedSet {
                 kind: SetKind::Triplet,
-                tile_ids: run.structure_tiles[3..6].iter().map(|t| t.id).collect(),
+                tile_ids: run.structure_tiles()[3..6].iter().map(|t| t.id).collect(),
             },
             DetectedSet {
                 kind: SetKind::Triplet,
-                tile_ids: run.structure_tiles[6..9].iter().map(|t| t.id).collect(),
+                tile_ids: run.structure_tiles()[6..9].iter().map(|t| t.id).collect(),
             },
             DetectedSet {
                 kind: SetKind::Triplet,
-                tile_ids: run.structure_tiles[9..12].iter().map(|t| t.id).collect(),
+                tile_ids: run.structure_tiles()[9..12].iter().map(|t| t.id).collect(),
             },
         ];
-        assert_eq!(run.structure_tiles.len(), HAND_SIZE - 2);
+        assert_eq!(run.structure_tiles().len(), HAND_SIZE - 2);
 
         let best = pick_best_play(&run);
         assert!(
             best.as_ref()
-                .map(|(_, indices)| run.structure_tiles.len() + indices.len() <= HAND_SIZE)
+                .map(|(_, indices)| run.structure_tiles().len() + indices.len() <= HAND_SIZE)
                 .unwrap_or(true),
             "bot should not choose a play that the structure bank would reject"
         );
@@ -1169,7 +1170,7 @@ mod tests {
     #[test]
     fn enumerated_masks_match_bruteforce_best_play_with_flowers() {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             t(Suit::Characters, 2, 1),
             t(Suit::Characters, 3, 2),
             t(Suit::Characters, 5, 3),
@@ -1182,8 +1183,8 @@ mod tests {
             t(Suit::Flower, 1, 10),
             t(Suit::Flower, 2, 11),
         ];
-        run.hand.sort();
-        let new_best = best_play_in_hand(&run, &run.hand, &run.round_rules, None, None);
+        run.hand_mut().sort();
+        let new_best = best_play_in_hand(&run, &run.hand(), &run.round_rules, None, None);
         let old_best = brute_force_best_play_in_hand(&run);
         assert_eq!(new_best, old_best);
     }
@@ -1191,7 +1192,7 @@ mod tests {
     #[test]
     fn candidate_masks_only_produce_valid_selections() {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             t(Suit::Characters, 1, 1),
             t(Suit::Characters, 2, 2),
             t(Suit::Characters, 3, 3),
@@ -1205,11 +1206,11 @@ mod tests {
             t(Suit::Flower, 3, 11),
             t(Suit::Flower, 4, 12),
         ];
-        run.hand.sort();
+        run.hand_mut().sort();
 
-        for mask in enumerate_candidate_play_masks(&run.hand, &run.round_rules) {
+        for mask in enumerate_candidate_play_masks(&run.hand(), &run.round_rules) {
             let tiles: Vec<_> = run
-                .hand
+                .hand()
                 .iter()
                 .enumerate()
                 .filter_map(|(i, t)| (mask & (1 << i) != 0).then_some(*t))
@@ -1218,7 +1219,7 @@ mod tests {
                 crate::core::hand::validate_selection_with_rules(&tiles, &run.round_rules)
                     .is_some(),
                 "invalid candidate mask {mask:b} for hand {:?}",
-                run.hand
+                run.hand()
             );
         }
     }
@@ -1226,19 +1227,19 @@ mod tests {
     #[test]
     fn candidate_masks_include_each_flower_identity_for_wildcard_melds() {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             t(Suit::Characters, 5, 1),
             t(Suit::Characters, 5, 2),
             t(Suit::Flower, 1, 3),
             t(Suit::Flower, 2, 4),
         ];
-        run.hand.sort();
+        run.hand_mut().sort();
 
-        let masks = enumerate_candidate_play_masks(&run.hand, &run.round_rules);
+        let masks = enumerate_candidate_play_masks(&run.hand(), &run.round_rules);
         let selected_ids: Vec<Vec<u32>> = masks
             .iter()
             .map(|mask| {
-                run.hand
+                run.hand()
                     .iter()
                     .enumerate()
                     .filter_map(|(idx, tile)| (mask & (1 << idx) != 0).then_some(tile.id))
@@ -1337,7 +1338,7 @@ mod tests {
         assert!(use_bot_consumables(&mut run, false));
         assert_eq!(run.yaku_levels.level_of(ZodiacKind::Ox.yaku()), 2);
         assert!(
-            run.hand.iter().all(|tile| tile.enhancement.is_some()),
+            run.hand().iter().all(|tile| tile.enhancement.is_some()),
             "best talisman should stamp the hand"
         );
         assert!(run.consumables.items.is_empty());
@@ -1458,9 +1459,9 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     hypothetical.active.push(candidate);
 
     // Sample 1: the bot's actual current hand (weighted heavily).
-    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand, Some(&hypothetical), None)
+    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand(), Some(&hypothetical), None)
         as i64
-        - best_play_score_for_hand(run, &run.hand, None, None) as i64;
+        - best_play_score_for_hand(run, &run.hand(), None, None) as i64;
     let mut sample_count: i64 = 1;
 
     // Samples 2..N: synthetic random hands from fresh walls.
@@ -1478,9 +1479,9 @@ fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
     let mut hypothetical = run.yaku_levels.clone();
     hypothetical.level_up(zodiac.yaku());
 
-    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand, None, Some(&hypothetical))
+    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand(), None, Some(&hypothetical))
         as i64
-        - best_play_score_for_hand(run, &run.hand, None, None) as i64;
+        - best_play_score_for_hand(run, &run.hand(), None, None) as i64;
     let mut sample_count: i64 = 1;
 
     for _ in 0..RELIC_EVAL_SAMPLES {
@@ -1665,7 +1666,7 @@ fn best_selection_for_talisman_on_hand(
 /// Convenience wrapper that picks a selection on the bot's current hand.
 /// Used at talisman-use time (the hand is populated then).
 fn best_selection_for_talisman(run: &RunState, kind: TalismanKind) -> Option<(Vec<usize>, i64)> {
-    best_selection_for_talisman_on_hand(run, &run.hand, kind)
+    best_selection_for_talisman_on_hand(run, &run.hand(), kind)
 }
 
 /// Estimate the score improvement from using a selection talisman on a
@@ -1706,8 +1707,8 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     // zodiacs) to avoid zero-variance on an unlucky current hand, then
     // use the average single-play delta as a conservative one-shot value.
     let mut delta_sum: i64 = {
-        let base = best_play_score_for_hand(run, &run.hand, None, None) as i64;
-        let mut enhanced_hand = run.hand.clone();
+        let base = best_play_score_for_hand(run, &run.hand(), None, None) as i64;
+        let mut enhanced_hand = run.hand().to_vec();
         crate::core::talisman::apply_to_hand(&mut enhanced_hand, talisman);
         let buffed = best_play_score_for_hand(run, &enhanced_hand, None, None) as i64;
         buffed - base
@@ -1849,8 +1850,8 @@ fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
                 return used_any;
             };
             // Clear any stale selection, then select the chosen tiles.
-            let existing: Vec<usize> = (0..run.hand.len())
-                .filter(|&i| run.selected.get(i).copied().unwrap_or(false))
+            let existing: Vec<usize> = (0..run.hand().len())
+                .filter(|&i| run.selected_slice().get(i).copied().unwrap_or(false))
                 .collect();
             for i in existing {
                 run.toggle_select(i);

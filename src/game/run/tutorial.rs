@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::game::engine_state::GameplayCoreState;
+
 impl RunState {
     /// Advance the tutorial to the next lesson. Adjusts hand size, target,
     /// discards, and available yaku per the lesson definition. Returns the
@@ -29,8 +31,9 @@ impl RunState {
                 break;
             }
         }
-        self.hand.sort();
-        self.selected.resize(self.hand.len(), false);
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.sort_hand_resize_selection_false();
+        });
 
         // Seed guaranteed melds for early lessons.
         self.seed_tutorial_hand();
@@ -79,8 +82,9 @@ impl RunState {
                 self.hand.push(t);
             }
         }
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.finalize_hand_after_draw();
+        });
         self.restamp_hand_enhancements();
         self.seed_tutorial_hand();
 

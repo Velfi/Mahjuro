@@ -56,9 +56,9 @@ impl RunState {
                 bus.push(GameEvent::InvalidAction);
                 return 0;
             }
-            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
-            core.commit_sets_to_structure(&sets, &scoring_tiles);
-            core.write_back(self);
+            crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
+                core.commit_sets_to_structure(&sets, &scoring_tiles);
+            });
             bus.push(GameEvent::StructureCommitted);
         } else {
             let _ = self.apply_scored_melds(
@@ -68,9 +68,9 @@ impl RunState {
                 None,
                 bus,
             );
-            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
-            core.consume_play();
-            core.write_back(self);
+            crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
+                core.consume_play();
+            });
         }
 
         if self.relics.has(RelicId::MeltingIce) {
@@ -144,11 +144,9 @@ impl RunState {
             self.scored_last_turn = false;
         }
 
-        {
-            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+        crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             let _ = core.take_selected_tiles();
-            core.write_back(self);
-        }
+        });
 
         let effective = boss::effective_hand_size(self);
         let draw_target =
@@ -166,22 +164,17 @@ impl RunState {
             drawn.push(t);
         }
         let restocked = !drawn.is_empty();
-        {
-            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+        crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             core.push_drawn_tiles(&drawn);
-            core.write_back(self);
-        }
+        });
         if restocked {
             self.times_restocked = self.times_restocked.saturating_add(1);
         }
 
-        self.hand.sort();
         self.set_magnet_draw_fourths(bus);
-        {
-            let mut core = crate::game::engine_state::GameplayCoreState::from_run(self);
+        crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             core.finalize_hand_after_draw();
-            core.write_back(self);
-        }
+        });
         self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
 

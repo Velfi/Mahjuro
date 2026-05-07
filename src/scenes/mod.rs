@@ -284,6 +284,61 @@ pub struct DrawCtx<'a> {
     pub suspended_collection: Option<&'a CollectionScene>,
 }
 
+impl<'a> DrawCtx<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        layout: &'a LayoutResult,
+        anim: &'a AnimationController,
+        run: &'a RunState,
+        progress: &'a crate::core::progression::PlayerProgress,
+        active_profile: usize,
+        game_in_progress: bool,
+        proj: &'a crate::render::wgpu_renderer::ProjectionCache,
+        picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
+        picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
+        debug_visibility: DebugVisibility,
+        ui_scale: f32,
+        modal_active: bool,
+        arrange_preview: Option<crate::ui::placement::ArrangePreview>,
+        shop_env_height_scale: f32,
+        shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
+        effect_layers: EffectLayers,
+        cursor_pos: (f32, f32),
+        input_mode: InputMode,
+        gamepad_swap_ab: bool,
+        gamepad_swap_xy: bool,
+        gamepad_style: crate::ui::button_prompts::GamepadStyle,
+        suspended_shop: Option<&'a ShopScene>,
+        suspended_collection: Option<&'a CollectionScene>,
+    ) -> Self {
+        Self {
+            layout,
+            anim,
+            run,
+            progress,
+            active_profile,
+            game_in_progress,
+            proj,
+            picked_gameplay_object,
+            picked_shop_object,
+            debug_visibility,
+            ui_scale,
+            modal_active,
+            arrange_preview,
+            shop_env_height_scale,
+            shop_env_lighting,
+            effect_layers,
+            cursor_pos,
+            input_mode,
+            gamepad_swap_ab,
+            gamepad_swap_xy,
+            gamepad_style,
+            suspended_shop,
+            suspended_collection,
+        }
+    }
+}
+
 /// What happens when a `ButtonDef` is clicked.
 ///
 /// `Ui(action)` enqueues `action` into the next frame's action queue, just

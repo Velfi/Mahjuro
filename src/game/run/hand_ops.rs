@@ -118,9 +118,7 @@ impl RunState {
             0
         };
 
-        let mut core = GameplayCoreState::from_run(self);
-        let removed = core.discard_selected();
-        core.write_back(self);
+        let removed = GameplayCoreState::with_run_mut(self, |core| core.discard_selected());
         let count = removed.len();
         if count == 0 {
             return 0;
@@ -203,9 +201,9 @@ impl RunState {
             drawn.push(t);
         }
 
-        let mut core = GameplayCoreState::from_run(self);
-        core.push_drawn_tiles(&drawn);
-        core.write_back(self);
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.push_drawn_tiles(&drawn);
+        });
         let mut restocked = !drawn.is_empty();
 
         // Shanten Shove: if the refilled hand holds at least one partial
@@ -214,9 +212,9 @@ impl RunState {
             && crate::core::shanten::has_scoring_partial(&self.hand)
             && let Some(t) = self.wall.draw()
         {
-            let mut core = GameplayCoreState::from_run(self);
-            core.push_drawn_tiles(&[t]);
-            core.write_back(self);
+            GameplayCoreState::with_run_mut(self, |core| {
+                core.push_drawn_tiles(&[t]);
+            });
             bus.push(GameEvent::TileDrawn);
             self.relic_activations
                 .push(crate::core::relic::RelicId::ShantenShove);
@@ -227,9 +225,9 @@ impl RunState {
         }
         self.set_magnet_draw_fourths(bus);
 
-        let mut core = GameplayCoreState::from_run(self);
-        core.finalize_hand_after_draw();
-        core.write_back(self);
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.finalize_hand_after_draw();
+        });
 
         self.seed_tutorial_hand();
         self.restamp_hand_enhancements();

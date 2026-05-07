@@ -1,4 +1,9 @@
 //! Single-run state: wall, hand, score target, round modifiers.
+//!
+//! Hand, selection, structure bank, and the fields mirrored by
+//! [`crate::game::engine_state::GameplayCoreState`] should be mutated through
+//! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
+//! or [`crate::game::engine::GameEngine`] so `hand` and `selected` stay aligned.
 
 pub mod discard_undo;
 
@@ -504,15 +509,15 @@ fn structure_label_from_yaku(yaku: &[YakuKind]) -> String {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunState {
     pub wall: Wall,
-    pub hand: Vec<Tile>,
+    hand: Vec<Tile>,
     /// Which hand tiles are marked for discard (parallel with `hand`).
-    pub selected: Vec<bool>,
+    selected: Vec<bool>,
     /// Melds committed from hand into the structure (deferred scoring until trigger).
     #[serde(default)]
-    pub structure_sets: Vec<DetectedSet>,
+    structure_sets: Vec<DetectedSet>,
     /// Tile copies held in the structure (same ids as in `structure_sets`).
     #[serde(default)]
-    pub structure_tiles: Vec<Tile>,
+    structure_tiles: Vec<Tile>,
     pub round_score: u64,
     pub target_score: u32,
     pub base_target: u32,
@@ -712,6 +717,51 @@ pub struct RunState {
 }
 
 impl RunState {
+    pub fn hand(&self) -> &[Tile] {
+        &self.hand
+    }
+
+    pub(crate) fn hand_mut(&mut self) -> &mut Vec<Tile> {
+        &mut self.hand
+    }
+
+    pub fn selected_slice(&self) -> &[bool] {
+        &self.selected
+    }
+
+    pub(crate) fn selected_mut(&mut self) -> &mut Vec<bool> {
+        &mut self.selected
+    }
+
+    pub fn structure_sets(&self) -> &[DetectedSet] {
+        &self.structure_sets
+    }
+
+    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedSet> {
+        &mut self.structure_sets
+    }
+
+    pub fn structure_tiles(&self) -> &[Tile] {
+        &self.structure_tiles
+    }
+
+    pub(crate) fn structure_tiles_mut(&mut self) -> &mut Vec<Tile> {
+        &mut self.structure_tiles
+    }
+
+    pub(crate) fn set_gameplay_core_slice(
+        &mut self,
+        hand: Vec<Tile>,
+        selected: Vec<bool>,
+        structure_sets: Vec<DetectedSet>,
+        structure_tiles: Vec<Tile>,
+    ) {
+        self.hand = hand;
+        self.selected = selected;
+        self.structure_sets = structure_sets;
+        self.structure_tiles = structure_tiles;
+    }
+
     fn round_play_cap(&self) -> u32 {
         let mut plays = self.mode.starting_plays;
         if self.relics.has(crate::core::relic::RelicId::SecondWind) {
