@@ -7,6 +7,19 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-0 — 2026-05-06
+
+### Added
+- Under **Options → Accessibility**, you can turn on **Discard undo** (off by default). With it enabled, after you discard and your hand refills, an **Undo** button appears just under the discard river’s lower-left corner; it restores that discard until you play, sort, use a consumable, or discard again.
+- A new set of "painted from scratch" tiles has been added to the game. Credit to Mari Starkiller.
+- The shop shows on-screen gamepad button prompts (Kenney Input Prompts) for actions like inspecting items and hold-to-sell, with glyphs that match Xbox, PlayStation, or Nintendo-style controllers when the game can tell which you’re using.
+
+### Changed
+- Hand tile hover and selection rim rendering is lighter on the GPU, so the game should stay smoother when you move the cursor over the rack or focus tiles.
+- Lotus Bloom's tooltip now shows how many flowers have been drawn or scored and the permanent mult you get from them.
+- Mirror Tile’s tooltip now names the relic it copies from inventory order, notes when another Mirror Tile is the one scoring cares about, and calls out when that copy fully applies to hand scoring (chips and mult). Shadow Hand’s tooltip does the same for the leftmost copied relic.
+- Taotie's description now spells out that scored honor tiles are destroyed at cash-in and that each one permanently adds chips to the relic, using the same timing and keyword wording as other relics.
+
 ## 0.4.5 — 2026-04-29
 
 ### Added
