@@ -161,7 +161,7 @@ impl WgpuRenderer {
         pending
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: crate::physical_size::PhysicalSize) {
         if new_size.width == 0 || new_size.height == 0 {
             return;
         }

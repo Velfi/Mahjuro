@@ -172,7 +172,7 @@ impl WgpuRenderer {
                         self.active_scene_key.as_deref(),
                         frame.camera_override.as_ref(),
                     ) {
-                        (Some("shop"), Some(cam)) => {
+                        (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,
                                 h,

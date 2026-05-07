@@ -1,5 +1,5 @@
 //! On-screen button prompts: face-button glyphs by manufacturer style and
-//! small helpers for keyboard labels. Gilrs maps all pads onto `South` /
+//! small helpers for keyboard labels. SDL gamepad mappings use `South` /
 //! `East` / `West` / `North`; this module turns those into what the player
 //! expects to see on their controller.
 
@@ -66,7 +66,7 @@ impl GamepadStyle {
     }
 }
 
-/// Physical face positions in the SDL / gilrs **semantic** layout (south =
+/// Physical face positions in the SDL **semantic** layout (south =
 /// bottom, etc.), not vendor paint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FaceButton {

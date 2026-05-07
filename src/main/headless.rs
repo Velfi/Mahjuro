@@ -674,44 +674,97 @@ impl HeadlessApp {
             .map(|(_, a)| *a)
             .collect();
         self.tick_count += 1;
-        let update_ctx = UpdateCtx {
-            actions: &actions_this_tick,
-            button_clicks: &[],
-            progress: &self.progress,
-            run: &mut self.run,
-            bus: &mut bus,
-            anim: &mut self.anim,
-            layout: &layout,
-            focus_tile_index: 0,
-            quit_requested: &mut quit_requested,
-            switch_profile: &mut switch_profile,
-            delete_profile: &mut delete_profile,
-            complete_onboarding: &mut complete_onboarding,
-            cursor_pos: (0.0, 0.0),
-            loading_done: !self.renderer.is_loading(),
-            cascade_tuning: &CascadeTuning::default(),
-            picked_shop_object: None,
-            picked_gameplay_object: None,
-            picked_collection_object: None,
-            input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
-            picked_hand_tile: None,
-            scroll_lines: 0.0,
-            ui_scale: self.gfx.ui_scale,
-            tutorial_eligible: false,
-            multiple_materials: self.progress.plastic_unlocked(),
-            resume_scene: persistence::ResumeScene::default(),
-            transitioning: false,
-            overlay_request: &mut overlay_request,
-            headless: true,
-            effect_layers: self.effect_layers,
-            shop_inspect_orbit_stick: (0.0, 0.0),
-            shop_inspect_zoom_triggers: 0.0,
-            rumble_lab_ops: &mut rumble_lab_ops,
-        };
-        let update_result = if let Some(top) = self.overlay_stack.last_mut() {
-            top.update(update_ctx)
+        let headless_cascade = CascadeTuning::default();
+        let update_result = if self.overlay_stack.is_empty() {
+            self.scene.update(UpdateCtx {
+                actions: &actions_this_tick,
+                button_clicks: &[],
+                progress: &self.progress,
+                run: &mut self.run,
+                bus: &mut bus,
+                anim: &mut self.anim,
+                layout: &layout,
+                focus_tile_index: 0,
+                quit_requested: &mut quit_requested,
+                switch_profile: &mut switch_profile,
+                delete_profile: &mut delete_profile,
+                complete_onboarding: &mut complete_onboarding,
+                cursor_pos: (0.0, 0.0),
+                loading_done: !self.renderer.is_loading(),
+                cascade_tuning: &headless_cascade,
+                picked_shop_object: None,
+                picked_gameplay_object: None,
+                picked_collection_object: None,
+                input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
+                picked_hand_tile: None,
+                scroll_lines: 0.0,
+                ui_scale: self.gfx.ui_scale,
+                tutorial_eligible: false,
+                multiple_materials: self.progress.plastic_unlocked(),
+                resume_scene: persistence::ResumeScene::default(),
+                transitioning: false,
+                overlay_request: &mut overlay_request,
+                headless: true,
+                effect_layers: self.effect_layers,
+                shop_inspect_orbit_stick: (0.0, 0.0),
+                shop_inspect_zoom_triggers: 0.0,
+                rumble_lab_ops: &mut rumble_lab_ops,
+                suspended_shop: None,
+            })
         } else {
-            self.scene.update(update_ctx)
+            let item_inspect_shop = self.overlay_stack.last().is_some_and(|top| {
+                matches!(
+                    top,
+                    Scene::ItemInspect(ins)
+                        if matches!(ins.host, scenes::ItemInspectHost::Shop)
+                )
+            });
+            let suspended_shop = if item_inspect_shop {
+                match &self.scene {
+                    Scene::Shop(shop) => Some(shop),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            self.overlay_stack
+                .last_mut()
+                .expect("overlay stack non-empty")
+                .update(UpdateCtx {
+                    actions: &actions_this_tick,
+                    button_clicks: &[],
+                    progress: &self.progress,
+                    run: &mut self.run,
+                    bus: &mut bus,
+                    anim: &mut self.anim,
+                    layout: &layout,
+                    focus_tile_index: 0,
+                    quit_requested: &mut quit_requested,
+                    switch_profile: &mut switch_profile,
+                    delete_profile: &mut delete_profile,
+                    complete_onboarding: &mut complete_onboarding,
+                    cursor_pos: (0.0, 0.0),
+                    loading_done: !self.renderer.is_loading(),
+                    cascade_tuning: &headless_cascade,
+                    picked_shop_object: None,
+                    picked_gameplay_object: None,
+                    picked_collection_object: None,
+                    input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
+                    picked_hand_tile: None,
+                    scroll_lines: 0.0,
+                    ui_scale: self.gfx.ui_scale,
+                    tutorial_eligible: false,
+                    multiple_materials: self.progress.plastic_unlocked(),
+                    resume_scene: persistence::ResumeScene::default(),
+                    transitioning: false,
+                    overlay_request: &mut overlay_request,
+                    headless: true,
+                    effect_layers: self.effect_layers,
+                    shop_inspect_orbit_stick: (0.0, 0.0),
+                    shop_inspect_zoom_triggers: 0.0,
+                    rumble_lab_ops: &mut rumble_lab_ops,
+                    suspended_shop,
+                })
         };
         match overlay_request {
             Some(scenes::OverlayRequest::Push(s)) => self.overlay_stack.push(*s),
@@ -838,7 +891,12 @@ impl HeadlessApp {
 
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::Shop(_) | Scene::TilePackCelebration(_) => Some("shop"),
+            Scene::ItemInspect(ins) => match ins.host {
+                scenes::ItemInspectHost::Shop => Some("shop"),
+                scenes::ItemInspectHost::Collection => Some("collection"),
+            },
+            Scene::Shop(_) => Some("shop"),
+            Scene::TilePackCelebration(_) => Some("tile_pack_celebration"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
@@ -847,8 +905,12 @@ impl HeadlessApp {
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
+        let rotations_scene = match self.overlay_stack.last() {
+            Some(Scene::ItemInspect(_)) => &self.scene,
+            _ => scene_for_renderer,
+        };
         self.renderer
-            .set_committed_arrange_rotations(collect_committed_rotations(scene_for_renderer));
+            .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
             .set_shop_env_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
         let sl = crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS;

@@ -14,14 +14,13 @@ use self::showcase::*;
 
 use std::collections::HashMap;
 
-use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
 
 use chrono::{NaiveDate, Utc};
 use glam::Mat4;
+use sdl3::video::Window;
 use wgpu::util::DeviceExt;
-use winit::window::Window;
 
 use crate::core::relic::{RelicId, RelicRenderMaterial, relic_visual};
 use crate::core::tile::{Suit, Tile};
@@ -89,8 +88,8 @@ use crate::scenes::BackgroundId;
 pub(crate) const MAX_RENDER_DIMENSION: u32 = 8192;
 
 pub(crate) fn clamp_render_physical_size(
-    size: winit::dpi::PhysicalSize<u32>,
-) -> winit::dpi::PhysicalSize<u32> {
+    size: crate::physical_size::PhysicalSize,
+) -> crate::physical_size::PhysicalSize {
     let w = size.width.clamp(1, MAX_RENDER_DIMENSION);
     let h = size.height.clamp(1, MAX_RENDER_DIMENSION);
     if w != size.width || h != size.height {
@@ -103,7 +102,7 @@ pub(crate) fn clamp_render_physical_size(
             MAX_RENDER_DIMENSION
         );
     }
-    winit::dpi::PhysicalSize::new(w, h)
+    crate::physical_size::PhysicalSize::new(w, h)
 }
 
 #[repr(C)]
@@ -850,7 +849,7 @@ enum RenderTarget {
 /// `Headless`.
 pub enum TargetInit {
     Windowed {
-        window: Arc<Window>,
+        window: Window,
         hdr_enabled: bool,
     },
     Headless {
@@ -1019,7 +1018,7 @@ pub struct WgpuRenderer {
     image_pipeline_scene_hdr: wgpu::RenderPipeline,
     ui_font: Option<fontdue::Font>,
     emoji_font: Option<fontdue::Font>,
-    pub size: winit::dpi::PhysicalSize<u32>,
+    pub size: crate::physical_size::PhysicalSize,
     /// Last focused tile index — used to detect focus changes.
     last_focus: usize,
     /// When the focused tile changed: (slot_index, start_time). Drives the 360° spin.

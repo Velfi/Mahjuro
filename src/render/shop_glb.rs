@@ -166,7 +166,7 @@ pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
 /// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual`). Default `1` uses authored intensities.
-pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.5;
+pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.4;
 
 /// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
 /// Multiplied with [`ShopEnvLightingTune::linear_exposure`] and written to `shop_glb` / shop `lit_mesh` path.
@@ -176,13 +176,19 @@ pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 /// on top. Table scenes use this value alone (no shop base).
 pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 
+/// Linear HDR multiplier for tile-pack celebration (`Scene::TilePackCelebration`): no
+/// [`crate::render::draw_cmd::DrawCmd::ShopEnvironment`], but showcase tiles still use shop-style
+/// punctual lights — without this, `tile_hdr_tonemap` falls back to `linear_hdr ≈ 1` and faces clip.
+/// Between full shop (`×`[`SHOP_ENV_LINEAR_EXPOSURE_BASE`]) and isolation showcase.
+pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 40.0;
+
 /// Hemispheric fill in `shop_glb.wgsl` (`decal_atlas_uv.x`).
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 
 /// Applied in `lit_mesh.wgsl` as `shop_gltf_point_lights.extras.w` when
 /// [`crate::render::draw_cmd::UiFrame::shop_env_gltf_punctual`] is set (`shop_glb.wgsl` ignores it).
 /// Defaults to `1` so embedded punctual lights match the room; debug tuning may lower it.
-pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 1.0;
+pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
 
 /// glTF **node** name prefix for punctual lights that should read as warm candles (`light_candle_00`, …).
 pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle_";

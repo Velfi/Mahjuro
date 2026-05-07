@@ -216,7 +216,23 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (pbr.alpha_mode == 2u) {
         out_alpha = tex_a;
     }
-    let albedo = base_s.rgb * in.v_color.rgb;
+    // Many Blender text / curve exports store glyph coverage in alpha only (RGB ≈ 0).
+    // Multiplying that by vertex colour yields a black albedo while bevels still catch
+    // highlights — reads as an outline with a black fill. Recover greyscale from alpha
+    // for cutout materials only so opaque true-black surfaces stay black.
+    var tex_rgb = base_s.rgb;
+    let tex_lum = dot(tex_rgb, vec3<f32>(0.299, 0.587, 0.114));
+    if ((pbr.alpha_mode == 1u || pbr.alpha_mode == 2u)
+        && tex_lum < 1e-4
+        && base_s.a > 1e-4) {
+        tex_rgb = vec3<f32>(base_s.a);
+    }
+    let albedo = tex_rgb * in.v_color.rgb;
+    let albedo_lum = dot(albedo, vec3<f32>(0.299, 0.587, 0.114));
+
+    let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
+    let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
+    let roughness = clamp(mr_s.g * pbr.roughness_factor, 0.04, 1.0);
 
     let nm = textureSample(normal_tex, base_sampler, in.uv_emr).rgb * 2.0 - 1.0;
     var Ngeom = normalize(in.wn);
@@ -227,15 +243,18 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let B = normalize(in.b_w);
     let n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
 
-    let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
-    let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
-    let roughness = clamp(mr_s.g * pbr.roughness_factor, 0.04, 1.0);
     let emissive =
         textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
 
     let V = normalize(cam.cam_pos - in.world_pos);
     let NdotV = max(dot(n_world, V), 1e-4);
-    let F0 = mix(vec3<f32>(0.04), albedo, metallic);
+    // Punctual-only shading has no IBL: metallic BRDF uses baseColor as F0. Near-black
+    // baseColor + metallic≈1 makes F0≈0 so large flat facets read black while bevels
+    // still catch specular. Floor F0 for that case and add a small metal ambient fill.
+    let metal_f0_floor = vec3<f32>(0.52, 0.42, 0.24);
+    let boost_dark_metal_f0 = metallic > 0.55 && albedo_lum < 0.07;
+    let f0_base = select(albedo, max(albedo, metal_f0_floor), boost_dark_metal_f0);
+    let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
 
     var Lo = vec3<f32>(0.0);
 
@@ -314,9 +333,31 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     let ambient_scale = cam.decal_atlas_uv.x;
-    let ambient = ambient_scale * albedo * (1.0 - metallic) * vec3<f32>(0.08);
+    let amb_dielectric = ambient_scale * albedo * (1.0 - metallic) * vec3<f32>(0.08);
+    let metal_amb_tint = mix(
+        vec3<f32>(0.58, 0.50, 0.40),
+        albedo,
+        clamp(albedo_lum * 22.0, 0.0, 1.0),
+    );
+    let amb_metal = ambient_scale * metallic * metal_amb_tint * vec3<f32>(0.14);
+    let ambient = amb_dielectric + amb_metal;
 
-    var hdr = ambient + Lo + emissive;
+    // `SHOP_ENV_AMBIENT_SCALE` defaults to 0 for this scene — dielectric ambient is off.
+    // Without IBL, dark-metallic facets still need a tiny direction-dependent fill so
+    // flat faces toward the camera read as metal, not void.
+    let dark_metal_face = metallic > 0.5 && albedo_lum < 0.08;
+    let hemi_tint = mix(
+        vec3<f32>(0.062, 0.054, 0.041),
+        albedo,
+        clamp(albedo_lum * 15.0, 0.0, 1.0),
+    );
+    let metal_hemi = select(
+        vec3<f32>(0.0),
+        metallic * hemi_tint * (0.10 + 0.26 * NdotV),
+        dark_metal_face,
+    );
+
+    var hdr = ambient + Lo + emissive + metal_hemi;
     hdr = hdr * cam.tile_seed;
 
     // Gameplay shadow map is ortho-fit around the mahjong table near the origin.

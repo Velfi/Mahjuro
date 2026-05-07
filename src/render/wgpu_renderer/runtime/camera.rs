@@ -16,7 +16,7 @@ pub(super) struct CameraFrame {
 }
 
 impl CameraFrame {
-    pub(super) fn build(frame: &UiFrame, size: winit::dpi::PhysicalSize<u32>) -> Self {
+    pub(super) fn build(frame: &UiFrame, size: crate::physical_size::PhysicalSize) -> Self {
         let w = size.width.max(1) as f32;
         let h = size.height.max(1) as f32;
         let aspect = w / h;
@@ -121,6 +121,16 @@ impl WgpuRenderer {
                 | Some("collection")
         );
         let shop_scene = k == Some("shop");
+        let tile_pack_celebration = k == Some("tile_pack_celebration");
+        if tile_pack_celebration {
+            return [
+                1.0,
+                self.shop_env_linear_exposure
+                    * crate::render::shop_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
+                self.shop_env_ambient_scale * 0.45,
+                0.0,
+            ];
+        }
         // Shop applies a heavy linear HDR divisor so bright `Shop.glb` fills land in
         // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
         // use ordinary tile shading — same /512 crush makes them vanish.

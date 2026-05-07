@@ -1,4 +1,4 @@
-//! Rumble lab — debug overlay for iterating dual-motor force feedback (gilrs weak/strong).
+//! Rumble lab — debug overlay for iterating dual-motor force feedback (SDL weak/strong rumble).
 //!
 //! Enter from **Debug → Scene Jumps → Rumble Lab…** or **Ctrl+Shift+H**.
 
@@ -191,10 +191,6 @@ impl RumbleLabScene {
 
 impl SceneBehavior for RumbleLabScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if ctx.transitioning {
-            return None;
-        }
-
         let items = Self::layout_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
         let input = TreeInput {
             actions: ctx.actions,

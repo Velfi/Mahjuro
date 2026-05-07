@@ -11,9 +11,10 @@ use crate::render::draw_cmd::{CameraParams, UiFrame};
 use crate::ui::input::UiAction;
 
 use super::{BackgroundId, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
+use crate::scenes::shop;
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ItemInspectOrbitState {
     pub target_world: [f32; 3],
     pub yaw: f32,
@@ -78,6 +79,18 @@ pub fn inspect_orbit_camera(base: &CameraParams, ins: &ItemInspectOrbitState) ->
 
 impl SceneBehavior for ItemInspectScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        if matches!(self.host, ItemInspectHost::Shop) {
+            if let Some(shop) = ctx.suspended_shop {
+                shop::sync_item_inspect_orbit_target(
+                    shop,
+                    ctx.run,
+                    ctx.layout.window_w,
+                    ctx.layout.window_h,
+                    &mut self.orbit,
+                );
+            }
+        }
+
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;

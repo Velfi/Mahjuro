@@ -5,11 +5,7 @@ impl App {
     /// scoring cascade was still playing. Pushes celebration modals, plays the
     /// appropriate sting, and queues the next scene.
     pub(super) fn handle_round_end_event(&mut self, ev: GameEvent) {
-        let win_size = self
-            .window
-            .as_ref()
-            .map(|w| w.inner_size())
-            .unwrap_or(PhysicalSize::new(800, 600));
+        let win_size = self.last_drawable_px;
         let ww = win_size.width as f32;
         let wh = win_size.height as f32;
         match ev {
@@ -256,7 +252,7 @@ impl App {
         }
     }
 
-    pub(super) fn draw(&mut self) {
+    pub(super) fn draw(&mut self, shell: &mut crate::sdl_shell::SdlShell) {
         // Cache once up front so the borrow checker doesn't have to reason
         // about us calling `&self` methods while `self.renderer` is held
         // mutably below.
@@ -268,20 +264,27 @@ impl App {
         // buttons themselves and clicks would land on nothing. Scenes are
         // responsible for suppressing their own non-overlay buttons while
         // their overlay is up (see e.g. `GameplayScene::draw_frame`).
+        //
+        // Pushdown overlays on `overlay_stack` (Rumble Lab, material viewer,
+        // …) are the *only* source of `frame.buttons` while they are on top.
+        // `app_overlay_wipe` would erase those hit targets even though the
+        // player still sees the overlay — clicks fall through as misses.
         let app_overlay_wipe = self.modals.is_active()
             || self.debug.tuning_overlay.is_some()
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.shop_env_debug_overlay.is_some()
             || self.debug.volumetric_debug_overlay.is_some();
+        let preserve_overlay_stack_buttons = matches!(
+            self.overlay_stack.last(),
+            Some(
+                Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_)
+            )
+        );
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let Some(win) = self.window.as_ref() else {
-            return;
-        };
-
-        let size = win.inner_size();
+        let size = self.last_drawable_px;
         let layout = self
             .layout_engine
             .solve(size.width as f32, size.height as f32);
@@ -395,7 +398,7 @@ impl App {
             .camera_override
             .unwrap_or_else(|| CameraParams::default_table_camera(h));
 
-        win.set_title(&frame.window_title);
+        let _ = shell.window.set_title(&frame.window_title);
         self.active_buttons = frame.buttons.clone();
 
         // Click-safety wipe: if any modal-like overlay is up, scene buttons
@@ -403,7 +406,7 @@ impl App {
         // clickable surface (e.g. `ModalQueue`'s full-screen dismiss button)
         // write to `active_buttons` *after* this point in their draw step.
         // See `App::modal_overlay_active` for the contract.
-        if app_overlay_wipe {
+        if app_overlay_wipe && (!preserve_overlay_stack_buttons || self.modals.is_active()) {
             self.active_buttons.clear();
         }
 
@@ -417,8 +420,6 @@ impl App {
         frame.apply_alpha(alpha);
 
         // Overlay the shooting-star cascade effect during dramatic transitions.
-        let size = win.inner_size();
-
         if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx {
             match self.transition_kind {
                 TransitionKind::ShootingStarCascade => {
@@ -714,11 +715,7 @@ impl App {
         // nothing is picked yet). Mirrors the FPS HUD sizing in the
         // upper-right.
         if let Some(ref inner) = self.debug.arrange_mode {
-            let size = self
-                .window
-                .as_ref()
-                .map(|w| w.inner_size())
-                .unwrap_or(winit::dpi::PhysicalSize::new(1280, 720));
+            let size = self.last_drawable_px;
             let w = size.width as f32;
             let h = size.height as f32;
             let label_h = (h * 0.09).max(60.0);
@@ -821,7 +818,12 @@ impl App {
         // prefixed canonical pickable names for arrange mode.
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::Shop(_) | Scene::TilePackCelebration(_) => Some("shop"),
+            Scene::ItemInspect(ins) => match ins.host {
+                crate::scenes::ItemInspectHost::Shop => Some("shop"),
+                crate::scenes::ItemInspectHost::Collection => Some("collection"),
+            },
+            Scene::Shop(_) => Some("shop"),
+            Scene::TilePackCelebration(_) => Some("tile_pack_celebration"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
@@ -834,7 +836,11 @@ impl App {
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
-        renderer.set_committed_arrange_rotations(collect_committed_rotations(scene_for_renderer));
+        let rotations_scene = match self.overlay_stack.last() {
+            Some(Scene::ItemInspect(_)) => &self.scene,
+            _ => scene_for_renderer,
+        };
+        renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
 
         renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
         let sl = self.debug.shop_env_lighting;

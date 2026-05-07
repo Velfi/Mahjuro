@@ -209,6 +209,8 @@ pub struct UpdateCtx<'a> {
     pub shop_inspect_zoom_triggers: f32,
     /// Queued by the rumble lab scene; drained into input state after `update()`.
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
+    /// [`ShopScene`] under shop [`Scene::ItemInspect`]: lets inspect sync orbit target to mesh anchors.
+    pub suspended_shop: Option<&'a ShopScene>,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
