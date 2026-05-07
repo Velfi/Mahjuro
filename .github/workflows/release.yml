@@ -92,6 +92,19 @@ jobs:
             libfuse2 \
             xvfb
 
+      # Exit 143 (SIGTERM) on Linux is often OOM during parallel rustc + linker.
+      # Extra swap + fewer jobs keeps peak RSS below hosted-runner limits (release
+      # builds are heavier than CI debug builds).
+      - name: Linux — swap and compile job limit
+        if: matrix.name == 'Linux'
+        run: |
+          SWAPFILE=/home/runner/cargo_extra.swap
+          sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192 status=none
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+
       - name: Install AzureSignTool (Windows code signing)
         if: matrix.name == 'Windows'
         shell: bash
@@ -213,6 +226,8 @@ jobs:
           # Binary
           cp target/release-universal/mahjuro "$APP/Contents/MacOS/mahjuro"
           chmod +x "$APP/Contents/MacOS/mahjuro"
+          cp packaging/steam_input/game_actions_4636490.vdf \
+            "$APP/Contents/MacOS/game_actions_4636490.vdf"
 
           # Info.plist with version substituted in
           sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
@@ -382,6 +397,7 @@ jobs:
           $stage = "installer-src"
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\${{ matrix.binary }}" "$stage\"
+          Copy-Item "packaging\steam_input\game_actions_4636490.vdf" "$stage\"
           # Generate multi-resolution icon.ico from icon.png. ImageMagick is
           # preinstalled on windows-latest runners as `magick`.
           magick icon.png -define icon:auto-resize=256,128,64,48,32,16 "$stage\icon.ico"
@@ -433,6 +449,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$APPDIR/usr/bin/mahjuro"
           chmod +x "$APPDIR/usr/bin/mahjuro"
           cp "target/${{ matrix.target }}/release/libsteam_api.so" "$APPDIR/usr/bin/"
+          cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
 
           cp packaging/AppRun "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
@@ -457,7 +474,9 @@ jobs:
             --timestamp \
             target/release-universal/mahjuro
           ARCHIVE="mahjuro-${RELEASE_TAG}-macos-universal.tar.gz"
-          tar -czf "$ARCHIVE" -C target/release-universal mahjuro
+          cp packaging/steam_input/game_actions_4636490.vdf target/release-universal/
+          tar -czf "$ARCHIVE" -C target/release-universal \
+            mahjuro game_actions_4636490.vdf
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Create update archive (Windows)
@@ -467,7 +486,7 @@ jobs:
         run: |
           ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
           cd "target/${{ matrix.target }}/release"
-          7z a "../../../${ARCHIVE}" "${{ matrix.binary }}"
+          7z a "../../../${ARCHIVE}" "${{ matrix.binary }}" game_actions_4636490.vdf
           cd ../../..
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
@@ -477,7 +496,7 @@ jobs:
         run: |
           ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
           tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" \
-            mahjuro libsteam_api.so
+            mahjuro libsteam_api.so game_actions_4636490.vdf
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Set update archive name
