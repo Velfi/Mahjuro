@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-2 — 2026-05-07
+
+### Added
+- Options now include Swap X/Y next to Swap A/B. Score, discard, shop hold-to-sell and inspect, and collection inspect use the swapped face buttons when it’s on, and shop controller hint icons stay in sync.
+
 ## 0.5.0-1 — 2026-05-06
 
 ### Changed
