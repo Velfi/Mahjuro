@@ -78,12 +78,23 @@ cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
 
 # Steamworks redistributable. The dylib's install_name is
 # `@loader_path/libsteam_api.dylib`, so it must live next to the binary
-# inside Contents/MacOS/. The redistributable already ships as a fat
-# arm64+x86_64 dylib, so one copy works for both archs and the universal
-# build. STEAM_SDK_LOCATION must be set in the build environment.
-: "${STEAM_SDK_LOCATION:?STEAM_SDK_LOCATION not set; cannot bundle Steamworks dylib}"
-cp "${STEAM_SDK_LOCATION}/redistributable_bin/osx/libsteam_api.dylib" \
-    "$APP/Contents/MacOS/libsteam_api.dylib"
+# inside Contents/MacOS/. Prefer the SDK copy when STEAM_SDK_LOCATION is
+# set; otherwise reuse the file build.rs placed next to the release binary
+# (same sources as .github/workflows/release.yml for universal builds).
+STEAM_DYLIB_DST="$APP/Contents/MacOS/libsteam_api.dylib"
+SDK_DYLIB="${STEAM_SDK_LOCATION:-}/redistributable_bin/osx/libsteam_api.dylib"
+if [[ -n "${STEAM_SDK_LOCATION:-}" && -f "$SDK_DYLIB" ]]; then
+    cp "$SDK_DYLIB" "$STEAM_DYLIB_DST"
+elif [[ $UNIVERSAL -eq 1 && -f target/aarch64-apple-darwin/release/libsteam_api.dylib ]]; then
+    cp target/aarch64-apple-darwin/release/libsteam_api.dylib "$STEAM_DYLIB_DST"
+elif [[ -f target/release/libsteam_api.dylib ]]; then
+    cp target/release/libsteam_api.dylib "$STEAM_DYLIB_DST"
+else
+    echo "error: libsteam_api.dylib not found for bundling." >&2
+    echo "       Run this script after \`cargo build --release\` (or --universal), or set" >&2
+    echo "       STEAM_SDK_LOCATION to a Steamworks SDK with redistributable_bin/osx/." >&2
+    exit 1
+fi
 
 sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
