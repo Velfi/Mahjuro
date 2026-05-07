@@ -321,8 +321,8 @@ impl FlameParticleSystem {
                 .unwrap_or((1.0, 0.0));
             let ep = emit_phase * std::f32::consts::TAU;
             // Shared low-frequency flicker per candle (phase keeps neighbours apart).
-            let flick = 1.0
-                + 0.085 * (ep + time_s * 6.9).sin() * (time_s * 11.5 + emit_phase * 4.3).sin();
+            let flick =
+                1.0 + 0.085 * (ep + time_s * 6.9).sin() * (time_s * 11.5 + emit_phase * 4.3).sin();
             let brightness = (base_b * flick).clamp(0.0, 1.38);
             for cross_slice in [0.0_f32, 1.0_f32] {
                 out.push(GpuFlameParticle {

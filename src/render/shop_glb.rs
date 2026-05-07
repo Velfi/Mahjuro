@@ -2,7 +2,7 @@
 //!
 //! Marker object names (Blender object names → glTF node names):
 //! - `exit_btn`, `restock_btn`, `journal_btn`
-//! - [`PLAYER_GOLD_DISH_MARKER`] — origin for the procedural gold coin pile (place at the dish floor).
+//! - [`PLAYER_GOLD_DISH_MARKER`] (legacy: `PlayerGoldDish`) — origin for the procedural gold coin pile (place at the dish floor).
 //! - `shop_spawn_relic_00` … `shop_spawn_relic_08`
 //! - `shop_player_relic_00` … `shop_player_relic_04`
 //! - `shop_player_consumable_00`, `shop_player_consumable_01`
@@ -95,7 +95,7 @@ fn ensure_shop_glb_loaded() {
     let ready = if let Some(file) = crate::asset_path::get("Shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
             Ok(cpu) => {
-                log::info!(
+                log::debug!(
                     "Shop.glb: {} marker node(s), {} draw primitive(s), {} collision mesh(es)",
                     cpu.markers.len(),
                     cpu.environment_primitives.len(),
@@ -105,14 +105,15 @@ fn ensure_shop_glb_loaded() {
                     || !cpu.embedded_point_lights.is_empty()
                     || !cpu.embedded_spot_lights.is_empty()
                 {
-                    log::info!(
+                    log::debug!(
                         "Shop.glb scene extras: perspective_camera={} point_lights={} spot_lights={}",
                         cpu.embedded_perspective_camera.is_some(),
                         cpu.embedded_point_lights.len(),
                         cpu.embedded_spot_lights.len(),
                     );
-                    if !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty() {
-                        log::info!(
+                    if !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
+                    {
+                        log::debug!(
                             "Shop.glb punctual lights: re-export from Blender glTF with Lighting Mode **Standard** (cd/lx); validate in https://gltf-viewer.donmccurdy.com/"
                         );
                     }
@@ -121,7 +122,7 @@ fn ensure_shop_glb_loaded() {
             }
             Err(e) => {
                 let msg = format!("{e:#}");
-                log::warn!("Shop.glb failed to load: {msg}");
+                log::error!("Shop.glb failed to load: {msg}");
                 if msg.contains("KHR_draco_mesh_compression") {
                     log::warn!(
                         "Re-export Shop.glb with Draco compression disabled (Blender glTF: turn off mesh compression / Draco)."
@@ -131,7 +132,7 @@ fn ensure_shop_glb_loaded() {
             }
         }
     } else {
-        log::debug!("Shop.glb not embedded; using PNG storeroom backdrop");
+        log::warn!("Shop.glb not embedded; using PNG storeroom backdrop");
         None
     };
     *w = ShopGlbCache::Ready(ready);
@@ -324,11 +325,7 @@ pub fn shop_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3)
 
 /// Model matrix using bounds center from the loaded Shop.glb, or plain scale if missing.
 #[inline]
-pub fn shop_env_model_matrix_from_cpu(
-    window_h: f32,
-    height_scale: f32,
-    cpu: &ShopGlbCpu,
-) -> Mat4 {
+pub fn shop_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &ShopGlbCpu) -> Mat4 {
     let c = cpu
         .environment_bounds_doc
         .map(|b| b.center())
@@ -347,11 +344,7 @@ pub fn shop_world_bounds_corners_centered(
     };
     let s = shop_env_world_scale(window_h, env_height_scale);
     let c = bounds.center();
-    bounds
-        .corners()
-        .iter()
-        .map(|p| (*p - c) * s)
-        .collect()
+    bounds.corners().iter().map(|p| (*p - c) * s).collect()
 }
 
 /// Widen vertical FOV (only upward) so corners **in front of** the camera project inside `±margin_ndc`.
@@ -517,14 +510,26 @@ pub fn player_consumable_marker_name(slot: usize) -> String {
 }
 
 /// glTF node name for the shop gold dish anchor (gameplay-style coin pile is centered here).
-pub const PLAYER_GOLD_DISH_MARKER: &str = "PlayerGoldDish";
+/// Blender exports often use snake_case; [`player_gold_dish_marker_translation`] also checks legacy PascalCase.
+pub const PLAYER_GOLD_DISH_MARKER: &str = "player_gold_dish";
+
+/// Document-space offset for the gold dish empty, same basis as [`marker_translation`].
+#[inline]
+pub fn player_gold_dish_marker_translation(cpu: &ShopGlbCpu) -> Option<Vec3> {
+    marker_translation(cpu, PLAYER_GOLD_DISH_MARKER)
+        .or_else(|| marker_translation(cpu, "PlayerGoldDish"))
+}
 
 fn is_marker_name(name: &str) -> bool {
     matches!(
         name,
-        "exit_btn" | "restock_btn" | "journal_btn" | "Dish" | PLAYER_GOLD_DISH_MARKER
-    )
-        || name.starts_with("shop_spawn_relic_")
+        "exit_btn"
+            | "restock_btn"
+            | "journal_btn"
+            | "Dish"
+            | PLAYER_GOLD_DISH_MARKER
+            | "PlayerGoldDish"
+    ) || name.starts_with("shop_spawn_relic_")
         || name.starts_with("shop_player_relic_")
         || name.starts_with("shop_player_consumable_")
 }
@@ -562,7 +567,10 @@ fn decode_collision_triangles(
     Ok(out)
 }
 
-fn shop_embedded_camera_from_node(world: Mat4, cam: gltf::Camera<'_>) -> Option<ShopGlbEmbeddedCamera> {
+fn shop_embedded_camera_from_node(
+    world: Mat4,
+    cam: gltf::Camera<'_>,
+) -> Option<ShopGlbEmbeddedCamera> {
     let gltf::camera::Projection::Perspective(p) = cam.projection() else {
         return None;
     };
@@ -892,10 +900,7 @@ fn walk_node(
                 }
             }
             gltf::camera::Projection::Orthographic(_) => {
-                log::debug!(
-                    "Shop.glb: skipping orthographic camera on node {:?}",
-                    name
-                );
+                log::debug!("Shop.glb: skipping orthographic camera on node {:?}", name);
             }
         }
     }
@@ -999,7 +1004,10 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
 
 /// Shop camera from embedded GLB perspective camera, scaled like marker geometry.
 #[inline]
-pub fn shop_camera_from_glb_if_present(window_h: f32, env_height_scale: f32) -> Option<CameraParams> {
+pub fn shop_camera_from_glb_if_present(
+    window_h: f32,
+    env_height_scale: f32,
+) -> Option<CameraParams> {
     with_shop_glb_cpu(|opt| {
         let cpu = opt?;
         let center_doc = cpu

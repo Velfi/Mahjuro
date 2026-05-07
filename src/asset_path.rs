@@ -19,9 +19,9 @@ pub fn get(path: &str) -> Option<rust_embed::EmbeddedFile> {
 
 /// Log all embedded asset paths (for debugging).
 pub fn log_all_assets() {
-    log::info!("Embedded assets:");
+    log::trace!("Embedded assets:");
     for name in <Assets as Embed>::iter() {
-        log::info!("  {name}");
+        log::trace!("  {name}");
     }
 }
 

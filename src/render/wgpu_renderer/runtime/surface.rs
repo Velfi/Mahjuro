@@ -279,32 +279,33 @@ impl WgpuRenderer {
         );
         self.bloom_pong_texture = bot;
         self.bloom_pong_view = bov;
-        self.lit_mesh_spot_ssr_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("lit-mesh-spot-ssr-bg"),
-            layout: &self.lit_mesh_spot_ssr_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.spot_lights_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.lit_mesh_ssr_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.scene_prev_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&self.lit_mesh_ssr_sampler),
-                },
-            ],
-        });
+        self.lit_mesh_spot_ssr_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("lit-mesh-spot-ssr-bg"),
+                layout: &self.lit_mesh_spot_ssr_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.spot_lights_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.lit_mesh_ssr_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.scene_prev_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&self.ssr_prev_depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Sampler(&self.lit_mesh_ssr_sampler),
+                    },
+                ],
+            });
         self.bloom_scene_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bloom-scene-bg"),
             layout: &self.bloom_bind_group_layout,
@@ -452,6 +453,5 @@ impl WgpuRenderer {
                 data1: [0.0; 4],
             }),
         );
-
     }
 }

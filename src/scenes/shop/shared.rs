@@ -1,5 +1,5 @@
-use crate::core::tile_pack::TilePackKind;
 use super::*;
+use crate::core::tile_pack::TilePackKind;
 use crate::scenes::meld_guide;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -549,8 +549,7 @@ impl PackCelebration {
         let mut s = Self::new(tiles, pack_name, pack_kind);
         s.phase = CelebPhase::Reveal;
         let dur = s.total_duration();
-        s.started_at =
-            Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
+        s.started_at = Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
         s.revealed_count = s.tiles.len();
         s
     }

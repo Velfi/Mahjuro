@@ -162,7 +162,7 @@ fn run_check() -> Option<UpdateResult> {
 
 fn run_install(new_version: String) -> UpdateResult {
     let current = env!("CARGO_PKG_VERSION");
-    log::info!("user accepted update; downloading v{new_version}...");
+    log::info!("downloading v{new_version}...");
 
     let updater = match github::Update::configure()
         .repo_owner(REPO_OWNER)

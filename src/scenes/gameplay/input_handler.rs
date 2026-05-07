@@ -292,9 +292,7 @@ pub(super) fn process_focus_and_actions(
                     // UP from Undo → back to Discard
                     (Some(FocusTarget::DiscardUndo), FocusDir::Up) => focus_rects
                         .iter()
-                        .find(|(t, _)| {
-                            matches!(t, FocusTarget::Button(GameplayButton::Discard))
-                        })
+                        .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Discard)))
                         .map(|(t, _)| *t),
                     _ => None,
                 };
@@ -323,9 +321,7 @@ pub(super) fn process_focus_and_actions(
             // slots, then the optional discard-undo control (Accessibility).
             UiAction::NavigateHudNext => {
                 if !hud_cycle.is_empty() {
-                    let cur_pos = hud_cycle
-                        .iter()
-                        .position(|t| Some(*t) == scene.focus);
+                    let cur_pos = hud_cycle.iter().position(|t| Some(*t) == scene.focus);
                     scene.focus = match cur_pos {
                         None => Some(hud_cycle[0]),
                         Some(i) if i + 1 >= hud_cycle.len() => None,
@@ -336,9 +332,7 @@ pub(super) fn process_focus_and_actions(
             }
             UiAction::NavigateHudPrev => {
                 if !hud_cycle.is_empty() {
-                    let cur_pos = hud_cycle
-                        .iter()
-                        .position(|t| Some(*t) == scene.focus);
+                    let cur_pos = hud_cycle.iter().position(|t| Some(*t) == scene.focus);
                     scene.focus = match cur_pos {
                         None => Some(*hud_cycle.last().unwrap()),
                         Some(0) => None,
@@ -807,8 +801,9 @@ pub(super) fn process_focus_and_actions(
                     && let Some(snap) = scene.discard_undo.take()
                 {
                     ctx.run.apply_discard_undo(snap);
-                    ctx.bus
-                        .push(crate::game::event_bus::GameEvent::UiSound(crate::audio::SfxId::TilePlace));
+                    ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
+                        crate::audio::SfxId::TilePlace,
+                    ));
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
                 }
             }
@@ -819,7 +814,7 @@ pub(super) fn process_focus_and_actions(
     let non_handled: Vec<_> = actions_for_scene
         .iter()
         .filter(|a| {
-                !matches!(
+            !matches!(
                 a,
                 UiAction::ScoreHand
                     | UiAction::TriggerStructure

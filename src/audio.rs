@@ -461,9 +461,9 @@ impl AudioManager {
         }
 
         if sfx_data.is_empty() {
-            log::info!("No audio files found in assets/audio/. Sound effects disabled.");
+            log::warn!("No audio files found in assets/audio/. Sound effects disabled.");
         } else {
-            log::info!("Loaded {} sound effect(s).", sfx_data.len());
+            log::debug!("Loaded {} sound effect(s).", sfx_data.len());
         }
 
         let mut relic_trigger_data = HashMap::new();
@@ -478,7 +478,7 @@ impl AudioManager {
             }
         }
         if !relic_trigger_data.is_empty() {
-            log::info!(
+            log::debug!(
                 "Loaded {} per-relic trigger sound(s).",
                 relic_trigger_data.len()
             );
@@ -571,7 +571,7 @@ impl AudioManager {
         }
 
         let effective_vol = self.master_volume * self.sfx_volume;
-        log::debug!(
+        log::trace!(
             "play_clip({tag}): vol={effective_vol:.2} live={}",
             self.active_sinks.len() + 1,
         );

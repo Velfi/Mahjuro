@@ -892,12 +892,12 @@ impl CameraDebugOverlay {
                     match arboard::Clipboard::new() {
                         Ok(mut cb) => {
                             if let Err(e) = cb.set_text(&text) {
-                                log::error!("[Debug] Clipboard write failed: {e}");
+                                log::error!("Clipboard write failed: {e}");
                             } else {
-                                log::info!("[Debug] Camera params copied to clipboard");
+                                log::info!("Camera params copied to clipboard");
                             }
                         }
-                        Err(e) => log::error!("[Debug] Could not open clipboard: {e}"),
+                        Err(e) => log::error!("Could not open clipboard: {e}"),
                     }
                 }
                 UiAction::Cancel | UiAction::Pause => {
@@ -1104,10 +1104,7 @@ pub struct ShopEnvDebugOverlay {
 }
 
 impl ShopEnvDebugOverlay {
-    pub fn new(
-        height_scale: f32,
-        lighting: crate::render::shop_glb::ShopEnvLightingTune,
-    ) -> Self {
+    pub fn new(height_scale: f32, lighting: crate::render::shop_glb::ShopEnvLightingTune) -> Self {
         Self {
             cursor: 0,
             height_scale,
@@ -1233,12 +1230,12 @@ impl ShopEnvDebugOverlay {
         match arboard::Clipboard::new() {
             Ok(mut cb) => {
                 if let Err(e) = cb.set_text(&text) {
-                    log::error!("[Debug] Clipboard write failed: {e}");
+                    log::error!("Clipboard write failed: {e}");
                 } else {
-                    log::info!("[Debug] Shop env + lighting constants copied to clipboard");
+                    log::info!("Shop env + lighting constants copied to clipboard");
                 }
             }
-            Err(e) => log::error!("[Debug] Could not open clipboard: {e}"),
+            Err(e) => log::error!("Could not open clipboard: {e}"),
         }
     }
 
@@ -1466,7 +1463,12 @@ impl ShopEnvDebugOverlay {
         });
 
         labels.push(TextLabel {
-            rect: [layout.panel_x, layout.panel_y + pad, layout.panel_w, title_h],
+            rect: [
+                layout.panel_x,
+                layout.panel_y + pad,
+                layout.panel_w,
+                title_h,
+            ],
             text: "Shop Env & Lighting".into(),
             color: [0.65, 1.0, 0.55, 1.0],
             ..Default::default()
@@ -1565,7 +1567,8 @@ impl ShopEnvDebugOverlay {
             });
         }
 
-        let hint_y = layout.rows_y0 + layout.row_count as f32 * (layout.row_h + layout.row_gap) + pad;
+        let hint_y =
+            layout.rows_y0 + layout.row_count as f32 * (layout.row_h + layout.row_gap) + pad;
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y, layout.panel_w, hint_h],
             text: "Mouse: drag slider / click value to type".into(),
@@ -1574,8 +1577,9 @@ impl ShopEnvDebugOverlay {
         });
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y + hint_h, layout.panel_w, hint_h],
-            text: "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge  Enter edit/apply  Esc  Ctrl+C copy"
-                .into(),
+            text:
+                "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge  Enter edit/apply  Esc  Ctrl+C copy"
+                    .into(),
             color: [0.55, 0.55, 0.65, 0.75],
             ..Default::default()
         });
@@ -1583,7 +1587,6 @@ impl ShopEnvDebugOverlay {
         (instances, labels)
     }
 }
-
 
 // ── Volumetric tuning overlay ───────────────────────────────────────────
 //

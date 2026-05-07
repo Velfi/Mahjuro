@@ -10,6 +10,7 @@ pub mod journal_transition;
 pub mod main_menu_exterior;
 pub mod material_viewer;
 pub mod meld_guide;
+pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_blind;
@@ -19,6 +20,7 @@ pub mod shop;
 pub mod splash;
 pub mod start_game_modal;
 pub mod tile_literacy;
+pub mod tile_pack_celebration;
 pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_overlay;
@@ -26,7 +28,6 @@ pub mod tutorial_recap;
 pub mod tutorial_summary;
 pub mod yaku_journal;
 pub mod zodiac_celebration;
-pub mod tile_pack_celebration;
 
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
@@ -35,6 +36,11 @@ pub use item_inspect::{ItemInspectHost, ItemInspectScene};
 pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
 pub use meld_guide::MeldGuideScene;
+#[allow(unused_imports)] // crate-root re-exports for inspect hosts
+pub use object3d_inspect::{
+    InspectFrameEnv, InspectLightPreset, InspectRig, ItemInspectOrbitState,
+    apply_inspect_view_to_frame, inspect_orbit_camera, inspect_point_lights,
+};
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
@@ -43,13 +49,13 @@ pub use shop::ShopScene;
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
 pub use tile_literacy::TileLiteracyScene;
+pub use tile_pack_celebration::TilePackCelebrationScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
 pub use zodiac_celebration::ZodiacCelebrationScene;
-pub use tile_pack_celebration::TilePackCelebrationScene;
 
 use enum_dispatch::enum_dispatch;
 
@@ -268,9 +274,11 @@ pub struct DrawCtx<'a> {
     pub input_mode: InputMode,
     /// Reflects settings: when true, gamepad South/East (A/B) actions are swapped.
     pub gamepad_swap_ab: bool,
+    /// Reflects settings: when true, gamepad West/North (X/Y on Xbox layout) actions are swapped.
+    pub gamepad_swap_xy: bool,
     /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
     pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
-    /// Suspended shop beneath [`Scene::ItemInspect`] — used to paint the storeroom while orbiting.
+    /// Frozen [`ShopScene`] under [`Scene::ItemInspect`] — fed to [`crate::scenes::shop::render_shop_frame`].
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath [`Scene::ItemInspect`] for pedestal orbit.
     pub suspended_collection: Option<&'a CollectionScene>,
@@ -413,4 +421,21 @@ pub enum Scene {
     YakuJournal(YakuJournalScene),
     ZodiacCelebration(ZodiacCelebrationScene),
     TilePackCelebration(TilePackCelebrationScene),
+}
+
+/// Refresh cached layout structs after deleting override JSON on disk.
+pub fn reload_scene_layout_from_disk(scene: &mut Scene) {
+    use crate::ui::scene_layout::{
+        load_collection_positions, load_gameplay_positions, load_main_menu_exterior_positions,
+        load_shop_positions, load_tutorial_positions,
+    };
+    match scene {
+        Scene::MainMenuExterior(s) => s.positions = load_main_menu_exterior_positions(),
+        Scene::Shop(s) => s.positions = load_shop_positions(),
+        Scene::Gameplay(s) => s.positions = load_gameplay_positions(),
+        Scene::Collection(s) => s.positions = load_collection_positions(),
+        Scene::TutorialCampaign(s) => s.positions = load_tutorial_positions(),
+        Scene::TilePackCelebration(s) => s.positions = load_shop_positions(),
+        _ => {}
+    }
 }

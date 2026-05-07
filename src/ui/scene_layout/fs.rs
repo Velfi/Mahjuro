@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use anyhow::Context;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::ui::placement::Placement;
@@ -37,6 +38,26 @@ where
     fs::write(&path, json)?;
     log::info!("[Layout] Saved {label} positions → {}", path.display());
     Ok(())
+}
+
+/// Remove every `*.json` file under [`layouts_dir`]. Used by the debug menu
+/// to drop arrange-mode overrides so compiled-in defaults apply again.
+pub fn clear_saved_layout_files() -> anyhow::Result<usize> {
+    let dir = layouts_dir();
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut removed = 0usize;
+    for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+            log::info!("[Layout] Removed {}", path.display());
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 pub(super) fn sanitize_placements<T, F>(

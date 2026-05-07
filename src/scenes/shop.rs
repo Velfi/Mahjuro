@@ -10,6 +10,8 @@ mod shared;
 mod update;
 mod view;
 
+pub(crate) use self::view::render_shop_frame;
+
 use crate::render::draw_cmd::CameraParams;
 
 pub(crate) use self::layout::{ShopInventoryCounts, ShopLayout};

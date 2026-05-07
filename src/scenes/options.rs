@@ -10,7 +10,7 @@ use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-use crate::ui::input::UiAction;
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 
 use crate::render::draw_cmd::UiFrame;
@@ -82,6 +82,7 @@ enum Row {
     Hdr,
     UndoDiscard,
     SwapAb,
+    SwapXy,
     XyQuickAction,
     HoldToSellRumble,
     AutoCashInOnFullStructure,
@@ -122,6 +123,7 @@ const ROWS: &[Row] = &[
     Row::Hdr,
     Row::UndoDiscard,
     Row::SwapAb,
+    Row::SwapXy,
     Row::XyQuickAction,
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
@@ -157,6 +159,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::UndoDiscard),
     ContentSlot::Header(Section::Controls),
     ContentSlot::Row(Row::SwapAb),
+    ContentSlot::Row(Row::SwapXy),
     ContentSlot::Row(Row::XyQuickAction),
     ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
@@ -310,6 +313,7 @@ pub struct OptionsScene {
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
     pub swap_ab: bool,
+    pub swap_xy: bool,
     pub xy_quick_action: bool,
     pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
@@ -353,6 +357,7 @@ impl OptionsScene {
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
             swap_ab: settings.swap_ab,
+            swap_xy: settings.swap_xy,
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
@@ -399,6 +404,7 @@ impl OptionsScene {
         settings.ssr_enabled = self.ssr_enabled;
         settings.hdr_enabled = self.hdr_enabled;
         settings.swap_ab = self.swap_ab;
+        settings.swap_xy = self.swap_xy;
         settings.xy_quick_action = self.xy_quick_action;
         settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
@@ -511,6 +517,7 @@ impl OptionsScene {
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::SwapXy => self.swap_xy = !self.swap_xy,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
@@ -540,6 +547,7 @@ impl OptionsScene {
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
             Row::SwapAb => self.swap_ab = !self.swap_ab,
+            Row::SwapXy => self.swap_xy = !self.swap_xy,
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
@@ -604,6 +612,10 @@ impl OptionsScene {
                 self.swap_ab = !self.swap_ab;
                 self.save_settings();
             }
+            Row::SwapXy => {
+                self.swap_xy = !self.swap_xy;
+                self.save_settings();
+            }
             Row::XyQuickAction => {
                 self.xy_quick_action = !self.xy_quick_action;
                 self.save_settings();
@@ -640,6 +652,7 @@ impl OptionsScene {
         window_w: f32,
         window_h: f32,
         scroll_lines: f32,
+        input_mode: InputMode,
     ) -> bool {
         self.focus_changed = false;
         self.confirm_requested = false;
@@ -665,30 +678,34 @@ impl OptionsScene {
         }
 
         // ── Mouse hover ────────────────────────────────────────────────
-        let (cx, cy) = cursor_pos;
-        let scroll = self.scroll.target() as usize;
-        for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
-            if vi >= layout.visible_slots {
-                break;
-            }
-            if let ContentSlot::Row(row) = CONTENT[ci] {
-                let ry = layout.content_start_y + vi as f32 * (layout.slot_h + layout.slot_gap);
-                if cx >= layout.content_x
-                    && cx <= layout.content_x + layout.content_w
-                    && cy >= ry
-                    && cy <= ry + layout.slot_h
-                {
-                    self.focused = row;
-                    self.back_focused = false;
+        // Match widget-tree / main-menu: only the mouse drives hover in cursor
+        // mode so controller / keyboard focus is not overwritten by a parked cursor.
+        if input_mode == InputMode::Cursor {
+            let (cx, cy) = cursor_pos;
+            let scroll = self.scroll.target() as usize;
+            for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
+                if vi >= layout.visible_slots {
+                    break;
+                }
+                if let ContentSlot::Row(row) = CONTENT[ci] {
+                    let ry = layout.content_start_y + vi as f32 * (layout.slot_h + layout.slot_gap);
+                    if cx >= layout.content_x
+                        && cx <= layout.content_x + layout.content_w
+                        && cy >= ry
+                        && cy <= ry + layout.slot_h
+                    {
+                        self.focused = row;
+                        self.back_focused = false;
+                    }
                 }
             }
-        }
-        if cx >= layout.back_x
-            && cx <= layout.back_x + layout.back_w
-            && cy >= layout.back_y
-            && cy <= layout.back_y + layout.back_h
-        {
-            self.back_focused = true;
+            if cx >= layout.back_x
+                && cx <= layout.back_x + layout.back_w
+                && cy >= layout.back_y
+                && cy <= layout.back_y + layout.back_h
+            {
+                self.back_focused = true;
+            }
         }
 
         // ── Button clicks ──────────────────────────────────────────────
@@ -1088,13 +1105,18 @@ impl OptionsScene {
                     ),
                     Row::Hdr => format!("HDR: {}", if self.hdr_enabled { "ON" } else { "OFF" }),
                     Row::SwapAb => format!("Swap A/B: {}", if self.swap_ab { "ON" } else { "OFF" }),
+                    Row::SwapXy => format!("Swap X/Y: {}", if self.swap_xy { "ON" } else { "OFF" }),
                     Row::XyQuickAction => format!(
                         "X and Y Quick Action: {}",
                         if self.xy_quick_action { "ON" } else { "OFF" }
                     ),
                     Row::HoldToSellRumble => format!(
                         "Controller rumble: {}",
-                        if self.hold_to_sell_rumble { "ON" } else { "OFF" }
+                        if self.hold_to_sell_rumble {
+                            "ON"
+                        } else {
+                            "OFF"
+                        }
                     ),
                     Row::AutoCashInOnFullStructure => format!(
                         "Auto Cash-In on Full Structure: {}",
@@ -1109,7 +1131,11 @@ impl OptionsScene {
                     }
                     Row::UndoDiscard => format!(
                         "Discard undo: {}",
-                        if self.discard_undo_enabled { "ON" } else { "OFF" }
+                        if self.discard_undo_enabled {
+                            "ON"
+                        } else {
+                            "OFF"
+                        }
                     ),
                     _ => unreachable!(),
                 };
@@ -1135,6 +1161,7 @@ impl SceneBehavior for OptionsScene {
             ctx.layout.window_w,
             ctx.layout.window_h,
             ctx.scroll_lines,
+            ctx.input_mode,
         ) {
             if self.take_cancel_requested() {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));

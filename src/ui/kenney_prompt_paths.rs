@@ -7,6 +7,7 @@ pub fn shop_prompt_icon_paths(
     surface: PromptInputSurface,
     style: GamepadStyle,
     swap_ab: bool,
+    swap_xy: bool,
 ) -> [&'static str; 4] {
     match surface {
         PromptInputSurface::MouseOrKeyboard => [
@@ -21,11 +22,16 @@ pub fn shop_prompt_icon_paths(
             } else {
                 (FaceButton::East, FaceButton::South)
             };
+            let (hold_face, inspect_face) = if swap_xy {
+                (FaceButton::North, FaceButton::West)
+            } else {
+                (FaceButton::West, FaceButton::North)
+            };
             [
                 face_path(style, exit_face),
                 face_path(style, select_face),
-                face_path(style, FaceButton::West),
-                face_path(style, FaceButton::North),
+                face_path(style, hold_face),
+                face_path(style, inspect_face),
             ]
         }
     }
@@ -40,7 +46,9 @@ fn face_path(style: GamepadStyle, face: FaceButton) -> &'static str {
         }
         (Xbox | Generic, East) => "kenney_input-prompts/Xbox Series/Vector/xbox_button_color_b.svg",
         (Xbox | Generic, West) => "kenney_input-prompts/Xbox Series/Vector/xbox_button_color_x.svg",
-        (Xbox | Generic, North) => "kenney_input-prompts/Xbox Series/Vector/xbox_button_color_y.svg",
+        (Xbox | Generic, North) => {
+            "kenney_input-prompts/Xbox Series/Vector/xbox_button_color_y.svg"
+        }
 
         (PlayStation, South) => {
             "kenney_input-prompts/PlayStation Series/Vector/playstation_button_color_cross.svg"

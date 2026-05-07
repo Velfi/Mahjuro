@@ -11,9 +11,9 @@ use crate::ui::widget_tree::{
     self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
 };
 
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::options::OptionsScene;
 use super::shop::ShopScene;
-use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,6 +260,7 @@ impl PauseMenu {
                 window_w,
                 window_h,
                 scroll_lines,
+                input_mode,
             ) {
                 self.options_overlay = None;
             }

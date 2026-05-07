@@ -137,7 +137,11 @@ fn box_downsample_half_rgba8(src: &[u8], w: u32, h: u32) -> (Vec<u8>, u32, u32) 
 }
 
 #[inline]
-pub fn clamp_gltf_rgba8_max_dimension(mut pixels: Vec<u8>, mut w: u32, mut h: u32) -> (Vec<u8>, u32, u32) {
+pub fn clamp_gltf_rgba8_max_dimension(
+    mut pixels: Vec<u8>,
+    mut w: u32,
+    mut h: u32,
+) -> (Vec<u8>, u32, u32) {
     let cap = GLTF_TEXTURE_MAX_DIMENSION;
     if cap == 0 || (w <= cap && h <= cap) {
         return (pixels, w, h);
@@ -387,11 +391,7 @@ fn ensure_tile_engine_local_axes(tile: &mut LoadedTile) {
     if !any {
         return;
     }
-    let ex = [
-        max[0] - min[0],
-        max[1] - min[1],
-        max[2] - min[2],
-    ];
+    let ex = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let i_min = if ex[0] <= ex[1] && ex[0] <= ex[2] {
         0
     } else if ex[1] <= ex[2] {

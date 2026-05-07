@@ -115,10 +115,7 @@ impl WgpuRenderer {
         let k = self.active_scene_key;
         let table_like = matches!(
             k,
-            Some("gameplay")
-                | Some("tutorial")
-                | Some("pick_blind")
-                | Some("collection")
+            Some("gameplay") | Some("tutorial") | Some("pick_blind") | Some("collection")
         );
         let shop_scene = k == Some("shop");
         let tile_pack_celebration = k == Some("tile_pack_celebration");
@@ -135,19 +132,17 @@ impl WgpuRenderer {
         // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
         // use ordinary tile shading — same /512 crush makes them vanish.
         let shop_showcase_without_env = shop_scene
-            && frame.cmds.iter().any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
+            && frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
             && !frame
                 .cmds
                 .iter()
                 .any(|c| matches!(c, DrawCmd::ShopEnvironment));
         if shop_showcase_without_env {
             let linear_hdr = self.shop_env_linear_exposure;
-            return [
-                1.0,
-                linear_hdr,
-                self.shop_env_ambient_scale,
-                0.0,
-            ];
+            return [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0];
         }
         if !(shop_scene || table_like) {
             return [0.0; 4];
@@ -158,12 +153,7 @@ impl WgpuRenderer {
             } else {
                 1.0
             };
-        [
-            1.0,
-            linear_hdr,
-            self.shop_env_ambient_scale,
-            0.0,
-        ]
+        [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0]
     }
 
     pub(super) fn upload_camera_uniforms(
@@ -179,7 +169,8 @@ impl WgpuRenderer {
         // Document-space punctual attenuation for shop glTF only.
         let shop_lit_hdr = self.active_scene_key == Some("shop") && frame.shop_env_gltf_punctual;
         let shop_punctual_inv_doc = if shop_lit_hdr {
-            let s = crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
+            let s =
+                crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
             1.0 / s.max(1e-6)
         } else {
             0.0

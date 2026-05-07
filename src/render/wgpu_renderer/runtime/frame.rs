@@ -169,10 +169,7 @@ impl WgpuRenderer {
         ) {
             (Some("shop") | Some("tile_pack_celebration"), Some(cam))
                 if frame.cmds.iter().any(|c| {
-                    matches!(
-                        c,
-                        crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)
-                    )
+                    matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_))
                 }) =>
             {
                 PointLightsBuf::from_lights_shop_camera(

@@ -2,7 +2,7 @@
 
 // Release builds on Windows: detach from the console so launching the .exe
 // doesn't pop a black terminal behind the game window. Debug builds keep the
-// console so `log::info!` output is visible during development.
+// console so `log` output is visible during development.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 pub mod asset_path;
@@ -282,7 +282,7 @@ impl App {
         if !settings.sfx_enabled {
             audio.set_enabled(false);
         }
-        log::info!("App::new() settings + profile loaded in {:?}", t0.elapsed());
+        log::debug!("App::new() settings + profile loaded in {:?}", t0.elapsed());
         // Steam owns updates for Steam-installed builds: self-replacing the
         // binary fights the Steam content system. Detect Steam two ways —
         // the SDK signal (strongest: Steam *is* hosting us right now) and
@@ -290,9 +290,9 @@ impl App {
         // library" and offline-mode init failures).
         let is_steam_build = steam.is_connected() || steam::launched_via_steam();
         if is_steam_build {
-            log::info!("Steam-hosted build detected; skipping in-app updaters");
+            log::debug!("Steam-hosted build detected; skipping in-app updaters");
         }
-            Self {
+        Self {
             last_drawable_px: PhysicalSize::new(1920, 1080),
             renderer: None,
             layout_engine: UiLayout::new(),
@@ -466,7 +466,7 @@ fn main() -> anyhow::Result<()> {
             // back to `Disabled` — the game then runs normally without
             // achievements/overlay.
             let steam = if no_steam {
-                log::info!("--no-steam: skipping Steamworks init");
+                log::debug!("--no-steam: skipping Steamworks init");
                 steam::SteamClient::disabled()
             } else if !steam::steamworks_dll_ready() {
                 log::warn!(
@@ -475,7 +475,8 @@ fn main() -> anyhow::Result<()> {
                 );
                 steam::SteamClient::disabled()
             } else {
-                steam::SteamClient::init()
+                let steam_input_api = cli.steam_input || steam::steam_input_api_requested_via_env();
+                steam::SteamClient::init(steam_input_api)
             };
 
             let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080)?;

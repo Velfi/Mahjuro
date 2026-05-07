@@ -10,7 +10,7 @@ use crate::ui::{
         collection::{COLLECTION_HIERARCHY, CollectionField},
         gameplay::{GAMEPLAY_HIERARCHY, GameplayField, sanitize_gameplay_positions},
         main_menu_exterior::{MAIN_MENU_EXTERIOR_HIERARCHY, MainMenuExteriorField},
-        shop::{ShopField, SHOP_HIERARCHY, sanitize_shop_positions},
+        shop::{SHOP_HIERARCHY, ShopField, sanitize_shop_positions},
         tutorial::{TUTORIAL_HIERARCHY, TutorialField},
     },
 };

@@ -314,6 +314,8 @@ pub struct AppSettings {
     pub hdr_enabled: bool,
     #[serde(default)]
     pub swap_ab: bool,
+    #[serde(default)]
+    pub swap_xy: bool,
     #[serde(default = "default_true")]
     pub xy_quick_action: bool,
     /// Controller vibration (shop hold-to-sell, scoring cascade, etc.). Default on.
@@ -369,6 +371,7 @@ impl Default for AppSettings {
             ssr_enabled: true,
             hdr_enabled: false,
             swap_ab: false,
+            swap_xy: false,
             xy_quick_action: true,
             hold_to_sell_rumble: true,
             auto_cash_in_on_full_structure: true,
@@ -396,6 +399,13 @@ pub fn load_settings() -> AppSettings {
     settings.active_profile = settings.active_profile.min(MAX_PROFILES - 1);
     if crate::asset_path::is_internal_only_tileset(&settings.tileset_name) {
         settings.tileset_name = default_tileset_name();
+    }
+    let player_tilesets = crate::asset_path::list_player_tilesets();
+    if !player_tilesets.iter().any(|n| n == &settings.tileset_name) {
+        settings.tileset_name = player_tilesets
+            .first()
+            .cloned()
+            .unwrap_or_else(default_tileset_name);
     }
     settings
 }
@@ -581,7 +591,7 @@ pub fn load_run(index: usize) -> Option<LoadedRun> {
         }
     };
     if saved.version != current_save_version() {
-        log::info!(
+        log::debug!(
             "load_run: save version {} != current {} (deleting)",
             saved.version,
             current_save_version()

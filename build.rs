@@ -38,8 +38,40 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=packaging/steam_input/game_actions_4636490.vdf");
 
     copy_steam_redistributable_next_to_binary();
+    copy_steam_input_actions_next_to_binary();
+}
+
+/// Steam Input In-Game Actions file (`game_actions_<appid>.vdf`). Lived next to
+/// the executable so [`crate::steam`] can pass an absolute path to
+/// `ISteamInput::SetInputActionManifestFilePath` at runtime.
+fn copy_steam_input_actions_next_to_binary() {
+    let out_dir = match env::var_os("OUT_DIR") {
+        Some(p) => PathBuf::from(p),
+        None => return,
+    };
+    let Some(profile_dir) = profile_dir(&out_dir) else {
+        return;
+    };
+    let manifest = Path::new("packaging/steam_input/game_actions_4636490.vdf");
+    if !manifest.is_file() {
+        println!(
+            "cargo:warning=Steam Input IGA missing at {} — skipping copy",
+            manifest.display()
+        );
+        return;
+    }
+    let dst = profile_dir.join("game_actions_4636490.vdf");
+    if let Err(e) = fs::copy(manifest, &dst) {
+        println!(
+            "cargo:warning=failed to copy {} → {}: {}",
+            manifest.display(),
+            dst.display(),
+            e,
+        );
+    }
 }
 
 fn copy_steam_redistributable_next_to_binary() {

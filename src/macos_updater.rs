@@ -58,7 +58,7 @@ impl SparkleUpdater {
         let retained: Retained<NSObject> =
             unsafe { Retained::from_raw(controller as *mut NSObject)? };
 
-        log::info!("Sparkle: updater controller initialized");
+        log::debug!("Sparkle: updater controller initialized");
         Some(Self {
             _controller: retained,
         })

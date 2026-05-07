@@ -478,12 +478,7 @@ impl PointLightsBuf {
         let n = src.len().min(MAX_POINT_LIGHTS);
         for (i, l) in src.iter().take(n).enumerate() {
             let p = crate::render::world_space::world_on_camera_ray_plane_z(
-                screen_w,
-                screen_h,
-                cam,
-                l.pos[0],
-                l.pos[1],
-                l.pos[2],
+                screen_w, screen_h, cam, l.pos[0], l.pos[1], l.pos[2],
             );
             lights[i] = PointLightGpu {
                 pos: [p.x, p.y, p.z, l.radius],
@@ -1615,7 +1610,7 @@ impl WgpuRenderer {
 
     /// Begin a GPU pass timing capture for the next `frames` frames. The
     /// debug menu binds this to the "Profile GPU…" entry. Results are
-    /// emitted via `log::info!` once the capture finishes; if the adapter
+    /// emitted via `log::debug!` once the capture finishes; if the adapter
     /// lacks `TIMESTAMP_QUERY` support a warning is logged instead.
     pub fn start_gpu_profile(&mut self, frames: u32) {
         self.gpu_profiler
@@ -1737,7 +1732,7 @@ impl WgpuRenderer {
                 .take()
                 .map(|t| t.elapsed())
                 .unwrap_or_default();
-            log::info!(
+            log::debug!(
                 "all {} relic textures uploaded to GPU in {:?} (spawn → last upload)",
                 self.relic_textures.len(),
                 elapsed,
@@ -1794,7 +1789,7 @@ impl WgpuRenderer {
                 .take()
                 .map(|t| t.elapsed())
                 .unwrap_or_default();
-            log::info!(
+            log::debug!(
                 "all {} background textures uploaded to GPU in {:?} (spawn → last upload)",
                 self.background_textures.len(),
                 elapsed,

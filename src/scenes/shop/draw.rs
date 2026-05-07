@@ -18,5 +18,4 @@ impl ShopScene {
             frame.text(lbl);
         }
     }
-
 }

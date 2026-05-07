@@ -48,6 +48,7 @@ Section "Mahjuro" SecMain
   SetOutPath "$INSTDIR"
 
   File "${SOURCE_DIR}\mahjuro.exe"
+  File "${SOURCE_DIR}\game_actions_4636490.vdf"
   File "${SOURCE_DIR}\icon.ico"
 
   WriteRegStr HKCU "Software\Mahjuro" "InstallDir" "$INSTDIR"
@@ -72,6 +73,7 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\mahjuro.exe"
+  Delete "$INSTDIR\game_actions_4636490.vdf"
   Delete "$INSTDIR\icon.ico"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"

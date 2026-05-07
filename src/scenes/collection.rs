@@ -21,9 +21,9 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-use crate::scenes::item_inspect::{
-    item_inspect_orbit_camera, item_inspect_point_lights, ItemInspectHost, ItemInspectOrbitState,
-    ItemInspectScene,
+use crate::scenes::item_inspect::{ItemInspectHost, ItemInspectScene};
+use crate::scenes::object3d_inspect::{
+    InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
 };
 
 /// One catalog section. Each tab drives a separate grid of artifacts.
@@ -510,11 +510,20 @@ impl CollectionScene {
             up: [0.0, 0.0, 1.0],
             fovy_deg: 48.0,
         };
-        frame.camera_override = Some(
-            inspect
-                .map(|ins| item_inspect_orbit_camera(ItemInspectHost::Collection, h, ins, None))
-                .unwrap_or(base_cam),
-        );
+        let coll_rig = InspectRig::collection(h);
+        if let Some(ins) = inspect {
+            apply_inspect_view_to_frame(
+                &mut frame,
+                w,
+                h,
+                ins,
+                &coll_rig,
+                ins.target_world,
+                InspectFrameEnv::Neutral,
+            );
+        } else {
+            frame.camera_override = Some(base_cam);
+        }
 
         frame.fisheye_strength = 0.0;
 
@@ -522,18 +531,12 @@ impl CollectionScene {
         let focus_px_y = cab_px_y; // cabinet plane
         let focus_px_z = focus_world_z;
 
-        frame.point_lights = if let Some(ins) = inspect {
-            let cam = frame
-                .camera_override
-                .as_ref()
-                .expect("inspect sets camera_override above");
-            item_inspect_point_lights(ItemInspectHost::Collection, w, h, cam, ins.target_world)
-        } else {
+        if inspect.is_none() {
             // Three warm key-lights in front of the cabinet. Light `pos`
             // is pixel-space (renderer converts via `pixel_to_world`), so
             // pixel_x + pixel_y define the (X, Y) world position and the
             // third coordinate is the world-Z lift directly.
-            vec![
+            frame.point_lights = vec![
                 PointLight {
                     pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
                     radius: cell_pitch * 14.0,
@@ -560,8 +563,8 @@ impl CollectionScene {
                     color: [1.0, 0.65, 0.55],
                     intensity: 1.3,
                 },
-            ]
-        };
+            ];
+        }
 
         // Grid window size — how many cells we actually push as 3D
         // objects. Larger = more infinite-looking, slower to render.
@@ -1424,12 +1427,10 @@ impl SceneBehavior for CollectionScene {
                     if let Some(orbit) =
                         self.collection_inspect_orbit_for_focus(w, h, &bosses, ctx.layout)
                     {
-                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                            Scene::ItemInspect(ItemInspectScene::new(
-                                ItemInspectHost::Collection,
-                                orbit,
-                            )),
-                        )));
+                        *ctx.overlay_request =
+                            Some(OverlayRequest::Push(Box::new(Scene::ItemInspect(
+                                ItemInspectScene::new(ItemInspectHost::Collection, orbit),
+                            ))));
                     }
                 }
                 _ => {}
