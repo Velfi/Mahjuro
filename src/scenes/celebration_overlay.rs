@@ -48,7 +48,11 @@ impl CelebrationOverlayScratch {
 
     /// Dimmer with overall opacity multiplier (0 = invisible, 1 = full [`DIMMER_RGBA`] alpha).
     #[inline]
-    pub fn push_dimmer_scaled(self, frame: &mut UiFrame, dimmer_alpha_mul: f32) -> AfterCelebrationDimmer {
+    pub fn push_dimmer_scaled(
+        self,
+        frame: &mut UiFrame,
+        dimmer_alpha_mul: f32,
+    ) -> AfterCelebrationDimmer {
         push_dimmer_quad_scaled(frame, self.w, self.h, dimmer_alpha_mul);
         AfterCelebrationDimmer
     }

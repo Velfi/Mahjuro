@@ -92,6 +92,9 @@ pub enum DebugAction {
     /// nudge its position (X/Y) or Shift+arrow to rotate it (Z/X). Press
     /// Enter to confirm and copy the result to the clipboard.
     ToggleArrangeMode,
+    /// Delete all `*.json` under the user `layouts/` folder and reload
+    /// defaults into scenes that cache layout data.
+    ClearSavedSceneLayouts,
     /// Push the material viewer pushdown scene onto the overlay stack.
     /// Shows one preview orb per `MaterialKind` for visual inspection.
     OpenMaterialViewer,
@@ -202,6 +205,13 @@ impl DebugMenuBar {
         let arrange_item = MenuItem::new("Arrange Mode", true, None);
         mappings.push((arrange_item.id().clone(), DebugAction::ToggleArrangeMode));
         let _ = tools_sub.append(&arrange_item);
+
+        let clear_layouts_item = MenuItem::new("Clear Saved Scene Layouts", true, None);
+        mappings.push((
+            clear_layouts_item.id().clone(),
+            DebugAction::ClearSavedSceneLayouts,
+        ));
+        let _ = tools_sub.append(&clear_layouts_item);
 
         let _ = debug_menu.append(&tools_sub);
 

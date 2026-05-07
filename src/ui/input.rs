@@ -221,6 +221,8 @@ pub struct InputState {
     pub drag: Option<DragState>,
     /// When true, gamepad South (A) and East (B) are swapped.
     pub swap_ab: bool,
+    /// When true, gamepad West (X) and North (Y) are swapped.
+    pub swap_xy: bool,
     /// When true, gamepad West (X) immediately commits ScoreHand and North
     /// (Y) immediately commits CommitDiscard. When false, those buttons
     /// only move focus onto the corresponding action button — the player
@@ -267,6 +269,7 @@ impl InputState {
             mode: InputMode::Cursor,
             drag: None,
             swap_ab: settings.swap_ab,
+            swap_xy: settings.swap_xy,
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble_enabled: settings.hold_to_sell_rumble,
             left_stick_x_dir: 0,
@@ -354,7 +357,12 @@ impl InputState {
     }
 
     /// Drain rumble patterns queued by the rumble lab debug scene.
-    pub fn apply_rumble_lab_ops(&mut self, shell: &mut SdlShell, now: Instant, ops: Vec<RumbleLabOp>) {
+    pub fn apply_rumble_lab_ops(
+        &mut self,
+        shell: &mut SdlShell,
+        now: Instant,
+        ops: Vec<RumbleLabOp>,
+    ) {
         for op in ops {
             match op {
                 RumbleLabOp::Pulse {
@@ -454,7 +462,12 @@ impl InputState {
     }
 
     /// Stronger pulse for the final total; scales with hand magnitude like screen shake.
-    pub fn play_scoring_cascade_final_rumble(&mut self, shell: &mut SdlShell, now: Instant, earned: u64) {
+    pub fn play_scoring_cascade_final_rumble(
+        &mut self,
+        shell: &mut SdlShell,
+        now: Instant,
+        earned: u64,
+    ) {
         let (weak, strong, duration_ms, gain) = Self::cascade_final_rumble_params(earned);
         self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
     }
@@ -531,34 +544,24 @@ impl InputState {
         const TRIG_PRESS: f32 = 0.65;
 
         match event {
-                Event::ControllerDeviceAdded { .. }
-                | Event::ControllerDeviceRemoved { .. }
-                | Event::ControllerDeviceRemapped { .. } => {
-                    shell.refresh_gamepads();
-                }
-                Event::ControllerButtonDown { button, .. } => match button {
-                    GpButton::South => actions.push(if self.swap_ab {
-                        UiAction::Cancel
-                    } else {
-                        UiAction::Confirm
-                    }),
-                    GpButton::East => actions.push(if self.swap_ab {
-                        UiAction::Confirm
-                    } else {
-                        UiAction::Cancel
-                    }),
-                    GpButton::West => {
-                        if poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::ShopSellHoldPress);
-                        } else {
-                            actions.push(if self.xy_quick_action {
-                                UiAction::ScoreHand
-                            } else {
-                                UiAction::FocusPlayButton
-                            });
-                        }
-                    }
-                    GpButton::North => {
+            Event::ControllerDeviceAdded { .. }
+            | Event::ControllerDeviceRemoved { .. }
+            | Event::ControllerDeviceRemapped { .. } => {
+                shell.refresh_gamepads();
+            }
+            Event::ControllerButtonDown { button, .. } => match button {
+                GpButton::South => actions.push(if self.swap_ab {
+                    UiAction::Cancel
+                } else {
+                    UiAction::Confirm
+                }),
+                GpButton::East => actions.push(if self.swap_ab {
+                    UiAction::Confirm
+                } else {
+                    UiAction::Cancel
+                }),
+                GpButton::West => {
+                    if self.swap_xy {
                         if poll_ctx.shop_face_buttons || poll_ctx.collection_inspect_north {
                             actions.push(UiAction::ShopItemInspectToggle);
                         } else {
@@ -568,141 +571,170 @@ impl InputState {
                                 UiAction::FocusDiscardButton
                             });
                         }
+                    } else if poll_ctx.shop_face_buttons {
+                        actions.push(UiAction::ShopSellHoldPress);
+                    } else {
+                        actions.push(if self.xy_quick_action {
+                            UiAction::ScoreHand
+                        } else {
+                            UiAction::FocusPlayButton
+                        });
                     }
-                    GpButton::DPadRight => {
-                        actions.push(UiAction::FocusNext);
-                        self.dpad_repeat = Some((
-                            UiAction::FocusNext,
-                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
-                        ));
-                    }
-                    GpButton::DPadLeft => {
-                        actions.push(UiAction::FocusPrev);
-                        self.dpad_repeat = Some((
-                            UiAction::FocusPrev,
-                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
-                        ));
-                    }
-                    GpButton::DPadDown => {
-                        actions.push(UiAction::FocusDown);
-                        self.dpad_repeat = Some((
-                            UiAction::FocusDown,
-                            Instant::now() + NAV_REPEAT_INITIAL_DELAY,
-                        ));
-                    }
-                    GpButton::DPadUp => {
-                        actions.push(UiAction::FocusUp);
-                        self.dpad_repeat =
-                            Some((UiAction::FocusUp, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
-                    }
-                    GpButton::Start => actions.push(UiAction::Pause),
-                    GpButton::Back => actions.push(UiAction::Help),
-                    GpButton::LeftShoulder => {
-                        actions.push(UiAction::NavigateHudPrev);
-                        actions.push(UiAction::TabPrev);
-                    }
-                    GpButton::RightShoulder => {
-                        actions.push(UiAction::NavigateHudNext);
-                        actions.push(UiAction::TabNext);
-                    }
-                    _ => {}
-                },
-                Event::ControllerButtonUp { button, .. } => match button {
-                    GpButton::South => {
-                        if !self.swap_ab {
-                            actions.push(UiAction::ConfirmRelease);
-                        }
-                    }
-                    GpButton::East => {
-                        if self.swap_ab {
-                            actions.push(UiAction::ConfirmRelease);
-                        }
-                    }
-                    GpButton::West => {
+                }
+                GpButton::North => {
+                    if self.swap_xy {
                         if poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::ShopSellHoldRelease);
+                            actions.push(UiAction::ShopSellHoldPress);
+                        } else {
+                            actions.push(if self.xy_quick_action {
+                                UiAction::ScoreHand
+                            } else {
+                                UiAction::FocusPlayButton
+                            });
                         }
+                    } else if poll_ctx.shop_face_buttons || poll_ctx.collection_inspect_north {
+                        actions.push(UiAction::ShopItemInspectToggle);
+                    } else {
+                        actions.push(if self.xy_quick_action {
+                            UiAction::CommitDiscard
+                        } else {
+                            UiAction::FocusDiscardButton
+                        });
                     }
-                    _ => {}
-                },
-                Event::ControllerAxisMotion {
-                    which, axis, value, ..
-                } => {
-                    let id = joystick_id(which);
-                    let v = axis_norm(value);
-                    match axis {
-                        GpAxis::LeftX => {
-                            let old_dir = self.left_stick_x_dir;
-                            let new_dir = if v >= STICK_DEADZONE {
-                                1
-                            } else if v <= -STICK_DEADZONE {
-                                -1
-                            } else {
-                                0
-                            };
-                            self.left_stick_x_dir = new_dir;
-                            if new_dir == 0 {
-                                self.stick_repeat_x = None;
-                            } else if new_dir != old_dir {
-                                actions.push(if new_dir > 0 {
-                                    UiAction::FocusNext
-                                } else {
-                                    UiAction::FocusPrev
-                                });
-                                self.last_stick_nav_at = Instant::now();
-                                self.stick_repeat_x =
-                                    Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
-                            }
-                        }
-                        GpAxis::LeftY => {
-                            let vendor = shell.gamepad.vendor_for_id(id);
-                            let v = if Self::macos_microsoft_stick_y_invert(vendor) {
-                                -v
-                            } else {
-                                v
-                            };
-                            let old_dir = self.left_stick_y_dir;
-                            let new_dir = if v >= STICK_DEADZONE {
-                                1
-                            } else if v <= -STICK_DEADZONE {
-                                -1
-                            } else {
-                                0
-                            };
-                            self.left_stick_y_dir = new_dir;
-                            if new_dir == 0 {
-                                self.stick_repeat_y = None;
-                            } else if new_dir != old_dir {
-                                actions.push(if new_dir > 0 {
-                                    UiAction::FocusUp
-                                } else {
-                                    UiAction::FocusDown
-                                });
-                                self.last_stick_nav_at = Instant::now();
-                                self.stick_repeat_y =
-                                    Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
-                            }
-                        }
-                        GpAxis::TriggerLeft => {
-                            let cur = trigger_norm(value);
-                            let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
-                            if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
-                                actions.push(UiAction::TriggerStructure);
-                            }
-                            shell.lt_prev.insert(id, cur);
-                        }
-                        GpAxis::TriggerRight => {
-                            let cur = trigger_norm(value);
-                            let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
-                            if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
-                                actions.push(UiAction::TriggerStructure);
-                            }
-                            shell.rt_prev.insert(id, cur);
-                        }
-                        _ => {}
+                }
+                GpButton::DPadRight => {
+                    actions.push(UiAction::FocusNext);
+                    self.dpad_repeat = Some((
+                        UiAction::FocusNext,
+                        Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                    ));
+                }
+                GpButton::DPadLeft => {
+                    actions.push(UiAction::FocusPrev);
+                    self.dpad_repeat = Some((
+                        UiAction::FocusPrev,
+                        Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                    ));
+                }
+                GpButton::DPadDown => {
+                    actions.push(UiAction::FocusDown);
+                    self.dpad_repeat = Some((
+                        UiAction::FocusDown,
+                        Instant::now() + NAV_REPEAT_INITIAL_DELAY,
+                    ));
+                }
+                GpButton::DPadUp => {
+                    actions.push(UiAction::FocusUp);
+                    self.dpad_repeat =
+                        Some((UiAction::FocusUp, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                }
+                GpButton::Start => actions.push(UiAction::Pause),
+                GpButton::Back => actions.push(UiAction::Help),
+                GpButton::LeftShoulder => {
+                    actions.push(UiAction::NavigateHudPrev);
+                    actions.push(UiAction::TabPrev);
+                }
+                GpButton::RightShoulder => {
+                    actions.push(UiAction::NavigateHudNext);
+                    actions.push(UiAction::TabNext);
+                }
+                _ => {}
+            },
+            Event::ControllerButtonUp { button, .. } => match button {
+                GpButton::South => {
+                    if !self.swap_ab {
+                        actions.push(UiAction::ConfirmRelease);
+                    }
+                }
+                GpButton::East => {
+                    if self.swap_ab {
+                        actions.push(UiAction::ConfirmRelease);
+                    }
+                }
+                GpButton::West => {
+                    if poll_ctx.shop_face_buttons && !self.swap_xy {
+                        actions.push(UiAction::ShopSellHoldRelease);
+                    }
+                }
+                GpButton::North => {
+                    if poll_ctx.shop_face_buttons && self.swap_xy {
+                        actions.push(UiAction::ShopSellHoldRelease);
                     }
                 }
                 _ => {}
+            },
+            Event::ControllerAxisMotion {
+                which, axis, value, ..
+            } => {
+                let id = joystick_id(which);
+                let v = axis_norm(value);
+                match axis {
+                    GpAxis::LeftX => {
+                        let old_dir = self.left_stick_x_dir;
+                        let new_dir = if v >= STICK_DEADZONE {
+                            1
+                        } else if v <= -STICK_DEADZONE {
+                            -1
+                        } else {
+                            0
+                        };
+                        self.left_stick_x_dir = new_dir;
+                        if new_dir == 0 {
+                            self.stick_repeat_x = None;
+                        } else if new_dir != old_dir {
+                            actions.push(if new_dir > 0 {
+                                UiAction::FocusNext
+                            } else {
+                                UiAction::FocusPrev
+                            });
+                            self.last_stick_nav_at = Instant::now();
+                            self.stick_repeat_x =
+                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                        }
+                    }
+                    GpAxis::LeftY => {
+                        let old_dir = self.left_stick_y_dir;
+                        let new_dir = if v >= STICK_DEADZONE {
+                            -1
+                        } else if v <= -STICK_DEADZONE {
+                            1
+                        } else {
+                            0
+                        };
+                        self.left_stick_y_dir = new_dir;
+                        if new_dir == 0 {
+                            self.stick_repeat_y = None;
+                        } else if new_dir != old_dir {
+                            actions.push(if new_dir > 0 {
+                                UiAction::FocusUp
+                            } else {
+                                UiAction::FocusDown
+                            });
+                            self.last_stick_nav_at = Instant::now();
+                            self.stick_repeat_y =
+                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                        }
+                    }
+                    GpAxis::TriggerLeft => {
+                        let cur = trigger_norm(value);
+                        let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
+                        if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                            actions.push(UiAction::TriggerStructure);
+                        }
+                        shell.lt_prev.insert(id, cur);
+                    }
+                    GpAxis::TriggerRight => {
+                        let cur = trigger_norm(value);
+                        let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
+                        if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                            actions.push(UiAction::TriggerStructure);
+                        }
+                        shell.rt_prev.insert(id, cur);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
 
         if actions.len() > before && self.mode != InputMode::Controller {
@@ -751,17 +783,6 @@ impl InputState {
         false
     }
 
-    /// Xbox / Xbox 360 class devices on macOS often expose inverted stick Y vs other backends.
-    #[cfg(target_os = "macos")]
-    fn macos_microsoft_stick_y_invert(vendor_id: Option<u16>) -> bool {
-        vendor_id == Some(0x045E)
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    fn macos_microsoft_stick_y_invert(_vendor_id: Option<u16>) -> bool {
-        false
-    }
-
     fn sync_gamepad_style_from_first_connected(shell: &SdlShell, out: &mut GamepadStyle) {
         let Ok(ids) = shell.gamepad.gamepads() else {
             return;
@@ -791,12 +812,8 @@ impl InputState {
             if !gp.connected() {
                 continue;
             }
-            let vendor = shell.gamepad.vendor_for_id(id);
             let x = axis_norm(gp.axis(GpAxis::RightX));
-            let mut y = axis_norm(gp.axis(GpAxis::RightY));
-            if Self::macos_microsoft_stick_y_invert(vendor) {
-                y = -y;
-            }
+            let y = axis_norm(gp.axis(GpAxis::RightY));
             *out_stick = (
                 if x.abs() < STICK_DZ { 0.0 } else { x },
                 if y.abs() < STICK_DZ { 0.0 } else { y },
@@ -978,12 +995,8 @@ impl InputState {
             if !gp.connected() {
                 continue;
             }
-            let vendor = shell.gamepad.vendor_for_id(id);
             let x = axis_norm(gp.axis(GpAxis::LeftX));
-            let mut y = axis_norm(gp.axis(GpAxis::LeftY));
-            if Self::macos_microsoft_stick_y_invert(vendor) {
-                y = -y;
-            }
+            let y = axis_norm(gp.axis(GpAxis::LeftY));
             let sx = if x >= deadzone {
                 1
             } else if x <= -deadzone {
@@ -1007,7 +1020,12 @@ impl InputState {
 
     /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
     /// Returns true if the mode changed.
-    pub fn on_key(&mut self, key: Option<Scancode>, shift: bool, actions: &mut Vec<UiAction>) -> bool {
+    pub fn on_key(
+        &mut self,
+        key: Option<Scancode>,
+        shift: bool,
+        actions: &mut Vec<UiAction>,
+    ) -> bool {
         let Some(code) = key else {
             return false;
         };

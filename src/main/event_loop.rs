@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::physical_size::PhysicalSize;
-use crate::sdl_shell::SdlShell;
 use crate::scenes::shop::pick_ids::PICK_SELL_TRAY;
+use crate::sdl_shell::SdlShell;
 use sdl3::event::Event;
 use sdl3::keyboard::{Mod, Scancode};
 use sdl3::mouse::MouseButton as SdlMouseButton;
@@ -33,13 +33,14 @@ impl App {
         {
             self.debug.menu = Some(DebugMenuBar::new(&shell.window));
         }
-        log::info!("SDL shell: window + wgpu + input ready");
+        log::debug!("SDL shell: window + wgpu + input ready");
 
         'running: loop {
             self.steam.run_callbacks();
             if self.quit_requested {
                 break 'running;
             }
+            self.steam.run_steam_input_frame();
             let events: Vec<Event> = shell.pump.poll_iter().collect();
             for event in events {
                 if self.dispatch_sdl_event(shell, event)? {
@@ -63,7 +64,7 @@ impl App {
         if self.close_saved {
             return Ok(());
         }
-        log::info!("SDL loop exit — saving profile");
+        log::debug!("SDL loop exit — saving profile");
         self.progress.record_score(self.run.round_score);
         let _ = persistence::save_profile(self.active_profile, &self.progress);
         self.persist_run_if_in_progress();
@@ -75,22 +76,26 @@ impl App {
         let our_win = shell.window.id();
         match event {
             Event::Quit { .. } => {
-                log::info!("Quit event — saving and exiting");
+                log::debug!("Quit event — saving and exiting");
                 self.progress.record_score(self.run.round_score);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
                 self.persist_run_if_in_progress();
                 self.close_saved = true;
                 return Ok(true);
             }
-            Event::Window { window_id, win_event, .. } if window_id == our_win => {
+            Event::Window {
+                window_id,
+                win_event,
+                ..
+            } if window_id == our_win => {
                 use sdl3::event::WindowEvent;
                 match win_event {
                     WindowEvent::CloseRequested => {
                         if self.close_saved {
-                            log::info!("CloseRequested again — exiting immediately");
+                            log::debug!("CloseRequested again — exiting immediately");
                             return Ok(true);
                         }
-                        log::info!("CloseRequested — saving profile and exiting");
+                        log::debug!("CloseRequested — saving profile and exiting");
                         self.progress.record_score(self.run.round_score);
                         let _ = persistence::save_profile(self.active_profile, &self.progress);
                         self.persist_run_if_in_progress();
@@ -108,16 +113,26 @@ impl App {
                     _ => {}
                 }
             }
-            Event::MouseMotion { window_id, x, y, .. } if window_id == our_win => {
+            Event::MouseMotion {
+                window_id, x, y, ..
+            } if window_id == our_win => {
                 let (px, py) = shell.event_xy_to_pixels(x, y);
                 self.sdl_handle_mouse_motion(shell, px, py);
             }
-            Event::MouseButtonDown { window_id, mouse_btn, .. } if window_id == our_win => {
+            Event::MouseButtonDown {
+                window_id,
+                mouse_btn,
+                ..
+            } if window_id == our_win => {
                 if mouse_btn == SdlMouseButton::Left {
                     self.sdl_handle_left_button(shell, true);
                 }
             }
-            Event::MouseButtonUp { window_id, mouse_btn, .. } if window_id == our_win => {
+            Event::MouseButtonUp {
+                window_id,
+                mouse_btn,
+                ..
+            } if window_id == our_win => {
                 if mouse_btn == SdlMouseButton::Left {
                     self.sdl_handle_left_button(shell, false);
                 }
@@ -210,13 +225,14 @@ impl App {
                     .as_ref()
                     .and_then(|r| r.pick_debug_object(cursor.0, cursor.1));
                 match name {
-                    Some(n) => log::info!(
-                        "[Debug] Object hit test: {n} at ({:.0}, {:.0})",
+                    Some(n) => log::debug!(
+                        "Object hit test: {} at ({:.0}, {:.0})",
+                        n,
                         cursor.0,
                         cursor.1
                     ),
-                    None => log::info!(
-                        "[Debug] Object hit test: (no object) at ({:.0}, {:.0})",
+                    None => log::debug!(
+                        "Object hit test: (no object) at ({:.0}, {:.0})",
                         cursor.0,
                         cursor.1
                     ),
@@ -232,9 +248,10 @@ impl App {
                 // Only try to select an object when nothing is
                 // selected yet (inner = None).
                 if matches!(self.debug.arrange_mode, Some(None)) {
-                    let picked = self.renderer.as_ref().and_then(|r| {
-                        r.pick_debug_object_with_model(cursor.0, cursor.1)
-                    });
+                    let picked = self
+                        .renderer
+                        .as_ref()
+                        .and_then(|r| r.pick_debug_object_with_model(cursor.0, cursor.1));
                     match picked {
                         Some((name, Some(model))) => {
                             // Start with zero deltas — the override
@@ -301,9 +318,7 @@ impl App {
                             );
                         }
                         None => {
-                            log::info!(
-                                "[Arrange] Click missed all pickables — no move"
-                            );
+                            log::info!("[Arrange] Click missed all pickables — no move");
                         }
                     }
                 }
@@ -316,11 +331,7 @@ impl App {
             let mut hit_shop_3d = false;
             for btn in &self.active_buttons {
                 let (bx, by, bw, bh) = btn.rect;
-                if cursor.0 >= bx
-                    && cursor.0 <= bx + bw
-                    && cursor.1 >= by
-                    && cursor.1 <= by + bh
-                {
+                if cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh {
                     self.audio.play_sfx(audio::SfxId::TileClick);
                     match btn.action {
                         ButtonAction::Ui(a) => self.mouse_actions.push(a),
@@ -411,9 +422,7 @@ impl App {
                             if let Some(target_slot) = dropped_relic_slot
                                 && target_slot != drag.from_slot
                             {
-                                self.run
-                                    .relics
-                                    .swap_relics(drag.from_slot, target_slot);
+                                self.run.relics.swap_relics(drag.from_slot, target_slot);
                             }
                         }
                     }
@@ -429,24 +438,29 @@ impl App {
     fn sdl_handle_mouse_motion(&mut self, shell: &mut SdlShell, x: f32, y: f32) {
         if let Some(input) = self.input.as_mut() {
             let new_cursor = (x, y);
-            // Only flip back to Cursor mode if the cursor actually
-            // moved meaningfully. Skip while in Controller mode —
-            // micro-movements still fight stick navigation; switching
-            // to Cursor uses LMB instead (see MouseInput).
+            let prev_mode = input.mode;
             let dx = new_cursor.0 - input.last_cursor.0;
             let dy = new_cursor.1 - input.last_cursor.1;
-            let moved = (dx * dx + dy * dy) > 4.0;
-            let was_hidden = moved && input.mode != InputMode::Cursor;
-            if moved && input.mode != InputMode::Controller {
-                // Pointer jitter / OS drift used to flip Controller→Cursor
-                // and break stick navigation; explicit mouse use is LMB
-                // (see MouseInput).
+            let dist_sq = dx * dx + dy * dy;
+            // Keyboard → cursor: small movement restores mouse modality (same as before).
+            const CURSOR_MODE_MOUSE_MOVE_SQ: f32 = 4.0;
+            // Controller → cursor: require a larger delta so stick / driver jitter
+            // does not exit controller mode; intentional mouse motion still restores hover.
+            const CONTROLLER_TO_CURSOR_MOUSE_MOVE_SQ: f32 = 100.0;
+            let switch_to_cursor = match input.mode {
+                InputMode::Controller => dist_sq > CONTROLLER_TO_CURSOR_MOUSE_MOVE_SQ,
+                InputMode::Keyboard => dist_sq > CURSOR_MODE_MOUSE_MOVE_SQ,
+                InputMode::Cursor => false,
+            };
+            if switch_to_cursor {
                 input.mode = InputMode::Cursor;
             }
+            let was_hidden = switch_to_cursor && prev_mode != InputMode::Cursor;
             input.last_cursor = new_cursor;
-            let layout = self
-                .layout_engine
-                .solve(self.last_drawable_px.width as f32, self.last_drawable_px.height as f32);
+            let layout = self.layout_engine.solve(
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
             // Same raycast-based pick as the per-frame update path.
             let hand_slot_count = self.run.hand.len().max(layout.hand_slots.len());
             let mut slots: Vec<(f32, f32, f32, f32)> =
@@ -500,9 +514,7 @@ impl App {
 
         // Arrange mode: Escape while waiting for a click exits the
         // mode entirely.
-        if matches!(self.debug.arrange_mode, Some(None))
-            && scancode == Some(Scancode::Escape)
-        {
+        if matches!(self.debug.arrange_mode, Some(None)) && scancode == Some(Scancode::Escape) {
             self.debug.arrange_mode = None;
             log::info!("[Arrange] Mode exited");
             return Ok(());
@@ -512,9 +524,7 @@ impl App {
         // scene's placement hierarchy. Works whether an object is
         // already selected or not — picking a group applies deltas
         // to every descendant leaf on save.
-        if self.debug.arrange_mode.is_some()
-            && scancode == Some(Scancode::Tab)
-        {
+        if self.debug.arrange_mode.is_some() && scancode == Some(Scancode::Tab) {
             let flat = arrange_hierarchy_flat(&self.scene);
             if flat.is_empty() {
                 log::info!("[Arrange] Current scene has no hierarchy");
@@ -523,8 +533,7 @@ impl App {
                     Some(Some(s)) => Some(s.object_name.as_str()),
                     _ => None,
                 };
-                let current_idx =
-                    current_name.and_then(|n| flat.iter().position(|e| e.name == n));
+                let current_idx = current_name.and_then(|n| flat.iter().position(|e| e.name == n));
                 let reverse = mod_shift(self.modifiers);
                 let next_idx = match (current_idx, reverse) {
                     (None, false) => 0,
@@ -664,13 +673,9 @@ impl App {
                         match arboard::Clipboard::new() {
                             Ok(mut cb) => {
                                 if let Err(e) = cb.set_text(&text) {
-                                    log::error!(
-                                        "[Arrange] Clipboard write failed: {e}"
-                                    );
+                                    log::error!("[Arrange] Clipboard write failed: {e}");
                                 } else {
-                                    log::info!(
-                                        "[Arrange] Copied to clipboard:\n{text}"
-                                    );
+                                    log::info!("[Arrange] Copied to clipboard:\n{text}");
                                 }
                             }
                             Err(e) => {
@@ -808,7 +813,7 @@ impl App {
             {
                 self.overlay_stack
                     .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
-                log::info!("[Debug] Opened material viewer (keyboard shortcut)");
+                log::debug!("Opened material viewer (keyboard shortcut)");
             }
             return Ok(());
         }
@@ -825,7 +830,7 @@ impl App {
             {
                 self.overlay_stack
                     .push(Scene::RumbleLab(RumbleLabScene::new(true)));
-                log::info!("[Debug] Opened rumble lab (keyboard shortcut)");
+                log::debug!("Opened rumble lab (keyboard shortcut)");
             }
             return Ok(());
         }

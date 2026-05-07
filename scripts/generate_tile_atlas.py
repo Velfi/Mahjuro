@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
 """Generate a new mahjong tile-set atlas via a single OpenAI image edit call.
 
-Takes a template atlas (e.g. `assets/sets/original/atlas.png`) as the layout
-reference and asks the model to restyle the whole 8-column grid in a given
-theme, preserving every tile's position, size, and content. Returns one atlas
-image, saved as `assets/sets/<name>/atlas.png` alongside the standard
-`atlas.toml`.
+**Default workflow:** pass a **reference atlas** image (default: the repo’s
+procedural layout at `assets/sets/classic/atlas.png`) plus style instructions;
+the model restyles the full 9×5 grid in one shot while preserving layout and tile
+identity. Output goes to `assets/sets/<name>/atlas.png` + `atlas.toml`.
 
-Why one call: generating all 38 tiles individually costs ~$1.50 per set with
-gpt-image-2 high. A single whole-atlas restyling is ~$0.04–0.10 depending on
-size, and keeps the grid composition correct because the template enforces it.
+Why one call: generating dozens of tiles individually is expensive; one
+whole-atlas edit is typically ~$0.04–0.10 and keeps the grid aligned.
 
 Usage:
     pip install openai pillow
     export OPENAI_API_KEY="sk-..."
 
-    # list themes
+    # list built-in themes
     python3 scripts/generate_tile_atlas.py --list
 
-    # restyle the original atlas into a jade-themed set
+    # reference atlas + built-in theme
     python3 scripts/generate_tile_atlas.py --theme jade --name jade
 
-    # use a different template
+    # default reference + your own prompt (new or restyled set name)
+    python3 scripts/generate_tile_atlas.py --name my_theme --force \\
+        --prompt "soft watercolor, spring wildflowers, pastel..."
+
+    # use another reference image (same grid geometry)
     python3 scripts/generate_tile_atlas.py --theme lacquer --name lacquer \\
-        --template assets/sets/classic/atlas.png
+        --template assets/sets/original/atlas.png
 
     # preview the prompt, don't call the API
     python3 scripts/generate_tile_atlas.py --theme jade --dry-run
-
-    # write a custom theme inline without editing this file
-    python3 scripts/generate_tile_atlas.py --name vapor \\
-        --custom-style "synthwave purple chrome with pink neon accents"
 """
 
 from __future__ import annotations
@@ -41,6 +39,8 @@ import io
 import os
 import sys
 from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
 
 try:
     from openai import OpenAI
@@ -71,6 +71,7 @@ LAYOUT = [
     "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
     "EWind", "SWind", "WWind", "NWind", "DRed", "DGreen", "DWhite", "", "",
     "Flower1", "Flower2", "Flower3", "Flower4",
+    "Season1", "Season2", "Season3", "Season4", "",
 ]
 
 ATLAS_W = TILE_W * COLUMNS                            # 2304
@@ -78,7 +79,8 @@ ATLAS_H = TILE_H * ((len(LAYOUT) + COLUMNS - 1) // COLUMNS)  # 1920
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SETS_DIR = REPO_ROOT / "assets" / "sets"
-DEFAULT_TEMPLATE = SETS_DIR / "original" / "atlas.png"
+# Default reference: procedural atlas shipped in-repo (9×5 layout). Override with --template.
+DEFAULT_TEMPLATE = SETS_DIR / "classic" / "atlas.png"
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +156,28 @@ THEMES: dict[str, dict[str, str]] = {
 
 
 # ---------------------------------------------------------------------------
+# Geometry — keep model output on a uniform grid (no aspect-ratio squash)
+# ---------------------------------------------------------------------------
+
+def fit_atlas_cover(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Scale uniformly (cover) then center-crop to exact atlas size.
+
+    A naive ``resize`` to the target distorts when the API aspect ratio differs,
+    which makes the 9×5 tile grid look uneven or stretched.
+    """
+    iw, ih = img.size
+    if iw == target_w and ih == target_h:
+        return img
+    scale = max(target_w / iw, target_h / ih)
+    nw = max(1, int(round(iw * scale)))
+    nh = max(1, int(round(ih * scale)))
+    img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+    left = (nw - target_w) // 2
+    top = (nh - target_h) // 2
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+# ---------------------------------------------------------------------------
 # Prompt construction
 # ---------------------------------------------------------------------------
 
@@ -169,15 +193,19 @@ Style: {style}
 Hard requirements — follow these verbatim:
 - Output is a single atlas image at {atlas_w}x{atlas_h} with 9 tiles per \
 row and {rows} rows total.
-- Each of the 38 tiles occupies one {tile_w}x{tile_h} cell of the grid; \
-the cell grid is rigid and aligned.
+- Each illustrated tile face occupies one {tile_w}x{tile_h} pixel cell; \
+all cells are identical in width and height; the 9×5 grid is perfectly \
+rectilinear (no curved rows, no drifting seams, no variable gutters).
+- Column boundaries are at x = 0, {tile_w}, {tile_w}*2, …; row boundaries \
+at y = 0, {tile_h}, {tile_h}*2, … — match the reference atlas exactly.
 - The set of tiles depicted and their grid positions must match the \
 reference atlas precisely — one suit per row:
   * Row 1: bamboos B1 through B9 left to right
   * Row 2: characters 一萬 through 九萬 left to right (C1–C9)
   * Row 3: circles/dots D1 through D9 left to right
   * Row 4: winds 東 南 西 北 then dragons 中 發 白 (7 tiles), then 2 empty cells
-  * Row 5: flowers 梅 蘭 菊 竹 (4 tiles), then 5 empty cells
+  * Row 5: flowers 梅 蘭 菊 竹 (4 tiles), then four season tiles 春 夏 秋 冬 \
+with recognizable spring/summer/autumn/winter motifs, then 1 empty cell
 - Preserve the traditional color conventions: 1-dot red center; 5-dot red \
 center; 7-dot red top-diagonal; 9-dot red top+bottom rows with green \
 middle; 3-bamboo, 5-bamboo, 7-bamboo, 9-bamboo have red accents in the \
@@ -188,8 +216,8 @@ tabletop, no drop shadows beneath tiles, no perspective, no 3D tile \
 thickness — each cell is a flat orthographic tile face.
 - Tiles do not overlap or bleed into neighbors; a small consistent gap \
 or clean tile edge between neighbors is fine.
-- Empty cells (row 4 positions 8–9 and row 5 positions 5–9) should be \
-left as transparent or neutral background, matching the reference.
+- Empty cells (row 4 columns 8–9 and row 5 column 9) should be left as \
+transparent or neutral background, matching the reference.
 """
 
 
@@ -240,8 +268,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--theme", choices=sorted(THEMES.keys()),
                     help="Built-in theme to apply.")
-    ap.add_argument("--custom-style",
-                    help="One-off style description, used instead of --theme.")
+    ap.add_argument(
+        "--custom-style",
+        "--prompt",
+        dest="custom_style",
+        metavar="TEXT",
+        help="Full style / art-direction prompt (instead of --theme). "
+             "Alias: --prompt",
+    )
     ap.add_argument("--name",
                     help="Output set directory name under assets/sets/. "
                          "Defaults to the theme name.")
@@ -257,10 +291,15 @@ def main() -> None:
                     help="OpenAI image model.")
     ap.add_argument("--size", default=f"{ATLAS_W}x{ATLAS_H}",
                     help="API output size. Default matches the atlas "
-                         "(2048x1920); the model will clamp to its nearest "
+                         f"({ATLAS_W}x{ATLAS_H}); the model may clamp to a "
                          "supported size and Pillow resizes back.")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite existing atlas.png/atlas.toml.")
+    ap.add_argument(
+        "--annotate-indices",
+        action="store_true",
+        help="After generation, draw 1…N Arabic indices on each tile cell",
+    )
     args = ap.parse_args()
 
     if args.list:
@@ -314,15 +353,24 @@ def main() -> None:
     b64 = response.data[0].b64_json
     img_bytes = base64.b64decode(b64)
     img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-    # The model may return a different size; resize to the atlas canonical dims.
+    # Model size may differ; uniform scale + crop preserves square tile aspect.
     if img.size != (ATLAS_W, ATLAS_H):
-        print(f"  resizing model output from {img.size} to "
-              f"{(ATLAS_W, ATLAS_H)}")
-        img = img.resize((ATLAS_W, ATLAS_H), Image.LANCZOS)
+        print(f"  fitting model output {img.size} → {(ATLAS_W, ATLAS_H)} "
+              f"(uniform scale + center crop)")
+        img = fit_atlas_cover(img, ATLAS_W, ATLAS_H)
     img.save(atlas_out)
     write_toml(toml_out)
     print(f"Wrote {atlas_out} ({atlas_out.stat().st_size} bytes) + "
           f"{toml_out.name}")
+
+    if args.annotate_indices:
+        if str(SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS_DIR))
+        import annotate_atlas_indices as _atlas_lbl
+
+        n = _atlas_lbl.annotate_atlas_png(atlas_out)
+        print(f"Annotated atlas with {n} corner indices")
+
     print("Run the game and switch to this set in Options → Visual → "
           "Tile Set.")
 

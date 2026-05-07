@@ -19,20 +19,20 @@ Usage:
     export OPENAI_API_KEY="sk-..."
 
     # dry-run: show the prompt, touch nothing
-    python3 scripts/fix_tile.py american_spring B5 --dry-run
+    python3 scripts/fix_tile.py classic B5 --dry-run
 
     # use the built-in spec for this tile code
-    python3 scripts/fix_tile.py american_spring B5
+    python3 scripts/fix_tile.py classic B5
 
     # override with a custom instruction
-    python3 scripts/fix_tile.py american_spring B5 \\
+    python3 scripts/fix_tile.py classic B5 \\
         --prompt "four green stalks in the corners, one red stalk centered"
 
     # fix several tiles in one invocation
-    python3 scripts/fix_tile.py american_spring B5 B6 B7
+    python3 scripts/fix_tile.py classic B5 B6 B7
 
     # keep a backup of the atlas before overwriting
-    python3 scripts/fix_tile.py american_spring B5 --backup
+    python3 scripts/fix_tile.py classic B5 --backup
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("set_name",
                     help="Tileset directory name under assets/sets/ "
-                         "(e.g. american_spring).")
+                         "(e.g. classic).")
     ap.add_argument("codes", nargs="+",
                     help="One or more tile codes to fix (e.g. B5 B6 B7).")
     ap.add_argument("--prompt", default=None,

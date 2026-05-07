@@ -13,13 +13,13 @@ use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
 use crate::render::river_mesh::{
     RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
 };
-use crate::scenes::shop::pick_ids::{PICK_LEAVE_PROP, PICK_REROLL_PROP};
 use crate::render::talisman_mesh::TALISMAN_LOCAL_HALF;
 use crate::render::wgpu_renderer::{
     GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
     MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MainMenuPick, ShopHit, WgpuRenderer,
 };
 use crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
+use crate::scenes::shop::pick_ids::{PICK_LEAVE_PROP, PICK_REROLL_PROP};
 
 fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
     match node_name {

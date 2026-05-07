@@ -23,7 +23,8 @@ impl WgpuRenderer {
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
         let (exposure, ambient_x) = if shop_gltf_punctual {
             (
-                self.shop_env_linear_exposure * crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
+                self.shop_env_linear_exposure
+                    * crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
                 self.shop_env_ambient_scale,
             )
         } else {

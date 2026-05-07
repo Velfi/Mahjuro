@@ -1,12 +1,12 @@
 pub mod button_prompts;
-pub mod kenney_prompt_paths;
-pub mod prompt_hold_ring;
 pub mod focus_nav;
 pub mod input;
 pub mod inspect_plaque;
+pub mod kenney_prompt_paths;
 pub mod layout;
 pub mod modal;
 pub mod placement;
+pub mod prompt_hold_ring;
 pub mod scene_layout;
 pub mod smooth_scroll;
 pub mod tooltip;

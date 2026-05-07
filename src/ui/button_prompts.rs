@@ -23,9 +23,9 @@ impl GamepadStyle {
     pub fn infer(vendor_id: Option<u16>, name: &str) -> Self {
         if let Some(v) = vendor_id {
             match v {
-                0x045E => return Self::Xbox,       // Microsoft
+                0x045E => return Self::Xbox,        // Microsoft
                 0x054C => return Self::PlayStation, // Sony
-                0x057E => return Self::Nintendo,   // Nintendo
+                0x057E => return Self::Nintendo,    // Nintendo
                 _ => {}
             }
         }
@@ -136,9 +136,7 @@ impl ButtonPrompt {
     pub fn shop_inspect_mode_hint(surface: PromptInputSurface, style: GamepadStyle) -> String {
         match surface {
             PromptInputSurface::Controller => Self::inspect_camera_extras(style),
-            PromptInputSurface::MouseOrKeyboard => {
-                "Mouse wheel zoom (inspect)".to_string()
-            }
+            PromptInputSurface::MouseOrKeyboard => "Mouse wheel zoom (inspect)".to_string(),
         }
     }
 
@@ -210,10 +208,7 @@ mod tests {
 
     #[test]
     fn infer_vendor_microsoft() {
-        assert_eq!(
-            GamepadStyle::infer(Some(0x045E), "Foo"),
-            GamepadStyle::Xbox
-        );
+        assert_eq!(GamepadStyle::infer(Some(0x045E), "Foo"), GamepadStyle::Xbox);
     }
 
     #[test]

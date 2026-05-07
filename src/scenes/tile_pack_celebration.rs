@@ -15,9 +15,11 @@ use crate::scenes::shop::{
     CelebPhase, PackCelebration, ShopInventoryCounts, ShopLayout, shop_celebration_camera,
 };
 use crate::ui::input::UiAction;
-use crate::ui::scene_layout::{load_shop_positions, ShopPositions};
+use crate::ui::scene_layout::{ShopPositions, load_shop_positions};
 
-use super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{
+    BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx,
+};
 
 pub struct TilePackCelebrationScene {
     celebration: PackCelebration,
@@ -36,7 +38,10 @@ impl TilePackCelebrationScene {
 
     /// Headless screenshot: settled reveal row (legacy counts-from-run helper).
     #[allow(dead_code)]
-    pub fn new_headless_screenshot(run: &crate::game::run::RunState, pack_kind: TilePackKind) -> Self {
+    pub fn new_headless_screenshot(
+        run: &crate::game::run::RunState,
+        pack_kind: TilePackKind,
+    ) -> Self {
         let tiles = pack_kind.generate_tiles(PACK_TILE_ID_BASE);
         let shop_rm = GameEngine::read_shop(run);
         let inventory = ShopInventoryCounts {
@@ -64,16 +69,11 @@ impl TilePackCelebrationScene {
         )
     }
 
-    fn push_celebration_draw(
-        &self,
-        frame: &mut UiFrame,
-        layout: &ShopLayout,
-        w: f32,
-        h: f32,
-    ) {
+    fn push_celebration_draw(&self, frame: &mut UiFrame, layout: &ShopLayout, w: f32, h: f32) {
         let celeb = &self.celebration;
         let n = celeb.tiles.len();
-        celebration_overlay::CelebrationOverlayScratch::new(w, h).push_dimmer_then_depth_reset(frame);
+        celebration_overlay::CelebrationOverlayScratch::new(w, h)
+            .push_dimmer_then_depth_reset(frame);
         frame.text(celebration_overlay::label_pack_title(
             h,
             w,
@@ -163,7 +163,9 @@ impl TilePackCelebrationScene {
 
                 if celeb.fully_settled() {
                     let elapsed = celeb.elapsed();
-                    frame.text(celebration_overlay::label_confirm_to_continue(h, w, elapsed, 1.0));
+                    frame.text(celebration_overlay::label_confirm_to_continue(
+                        h, w, elapsed, 1.0,
+                    ));
                 }
             }
         }

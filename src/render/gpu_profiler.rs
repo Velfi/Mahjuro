@@ -24,12 +24,7 @@ const NUM_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
 const TIMESTAMP_BYTES: u64 = 8;
 const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
 
-const PASS_LABELS: [&str; NUM_PASSES] = [
-    "shadow",
-    "main",
-    "main-table",
-    "main-scene",
-];
+const PASS_LABELS: [&str; NUM_PASSES] = ["shadow", "main", "main-table", "main-scene"];
 
 /// Per-pass timestamp slot indices into the shared query set.
 
@@ -136,13 +131,11 @@ impl GpuProfiler {
     /// session is already in flight.
     pub fn start(&mut self, frames: u32, width: u32, height: u32) {
         if !self.enabled {
-            log::warn!(
-                "[GpuProfiler] TIMESTAMP_QUERY not supported by this adapter; cannot profile"
-            );
+            log::warn!("TIMESTAMP_QUERY not supported by this adapter; cannot profile");
             return;
         }
         if self.sampling {
-            log::warn!("[GpuProfiler] profile already running; ignoring start request");
+            log::warn!("GPU profile already running; ignoring start request");
             return;
         }
         let frames = frames.max(1);
@@ -156,7 +149,7 @@ impl GpuProfiler {
         for c in &self.last_frame_passes {
             c.set(false);
         }
-        log::info!("[GpuProfiler] starting capture over {frames} frames");
+        log::debug!("Starting GPU profile capture over {frames} frames");
     }
 
     #[cfg(debug_assertions)]
@@ -268,26 +261,28 @@ impl GpuProfiler {
     }
 
     fn report(&self) {
-        log::info!(
-            "[GpuProfiler] === GPU pass timings averaged over {} frames ({}×{}) ===",
-            self.total_frames,
-            self.capture_width,
-            self.capture_height
-        );
+        let mut acc = String::new();
+        acc.push_str(&format!(
+            "=== GPU pass timings averaged over {} frames ({}×{}) ===",
+            self.total_frames, self.capture_width, self.capture_height,
+        ));
         let mut total = 0.0_f64;
         for (i, label) in PASS_LABELS.iter().enumerate() {
             let frames = self.pass_frame_counts[i];
             if frames == 0 {
-                log::info!("[GpuProfiler]   {label:<12} (not run)");
+                acc.push_str(&format!("   {label:<12} (not run)\n"));
                 continue;
             }
             let avg = self.accum_ms[i] / frames as f64;
             total += avg;
-            log::info!("[GpuProfiler]   {label:<12} {avg:>7.3} ms  ({frames} frames)");
+            acc.push_str(&format!(
+                "   {label:<12} {avg:>7.3} ms  ({frames} frames)\n"
+            ));
         }
-        log::info!(
-            "[GpuProfiler]   {:<12} {total:>7.3} ms (sum of averages)",
+        acc.push_str(&format!(
+            "   {:<12} {total:>7.3} ms (sum of averages)\n",
             "TOTAL"
-        );
+        ));
+        log::debug!("{}", acc);
     }
 }

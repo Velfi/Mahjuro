@@ -3,8 +3,10 @@ use super::*;
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::ShopEnvDebugOverlay;
 use crate::game::engine::GameEngine;
-use crate::scenes::shop::PackCelebration;
 use crate::scenes::TilePackCelebrationScene;
+use crate::scenes::reload_scene_layout_from_disk;
+use crate::scenes::shop::PackCelebration;
+use crate::ui::scene_layout::clear_saved_layout_files;
 use rand::RngExt;
 
 impl App {
@@ -26,11 +28,7 @@ impl App {
                 let level_up = self.progress.check_level_up();
                 self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
-                log::info!(
-                    "[Debug] Set player level to {} (runs_completed={})",
-                    level,
-                    runs
-                );
+                log::debug!("Set player level to {} (runs_completed={})", level, runs);
                 if let Some(result) = level_up {
                     let ww = self.last_drawable_px.width as f32;
                     let wh = self.last_drawable_px.height as f32;
@@ -42,7 +40,7 @@ impl App {
             }
             DebugAction::SetGold(amount) => {
                 self.run.gold = amount as i32;
-                log::info!("[Debug] Set gold to {}", amount);
+                log::debug!("Set gold to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {
                 if !self.run.relics.active.contains(&relic_id) {
@@ -52,14 +50,14 @@ impl App {
                     }
                     self.run.relics.active.push(relic_id);
                     self.run.recompute_capacities();
-                    log::info!("[Debug] Added relic {:?}", relic_id);
+                    log::debug!("Added relic {:?}", relic_id);
                 } else {
-                    log::info!("[Debug] Relic {:?} already active", relic_id);
+                    log::debug!("Relic {:?} already active", relic_id);
                 }
             }
             DebugAction::ClearRelics => {
                 self.run.relics.active.clear();
-                log::info!("[Debug] Cleared all relics");
+                log::debug!("Cleared all relics");
             }
             DebugAction::AddTalisman(kind) => {
                 use crate::core::consumable::Consumable;
@@ -67,7 +65,7 @@ impl App {
                     self.run.consumables.capacity += 1;
                 }
                 self.run.consumables.try_push(Consumable::Talisman(kind));
-                log::info!("[Debug] Added talisman {:?}", kind);
+                log::debug!("Added talisman {:?}", kind);
             }
             DebugAction::AddZodiac(kind) => {
                 use crate::core::consumable::Consumable;
@@ -75,20 +73,20 @@ impl App {
                     self.run.consumables.capacity += 1;
                 }
                 self.run.consumables.try_push(Consumable::Zodiac(kind));
-                log::info!("[Debug] Added zodiac {:?}", kind);
+                log::debug!("Added zodiac {:?}", kind);
             }
             DebugAction::ClearConsumables => {
                 self.run.consumables.items.clear();
-                log::info!("[Debug] Cleared all consumables");
+                log::debug!("Cleared all consumables");
             }
             DebugAction::ToggleShowFps => {
                 self.debug.show_fps = !self.debug.show_fps;
-                log::info!("[Debug] Show FPS: {}", self.debug.show_fps);
+                log::debug!("Show FPS: {}", self.debug.show_fps);
             }
             DebugAction::OpenDebugVisibility => {
                 if self.debug.visibility_overlay.is_some() {
                     self.debug.visibility_overlay = None;
-                    log::info!("[Debug] Closed debug visibility overlay");
+                    log::debug!("Closed debug visibility overlay");
                 } else {
                     self.debug.visibility_overlay = Some(DebugVisibilityOverlay::new(
                         self.debug.hide_tiles,
@@ -97,26 +95,26 @@ impl App {
                         self.debug.hide_scoring_placard,
                         self.debug.hide_inventory,
                     ));
-                    log::info!("[Debug] Opened debug visibility overlay");
+                    log::debug!("Opened debug visibility overlay");
                 }
             }
             DebugAction::OpenTuning => {
                 if self.debug.tuning_overlay.is_none() {
                     self.debug.tuning_overlay = Some(TuningOverlay::new(&self.cascade_tuning));
-                    log::info!("[Debug] Opened cascade tuning overlay");
+                    log::debug!("Opened cascade tuning overlay");
                 }
             }
             DebugAction::OpenSfxTest => {
                 if self.debug.sfx_test_overlay.is_none() {
                     self.debug.sfx_test_overlay = Some(SfxTestOverlay::new());
-                    log::info!("[Debug] Opened SFX test overlay");
+                    log::debug!("Opened SFX test overlay");
                 }
             }
             DebugAction::OpenCameraDebug => {
                 if self.debug.camera_debug_overlay.is_none() {
                     let seed = self.debug.last_effective_camera;
                     self.debug.camera_debug_overlay = Some(CameraDebugOverlay::new(&seed));
-                    log::info!("[Debug] Opened camera debug overlay");
+                    log::debug!("Opened camera debug overlay");
                 }
             }
             DebugAction::OpenShopEnvDebug => {
@@ -125,22 +123,22 @@ impl App {
                         self.debug.shop_env_height_scale,
                         self.debug.shop_env_lighting,
                     ));
-                    log::info!("[Debug] Opened shop env & lighting debug overlay");
+                    log::debug!("Opened shop env & lighting debug overlay");
                 }
             }
             DebugAction::OpenVolumetricDebug => {
                 if self.debug.volumetric_debug_overlay.is_none() {
                     self.debug.volumetric_debug_overlay =
                         Some(VolumetricDebugOverlay::new(&self.volumetric_tuning));
-                    log::info!("[Debug] Opened volumetric debug overlay");
+                    log::debug!("Opened volumetric debug overlay");
                 }
             }
             DebugAction::ProfileGpu => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.start_gpu_profile(100);
-                    log::info!("[Debug] GPU profile capture queued (100 frames)");
+                    log::debug!("GPU profile capture queued (100 frames)");
                 } else {
-                    log::warn!("[Debug] Cannot start GPU profile: renderer not initialised");
+                    log::warn!("Cannot start GPU profile: renderer not initialised");
                 }
             }
             DebugAction::BlowWindGust => {
@@ -148,30 +146,30 @@ impl App {
                 // so the gameplay scene's existing wind-trigger branch
                 // picks it up on the next frame.
                 self.mouse_actions.push(UiAction::DebugBlowWind);
-                log::info!("[Debug] Blow wind gust queued");
+                log::debug!("Blow wind gust queued");
             }
             DebugAction::ToggleWorldAxes => {
                 // Forward to the gameplay scene's existing toggle branch
                 // via the same UiAction the keyboard binding used to push.
                 self.mouse_actions.push(UiAction::DebugToggleAxes);
-                log::info!("[Debug] World-axes overlay toggled");
+                log::debug!("World-axes overlay toggled");
             }
             DebugAction::ArmObjectHitTest => {
                 self.debug.object_hit_test_armed = !self.debug.object_hit_test_armed;
                 if self.debug.object_hit_test_armed {
-                    log::info!(
-                        "[Debug] Object hit test ARMED — click anywhere in the world to identify the object under the cursor"
+                    log::debug!(
+                        "Object hit test ARMED — click anywhere in the world to identify the object under the cursor"
                     );
                 } else {
-                    log::info!("[Debug] Object hit test disarmed");
+                    log::debug!("Object hit test disarmed");
                 }
             }
             DebugAction::RerollShop => match &mut self.scene {
                 Scene::Shop(s) => {
                     s.debug_reroll(&self.run);
-                    log::info!("[Debug] Rerolled shop stock (free)");
+                    log::debug!("Rerolled shop stock (free)");
                 }
-                _ => log::warn!("[Debug] Reroll Shop ignored — not in shop scene"),
+                _ => log::warn!("Reroll Shop ignored — not in shop scene"),
             },
             DebugAction::OpenPack => match &mut self.scene {
                 Scene::Shop(s) => {
@@ -183,9 +181,9 @@ impl App {
                     self.overlay_stack.push(Scene::TilePackCelebration(
                         TilePackCelebrationScene::new(celeb, inventory),
                     ));
-                    log::info!("[Debug] Opened tile pack celebration overlay");
+                    log::debug!("Opened tile pack celebration overlay");
                 }
-                _ => log::warn!("[Debug] Open Pack ignored — not in shop scene"),
+                _ => log::warn!("Open Pack ignored — not in shop scene"),
             },
             DebugAction::DemoCascade => {
                 if let Scene::Gameplay(gp) = &mut self.scene {
@@ -219,7 +217,7 @@ impl App {
                         Scene::ZodiacCelebration(_) => "ZodiacCelebration",
                         Scene::TilePackCelebration(_) => "TilePackCelebration",
                     };
-                    log::warn!("[Debug] Demo Cascade ignored — current scene is {name}");
+                    log::warn!("Demo Cascade ignored — current scene is {name}");
                 }
             }
             DebugAction::SetBoss(kind) => {
@@ -230,12 +228,12 @@ impl App {
                 // prior boss doesn't leak through.
                 self.run.boss.upcoming = Some(kind);
                 self.run.resolve_upcoming_boss();
-                log::info!("[Debug] Set boss to {}", kind.name());
+                log::debug!("Set boss to {}", kind.name());
             }
             DebugAction::SetDora(suit, rank) => {
                 self.run.wall.set_sole_dora(suit, rank);
                 let name = crate::core::tile::Tile::new(suit, rank, 0).full_name();
-                log::info!("[Debug] Set dora to {name}");
+                log::debug!("Set dora to {name}");
             }
             DebugAction::TestOverlay => {
                 let modal = Modal::new(
@@ -244,23 +242,23 @@ impl App {
                     ModalTheme::Info,
                 );
                 self.modals.push(modal);
-                log::info!("[Debug] Spawned test overlay modal");
+                log::debug!("Spawned test overlay modal");
             }
             DebugAction::OpenMaterialViewer => {
                 self.overlay_stack
                     .push(Scene::MaterialViewer(MaterialViewerScene::new(true)));
-                log::info!("[Debug] Opened material viewer");
+                log::debug!("Opened material viewer");
             }
             DebugAction::OpenTransitionPlayground => {
                 self.overlay_stack.push(Scene::TransitionPlayground(
                     TransitionPlaygroundScene::new(true),
                 ));
-                log::info!("[Debug] Opened transition playground");
+                log::debug!("Opened transition playground");
             }
             DebugAction::OpenRumbleLab => {
                 self.overlay_stack
                     .push(Scene::RumbleLab(RumbleLabScene::new(true)));
-                log::info!("[Debug] Opened rumble lab");
+                log::debug!("Opened rumble lab");
             }
             DebugAction::OpenAbout => {
                 let body = format!(
@@ -269,13 +267,13 @@ impl App {
                 );
                 self.modals
                     .push(Modal::new("About Mahjuro", body, ModalTheme::Info));
-                log::info!("[Debug] Opened About modal");
+                log::debug!("Opened About modal");
             }
             DebugAction::ShowVictoryScreen => {
                 while self.modals.dismiss() {}
                 self.pending_scene = Some(Scene::GameOver(GameOverScene::victory(&self.run)));
                 self.transition_alpha = 1.0;
-                log::info!("[Debug] Showing victory screen");
+                log::debug!("Showing victory screen");
             }
             DebugAction::ShowDefeatScreen => {
                 while self.modals.dismiss() {}
@@ -284,19 +282,31 @@ impl App {
                     crate::game::event_bus::GameOverReason::OutOfPlays,
                 )));
                 self.transition_alpha = 1.0;
-                log::info!("[Debug] Showing defeat screen");
+                log::debug!("Showing defeat screen");
             }
             DebugAction::ToggleArrangeMode => {
                 if self.debug.arrange_mode.is_some() {
                     self.debug.arrange_mode = None;
-                    log::info!("[Debug] Arrange mode DEACTIVATED");
+                    log::debug!("Arrange mode DEACTIVATED");
                 } else {
                     self.debug.arrange_mode = Some(None);
-                    log::info!(
-                        "[Debug] Arrange mode ARMED — click an object OR press Tab to browse the hierarchy"
+                    log::debug!(
+                        "Arrange mode ARMED — click an object OR press Tab to browse the hierarchy"
                     );
                 }
             }
+            DebugAction::ClearSavedSceneLayouts => match clear_saved_layout_files() {
+                Ok(n) => {
+                    reload_scene_layout_from_disk(&mut self.scene);
+                    for overlay in &mut self.overlay_stack {
+                        reload_scene_layout_from_disk(overlay);
+                    }
+                    log::info!(
+                        "[Layout] Removed {n} saved layout file(s); reloaded defaults in active scenes"
+                    );
+                }
+                Err(e) => log::error!("[Layout] Failed to clear saved layouts: {e:#}"),
+            },
         }
     }
 }

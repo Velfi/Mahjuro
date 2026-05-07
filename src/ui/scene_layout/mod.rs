@@ -47,5 +47,10 @@ pub use shop::{
 };
 pub use tutorial::{TutorialPositions, load_tutorial_positions, save_tutorial_positions};
 
+/// Deletes saved scene-layout JSON (arrange-mode overrides under `…/Mahjuro/layouts/`).
+pub fn clear_saved_layout_files() -> anyhow::Result<usize> {
+    fs::clear_saved_layout_files()
+}
+
 #[cfg(test)]
 mod tests;

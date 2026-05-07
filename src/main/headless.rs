@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::scenes::shop::ShopScene;
 use crate::scenes::TilePackCelebrationScene;
+use crate::scenes::shop::ShopScene;
 
 /// Map a user-supplied `--boss` slug (case-insensitive, spaces/underscores
 /// interchangeable) to a `BossKind`. Matches against canonical `name()`
@@ -64,7 +64,9 @@ fn parse_tile_pack_slug(slug: &str) -> anyhow::Result<crate::core::tile_pack::Ti
             return Ok(k);
         }
     }
-    anyhow::bail!("unknown --pack '{slug}' (try honors, terminals, flowers, bamboo_grove, coin_cache, scroll_library)");
+    anyhow::bail!(
+        "unknown --pack '{slug}' (try honors, terminals, flowers, bamboo_grove, coin_cache, scroll_library)"
+    );
 }
 
 fn shop_focus_slug_inspectable(slug: &str) -> bool {
@@ -315,10 +317,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             Scene::MaterialViewer(scenes::MaterialViewerScene::new(false)),
             false,
         ),
-        "rumble_lab" => (
-            Scene::RumbleLab(scenes::RumbleLabScene::new(false)),
-            false,
-        ),
+        "rumble_lab" => (Scene::RumbleLab(scenes::RumbleLabScene::new(false)), false),
         // Layered the relic-unlock modal on top of the main-menu backdrop
         // so we can iterate on the modal's hero staging without driving a live
         // game state. The modal stages itself entirely on top.
@@ -358,9 +357,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             let shop = ShopScene::new(&mut run);
             let counts = shop.tile_pack_celeb_inventory_counts(&run);
             (
-                Scene::TilePackCelebration(TilePackCelebrationScene::new_headless_with_shop_counts(
-                    &run, pack, counts,
-                )),
+                Scene::TilePackCelebration(
+                    TilePackCelebrationScene::new_headless_with_shop_counts(&run, pack, counts),
+                ),
                 true,
             )
         }
@@ -393,9 +392,11 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                         "--item-inspect: could not build inspect orbit (check --shop-focus index and stock)"
                     )
                 })?;
-                app.overlay_stack.push(Scene::ItemInspect(
-                    scenes::ItemInspectScene::new(scenes::ItemInspectHost::Shop, orbit),
-                ));
+                app.overlay_stack
+                    .push(Scene::ItemInspect(scenes::ItemInspectScene::new(
+                        scenes::ItemInspectHost::Shop,
+                        orbit,
+                    )));
             }
             Scene::Collection(coll) => {
                 let orbit = coll
@@ -405,16 +406,16 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                             "--item-inspect: collection tab has no artifacts or orbit failed"
                         )
                     })?;
-                app.overlay_stack.push(Scene::ItemInspect(
-                    scenes::ItemInspectScene::new(scenes::ItemInspectHost::Collection, orbit),
-                ));
+                app.overlay_stack
+                    .push(Scene::ItemInspect(scenes::ItemInspectScene::new(
+                        scenes::ItemInspectHost::Collection,
+                        orbit,
+                    )));
             }
             _ => {}
         }
     }
-    if (s.shop_focus.is_some() && shop_like)
-        || (s.item_inspect && collection_like)
-    {
+    if (s.shop_focus.is_some() && shop_like) || (s.item_inspect && collection_like) {
         // Cursor-mode update reassigns focus from the cursor pick every
         // tick; controller mode keeps pre-set shop/collection focus stable
         // across warmup.
@@ -775,10 +776,7 @@ impl HeadlessApp {
         }
         let _ = update_result;
 
-        let item_inspect_top = matches!(
-            self.overlay_stack.last(),
-            Some(Scene::ItemInspect(_))
-        );
+        let item_inspect_top = matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
         let suspended_shop = match (&self.scene, item_inspect_top) {
             (Scene::Shop(s), true) => Some(s),
             _ => None,
@@ -811,6 +809,7 @@ impl HeadlessApp {
             cursor_pos: (0.0, 0.0),
             input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
             gamepad_swap_ab: false,
+            gamepad_swap_xy: false,
             gamepad_style: crate::ui::button_prompts::GamepadStyle::default(),
             suspended_shop,
             suspended_collection,
@@ -983,7 +982,7 @@ impl HeadlessApp {
             extra += 1;
         }
         if extra > 0 {
-            log::info!("screenshot: waited {extra} extra ticks for asset loading");
+            log::debug!("screenshot: waited {extra} extra ticks for asset loading");
         }
         self.renderer.queue_screenshot(output.clone());
         self.tick();

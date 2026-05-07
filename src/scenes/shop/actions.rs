@@ -197,10 +197,7 @@ impl ShopScene {
         Self::new_with_mode(run, ShopMode::Tutorial)
     }
 
-    fn new_with_mode(
-        run: &mut crate::game::run::RunState,
-        mode: ShopMode,
-    ) -> Self {
+    fn new_with_mode(run: &mut crate::game::run::RunState, mode: ShopMode) -> Self {
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
         let stake = run.mode.stake;
@@ -392,9 +389,9 @@ impl ShopScene {
                     n_for_sale_talismans: self.talisman_items.len(),
                     n_owned_relics: shop_rm.owned_relics.len(),
                 };
-                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::TilePackCelebration(
-                    TilePackCelebrationScene::new(celeb, inventory),
-                ))));
+                *overlay_request = Some(OverlayRequest::Push(Box::new(
+                    Scene::TilePackCelebration(TilePackCelebrationScene::new(celeb, inventory)),
+                )));
             }
             ShopActionResult::ZodiacApplied {
                 zodiac_kind,
@@ -454,5 +451,4 @@ impl ShopScene {
         self.pack_items = pack_items;
         self.focus = None;
     }
-
 }

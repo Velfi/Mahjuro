@@ -65,12 +65,7 @@ impl SceneBehavior for ZodiacCelebrationScene {
         }
         let grace_ok = self
             .intro_grace_start
-            .map(|t| {
-                Instant::now()
-                    .saturating_duration_since(t)
-                    .as_secs_f32()
-                    >= DISMISS_GRACE
-            })
+            .map(|t| Instant::now().saturating_duration_since(t).as_secs_f32() >= DISMISS_GRACE)
             .unwrap_or(false);
         let has_input = ctx.actions.iter().any(|a| {
             matches!(
@@ -177,7 +172,9 @@ impl SceneBehavior for ZodiacCelebrationScene {
             format!("{} Lvl.{}", self.yaku_name, self.new_level),
             alpha,
         ));
-        frame.text(celebration_overlay::label_confirm_to_continue(h, w, t, alpha));
+        frame.text(celebration_overlay::label_confirm_to_continue(
+            h, w, t, alpha,
+        ));
 
         if self.intro.is_done_for(&ctx.effect_layers) {
             frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];

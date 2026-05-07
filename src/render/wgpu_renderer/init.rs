@@ -1,7 +1,9 @@
 use super::*;
 
 use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
-use crate::render::lamp_mesh::{build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh};
+use crate::render::lamp_mesh::{
+    build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
+};
 
 impl WgpuRenderer {
     pub fn new(target_init: TargetInit) -> anyhow::Result<Self> {
@@ -45,7 +47,8 @@ impl WgpuRenderer {
                 height,
                 hdr_enabled,
             } => {
-                let size = crate::physical_size::PhysicalSize::new((*width).max(1), (*height).max(1));
+                let size =
+                    crate::physical_size::PhysicalSize::new((*width).max(1), (*height).max(1));
                 (None, size, *hdr_enabled)
             }
         };
@@ -59,7 +62,7 @@ impl WgpuRenderer {
             force_fallback_adapter: false,
         }))
         .map_err(|e| anyhow::anyhow!("adapter: {e:?}"))?;
-        log::info!("wgpu adapter acquired in {:?}", t0.elapsed());
+        log::debug!("wgpu adapter acquired in {:?}", t0.elapsed());
 
         // Flag CPU-fallback adapters in headless mode so local runs don't
         // silently get wrong anti-aliasing. Still valid on CI without a GPU.
@@ -119,8 +122,7 @@ impl WgpuRenderer {
         // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
         let scene_hdr_format = SCENE_HDR_FORMAT;
 
-        let limits =
-            wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
+        let limits = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
 
         // Opt into TIMESTAMP_QUERY when the adapter supports it so the GPU
         // pass profiler (Debug menu → "Profile GPU…") can record start/end
@@ -151,7 +153,7 @@ impl WgpuRenderer {
             trace: wgpu::Trace::default(),
         }))
         .map_err(|e| anyhow::anyhow!("device: {e:?}"))?;
-        log::info!("wgpu device created in {:?}", t0.elapsed());
+        log::debug!("wgpu device created in {:?}", t0.elapsed());
 
         // Build the shared `SurfaceConfiguration` that downstream textures
         // track against. Windowed mode seeds it from `get_default_config`
@@ -297,20 +299,21 @@ impl WgpuRenderer {
         });
         // Shop `KHR_lights_punctual` — separate buffer; bound at group 1 binding 2 so `lit_mesh`
         // stays within WebGPU's max_bind_groups = 4 (Metal).
-        let shop_gltf_point_lights_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("shop-gltf-point-lights"),
-            contents: bytemuck::bytes_of(&PointLightsBuf::from_lights(
-                &[],
-                0,
-                0.0,
-                1.0,
-                1.0,
-                1.0,
-                1.0,
-                0.0,
-            )),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let shop_gltf_point_lights_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("shop-gltf-point-lights"),
+                contents: bytemuck::bytes_of(&PointLightsBuf::from_lights(
+                    &[],
+                    0,
+                    0.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    0.0,
+                )),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let point_lights_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("point-lights-layout"),
@@ -396,24 +399,25 @@ impl WgpuRenderer {
             }],
         });
 
-        let shop_gltf_point_lights_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shop-gltf-point-lights-scene-bg"),
-            layout: &point_lights_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: shop_gltf_point_lights_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: tile_occluders_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: shop_gltf_point_lights_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let shop_gltf_point_lights_scene_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shop-gltf-point-lights-scene-bg"),
+                layout: &point_lights_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: shop_gltf_point_lights_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: tile_occluders_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: shop_gltf_point_lights_buffer.as_entire_binding(),
+                    },
+                ],
+            });
 
         let tile_material_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2503,23 +2507,23 @@ impl WgpuRenderer {
             ],
         });
 
-        log::info!("shaders + pipelines compiled in {:?}", t0.elapsed());
+        log::debug!("shaders + pipelines compiled in {:?}", t0.elapsed());
 
         let t0 = Instant::now();
         let ui_font = load_ui_font();
         if ui_font.is_some() {
-            log::info!("UI font loaded.");
+            log::debug!("UI font loaded.");
         } else {
             log::warn!("No UI font found; panel text will be blank.");
         }
         let emoji_font = load_noto_emoji_font();
         if emoji_font.is_some() {
-            log::info!("Noto Emoji font loaded.");
+            log::debug!("Noto Emoji font loaded.");
         } else {
             log::warn!("No Noto Emoji font found; tile symbols may be blank.");
         }
 
-        log::info!("fonts loaded in {:?}", t0.elapsed());
+        log::debug!("fonts loaded in {:?}", t0.elapsed());
 
         let quad_v: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2705,13 +2709,13 @@ impl WgpuRenderer {
 
         log::info!("tile mesh loaded in {:?}", t0.elapsed());
 
-        let (shop_env_primitives, shop_environment) = crate::render::shop_glb::with_shop_glb_cpu(
-            |cpu_opt| {
-            let mut prims = Vec::new();
-            let mut gpu_wrap = None;
-            let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap);
-            };
+        let (shop_env_primitives, shop_environment) =
+            crate::render::shop_glb::with_shop_glb_cpu(|cpu_opt| {
+                let mut prims = Vec::new();
+                let mut gpu_wrap = None;
+                let Some(cpu) = cpu_opt else {
+                    return (prims, gpu_wrap);
+                };
                 if !cpu.environment_primitives.is_empty() {
                     for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                         let prim = &env_prim.mesh;
@@ -2896,9 +2900,8 @@ impl WgpuRenderer {
                     });
                     log::info!("Shop.glb GPU: {} primitive draw(s)", prims.len());
                 }
-            (prims, gpu_wrap)
-            },
-        );
+                (prims, gpu_wrap)
+            });
 
         crate::render::shop_glb::release_shop_environment_cpu_sources_after_gpu_upload();
 
@@ -3519,7 +3522,8 @@ impl WgpuRenderer {
             shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             shop_env_linear_exposure: crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE,
             shop_env_ambient_scale: crate::render::shop_glb::SHOP_ENV_AMBIENT_SCALE,
-            shop_lit_mesh_gltf_punctual_scale: crate::render::shop_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
+            shop_lit_mesh_gltf_punctual_scale:
+                crate::render::shop_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
             shop_env_collision_meshes,
             tile_base_color_factor,
             // Populated on first render() from RenderSettings.tileset_name.

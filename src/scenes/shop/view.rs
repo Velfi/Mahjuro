@@ -14,38 +14,40 @@ use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
+use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
-    camera_facing_euler_xyz_rad, CameraParams, Object3d, Object3dKind, PromptIconQuad, UiFrame,
+    CameraParams, Object3d, Object3dKind, PromptIconQuad, UiFrame, camera_facing_euler_xyz_rad,
 };
-use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::shop_glb::{
-    ShopEnvLightingTune, PLAYER_GOLD_DISH_MARKER, marker_translation,
-    player_consumable_marker_name, player_relic_marker_name, shop_camera_fit_fovy_for_corners,
-    shop_camera_from_glb_if_present, shop_env_world_scale, shop_world_bounds_corners_centered,
-    spawn_relic_marker_name, with_shop_glb_cpu,
+    ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
+    player_gold_dish_marker_translation, player_relic_marker_name,
+    shop_camera_fit_fovy_for_corners, shop_camera_from_glb_if_present, shop_env_world_scale,
+    shop_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
+use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::GpuInstance;
 use crate::render::wgpu_renderer::{
-    PointLight, ShopHit, SpotLight, TextAlign, TextLabel, MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS,
+    MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, ShopHit, SpotLight, TextAlign, TextLabel,
 };
-use crate::render::world_space::{object3d_pos_for_screen_at_world_z, surface_anchor_from_world_xyz};
-use crate::scenes::item_inspect::{
-    item_inspect_orbit_camera, item_inspect_point_lights, ItemInspectHost, ItemInspectOrbitState,
+use crate::render::world_space::{
+    object3d_pos_for_screen_at_world_z, surface_anchor_from_world_xyz,
 };
 use crate::scenes::journal_transition;
+use crate::scenes::object3d_inspect::{
+    InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
+    inspect_orbit_camera,
+};
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{
     BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx, YakuJournalScene,
 };
-use crate::ui::button_prompts::{
-    ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS,
-};
-use crate::ui::kenney_prompt_paths::shop_prompt_icon_paths;
+use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS};
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::push_focus_tooltip_panel_2d;
+use crate::ui::kenney_prompt_paths::shop_prompt_icon_paths;
 
 use super::layout::{
     ShopInventoryCounts, ShopLayout, consumable_color, is_tile_pack_pick, live_shop_hit,
@@ -53,8 +55,7 @@ use super::layout::{
 };
 use super::shared::shop_focus_inspectable;
 use super::{
-    ConsumableShopItem, BUG_COUNT, BUG_PARAMS, ShopFocus, ShopMode, ShopScene,
-    push_free_badge,
+    BUG_COUNT, BUG_PARAMS, ConsumableShopItem, ShopFocus, ShopMode, ShopScene, push_free_badge,
 };
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
@@ -109,7 +110,12 @@ fn shop_glb_has_embedded_lights() -> bool {
 /// smooth linear-distance falloff and `max(radius, 1)` — uploading `0` becomes **one world unit** at
 /// shop scale, so candle pools vanish. When `range` is missing, use a wide cap so both paths behave.
 #[inline]
-fn glb_punctual_radius_upload_world(h: f32, _env_h: f32, scale: f32, range_doc: Option<f32>) -> f32 {
+fn glb_punctual_radius_upload_world(
+    h: f32,
+    _env_h: f32,
+    scale: f32,
+    range_doc: Option<f32>,
+) -> f32 {
     match range_doc {
         Some(r) => (r * scale).max(1e-3),
         None => (h * 24.0).max(scale * 40.0),
@@ -118,7 +124,11 @@ fn glb_punctual_radius_upload_world(h: f32, _env_h: f32, scale: f32, range_doc: 
 
 /// Point lights from glTF only (`KHR_lights_punctual`). Empty when the GLB has spots but no points.
 #[inline]
-fn gltf_punctual_linear_rgb(raw: [f32; 3], is_candle: bool, tune: &ShopEnvLightingTune) -> [f32; 3] {
+fn gltf_punctual_linear_rgb(
+    raw: [f32; 3],
+    is_candle: bool,
+    tune: &ShopEnvLightingTune,
+) -> [f32; 3] {
     if is_candle {
         [
             (raw[0] * tune.candle_light_color_mul[0]).clamp(0.0, 1.0),
@@ -406,9 +416,11 @@ pub(super) fn shop_sync_item_inspect_orbit_target(
     }
     let shop_rm = GameEngine::read_shop(run);
     let env_h = scene.drawn_env_height_scale.get();
+    let rig = InspectRig::shop(h, env_h);
     for _ in 0..4 {
-        let cam_try = item_inspect_orbit_camera(ItemInspectHost::Shop, h, orbit, Some(env_h));
-        let Some(pivot) = shop_inspect_pivot_world(scene, &shop_rm, w, h, &cam_try, env_h, foc) else {
+        let cam_try = inspect_orbit_camera(orbit, &rig);
+        let Some(pivot) = shop_inspect_pivot_world(scene, &shop_rm, w, h, &cam_try, env_h, foc)
+        else {
             break;
         };
         orbit.target_world = pivot.to_array();
@@ -426,14 +438,16 @@ fn marker_screen_rect(
 ) -> Option<[f32; 4]> {
     with_shop_glb_cpu(|opt| {
         let cpu = opt?;
-        let tw = marker_translation(cpu, node_name)? * shop_env_world_scale(win_h, env_height_scale);
+        let tw =
+            marker_translation(cpu, node_name)? * shop_env_world_scale(win_h, env_height_scale);
         let (cx, cy) = cam.project_world_to_screen(win_w, win_h, tw);
         Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
     })
 }
 
-/// [`Object3d::pos`] for the gameplay-style coin pile: [`PLAYER_GOLD_DISH_MARKER`] when the room
-/// loads, otherwise [`ShopLayout::coin_dish_center_px`] with a perspective-correct lift.
+/// [`Object3d::pos`] for the gameplay-style coin pile: [`crate::render::shop_glb::PLAYER_GOLD_DISH_MARKER`]
+/// (or legacy `PlayerGoldDish`) when the room loads, otherwise [`ShopLayout::coin_dish_center_px`]
+/// with a perspective-correct lift.
 fn player_gold_dish_object3d_anchor(
     w: f32,
     h: f32,
@@ -442,9 +456,9 @@ fn player_gold_dish_object3d_anchor(
     layout: &ShopLayout,
 ) -> [f32; 3] {
     let scale = shop_env_world_scale(h, env_h);
-    if let Some(tw) = with_shop_glb_cpu(|opt| {
-        opt.and_then(|cpu| marker_translation(cpu, PLAYER_GOLD_DISH_MARKER))
-    }) {
+    if let Some(tw) =
+        with_shop_glb_cpu(|opt| opt.and_then(|cpu| player_gold_dish_marker_translation(cpu)))
+    {
         let world = tw * scale;
         return surface_anchor_from_world_xyz(w, h, world);
     }
@@ -456,7 +470,11 @@ fn player_gold_dish_object3d_anchor(
 
 /// Settled metal coin cylinders matching gameplay (`animation_state` pile), without a procedural
 /// dish mesh — the GLB supplies the tray.
-fn shop_gameplay_style_gold_pile(layout: &ShopLayout, gold: u32, anchor: [f32; 3]) -> Vec<Object3d> {
+fn shop_gameplay_style_gold_pile(
+    layout: &ShopLayout,
+    gold: u32,
+    anchor: [f32; 3],
+) -> Vec<Object3d> {
     if gold == 0 {
         return Vec::new();
     }
@@ -542,7 +560,7 @@ impl SceneBehavior for ShopScene {
     }
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
-        self.draw_shop_frame(ctx, None)
+        render_shop_frame(self, ctx, None)
     }
 
     fn has_blocking_overlay(&self) -> bool {
@@ -561,153 +579,156 @@ impl ShopScene {
         let cam = shop_camera_params(w, h, env_h);
         *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop);
     }
+}
 
-    pub(crate) fn draw_shop_frame(
-        &self,
-        ctx: DrawCtx<'_>,
-        inspect: Option<&ItemInspectOrbitState>,
-    ) -> UiFrame {
-        let w = ctx.layout.window_w;
-        let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let env_h = ctx.shop_env_height_scale;
-        self.drawn_env_height_scale.set(env_h);
-        let shop_rm = GameEngine::read_shop(ctx.run);
+/// Storeroom draw for the normal shop face and for item inspect (`inspect` = orbit camera).
+pub(crate) fn render_shop_frame(
+    shop: &ShopScene,
+    ctx: DrawCtx<'_>,
+    inspect: Option<&ItemInspectOrbitState>,
+) -> UiFrame {
+    let w = ctx.layout.window_w;
+    let h = ctx.layout.window_h;
+    let ui_scale = ctx.ui_scale;
+    let env_h = ctx.shop_env_height_scale;
+    shop.drawn_env_height_scale.set(env_h);
+    let shop_rm = GameEngine::read_shop(ctx.run);
 
-        let scale = metrics::scene_scale(w, h, ui_scale);
+    let scale = metrics::scene_scale(w, h, ui_scale);
 
-        let mut frame = UiFrame::new();
-        if with_shop_glb_cpu(|opt| opt.is_some()) {
-            frame.quad(GpuInstance {
-                rect: [0.0, 0.0, w, h],
-                color: [0.04, 0.04, 0.055, 1.0],
-            });
-            frame.shop_environment();
-        } else {
-            frame.background(BackgroundId::ShopStoreroom);
-        }
+    let mut frame = UiFrame::new();
+    if with_shop_glb_cpu(|opt| opt.is_some()) {
+        frame.quad(GpuInstance {
+            rect: [0.0, 0.0, w, h],
+            color: [0.04, 0.04, 0.055, 1.0],
+        });
+        frame.shop_environment();
+    } else {
+        frame.background(BackgroundId::ShopStoreroom);
+    }
 
-        // Mesh anchors use ray/plane hits so props sit under vitrine pixels (plain
-        // `pixel_to_world` drifts under perspective).
-        let base = shop_camera_base(w, h, env_h);
-        let (cam, inspect_orbit_resolved) = if let Some(ins) = inspect {
-            let o = if let Some(foc) = self.focus {
-                let mut o = *ins;
-                // One frame may draw before `ItemInspectScene::update` runs (push ordering).
-                for _ in 0..2 {
-                    let cam_try =
-                        item_inspect_orbit_camera(ItemInspectHost::Shop, h, &o, Some(env_h));
-                    if let Some(pivot) =
-                        shop_inspect_pivot_world(self, &shop_rm, w, h, &cam_try, env_h, foc)
-                    {
-                        o.target_world = pivot.to_array();
-                    } else {
-                        break;
-                    }
+    // Mesh anchors use ray/plane hits so props sit under vitrine pixels (plain
+    // `pixel_to_world` drifts under perspective).
+    let base = shop_camera_base(w, h, env_h);
+    let inspect_rig = InspectRig::shop(h, env_h);
+    let (cam, inspect_orbit_resolved) = if let Some(ins) = inspect {
+        let o = if let Some(foc) = shop.focus {
+            let mut o = *ins;
+            // One frame may draw before `ItemInspectScene::update` runs (push ordering).
+            for _ in 0..2 {
+                let cam_try = inspect_orbit_camera(&o, &inspect_rig);
+                if let Some(pivot) =
+                    shop_inspect_pivot_world(shop, &shop_rm, w, h, &cam_try, env_h, foc)
+                {
+                    o.target_world = pivot.to_array();
+                } else {
+                    break;
                 }
-                o
-            } else {
-                *ins
-            };
-            let cam = item_inspect_orbit_camera(ItemInspectHost::Shop, h, &o, Some(env_h));
-            (cam, Some(o))
+            }
+            o
         } else {
-            (base, None)
+            *ins
         };
-        frame.camera_override = Some(cam);
-
-        let layout = ShopLayout::build(
-            ctx.layout,
-            &self.positions,
-            ShopInventoryCounts {
-                n_for_sale: self.items.len(),
-                n_for_sale_zodiacs: self.zodiac_items.len(),
-                n_for_sale_talismans: self.talisman_items.len(),
-                n_owned_relics: shop_rm.owned_relics.len(),
-            },
+        let cam = inspect_orbit_camera(&o, &inspect_rig);
+        apply_inspect_view_to_frame(
+            &mut frame,
+            w,
+            h,
+            &o,
+            &inspect_rig,
+            o.target_world,
+            InspectFrameEnv::ShopStoreroomInspect,
         );
-        let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, &layout);
+        (cam, Some(o))
+    } else {
+        frame.camera_override = Some(base);
+        (base, None)
+    };
 
-        let lp = layout.lamp_center_px;
-        let lamp_mesh_h = h * 0.30;
-        let tf = self.age_secs;
-        let flick_fast = (tf * 37.3).sin() * 0.04 + (tf * 61.7).sin() * 0.025;
-        let flick_slow = (tf * 4.1).sin() * 0.06;
-        let brownout = {
-            let d = (tf * 0.73).sin() * (tf * 1.19).sin();
-            (d - 0.55).max(0.0) * 0.35
-        };
-        let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.55, 1.12);
+    let layout = ShopLayout::build(
+        ctx.layout,
+        &shop.positions,
+        ShopInventoryCounts {
+            n_for_sale: shop.items.len(),
+            n_for_sale_zodiacs: shop.zodiac_items.len(),
+            n_for_sale_talismans: shop.talisman_items.len(),
+            n_owned_relics: shop_rm.owned_relics.len(),
+        },
+    );
+    let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, &layout);
 
-        let journal_cx = self.positions.book.nx * w;
-        let journal_cy = self.positions.book.ny * h;
-        let journal_cz = ctx.layout.mm(self.positions.book.lift_mm);
+    let lp = layout.lamp_center_px;
+    let lamp_mesh_h = h * 0.30;
+    let tf = shop.age_secs;
+    let flick_fast = (tf * 37.3).sin() * 0.04 + (tf * 61.7).sin() * 0.025;
+    let flick_slow = (tf * 4.1).sin() * 0.06;
+    let brownout = {
+        let d = (tf * 0.73).sin() * (tf * 1.19).sin();
+        (d - 0.55).max(0.0) * 0.35
+    };
+    let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.55, 1.12);
 
-        let hover = self
-            .focus
-            .and_then(|f| f.to_hit())
-            .or(ctx.picked_shop_object)
-            .and_then(|hit| {
-                live_shop_hit(
-                    hit,
-                    self,
-                    &self.items,
-                    &self.zodiac_items,
-                    &self.talisman_items,
-                    &self.pack_items,
-                    &shop_rm,
-                )
-            });
+    let journal_cx = shop.positions.book.nx * w;
+    let journal_cy = shop.positions.book.ny * h;
+    let journal_cz = ctx.layout.mm(shop.positions.book.lift_mm);
 
-        let room_glb_lights = shop_glb_has_embedded_lights();
-        if let Some(orbit) = inspect_orbit_resolved {
-            frame.shop_env_gltf_punctual = false;
-            frame.point_lights =
-                item_inspect_point_lights(ItemInspectHost::Shop, w, h, &cam, orbit.target_world);
-            frame.shop_gltf_point_lights = Vec::new();
-            frame.spot_lights = Vec::new();
+    let hover = shop
+        .focus
+        .and_then(|f| f.to_hit())
+        .or(ctx.picked_shop_object)
+        .and_then(|hit| {
+            live_shop_hit(
+                hit,
+                shop,
+                &shop.items,
+                &shop.zodiac_items,
+                &shop.talisman_items,
+                &shop.pack_items,
+                &shop_rm,
+            )
+        });
+
+    let room_glb_lights = shop_glb_has_embedded_lights();
+    if inspect_orbit_resolved.is_none() {
+        frame.shop_env_gltf_punctual = room_glb_lights;
+        let use_glb_lights = room_glb_lights;
+        let shop_gltf_point_lights: Vec<PointLight> = if use_glb_lights {
+            embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
         } else {
-            frame.shop_env_gltf_punctual = room_glb_lights;
-            let use_glb_lights = room_glb_lights;
-            let shop_gltf_point_lights: Vec<PointLight> = if use_glb_lights {
-                embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
-            } else {
-                Vec::new()
-            };
-            let mut point_lights: Vec<PointLight> = if use_glb_lights {
-                Vec::new()
-            } else {
-                let mut v = vec![
-                    PointLight {
-                        pos: [lp.0, lp.1, lp.2],
-                        radius: h * 1.15,
-                        color: [0.86, 0.96, 0.98],
-                        intensity: 2.15 * lamp_flicker,
-                    },
-                ];
-                v.extend(default_fill_point_lights(w, h));
-                v
-            };
+            Vec::new()
+        };
+        let mut point_lights: Vec<PointLight> = if use_glb_lights {
+            Vec::new()
+        } else {
+            let mut v = vec![PointLight {
+                pos: [lp.0, lp.1, lp.2],
+                radius: h * 1.15,
+                color: [0.86, 0.96, 0.98],
+                intensity: 2.15 * lamp_flicker,
+            }];
+            v.extend(default_fill_point_lights(w, h));
+            v
+        };
 
-            // Hover fill: full-strength when we synthesize shop lighting; with embedded
-            // `KHR_lights_punctual`, use a ~10% pool so props stay readable (see focus ring below).
-            let (hover_i_mul, hover_r_mul) = if use_glb_lights {
-                (0.10_f32, 1.08_f32)
-            } else {
-                (1.0_f32, 1.0_f32)
-            };
-            if let Some(hit) = hover {
-            let n_for_sale_relics = self.items.len().min(layout.niche_count);
+        // Hover fill: full-strength when we synthesize shop lighting; with embedded
+        // `KHR_lights_punctual`, use a ~10% pool so props stay readable (see focus ring below).
+        let (hover_i_mul, hover_r_mul) = if use_glb_lights {
+            (0.10_f32, 1.08_f32)
+        } else {
+            (1.0_f32, 1.0_f32)
+        };
+        if let Some(hit) = hover {
+            let n_for_sale_relics = shop.items.len().min(layout.niche_count);
             let n_owned_relics = shop_rm.owned_relics.len();
             match hit {
                 ShopHit::Relic(i) => {
                     let (px, py, wy) = if let Some((cx, cy)) =
-                        screen_xy_for_hit(hit, self, &shop_rm, w, h, &cam)
+                        screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam)
                     {
                         (cx, cy, light_lift_at_screen_y(cy, h))
                     } else if i < n_for_sale_relics {
                         layout.niche_centers_px[i]
-                    } else if let Some(si) = sale_slot_for_focus(self, ShopFocus::Relic(i)) {
+                    } else if let Some(si) = sale_slot_for_focus(shop, ShopFocus::Relic(i)) {
                         let r = shop_shelf_slot_rect(w, h, &cam, si, env_h);
                         (
                             r[0] + r[2] * 0.5,
@@ -715,7 +736,7 @@ impl ShopScene {
                             shop_shelf_slot_wz(h, si),
                         )
                     } else {
-                        let oi = i - self.items.len();
+                        let oi = i - shop.items.len();
                         if oi < n_owned_relics {
                             layout.owned_relic_pos(oi)
                         } else {
@@ -730,8 +751,7 @@ impl ShopScene {
                     });
                 }
                 ShopHit::Ribbon(_) | ShopHit::Talisman(_) => {
-                    if let Some((cx, cy)) = screen_xy_for_hit(hit, self, &shop_rm, w, h, &cam)
-                    {
+                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam) {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
@@ -763,8 +783,7 @@ impl ShopScene {
                     });
                 }
                 ShopHit::TilePack(id) => {
-                    if let Some((cx, cy)) = screen_xy_for_hit(hit, self, &shop_rm, w, h, &cam)
-                    {
+                    if let Some((cx, cy)) = screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam) {
                         let wy = light_lift_at_screen_y(cy, h);
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
@@ -790,36 +809,37 @@ impl ShopScene {
                 | ShopHit::EnvInvSlot(_)
                 | ShopHit::EnvConsumableOrd(_) => {}
             }
-            }
-
-            frame.point_lights = point_lights;
-            frame.shop_gltf_point_lights = shop_gltf_point_lights;
-            frame.spot_lights = spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
         }
 
-        let stock = push_stock_meshes(self, &shop_rm, w, h, &cam);
-        if !stock.is_empty() {
-            frame.object3d_batch(stock);
-        }
-        let gold_pile = shop_gameplay_style_gold_pile(&layout, shop_rm.display_gold, gold_dish_anchor);
-        if !gold_pile.is_empty() {
-            frame.object3d_batch(gold_pile);
-        }
+        frame.point_lights = point_lights;
+        frame.shop_gltf_point_lights = shop_gltf_point_lights;
+        frame.spot_lights = spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
+    }
 
-        // Moths orbiting the pendant lamp (shop face only — not during item inspect).
-        if inspect_orbit_resolved.is_none() {
-            let lamp_w = h * 0.22;
-            let lamp_h = lamp_mesh_h;
-            let lamp_hang_z = lp.2;
-            let bulb_wz = lamp_hang_z * lamp_h;
-            let t_now = self.age_secs;
-            let bulb_wx = lp.0 - w * 0.5;
-            let bulb_wy = h * 0.5 - lp.1;
-            let bug_body_len = h * 0.022;
-            let flap_hz: f32 = 25.0;
-            let flap_amp: f32 = 1.1;
+    let stock = push_stock_meshes(shop, &shop_rm, w, h, &cam);
+    if !stock.is_empty() {
+        frame.object3d_batch(stock);
+    }
+    let gold_pile = shop_gameplay_style_gold_pile(&layout, shop_rm.display_gold, gold_dish_anchor);
+    if !gold_pile.is_empty() {
+        frame.object3d_batch(gold_pile);
+    }
 
-            let sample_bug = |scene: &ShopScene, i: usize, t_back: f32| -> ([f32; 3], [f32; 3], Mat4, f32) {
+    // Moths orbiting the pendant lamp (shop face only — not during item inspect).
+    if inspect_orbit_resolved.is_none() {
+        let lamp_w = h * 0.22;
+        let lamp_h = lamp_mesh_h;
+        let lamp_hang_z = lp.2;
+        let bulb_wz = lamp_hang_z * lamp_h;
+        let t_now = shop.age_secs;
+        let bulb_wx = lp.0 - w * 0.5;
+        let bulb_wy = h * 0.5 - lp.1;
+        let bug_body_len = h * 0.022;
+        let flap_hz: f32 = 25.0;
+        let flap_amp: f32 = 1.1;
+
+        let sample_bug =
+            |scene: &ShopScene, i: usize, t_back: f32| -> ([f32; 3], [f32; 3], Mat4, f32) {
                 let (r_frac, z_frac, speed, size_frac) = BUG_PARAMS[i];
                 let fi = i as f32;
                 let t = t_now - t_back;
@@ -835,7 +855,8 @@ impl ShopScene {
                 let bug_wz = bulb_wz + lamp_h * z_frac + bob;
 
                 let wing_half_span = 1.13 * size_frac * bug_body_len;
-                let orbit_r = (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
+                let orbit_r =
+                    (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
 
                 let bug_wx = bulb_wx + orbit_r * phase.cos();
                 let bug_wy = bulb_wy + orbit_r * phase.sin();
@@ -845,8 +866,7 @@ impl ShopScene {
 
                 let tx = -phase.sin();
                 let ty = phase.cos();
-                let bank =
-                    std::f32::consts::FRAC_PI_4 * 0.5 + (t * 1.9 + fi * 0.8).sin() * 0.30;
+                let bank = std::f32::consts::FRAC_PI_4 * 0.5 + (t * 1.9 + fi * 0.8).sin() * 0.30;
                 let pitch = (t * pitch_freq + fi * 0.5).sin() * 0.25;
                 let yaw = Mat4::from_cols(
                     glam::Vec4::new(tx, ty, 0.0, 0.0),
@@ -856,423 +876,476 @@ impl ShopScene {
                 );
                 let rot = yaw * Mat4::from_rotation_x(bank) * Mat4::from_rotation_y(pitch);
                 let flap = flap_amp * (t * flap_hz * std::f32::consts::TAU + fi * 1.3).sin();
-                ([bug_px, bug_py, bug_wz], [bug_sz, bug_sz, bug_sz], rot, flap)
+                (
+                    [bug_px, bug_py, bug_wz],
+                    [bug_sz, bug_sz, bug_sz],
+                    rot,
+                    flap,
+                )
             };
 
-            let mut bugs: Vec<Object3d> = Vec::with_capacity(BUG_COUNT);
-            for i in 0..BUG_COUNT {
-                let (pos, extents, rot, flap_rad) = sample_bug(self, i, 0.0);
-                let fi = i as f32;
-                let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3)
-                    .cos()
-                    .abs();
-                let live_wing_alpha = 1.0 - 0.7 * speed_factor;
-                let blur_alpha = 0.6 * speed_factor;
-                bugs.push(Object3d {
-                    pos,
-                    extents,
-                    rotation: mat4_to_euler_xyz_rad(rot),
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::Bug {
-                        slot: i,
-                        flap_rad,
-                        live_wing_alpha,
-                        blur_alpha,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                    arrange_name: None,
-                });
-            }
-            frame.object3d_batch(bugs);
-        }
-
-        let label_px = typography::size(typography::BODY, h, ui_scale).max(18.0);
-        let credits_rw = w * 0.16;
-        let credits_rh = h * 0.045;
-        let mut credits_rect = marker_screen_rect(w, h, &cam, "Dish", credits_rw, credits_rh, env_h)
-            .unwrap_or_else(|| rect_center_n(w, h, 0.88, 0.595, credits_rw, credits_rh));
-        credits_rect[1] -= h * 0.028;
-        frame.texts([TextLabel {
-            rect: credits_rect,
-            text: format!("Credits {}", shop_rm.display_gold),
-            color: color::CHAMPAGNE,
-            font_px: Some(label_px),
-            align: TextAlign::Center,
-            no_glossary: false,
-            scroll_offset: 0.0,
-        }]);
-
-        if !self.pause_menu.paused {
-            if let Some(ring_rect) = ring_target_rect(&ctx, self, &shop_rm, w, h, &cam)
-                .and_then(|r| clamp_rect_to_viewport(r, w, h))
-            {
-                let mut quads = Vec::new();
-                let ring_scale = if room_glb_lights && inspect_orbit_resolved.is_none() {
-                    scale * 1.24
-                } else {
-                    scale
-                };
-                push_focus_ring(ring_rect, ring_scale, w, h, &mut quads);
-                frame.quads(quads);
-            }
-
-            let mut free_quads = Vec::new();
-            let mut free_texts = Vec::new();
-            for (slot_i, sf) in for_sale_slots(self).into_iter().enumerate() {
-                if let Some(ShopFocus::Relic(idx)) = sf {
-                    if let Some(item) = self.items.get(idx)
-                        && !item.sold
-                        && item.price == 0
-                    {
-                        let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
-                        push_free_badge(&mut free_quads, &mut free_texts, r, h, ui_scale);
-                    }
-                }
-            }
-            if !free_quads.is_empty() {
-                frame.quads(free_quads);
-                frame.texts(free_texts);
-            }
-        }
-
-        if self.journal_transition.is_none()
-            && let Some(hit) = hover
-            && let Some((ref title, ref desc, ref cta, col)) =
-                hover_tooltip_content(self, &shop_rm, &ctx.run.mode, hit)
-            && !title.is_empty()
-        {
-            let f = ShopFocus::from_hit(hit);
-            let tooltip_anchor = self
-                .last_focus_rects
-                .borrow()
-                .iter()
-                .find(|(g, _)| *g == f)
-                .map(|(_, r)| *r);
-            let hover_is_owned = matches!(hit, ShopHit::Relic(i) if i >= self.items.len())
-                || matches!(hit, ShopHit::Ribbon(i) if i >= self.zodiac_items.len())
-                || matches!(hit, ShopHit::Talisman(i) if i >= self.talisman_items.len());
-            let skip_title = matches!(
-                hit,
-                ShopHit::Dish(id)
-                    if id == super::PICK_JOURNAL_BOOK
-                        || id == super::PICK_LEAVE_PROP
-                        || id == super::PICK_REROLL_PROP
-                        || id == super::PICK_SELL_TRAY
-            );
-            let mut tip_quads = Vec::new();
-            let mut tip_texts = Vec::new();
-            push_focus_tooltip_panel_2d(
-                &mut tip_quads,
-                &mut tip_texts,
-                w,
-                h,
-                ui_scale,
-                tooltip_anchor,
-                title,
-                desc,
-                cta,
-                col,
-                hover_is_owned,
-                skip_title,
-            );
-            frame.quads(tip_quads);
-            frame.texts(tip_texts);
-        }
-
-        // Journal book mesh + prepass: enables arrange-mode picking for `shop.props.journal`
-        // and live page texture.
-        let cam_euler = camera_facing_euler_xyz_rad(cam.eye, cam.target);
-        if let Some(t) = self.journal_transition {
-            let zp = t.zoom_progress();
-            if zp > 0.001 {
-                let smoothed = zp * zp * (3.0 - 2.0 * zp);
-                let a = smoothed * 0.72;
-                frame.quad(GpuInstance {
-                    rect: [0.0, 0.0, w, h],
-                    color: [0.03, 0.04, 0.06, a],
-                });
-            }
-        }
-        let (journal_zoom, journal_pos) = match self.journal_transition {
-            Some(t) => {
-                let z = t.zoom_progress();
-                let smoothed = z * z * (3.0 - 2.0 * z);
-                let zoom = 1.0 + smoothed * 7.0;
-                let cx = w * 0.5;
-                let cy = h * 0.5;
-                let pos = [
-                    journal_cx + (cx - journal_cx) * smoothed,
-                    journal_cy + (cy - journal_cy) * smoothed,
-                    journal_cz,
-                ];
-                (zoom, pos)
-            }
-            None => (1.0, [journal_cx, journal_cy, journal_cz]),
-        };
-        let (face_w, face_h) =
-            journal_transition::book_cover_face_extents_xy(w, journal_zoom);
-        frame.object3d(Object3d {
-            pos: journal_pos,
-            extents: [
-                face_w,
-                ctx.layout.mm(journal_transition::BOOK_SPINE_THICKNESS_MM) * journal_zoom,
-                face_h,
-            ],
-            rotation: cam_euler,
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Book {
-                spine_label: Cow::Borrowed("Journal"),
-                pick_id: Some(super::PICK_JOURNAL_BOOK),
-                open_amount: self.journal_open_amount,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("shop.props.journal"),
-        });
-
-        if self.journal_open_amount > 0.001 {
-            let scratch = YakuJournalScene::new();
-            let inner_ctx = DrawCtx {
-                layout: ctx.layout,
-                anim: ctx.anim,
-                run: ctx.run,
-                progress: ctx.progress,
-                active_profile: ctx.active_profile,
-                game_in_progress: ctx.game_in_progress,
-                proj: ctx.proj,
-                picked_gameplay_object: ctx.picked_gameplay_object,
-                picked_shop_object: ctx.picked_shop_object,
-                debug_visibility: ctx.debug_visibility,
-                ui_scale: ctx.ui_scale,
-                modal_active: ctx.modal_active,
-                arrange_preview: ctx.arrange_preview.clone(),
-                shop_env_height_scale: ctx.shop_env_height_scale,
-                shop_env_lighting: ctx.shop_env_lighting,
-                effect_layers: ctx.effect_layers,
-                cursor_pos: ctx.cursor_pos,
-                input_mode: ctx.input_mode,
-                gamepad_swap_ab: ctx.gamepad_swap_ab,
-                gamepad_style: ctx.gamepad_style,
-                suspended_shop: None,
-                suspended_collection: None,
-            };
-            let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
-            frame.journal_prepass_frame = Some(Box::new(prepass));
-        }
-
-        self.push_shop_particle_quads(&mut frame);
-        self.push_shop_score_popup_labels(&mut frame, w, h);
-
-        // Pointer targets in stack order: specific zones first (main loop uses first hit).
-        // Pause overlay quads/texts are appended last so they composite above shelf geometry.
-        if self.pause_menu.paused {
-            let mut pause_quads: Vec<GpuInstance> = Vec::new();
-            let mut pause_text: Vec<TextLabel> = Vec::new();
-            let mut pause_buttons: Vec<ButtonDef> = Vec::new();
-            self.pause_menu.draw(
-                crate::ui::layout::ViewportCtx {
-                    window_w: w,
-                    window_h: h,
-                    ui_scale,
+        let mut bugs: Vec<Object3d> = Vec::with_capacity(BUG_COUNT);
+        for i in 0..BUG_COUNT {
+            let (pos, extents, rot, flap_rad) = sample_bug(shop, i, 0.0);
+            let fi = i as f32;
+            let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3)
+                .cos()
+                .abs();
+            let live_wing_alpha = 1.0 - 0.7 * speed_factor;
+            let blur_alpha = 0.6 * speed_factor;
+            bugs.push(Object3d {
+                pos,
+                extents,
+                rotation: mat4_to_euler_xyz_rad(rot),
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::Bug {
+                    slot: i,
+                    flap_rad,
+                    live_wing_alpha,
+                    blur_alpha,
                 },
-                scale,
-                &mut pause_quads,
-                &mut pause_text,
-                &mut pause_buttons,
-            );
-            frame.quads(pause_quads);
-            frame.texts(pause_text);
-            pause_buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
-            frame.buttons = pause_buttons;
-        } else if inspect.is_some() {
-            // [`ItemInspectScene`] owns input — draw visuals only.
-        } else {
-            for i in 0..SHOP_SPAWN_SLOT_COUNT {
-                let r = shop_shelf_slot_rect(w, h, &cam, i, env_h);
-                frame.buttons.push(ButtonDef::scene(
-                    (r[0], r[1], r[2], r[3]),
-                    SHOP_SHELF_CLICK_BASE + i as u32,
-                ));
-            }
-            for i in 0..7 {
-                let r = inv_slot_rect(w, h, &cam, self, &shop_rm, i, env_h);
-                frame.buttons.push(ButtonDef::scene(
-                    (r[0], r[1], r[2], r[3]),
-                    SHOP_INV_CLICK_BASE + i as u32,
-                ));
-            }
-            let jr = journal_btn_rect(w, h, &cam, env_h);
-            // No `hover_label` here — [`push_focus_tooltip_panel_2d`] already shows name /
-            // description / action for these hits; main/draw would duplicate it as a second
-            // brass tooltip when the cursor hovers the same rect.
-            frame.buttons.push(ButtonDef::scene(
-                (jr[0], jr[1], jr[2], jr[3]),
-                SHOP_CLICK_JOURNAL,
-            ));
-            let rr = reroll_btn_rect(w, h, &cam, env_h);
-            frame
-                .buttons
-                .push(ButtonDef::scene((rr[0], rr[1], rr[2], rr[3]), SHOP_CLICK_REROLL));
-            let lr = leave_btn_rect(w, h, &cam, env_h);
-            frame
-                .buttons
-                .push(ButtonDef::scene((lr[0], lr[1], lr[2], lr[3]), SHOP_CLICK_LEAVE));
-            let sr = sell_tray_rect(w, h);
-            frame
-                .buttons
-                .push(ButtonDef::scene((sr[0], sr[1], sr[2], sr[3]), SHOP_CLICK_SELL));
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: None,
+            });
         }
-
-        // Floating control hints — copy reflects [`DrawCtx::input_mode`] + [`DrawCtx::gamepad_swap_ab`].
-        if !self.pause_menu.paused {
-            let surface = match ctx.input_mode {
-                InputMode::Controller => PromptInputSurface::Controller,
-                InputMode::Keyboard | InputMode::Cursor => PromptInputSurface::MouseOrKeyboard,
-            };
-            let inspect_active = inspect.is_some();
-            let pad_bottom = h * 0.014;
-            let x = w * 0.05;
-            let bw = w * 0.90;
-            let inner_left = x + bw * 0.02;
-            let inner_right = x + bw * 0.98;
-            let inner_w = (inner_right - inner_left).max(8.0);
-
-            let font_px = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
-
-            // Primary row: four equal columns, each `[icon][label]` for Exit → Select → Hold sell → Inspect.
-            // Icons are ~3× the old bar-relative size; each prompt gets its own backer (no full-width bar).
-            let bar_h_ref = h * 0.056;
-            let icon_cap_3x = if inspect_active {
-                bar_h_ref * 0.38 * 3.0
-            } else {
-                bar_h_ref * 0.72 * 3.0
-            };
-
-            let col_w = inner_w / 4.0;
-            let col_pad = (col_w * 0.045).min(8.0_f32).max(2.0);
-            let mut icon_px = icon_cap_3x.clamp(48.0, 132.0);
-            let mut gap_after_icon = icon_px * 0.18;
-            loop {
-                let slot = icon_px + gap_after_icon;
-                if slot <= col_w - col_pad * 2.0 || icon_px <= 18.0 {
-                    break;
-                }
-                icon_px -= 1.0;
-                gap_after_icon = icon_px * 0.18;
-            }
-
-            let primary_h = (icon_px * 1.06).max(font_px * 1.35);
-            let inspect_line_h = if inspect_active {
-                (font_px * 0.92).max(12.0) * 1.4 + h * 0.008
-            } else {
-                0.0
-            };
-            let gap_before_inspect_line = if inspect_active { h * 0.01 } else { 0.0 };
-            let block_h = primary_h + gap_before_inspect_line + inspect_line_h;
-            let primary_y0 = h - pad_bottom - block_h;
-            let iy = primary_y0 + (primary_h - icon_px) * 0.5;
-
-            let paths = shop_prompt_icon_paths(surface, ctx.gamepad_style, ctx.gamepad_swap_ab);
-
-            let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
-            let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0);
-            let pill_pad_y = (primary_h * 0.10).clamp(4.0, 12.0);
-
-            let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(4);
-            let mut icon_cmds: Vec<PromptIconQuad> = Vec::with_capacity(4);
-            let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(if inspect_active { 5 } else { 4 });
-
-            for i in 0..4 {
-                let col_x = inner_left + i as f32 * col_w;
-                let ix = col_x + col_pad;
-                let text_x = ix + icon_px + gap_after_icon;
-                let text_w = (col_x + col_w - col_pad - text_x).max(10.0);
-                let pill_left = (ix - pill_pad_x).max(col_x + 1.0);
-                let pill_w = (text_x + text_w + pill_pad_x - pill_left).min(col_x + col_w - pill_left);
-                pill_quads.push(GpuInstance {
-                    rect: [
-                        pill_left,
-                        primary_y0 - pill_pad_y,
-                        pill_w,
-                        primary_h + pill_pad_y * 2.0,
-                    ],
-                    color: pill_bg,
-                });
-                icon_cmds.push(PromptIconQuad {
-                    inst: GpuInstance {
-                        rect: [ix, iy, icon_px, icon_px],
-                        color: [0.92, 0.88, 0.82, 0.96],
-                    },
-                    asset_rel_path: paths[i],
-                });
-                legend_texts.push(TextLabel {
-                    rect: [
-                        text_x,
-                        primary_y0 + primary_h * 0.08,
-                        text_w,
-                        primary_h * 0.84,
-                    ],
-                    text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
-                    color: [0.88, 0.84, 0.78, 0.96],
-                    font_px: Some(font_px),
-                    align: TextAlign::Left,
-                    no_glossary: false,
-                    scroll_offset: 0.0,
-                });
-            }
-
-            frame.quads(pill_quads);
-
-            const HOLD_SELL_LEGEND_COL: usize = 2;
-            if let Some(started) = self.north_sell_hold_started {
-                let elapsed = Instant::now()
-                    .saturating_duration_since(started)
-                    .as_secs_f32();
-                let progress =
-                    (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
-                let col_x = inner_left + HOLD_SELL_LEGEND_COL as f32 * col_w;
-                let ix = col_x + col_pad;
-                let cx = ix + icon_px * 0.5;
-                let cy = iy + icon_px * 0.5;
-                let r = icon_px * 0.58;
-                let thickness = (icon_px * 0.12).max(3.5);
-                let mut ring_quads: Vec<GpuInstance> = Vec::with_capacity(72);
-                crate::ui::prompt_hold_ring::push_hold_prompt_ring(
-                    &mut ring_quads,
-                    cx,
-                    cy,
-                    r,
-                    thickness,
-                    progress,
-                );
-                frame.quads(ring_quads);
-            }
-
-            frame.prompt_icon_quads(icon_cmds);
-
-            if inspect_active {
-                legend_texts.push(TextLabel {
-                    rect: [
-                        inner_left,
-                        primary_y0 + primary_h + gap_before_inspect_line,
-                        inner_w,
-                        inspect_line_h,
-                    ],
-                    text: ButtonPrompt::shop_inspect_mode_hint(surface, ctx.gamepad_style),
-                    color: [0.82, 0.78, 0.72, 0.94],
-                    font_px: Some((font_px * 0.92).max(12.0)),
-                    align: TextAlign::Center,
-                    no_glossary: false,
-                    scroll_offset: 0.0,
-                });
-            }
-
-            frame.texts(legend_texts);
-        }
-
-        frame
+        frame.object3d_batch(bugs);
     }
+
+    let credits_font_px = typography::size(typography::BODY, h, ui_scale).max(18.0) * 2.0;
+    let gold_text = format!("{}g", shop_rm.display_gold);
+    let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
+    let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
+        let (_, _, advances) = measure_label_advances(font, &gold_text, 8192, h_px, Some(credits_font_px));
+        let text_w: f32 = advances.iter().sum();
+        let rw = text_w.max(credits_font_px * 1.2).min(w * 0.92);
+        let rh = credits_font_px * 1.38;
+        (rw, rh)
+    } else {
+        let est_ch = gold_text.chars().count().max(1) as f32;
+        let rw = (credits_font_px * 0.62 * est_ch).min(w * 0.92);
+        let rh = credits_font_px * 1.38;
+        (rw, rh)
+    };
+    let mut credits_rect = with_shop_glb_cpu(|opt| {
+        let cpu = opt?;
+        let tw = player_gold_dish_marker_translation(cpu)? * shop_env_world_scale(h, env_h);
+        let (cx, cy) = cam.project_world_to_screen(w, h, tw);
+        Some([
+            cx - credits_rw * 0.5,
+            cy - credits_rh * 0.5,
+            credits_rw,
+            credits_rh,
+        ])
+    })
+    .unwrap_or_else(|| rect_center_n(w, h, 0.88, 0.595, credits_rw, credits_rh));
+    // Marker sits in the dish; float the label above it.
+    credits_rect[1] -= credits_rh * 0.52 + h * 0.014;
+    let pad = credits_font_px * 0.24;
+    let bx = credits_rect[0] - pad;
+    let by = credits_rect[1] - pad * 0.4;
+    let bw = credits_rect[2] + pad * 2.0;
+    let bh = credits_rect[3] + pad * 1.05;
+    frame.quad(GpuInstance {
+        rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
+        color: [0.02, 0.02, 0.04, 0.48],
+    });
+    frame.quad(GpuInstance {
+        rect: [bx, by, bw, bh],
+        color: [
+            color::WALNUT_DEEP[0],
+            color::WALNUT_DEEP[1],
+            color::WALNUT_DEEP[2],
+            0.88,
+        ],
+    });
+    frame.texts([TextLabel {
+        rect: credits_rect,
+        text: gold_text,
+        color: color::CHAMPAGNE,
+        font_px: Some(credits_font_px),
+        align: TextAlign::Center,
+        no_glossary: false,
+        scroll_offset: 0.0,
+    }]);
+
+    if !shop.pause_menu.paused {
+        if let Some(ring_rect) = ring_target_rect(&ctx, shop, &shop_rm, w, h, &cam)
+            .and_then(|r| clamp_rect_to_viewport(r, w, h))
+        {
+            let mut quads = Vec::new();
+            let ring_scale = if room_glb_lights && inspect_orbit_resolved.is_none() {
+                scale * 1.24
+            } else {
+                scale
+            };
+            push_focus_ring(ring_rect, ring_scale, w, h, &mut quads);
+            frame.quads(quads);
+        }
+
+        let mut free_quads = Vec::new();
+        let mut free_texts = Vec::new();
+        for (slot_i, sf) in for_sale_slots(shop).into_iter().enumerate() {
+            if let Some(ShopFocus::Relic(idx)) = sf {
+                if let Some(item) = shop.items.get(idx)
+                    && !item.sold
+                    && item.price == 0
+                {
+                    let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
+                    push_free_badge(&mut free_quads, &mut free_texts, r, h, ui_scale);
+                }
+            }
+        }
+        if !free_quads.is_empty() {
+            frame.quads(free_quads);
+            frame.texts(free_texts);
+        }
+    }
+
+    if shop.journal_transition.is_none()
+        && let Some(hit) = hover
+        && let Some((ref title, ref desc, ref cta, col)) =
+            hover_tooltip_content(shop, &shop_rm, &ctx.run.mode, hit)
+        && !title.is_empty()
+    {
+        let f = ShopFocus::from_hit(hit);
+        let tooltip_anchor = shop
+            .last_focus_rects
+            .borrow()
+            .iter()
+            .find(|(g, _)| *g == f)
+            .map(|(_, r)| *r);
+        let hover_is_owned = matches!(hit, ShopHit::Relic(i) if i >= shop.items.len())
+            || matches!(hit, ShopHit::Ribbon(i) if i >= shop.zodiac_items.len())
+            || matches!(hit, ShopHit::Talisman(i) if i >= shop.talisman_items.len());
+        let skip_title = matches!(
+            hit,
+            ShopHit::Dish(id)
+                if id == super::PICK_JOURNAL_BOOK
+                    || id == super::PICK_LEAVE_PROP
+                    || id == super::PICK_REROLL_PROP
+                    || id == super::PICK_SELL_TRAY
+        );
+        let mut tip_quads = Vec::new();
+        let mut tip_texts = Vec::new();
+        push_focus_tooltip_panel_2d(
+            &mut tip_quads,
+            &mut tip_texts,
+            w,
+            h,
+            ui_scale,
+            tooltip_anchor,
+            title,
+            desc,
+            cta,
+            col,
+            hover_is_owned,
+            skip_title,
+        );
+        frame.quads(tip_quads);
+        frame.texts(tip_texts);
+    }
+
+    // Journal book mesh + prepass: enables arrange-mode picking for `shop.props.journal`
+    // and live page texture.
+    let cam_euler = camera_facing_euler_xyz_rad(cam.eye, cam.target);
+    if let Some(t) = shop.journal_transition {
+        let zp = t.zoom_progress();
+        if zp > 0.001 {
+            let smoothed = zp * zp * (3.0 - 2.0 * zp);
+            let a = smoothed * 0.72;
+            frame.quad(GpuInstance {
+                rect: [0.0, 0.0, w, h],
+                color: [0.03, 0.04, 0.06, a],
+            });
+        }
+    }
+    let (journal_zoom, journal_pos) = match shop.journal_transition {
+        Some(t) => {
+            let z = t.zoom_progress();
+            let smoothed = z * z * (3.0 - 2.0 * z);
+            let zoom = 1.0 + smoothed * 7.0;
+            let cx = w * 0.5;
+            let cy = h * 0.5;
+            let pos = [
+                journal_cx + (cx - journal_cx) * smoothed,
+                journal_cy + (cy - journal_cy) * smoothed,
+                journal_cz,
+            ];
+            (zoom, pos)
+        }
+        None => (1.0, [journal_cx, journal_cy, journal_cz]),
+    };
+    let (face_w, face_h) = journal_transition::book_cover_face_extents_xy(w, journal_zoom);
+    frame.object3d(Object3d {
+        pos: journal_pos,
+        extents: [
+            face_w,
+            ctx.layout.mm(journal_transition::BOOK_SPINE_THICKNESS_MM) * journal_zoom,
+            face_h,
+        ],
+        rotation: cam_euler,
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::Book {
+            spine_label: Cow::Borrowed("Journal"),
+            pick_id: Some(super::PICK_JOURNAL_BOOK),
+            open_amount: shop.journal_open_amount,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+        arrange_name: Some("shop.props.journal"),
+    });
+
+    if shop.journal_open_amount > 0.001 {
+        let scratch = YakuJournalScene::new();
+        let inner_ctx = DrawCtx {
+            layout: ctx.layout,
+            anim: ctx.anim,
+            run: ctx.run,
+            progress: ctx.progress,
+            active_profile: ctx.active_profile,
+            game_in_progress: ctx.game_in_progress,
+            proj: ctx.proj,
+            picked_gameplay_object: ctx.picked_gameplay_object,
+            picked_shop_object: ctx.picked_shop_object,
+            debug_visibility: ctx.debug_visibility,
+            ui_scale: ctx.ui_scale,
+            modal_active: ctx.modal_active,
+            arrange_preview: ctx.arrange_preview.clone(),
+            shop_env_height_scale: ctx.shop_env_height_scale,
+            shop_env_lighting: ctx.shop_env_lighting,
+            effect_layers: ctx.effect_layers,
+            cursor_pos: ctx.cursor_pos,
+            input_mode: ctx.input_mode,
+            gamepad_swap_ab: ctx.gamepad_swap_ab,
+            gamepad_swap_xy: ctx.gamepad_swap_xy,
+            gamepad_style: ctx.gamepad_style,
+            suspended_shop: None,
+            suspended_collection: None,
+        };
+        let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
+        frame.journal_prepass_frame = Some(Box::new(prepass));
+    }
+
+    shop.push_shop_particle_quads(&mut frame);
+    shop.push_shop_score_popup_labels(&mut frame, w, h);
+
+    // Pointer targets in stack order: specific zones first (main loop uses first hit).
+    // Pause overlay quads/texts are appended last so they composite above shelf geometry.
+    if shop.pause_menu.paused {
+        let mut pause_quads: Vec<GpuInstance> = Vec::new();
+        let mut pause_text: Vec<TextLabel> = Vec::new();
+        let mut pause_buttons: Vec<ButtonDef> = Vec::new();
+        shop.pause_menu.draw(
+            crate::ui::layout::ViewportCtx {
+                window_w: w,
+                window_h: h,
+                ui_scale,
+            },
+            scale,
+            &mut pause_quads,
+            &mut pause_text,
+            &mut pause_buttons,
+        );
+        frame.quads(pause_quads);
+        frame.texts(pause_text);
+        pause_buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
+        frame.buttons = pause_buttons;
+    } else if inspect.is_some() {
+        // [`ItemInspectScene`] owns input — draw visuals only.
+    } else {
+        for i in 0..SHOP_SPAWN_SLOT_COUNT {
+            let r = shop_shelf_slot_rect(w, h, &cam, i, env_h);
+            frame.buttons.push(ButtonDef::scene(
+                (r[0], r[1], r[2], r[3]),
+                SHOP_SHELF_CLICK_BASE + i as u32,
+            ));
+        }
+        for i in 0..7 {
+            let r = inv_slot_rect(w, h, &cam, shop, &shop_rm, i, env_h);
+            frame.buttons.push(ButtonDef::scene(
+                (r[0], r[1], r[2], r[3]),
+                SHOP_INV_CLICK_BASE + i as u32,
+            ));
+        }
+        let jr = journal_btn_rect(w, h, &cam, env_h);
+        // No `hover_label` here — [`push_focus_tooltip_panel_2d`] already shows name /
+        // description / action for these hits; main/draw would duplicate it as a second
+        // brass tooltip when the cursor hovers the same rect.
+        frame.buttons.push(ButtonDef::scene(
+            (jr[0], jr[1], jr[2], jr[3]),
+            SHOP_CLICK_JOURNAL,
+        ));
+        let rr = reroll_btn_rect(w, h, &cam, env_h);
+        frame.buttons.push(ButtonDef::scene(
+            (rr[0], rr[1], rr[2], rr[3]),
+            SHOP_CLICK_REROLL,
+        ));
+        let lr = leave_btn_rect(w, h, &cam, env_h);
+        frame.buttons.push(ButtonDef::scene(
+            (lr[0], lr[1], lr[2], lr[3]),
+            SHOP_CLICK_LEAVE,
+        ));
+        let sr = sell_tray_rect(w, h);
+        frame.buttons.push(ButtonDef::scene(
+            (sr[0], sr[1], sr[2], sr[3]),
+            SHOP_CLICK_SELL,
+        ));
+    }
+
+    // Floating control hints — copy reflects [`DrawCtx::input_mode`] + swap toggles.
+    if !shop.pause_menu.paused {
+        let surface = match ctx.input_mode {
+            InputMode::Controller => PromptInputSurface::Controller,
+            InputMode::Keyboard | InputMode::Cursor => PromptInputSurface::MouseOrKeyboard,
+        };
+        let inspect_active = inspect.is_some();
+        let pad_bottom = h * 0.014;
+        let x = w * 0.05;
+        let bw = w * 0.90;
+        let inner_left = x + bw * 0.02;
+        let inner_right = x + bw * 0.98;
+        let inner_w = (inner_right - inner_left).max(8.0);
+
+        let font_px = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
+
+        // Primary row: four equal columns, each `[icon][label]` for Exit → Select → Hold sell → Inspect.
+        // Icons are ~3× the old bar-relative size; each prompt gets its own backer (no full-width bar).
+        let bar_h_ref = h * 0.056;
+        let icon_cap_3x = if inspect_active {
+            bar_h_ref * 0.38 * 3.0
+        } else {
+            bar_h_ref * 0.72 * 3.0
+        };
+
+        let col_w = inner_w / 4.0;
+        let col_pad = (col_w * 0.045).min(8.0_f32).max(2.0);
+        let mut icon_px = icon_cap_3x.clamp(48.0, 132.0);
+        let mut gap_after_icon = icon_px * 0.18;
+        loop {
+            let slot = icon_px + gap_after_icon;
+            if slot <= col_w - col_pad * 2.0 || icon_px <= 18.0 {
+                break;
+            }
+            icon_px -= 1.0;
+            gap_after_icon = icon_px * 0.18;
+        }
+
+        let primary_h = (icon_px * 1.06).max(font_px * 1.35);
+        let inspect_line_h = if inspect_active {
+            (font_px * 0.92).max(12.0) * 1.4 + h * 0.008
+        } else {
+            0.0
+        };
+        let gap_before_inspect_line = if inspect_active { h * 0.01 } else { 0.0 };
+        let block_h = primary_h + gap_before_inspect_line + inspect_line_h;
+        let primary_y0 = h - pad_bottom - block_h;
+        let iy = primary_y0 + (primary_h - icon_px) * 0.5;
+
+        let paths = shop_prompt_icon_paths(
+            surface,
+            ctx.gamepad_style,
+            ctx.gamepad_swap_ab,
+            ctx.gamepad_swap_xy,
+        );
+
+        let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
+        let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0);
+        let pill_pad_y = (primary_h * 0.10).clamp(4.0, 12.0);
+
+        let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(4);
+        let mut icon_cmds: Vec<PromptIconQuad> = Vec::with_capacity(4);
+        let mut legend_texts: Vec<TextLabel> =
+            Vec::with_capacity(if inspect_active { 5 } else { 4 });
+
+        for i in 0..4 {
+            let col_x = inner_left + i as f32 * col_w;
+            let ix = col_x + col_pad;
+            let text_x = ix + icon_px + gap_after_icon;
+            let text_w = (col_x + col_w - col_pad - text_x).max(10.0);
+            let pill_left = (ix - pill_pad_x).max(col_x + 1.0);
+            let pill_w = (text_x + text_w + pill_pad_x - pill_left).min(col_x + col_w - pill_left);
+            pill_quads.push(GpuInstance {
+                rect: [
+                    pill_left,
+                    primary_y0 - pill_pad_y,
+                    pill_w,
+                    primary_h + pill_pad_y * 2.0,
+                ],
+                color: pill_bg,
+            });
+            icon_cmds.push(PromptIconQuad {
+                inst: GpuInstance {
+                    rect: [ix, iy, icon_px, icon_px],
+                    color: [0.92, 0.88, 0.82, 0.96],
+                },
+                asset_rel_path: paths[i],
+            });
+            legend_texts.push(TextLabel {
+                rect: [
+                    text_x,
+                    primary_y0 + primary_h * 0.08,
+                    text_w,
+                    primary_h * 0.84,
+                ],
+                text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
+                color: [0.88, 0.84, 0.78, 0.96],
+                font_px: Some(font_px),
+                align: TextAlign::Left,
+                no_glossary: false,
+                scroll_offset: 0.0,
+            });
+        }
+
+        frame.quads(pill_quads);
+
+        const HOLD_SELL_LEGEND_COL: usize = 2;
+        if let Some(started) = shop.north_sell_hold_started {
+            let elapsed = Instant::now()
+                .saturating_duration_since(started)
+                .as_secs_f32();
+            let progress = (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
+            let col_x = inner_left + HOLD_SELL_LEGEND_COL as f32 * col_w;
+            let ix = col_x + col_pad;
+            let cx = ix + icon_px * 0.5;
+            let cy = iy + icon_px * 0.5;
+            let r = icon_px * 0.58;
+            let thickness = (icon_px * 0.12).max(3.5);
+            let mut ring_quads: Vec<GpuInstance> = Vec::with_capacity(72);
+            crate::ui::prompt_hold_ring::push_hold_prompt_ring(
+                &mut ring_quads,
+                cx,
+                cy,
+                r,
+                thickness,
+                progress,
+            );
+            frame.quads(ring_quads);
+        }
+
+        frame.prompt_icon_quads(icon_cmds);
+
+        if inspect_active {
+            legend_texts.push(TextLabel {
+                rect: [
+                    inner_left,
+                    primary_y0 + primary_h + gap_before_inspect_line,
+                    inner_w,
+                    inspect_line_h,
+                ],
+                text: ButtonPrompt::shop_inspect_mode_hint(surface, ctx.gamepad_style),
+                color: [0.82, 0.78, 0.72, 0.94],
+                font_px: Some((font_px * 0.92).max(12.0)),
+                align: TextAlign::Center,
+                no_glossary: false,
+                scroll_offset: 0.0,
+            });
+        }
+
+        frame.texts(legend_texts);
+    }
+
+    frame
 }
 
 /// Name, description, price line, and accent colour for hover tooltip.
@@ -1680,11 +1753,7 @@ pub(super) fn resolve_shop_glb_env_hit(
     hit: ShopHit,
 ) -> Option<ShopHit> {
     match hit {
-        ShopHit::EnvSpawnSlot(slot) => for_sale_slots(scene)
-            .get(slot)
-            .copied()
-            .flatten()?
-            .to_hit(),
+        ShopHit::EnvSpawnSlot(slot) => for_sale_slots(scene).get(slot).copied().flatten()?.to_hit(),
         ShopHit::EnvInvSlot(slot) => inventory_slots(scene, shop)
             .get(slot)
             .copied()
@@ -1739,9 +1808,10 @@ fn inv_marker_surface_anchor(
     cy: f32,
     cz_fallback: f32,
 ) -> [f32; 3] {
-    inv_slot_glb_marker_name(scene, shop, slot_i).and_then(|name| {
-        with_shop_glb_cpu(|opt| opt.and_then(|cpu| marker_translation(cpu, &name)))
-    })
+    inv_slot_glb_marker_name(scene, shop, slot_i)
+        .and_then(|name| {
+            with_shop_glb_cpu(|opt| opt.and_then(|cpu| marker_translation(cpu, &name)))
+        })
         .map(|tw| surface_anchor_from_world_xyz(w, h, tw * shop_env_world_scale(h, env_h)))
         .unwrap_or_else(|| lit_anchor(cam, w, h, cx, cy, cz_fallback))
 }
@@ -1967,11 +2037,9 @@ fn push_stock_meshes(
                 let half = relic_half_extents(rid, niche_base * 0.92);
                 let glow = relic_glow(scene, rid);
                 let cz = wz + half[2];
-                let relic_pos = inv_marker_surface_anchor(
-                    w, h, cam, scene, shop, slot_i, env_h, cx, cy, cz,
-                );
-                let base_rot =
-                    euler_xyz_rad_from_deg(super::SHOP_RELIC_LEAN_INVENTORY, 0.0, 0.0);
+                let relic_pos =
+                    inv_marker_surface_anchor(w, h, cam, scene, shop, slot_i, env_h, cx, cy, cz);
+                let base_rot = euler_xyz_rad_from_deg(super::SHOP_RELIC_LEAN_INVENTORY, 0.0, 0.0);
                 out.push(Object3d {
                     pos: relic_pos,
                     extents: [half[0] * 2.0, half[1] * 2.0, half[2] * 2.0],
@@ -2057,9 +2125,7 @@ fn rect_center_n(window_w: f32, window_h: f32, nx: f32, ny: f32, rw: f32, rh: f3
 fn shop_shelf_slot_rect(w: f32, h: f32, cam: &CameraParams, index: usize, env_h: f32) -> [f32; 4] {
     let rw = w * 0.065;
     let rh = h * 0.125;
-    if let Some(r) =
-        marker_screen_rect(w, h, cam, &spawn_relic_marker_name(index), rw, rh, env_h)
-    {
+    if let Some(r) = marker_screen_rect(w, h, cam, &spawn_relic_marker_name(index), rw, rh, env_h) {
         return r;
     }
     let nx_span_start = 0.14_f32;
@@ -2238,7 +2304,10 @@ fn closest_purchasable_focus(
     best.map(|(f, _)| f)
 }
 
-fn first_purchasable_focus(rects: &[(ShopFocus, [f32; 4])], scene: &ShopScene) -> Option<ShopFocus> {
+fn first_purchasable_focus(
+    rects: &[(ShopFocus, [f32; 4])],
+    scene: &ShopScene,
+) -> Option<ShopFocus> {
     rects
         .iter()
         .find_map(|(f, _)| is_purchasable_shop_focus(*f, scene).then_some(*f))
@@ -2321,7 +2390,9 @@ fn map_shop_ui_click_to_hit(cid: u32, scene: &ShopScene, shop: &ShopReadModel) -
         SHOP_CLICK_LEAVE => Some(ShopHit::Dish(super::PICK_LEAVE_PROP)),
         SHOP_CLICK_SELL => Some(ShopHit::Dish(super::PICK_SELL_TRAY)),
         _ => {
-            if (SHOP_SHELF_CLICK_BASE..SHOP_SHELF_CLICK_BASE + SHOP_SPAWN_SLOT_COUNT as u32).contains(&cid) {
+            if (SHOP_SHELF_CLICK_BASE..SHOP_SHELF_CLICK_BASE + SHOP_SPAWN_SLOT_COUNT as u32)
+                .contains(&cid)
+            {
                 let idx = (cid - SHOP_SHELF_CLICK_BASE) as usize;
                 return for_sale_slots(scene)[idx].and_then(|f| f.to_hit());
             }

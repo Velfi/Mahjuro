@@ -323,7 +323,7 @@ pub(crate) fn load_pack_textures(
             },
         );
     }
-    log::info!("loaded {} pack textures synchronously", map.len());
+    log::debug!("loaded {} pack textures synchronously", map.len());
     map
 }
 
@@ -377,7 +377,7 @@ pub(crate) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage
                     break;
                 }
             }
-            log::info!(
+            log::debug!(
                 "bg-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
                 t_thread.elapsed(),
             );

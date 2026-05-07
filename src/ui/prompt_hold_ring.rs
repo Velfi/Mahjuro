@@ -28,7 +28,17 @@ pub fn push_hold_prompt_ring(
 
     if sweep_track > 1e-3 {
         let n = (((SEGMENTS as f32) * (sweep_track / tau)).ceil() as usize).clamp(4, SEGMENTS);
-        push_arc_stroke(out, cx, cy, radius, half, start + sweep_fill, sweep_track, track, n);
+        push_arc_stroke(
+            out,
+            cx,
+            cy,
+            radius,
+            half,
+            start + sweep_fill,
+            sweep_track,
+            track,
+            n,
+        );
     }
     if sweep_fill > 1e-3 {
         let n = (((SEGMENTS as f32) * (sweep_fill / tau)).ceil() as usize).clamp(4, SEGMENTS);

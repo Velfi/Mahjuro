@@ -277,9 +277,7 @@ impl App {
             || self.debug.volumetric_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
-            Some(
-                Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_)
-            )
+            Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_))
         );
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -357,6 +355,7 @@ impl App {
                 .map(|i| i.mode)
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
             gamepad_swap_ab: self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
+            gamepad_swap_xy: self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false),
             gamepad_style: self
                 .input
                 .as_ref()
@@ -844,7 +843,11 @@ impl App {
 
         renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
         let sl = self.debug.shop_env_lighting;
-        renderer.set_shop_env_render_tune(sl.linear_exposure, sl.ambient_scale, sl.lit_mesh_gltf_punctual_scale);
+        renderer.set_shop_env_render_tune(
+            sl.linear_exposure,
+            sl.ambient_scale,
+            sl.lit_mesh_gltf_punctual_scale,
+        );
         // Push mountain-haze art-direction knobs into the haze shader's
         // uniform — lets the Volumetric debug overlay drive density,
         // colour, horizon band, and wind speed live.

@@ -182,7 +182,9 @@ impl WgpuRenderer {
                                 p.center_pos[2],
                             )
                         }
-                        _ => pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2]),
+                        _ => {
+                            pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2])
+                        }
                     };
                     let tile_short_px = p.size_px * 0.85;
                     let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
@@ -300,11 +302,12 @@ impl WgpuRenderer {
                         const OUTLINE_GROW: f32 = 1.055;
                         let outline_scale = scale * OUTLINE_GROW;
                         let outline_model = translate_rot_scale(center, oriented, outline_scale);
-                        self.tile_outline_instances_staging
-                            .push(super::super::TileOutlineInstance {
+                        self.tile_outline_instances_staging.push(
+                            super::super::TileOutlineInstance {
                                 model: outline_model.to_cols_array(),
                                 base_color_factor: sc_bcf,
-                            });
+                            },
+                        );
                     }
                     let su = ShadowCasterUniform {
                         light_view_proj: light_view_proj_arr,
@@ -325,7 +328,8 @@ impl WgpuRenderer {
 
                     slot_cursor += 1;
                 }
-                let outline_n = self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
+                let outline_n =
+                    self.tile_outline_instances_staging.len() as u32 - outline_batch_start;
                 self.tile_outline_batch_ranges
                     .push((outline_batch_start, outline_n));
             }
@@ -395,7 +399,6 @@ impl WgpuRenderer {
                     ));
                 }
             }
-
         }
 
         // Snapshot projected tile rects and pick models now that both the hand

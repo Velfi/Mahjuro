@@ -10,8 +10,8 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::meld_guide::MeldGuideScene;
 use super::main_menu_exterior::MainMenuExteriorScene;
+use super::meld_guide::MeldGuideScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

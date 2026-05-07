@@ -715,10 +715,7 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::PromptIconQuad(icon) => {
-                    if !self
-                        .prompt_icon_overlays
-                        .contains_key(icon.asset_rel_path)
-                    {
+                    if !self.prompt_icon_overlays.contains_key(icon.asset_rel_path) {
                         match make_prompt_icon_overlay_gpu(
                             &self.device,
                             &self.queue,
@@ -727,8 +724,7 @@ impl WgpuRenderer {
                             icon.asset_rel_path,
                         ) {
                             Some(gpu) => {
-                                self.prompt_icon_overlays
-                                    .insert(icon.asset_rel_path, gpu);
+                                self.prompt_icon_overlays.insert(icon.asset_rel_path, gpu);
                             }
                             None => {
                                 log::warn!(
@@ -1195,8 +1191,8 @@ impl WgpuRenderer {
         // ── Pass A: clear + draw main scene ───────────────────────────────
         {
             #[cfg(debug_assertions)]
-            let split_main_for_profile = self.gpu_profiler.is_sampling()
-                && ops.iter().any(|o| matches!(o, RenderOp::Table));
+            let split_main_for_profile =
+                self.gpu_profiler.is_sampling() && ops.iter().any(|o| matches!(o, RenderOp::Table));
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
@@ -1214,10 +1210,7 @@ impl WgpuRenderer {
                         // lacquered-table SSR sample. Gameplay plaques are
                         // `Object3d` meshes (engraved decal on the mesh); they
                         // render here in Pass A like other lit meshes.
-                        if matches!(
-                            op,
-                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
-                        ) {
+                        if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1235,10 +1228,7 @@ impl WgpuRenderer {
             macro_rules! pass_a_draw_chunk {
                 ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
                     for op in $chunk.iter() {
-                        if matches!(
-                            op,
-                            RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
-                        ) {
+                        if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1323,14 +1313,16 @@ impl WgpuRenderer {
                                 },
                                 depth_slice: None,
                             })],
-                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                                view: &self.depth_view,
-                                depth_ops: Some(wgpu::Operations {
-                                    load: depth_load,
-                                    store: wgpu::StoreOp::Store,
-                                }),
-                                stencil_ops: None,
-                            }),
+                            depth_stencil_attachment: Some(
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: &self.depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: depth_load,
+                                        store: wgpu::StoreOp::Store,
+                                    }),
+                                    stencil_ops: None,
+                                },
+                            ),
                             occlusion_query_set: None,
                             timestamp_writes: if ci == 0 {
                                 self.gpu_profiler
@@ -1368,14 +1360,16 @@ impl WgpuRenderer {
                                 },
                                 depth_slice: None,
                             })],
-                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                                view: &self.depth_view,
-                                depth_ops: Some(wgpu::Operations {
-                                    load: depth_load,
-                                    store: wgpu::StoreOp::Store,
-                                }),
-                                stencil_ops: None,
-                            }),
+                            depth_stencil_attachment: Some(
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: &self.depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: depth_load,
+                                        store: wgpu::StoreOp::Store,
+                                    }),
+                                    stencil_ops: None,
+                                },
+                            ),
                             occlusion_query_set: None,
                             timestamp_writes: if ci == 0 {
                                 self.gpu_profiler
@@ -1640,12 +1634,10 @@ impl WgpuRenderer {
         // ── Overlay pass: 2D HUD text labels ────────────────────────────
         // After tonemap, Load the final target so labels are not in the linear
         // HDR `scene_prev_texture` used for lacquered-table SSR.
-        if ops.iter().any(|o| {
-            matches!(
-                o,
-                RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
-            )
-        }) {
+        if ops
+            .iter()
+            .any(|o| matches!(o, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)))
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1670,10 +1662,7 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             for op in &ops {
-                if matches!(
-                    op,
-                    RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)
-                ) {
+                if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
                 }
             }

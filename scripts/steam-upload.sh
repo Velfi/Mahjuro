@@ -151,8 +151,11 @@ stage_local () {
                 exit 1
             fi
             cp "$so" "$CONTENT/linux/libsteam_api.so"
+            cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
+                "$CONTENT/linux/game_actions_4636490.vdf"
             echo "staged: linux/mahjuro (from $bin)"
             echo "staged: linux/libsteam_api.so (from $so)"
+            echo "staged: linux/game_actions_4636490.vdf"
             echo "warning: --local stages only the host platform; windows/ and macos/ are empty." >&2
             ;;
         *)

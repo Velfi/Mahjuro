@@ -362,7 +362,11 @@ impl WgpuRenderer {
                         // GPU upload skipped — asset missing or markers-only GLB.
                     } else {
                         if frame.shop_env_gltf_punctual {
-                            pass.set_bind_group(1, &self.shop_gltf_point_lights_scene_bind_group, &[]);
+                            pass.set_bind_group(
+                                1,
+                                &self.shop_gltf_point_lights_scene_bind_group,
+                                &[],
+                            );
                         } else {
                             pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
                         }

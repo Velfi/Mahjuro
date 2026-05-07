@@ -93,19 +93,13 @@ impl LabAction {
             LabAction::AlternatingMotors => {
                 ops.push(RumbleLabOp::Composite {
                     gain: 0.52,
-                    segments: vec![
-                        (0, 17_000, 800, 45),
-                        (52, 600, 15_000, 48),
-                    ],
+                    segments: vec![(0, 17_000, 800, 45), (52, 600, 15_000, 48)],
                 });
             }
             LabAction::Heartbeat => {
                 ops.push(RumbleLabOp::Composite {
                     gain: 0.5,
-                    segments: vec![
-                        (0, 14_000, 5_000, 58),
-                        (125, 11_000, 4_200, 58),
-                    ],
+                    segments: vec![(0, 14_000, 5_000, 58), (125, 11_000, 4_200, 58)],
                 });
             }
             LabAction::EnvelopeSwell => {
@@ -244,7 +238,7 @@ impl SceneBehavior for RumbleLabScene {
 
         #[cfg(target_os = "macos")]
         let body_lines = "Fire preset patterns on connected FF-capable gamepads.\n\
-            macOS: Xbox/Series rumble usually needs Bluetooth; USB often exposes no rumble to apps (Gilrs/SDL). Check the log line SDL_PROP_GAMEPAD_CAP_RUMBLE when the pad connects.";
+            macOS: Xbox/Series rumble over USB is often unavailable to apps; Bluetooth may work. Check the log line SDL_PROP_GAMEPAD_CAP_RUMBLE when the pad connects.";
         #[cfg(not(target_os = "macos"))]
         let body_lines = "Fire preset patterns on connected FF-capable gamepads.";
         #[cfg(target_os = "macos")]

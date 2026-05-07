@@ -73,6 +73,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/mahjuro"
 chmod +x "$APP/Contents/MacOS/mahjuro"
+cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
+    "$APP/Contents/MacOS/game_actions_4636490.vdf"
 
 # Steamworks redistributable. The dylib's install_name is
 # `@loader_path/libsteam_api.dylib`, so it must live next to the binary

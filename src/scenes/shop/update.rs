@@ -318,9 +318,10 @@ impl ShopScene {
                         if let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
                             self, w, h, env_h, &shop, f,
                         ) {
-                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
-                                Scene::ItemInspect(ItemInspectScene::new(ItemInspectHost::Shop, orbit)),
-                            )));
+                            *ctx.overlay_request =
+                                Some(OverlayRequest::Push(Box::new(Scene::ItemInspect(
+                                    ItemInspectScene::new(ItemInspectHost::Shop, orbit),
+                                ))));
                         }
                     }
                 }

@@ -2,8 +2,8 @@
 
 Expects files named by tile code (B1.png, EWind.png, DRed.png, Flower1.png, …)
 with uniform dimensions across the set. Writes:
-  <dir>/atlas.png    RGBA grid, row-major in the same LAYOUT order used by
-                     generate_classic_atlas.py
+  <dir>/atlas.png    RGBA grid, row-major using the LAYOUT constant below
+                     (shared with ``generate_classic_atlas.py`` and the game)
   <dir>/atlas.toml   image / tile_width / tile_height / columns / layout
 
 Does NOT delete the source PNGs — that's a manual follow-up after verifying
@@ -29,6 +29,7 @@ LAYOUT = [
     "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
     "EWind", "SWind", "WWind", "NWind", "DRed", "DGreen", "DWhite", "", "",
     "Flower1", "Flower2", "Flower3", "Flower4",
+    "Season1", "Season2", "Season3", "Season4", "",
 ]
 
 # Optional alternate stems (no `.png`) when sources use descriptive names.
@@ -44,6 +45,10 @@ CODE_ALTERNATES: dict[str, tuple[str, ...]] = {
     "Flower2": ("F2",),
     "Flower3": ("F3",),
     "Flower4": ("F4",),
+    "Season1": ("S1",),
+    "Season2": ("S2",),
+    "Season3": ("S3",),
+    "Season4": ("S4",),
 }
 
 
@@ -64,7 +69,7 @@ def pack(set_dir: Path) -> None:
             continue  # empty layout slot: no source PNG expected
         path = _resolve_tile_path(set_dir, code)
         if path is None:
-            if code.startswith("Flower") and tile_w is not None:
+            if (code.startswith("Flower") or code.startswith("Season")) and tile_w is not None:
                 print(
                     f"warning: missing {code} (no {code}.png / alternates); "
                     f"using transparent {tile_w}x{tile_h} placeholder"

@@ -150,7 +150,7 @@ pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
                     break;
                 }
             }
-            log::info!(
+            log::debug!(
                 "relic-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
                 t_thread.elapsed(),
             );

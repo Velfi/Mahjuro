@@ -214,4 +214,3 @@ pub fn button_colors(variant: ButtonVariant, state: ButtonState) -> ButtonColors
 
     ButtonColors { bg, border, text }
 }
-

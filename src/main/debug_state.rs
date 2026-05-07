@@ -6,8 +6,8 @@
 
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay,
-    TuningOverlay, VolumetricDebugOverlay,
+    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay, TuningOverlay,
+    VolumetricDebugOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
 use crate::render::shop_glb::ShopEnvLightingTune;

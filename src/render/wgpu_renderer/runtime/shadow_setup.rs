@@ -53,8 +53,11 @@ impl WgpuRenderer {
             self.active_scene_key.as_deref(),
             Some("shop" | "tile_pack_celebration")
         );
-        let shadow_enabled_flag =
-            if shadows_enabled && !shop_suppresses_shadow { 1.0_f32 } else { 0.0 };
+        let shadow_enabled_flag = if shadows_enabled && !shop_suppresses_shadow {
+            1.0_f32
+        } else {
+            0.0
+        };
         self.queue.write_buffer(
             &self.shadow_globals_buffer,
             0,
@@ -214,11 +217,7 @@ impl WgpuRenderer {
                                 glam::Vec3::new(eff_w, seg_h, depth),
                             );
                             *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(
-                                    &self.queue,
-                                    light_view_proj_arr,
-                                    mid_model,
-                                );
+                                .write_shadow_uniform(&self.queue, light_view_proj_arr, mid_model);
                             ribbon_shadow_cursor += 1;
                             let bot_model = ribbon_submesh(
                                 base_transform,

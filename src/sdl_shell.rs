@@ -1,10 +1,10 @@
 //! Single SDL3 context: window, event pump, gamepads (wgpu stays separate).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sdl3::gamepad::Gamepad;
 use sdl3::joystick::JoystickId;
-use sdl3::video::{FullscreenType, Window, WindowBuilder, WindowFlags};
+use sdl3::video::{FullscreenType, Window, WindowBuilder};
 use sdl3::{EventPump, GamepadSubsystem, JoystickSubsystem, Sdl, VideoSubsystem};
 
 pub struct SdlShell {
@@ -19,28 +19,12 @@ pub struct SdlShell {
     pub(crate) pads: HashMap<JoystickId, Gamepad>,
     pub(crate) lt_prev: HashMap<JoystickId, f32>,
     pub(crate) rt_prev: HashMap<JoystickId, f32>,
-}
-
-fn apply_sdl_hints_before_init() {
-    // Hints that must be set before `SDL_Init` / opening joysticks (SDL wiki).
-    #[cfg(target_os = "macos")]
-    {
-        // Wired Xbox / Series controllers on macOS often bind to HIDAPI or GIP with
-        // **no rumble**; Bluetooth + GCController is the path that usually works.
-        // Gilrs hits the same IOKit / driver limits. Opt out with:
-        //   MAHJURO_SDL_XBOX_HIDAPI=1
-        if std::env::var("MAHJURO_SDL_XBOX_HIDAPI").ok().as_deref() != Some("1") {
-            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX", "0");
-            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX_ONE", "0");
-            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_XBOX_360", "0");
-            let _ = sdl3::hint::set("SDL_JOYSTICK_HIDAPI_GIP", "0");
-        }
-    }
+    /// Joystick IDs we already logged as non-gamepad (avoid spam each frame).
+    non_gamepad_logged: HashSet<JoystickId>,
 }
 
 impl SdlShell {
     pub fn new(title: &str, width: u32, height: u32) -> anyhow::Result<Self> {
-        apply_sdl_hints_before_init();
         let _sdl = sdl3::init().map_err(anyhow::Error::from)?;
         let _ = sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
 
@@ -53,7 +37,9 @@ impl SdlShell {
 
         #[cfg(target_os = "macos")]
         {
-            wb.set_flags(WindowFlags::METAL | WindowFlags::RESIZABLE | WindowFlags::HIGH_PIXEL_DENSITY);
+            wb.set_flags(
+                WindowFlags::METAL | WindowFlags::RESIZABLE | WindowFlags::HIGH_PIXEL_DENSITY,
+            );
             wb.metal_view();
         }
         #[cfg(all(unix, not(target_os = "macos")))]
@@ -81,6 +67,7 @@ impl SdlShell {
             pads: HashMap::new(),
             lt_prev: HashMap::new(),
             rt_prev: HashMap::new(),
+            non_gamepad_logged: HashSet::new(),
         };
         shell.refresh_gamepads();
         Ok(shell)
@@ -110,24 +97,41 @@ impl SdlShell {
         self.pads.retain(|id, _| ids.contains(id));
         self.lt_prev.retain(|id, _| ids.contains(id));
         self.rt_prev.retain(|id, _| ids.contains(id));
+        self.non_gamepad_logged.retain(|id| ids.contains(id));
         for &id in &ids {
             if self.pads.contains_key(&id) {
                 continue;
             }
             if !self.gamepad.is_gamepad(id) {
+                if !self.non_gamepad_logged.contains(&id) {
+                    if let Ok(name) = self.gamepad.name_for_id(id) {
+                        let lower = name.to_lowercase();
+                        if lower.contains("nintendo")
+                            || lower.contains("switch")
+                            || lower.contains("pro controller")
+                        {
+                            log::warn!(
+                                "SDL lists '{name}' (id={}) but is_gamepad=false — controller input is disabled. \
+                                 Re-pair the pad, update the game/SDL, or set SDL_GAMECONTROLLERCONFIG / SDL hints per SDL docs.",
+                                id.0
+                            );
+                        }
+                    }
+                    self.non_gamepad_logged.insert(id);
+                }
                 continue;
             }
             match self.gamepad.open(id) {
                 Ok(gp) => {
                     let name = gp.name().unwrap_or_else(|| "(unknown)".into());
                     let rumble = unsafe { gp.has_rumble() };
-                    log::info!(
+                    log::debug!(
                         "SDL gamepad opened: id={} name={name:?} SDL_PROP_GAMEPAD_CAP_RUMBLE={rumble}",
                         id.0
                     );
                     if !rumble {
                         log::warn!(
-                            "This gamepad reports no rumble to SDL — force feedback will not run (common on macOS USB Xbox; try Bluetooth, or MAHJURO_SDL_XBOX_HIDAPI=1)."
+                            "This gamepad reports no rumble to SDL — force feedback will not run (driver/SDL limits; see SDL joystick hints)."
                         );
                     }
                     self.lt_prev.insert(id, 0.0);
@@ -159,7 +163,9 @@ impl SdlShell {
     }
 
     pub fn set_desktop_fullscreen(&mut self, on: bool) -> anyhow::Result<()> {
-        self.window.set_fullscreen(on).map_err(anyhow::Error::from)?;
+        self.window
+            .set_fullscreen(on)
+            .map_err(anyhow::Error::from)?;
         Ok(())
     }
 }
