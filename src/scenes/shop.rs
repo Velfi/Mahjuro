@@ -20,6 +20,16 @@ pub(crate) fn shop_celebration_camera(w: f32, h: f32, env_h: f32) -> CameraParam
     view::shop_camera_base(w, h, env_h)
 }
 
+pub(crate) fn sync_item_inspect_orbit_target(
+    scene: &ShopScene,
+    run: &crate::game::run::RunState,
+    w: f32,
+    h: f32,
+    orbit: &mut crate::scenes::item_inspect::ItemInspectOrbitState,
+) {
+    view::shop_sync_item_inspect_orbit_target(scene, run, w, h, orbit);
+}
+
 use self::layout::*;
 use self::shared::*;
 

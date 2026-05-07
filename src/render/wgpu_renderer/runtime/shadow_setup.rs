@@ -49,7 +49,10 @@ impl WgpuRenderer {
         let light_view_proj_arr = light_view_proj.to_cols_array();
         // Shop props share `lit_mesh` + the table key-light shadow map; frustum is fit to mahjong
         // scale near the origin while shop geometry uses `window_h` world extent — PCF zeros relics.
-        let shop_suppresses_shadow = self.active_scene_key.as_deref() == Some("shop");
+        let shop_suppresses_shadow = matches!(
+            self.active_scene_key.as_deref(),
+            Some("shop" | "tile_pack_celebration")
+        );
         let shadow_enabled_flag =
             if shadows_enabled && !shop_suppresses_shadow { 1.0_f32 } else { 0.0 };
         self.queue.write_buffer(

@@ -10,4 +10,5 @@
 - gold piles need work, revisit different objects for different denominations
 - remove solitaire from the main menu
 - consider merging the profile and collection screens
-- 
+- controller rumble broken
+  - We switched to SDL to avoid gilrs problems. Let's make sure everything we think we got out of the switch is actually real.

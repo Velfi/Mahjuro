@@ -13,14 +13,16 @@
 //!
 //! - **macOS**: installed as the global NSApp menu via `init_for_nsapp()`.
 //! - **Windows**: installed onto the main window's HWND via `init_for_hwnd()`.
-//!   The HWND is extracted from the winit window's `RawWindowHandle::Win32`.
+//!   The HWND is extracted from the SDL window's `RawWindowHandle::Win32`.
 //! - **Linux**: muda requires GTK on Linux, which the rest of the app does not
 //!   pull in. The menu is built (so `poll()` continues to work for any
 //!   programmatically-injected events) but is *not* attached to the window —
 //!   Linux users reach the same actions via in-app keyboard shortcuts instead.
 
 use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
-use winit::window::Window;
+#[cfg(target_os = "windows")]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use sdl3::video::Window;
 
 use crate::core::boss::{BossKind, all_bosses, final_bosses};
 use crate::core::relic::{RelicId, all_relic_defs};
@@ -388,7 +390,6 @@ fn install_menu(menu: &Menu, _window: &Window) {
 
 #[cfg(target_os = "windows")]
 fn install_menu(menu: &Menu, window: &Window) {
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let handle = match window.window_handle() {
         Ok(h) => h,
         Err(_) => {

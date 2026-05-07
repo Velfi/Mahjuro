@@ -114,8 +114,11 @@ impl TilePackCelebrationScene {
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
             }
             CelebPhase::Reveal => {
-                let tile_size = h * 0.13;
-                let gap = tile_size * 0.25;
+                // Strong perspective tilt enlarges the face on screen — keep height and row width tight.
+                let gap_ratio = 0.22_f32;
+                let row_units = n as f32 * (1.0 + gap_ratio) - gap_ratio;
+                let tile_size = (h * 0.048).min((w * 0.48) / row_units.max(1.0));
+                let gap = tile_size * gap_ratio;
                 let total_w = n as f32 * tile_size + (n.saturating_sub(1)) as f32 * gap;
                 let row_x0 = (w - total_w) * 0.5 + w * self.positions.celeb_pack_reveal.nx;
                 let row_py = h * self.positions.celeb_pack_reveal.ny;
@@ -124,7 +127,7 @@ impl TilePackCelebrationScene {
                 let src_py = h * self.positions.celeb_pack_closeup.ny;
                 let src_lift = row_lift + h * 0.15;
                 let row_rx =
-                    self.positions.celeb_pack_reveal.rx_deg.to_radians() + 60.0_f32.to_radians();
+                    self.positions.celeb_pack_reveal.rx_deg.to_radians() + 32.0_f32.to_radians();
                 let row_ry = self.positions.celeb_pack_reveal.ry_deg.to_radians();
                 let row_rz =
                     self.positions.celeb_pack_reveal.rz_deg.to_radians() + std::f32::consts::PI;
@@ -146,7 +149,7 @@ impl TilePackCelebrationScene {
                         rotation: [row_rx, row_ry, row_rz],
                         scale,
                         size_px: tile_size,
-                        brightness: 1.0,
+                        brightness: 0.82,
                         selected: false,
                         hovered: false,
                         outline: false,
@@ -181,19 +184,19 @@ fn pack_celebration_isolation_lights(
             pos: [cx + w * 0.14, row_py - h * 0.22, lift + h * 0.48],
             radius: h * 3.2,
             color: [1.0, 0.93, 0.78],
-            intensity: 5.2,
+            intensity: 1.55,
         },
         PointLight {
             pos: [cx - w * 0.16, row_py + h * 0.06, lift + h * 0.32],
             radius: h * 2.8,
             color: [0.70, 0.82, 1.0],
-            intensity: 3.4,
+            intensity: 1.05,
         },
         PointLight {
             pos: [cx, row_py - h * 0.38, lift + h * 0.62],
             radius: h * 2.6,
             color: [1.0, 0.97, 0.90],
-            intensity: 4.0,
+            intensity: 1.25,
         },
     ]
 }

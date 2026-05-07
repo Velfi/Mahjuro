@@ -167,7 +167,7 @@ impl WgpuRenderer {
             self.active_scene_key.as_deref(),
             frame.camera_override.as_ref(),
         ) {
-            (Some("shop"), Some(cam))
+            (Some("shop") | Some("tile_pack_celebration"), Some(cam))
                 if frame.cmds.iter().any(|c| {
                     matches!(
                         c,

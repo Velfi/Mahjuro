@@ -1,4 +1,4 @@
-//! Mahjuro — UI-first shell: winit + wgpu + cassowary + input + scene system.
+//! Mahjuro — UI-first shell: SDL3 + wgpu + cassowary + input + scene system.
 
 // Release builds on Windows: detach from the console so launching the .exe
 // doesn't pop a black terminal behind the game window. Debug builds keep the
@@ -32,18 +32,21 @@ mod main_debug_state;
 mod main_draw;
 #[path = "main/event_loop.rs"]
 mod main_event_loop;
+#[path = "main/frame_tick.rs"]
+mod main_frame_tick;
 #[path = "main/headless.rs"]
 mod main_headless;
 #[path = "main/render_settings.rs"]
 mod main_render_settings;
 mod persistence;
+mod physical_size;
 mod render;
 mod scenes;
+mod sdl_shell;
 mod steam;
 mod ui;
 mod update_check;
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -75,12 +78,9 @@ use serde::{Deserialize, Serialize};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
-use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowId};
+
+use crate::physical_size::PhysicalSize;
+use sdl3::keyboard::{Mod, Scancode};
 
 use main_arrange::{
     ArrangeInput, apply_arrange_to_layout, arrange_hierarchy_flat, collect_committed_rotations,
@@ -109,7 +109,8 @@ enum TransitionKind {
 }
 
 struct App {
-    window: Option<Arc<Window>>,
+    /// Last known drawable size in pixels (updated each SDL frame).
+    last_drawable_px: PhysicalSize,
     renderer: Option<WgpuRenderer>,
     layout_engine: UiLayout,
     input: Option<InputState>,
@@ -173,7 +174,7 @@ struct App {
     /// Steam is hosting us (Steam owns updates).
     #[cfg(target_os = "macos")]
     sparkle: Option<macos_updater::SparkleUpdater>,
-    modifiers: ModifiersState,
+    modifiers: Mod,
     /// Shop drag-to-sell: the 3D hit that started a mouse-drag over an owned
     /// shop item, plus the cursor position at drag start.  Set on mouse-down;
     /// if the cursor moves far enough and is over the sell tray on mouse-up,
@@ -291,8 +292,8 @@ impl App {
         if is_steam_build {
             log::info!("Steam-hosted build detected; skipping in-app updaters");
         }
-        Self {
-            window: None,
+            Self {
+            last_drawable_px: PhysicalSize::new(1920, 1080),
             renderer: None,
             layout_engine: UiLayout::new(),
             input: None,
@@ -350,54 +351,50 @@ impl App {
             sparkle: (!is_steam_build)
                 .then(macos_updater::SparkleUpdater::start)
                 .flatten(),
-            modifiers: ModifiersState::default(),
+            modifiers: Mod::NOMOD,
             shop_drag_start: None::<(ShopHit, (f32, f32))>,
             steam,
         }
     }
 
-    fn toggle_fullscreen(&self) {
-        let Some(window) = self.window.as_ref() else {
-            return;
-        };
-        let fullscreen = if window.fullscreen().is_some() {
-            None
-        } else {
-            Some(Fullscreen::Borderless(None))
-        };
-        window.set_fullscreen(fullscreen);
+    fn toggle_fullscreen(&mut self, shell: &mut sdl_shell::SdlShell) -> anyhow::Result<()> {
+        let on = shell.desktop_fullscreen_on();
+        shell.set_desktop_fullscreen(!on)?;
+        Ok(())
     }
 
-    fn wants_fullscreen_shortcut(&self, event: &KeyEvent) -> bool {
-        if event.repeat || event.state != ElementState::Pressed {
+    fn wants_fullscreen_shortcut(
+        &self,
+        scancode: Option<Scancode>,
+        keymod: Mod,
+        repeat: bool,
+    ) -> bool {
+        if repeat {
             return false;
         }
-        let PhysicalKey::Code(code) = event.physical_key else {
+        let Some(code) = scancode else {
             return false;
         };
 
         #[cfg(target_os = "windows")]
         {
-            let no_extra_modifiers = !self.modifiers.control_key()
-                && !self.modifiers.shift_key()
-                && !self.modifiers.super_key();
-            self.modifiers.alt_key()
+            let no_extra_modifiers = !(keymod.contains(Mod::LCTRLMOD | Mod::RCTRLMOD)
+                || keymod.contains(Mod::LSHIFTMOD | Mod::RSHIFTMOD)
+                || keymod.contains(Mod::LGUIMOD | Mod::RGUIMOD));
+            keymod.contains(Mod::LALTMOD | Mod::RALTMOD)
                 && no_extra_modifiers
-                && matches!(code, KeyCode::Enter | KeyCode::NumpadEnter)
+                && matches!(code, Scancode::Return | Scancode::KpEnter)
         }
 
         #[cfg(target_os = "macos")]
         {
-            // `fn` is generally handled below the app layer on macOS and is
-            // rarely surfaced by winit, so the practical signal we can bind
-            // is the bare `F` keypress that macOS emits for the standard
-            // fullscreen shortcut on Apple keyboards.
-            self.modifiers.is_empty() && code == KeyCode::KeyF
+            keymod.is_empty() && code == Scancode::F
         }
 
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         {
             let _ = code;
+            let _ = keymod;
             false
         }
     }
@@ -481,11 +478,9 @@ fn main() -> anyhow::Result<()> {
                 steam::SteamClient::init()
             };
 
-            let event_loop = EventLoop::new()?;
-            event_loop.set_control_flow(ControlFlow::Poll);
-
-            let mut app = App::new(steam);
-            event_loop.run_app(&mut app)?;
+            let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080)?;
+            let app = App::new(steam);
+            app.run_sdl_main(&mut shell)?;
             Ok(())
         }));
 

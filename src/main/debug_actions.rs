@@ -32,13 +32,8 @@ impl App {
                     runs
                 );
                 if let Some(result) = level_up {
-                    let win_size = self
-                        .window
-                        .as_ref()
-                        .map(|w| w.inner_size())
-                        .unwrap_or(PhysicalSize::new(800, 600));
-                    let ww = win_size.width as f32;
-                    let wh = win_size.height as f32;
+                    let ww = self.last_drawable_px.width as f32;
+                    let wh = self.last_drawable_px.height as f32;
                     if let Some(modal) = main_draw::build_level_up_modal(&result, ww, wh) {
                         self.modals.push(modal);
                         self.audio.play_sfx(audio::SfxId::LevelUp);
@@ -194,13 +189,11 @@ impl App {
             },
             DebugAction::DemoCascade => {
                 if let Scene::Gameplay(gp) = &mut self.scene {
-                    if let Some(win) = self.window.as_ref() {
-                        let size = win.inner_size();
-                        let layout = self
-                            .layout_engine
-                            .solve(size.width as f32, size.height as f32);
-                        gp.debug_demo_cascade(&layout, &self.run);
-                    }
+                    let size = self.last_drawable_px;
+                    let layout = self
+                        .layout_engine
+                        .solve(size.width as f32, size.height as f32);
+                    gp.debug_demo_cascade(&layout, &self.run);
                 } else {
                     let name = match &self.scene {
                         Scene::Splash(_) => "Splash",
@@ -304,10 +297,6 @@ impl App {
                     );
                 }
             }
-        }
-        // Request redraw to reflect changes immediately.
-        if let Some(w) = self.window.as_ref() {
-            w.request_redraw();
         }
     }
 }

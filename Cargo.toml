@@ -19,17 +19,17 @@ fontdue = "0.8"
 glam = { version = "0.30.9", features = ["bytemuck"] }
 gltf = { version = "1.4.1", features = ["KHR_texture_transform", "KHR_lights_punctual"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-gilrs = "0.11.0"
+sdl3 = { version = "0.17", features = ["build-from-source", "raw-window-handle"] }
 log = "0.4.28"
 pollster = "0.4.0"
 rand = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+raw-window-handle = "0.6"
 thiserror = "2.0.18"
 ttf-parser = "0.25"
 tokio = "1.51.0"
 wgpu = "29.0.1"
-winit = "0.30.12"
 muda = "0.17.2"
 chrono = "0.4.44"
 dirs = "5"

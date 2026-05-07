@@ -14,15 +14,30 @@ impl WgpuRenderer {
         // any surface and picks the format itself.
         let (surface_opt, size, hdr_enabled): (
             Option<wgpu::Surface<'static>>,
-            winit::dpi::PhysicalSize<u32>,
+            crate::physical_size::PhysicalSize,
             bool,
         ) = match &target_init {
             TargetInit::Windowed {
                 window,
                 hdr_enabled,
             } => {
-                let size = window.inner_size();
-                let surface = instance.create_surface(window.clone())?;
+                let (pw, ph) = window.size_in_pixels();
+                let size = crate::physical_size::PhysicalSize::new(pw.max(1), ph.max(1));
+                use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+                let raw_window_handle = window
+                    .window_handle()
+                    .map_err(|e| anyhow::anyhow!("window_handle: {e}"))?
+                    .as_raw();
+                let raw_display_handle = window
+                    .display_handle()
+                    .map_err(|e| anyhow::anyhow!("display_handle: {e}"))?
+                    .as_raw();
+                let surface = unsafe {
+                    instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                        raw_display_handle: Some(raw_display_handle),
+                        raw_window_handle,
+                    })?
+                };
                 (Some(surface), size, *hdr_enabled)
             }
             TargetInit::Headless {
@@ -30,7 +45,7 @@ impl WgpuRenderer {
                 height,
                 hdr_enabled,
             } => {
-                let size = winit::dpi::PhysicalSize::new((*width).max(1), (*height).max(1));
+                let size = crate::physical_size::PhysicalSize::new((*width).max(1), (*height).max(1));
                 (None, size, *hdr_enabled)
             }
         };

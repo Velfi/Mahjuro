@@ -374,7 +374,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         if (pbr.alpha_mode == 2u) {
             out_alpha = tex_a;
         }
-        base_rgb = base_s.rgb * in.v_color.rgb;
+        // See `shop_glb.wgsl`: alpha-mask base colour with zero RGB (common on text meshes).
+        var tex_rgb = base_s.rgb;
+        let tex_lum = dot(tex_rgb, vec3<f32>(0.299, 0.587, 0.114));
+        if ((pbr.alpha_mode == 1u || pbr.alpha_mode == 2u)
+            && tex_lum < 1e-4
+            && base_s.a > 1e-4) {
+            tex_rgb = vec3<f32>(base_s.a);
+        }
+        base_rgb = tex_rgb * in.v_color.rgb;
     } else {
         // Real mahjong tiles are a thin ivory/bone face layer glued onto a
         // bamboo body — the ivory wraps around the top of the side bevels

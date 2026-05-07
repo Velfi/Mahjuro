@@ -8,8 +8,7 @@ use crate::game::volumetric_tuning::VolumetricTuning;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
-use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use sdl3::keyboard::Scancode;
 
 // ── Debug visibility overlay ────────────────────────────────────────────
 
@@ -1245,15 +1244,12 @@ impl ShopEnvDebugOverlay {
 
     /// Keyboard while overlay is open. Returns `true` if the key was consumed
     /// (caller should skip the normal gameplay key dispatch).
-    pub fn feed_key_event(&mut self, event: &KeyEvent, ctrl: bool) -> bool {
-        if event.state != ElementState::Pressed {
-            return false;
-        }
-        let PhysicalKey::Code(code) = event.physical_key else {
+    pub fn feed_key_event(&mut self, scancode: Option<Scancode>, ctrl: bool) -> bool {
+        let Some(code) = scancode else {
             return false;
         };
 
-        if ctrl && matches!(code, KeyCode::KeyC) && !self.editing {
+        if ctrl && matches!(code, Scancode::C) && !self.editing {
             self.copy_to_clipboard();
             return true;
         }
@@ -1263,63 +1259,63 @@ impl ShopEnvDebugOverlay {
         }
 
         match code {
-            KeyCode::Backspace => {
+            Scancode::Backspace => {
                 let _ = self.edit_buffer.pop();
                 true
             }
-            KeyCode::Escape => {
+            Scancode::Escape => {
                 self.clear_edit();
                 true
             }
-            KeyCode::Enter | KeyCode::NumpadEnter => {
+            Scancode::Return | Scancode::KpEnter => {
                 self.commit_edit();
                 true
             }
-            KeyCode::Digit0 | KeyCode::Numpad0 => {
+            Scancode::_0 | Scancode::Kp0 => {
                 self.push_edit_char('0');
                 true
             }
-            KeyCode::Digit1 | KeyCode::Numpad1 => {
+            Scancode::_1 | Scancode::Kp1 => {
                 self.push_edit_char('1');
                 true
             }
-            KeyCode::Digit2 | KeyCode::Numpad2 => {
+            Scancode::_2 | Scancode::Kp2 => {
                 self.push_edit_char('2');
                 true
             }
-            KeyCode::Digit3 | KeyCode::Numpad3 => {
+            Scancode::_3 | Scancode::Kp3 => {
                 self.push_edit_char('3');
                 true
             }
-            KeyCode::Digit4 | KeyCode::Numpad4 => {
+            Scancode::_4 | Scancode::Kp4 => {
                 self.push_edit_char('4');
                 true
             }
-            KeyCode::Digit5 | KeyCode::Numpad5 => {
+            Scancode::_5 | Scancode::Kp5 => {
                 self.push_edit_char('5');
                 true
             }
-            KeyCode::Digit6 | KeyCode::Numpad6 => {
+            Scancode::_6 | Scancode::Kp6 => {
                 self.push_edit_char('6');
                 true
             }
-            KeyCode::Digit7 | KeyCode::Numpad7 => {
+            Scancode::_7 | Scancode::Kp7 => {
                 self.push_edit_char('7');
                 true
             }
-            KeyCode::Digit8 | KeyCode::Numpad8 => {
+            Scancode::_8 | Scancode::Kp8 => {
                 self.push_edit_char('8');
                 true
             }
-            KeyCode::Digit9 | KeyCode::Numpad9 => {
+            Scancode::_9 | Scancode::Kp9 => {
                 self.push_edit_char('9');
                 true
             }
-            KeyCode::Period | KeyCode::NumpadDecimal => {
+            Scancode::Period | Scancode::KpPeriod => {
                 self.push_edit_char('.');
                 true
             }
-            KeyCode::Minus | KeyCode::NumpadSubtract => {
+            Scancode::Minus | Scancode::KpMinus => {
                 self.push_edit_char('-');
                 true
             }

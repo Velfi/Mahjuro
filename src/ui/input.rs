@@ -2,14 +2,18 @@
 
 use std::time::{Duration, Instant};
 
-use gilrs::{Axis, Button, Event as GilEvent, Gilrs};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use sdl3::event::Event;
+use sdl3::gamepad::{Axis as GpAxis, Button as GpButton};
+use sdl3::joystick::JoystickId;
+use sdl3::keyboard::Scancode;
+
+use crate::sdl_shell::SdlShell;
 
 use crate::game::run::RunState;
 use crate::render::animation::AnimationController;
 use crate::ui::button_prompts::GamepadStyle;
 
-/// Peak gilrs effect gain; multiplied each frame by [`shop_hold_rumble_gain_curve`].
+/// Peak rumble gain for shop hold; multiplied each frame by [`shop_hold_rumble_gain_curve`].
 const SHOP_HOLD_RUMBLE_PEAK_GAIN: f32 = 0.58;
 
 /// Short pulse on each scoring cascade step reveal.
@@ -18,10 +22,7 @@ const SCORING_STEP_RUMBLE_WEAK: u16 = 6_500;
 const SCORING_STEP_RUMBLE_STRONG: u16 = 2_200;
 const SCORING_STEP_RUMBLE_GAIN: f32 = 0.42;
 
-/// Extra wall-clock margin after `play_for` before dropping the effect handle.
-const SCORING_RUMBLE_KEEPALIVE_TAIL_MS: u64 = 45;
-
-/// Requests from the rumble lab scene: dual-motor FF via gilrs (`Weak` / `Strong`).
+/// Requests from the rumble lab scene: dual-motor rumble (`SDL_Gamepad::set_rumble`).
 #[derive(Clone, Debug)]
 pub enum RumbleLabOp {
     Pulse {
@@ -200,8 +201,19 @@ impl MarqueeSelect {
 const NAV_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(400);
 const NAV_REPEAT_INTERVAL: Duration = Duration::from_millis(90);
 
+fn joystick_id(raw: u32) -> JoystickId {
+    JoystickId::new(raw)
+}
+
+fn axis_norm(v: i16) -> f32 {
+    (v as f32 / 32767.0).clamp(-1.0, 1.0)
+}
+
+fn trigger_norm(v: i16) -> f32 {
+    (v.max(0) as f32 / 32767.0).clamp(0.0, 1.0)
+}
+
 pub struct InputState {
-    pub gilrs: Option<Gilrs>,
     pub focus_slot: usize,
     pub pointer_slot: Option<usize>,
     pub last_cursor: (f32, f32),
@@ -232,23 +244,23 @@ pub struct InputState {
     stick_repeat_x: Option<(i8, Instant)>,
     /// Left stick: repeat vertical nav while tilt is held past the deadzone.
     stick_repeat_y: Option<(i8, Instant)>,
+    /// D-pad hold repeats (also fed from SDL D-pad buttons).
+    dpad_axis_repeat_x: Option<(i8, Instant)>,
+    dpad_axis_repeat_y: Option<(i8, Instant)>,
     /// Right stick axes (−1..1) while shop item inspect is active.
     pub shop_inspect_orbit_stick: (f32, f32),
     /// Trigger analog zoom for shop inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_shop_inspect_analog`]).
     pub shop_inspect_zoom_triggers: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
     pub gamepad_style: GamepadStyle,
-    /// Continuous rumble during shop hold-to-sell (gilrs FF; gain varies each frame).
-    shop_sell_hold_rumble: Option<gilrs::ff::Effect>,
-    /// Hold [`gilrs::ff::Effect`] handles until one-shot scoring pulses finish (Drop stops playback).
-    scoring_rumble_keepalive: Vec<(Instant, gilrs::ff::Effect)>,
+    /// Scheduled scoring / rumble-lab pulses (`SDL_Gamepad::set_rumble` cannot overlap envelope/composite).
+    scoring_rumble_schedule: Vec<(Instant, u16, u16, u32, f32)>,
 }
 
 impl InputState {
     pub fn new() -> anyhow::Result<Self> {
         let settings = crate::persistence::load_settings();
         Ok(Self {
-            gilrs: Gilrs::new().ok(),
             focus_slot: 0,
             pointer_slot: None,
             last_cursor: (0.0, 0.0),
@@ -263,18 +275,60 @@ impl InputState {
             dpad_repeat: None,
             stick_repeat_x: None,
             stick_repeat_y: None,
+            dpad_axis_repeat_x: None,
+            dpad_axis_repeat_y: None,
             shop_inspect_orbit_stick: (0.0, 0.0),
             shop_inspect_zoom_triggers: 0.0,
             gamepad_style: GamepadStyle::default(),
-            shop_sell_hold_rumble: None,
-            scoring_rumble_keepalive: Vec::new(),
+            scoring_rumble_schedule: Vec::new(),
         })
     }
 
-    /// Drop finished one-shot scoring rumble effects so motors release cleanly.
-    pub fn tick_scoring_rumble_keepalive(&mut self, now: Instant) {
-        self.scoring_rumble_keepalive
-            .retain(|(until, _)| now < *until);
+    /// Run scheduled SDL rumble pulses (composite / staggered lab patterns).
+    pub fn tick_scoring_rumble_keepalive(&mut self, shell: &mut SdlShell, now: Instant) {
+        let mut fired: Vec<(u16, u16, u32, f32)> = Vec::new();
+        self.scoring_rumble_schedule.retain(|(at, w, s, d, g)| {
+            if *at <= now {
+                fired.push((*w, *s, *d, *g));
+                false
+            } else {
+                true
+            }
+        });
+        for (w, s, d, g) in fired {
+            Self::fire_sdl_rumble(shell, w, s, d, g);
+        }
+    }
+
+    fn fire_sdl_rumble(shell: &mut SdlShell, weak: u16, strong: u16, duration_ms: u32, gain: f32) {
+        if duration_ms == 0 {
+            return;
+        }
+        let g = gain.clamp(0.0, 1.0);
+        let low = ((weak as f32) * g).min(65535.0) as u16;
+        let high = ((strong as f32) * g).min(65535.0) as u16;
+        if low == 0 && high == 0 {
+            return;
+        }
+        if shell.pads.is_empty() {
+            log::warn!(
+                "gamepad rumble skipped: no opened SDL gamepads (device may lack mapping or open failed)"
+            );
+            return;
+        }
+        for gp in shell.pads.values_mut() {
+            if let Err(e) = gp.set_rumble(low, high, duration_ms) {
+                log::warn!("sdl gamepad rumble failed: {e}");
+            }
+        }
+        shell.sync_gamepad_rumble_output();
+    }
+
+    fn stop_sdl_rumble(shell: &mut SdlShell) {
+        for gp in shell.pads.values_mut() {
+            let _ = gp.set_rumble(0, 0, 1);
+        }
+        shell.sync_gamepad_rumble_output();
     }
 
     /// Same motors/gain as [`Self::play_scoring_cascade_step_rumble`] — for the debug lab UI.
@@ -299,7 +353,7 @@ impl InputState {
     }
 
     /// Drain rumble patterns queued by the rumble lab debug scene.
-    pub fn apply_rumble_lab_ops(&mut self, now: Instant, ops: Vec<RumbleLabOp>) {
+    pub fn apply_rumble_lab_ops(&mut self, shell: &mut SdlShell, now: Instant, ops: Vec<RumbleLabOp>) {
         for op in ops {
             match op {
                 RumbleLabOp::Pulse {
@@ -307,9 +361,9 @@ impl InputState {
                     strong,
                     duration_ms,
                     gain,
-                } => self.play_scoring_rumble_pulse(now, weak, strong, duration_ms, gain),
+                } => self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain),
                 RumbleLabOp::Composite { gain, segments } => {
-                    self.play_rumble_composite(now, gain, &segments);
+                    self.play_rumble_composite(shell, now, gain, &segments);
                 }
                 RumbleLabOp::Envelope {
                     gain,
@@ -318,81 +372,41 @@ impl InputState {
                     duration_ms,
                     attack_ms,
                     fade_ms,
-                } => self.play_rumble_envelope(now, gain, weak, strong, duration_ms, attack_ms, fade_ms),
+                } => self.play_rumble_envelope(
+                    shell,
+                    now,
+                    gain,
+                    weak,
+                    strong,
+                    duration_ms,
+                    attack_ms,
+                    fade_ms,
+                ),
             }
         }
     }
 
     fn play_rumble_composite(
         &mut self,
+        shell: &mut SdlShell,
         now: Instant,
         gain: f32,
         segments: &[(u32, u16, u16, u32)],
     ) {
-        use gilrs::ff::{
-            BaseEffect, BaseEffectType, EffectBuilder, Replay, Repeat, Ticks,
-        };
-
-        let Some(ref mut gilrs) = self.gilrs else {
-            return;
-        };
-        if segments.is_empty() {
+        if shell.pads.is_empty() || segments.is_empty() {
             return;
         }
-
-        let ids: Vec<_> = gilrs
-            .gamepads()
-            .filter_map(|(id, gp)| (gp.is_connected() && gp.is_ff_supported()).then_some(id))
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-
-        let mut total_ms = 1u32;
-        for &(delay, _, _, dur) in segments {
-            total_ms = total_ms.max(delay.saturating_add(dur.max(1)));
-        }
-
-        let mut builder = EffectBuilder::new();
-        builder.gain(gain.clamp(0.0, 1.0));
-        builder.repeat(Repeat::For(Ticks::from_ms(total_ms)));
+        let g = gain.clamp(0.0, 1.0);
         for &(delay, weak, strong, dur) in segments {
-            let after = Ticks::from_ms(delay);
-            let play_for = Ticks::from_ms(dur.max(1));
-            builder.add_effect(BaseEffect {
-                kind: BaseEffectType::Weak { magnitude: weak },
-                scheduling: Replay {
-                    after,
-                    play_for,
-                    with_delay: Ticks::from_ms(0),
-                },
-                envelope: Default::default(),
-            });
-            builder.add_effect(BaseEffect {
-                kind: BaseEffectType::Strong { magnitude: strong },
-                scheduling: Replay {
-                    after,
-                    play_for,
-                    with_delay: Ticks::from_ms(0),
-                },
-                envelope: Default::default(),
-            });
-        }
-
-        match builder.gamepads(&ids).finish(gilrs) {
-            Ok(effect) => {
-                if effect.play().is_ok() {
-                    let until = now
-                        + Duration::from_millis(u64::from(total_ms) + SCORING_RUMBLE_KEEPALIVE_TAIL_MS);
-                    self.scoring_rumble_keepalive.push((until, effect));
-                }
-            }
-            Err(e) => log::debug!("rumble lab composite unavailable: {e}"),
+            let at = now + Duration::from_millis(u64::from(delay));
+            self.scoring_rumble_schedule
+                .push((at, weak, strong, dur.max(1), g));
         }
     }
 
     fn play_rumble_envelope(
         &mut self,
+        shell: &mut SdlShell,
         now: Instant,
         gain: f32,
         weak: u16,
@@ -401,133 +415,35 @@ impl InputState {
         attack_ms: u32,
         fade_ms: u32,
     ) {
-        use gilrs::ff::{
-            BaseEffect, BaseEffectType, EffectBuilder, Envelope, Replay, Repeat, Ticks,
-        };
-
-        let Some(ref mut gilrs) = self.gilrs else {
-            return;
-        };
-
-        let ids: Vec<_> = gilrs
-            .gamepads()
-            .filter_map(|(id, gp)| (gp.is_connected() && gp.is_ff_supported()).then_some(id))
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-
-        let dur_ticks = Ticks::from_ms(duration_ms.max(60));
-        let atk = Ticks::from_ms(attack_ms);
-        let fade = Ticks::from_ms(fade_ms);
-        // gilrs asserts attack + fade < play_for duration (tick granularity).
         let min_gap_ticks = 3u32;
         let dur_tick_u32 = duration_ms.max(60).div_ceil(50).max(2);
         let atk_tick_u32 = attack_ms.div_ceil(50);
         let fade_tick_u32 = fade_ms.div_ceil(50);
         if atk_tick_u32 + fade_tick_u32 + min_gap_ticks >= dur_tick_u32 {
-            self.play_scoring_rumble_pulse(now, weak, strong, duration_ms.max(60), gain);
+            self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms.max(60), gain);
             return;
         }
-
-        let env = Envelope {
-            attack_length: atk,
-            attack_level: 0.03,
-            fade_length: fade,
-            fade_level: 0.03,
-        };
-        let scheduling = Replay {
-            after: Ticks::from_ms(0),
-            play_for: dur_ticks,
-            with_delay: Ticks::from_ms(0),
-        };
-
-        let mut builder = EffectBuilder::new();
-        builder.gain(gain.clamp(0.0, 1.0));
-        builder.repeat(Repeat::For(dur_ticks));
-        builder.add_effect(BaseEffect {
-            kind: BaseEffectType::Weak { magnitude: weak },
-            scheduling,
-            envelope: env,
-        });
-        builder.add_effect(BaseEffect {
-            kind: BaseEffectType::Strong { magnitude: strong },
-            scheduling,
-            envelope: env,
-        });
-
-        match builder.gamepads(&ids).finish(gilrs) {
-            Ok(effect) => {
-                if effect.play().is_ok() {
-                    let wall_ms = duration_ms.max(60);
-                    let until = now
-                        + Duration::from_millis(u64::from(wall_ms) + SCORING_RUMBLE_KEEPALIVE_TAIL_MS);
-                    self.scoring_rumble_keepalive.push((until, effect));
-                }
-            }
-            Err(e) => log::debug!("rumble lab envelope unavailable: {e}"),
-        }
+        // SDL rumble has no attack/fade envelope — single pulse is the closest match.
+        self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms.max(60), gain);
     }
 
-    /// Fire-and-forget scoring cascade pulse on all FF-capable connected gamepads.
+    /// Fire-and-forget scoring cascade pulse on connected gamepads.
     pub fn play_scoring_rumble_pulse(
         &mut self,
-        now: Instant,
+        shell: &mut SdlShell,
+        _now: Instant,
         weak: u16,
         strong: u16,
         duration_ms: u32,
         gain: f32,
     ) {
-        use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Replay, Ticks};
-
-        let Some(ref mut gilrs) = self.gilrs else {
-            return;
-        };
-        let ids: Vec<_> = gilrs
-            .gamepads()
-            .filter_map(|(id, gp)| (gp.is_connected() && gp.is_ff_supported()).then_some(id))
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-
-        let play_for = Ticks::from_ms(duration_ms);
-        let mut builder = EffectBuilder::new();
-        builder.gain(gain.clamp(0.0, 1.0));
-        builder.add_effect(BaseEffect {
-            kind: BaseEffectType::Weak { magnitude: weak },
-            scheduling: Replay {
-                after: Ticks::from_ms(0),
-                play_for,
-                with_delay: Ticks::from_ms(0),
-            },
-            envelope: Default::default(),
-        });
-        builder.add_effect(BaseEffect {
-            kind: BaseEffectType::Strong { magnitude: strong },
-            scheduling: Replay {
-                after: Ticks::from_ms(0),
-                play_for,
-                with_delay: Ticks::from_ms(0),
-            },
-            envelope: Default::default(),
-        });
-
-        match builder.gamepads(&ids).finish(gilrs) {
-            Ok(effect) => {
-                if effect.play().is_ok() {
-                    let until = now
-                        + Duration::from_millis(u64::from(duration_ms) + SCORING_RUMBLE_KEEPALIVE_TAIL_MS);
-                    self.scoring_rumble_keepalive.push((until, effect));
-                }
-            }
-            Err(e) => log::debug!("scoring cascade rumble unavailable: {e}"),
-        }
+        Self::fire_sdl_rumble(shell, weak, strong, duration_ms, gain);
     }
 
     /// Light tap aligned with each cascade reveal beat (score tick SFX).
-    pub fn play_scoring_cascade_step_rumble(&mut self, now: Instant) {
+    pub fn play_scoring_cascade_step_rumble(&mut self, shell: &mut SdlShell, now: Instant) {
         self.play_scoring_rumble_pulse(
+            shell,
             now,
             SCORING_STEP_RUMBLE_WEAK,
             SCORING_STEP_RUMBLE_STRONG,
@@ -537,79 +453,43 @@ impl InputState {
     }
 
     /// Stronger pulse for the final total; scales with hand magnitude like screen shake.
-    pub fn play_scoring_cascade_final_rumble(&mut self, now: Instant, earned: u64) {
+    pub fn play_scoring_cascade_final_rumble(&mut self, shell: &mut SdlShell, now: Instant, earned: u64) {
         let (weak, strong, duration_ms, gain) = Self::cascade_final_rumble_params(earned);
-        self.play_scoring_rumble_pulse(now, weak, strong, duration_ms, gain);
+        self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
     }
 
     /// Drive shop hold-to-sell rumble (same master toggle as scoring-cascade rumble).
-    /// Call once per frame after scene update. `hold_progress` is ignored unless `active`.
+    /// Call once per frame after scene update, only while the unobstructed shop face is active.
+    /// When `active` is false this stops motors — do not call from other scenes or overlays
+    /// or you will cancel unrelated rumble. `hold_progress` is ignored unless `active`.
     pub fn sync_shop_sell_hold_rumble(
         &mut self,
+        shell: &mut SdlShell,
         active: bool,
         controller: bool,
         rumble_enabled: bool,
         hold_progress: f32,
     ) {
-        use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder, Replay, Ticks};
-
         if !active || !controller || !rumble_enabled {
-            if let Some(e) = self.shop_sell_hold_rumble.take() {
-                let _ = e.stop();
-            }
+            Self::stop_sdl_rumble(shell);
             return;
         }
 
-        let Some(ref mut gilrs) = self.gilrs else {
+        if shell.pads.is_empty() {
             return;
-        };
-
-        if self.shop_sell_hold_rumble.is_none() {
-            let ids: Vec<_> = gilrs
-                .gamepads()
-                .filter_map(|(id, gp)| (gp.is_connected() && gp.is_ff_supported()).then_some(id))
-                .collect();
-            if ids.is_empty() {
-                return;
-            }
-
-            let play_for = Ticks::from_ms(90_000);
-            let mut builder = EffectBuilder::new();
-            builder.gain(SHOP_HOLD_RUMBLE_PEAK_GAIN);
-            builder.add_effect(BaseEffect {
-                kind: BaseEffectType::Weak { magnitude: 18_000 },
-                scheduling: Replay {
-                    after: Ticks::from_ms(0),
-                    play_for,
-                    with_delay: Ticks::from_ms(0),
-                },
-                envelope: Default::default(),
-            });
-            builder.add_effect(BaseEffect {
-                kind: BaseEffectType::Strong { magnitude: 5_000 },
-                scheduling: Replay {
-                    after: Ticks::from_ms(0),
-                    play_for,
-                    with_delay: Ticks::from_ms(0),
-                },
-                envelope: Default::default(),
-            });
-
-            match builder.gamepads(&ids).finish(gilrs) {
-                Ok(effect) => {
-                    if effect.play().is_ok() {
-                        self.shop_sell_hold_rumble = Some(effect);
-                    }
-                }
-                Err(e) => log::debug!("shop sell hold rumble unavailable: {e}"),
-            }
         }
 
         let curve = shop_hold_rumble_gain_curve(hold_progress);
         let gain = SHOP_HOLD_RUMBLE_PEAK_GAIN * curve;
-        if let Some(ref effect) = self.shop_sell_hold_rumble {
-            let _ = effect.set_gain(gain);
+        let low = ((18_000u32 as f32) * gain).min(65535.0) as u16;
+        let high = ((5_000u32 as f32) * gain).min(65535.0) as u16;
+        const HOLD_REFRESH_MS: u32 = 120;
+        for gp in shell.pads.values_mut() {
+            if let Err(e) = gp.set_rumble(low, high, HOLD_REFRESH_MS) {
+                log::debug!("shop sell hold rumble: {e}");
+            }
         }
+        shell.sync_gamepad_rumble_output();
     }
 
     pub fn focused_index(&self) -> usize {
@@ -635,61 +515,38 @@ impl InputState {
         };
     }
 
-    /// Poll gilrs; returns emitted actions.  Sets mode to Controller if any
-    /// action is produced.  Returns true if the mode changed.
-    pub fn poll_gamepads(
+    /// Handle one SDL controller event from the shared [`SdlShell`] pump.
+    /// Returns true when focus mode switches to [`InputMode::Controller`].
+    pub fn handle_controller_event(
         &mut self,
-        actions: &mut Vec<UiAction>,
+        shell: &mut SdlShell,
+        event: Event,
         poll_ctx: GamepadPollCtx,
+        actions: &mut Vec<UiAction>,
     ) -> bool {
-        self.shop_inspect_orbit_stick = (0.0, 0.0);
-        self.shop_inspect_zoom_triggers = 0.0;
-
         let before = actions.len();
-        {
-            let Some(ref mut gilrs) = self.gilrs else {
-                return false;
-            };
-            const STICK_DEADZONE: f32 = 0.65;
-            while let Some(GilEvent { id, event, .. }) = gilrs.next_event() {
-                use gilrs::EventType::*;
-                match event {
-                    Connected => {
-                        let gp = gilrs.gamepad(id);
-                        self.gamepad_style =
-                            GamepadStyle::infer(gp.vendor_id(), gp.os_name());
-                    }
-                    ButtonPressed(Button::South, _) => actions.push(if self.swap_ab {
+
+        const STICK_DEADZONE: f32 = 0.65;
+        const TRIG_PRESS: f32 = 0.65;
+
+        match event {
+                Event::ControllerDeviceAdded { .. }
+                | Event::ControllerDeviceRemoved { .. }
+                | Event::ControllerDeviceRemapped { .. } => {
+                    shell.refresh_gamepads();
+                }
+                Event::ControllerButtonDown { button, .. } => match button {
+                    GpButton::South => actions.push(if self.swap_ab {
                         UiAction::Cancel
                     } else {
                         UiAction::Confirm
                     }),
-                    ButtonReleased(Button::South, _) => {
-                        if !self.swap_ab {
-                            actions.push(UiAction::ConfirmRelease);
-                        }
-                    }
-                    ButtonPressed(Button::East, _) => actions.push(if self.swap_ab {
+                    GpButton::East => actions.push(if self.swap_ab {
                         UiAction::Confirm
                     } else {
                         UiAction::Cancel
                     }),
-                    ButtonReleased(Button::East, _) => {
-                        if self.swap_ab {
-                            actions.push(UiAction::ConfirmRelease);
-                        }
-                    }
-                    ButtonPressed(Button::LeftTrigger2, _) => {
-                        if !poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::TriggerStructure);
-                        }
-                    }
-                    ButtonPressed(Button::RightTrigger2, _) => {
-                        if !poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::TriggerStructure);
-                        }
-                    }
-                    ButtonPressed(Button::West, _) => {
+                    GpButton::West => {
                         if poll_ctx.shop_face_buttons {
                             actions.push(UiAction::ShopSellHoldPress);
                         } else {
@@ -700,12 +557,7 @@ impl InputState {
                             });
                         }
                     }
-                    ButtonReleased(Button::West, _) => {
-                        if poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::ShopSellHoldRelease);
-                        }
-                    }
-                    ButtonPressed(Button::North, _) => {
+                    GpButton::North => {
                         if poll_ctx.shop_face_buttons || poll_ctx.collection_inspect_north {
                             actions.push(UiAction::ShopItemInspectToggle);
                         } else {
@@ -716,102 +568,177 @@ impl InputState {
                             });
                         }
                     }
-                    AxisChanged(Axis::LeftStickX, v, _) => {
-                        let old_dir = self.left_stick_x_dir;
-                        let new_dir = if v >= STICK_DEADZONE {
-                            1
-                        } else if v <= -STICK_DEADZONE {
-                            -1
-                        } else {
-                            0
-                        };
-                        self.left_stick_x_dir = new_dir;
-                        if new_dir == 0 {
-                            self.stick_repeat_x = None;
-                        } else if new_dir != old_dir {
-                            actions.push(if new_dir > 0 {
-                                UiAction::FocusNext
-                            } else {
-                                UiAction::FocusPrev
-                            });
-                            self.last_stick_nav_at = Instant::now();
-                            self.stick_repeat_x =
-                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
-                        }
-                    }
-                    AxisChanged(Axis::LeftStickY, v, _) => {
-                        let old_dir = self.left_stick_y_dir;
-                        let new_dir = if v >= STICK_DEADZONE {
-                            1
-                        } else if v <= -STICK_DEADZONE {
-                            -1
-                        } else {
-                            0
-                        };
-                        self.left_stick_y_dir = new_dir;
-                        if new_dir == 0 {
-                            self.stick_repeat_y = None;
-                        } else if new_dir != old_dir {
-                            actions.push(if new_dir > 0 {
-                                UiAction::FocusUp
-                            } else {
-                                UiAction::FocusDown
-                            });
-                            self.last_stick_nav_at = Instant::now();
-                            self.stick_repeat_y =
-                                Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
-                        }
-                    }
-                    ButtonPressed(Button::DPadRight, _) => {
+                    GpButton::DPadRight => {
                         actions.push(UiAction::FocusNext);
                         self.dpad_repeat = Some((
                             UiAction::FocusNext,
                             Instant::now() + NAV_REPEAT_INITIAL_DELAY,
                         ));
                     }
-                    ButtonPressed(Button::DPadLeft, _) => {
+                    GpButton::DPadLeft => {
                         actions.push(UiAction::FocusPrev);
                         self.dpad_repeat = Some((
                             UiAction::FocusPrev,
                             Instant::now() + NAV_REPEAT_INITIAL_DELAY,
                         ));
                     }
-                    ButtonPressed(Button::DPadDown, _) => {
+                    GpButton::DPadDown => {
                         actions.push(UiAction::FocusDown);
                         self.dpad_repeat = Some((
                             UiAction::FocusDown,
                             Instant::now() + NAV_REPEAT_INITIAL_DELAY,
                         ));
                     }
-                    ButtonPressed(Button::DPadUp, _) => {
+                    GpButton::DPadUp => {
                         actions.push(UiAction::FocusUp);
                         self.dpad_repeat =
                             Some((UiAction::FocusUp, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
                     }
-                    ButtonPressed(Button::Start, _) => actions.push(UiAction::Pause),
-                    ButtonPressed(Button::Select, _) => actions.push(UiAction::Help),
-                    ButtonPressed(Button::LeftTrigger, _) => {
+                    GpButton::Start => actions.push(UiAction::Pause),
+                    GpButton::Back => actions.push(UiAction::Help),
+                    GpButton::LeftShoulder => {
                         actions.push(UiAction::NavigateHudPrev);
                         actions.push(UiAction::TabPrev);
                     }
-                    ButtonPressed(Button::RightTrigger, _) => {
+                    GpButton::RightShoulder => {
                         actions.push(UiAction::NavigateHudNext);
                         actions.push(UiAction::TabNext);
                     }
                     _ => {}
+                },
+                Event::ControllerButtonUp { button, .. } => match button {
+                    GpButton::South => {
+                        if !self.swap_ab {
+                            actions.push(UiAction::ConfirmRelease);
+                        }
+                    }
+                    GpButton::East => {
+                        if self.swap_ab {
+                            actions.push(UiAction::ConfirmRelease);
+                        }
+                    }
+                    GpButton::West => {
+                        if poll_ctx.shop_face_buttons {
+                            actions.push(UiAction::ShopSellHoldRelease);
+                        }
+                    }
+                    _ => {}
+                },
+                Event::ControllerAxisMotion {
+                    which, axis, value, ..
+                } => {
+                    let id = joystick_id(which);
+                    let v = axis_norm(value);
+                    match axis {
+                        GpAxis::LeftX => {
+                            let old_dir = self.left_stick_x_dir;
+                            let new_dir = if v >= STICK_DEADZONE {
+                                1
+                            } else if v <= -STICK_DEADZONE {
+                                -1
+                            } else {
+                                0
+                            };
+                            self.left_stick_x_dir = new_dir;
+                            if new_dir == 0 {
+                                self.stick_repeat_x = None;
+                            } else if new_dir != old_dir {
+                                actions.push(if new_dir > 0 {
+                                    UiAction::FocusNext
+                                } else {
+                                    UiAction::FocusPrev
+                                });
+                                self.last_stick_nav_at = Instant::now();
+                                self.stick_repeat_x =
+                                    Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                            }
+                        }
+                        GpAxis::LeftY => {
+                            let vendor = shell.gamepad.vendor_for_id(id);
+                            let v = if Self::macos_microsoft_stick_y_invert(vendor) {
+                                -v
+                            } else {
+                                v
+                            };
+                            let old_dir = self.left_stick_y_dir;
+                            let new_dir = if v >= STICK_DEADZONE {
+                                1
+                            } else if v <= -STICK_DEADZONE {
+                                -1
+                            } else {
+                                0
+                            };
+                            self.left_stick_y_dir = new_dir;
+                            if new_dir == 0 {
+                                self.stick_repeat_y = None;
+                            } else if new_dir != old_dir {
+                                actions.push(if new_dir > 0 {
+                                    UiAction::FocusUp
+                                } else {
+                                    UiAction::FocusDown
+                                });
+                                self.last_stick_nav_at = Instant::now();
+                                self.stick_repeat_y =
+                                    Some((new_dir, Instant::now() + NAV_REPEAT_INITIAL_DELAY));
+                            }
+                        }
+                        GpAxis::TriggerLeft => {
+                            let cur = trigger_norm(value);
+                            let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
+                            if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                                actions.push(UiAction::TriggerStructure);
+                            }
+                            shell.lt_prev.insert(id, cur);
+                        }
+                        GpAxis::TriggerRight => {
+                            let cur = trigger_norm(value);
+                            let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
+                            if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                                actions.push(UiAction::TriggerStructure);
+                            }
+                            shell.rt_prev.insert(id, cur);
+                        }
+                        _ => {}
+                    }
                 }
-            }
-            Self::sync_gamepad_style_from_first_connected(gilrs, &mut self.gamepad_style);
+                _ => {}
         }
-        let Some(gilrs) = self.gilrs.as_ref() else {
-            return false;
-        };
+
+        if actions.len() > before && self.mode != InputMode::Controller {
+            self.mode = InputMode::Controller;
+            return true;
+        }
+        false
+    }
+
+    /// Once per frame after SDL events: controller subsystem refresh, held-nav repeats,
+    /// inspect analog sampling. Returns true when switching to [`InputMode::Controller`].
+    pub fn gamepad_frame_tick(
+        &mut self,
+        shell: &mut SdlShell,
+        poll_ctx: GamepadPollCtx,
+        actions: &mut Vec<UiAction>,
+    ) -> bool {
+        self.shop_inspect_orbit_stick = (0.0, 0.0);
+        self.shop_inspect_zoom_triggers = 0.0;
+
+        let before = actions.len();
+        shell.prepare_gamepad_frame();
+
+        Self::sync_gamepad_style_from_first_connected(shell, &mut self.gamepad_style);
+
         if poll_ctx.shop_item_inspect {
-            Self::sample_shop_inspect_analog(gilrs, &mut self.shop_inspect_orbit_stick, &mut self.shop_inspect_zoom_triggers);
+            Self::sample_shop_inspect_analog(
+                shell,
+                &mut self.shop_inspect_orbit_stick,
+                &mut self.shop_inspect_zoom_triggers,
+            );
         }
         Self::emit_held_navigation_repeats(
-            gilrs,
+            shell,
             &mut self.dpad_repeat,
+            &mut self.dpad_axis_repeat_x,
+            &mut self.dpad_axis_repeat_y,
             &mut self.stick_repeat_x,
             &mut self.stick_repeat_y,
             actions,
@@ -823,36 +750,63 @@ impl InputState {
         false
     }
 
-    fn sync_gamepad_style_from_first_connected(gilrs: &Gilrs, out: &mut GamepadStyle) {
-        for (_, gp) in gilrs.gamepads() {
-            if gp.is_connected() {
-                *out = GamepadStyle::infer(gp.vendor_id(), gp.os_name());
+    /// Xbox / Xbox 360 class devices on macOS often expose inverted stick Y vs other backends.
+    #[cfg(target_os = "macos")]
+    fn macos_microsoft_stick_y_invert(vendor_id: Option<u16>) -> bool {
+        vendor_id == Some(0x045E)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn macos_microsoft_stick_y_invert(_vendor_id: Option<u16>) -> bool {
+        false
+    }
+
+    fn sync_gamepad_style_from_first_connected(shell: &SdlShell, out: &mut GamepadStyle) {
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return;
+        };
+        for id in ids {
+            let vendor = shell.gamepad.vendor_for_id(id);
+            if let Ok(name) = shell.gamepad.name_for_id(id) {
+                *out = GamepadStyle::infer(vendor, &name);
                 return;
             }
         }
     }
 
-    fn sample_shop_inspect_analog(gilrs: &Gilrs, out_stick: &mut (f32, f32), out_zoom: &mut f32) {
+    fn sample_shop_inspect_analog(
+        shell: &SdlShell,
+        out_stick: &mut (f32, f32),
+        out_zoom: &mut f32,
+    ) {
         const STICK_DZ: f32 = 0.15;
-        for (_, gp) in gilrs.gamepads() {
-            let x = gp.value(Axis::RightStickX);
-            let y = gp.value(Axis::RightStickY);
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return;
+        };
+        for id in ids {
+            let Some(gp) = shell.pads.get(&id) else {
+                continue;
+            };
+            if !gp.connected() {
+                continue;
+            }
+            let vendor = shell.gamepad.vendor_for_id(id);
+            let x = axis_norm(gp.axis(GpAxis::RightX));
+            let mut y = axis_norm(gp.axis(GpAxis::RightY));
+            if Self::macos_microsoft_stick_y_invert(vendor) {
+                y = -y;
+            }
             *out_stick = (
                 if x.abs() < STICK_DZ { 0.0 } else { x },
                 if y.abs() < STICK_DZ { 0.0 } else { y },
             );
-            // Triggers are `Axis::LeftZ` / `RightZ` in gilrs 0.11 (not `LeftTrigger2`).
-            let t01 = |x: f32| {
-                let n = if x < 0.0 { (x + 1.0) * 0.5 } else { x };
-                n.clamp(0.0, 1.0)
-            };
-            let lt = t01(gp.value(Axis::LeftZ));
-            let rt = t01(gp.value(Axis::RightZ));
+            let lt = trigger_norm(gp.axis(GpAxis::TriggerLeft));
+            let rt = trigger_norm(gp.axis(GpAxis::TriggerRight));
             let mut z = rt - lt;
-            if gp.is_pressed(Button::LeftTrigger) {
+            if gp.button(GpButton::LeftShoulder) {
                 z -= 1.0;
             }
-            if gp.is_pressed(Button::RightTrigger) {
+            if gp.button(GpButton::RightShoulder) {
                 z += 1.0;
             }
             *out_zoom = z;
@@ -861,8 +815,10 @@ impl InputState {
     }
 
     fn emit_held_navigation_repeats(
-        gilrs: &Gilrs,
+        shell: &SdlShell,
         dpad_repeat: &mut Option<(UiAction, Instant)>,
+        dpad_axis_repeat_x: &mut Option<(i8, Instant)>,
+        dpad_axis_repeat_y: &mut Option<(i8, Instant)>,
         stick_repeat_x: &mut Option<(i8, Instant)>,
         stick_repeat_y: &mut Option<(i8, Instant)>,
         actions: &mut Vec<UiAction>,
@@ -871,7 +827,7 @@ impl InputState {
 
         let mut clear_dpad = false;
         if let Some((action, next_at)) = dpad_repeat.as_mut() {
-            if !Self::gamepad_nav_button_pressed(gilrs, *action) {
+            if !Self::gamepad_dpad_nav_held(shell, *action) {
                 clear_dpad = true;
             } else if now >= *next_at {
                 actions.push(*action);
@@ -882,8 +838,45 @@ impl InputState {
             *dpad_repeat = None;
         }
 
+        const DPAD_AXIS_DEADZONE: f32 = 0.35;
+        let (dx, dy) = Self::sample_dpad_axis_dirs(shell, DPAD_AXIS_DEADZONE);
+
+        let mut clear_dx = false;
+        if let Some((dir, next_at)) = dpad_axis_repeat_x.as_mut() {
+            if dx == 0 || dx != *dir {
+                clear_dx = true;
+            } else if now >= *next_at {
+                actions.push(if *dir > 0 {
+                    UiAction::FocusNext
+                } else {
+                    UiAction::FocusPrev
+                });
+                *next_at = now + NAV_REPEAT_INTERVAL;
+            }
+        }
+        if clear_dx {
+            *dpad_axis_repeat_x = None;
+        }
+
+        let mut clear_dy = false;
+        if let Some((dir, next_at)) = dpad_axis_repeat_y.as_mut() {
+            if dy == 0 || dy != *dir {
+                clear_dy = true;
+            } else if now >= *next_at {
+                actions.push(if *dir > 0 {
+                    UiAction::FocusDown
+                } else {
+                    UiAction::FocusUp
+                });
+                *next_at = now + NAV_REPEAT_INTERVAL;
+            }
+        }
+        if clear_dy {
+            *dpad_axis_repeat_y = None;
+        }
+
         const STICK_DEADZONE: f32 = 0.65;
-        let (sx, sy) = Self::sample_left_stick_dirs(gilrs, STICK_DEADZONE);
+        let (sx, sy) = Self::sample_left_stick_dirs(shell, STICK_DEADZONE);
 
         let mut clear_sx = false;
         if let Some((dir, next_at)) = stick_repeat_x.as_mut() {
@@ -920,21 +913,76 @@ impl InputState {
         }
     }
 
-    fn gamepad_nav_button_pressed(gilrs: &Gilrs, action: UiAction) -> bool {
-        let btn = match action {
-            UiAction::FocusNext => Button::DPadRight,
-            UiAction::FocusPrev => Button::DPadLeft,
-            UiAction::FocusDown => Button::DPadDown,
-            UiAction::FocusUp => Button::DPadUp,
-            _ => return false,
+    fn gamepad_dpad_nav_held(shell: &SdlShell, action: UiAction) -> bool {
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return false;
         };
-        gilrs.gamepads().any(|(_, gp)| gp.is_pressed(btn))
+        ids.iter().any(|&id| {
+            let Some(gp) = shell.pads.get(&id) else {
+                return false;
+            };
+            if !gp.connected() {
+                return false;
+            }
+            match action {
+                UiAction::FocusNext => gp.button(GpButton::DPadRight),
+                UiAction::FocusPrev => gp.button(GpButton::DPadLeft),
+                UiAction::FocusDown => gp.button(GpButton::DPadDown),
+                UiAction::FocusUp => gp.button(GpButton::DPadUp),
+                _ => false,
+            }
+        })
     }
 
-    fn sample_left_stick_dirs(gilrs: &Gilrs, deadzone: f32) -> (i8, i8) {
-        for (_, gp) in gilrs.gamepads() {
-            let x = gp.value(Axis::LeftStickX);
-            let y = gp.value(Axis::LeftStickY);
+    fn sample_dpad_axis_dirs(shell: &SdlShell, _deadzone: f32) -> (i8, i8) {
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return (0, 0);
+        };
+        for id in ids {
+            let Some(gp) = shell.pads.get(&id) else {
+                continue;
+            };
+            if !gp.connected() {
+                continue;
+            }
+            let dx = if gp.button(GpButton::DPadRight) {
+                1
+            } else if gp.button(GpButton::DPadLeft) {
+                -1
+            } else {
+                0
+            };
+            let dy = if gp.button(GpButton::DPadDown) {
+                1
+            } else if gp.button(GpButton::DPadUp) {
+                -1
+            } else {
+                0
+            };
+            if dx != 0 || dy != 0 {
+                return (dx, dy);
+            }
+        }
+        (0, 0)
+    }
+
+    fn sample_left_stick_dirs(shell: &SdlShell, deadzone: f32) -> (i8, i8) {
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return (0, 0);
+        };
+        for id in ids {
+            let Some(gp) = shell.pads.get(&id) else {
+                continue;
+            };
+            if !gp.connected() {
+                continue;
+            }
+            let vendor = shell.gamepad.vendor_for_id(id);
+            let x = axis_norm(gp.axis(GpAxis::LeftX));
+            let mut y = axis_norm(gp.axis(GpAxis::LeftY));
+            if Self::macos_microsoft_stick_y_invert(vendor) {
+                y = -y;
+            }
             let sx = if x >= deadzone {
                 1
             } else if x <= -deadzone {
@@ -958,28 +1006,28 @@ impl InputState {
 
     /// Handle a key press.  Sets mode to Keyboard if a known key is pressed.
     /// Returns true if the mode changed.
-    pub fn on_key(&mut self, key: PhysicalKey, shift: bool, actions: &mut Vec<UiAction>) -> bool {
-        let PhysicalKey::Code(code) = key else {
+    pub fn on_key(&mut self, key: Option<Scancode>, shift: bool, actions: &mut Vec<UiAction>) -> bool {
+        let Some(code) = key else {
             return false;
         };
         let before = actions.len();
         match code {
-            KeyCode::ArrowRight | KeyCode::KeyD => actions.push(UiAction::FocusNext),
-            KeyCode::ArrowLeft | KeyCode::KeyA => actions.push(UiAction::FocusPrev),
-            KeyCode::ArrowDown | KeyCode::KeyS => actions.push(UiAction::FocusDown),
-            KeyCode::ArrowUp | KeyCode::KeyW => actions.push(UiAction::FocusUp),
-            KeyCode::Space => actions.push(UiAction::Confirm),
-            KeyCode::Escape => actions.push(UiAction::Pause),
-            KeyCode::Backspace => actions.push(UiAction::Cancel),
-            KeyCode::Delete | KeyCode::KeyX => actions.push(UiAction::Delete),
-            KeyCode::KeyT => actions.push(UiAction::TriggerStructure),
-            KeyCode::Enter | KeyCode::NumpadEnter => actions.push(UiAction::Confirm),
+            Scancode::Right | Scancode::D => actions.push(UiAction::FocusNext),
+            Scancode::Left | Scancode::A => actions.push(UiAction::FocusPrev),
+            Scancode::Down | Scancode::S => actions.push(UiAction::FocusDown),
+            Scancode::Up | Scancode::W => actions.push(UiAction::FocusUp),
+            Scancode::Space => actions.push(UiAction::Confirm),
+            Scancode::Escape => actions.push(UiAction::Pause),
+            Scancode::Backspace => actions.push(UiAction::Cancel),
+            Scancode::Delete | Scancode::X => actions.push(UiAction::Delete),
+            Scancode::T => actions.push(UiAction::TriggerStructure),
+            Scancode::Return | Scancode::KpEnter => actions.push(UiAction::Confirm),
             // Tab is dual-purpose: scenes that opt in to TabNext/TabPrev
             // (e.g. the collection browser) get tab-cycle semantics; the
             // gameplay scene treats SortBySuit identically to a Tab press.
             // Both actions are emitted so each scene can pick the one it
             // cares about and ignore the other.
-            KeyCode::Tab => {
+            Scancode::Tab => {
                 if shift {
                     actions.push(UiAction::TabPrev);
                 } else {
@@ -987,21 +1035,21 @@ impl InputState {
                     actions.push(UiAction::SortBySuit);
                 }
             }
-            KeyCode::PageDown => actions.push(UiAction::PageNext),
-            KeyCode::PageUp => actions.push(UiAction::PagePrev),
-            KeyCode::Backquote => actions.push(UiAction::SortByRank),
+            Scancode::PageDown => actions.push(UiAction::PageNext),
+            Scancode::PageUp => actions.push(UiAction::PagePrev),
+            Scancode::Grave => actions.push(UiAction::SortByRank),
             // HUD strip nav (consumable focus on the gameplay scene; includes the
             // optional discard undo target when Accessibility → Discard undo is on).
             // Mirrors LB / RB on the controller so keyboard players have a non-mouse path.
-            KeyCode::BracketLeft => actions.push(UiAction::NavigateHudPrev),
-            KeyCode::BracketRight => actions.push(UiAction::NavigateHudNext),
+            Scancode::LeftBracket => actions.push(UiAction::NavigateHudPrev),
+            Scancode::RightBracket => actions.push(UiAction::NavigateHudNext),
             // Shop (gamepad West = hold sell, North = inspect): **Q** hold sell, **E** inspect.
-            KeyCode::KeyE => actions.push(UiAction::ShopItemInspectToggle),
-            KeyCode::KeyQ => actions.push(UiAction::ShopSellHoldPress),
+            Scancode::E => actions.push(UiAction::ShopItemInspectToggle),
+            Scancode::Q => actions.push(UiAction::ShopSellHoldPress),
             // Glossary / help — `?`, `/`, `H`, `F1`. ShiftLeft+Slash on
             // most layouts produces `?`, but we don't need shift state here:
             // both Slash and KeyH are unambiguous.
-            KeyCode::Slash | KeyCode::KeyH | KeyCode::F1 => actions.push(UiAction::Help),
+            Scancode::Slash | Scancode::H | Scancode::F1 => actions.push(UiAction::Help),
             _ => {}
         }
         if actions.len() > before && self.mode != InputMode::Keyboard {
@@ -1015,14 +1063,14 @@ impl InputState {
     /// emits `ConfirmRelease` when Space/Enter goes up — the marquee
     /// multi-select gesture needs a release edge for keyboard parity with
     /// the gamepad South button.
-    pub fn on_key_release(&mut self, key: PhysicalKey, actions: &mut Vec<UiAction>) {
-        let PhysicalKey::Code(code) = key else {
+    pub fn on_key_release(&mut self, key: Option<Scancode>, actions: &mut Vec<UiAction>) {
+        let Some(code) = key else {
             return;
         };
-        if matches!(code, KeyCode::Space | KeyCode::Enter | KeyCode::NumpadEnter) {
+        if matches!(code, Scancode::Space | Scancode::Return | Scancode::KpEnter) {
             actions.push(UiAction::ConfirmRelease);
         }
-        if matches!(code, KeyCode::KeyQ) {
+        if matches!(code, Scancode::Q) {
             actions.push(UiAction::ShopSellHoldRelease);
         }
     }
