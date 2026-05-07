@@ -15,6 +15,11 @@
 //! Linux does not search the executable directory for shared libraries by
 //! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` can live next
 //! to `mahjuro` (same layout as Steam depots and GitHub release tarballs).
+//!
+//! On macOS, `sdl3-sys` (dynamic) links `libSDL3` with an `@rpath` install
+//! name but does not add an LC_RPATH to this crate. We pass
+//! `-Wl,-rpath,@loader_path` so bundled `libSDL3.0.dylib` next to `mahjuro`
+//! resolves (see `scripts/package-macos.sh`).
 
 use std::env;
 use std::fs;
@@ -34,6 +39,10 @@ fn main() {
 
     if target.contains("linux") && !target.contains("android") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+    }
+
+    if target.contains("apple-darwin") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path");
     }
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
