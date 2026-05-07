@@ -50,6 +50,7 @@ impl SdlShell {
         }
         #[cfg(target_os = "windows")]
         {
+            use sdl3::video::WindowFlags;
             wb.set_flags(WindowFlags::RESIZABLE | WindowFlags::HIGH_PIXEL_DENSITY);
         }
 
