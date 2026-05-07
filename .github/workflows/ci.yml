@@ -158,14 +158,19 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
+          set -euo pipefail
           dotnet tool install --global AzureSignTool --version 7.0.1
           cp "target/${{ matrix.target }}/debug/${{ matrix.binary }}" test_sign.exe
+          az login --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none
+          KV_TOKEN="$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)"
           AzureSignTool sign \
             -kvu https://mahjuro.vault.azure.net \
             -kvc Mahjuro \
-            -kvi "$AZURE_CLIENT_ID" \
-            -kvt "$AZURE_TENANT_ID" \
-            -kvs "$AZURE_CLIENT_SECRET" \
+            -kva "$KV_TOKEN" \
             -tr http://timestamp.digicert.com \
             -td sha256 \
             test_sign.exe
