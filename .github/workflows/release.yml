@@ -229,6 +229,11 @@ jobs:
           cp packaging/steam_input/game_actions_4636490.vdf \
             "$APP/Contents/MacOS/game_actions_4636490.vdf"
 
+          # Steamworks dylib: link uses @loader_path/libsteam_api.dylib (see build.rs).
+          # CI duplicates app layout here; must match scripts/package-macos.sh.
+          cp target/aarch64-apple-darwin/release/libsteam_api.dylib \
+            "$APP/Contents/MacOS/libsteam_api.dylib"
+
           # Info.plist with version substituted in
           sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 
