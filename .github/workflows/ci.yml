@@ -78,6 +78,18 @@ jobs:
             libxdo-dev \
             xvfb
 
+      # Exit 143 (SIGTERM) on Linux CI is often OOM during parallel rustc + linker.
+      # Extra swap + fewer jobs keeps peak RSS below hosted-runner limits.
+      - name: Linux — swap and compile job limit
+        if: matrix.name == 'Linux'
+        run: |
+          SWAPFILE=/home/runner/cargo_extra.swap
+          sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192 status=none
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+
       - name: Cache Cargo registry and target
         uses: actions/cache@v5
         with:
