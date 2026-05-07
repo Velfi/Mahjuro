@@ -1201,8 +1201,8 @@ pub fn apply_ui_actions(
             }
             UiAction::Confirm => {
                 // Toggle-select the focused tile for discard.
-                if !run.hand.is_empty() {
-                    let idx = focus_tile_index.min(run.hand.len() - 1);
+                if !run.hand().is_empty() {
+                    let idx = focus_tile_index.min(run.hand().len() - 1);
                     run.toggle_select(idx);
                 }
             }

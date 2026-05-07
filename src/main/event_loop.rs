@@ -462,7 +462,7 @@ impl App {
                 self.last_drawable_px.height as f32,
             );
             // Same raycast-based pick as the per-frame update path.
-            let hand_slot_count = self.run.hand.len().max(layout.hand_slots.len());
+            let hand_slot_count = self.run.hand().len().max(layout.hand_slots.len());
             let mut slots: Vec<(f32, f32, f32, f32)> =
                 vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
             let picked = self

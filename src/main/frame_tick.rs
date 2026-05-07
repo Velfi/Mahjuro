@@ -314,7 +314,7 @@ impl App {
             // We feed `update_pointer_hover` synthetic slots so only
             // the picked tile contains the cursor — the rest are
             // collapsed off-screen so they can't compete.
-            let hand_slot_count = self.run.hand.len().max(layout.hand_slots.len());
+            let hand_slot_count = self.run.hand().len().max(layout.hand_slots.len());
             let mut slots: Vec<(f32, f32, f32, f32)> =
                 vec![(-9999.0, -9999.0, 0.0, 0.0); hand_slot_count];
             let picked = self
@@ -340,7 +340,7 @@ impl App {
             for a in &actions {
                 match a {
                     UiAction::FocusNext | UiAction::FocusPrev => {
-                        input.wrap_focus_slot(*a, self.run.hand.len());
+                        input.wrap_focus_slot(*a, self.run.hand().len());
                     }
                     _ => {}
                 }

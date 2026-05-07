@@ -916,7 +916,8 @@ pub(crate) fn render_shop_frame(
     let gold_text = format!("{}g", shop_rm.display_gold);
     let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
     let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
-        let (_, _, advances) = measure_label_advances(font, &gold_text, 8192, h_px, Some(credits_font_px));
+        let (_, _, advances) =
+            measure_label_advances(font, &gold_text, 8192, h_px, Some(credits_font_px));
         let text_w: f32 = advances.iter().sum();
         let rw = text_w.max(credits_font_px * 1.2).min(w * 0.92);
         let rh = credits_font_px * 1.38;
@@ -1098,31 +1099,31 @@ pub(crate) fn render_shop_frame(
 
     if shop.journal_open_amount > 0.001 {
         let scratch = YakuJournalScene::new();
-        let inner_ctx = DrawCtx {
-            layout: ctx.layout,
-            anim: ctx.anim,
-            run: ctx.run,
-            progress: ctx.progress,
-            active_profile: ctx.active_profile,
-            game_in_progress: ctx.game_in_progress,
-            proj: ctx.proj,
-            picked_gameplay_object: ctx.picked_gameplay_object,
-            picked_shop_object: ctx.picked_shop_object,
-            debug_visibility: ctx.debug_visibility,
-            ui_scale: ctx.ui_scale,
-            modal_active: ctx.modal_active,
-            arrange_preview: ctx.arrange_preview.clone(),
-            shop_env_height_scale: ctx.shop_env_height_scale,
-            shop_env_lighting: ctx.shop_env_lighting,
-            effect_layers: ctx.effect_layers,
-            cursor_pos: ctx.cursor_pos,
-            input_mode: ctx.input_mode,
-            gamepad_swap_ab: ctx.gamepad_swap_ab,
-            gamepad_swap_xy: ctx.gamepad_swap_xy,
-            gamepad_style: ctx.gamepad_style,
-            suspended_shop: None,
-            suspended_collection: None,
-        };
+        let inner_ctx = DrawCtx::new(
+            ctx.layout,
+            ctx.anim,
+            ctx.run,
+            ctx.progress,
+            ctx.active_profile,
+            ctx.game_in_progress,
+            ctx.proj,
+            ctx.picked_gameplay_object,
+            ctx.picked_shop_object,
+            ctx.debug_visibility,
+            ctx.ui_scale,
+            ctx.modal_active,
+            ctx.arrange_preview.clone(),
+            ctx.shop_env_height_scale,
+            ctx.shop_env_lighting,
+            ctx.effect_layers,
+            ctx.cursor_pos,
+            ctx.input_mode,
+            ctx.gamepad_swap_ab,
+            ctx.gamepad_swap_xy,
+            ctx.gamepad_style,
+            None,
+            None,
+        );
         let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
         frame.journal_prepass_frame = Some(Box::new(prepass));
     }

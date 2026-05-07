@@ -3,6 +3,12 @@
 //! This module is the first slice of the larger gameplay rewrite: scenes
 //! dispatch typed commands and receive semantic outcomes, while the current
 //! `RunState` still acts as the legacy mutation backend underneath.
+//!
+//! Gameplay mutations to hand, selection, structure bank, and the resource
+//! fields owned by [`GameplayCoreState`](crate::game::engine_state::GameplayCoreState)
+//! should go through [`GameEngine`] commands or
+//! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
+//! so parallel vectors stay aligned.
 
 use crate::core::boss::BossKind;
 use crate::core::consumable::Consumable;
@@ -100,10 +106,10 @@ pub struct EngineSnapshot {
 impl EngineSnapshot {
     fn capture(run: &RunState) -> Self {
         Self {
-            hand_len: run.hand.len(),
+            hand_len: run.hand().len(),
             selected_count: run.selected_count(),
-            structure_tiles: run.structure_tiles.len(),
-            structure_sets: run.structure_sets.len(),
+            structure_tiles: run.structure_tiles().len(),
+            structure_sets: run.structure_sets().len(),
             consumable_count: run.consumables.items.len(),
             round_score: run.round_score,
             gold: run.gold,
@@ -451,12 +457,9 @@ impl<'a> GameEngine<'a> {
     }
 
     pub fn prepare_pending_blind(run: &mut RunState) {
-        let mut core = GameplayCoreState::from_run(run);
-        core.hand.clear();
-        core.selected.clear();
-        core.structure_sets.clear();
-        core.structure_tiles.clear();
-        core.write_back(run);
+        GameplayCoreState::with_run_mut(run, |core| {
+            core.clear_hand_structure_bank();
+        });
     }
 
     pub fn take_pending_zodiac_celebration(
@@ -499,10 +502,7 @@ impl<'a> GameEngine<'a> {
         run: &mut RunState,
         index: usize,
     ) -> Option<(MarqueeSelect, (u32, u32))> {
-        let mut core = GameplayCoreState::from_run(run);
-        let result = core.begin_marquee_selection(index);
-        core.write_back(run);
-        result
+        GameplayCoreState::with_run_mut(run, |core| core.begin_marquee_selection(index))
     }
 
     pub fn apply_marquee_selection(
@@ -510,10 +510,7 @@ impl<'a> GameEngine<'a> {
         marquee: &mut MarqueeSelect,
         index: usize,
     ) -> Option<(u32, u32)> {
-        let mut core = GameplayCoreState::from_run(run);
-        let result = core.apply_marquee_selection(marquee, index);
-        core.write_back(run);
-        result
+        GameplayCoreState::with_run_mut(run, |core| core.apply_marquee_selection(marquee, index))
     }
 
     pub fn swap_active_relics(run: &mut RunState, from_idx: usize, to_idx: usize) -> bool {
@@ -605,7 +602,7 @@ impl<'a> GameEngine<'a> {
             selected_count: run.selected_count(),
             discards_remaining: run.discards_remaining,
             round_score: run.round_score,
-            has_structure: !run.structure_sets.is_empty(),
+            has_structure: !run.structure_sets().is_empty(),
             blind: run.blind,
         }
     }
@@ -754,7 +751,11 @@ impl<'a> GameEngine<'a> {
             return Vec::new();
         };
         let lesson = tutorial.current_lesson_def();
-        crate::game::tutorial::affinity_tile_indices(&run.hand, &run.selected, lesson.allowed_sets)
+        crate::game::tutorial::affinity_tile_indices(
+            run.hand(),
+            run.selected_slice(),
+            lesson.allowed_sets,
+        )
     }
 
     pub fn tutorial_lesson(run: &RunState) -> Option<TutorialLessonReadModel> {
@@ -812,7 +813,7 @@ impl<'a> GameEngine<'a> {
     }
 
     pub fn dora_matching_hand_indices(run: &RunState, dora_faces: &[(Suit, u8)]) -> Vec<usize> {
-        run.hand
+        run.hand()
             .iter()
             .enumerate()
             .filter_map(|(i, &tile)| {
@@ -924,9 +925,9 @@ impl<'a> GameEngine<'a> {
                 CommandData::DiscardSelection { count }
             }
             GameCommand::RefillHand => {
-                let hand_before = self.run.hand.len();
+                let hand_before = self.run.hand().len();
                 self.run.refill_hand(self.bus);
-                if self.run.hand.len() == hand_before {
+                if self.run.hand().len() == hand_before {
                     return self.finish_outcome(
                         command,
                         before,
@@ -957,15 +958,15 @@ impl<'a> GameEngine<'a> {
                 CommandData::UseConsumable { result }
             }
             GameCommand::SortHandBySuit => {
-                let mut core = GameplayCoreState::from_run(self.run);
-                core.sort_hand_by_suit();
-                core.write_back(self.run);
+                GameplayCoreState::with_run_mut(self.run, |core| {
+                    core.sort_hand_by_suit();
+                });
                 CommandData::None
             }
             GameCommand::SortHandByRank => {
-                let mut core = GameplayCoreState::from_run(self.run);
-                core.sort_hand_by_rank();
-                core.write_back(self.run);
+                GameplayCoreState::with_run_mut(self.run, |core| {
+                    core.sort_hand_by_rank();
+                });
                 CommandData::None
             }
             GameCommand::ApplyBlind { blind } => {
@@ -1478,6 +1479,7 @@ mod tests {
     use super::*;
     use crate::core::consumable::Consumable;
     use crate::core::deck::{Wall, build_wall};
+    use crate::core::hand::{DetectedSet, SetKind};
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
     use crate::game::game_mode::GameMode;
@@ -1491,10 +1493,10 @@ mod tests {
             hand.push(wall.draw().expect("enough tiles for deterministic hand"));
         }
         run.wall = wall;
-        run.hand = hand;
-        run.selected = vec![false; run.hand.len()];
-        run.structure_sets.clear();
-        run.structure_tiles.clear();
+        *run.hand_mut() = hand;
+        *run.selected_mut() = vec![false; run.hand().len()];
+        run.structure_sets_mut().clear();
+        run.structure_tiles_mut().clear();
         run.last_breakdown = None;
         run
     }
@@ -1503,11 +1505,19 @@ mod tests {
         Tile::new(suit, rank, id)
     }
 
+    fn assert_hand_selection_invariant(run: &RunState) {
+        assert_eq!(
+            run.hand().len(),
+            run.selected_slice().len(),
+            "hand and selected mask must stay the same length"
+        );
+    }
+
     #[test]
     fn discard_command_emits_semantic_events() {
         let mut run = deterministic_run();
-        run.selected[0] = true;
-        run.selected[1] = true;
+        run.selected_mut()[0] = true;
+        run.selected_mut()[1] = true;
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
 
@@ -1522,17 +1532,18 @@ mod tests {
         );
         assert!(outcome.ui_hints.contains(&UiHint::Hand));
         assert_eq!(outcome.after.hand_len, outcome.before.hand_len - 2);
+        assert_hand_selection_invariant(&run);
     }
 
     #[test]
     fn play_selection_rejects_invalid_melds() {
         let mut run = deterministic_run();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             tile(Suit::Characters, 1, 0),
             tile(Suit::Bamboos, 4, 1),
             tile(Suit::Circles, 9, 2),
         ];
-        run.selected = vec![true, true, true];
+        *run.selected_mut() = vec![true, true, true];
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
 
@@ -1541,6 +1552,7 @@ mod tests {
         assert_eq!(outcome.rejection, Some(CommandRejection::InvalidSelection));
         assert!(outcome.events.contains(&EngineEvent::InvalidAction));
         assert_eq!(outcome.before, outcome.after);
+        assert_hand_selection_invariant(&run);
     }
 
     #[test]
@@ -1573,10 +1585,10 @@ mod tests {
     fn refill_command_is_deterministic_for_identical_state() {
         let mut run_a = deterministic_run();
         let mut run_b = deterministic_run();
-        run_a.hand.truncate(10);
-        run_b.hand.truncate(10);
-        run_a.selected = vec![false; run_a.hand.len()];
-        run_b.selected = vec![false; run_b.hand.len()];
+        run_a.hand_mut().truncate(10);
+        run_b.hand_mut().truncate(10);
+        *run_a.selected_mut() = vec![false; run_a.hand().len()];
+        *run_b.selected_mut() = vec![false; run_b.hand().len()];
         let mut bus_a = EventBus::default();
         let mut bus_b = EventBus::default();
 
@@ -1585,7 +1597,113 @@ mod tests {
 
         assert_eq!(outcome_a.after, outcome_b.after);
         assert_eq!(outcome_a.events, outcome_b.events);
-        assert_eq!(run_a.hand, run_b.hand);
+        assert_eq!(run_a.hand(), run_b.hand());
+        assert_hand_selection_invariant(&run_a);
+        assert_hand_selection_invariant(&run_b);
+    }
+
+    #[test]
+    fn sort_commands_preserve_hand_selection_invariant() {
+        let mut run = deterministic_run();
+        run.selected_mut()[0] = true;
+        let mut bus = EventBus::default();
+        {
+            let mut engine = GameEngine::new(&mut run, &mut bus);
+            let _ = engine.dispatch(GameCommand::SortHandBySuit);
+        }
+        assert_hand_selection_invariant(&run);
+        {
+            let mut engine = GameEngine::new(&mut run, &mut bus);
+            let _ = engine.dispatch(GameCommand::SortHandByRank);
+        }
+        assert_hand_selection_invariant(&run);
+    }
+
+    fn winning_structure_bank() -> (Vec<Tile>, Vec<DetectedSet>) {
+        let tiles = vec![
+            tile(Suit::Characters, 1, 1),
+            tile(Suit::Characters, 1, 2),
+            tile(Suit::Characters, 2, 3),
+            tile(Suit::Characters, 3, 4),
+            tile(Suit::Characters, 4, 5),
+            tile(Suit::Circles, 2, 6),
+            tile(Suit::Circles, 3, 7),
+            tile(Suit::Circles, 4, 8),
+            tile(Suit::Bamboos, 5, 9),
+            tile(Suit::Bamboos, 6, 10),
+            tile(Suit::Bamboos, 7, 11),
+            tile(Suit::Wind, 1, 12),
+            tile(Suit::Wind, 1, 13),
+            tile(Suit::Wind, 1, 14),
+        ];
+        let sets = vec![
+            DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![1, 2],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedSet {
+                kind: SetKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedSet {
+                kind: SetKind::Triplet,
+                tile_ids: vec![12, 13, 14],
+            },
+        ];
+        (tiles, sets)
+    }
+
+    #[test]
+    fn trigger_structure_command_preserves_hand_selection_invariant() {
+        let mut run = deterministic_run();
+        run.set_auto_cash_in_on_full_structure(false);
+        let (tiles, sets) = winning_structure_bank();
+        *run.structure_tiles_mut() = tiles;
+        *run.structure_sets_mut() = sets;
+        assert!(
+            run.can_trigger_structure_now(),
+            "test setup should allow manual structure cash-in"
+        );
+
+        let mut bus = EventBus::default();
+        let mut engine = GameEngine::new(&mut run, &mut bus);
+        let outcome = engine.dispatch(GameCommand::TriggerStructure);
+
+        assert_eq!(outcome.rejection, None);
+        match outcome.data {
+            CommandData::TriggerStructure { earned } => assert!(earned > 0),
+            other => panic!("expected TriggerStructure outcome, got {other:?}"),
+        }
+        assert_hand_selection_invariant(&run);
+        assert!(run.structure_sets().is_empty());
+        assert!(run.structure_tiles().is_empty());
+    }
+
+    #[test]
+    fn apply_blind_command_preserves_hand_selection_invariant() {
+        let mut run = deterministic_run();
+        run.blind = BlindKind::Small;
+        run.upcoming_blind = BlindKind::Small;
+        run.run_number = 1;
+
+        let mut bus = EventBus::default();
+        let mut engine = GameEngine::new(&mut run, &mut bus);
+        let outcome = engine.dispatch(GameCommand::ApplyBlind {
+            blind: BlindKind::Small,
+        });
+
+        assert_eq!(outcome.rejection, None);
+        assert_hand_selection_invariant(&run);
+        assert_eq!(run.hand().len(), run.selected_slice().len());
+        assert!(!run.hand().is_empty());
     }
 
     #[test]

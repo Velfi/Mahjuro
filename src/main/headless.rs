@@ -89,7 +89,7 @@ fn shop_focus_slug_inspectable(slug: &str) -> bool {
 fn setup_hero_state(run: &mut RunState) {
     use crate::core::relic::RelicId;
     use crate::core::tile::{Suit, Tile};
-    run.hand = vec![
+    *run.hand_mut() = vec![
         Tile::new(Suit::Dragon, 1, 100), // Red Dragon
         Tile::new(Suit::Dragon, 1, 101),
         Tile::new(Suit::Dragon, 1, 102),
@@ -105,8 +105,8 @@ fn setup_hero_state(run: &mut RunState) {
         Tile::new(Suit::Wind, 1, 112), // East
         Tile::new(Suit::Wind, 1, 113),
     ];
-    run.hand.sort();
-    run.selected = vec![true; run.hand.len()];
+    run.hand_mut().sort();
+    *run.selected_mut() = vec![true; run.hand().len()];
 
     run.relics.active.clear();
     for r in [
@@ -145,10 +145,10 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
     use crate::core::zodiac::ZodiacKind;
 
     setup_hero_state(run);
-    run.selected = vec![false; run.hand.len()];
+    *run.selected_mut() = vec![false; run.hand().len()];
 
     run.set_auto_cash_in_on_full_structure(false);
-    run.structure_tiles = vec![
+    *run.structure_tiles_mut() = vec![
         Tile::new(Suit::Characters, 1, 1),
         Tile::new(Suit::Characters, 1, 2),
         Tile::new(Suit::Characters, 2, 3),
@@ -164,7 +164,7 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
         Tile::new(Suit::Wind, 1, 13),
         Tile::new(Suit::Wind, 1, 14),
     ];
-    run.structure_sets = vec![
+    *run.structure_sets_mut() = vec![
         DetectedSet {
             kind: SetKind::Pair,
             tile_ids: vec![1, 2],
@@ -786,46 +786,41 @@ impl HeadlessApp {
             _ => None,
         };
 
-        let ctx = DrawCtx {
-            layout: &layout,
-            anim: &self.anim,
-            run: &self.run,
-            progress: &self.progress,
-            active_profile: self.active_profile,
-            game_in_progress: self.game_in_progress,
-            proj: self.renderer.projections(),
-            picked_gameplay_object: None,
-            picked_shop_object: None,
-            debug_visibility: scenes::DebugVisibility {
+        let ctx = DrawCtx::new(
+            &layout,
+            &self.anim,
+            &self.run,
+            &self.progress,
+            self.active_profile,
+            self.game_in_progress,
+            self.renderer.projections(),
+            None,
+            None,
+            scenes::DebugVisibility {
                 hide_candles: false,
                 hide_blind_plaque: false,
             },
-            ui_scale: self.gfx.ui_scale,
-            modal_active: false,
-            arrange_preview: None,
-            shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
-            shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS,
-            effect_layers: self.effect_layers,
-            cursor_pos: (0.0, 0.0),
-            input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
-            gamepad_swap_ab: false,
-            gamepad_swap_xy: false,
-            gamepad_style: crate::ui::button_prompts::GamepadStyle::default(),
+            self.gfx.ui_scale,
+            false,
+            None,
+            crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS,
+            self.effect_layers,
+            (0.0, 0.0),
+            self.input_mode_override.unwrap_or(InputMode::Cursor),
+            false,
+            false,
+            crate::ui::button_prompts::GamepadStyle::default(),
             suspended_shop,
             suspended_collection,
-        };
+        );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)
         } else {
             self.scene.draw_frame(ctx)
         };
 
-        // ── Modal overlay (relic_unlock screenshot path) ────────────
-        // Mirrors the modal-staging block in `App::draw` (src/main/
-        // draw.rs:476-545): tick the queue, draw it, then strip scene
-        // 3D ops + override the camera/lights so the relic mesh owns
-        // the depth buffer for its own pass. Kept in sync with the
-        // live path so screenshots match what players actually see.
+        // Modal overlay (`--scene relic_unlock`): same staging as `App::draw`.
         if let Some(ref mut queue) = self.modal_overlay {
             queue.update();
             if let Some((
@@ -842,49 +837,12 @@ impl HeadlessApp {
                 if !modal_gradient_quads.is_empty() {
                     frame.gradient_quads(modal_gradient_quads);
                 }
-                if !modal_relic_objects.is_empty() {
-                    use crate::render::draw_cmd::{CameraParams, DrawCmd};
-                    frame.cmds.retain(|cmd| {
-                        !matches!(
-                            cmd,
-                            DrawCmd::Object3d(_)
-                                | DrawCmd::Object3dBatch(_)
-                                | DrawCmd::ShowcaseTileBatch(_)
-                                | DrawCmd::TileFaceQuad(_)
-                                | DrawCmd::Table
-                        )
-                    });
-                    let w = self.width as f32;
-                    let h = self.height as f32;
-                    frame.camera_override = Some(CameraParams {
-                        eye: [0.0, -h * 3.0, 0.0],
-                        target: [0.0, 0.0, 0.0],
-                        up: [0.0, 0.0, 1.0],
-                        fovy_deg: 20.0,
-                    });
-                    use crate::render::wgpu_renderer::PointLight;
-                    frame.point_lights = vec![
-                        PointLight {
-                            pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
-                            radius: h * 1.6,
-                            color: [1.00, 0.94, 0.82],
-                            intensity: 2.0,
-                        },
-                        PointLight {
-                            pos: [w * 0.5 - w * 0.22, h * 0.5 + h * 0.35, h * 0.30],
-                            radius: h * 1.3,
-                            color: [0.78, 0.86, 1.00],
-                            intensity: 0.9,
-                        },
-                        PointLight {
-                            pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
-                            radius: h * 1.0,
-                            color: [1.00, 0.78, 0.42],
-                            intensity: 1.0,
-                        },
-                    ];
-                    frame.object3d_batch(modal_relic_objects);
-                }
+                apply_modal_relic_staging(
+                    &mut frame,
+                    self.width as f32,
+                    self.height as f32,
+                    modal_relic_objects,
+                );
             }
         }
 

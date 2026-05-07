@@ -200,7 +200,7 @@ pub(super) fn tick_active_cascade(
                     let gameplay = GameEngine::read(ctx.run);
                     if step.tile_ids.iter().any(|&tid| {
                         ctx.run
-                            .hand
+                            .hand()
                             .iter()
                             .chain(gameplay.structure_tiles.iter())
                             .find(|tile| tile.id == tid)

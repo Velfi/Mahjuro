@@ -610,7 +610,7 @@ pub fn load_run(index: usize) -> Option<LoadedRun> {
     // must have an active dealt hand. If the snapshot is still in the
     // pre-blind state, land in the shop instead of the black gameplay shell.
     if matches!(scene, ResumeScene::Gameplay)
-        && run.hand.is_empty()
+        && run.hand().is_empty()
         && run.blind == run.upcoming_blind
     {
         log::warn!(

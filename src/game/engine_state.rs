@@ -11,6 +11,10 @@ use crate::ui::input::MarqueeSelect;
 /// hand contents, selection, structure bank, round resources, and
 /// consumables. Legacy `RunState` still owns the rest of the run while the
 /// engine migrates incrementally.
+///
+/// **Single-writer rule:** gameplay mutations to this slice on [`RunState`] should
+/// go through [`Self::with_run_mut`] or other methods on this type (or
+/// [`crate::game::engine::GameEngine`] commands) so parallel vectors stay aligned.
 #[derive(Clone, Debug)]
 pub struct GameplayCoreState {
     pub hand: Vec<Tile>,
@@ -31,10 +35,10 @@ pub struct GameplayCoreState {
 impl GameplayCoreState {
     pub fn from_run(run: &RunState) -> Self {
         Self {
-            hand: run.hand.clone(),
-            selected: run.selected.clone(),
-            structure_sets: run.structure_sets.clone(),
-            structure_tiles: run.structure_tiles.clone(),
+            hand: run.hand().to_vec(),
+            selected: run.selected_slice().to_vec(),
+            structure_sets: run.structure_sets().to_vec(),
+            structure_tiles: run.structure_tiles().to_vec(),
             round_score: run.round_score,
             target_score: run.target_score,
             plays_remaining: run.plays_remaining,
@@ -48,10 +52,17 @@ impl GameplayCoreState {
     }
 
     pub fn write_back(&self, run: &mut RunState) {
-        run.hand = self.hand.clone();
-        run.selected = self.selected.clone();
-        run.structure_sets = self.structure_sets.clone();
-        run.structure_tiles = self.structure_tiles.clone();
+        debug_assert_eq!(
+            self.hand.len(),
+            self.selected.len(),
+            "GameplayCoreState: hand and selected mask must match before write_back"
+        );
+        run.set_gameplay_core_slice(
+            self.hand.clone(),
+            self.selected.clone(),
+            self.structure_sets.clone(),
+            self.structure_tiles.clone(),
+        );
         run.round_score = self.round_score;
         run.target_score = self.target_score;
         run.plays_remaining = self.plays_remaining;
@@ -61,6 +72,14 @@ impl GameplayCoreState {
         run.gold = self.gold;
         run.available_yaku = self.available_yaku.clone();
         run.consumables = self.consumables.clone();
+    }
+
+    /// Load the gameplay core slice from `run`, mutate it, then write it back once.
+    pub fn with_run_mut<R>(run: &mut RunState, f: impl FnOnce(&mut GameplayCoreState) -> R) -> R {
+        let mut core = Self::from_run(run);
+        let out = f(&mut core);
+        core.write_back(run);
+        out
     }
 
     pub fn hand_len(&self) -> usize {
@@ -152,8 +171,8 @@ impl GameplayCoreState {
     }
 
     /// Remove the currently-selected tiles from the hand without touching
-    /// resources or selection vector length bookkeeping. Used by the
-    /// play-selection scoring path which refills differently.
+    /// resources. Clears the selection mask to match the new hand size (all
+    /// `false`); draw/refill steps may extend the hand afterward.
     /// Returns (removed_tiles, removed_indices_in_hand_order).
     pub fn take_selected_tiles(&mut self) -> (Vec<Tile>, Vec<usize>) {
         let indices: Vec<usize> = self.selected_indices();
@@ -161,6 +180,7 @@ impl GameplayCoreState {
         for &i in indices.iter().rev() {
             self.hand.remove(i);
         }
+        self.selected = vec![false; self.hand.len()];
         (removed, indices)
     }
 
@@ -184,6 +204,7 @@ impl GameplayCoreState {
     /// already drawn from the wall and emitted any bus events.
     pub fn push_drawn_tiles(&mut self, drawn: &[Tile]) {
         self.hand.extend_from_slice(drawn);
+        self.selected.resize(self.hand.len(), false);
     }
 
     /// Sort the hand and reset the selection vector to match the new size.
@@ -191,6 +212,28 @@ impl GameplayCoreState {
     pub fn finalize_hand_after_draw(&mut self) {
         self.hand.sort();
         self.selected = vec![false; self.hand.len()];
+    }
+
+    /// Clear hand, selection mask, and structure bank (inter-round / skip transitions).
+    pub fn clear_hand_structure_bank(&mut self) {
+        self.hand.clear();
+        self.selected.clear();
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
+    }
+
+    /// After tiles were dealt into the hand from the wall, normalize for round start.
+    pub fn finalize_opening_deal(&mut self) {
+        self.hand.sort();
+        self.selected = vec![false; self.hand.len()];
+        self.structure_sets.clear();
+        self.structure_tiles.clear();
+    }
+
+    /// Sort the hand and extend `selected` with `false` for new indices (tutorial lesson grow).
+    pub fn sort_hand_resize_selection_false(&mut self) {
+        self.hand.sort();
+        self.selected.resize(self.hand.len(), false);
     }
 }
 
@@ -203,12 +246,12 @@ mod tests {
     #[test]
     fn core_state_round_trips_through_run() {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             Tile::new(Suit::Circles, 9, 1),
             Tile::new(Suit::Characters, 2, 2),
             Tile::new(Suit::Bamboos, 4, 3),
         ];
-        run.selected = vec![true, false, true];
+        *run.selected_mut() = vec![true, false, true];
         run.gold = 42;
 
         let mut core = GameplayCoreState::from_run(&run);
@@ -217,21 +260,21 @@ mod tests {
         core.write_back(&mut run);
 
         assert_eq!(run.gold, 47);
-        assert_eq!(run.selected, vec![false, false, false]);
-        assert_eq!(run.hand[0].rank, 2);
-        assert_eq!(run.hand[1].rank, 4);
-        assert_eq!(run.hand[2].rank, 9);
+        assert_eq!(run.selected_slice(), &[false, false, false]);
+        assert_eq!(run.hand()[0].rank, 2);
+        assert_eq!(run.hand()[1].rank, 4);
+        assert_eq!(run.hand()[2].rank, 9);
     }
 
     #[test]
     fn marquee_selection_updates_owned_selected_mask() {
         let mut run = RunState::new_demo();
-        run.hand = vec![
+        *run.hand_mut() = vec![
             Tile::new(Suit::Characters, 1, 10),
             Tile::new(Suit::Characters, 2, 11),
             Tile::new(Suit::Characters, 3, 12),
         ];
-        run.selected = vec![false; 3];
+        *run.selected_mut() = vec![false; 3];
         let mut core = GameplayCoreState::from_run(&run);
 
         let (mut marquee, _) = core.begin_marquee_selection(0).unwrap();

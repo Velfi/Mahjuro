@@ -206,10 +206,13 @@ fn whisper_apply(run: &mut RunState) {
     // Shrink the hand by 1 for the whole round. The bonus_hand_size delta is
     // honored by `refill_hand` and the `score_selected_tiles` draw target.
     run.boss.bonus_hand_size -= 1;
-    while run.hand.len() > effective_hand_size(run) {
-        run.hand.pop();
-    }
-    run.selected = vec![false; run.hand.len()];
+    let target = effective_hand_size(run);
+    crate::game::engine_state::GameplayCoreState::with_run_mut(run, |core| {
+        while core.hand.len() > target {
+            core.hand.pop();
+        }
+        core.selected = vec![false; core.hand.len()];
+    });
 }
 
 fn tribute_apply(run: &mut RunState) {
@@ -314,42 +317,42 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     let candidates = [
         (
             TileDebuff::Suit(crate::core::tile::Suit::Characters),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Characters)
                 .count(),
         ),
         (
             TileDebuff::Suit(crate::core::tile::Suit::Bamboos),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Bamboos)
                 .count(),
         ),
         (
             TileDebuff::Suit(crate::core::tile::Suit::Circles),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Circles)
                 .count(),
         ),
         (
             TileDebuff::Class(TileDebuffClass::Honors),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| TileDebuffClass::Honors.matches(t))
                 .count(),
         ),
         (
             TileDebuff::Class(TileDebuffClass::Terminals),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| TileDebuffClass::Terminals.matches(t))
                 .count(),
         ),
         (
             TileDebuff::Suit(crate::core::tile::Suit::Flower),
-            run.hand
+            run.hand()
                 .iter()
                 .filter(|t| t.suit == crate::core::tile::Suit::Flower)
                 .count(),
@@ -397,7 +400,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     }
 
     let fallback = run
-        .hand
+        .hand()
         .iter()
         .fold(
             (TileDebuff::Class(TileDebuffClass::Honors), 0usize),
@@ -420,7 +423,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
                     }
                     crate::core::tile::Suit::Season => TileDebuff::Class(TileDebuffClass::Honors),
                 };
-                let count = run.hand.iter().filter(|t| candidate.matches(t)).count();
+                let count = run.hand().iter().filter(|t| candidate.matches(t)).count();
                 if count > best.1 {
                     (candidate, count)
                 } else {
@@ -718,14 +721,14 @@ mod tests {
     #[test]
     fn blight_can_choose_flower_debuffs() {
         let mut run = RunState::new(GameMode::standard());
-        run.hand = vec![
+        *run.hand_mut() = vec![
             custom_tile(Suit::Flower, 1, 1),
             custom_tile(Suit::Flower, 2, 2),
             custom_tile(Suit::Flower, 3, 3),
             custom_tile(Suit::Characters, 1, 4),
             custom_tile(Suit::Bamboos, 2, 5),
         ];
-        run.selected = vec![false; run.hand.len()];
+        *run.selected_mut() = vec![false; run.hand().len()];
 
         let effect = blight_reveal(&mut run);
 
@@ -736,14 +739,14 @@ mod tests {
     fn counterweight_targets_relic_supported_family() {
         let mut run = RunState::new(GameMode::standard());
         run.relics.active = vec![RelicId::JadeSerpent, RelicId::GardenKeeper];
-        run.hand = vec![
+        *run.hand_mut() = vec![
             custom_tile(Suit::Characters, 1, 1),
             custom_tile(Suit::Characters, 2, 2),
             custom_tile(Suit::Bamboos, 3, 3),
             custom_tile(Suit::Bamboos, 4, 4),
             custom_tile(Suit::Flower, 1, 5),
         ];
-        run.selected = vec![false; run.hand.len()];
+        *run.selected_mut() = vec![false; run.hand().len()];
 
         let effect = counterweight_reveal(&mut run);
 

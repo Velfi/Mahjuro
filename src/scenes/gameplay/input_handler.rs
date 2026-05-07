@@ -595,7 +595,7 @@ pub(super) fn process_focus_and_actions(
                 } else {
                     let selected_tiles: Vec<_> = ctx
                         .run
-                        .hand
+                        .hand()
                         .iter()
                         .zip(interaction.selected.iter())
                         .filter(|&(_, &sel)| sel)
@@ -767,7 +767,7 @@ pub(super) fn process_focus_and_actions(
                 if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
                     let selected_indices: Vec<usize> = ctx
                         .run
-                        .selected
+                        .selected_slice()
                         .iter()
                         .enumerate()
                         .filter(|&(_, &s)| s)

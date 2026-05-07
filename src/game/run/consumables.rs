@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::game::engine_state::GameplayCoreState;
+
 impl RunState {
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
     /// their yaku for the run; Talismans stamp their enhancement onto every
@@ -203,8 +205,9 @@ impl RunState {
                 break;
             }
         }
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.finalize_hand_after_draw();
+        });
         self.restamp_hand_enhancements();
         if destroyed > 0 {
             bus.push(crate::game::event_bus::GameEvent::TilesDestroyed);

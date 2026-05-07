@@ -2,6 +2,7 @@
 
 use crate::core::deck::Wall;
 use crate::core::relic::{RelicId, RelicState};
+use crate::game::engine_state::GameplayCoreState;
 use crate::game::tutorial::TutorialState;
 
 /// Captures enough of [`super::RunState`] to restore hand, wall, counters,
@@ -41,8 +42,6 @@ impl DiscardUndoSnapshot {
 
 impl super::RunState {
     pub fn apply_discard_undo(&mut self, snap: DiscardUndoSnapshot) {
-        self.hand = snap.hand;
-        self.selected = snap.selected;
         self.discards_remaining = snap.discards_remaining;
         self.wall = snap.wall;
         self.gold = snap.gold;
@@ -52,6 +51,12 @@ impl super::RunState {
         self.relics = snap.relics;
         self.tutorial = snap.tutorial;
         self.relic_activations.truncate(snap.relic_activations_len);
+        let hand = snap.hand;
+        let selected = snap.selected;
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.hand = hand;
+            core.selected = selected;
+        });
         self.restamp_hand_enhancements();
     }
 }

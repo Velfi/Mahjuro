@@ -571,13 +571,12 @@ impl WgpuRenderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
             immediate_size: 0,
         });
-        let (_moon_albedo_texture, moon_albedo_view) =
-            crate::render::texture_upload::load_metal_heightmap(
-                &device,
-                &queue,
-                "textures/moon_albedo.png",
-                "moon-albedo",
-            );
+        let (_moon_albedo_texture, moon_albedo_view) = load_metal_heightmap(
+            &device,
+            &queue,
+            "textures/moon_albedo.png",
+            "moon-albedo",
+        );
         let moon_albedo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("moon-albedo-bg"),
             layout: &moon_albedo_tex_layout,

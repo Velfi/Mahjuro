@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::game::engine_state::GameplayCoreState;
+
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on
     /// boss blinds, and applies any per-round resource resets.
@@ -92,16 +94,17 @@ impl RunState {
                 self.hand.push(t);
             }
         }
-        self.hand.sort();
-        self.selected = vec![false; self.hand.len()];
-        self.structure_sets.clear();
-        self.structure_tiles.clear();
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.finalize_opening_deal();
+        });
         self.restamp_hand_enhancements();
         // SetMagnet: pull 4th copies of any triplets in the opening hand.
         // No bus available at deal time; create a throwaway sink.
         let mut _sink = EventBus::default();
         self.set_magnet_draw_fourths(&mut _sink);
-        self.hand.sort();
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.finalize_hand_after_draw();
+        });
 
         // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
         if self.relics.has(crate::core::relic::RelicId::Sweepstakes) {
@@ -231,10 +234,9 @@ impl RunState {
         self.honors_scored_this_round = false;
         self.upcoming_blind = self.upcoming_blind.next();
         self.blind = self.upcoming_blind;
-        self.hand.clear();
-        self.selected.clear();
-        self.structure_sets.clear();
-        self.structure_tiles.clear();
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.clear_hand_structure_bank();
+        });
         self.tag_bonus_hand_size = 0;
 
         // Tutorial: advance to the next lesson and apply its overrides.
@@ -293,9 +295,8 @@ impl RunState {
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.blind = self.upcoming_blind;
-        self.hand.clear();
-        self.selected.clear();
-        self.structure_sets.clear();
-        self.structure_tiles.clear();
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.clear_hand_structure_bank();
+        });
     }
 }
