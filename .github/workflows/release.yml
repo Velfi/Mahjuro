@@ -475,6 +475,15 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$APPDIR/usr/bin/mahjuro"
           chmod +x "$APPDIR/usr/bin/mahjuro"
           cp "target/${{ matrix.target }}/release/libsteam_api.so" "$APPDIR/usr/bin/"
+          RELEASE_DIR="target/${{ matrix.target }}/release"
+          shopt -s nullglob
+          sdl_libs=( "$RELEASE_DIR"/libSDL3.so* )
+          if [[ ${#sdl_libs[@]} -eq 0 ]]; then
+            echo "error: no libSDL3.so in $RELEASE_DIR (sdl3 build-from-source)" >&2
+            ls -la "$RELEASE_DIR"
+            exit 1
+          fi
+          cp "${sdl_libs[@]}" "$APPDIR/usr/bin/"
           cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
 
           cp packaging/AppRun "$APPDIR/AppRun"
@@ -520,9 +529,21 @@ jobs:
         if: matrix.name == 'Linux'
         id: update_archive_linux
         run: |
+          set -euo pipefail
           ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
-          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" \
-            mahjuro libsteam_api.so game_actions_4636490.vdf
+          RELEASE_DIR="target/${{ matrix.target }}/release"
+          (
+            cd "$RELEASE_DIR"
+            shopt -s nullglob
+            sdl_libs=( libSDL3.so* )
+            if [[ ${#sdl_libs[@]} -eq 0 ]]; then
+              echo "error: no libSDL3.so in $(pwd)" >&2
+              ls -la
+              exit 1
+            fi
+            tar -czf "$OLDPWD/$ARCHIVE" mahjuro libsteam_api.so \
+              "${sdl_libs[@]}" game_actions_4636490.vdf
+          )
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Set update archive name
