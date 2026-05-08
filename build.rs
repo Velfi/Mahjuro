@@ -13,8 +13,10 @@
 //! the bundle layout — see `scripts/package-macos.sh`.
 //!
 //! Linux does not search the executable directory for shared libraries by
-//! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` can live next
-//! to `mahjuro` (same layout as Steam depots and GitHub release tarballs).
+//! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` and `libSDL3.so*`
+//! (from `sdl3` build-from-source) can live next to `mahjuro` (same layout as
+//! Steam depots and GitHub release tarballs — see release workflow AppImage /
+//! linux tarball steps).
 //!
 //! On macOS, `sdl3-sys` (dynamic) links `libSDL3` with an `@rpath` install
 //! name but does not add an LC_RPATH to this crate. We pass
