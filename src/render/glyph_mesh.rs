@@ -1,6 +1,6 @@
 //! 3D extruded font glyphs for floating score popups.
 //!
-//! Uses `ttf-parser` to extract Cormorant Garamond outlines and
+//! Uses `ttf-parser` to extract Instrument Serif outlines and
 //! `lyon_tessellation` to triangulate the front/back caps with a nonzero
 //! fill rule (the rule TrueType outlines are authored against). Side walls
 //! and the top bevel are derived from the boundary edges of the fill
@@ -490,7 +490,7 @@ fn build_walls(pts: &[(f32, f32)], vertices: &mut Vec<Vertex3dTex>, indices: &mu
 
 /// Builds and caches `MeshCpu`s for label strings.
 ///
-/// All labels are composed from Cormorant Garamond outlines, so any
+/// All labels are composed from Instrument Serif outlines, so any
 /// character the font supports can appear. The per-string cache is bounded
 /// by the number of distinct popups the gameplay scene actually emits in a
 /// session — typically a few dozen.

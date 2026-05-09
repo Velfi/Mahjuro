@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::scene_transition::{
+    apply_post_scene_transition_effects, transition_spec_for_edge, PendingSceneDestination,
+    PostSceneTransitionCtx, SceneTag, DEFAULT_QUICK_SPEC,
+};
 use crate::sdl_shell::SdlShell;
 
 impl App {
@@ -225,6 +229,10 @@ impl App {
                 GameEvent::AchievementUnlocked(ach) => {
                     self.steam.unlock_achievement(ach);
                 }
+                GameEvent::TransformationSuccessorDiscovered(rid) => {
+                    let _ = self.progress.note_transformation_successor_discovered(rid);
+                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                }
             }
         }
 
@@ -291,14 +299,16 @@ impl App {
             let shop_face = matches!(&self.scene, Scene::Shop(_))
                 && self.overlay_stack.is_empty()
                 && !self.scene.has_blocking_overlay();
-            let collection_inspect_north = matches!(&self.scene, Scene::Collection(_))
+            let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
                 && self.overlay_stack.is_empty()
                 && !self.scene.has_blocking_overlay();
-            let shop_inspect = matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
+            let showcase_orbit_overlay = self.overlay_stack.last().is_some_and(|top| {
+                matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
+            });
             let gp_ctx = crate::ui::input::GamepadPollCtx {
                 shop_face_buttons: shop_face,
-                collection_inspect_north,
-                shop_item_inspect: shop_inspect,
+                collection_uses_north_for_inspect,
+                item_inspect_overlay: showcase_orbit_overlay,
             };
             if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
                 hide_cursor = true;
@@ -603,28 +613,29 @@ impl App {
                 overlay_request: &mut overlay_request,
                 headless: false,
                 effect_layers: self.effect_layers,
-                shop_inspect_orbit_stick: self
+                item_inspect_orbit_stick: self
                     .input
                     .as_ref()
-                    .map(|i| i.shop_inspect_orbit_stick)
+                    .map(|i| i.item_inspect_orbit_stick)
                     .unwrap_or((0.0, 0.0)),
-                shop_inspect_zoom_triggers: self
+                item_inspect_zoom_triggers: self
                     .input
                     .as_ref()
-                    .map(|i| i.shop_inspect_zoom_triggers)
+                    .map(|i| i.item_inspect_zoom_triggers)
                     .unwrap_or(0.0),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
+                shop_env_height_scale: self.debug.shop_env_height_scale,
             })
         } else {
-            let item_inspect_shop = self.overlay_stack.last().is_some_and(|top| {
+            let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
                 matches!(
                     top,
-                    Scene::ItemInspect(ins)
-                        if matches!(ins.host, scenes::ItemInspectHost::Shop)
+                    Scene::Showcase(s)
+                        if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            let suspended_shop = if item_inspect_shop {
+            let suspended_shop = if showcase_shop_inspect {
                 match &self.scene {
                     Scene::Shop(shop) => Some(shop),
                     _ => None,
@@ -670,18 +681,19 @@ impl App {
                     overlay_request: &mut overlay_request,
                     headless: false,
                     effect_layers: self.effect_layers,
-                    shop_inspect_orbit_stick: self
+                    item_inspect_orbit_stick: self
                         .input
                         .as_ref()
-                        .map(|i| i.shop_inspect_orbit_stick)
+                        .map(|i| i.item_inspect_orbit_stick)
                         .unwrap_or((0.0, 0.0)),
-                    shop_inspect_zoom_triggers: self
+                    item_inspect_zoom_triggers: self
                         .input
                         .as_ref()
-                        .map(|i| i.shop_inspect_zoom_triggers)
+                        .map(|i| i.item_inspect_zoom_triggers)
                         .unwrap_or(0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
+                    shop_env_height_scale: self.debug.shop_env_height_scale,
                 })
         };
         // Apply overlay push/pop before a SceneTransition (Replace).
@@ -721,77 +733,20 @@ impl App {
             }
         }
         if let Some(next_scene) = update_result {
-            // Choose transition style: dramatic cascade for
-            // new-game flows, quick fade for everything else.
-            let use_cascade = matches!(
-                (&self.scene, &next_scene),
-                (Scene::MainMenuExterior(_), Scene::TileSelect(_))
-                    | (Scene::MainMenuExterior(_), Scene::Shop(_))
-                    | (Scene::TileSelect(_), Scene::Shop(_))
-                    | (Scene::TileSelect(_), Scene::TutorialCampaign(_))
+            let spec = transition_spec_for_edge(
+                SceneTag::from(&self.scene),
+                SceneTag::from(&next_scene),
             );
-            let use_tile_teeth = matches!(
-                (&self.scene, &next_scene),
-                (Scene::MainMenuExterior(_), Scene::Collection(_))
-                    | (Scene::Collection(_), Scene::MainMenuExterior(_))
-            );
-            let use_galaxy = matches!(
-                (&self.scene, &next_scene),
-                (Scene::Collection(_), Scene::YakuJournal(_))
-                    | (Scene::YakuJournal(_), Scene::Collection(_))
-            );
-            let use_maelstrom = matches!(
-                (&self.scene, &next_scene),
-                (Scene::MainMenuExterior(_), Scene::Options(_))
-                    | (Scene::Options(_), Scene::MainMenuExterior(_))
-            );
-            let use_waterfall = matches!(
-                (&self.scene, &next_scene),
-                (Scene::MainMenuExterior(_), Scene::TileLiteracy(_))
-                    | (Scene::TileLiteracy(_), Scene::MainMenuExterior(_))
-            );
-            let use_shuffling_fan = matches!(
-                (&self.scene, &next_scene),
-                (Scene::MainMenuExterior(_), Scene::ProfileSelect(_))
-                    | (Scene::ProfileSelect(_), Scene::MainMenuExterior(_))
-            );
-            // Restart from the pause menu is the only path from
-            // Gameplay straight back to Shop; give it a deliberate
-            // fade-to-black instead of the snappy default.
-            let slow_fade = matches!(
-                (&self.scene, &next_scene),
-                (Scene::Gameplay(_), Scene::Shop(_))
-            );
-            if use_cascade {
-                self.transition_kind = TransitionKind::ShootingStarCascade;
-                self.transition_speed = 0.012;
-                self.audio.play_sfx(audio::SfxId::StarShimmer);
-            } else if use_tile_teeth {
-                self.transition_kind = TransitionKind::ForestOfTiles;
-                self.transition_speed = 0.035;
-            } else if use_galaxy {
-                self.transition_kind = TransitionKind::GalaxyOfTiles;
-                self.transition_speed = 0.032;
-            } else if use_maelstrom {
-                self.transition_kind = TransitionKind::Maelstrom;
-                self.transition_speed = 0.032;
-            } else if use_waterfall {
-                self.transition_kind = TransitionKind::TileWaterfall;
-                self.transition_speed = 0.034;
-            } else if use_shuffling_fan {
-                self.transition_kind = TransitionKind::ShufflingFan;
-                self.transition_speed = 0.035;
-            } else if slow_fade {
-                self.transition_kind = TransitionKind::Quick;
-                self.transition_speed = 0.025;
-            } else {
-                self.transition_kind = TransitionKind::Quick;
-                self.transition_speed = 0.08;
-            }
+            self.transition_kind = spec.kind;
+            self.transition_speed = spec.speed;
             self.transition_timer = 0.0;
             // Start fade-out transition.
             self.pending_scene = Some(next_scene);
-            self.pending_scene_targets_overlay = updated_overlay;
+            self.pending_scene_destination = if updated_overlay {
+                PendingSceneDestination::OverlayTop
+            } else {
+                PendingSceneDestination::Base
+            };
             self.transition_alpha = 1.0;
         }
 
@@ -898,57 +853,53 @@ impl App {
             if self.transition_alpha <= 0.0 {
                 self.transition_alpha = 0.0;
                 if let Some(next) = self.pending_scene.take() {
+                    let from_tag = SceneTag::from(&self.scene);
+                    let to_tag = SceneTag::from(&next);
                     // If we're transitioning out of the GameOver scene,
-                    // surface any deferred celebration modals now.
-                    if matches!(self.scene, Scene::GameOver(_))
-                        && !self.pending_post_game_over_modals.is_empty()
-                    {
-                        for modal in self.pending_post_game_over_modals.drain(..) {
-                            self.modals.push(modal);
-                        }
-                    }
-                    // Reset hand-tile world tracking on some scene
-                    // transitions so motion caches do not leak across.
-                    let clear_smoke = matches!(
-                        (&self.scene, &next),
-                        (Scene::TileSelect(_), Scene::Shop(_))
-                            | (Scene::TutorialCampaign(_), Scene::Shop(_))
-                            | (Scene::Shop(_), Scene::PickBlind(_))
-                    );
+                    // surface deferred meta level-up on the showcase overlay.
+                    let pushed_meta_level_up =
+                        if matches!(self.scene, Scene::GameOver(_))
+                            && let Some(modal) = self.pending_post_game_over_level_up.take()
+                        {
+                            self.overlay_stack.push(Scene::Showcase(scenes::ShowcaseScene::new(
+                                scenes::ShowcasePresenter::MetaLevelUp(
+                                    scenes::MetaLevelUpPresenter::new(modal),
+                                ),
+                            )));
+                            true
+                        } else {
+                            false
+                        };
                     // Route the new scene to the target recorded
                     // when the transition started, not whatever is
                     // on top now — overlays may have been pushed
                     // mid-fade (e.g. a zodiac celebration after a
                     // skip) and must not clobber them.
-                    let entering_main_menu = matches!(next, Scene::MainMenuExterior(_));
-                    if self.pending_scene_targets_overlay {
-                        if let Some(top) = self.overlay_stack.last_mut() {
-                            *top = next;
-                        } else {
+                    match self.pending_scene_destination {
+                        PendingSceneDestination::OverlayTop => {
+                            if let Some(top) = self.overlay_stack.last_mut() {
+                                *top = next;
+                            } else {
+                                self.scene = next;
+                            }
+                        }
+                        PendingSceneDestination::Base => {
                             self.scene = next;
                         }
-                    } else {
-                        self.scene = next;
                     }
-                    self.pending_scene_targets_overlay = false;
-                    if entering_main_menu {
-                        self.audio.play_sfx(audio::SfxId::MainMenuEnter);
-                    }
+                    self.pending_scene_destination = PendingSceneDestination::default();
                     if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                         self.resume_scene = scene;
                     }
-                    if clear_smoke && let Some(r) = self.renderer.as_mut() {
-                        r.clear_smoke();
-                    }
-                    if let Some(input) = self.input.as_mut() {
-                        input.focus_slot = 0;
-                    }
-                    // Fade score panel in for the new scene.
-                    self.anim
-                        .fade(render::animation::ENTITY_SCORE_PANEL, 0.0, 1.0, 300);
-                    // Slide hand strip up from below.
-                    self.anim
-                        .slide_to(render::animation::ENTITY_HAND_STRIP, 0.0, -20.0, 400);
+                    apply_post_scene_transition_effects(PostSceneTransitionCtx {
+                        from: from_tag,
+                        to: to_tag,
+                        pushed_meta_level_up,
+                        anim: &mut self.anim,
+                        renderer: self.renderer.as_mut(),
+                        input: self.input.as_mut(),
+                        audio: &mut self.audio,
+                    });
                 }
             }
         } else if self.transition_alpha < 1.0 {
@@ -958,8 +909,8 @@ impl App {
             // Reset transition kind once fully faded in.
             if self.transition_alpha >= 1.0 {
                 self.transition_timer = 0.0;
-                self.transition_kind = TransitionKind::Quick;
-                self.transition_speed = 0.08;
+                self.transition_kind = DEFAULT_QUICK_SPEC.kind;
+                self.transition_speed = DEFAULT_QUICK_SPEC.speed;
             }
         }
 

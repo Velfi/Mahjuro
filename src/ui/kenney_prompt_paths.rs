@@ -2,7 +2,7 @@
 
 use super::button_prompts::{FaceButton, GamepadStyle, PromptInputSurface};
 
-/// Four icons in order: **Exit**, **Select**, **Hold sell**, **Inspect** — matches the compact legend line.
+/// Four icons in order: **Exit**, **Select**, **Sell**, **Inspect** — matches the compact legend line.
 pub fn shop_prompt_icon_paths(
     surface: PromptInputSurface,
     style: GamepadStyle,
@@ -67,5 +67,43 @@ fn face_path(style: GamepadStyle, face: FaceButton) -> &'static str {
         (Nintendo, East) => "kenney_input-prompts/Nintendo Switch 2/Vector/switch_button_a.svg",
         (Nintendo, West) => "kenney_input-prompts/Nintendo Switch 2/Vector/switch_button_y.svg",
         (Nintendo, North) => "kenney_input-prompts/Nintendo Switch 2/Vector/switch_button_x.svg",
+    }
+}
+
+fn left_trigger_path(style: GamepadStyle) -> &'static str {
+    use GamepadStyle::{Generic, Nintendo, PlayStation, Xbox};
+    match style {
+        Xbox | Generic => "kenney_input-prompts/Xbox Series/Vector/xbox_lt.svg",
+        PlayStation => "kenney_input-prompts/PlayStation Series/Vector/playstation_trigger_l2.svg",
+        Nintendo => "kenney_input-prompts/Nintendo Switch 2/Vector/switch_button_zl.svg",
+    }
+}
+
+/// Icons for **discard bowl**, **play mirror**, **cash-in tablet** (that order).
+///
+/// Keyboard + mouse: **Q** / **E** / **T**. Controller: West/North face (or `swap_xy`) vs LT for cash-in.
+pub fn gameplay_action_prompt_icon_paths(
+    surface: PromptInputSurface,
+    style: GamepadStyle,
+    swap_xy: bool,
+) -> [&'static str; 3] {
+    match surface {
+        PromptInputSurface::MouseOrKeyboard => [
+            "kenney_input-prompts/Keyboard & Mouse/Vector/keyboard_q.svg",
+            "kenney_input-prompts/Keyboard & Mouse/Vector/keyboard_e.svg",
+            "kenney_input-prompts/Keyboard & Mouse/Vector/keyboard_t.svg",
+        ],
+        PromptInputSurface::Controller => {
+            let (discard_face, play_face) = if swap_xy {
+                (FaceButton::West, FaceButton::North)
+            } else {
+                (FaceButton::North, FaceButton::West)
+            };
+            [
+                face_path(style, discard_face),
+                face_path(style, play_face),
+                left_trigger_path(style),
+            ]
+        }
     }
 }

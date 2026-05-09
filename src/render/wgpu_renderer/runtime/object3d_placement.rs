@@ -8,6 +8,7 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run_object3d_placement(
         &mut self,
+        frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         object3d_cmds: &[&[crate::render::draw_cmd::Object3d]],
         wall_stack_cmds: &[&WallStackPlacement],
@@ -68,13 +69,30 @@ impl WgpuRenderer {
 
                 for obj in batch.iter() {
                     use crate::render::draw_cmd::Object3dKind;
-                    let center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
+                    let use_ray_plane = match (
+                        self.active_scene_key.as_deref(),
+                        frame.camera_override.as_ref(),
+                    ) {
+                        (Some("tile_pack_celebration"), Some(_)) => true,
+                        (Some("showcase"), Some(_)) => {
+                            frame.showcase_render_hints.object3d_use_camera_ray_plane_z
+                        }
+                        _ => false,
+                    };
+                    let center = if use_ray_plane
+                        && let Some(cam) = frame.camera_override.as_ref()
+                    {
+                        crate::render::world_space::world_on_camera_ray_plane_z(
+                            w, h, cam, obj.pos[0], obj.pos[1], obj.pos[2],
+                        )
+                    } else {
+                        pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2])
+                    };
                     let model = translate_rot_scale(
                         center,
                         obj.rotation_matrix(),
                         glam::Vec3::from(obj.extents),
                     );
-
                     match &obj.kind {
                         Object3dKind::Primitive {
                             shape,
@@ -84,6 +102,7 @@ impl WgpuRenderer {
                             silhouette,
                         } => {
                             self.place_object3d_primitive(
+                                frame,
                                 &camera,
                                 obj,
                                 shape,
@@ -394,8 +413,13 @@ impl WgpuRenderer {
                             let relic_arr_name = if let Some(name) = obj.arrange_name {
                                 name.to_string()
                             } else {
+                                let shop_like = self.active_scene_key == Some("shop")
+                                    || (self.active_scene_key == Some("showcase")
+                                        && frame
+                                            .showcase_render_hints
+                                            .shop_tonemap_and_lit_mesh_context);
                                 match self.active_scene_key {
-                                    Some("shop") => "shop.for_sale.relics".to_string(),
+                                    _ if shop_like => "shop.for_sale.relics".to_string(),
                                     Some("gameplay") => "gameplay.relic_col".to_string(),
                                     _ => format!("relic[{slot_i}]"),
                                 }
@@ -448,11 +472,12 @@ impl WgpuRenderer {
                                     base_color,
                                 );
                             } else {
-                                self.relic_instances[slot_i].write_uniform(
+                                self.relic_instances[slot_i].write_uniform_with_decal(
                                     &self.queue,
                                     view_proj_arr,
                                     model,
                                     material,
+                                    false,
                                 );
                             }
                             // Silhouette pass skips the relic albedo/relief
@@ -579,11 +604,12 @@ impl WgpuRenderer {
                                 specular_strength: 0.70,
                                 specular_power: 48.0,
                             };
-                            self.pack_instances[slot_i].write_uniform(
+                            self.pack_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 model,
                                 material,
+                                false,
                             );
                             let want_tex = if self.pack_textures.contains_key(kind) {
                                 Some(*kind)
@@ -883,11 +909,12 @@ impl WgpuRenderer {
                                 specular_strength: 0.85,
                                 specular_power: 64.0,
                             };
-                            self.dora_plinth_instances[slot_i].write_uniform(
+                            self.dora_plinth_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 plinth_model,
                                 material,
+                                false,
                             );
                             // Project AABB → screen rect for hover/focus.
                             let plinth_world_center = plinth_model.w_axis.truncate();
@@ -940,11 +967,12 @@ impl WgpuRenderer {
                                 obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
-                            self.bug_body_instances[slot].write_uniform(
+                            self.bug_body_instances[slot].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 bug_model,
                                 self.bug_body_mesh.default_material,
+                                false,
                             );
                             object3d_draw_list.push((DrawKind::BugBody, slot));
                             let flap_l = glam::Mat4::from_rotation_x(*flap_rad);

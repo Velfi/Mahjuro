@@ -459,10 +459,9 @@ fn tricky_chiitoitsu_seven_distinct_pairs() {
     assert!(alts.iter().all(|c| c.len() == 7));
 }
 
-/// Kokushi musou is not represented as 4 melds + pair; the engine only supports
-/// standard + chiitoitsu, so a valid kokushi 14 is rejected.
+/// Kokushi Musō: twelve orphan singletons + one pair on an orphan face.
 #[test]
-fn tricky_kokushi_musou_not_decomposed() {
+fn tricky_kokushi_musou_decomposed() {
     let tiles = vec![
         t(Suit::Characters, 1, 0),
         t(Suit::Characters, 9, 1),
@@ -479,7 +478,13 @@ fn tricky_kokushi_musou_not_decomposed() {
         t(Suit::Dragon, 3, 12),
         t(Suit::Characters, 1, 13), // pair on 1m
     ];
-    assert!(validate_selection(&tiles).is_none());
+    let sets = validate_selection(&tiles).expect("kokushi");
+    assert_eq!(sets.len(), 13);
+    assert_eq!(sets.iter().filter(|s| s.kind == SetKind::Single).count(), 12);
+    assert_eq!(sets.iter().filter(|s| s.kind == SetKind::Pair).count(), 1);
+    let yaku = crate::core::yaku::detect_yaku_with_wind(&tiles, &sets, None, None);
+    assert!(yaku.contains(&crate::core::yaku::YakuKind::KokushiMusou));
+    assert!(!yaku.contains(&crate::core::yaku::YakuKind::Honroutou));
 }
 
 /// 1-1-1-2-3: triplet(1) leaves orphans, but pair(1,1) + sequence(1,2,3) works.

@@ -21,7 +21,7 @@ pub fn apply_arrange_to_layout(
     use crate::ui::placement::{ArrangeDelta, apply_arrange};
     use crate::ui::scene_layout::{
         save_collection_positions, save_gameplay_positions, save_main_menu_exterior_positions,
-        save_shop_positions, save_tutorial_positions,
+        save_shop_positions, save_tile_select_positions, save_tutorial_positions,
     };
 
     let delta = ArrangeDelta {
@@ -59,10 +59,18 @@ pub fn apply_arrange_to_layout(
             let ok = apply_arrange(p, name, delta);
             (ok, ok.then(|| save_tutorial_positions(p)))
         }
-        crate::Scene::TilePackCelebration(t) => {
-            let p = &mut t.positions;
+        crate::Scene::Showcase(s) => match &mut s.presenter {
+            crate::scenes::ShowcasePresenter::TilePack(t) => {
+                let p = &mut t.positions;
+                let ok = apply_arrange(p, name, delta);
+                (ok, ok.then(|| save_shop_positions(p)))
+            }
+            _ => (false, None),
+        },
+        crate::Scene::TileSelect(s) => {
+            let p = &mut s.positions;
             let ok = apply_arrange(p, name, delta);
-            (ok, ok.then(|| save_shop_positions(p)))
+            (ok, ok.then(|| save_tile_select_positions(p)))
         }
         _ => (false, None),
     };
@@ -89,7 +97,11 @@ pub fn sample_arrange_placement(
         crate::Scene::Collection(c) => c.positions.placement(name).copied(),
         crate::Scene::MainMenuExterior(s) => s.positions.placement(name).copied(),
         crate::Scene::TutorialCampaign(t) => t.positions.placement(name).copied(),
-        crate::Scene::TilePackCelebration(t) => t.positions.placement(name).copied(),
+        crate::Scene::Showcase(s) => match &s.presenter {
+            crate::scenes::ShowcasePresenter::TilePack(t) => t.positions.placement(name).copied(),
+            _ => None,
+        },
+        crate::Scene::TileSelect(s) => s.positions.placement(name).copied(),
         _ => None,
     }
 }
@@ -98,7 +110,7 @@ pub fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
     use crate::ui::placement::reset_arrange;
     use crate::ui::scene_layout::{
         save_collection_positions, save_gameplay_positions, save_main_menu_exterior_positions,
-        save_shop_positions, save_tutorial_positions,
+        save_shop_positions, save_tile_select_positions, save_tutorial_positions,
     };
 
     let (matched, save_result): (bool, Option<anyhow::Result<()>>) = match scene {
@@ -127,10 +139,18 @@ pub fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
             let ok = reset_arrange(p, name);
             (ok, ok.then(|| save_tutorial_positions(p)))
         }
-        crate::Scene::TilePackCelebration(t) => {
-            let p = &mut t.positions;
+        crate::Scene::Showcase(s) => match &mut s.presenter {
+            crate::scenes::ShowcasePresenter::TilePack(t) => {
+                let p = &mut t.positions;
+                let ok = reset_arrange(p, name);
+                (ok, ok.then(|| save_shop_positions(p)))
+            }
+            _ => (false, None),
+        },
+        crate::Scene::TileSelect(s) => {
+            let p = &mut s.positions;
             let ok = reset_arrange(p, name);
-            (ok, ok.then(|| save_shop_positions(p)))
+            (ok, ok.then(|| save_tile_select_positions(p)))
         }
         _ => (false, None),
     };
@@ -174,9 +194,16 @@ pub fn collect_committed_rotations(
                 t.positions.hierarchy(),
                 Box::new(move |n| t.positions.placement(n).copied()),
             ),
-            crate::Scene::TilePackCelebration(t) => (
-                t.positions.hierarchy(),
-                Box::new(move |n| t.positions.placement(n).copied()),
+            crate::Scene::Showcase(s) => match &s.presenter {
+                crate::scenes::ShowcasePresenter::TilePack(t) => (
+                    t.positions.hierarchy(),
+                    Box::new(move |n| t.positions.placement(n).copied()),
+                ),
+                _ => return out,
+            },
+            crate::Scene::TileSelect(s) => (
+                s.positions.hierarchy(),
+                Box::new(move |n| s.positions.placement(n).copied()),
             ),
             _ => return out,
         };
@@ -232,7 +259,11 @@ pub fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
         crate::Scene::Collection(c) => c.positions.hierarchy(),
         crate::Scene::MainMenuExterior(s) => s.positions.hierarchy(),
         crate::Scene::TutorialCampaign(t) => t.positions.hierarchy(),
-        crate::Scene::TilePackCelebration(t) => t.positions.hierarchy(),
+        crate::Scene::Showcase(s) => match &s.presenter {
+            crate::scenes::ShowcasePresenter::TilePack(t) => t.positions.hierarchy(),
+            _ => &[],
+        },
+        crate::Scene::TileSelect(s) => s.positions.hierarchy(),
         _ => &[],
     };
     let mut out = Vec::new();

@@ -67,6 +67,7 @@ pub(crate) fn meld_chip_bonus(kind: SetKind) -> i32 {
         SetKind::Sequence => 28,
         SetKind::Triplet => 50,
         SetKind::Kong => 80,
+        SetKind::Single => 0,
     }
 }
 
@@ -76,6 +77,7 @@ pub(crate) fn describe_set(tiles: &[Tile], set: &DetectedSet) -> String {
         SetKind::Sequence => "Sequence",
         SetKind::Triplet => "Triplet",
         SetKind::Kong => "Kong",
+        SetKind::Single => "Single",
     };
     let faces = set
         .tile_ids

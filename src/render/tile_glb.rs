@@ -620,7 +620,7 @@ fn decode_tile_primitive(
         emissive_rgba,
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
-        emissive_factor: material.emissive_factor(),
+            emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),
         alpha_mode,
         alpha_cutoff,
         double_sided: material.double_sided(),
@@ -650,7 +650,7 @@ fn walk_tile_scene_nodes(
 
 pub fn load_glb_tile_from_bytes(data: &[u8]) -> anyhow::Result<LoadedTile> {
     let (document, buffers, images) =
-        gltf::import_slice(data).context("gltf::import_slice(Tile.glb)")?;
+        gltf::import_slice(data).context("gltf::import_slice(tile mesh glb)")?;
 
     let scene = document
         .default_scene()

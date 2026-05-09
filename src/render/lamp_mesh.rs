@@ -357,12 +357,7 @@ pub fn build_lamp_bulb_mesh() -> MeshCpu {
     MeshCpu {
         vertices: verts,
         indices: idxs,
-        default_material: MaterialParams {
-            kind: MaterialKind::Glass,
-            base_color: [1.00, 0.92, 0.60, 1.0],
-            specular_strength: 1.0,
-            specular_power: 128.0,
-        },
+        default_material: MaterialParams::emissive_lamp([1.00, 0.92, 0.60], 0.55),
     }
 }
 

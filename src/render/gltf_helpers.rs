@@ -40,6 +40,18 @@ impl GltfPbrUniform {
     }
 }
 
+/// Linear RGB emissive factor from glTF, including [`KHR_materials_emissive_strength`]
+/// when present (defaults to strength `1`).
+pub fn effective_gltf_emissive_rgb(material: &gltf::Material<'_>) -> [f32; 3] {
+    let f = material.emissive_factor();
+    let s = material
+        .emissive_strength()
+        .filter(|v| v.is_finite())
+        .unwrap_or(1.0)
+        .max(0.0);
+    [f[0] * s, f[1] * s, f[2] * s]
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum GltfAlphaMode {

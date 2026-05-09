@@ -17,7 +17,11 @@ lyon_path = "1.0"
 lyon_tessellation = "1.0"
 fontdue = "0.8"
 glam = { version = "0.30.9", features = ["bytemuck"] }
-gltf = { version = "1.4.1", features = ["KHR_texture_transform", "KHR_lights_punctual"] }
+gltf = { version = "1.4.1", features = [
+    "KHR_texture_transform",
+    "KHR_lights_punctual",
+    "KHR_materials_emissive_strength",
+] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 sdl3 = { version = "0.17", features = ["build-from-source", "raw-window-handle"] }
 log = "0.4.28"
@@ -35,7 +39,7 @@ chrono = "0.4.44"
 dirs = "5"
 arboard = "3.6.1"
 enum_dispatch = "0.3"
-rodio = { version = "0.19", features = ["vorbis"] }
+rodio = { version = "0.19", features = ["vorbis", "mp3"] }
 rust-embed = { version = "8", features = ["include-exclude"] }
 self_update = { version = "0.42", features = [
     "archive-zip",

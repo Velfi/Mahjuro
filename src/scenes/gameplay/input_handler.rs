@@ -498,9 +498,15 @@ pub(super) fn process_focus_and_actions(
                 }
                 continue;
             }
-            UiAction::ShopItemInspectToggle
-            | UiAction::ShopSellHoldPress
-            | UiAction::ShopSellHoldRelease => {
+            UiAction::WestFacePress => {
+                actions_for_scene.push(UiAction::CommitDiscard);
+                continue;
+            }
+            UiAction::NorthFacePress => {
+                actions_for_scene.push(UiAction::ScoreHand);
+                continue;
+            }
+            UiAction::WestFaceRelease => {
                 continue;
             }
             _ => {}
@@ -1330,7 +1336,6 @@ pub(super) fn build_consumable_dish(
                 let pendant_color = match item {
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
                     crate::core::consumable::Consumable::Talisman(tk) => match tk {
-                        crate::core::talisman::TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0],
                         crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
                         crate::core::talisman::TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
                         crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
@@ -1382,9 +1387,10 @@ pub(super) fn build_consumable_dish(
                             "gameplay.consumable_dish.talisman",
                             layout,
                         );
+                        let tscale = slot_h * 0.78;
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
-                            extents: [slot_h * 0.85, slot_h * 0.85 * 1.4, slot_h * 0.85 * 0.25],
+                            extents: [tscale, tscale * 1.28, tscale * 0.22],
                             rotation: anchor.object3d_rotation(),
                             color: pendant_color,
                             kind: Object3dKind::Talisman { kind: tk },

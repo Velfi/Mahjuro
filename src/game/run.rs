@@ -98,6 +98,69 @@ fn default_available_relics() -> Vec<RelicId> {
         .collect()
 }
 
+/// Paper Lantern–style shop pool swaps: once the primary relic has burned,
+/// it cannot appear again this run and its successor becomes eligible.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RelicShopPoolExtinction {
+    pub paper_lantern: bool,
+    pub silk_thread: bool,
+    pub melting_ice: bool,
+    pub tea_ceremony: bool,
+}
+
+/// Silk Moth / Taotie / Geese / Silver Filigree: shop-only after the primary
+/// burns **this run**; never carried in meta `available_relics`.
+fn transformation_successor_shop_eligible(
+    id: RelicId,
+    available_relics: &[RelicId],
+    ex: RelicShopPoolExtinction,
+) -> bool {
+    match id {
+        RelicId::SilverFiligreeLantern => {
+            ex.paper_lantern && available_relics.contains(&RelicId::PaperLantern)
+        }
+        RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
+        RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
+        RelicId::Geese => {
+            available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn relic_eligible_for_shop_stock(
+    id: RelicId,
+    relics: &RelicState,
+    available_relics: &[RelicId],
+    ex: RelicShopPoolExtinction,
+) -> bool {
+    if relics.owns(id) {
+        return false;
+    }
+    if id == RelicId::PhantomRelic {
+        return false;
+    }
+    if crate::core::progression::is_transformation_successor_relic(id) {
+        return transformation_successor_shop_eligible(id, available_relics, ex);
+    }
+    if !available_relics.contains(&id) {
+        return false;
+    }
+    if id == RelicId::PaperLantern && ex.paper_lantern {
+        return false;
+    }
+    if id == RelicId::SilkThread && ex.silk_thread {
+        return false;
+    }
+    if id == RelicId::MeltingIce && ex.melting_ice {
+        return false;
+    }
+    if id == RelicId::TeaCeremony && ex.tea_ceremony {
+        return false;
+    }
+    true
+}
+
 #[derive(Clone, Copy)]
 struct IndexedTile {
     hand_index: usize,
@@ -601,6 +664,15 @@ pub struct RunState {
     /// reappearing in shops and unlocks Silver Filigree Lantern in the shop pool.
     #[serde(default)]
     pub paper_lantern_extinct: bool,
+    /// Silk Thread burned this run — slot emptied; Silk Moth can appear in shops.
+    #[serde(default)]
+    pub silk_thread_extinct: bool,
+    /// Melting Ice burned this run — Taotie can appear in shops.
+    #[serde(default)]
+    pub melting_ice_extinct: bool,
+    /// Tea Ceremony burned this run — Geese returns to the shop pool (when Tea is meta-unlocked).
+    #[serde(default)]
+    pub tea_ceremony_extinct: bool,
     /// Per-yaku cumulative play counter for the entire run. Powers the
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
@@ -693,7 +765,7 @@ pub struct RunState {
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
     ///   SilkThread   → remaining mult ×10 (starts 40, -3 per discard)
     ///   NestEgg      → rounds held (sell value grows)
-    ///   TeaCeremony  → plays remaining before destruction
+    ///   TeaCeremony  → plays remaining before burning (Geese shop unlock)
     ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
@@ -777,6 +849,15 @@ impl RunState {
         self.mode.starting_discards
     }
 
+    pub fn relic_shop_pool_extinction(&self) -> RelicShopPoolExtinction {
+        RelicShopPoolExtinction {
+            paper_lantern: self.paper_lantern_extinct,
+            silk_thread: self.silk_thread_extinct,
+            melting_ice: self.melting_ice_extinct,
+            tea_ceremony: self.tea_ceremony_extinct,
+        }
+    }
+
     /// Canonical *relic destroyed* trigger.
     ///
     /// The "destroyed" keyword is the
@@ -787,9 +868,9 @@ impl RunState {
     /// a permanent +1 mult via its counter — adding a new destruction site
     /// without going through here will silently break that synergy.
     ///
-    /// Transformations (Silk Thread \u{2192} Silk Moth, Melting Ice \u{2192}
-    /// Taotie) deliberately do *not* call this — they're not destruction;
-    /// the relic stays in its slot and Kintsugi must not fire.
+    /// Gros-Michel-style relic burns (Paper Lantern, Silk Thread, Melting Ice,
+    /// Tea Ceremony) remove the relic from inventory and call this so Kintsugi
+    /// can react; successors enter the shop pool via [`RelicShopPoolExtinction`].
     fn note_relic_destroyed(&mut self) {
         if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
             *self
@@ -901,6 +982,9 @@ impl RunState {
             honors_scored_this_round: false,
             total_score_earned: 0,
             paper_lantern_extinct: false,
+            silk_thread_extinct: false,
+            melting_ice_extinct: false,
+            tea_ceremony_extinct: false,
             yaku_times_played: std::collections::HashMap::new(),
             tiles_played: 0,
             tiles_discarded: 0,
@@ -1107,6 +1191,9 @@ mod tests {
             tile_packs: vec![],
             total_score_earned: 0,
             paper_lantern_extinct: false,
+            silk_thread_extinct: false,
+            melting_ice_extinct: false,
+            tea_ceremony_extinct: false,
             small_blind_tag: None,
             big_blind_tag: None,
             tag_free_reroll: false,
@@ -1896,13 +1983,13 @@ mod tests {
         run.relics.active.push(RelicId::BrocadePouch);
         run.recompute_capacities();
         run.consumables
-            .try_push(Consumable::Talisman(TalismanKind::Jade));
+            .try_push(Consumable::Talisman(TalismanKind::Pearl));
 
         // Remember which tile ids are in hand *before* use; ids drawn later
         // should still pick up the enhancement via the global fallback.
         let original_ids: std::collections::HashSet<u32> = run.hand.iter().map(|t| t.id).collect();
         run.use_consumable(0, &mut bus);
-        assert_eq!(run.global_buff_enhancement, Some(TileEnhancement::Jade));
+        assert_eq!(run.global_buff_enhancement, Some(TileEnhancement::Pearl));
 
         // Discard all original-hand tiles to force the wall to hand out new ids.
         for i in 0..run.hand.len() {
@@ -1910,7 +1997,7 @@ mod tests {
         }
         run.discard_selected(&mut bus);
 
-        // Freshly-drawn tiles (different ids) should now carry Jade via the
+        // Freshly-drawn tiles (different ids) should now carry Pearl via the
         // global fallback in restamp_hand_enhancements.
         let replaced = run
             .hand
@@ -1922,8 +2009,8 @@ mod tests {
             run.hand
                 .iter()
                 .filter(|t| !original_ids.contains(&t.id))
-                .all(|t| t.enhancement == Some(TileEnhancement::Jade)),
-            "new tiles should inherit Jade from global buff"
+                .all(|t| t.enhancement == Some(TileEnhancement::Pearl)),
+            "new tiles should inherit Pearl from global buff"
         );
     }
 
@@ -1954,7 +2041,7 @@ mod tests {
         let mut run = test_run();
         let mut bus = bus();
         run.consumables
-            .try_push(Consumable::Talisman(TalismanKind::Jade));
+            .try_push(Consumable::Talisman(TalismanKind::Pearl));
         run.use_consumable(0, &mut bus);
         assert_eq!(run.global_buff_enhancement, None);
     }

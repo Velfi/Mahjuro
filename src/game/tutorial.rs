@@ -392,7 +392,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         step_prompts: &[
             "A standard complete hand is 4+4+4+4+2: 4 melds plus 1 pair. The other complete shape is 2x7: seven pairs. This lesson is about the 4+4+4+4+2 FullHand.",
             "Press Play to bank! The white tags at Trigger time are yaku \u{2014} bonus patterns that boost your mult.",
-            "FullHand is one yaku, and Chiitoitsu is the seven-pairs yaku \u{2014} check the Meld Guide (Pause menu) for all 13!",
+            "FullHand is one yaku, and Chiitoitsu is the seven-pairs yaku \u{2014} check the Meld Guide (Pause menu) for all pattern bonuses!",
             "Great \u{2014} the Meld Guide lists all 13 yaku. Keep banking and scoring to beat this blind!",
         ],
         allowed_sets: &[
@@ -589,6 +589,7 @@ pub fn validate_sets_for_lesson(
                 }
                 SetKind::Sequence => "Sequences aren't unlocked yet — try pairs or triplets!",
                 SetKind::Pair => "Pairs aren't available in this lesson.",
+                SetKind::Single => "That shape isn't used in this lesson.",
             });
         }
     }

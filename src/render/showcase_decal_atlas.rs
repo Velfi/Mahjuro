@@ -11,8 +11,8 @@ pub type ShowcaseDecalKey = (Suit, u8, Option<TileEnhancement>, bool);
 const DECAL_W: u32 = 192;
 const DECAL_H: u32 = 256;
 const ATLAS_COLS: u32 = 21;
-/// Base faces: 42 tile types × 5 enhancements × 2 debuff states = 420 cells (21×20).
-const ATLAS_ROWS: u32 = 20;
+/// Base faces: 42 tile types × 4 enhancements × 2 debuff states = 336 cells (21×16).
+const ATLAS_ROWS: u32 = 16;
 
 fn all_base_faces() -> Vec<(Suit, u8)> {
     let mut v = Vec::with_capacity(42);
@@ -37,10 +37,9 @@ fn all_base_faces() -> Vec<(Suit, u8)> {
     v
 }
 
-fn enhancements() -> [Option<TileEnhancement>; 5] {
+fn enhancements() -> [Option<TileEnhancement>; 4] {
     [
         None,
-        Some(TileEnhancement::Jade),
         Some(TileEnhancement::Pearl),
         Some(TileEnhancement::Gilded),
         Some(TileEnhancement::Polychrome),
@@ -115,7 +114,7 @@ pub fn build_showcase_decal_atlas_texture(
             }
         }
     }
-    debug_assert_eq!(idx, 420);
+    debug_assert_eq!(idx, 336);
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("showcase-decal-atlas"),

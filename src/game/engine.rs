@@ -334,7 +334,6 @@ pub struct ShopReadModel {
     pub owned_talismans: Vec<ShopOwnedConsumable>,
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
-    pub paper_lantern_extinct: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -549,7 +548,6 @@ impl<'a> GameEngine<'a> {
             owned_talismans,
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
-            paper_lantern_extinct: run.paper_lantern_extinct,
         }
     }
 

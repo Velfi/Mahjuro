@@ -40,8 +40,8 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, TileFaceQuad,
-    UiFrame, WallStackPlacement, YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ScenePunctualLight, ShowcaseTilePlacement, ShrinePlacement,
+    TallyFanKind, TileFaceQuad, UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lit_mesh::Aabb;
@@ -150,6 +150,17 @@ struct TonemapParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct EmissiveGiParams {
+    inv_view_proj: [f32; 16],
+    view_pos: [f32; 4],
+    /// Full-res width/height (pixels); zw unused.
+    screen: [f32; 4],
+    /// x = strength, y = depth edge weight, z = tap radius (px), w unused.
+    tuning: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [f32; 16],
     model: [f32; 16],
@@ -163,7 +174,8 @@ struct CameraUniform {
     /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
     decal_atlas_uv: [f32; 4],
     /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
-    /// w = unused. Matches `SsrGlobals.felt.yzw` on `lit_mesh` for the same frame.
+    /// w = `shop_glb` linear-HDR bloom pre-pass (`1` = output linear `hdr` RGB, skip ACES/γ).
+    /// Matches `SsrGlobals.felt.yzw` on `lit_mesh` for the same frame (except `w`).
     hdr_tonemap: [f32; 4],
 }
 
@@ -312,8 +324,8 @@ impl TileOccludersBuf {
     }
 }
 
-/// CPU-side description of a point light. Scenes push these into
-/// [`crate::render::draw_cmd::UiFrame::point_lights`]; the renderer translates
+/// CPU-side description of a point light. Scenes add these via
+/// [`crate::render::draw_cmd::SceneLighting`]; the renderer translates
 /// them into [`PointLightGpu`] each frame.
 #[derive(Clone, Copy, Debug)]
 pub struct PointLight {
@@ -331,13 +343,19 @@ pub struct PointLight {
     pub intensity: f32,
 }
 
+/// `PointLightGpu.params.x` — must match WGSL `lights.lights[i].params.x`.
+pub(super) const SCENE_POINT_KIND_SMOOTH: f32 = 0.0;
+pub(super) const SCENE_POINT_KIND_INVERSE_SQUARE: f32 = 1.0;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct PointLightGpu {
-    /// xyz = world-space position, w = radius.
+    /// xyz = world-space position, w = smooth radius **or** inverse-square range.
     pos: [f32; 4],
     /// rgb = colour, a = intensity.
     color: [f32; 4],
+    /// x = kind ([`SCENE_POINT_KIND_SMOOTH`] or [`SCENE_POINT_KIND_INVERSE_SQUARE`]).
+    params: [f32; 4],
 }
 
 #[repr(C)]
@@ -352,7 +370,7 @@ struct PointLightsBuf {
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for shaders that
     /// key flame envelope size off the shared point-light buffer).
-    /// `extras.w` = shop `KHR_lights_punctual` scale (`lit_mesh` binding 2); binding 0 uses `1`.
+    /// `extras.w` = inverse-square intensity scale in `lit_mesh` when embedded GLB punctual is active.
     extras: [f32; 4],
     lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
@@ -424,10 +442,17 @@ impl SpotLightsBuf {
     }
 
     /// Build the std140 spotlight buffer. Positions are mapped from pixel
-    /// space to world (Z-up) via `pixel_to_world`. Direction is taken as-is
+    /// space to world (Z-up) via `pixel_to_world`, or via
+    /// [`crate::render::world_space::world_on_camera_ray_plane_z`] when `pos_cam`
+    /// is set (perspective shop / pack celebration). Direction is taken as-is
     /// in world space (already Z-up) and normalised on the GPU side — we
     /// normalise here too to keep the uniform sane to inspect.
-    fn from_lights(src: &[SpotLight], screen_w: f32, screen_h: f32) -> Self {
+    fn from_lights(
+        src: &[SpotLight],
+        screen_w: f32,
+        screen_h: f32,
+        pos_cam: Option<&crate::render::draw_cmd::CameraParams>,
+    ) -> Self {
         let mut lights = [SpotLightGpu {
             pos: [0.0; 4],
             dir: [0.0, 0.0, -1.0, 1.0],
@@ -436,7 +461,18 @@ impl SpotLightsBuf {
         }; MAX_SPOT_LIGHTS];
         let n = src.len().min(MAX_SPOT_LIGHTS);
         for (i, l) in src.iter().take(n).enumerate() {
-            let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+            let p = if let Some(cam) = pos_cam {
+                crate::render::world_space::world_on_camera_ray_plane_z(
+                    screen_w,
+                    screen_h,
+                    cam,
+                    l.pos[0],
+                    l.pos[1],
+                    l.pos[2],
+                )
+            } else {
+                pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2])
+            };
             let d = glam::Vec3::from(l.dir).normalize_or_zero();
             let d = if d.length_squared() < 0.5 {
                 glam::Vec3::new(0.0, 0.0, -1.0)
@@ -458,11 +494,23 @@ impl SpotLightsBuf {
 }
 
 impl PointLightsBuf {
-    /// Same as [`Self::from_lights`] but positions each light via the shop camera ray /
-    /// horizontal-plane hit used by perspective-correct `Object3d` placement.
-    fn from_lights_shop_camera(
-        src: &[PointLight],
-        cam: &crate::render::draw_cmd::CameraParams,
+    fn push_scene_punctual_entry(
+        lights: &mut [PointLightGpu; MAX_POINT_LIGHTS],
+        i: usize,
+        p: &PointLight,
+        world_xyz: glam::Vec3,
+        kind: f32,
+    ) {
+        lights[i] = PointLightGpu {
+            pos: [world_xyz.x, world_xyz.y, world_xyz.z, p.radius],
+            color: [p.color[0], p.color[1], p.color[2], p.intensity],
+            params: [kind, 0.0, 0.0, 0.0],
+        };
+    }
+
+    /// Unified punctual upload (smooth + inverse-square in one buffer).
+    fn from_scene_punctual(
+        src: &[ScenePunctualLight],
         candle_count: u32,
         flame_height_world: f32,
         lit_mesh_punctual_intensity_scale: f32,
@@ -474,16 +522,26 @@ impl PointLightsBuf {
         let mut lights = [PointLightGpu {
             pos: [0.0; 4],
             color: [0.0; 4],
+            params: [0.0; 4],
         }; MAX_POINT_LIGHTS];
         let n = src.len().min(MAX_POINT_LIGHTS);
-        for (i, l) in src.iter().take(n).enumerate() {
-            let p = crate::render::world_space::world_on_camera_ray_plane_z(
-                screen_w, screen_h, cam, l.pos[0], l.pos[1], l.pos[2],
-            );
-            lights[i] = PointLightGpu {
-                pos: [p.x, p.y, p.z, l.radius],
-                color: [l.color[0], l.color[1], l.color[2], l.intensity],
-            };
+        for (i, ent) in src.iter().take(n).enumerate() {
+            match ent {
+                ScenePunctualLight::Smooth(l) => {
+                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+                    Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
+                }
+                ScenePunctualLight::InverseSquare(l) => {
+                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+                    Self::push_scene_punctual_entry(
+                        &mut lights,
+                        i,
+                        l,
+                        p,
+                        SCENE_POINT_KIND_INVERSE_SQUARE,
+                    );
+                }
+            }
         }
         Self {
             count: [n as u32, candle_count.min(n as u32), 0, 0],
@@ -497,11 +555,11 @@ impl PointLightsBuf {
         }
     }
 
-    /// Build the std140 light buffer, mapping each light's pixel-space
-    /// `(x, y)` onto the table-plane world (`world_x = x - w/2`,
-    /// `world_y = y - h/2`). The third position component is **+Z** lift above the felt.
-    fn from_lights(
-        src: &[PointLight],
+    /// Same as [`Self::from_scene_punctual`] but smooth lights use the shop camera ray /
+    /// horizontal-plane hit; inverse-square lights keep `pixel_to_world` (embedded anchors).
+    fn from_scene_punctual_shop_camera(
+        src: &[ScenePunctualLight],
+        cam: &crate::render::draw_cmd::CameraParams,
         candle_count: u32,
         flame_height_world: f32,
         lit_mesh_punctual_intensity_scale: f32,
@@ -513,14 +571,33 @@ impl PointLightsBuf {
         let mut lights = [PointLightGpu {
             pos: [0.0; 4],
             color: [0.0; 4],
+            params: [0.0; 4],
         }; MAX_POINT_LIGHTS];
         let n = src.len().min(MAX_POINT_LIGHTS);
-        for (i, l) in src.iter().take(n).enumerate() {
-            let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
-            lights[i] = PointLightGpu {
-                pos: [p.x, p.y, p.z, l.radius],
-                color: [l.color[0], l.color[1], l.color[2], l.intensity],
-            };
+        for (i, ent) in src.iter().take(n).enumerate() {
+            match ent {
+                ScenePunctualLight::Smooth(l) => {
+                    let p = crate::render::world_space::world_on_camera_ray_plane_z(
+                        screen_w,
+                        screen_h,
+                        cam,
+                        l.pos[0],
+                        l.pos[1],
+                        l.pos[2],
+                    );
+                    Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
+                }
+                ScenePunctualLight::InverseSquare(l) => {
+                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+                    Self::push_scene_punctual_entry(
+                        &mut lights,
+                        i,
+                        l,
+                        p,
+                        SCENE_POINT_KIND_INVERSE_SQUARE,
+                    );
+                }
+            }
         }
         Self {
             count: [n as u32, candle_count.min(n as u32), 0, 0],
@@ -566,7 +643,7 @@ impl TileGlbPipelineKey {
 /// One material slot of the tile mesh — vertex/index buffers + the primitive's
 /// own albedo texture.  A tile may consist of several of these (e.g. an ivory
 /// face primitive and a bamboo back primitive).
-struct TilePrimitiveGpu {
+pub(super) struct TilePrimitiveGpu {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
@@ -868,6 +945,7 @@ pub struct WgpuRenderer {
     ssr_prev_depth_view: wgpu::TextureView,
     quad_pipeline: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
+    squircle_quad_pipeline: wgpu::RenderPipeline,
     /// 3D billboarded flame particle pipeline. See
     /// [`crate::render::flame_particles`] and `shaders/flame.wgsl`.
     flame_pipeline: wgpu::RenderPipeline,
@@ -912,6 +990,11 @@ pub struct WgpuRenderer {
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
     shop_pipeline_blend_cull: wgpu::RenderPipeline,
+    /// Shop linear-HDR MRT pass: bloom RT0 + emissive-only RT1 (`shop_glb` `fs_main_mrt`).
+    shop_pipeline_mrt_opaque_double: wgpu::RenderPipeline,
+    shop_pipeline_mrt_opaque_cull: wgpu::RenderPipeline,
+    shop_pipeline_mrt_blend_double: wgpu::RenderPipeline,
+    shop_pipeline_mrt_blend_cull: wgpu::RenderPipeline,
     /// Gold-metal shell behind outlined showcase tiles: merged mesh + instance
     /// vertex stream (model columns + rim factor), one draw per batch.
     tile_outline_pipeline: wgpu::RenderPipeline,
@@ -934,10 +1017,6 @@ pub struct WgpuRenderer {
     point_lights_buffer: wgpu::Buffer,
     tile_occluders_buffer: wgpu::Buffer,
     point_lights_bind_group: wgpu::BindGroup,
-    /// Shop embedded `KHR_lights_punctual` points — group 1 binding 0 for `shop_glb.wgsl` when punctual;
-    /// binding 2 for `lit_mesh` (inverse-square in shader). Same layout as gameplay lights + occluders.
-    shop_gltf_point_lights_buffer: wgpu::Buffer,
-    shop_gltf_point_lights_scene_bind_group: wgpu::BindGroup,
     /// Per-frame spotlight buffer (`SpotLightsBuf`). Tile pipeline and
     /// lit_mesh bind it as group 3.
     spot_lights_buffer: wgpu::Buffer,
@@ -957,6 +1036,9 @@ pub struct WgpuRenderer {
     /// [`Shop.glb`](../../assets/Shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
+    /// [`hallway.glb`](../../assets/hallway.glb) pick-blind room.
+    hallway_env_primitives: Vec<TilePrimitiveGpu>,
+    hallway_environment: Option<ShopEnvironmentGpu>,
     /// Multiplier for `Shop.glb` environment scale (`window_h *` this). Set each frame from the app
     /// (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
     shop_env_height_scale: f32,
@@ -965,8 +1047,10 @@ pub struct WgpuRenderer {
     shop_env_linear_exposure: f32,
     /// Hemispheric ambient scale (`CameraUniform.decal_atlas_uv.x`).
     shop_env_ambient_scale: f32,
-    /// Scales embedded glTF punctual contribution in `lit_mesh` only (`shop_gltf` buffer `extras.w`).
+    /// Scales embedded glTF punctual contribution in `lit_mesh` (`PointLightsBuf.extras.w` when embedded).
     shop_lit_mesh_gltf_punctual_scale: f32,
+    /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
+    shop_gltf_emissive_scale: f32,
     /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/Shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
@@ -1099,6 +1183,22 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
+    /// Linear HDR shop-only redraw for bloom (`shop_glb` `hdr_tonemap.w` path).
+    shop_linear_bloom_texture: wgpu::Texture,
+    shop_linear_bloom_view: wgpu::TextureView,
+    /// Emissive-only linear RGB (`shop_glb` MRT) for GI gather — excludes BRDF / punctual.
+    room_emissive_texture: wgpu::Texture,
+    room_emissive_view: wgpu::TextureView,
+    /// Half-res emissive indirect estimate (linear HDR).
+    emissive_gi_texture: wgpu::Texture,
+    emissive_gi_view: wgpu::TextureView,
+    emissive_ssgi_pipeline: wgpu::RenderPipeline,
+    emissive_ssgi_bind_group_layout: wgpu::BindGroupLayout,
+    emissive_ssgi_bind_group: wgpu::BindGroup,
+    emissive_gi_params_buffer: wgpu::Buffer,
+    emissive_gi_composite_pipeline: wgpu::RenderPipeline,
+    emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
+    emissive_gi_composite_bind_group: wgpu::BindGroup,
     /// Fullscreen offscreen target for the live GPU render of the
     /// yaku-journal scene. The book mesh's leather shader samples this
     /// in screen space (not UV) so the rendered scene reads as a window
@@ -1116,6 +1216,7 @@ pub struct WgpuRenderer {
     bloom_blur_pipeline: wgpu::RenderPipeline,
     bloom_composite_pipeline: wgpu::RenderPipeline,
     bloom_bind_group_layout: wgpu::BindGroupLayout,
+    bloom_extract_bind_group_layout: wgpu::BindGroupLayout,
     bloom_composite_bind_group_layout: wgpu::BindGroupLayout,
     /// Per-pass bloom uniforms (extract / blur axis / composite differ in `data1`).
     bloom_extract_params_buffer: wgpu::Buffer,
@@ -1154,8 +1255,6 @@ pub struct WgpuRenderer {
     /// ghost trails). Alpha-blended, no depth write — same shader and bind
     /// group layouts as `lit_mesh_pipeline`.
     lit_mesh_blended_pipeline: wgpu::RenderPipeline,
-    /// Felt fluff shells: instanced `vs_felt_shell_instanced` + shared table uniform.
-    lit_mesh_felt_shell_instanced_pipeline: wgpu::RenderPipeline,
     /// 1×1 white texture used as a placeholder albedo for procedural meshes
     /// that don't sample from a texture.
     lit_mesh_white_view: wgpu::TextureView,
@@ -1197,10 +1296,6 @@ pub struct WgpuRenderer {
     candle_instances: Vec<[LitMeshInstance; 2]>,
     /// Single uniform buffer + bind group for the gameplay-scene table.
     table_instance: LitMeshInstance,
-    /// How many felt shell-fluff layers to draw this frame (instanced in one
-    /// draw using `lit_mesh_felt_shell_instanced_pipeline`). Set by
-    /// `apply_render_settings` from `effects_quality.felt_shell_count()` (max 10).
-    pub(super) active_felt_shell_count: usize,
     /// Uploaded to `SsrGlobals.felt.x` — procedural felt shader tier (see
     /// [`crate::persistence::EffectsQuality::felt_shader_lod`]).
     pub(super) felt_shader_lod: f32,
@@ -1599,6 +1694,16 @@ impl WgpuRenderer {
         }
     }
 
+    #[inline]
+    pub(super) fn shop_env_pipeline_mrt(&self, key: TileGlbPipelineKey) -> &wgpu::RenderPipeline {
+        match key {
+            TileGlbPipelineKey::OpaqueDoubleSided => &self.shop_pipeline_mrt_opaque_double,
+            TileGlbPipelineKey::OpaqueCullBack => &self.shop_pipeline_mrt_opaque_cull,
+            TileGlbPipelineKey::BlendDoubleSided => &self.shop_pipeline_mrt_blend_double,
+            TileGlbPipelineKey::BlendCullBack => &self.shop_pipeline_mrt_blend_cull,
+        }
+    }
+
     /// Queue a screenshot of the next fully rendered frame. The renderer
     /// copies the presented color target (swapchain or headless render
     /// texture) into a staging buffer, then maps + PNG-encodes it
@@ -1848,10 +1953,12 @@ impl WgpuRenderer {
         linear_exposure: f32,
         ambient_scale: f32,
         lit_mesh_gltf_punctual_scale: f32,
+        gltf_emissive_scale: f32,
     ) {
         self.shop_env_linear_exposure = linear_exposure;
         self.shop_env_ambient_scale = ambient_scale;
         self.shop_lit_mesh_gltf_punctual_scale = lit_mesh_gltf_punctual_scale;
+        self.shop_gltf_emissive_scale = gltf_emissive_scale;
     }
 
     #[inline]

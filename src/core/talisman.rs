@@ -21,7 +21,7 @@ use crate::core::tile::{Tile, TileEnhancement};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TalismanKind {
-    Jade,
+    #[serde(alias = "jade")]
     Pearl,
     Gilded,
     Polychrome,
@@ -45,7 +45,6 @@ pub enum TalismanKind {
 impl TalismanKind {
     pub fn all() -> &'static [TalismanKind] {
         &[
-            TalismanKind::Jade,
             TalismanKind::Pearl,
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
@@ -76,7 +75,6 @@ impl TalismanKind {
 
     pub fn name(self) -> &'static str {
         match self {
-            TalismanKind::Jade => "Jade Talisman",
             TalismanKind::Pearl => "Pearl Talisman",
             TalismanKind::Gilded => "Gilded Talisman",
             TalismanKind::Polychrome => "Polychrome Talisman",
@@ -93,8 +91,9 @@ impl TalismanKind {
     /// One-line shop tooltip.
     pub fn description(self) -> &'static str {
         match self {
-            TalismanKind::Jade => "Every tile in hand: +20 chips when scored in a meld.",
-            TalismanKind::Pearl => "Every tile in hand: +25 flat chips when scored.",
+            TalismanKind::Pearl => {
+                "Every tile in hand: each scored meld that includes a stamp gains +100 flat chips."
+            }
             TalismanKind::Gilded => "Every tile in hand: +$1 when scored in a meld.",
             TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
             TalismanKind::Kiln => "Select tiles, then use to destroy them permanently.",
@@ -123,7 +122,6 @@ impl TalismanKind {
     /// Returns `None` for talismans that transform or destroy tiles instead.
     pub fn enhancement(self) -> Option<TileEnhancement> {
         match self {
-            TalismanKind::Jade => Some(TileEnhancement::Jade),
             TalismanKind::Pearl => Some(TileEnhancement::Pearl),
             TalismanKind::Gilded => Some(TileEnhancement::Gilded),
             TalismanKind::Polychrome => Some(TileEnhancement::Polychrome),
@@ -142,7 +140,6 @@ impl TalismanKind {
     /// materials each read with their intended hue.
     pub fn accent_color(self) -> [f32; 4] {
         match self {
-            TalismanKind::Jade => [0.42, 0.82, 0.55, 1.0],
             TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
             TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0],
             TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
@@ -165,8 +162,7 @@ impl TalismanKind {
             | TalismanKind::Characters
             | TalismanKind::Honors
             | TalismanKind::Wildflower
-            | TalismanKind::Conformity => 8,
-            TalismanKind::Jade => 10,
+            |             TalismanKind::Conformity => 8,
             TalismanKind::Pearl => 12,
             TalismanKind::Gilded => 14,
             TalismanKind::Polychrome => 12,
@@ -200,9 +196,9 @@ mod tests {
             Tile::new(Suit::Circles, 7, 1),
             Tile::new(Suit::Dragon, 1, 2),
         ];
-        apply_to_hand(&mut hand, TalismanKind::Jade);
+        apply_to_hand(&mut hand, TalismanKind::Pearl);
         for t in &hand {
-            assert_eq!(t.enhancement, Some(TileEnhancement::Jade));
+            assert_eq!(t.enhancement, Some(TileEnhancement::Pearl));
         }
     }
 
@@ -211,7 +207,7 @@ mod tests {
         // Each tile can carry only one talisman mark at a time — applying a
         // new talisman overwrites whatever was on the tile before.
         let mut hand = vec![Tile::new(Suit::Bamboos, 5, 0)];
-        apply_to_hand(&mut hand, TalismanKind::Jade);
+        apply_to_hand(&mut hand, TalismanKind::Gilded);
         apply_to_hand(&mut hand, TalismanKind::Pearl);
         assert_eq!(hand[0].enhancement, Some(TileEnhancement::Pearl));
     }

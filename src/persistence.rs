@@ -90,22 +90,9 @@ impl EffectsQuality {
         }
     }
 
-    /// Number of felt shell-fluff layers to draw on top of the base
-    /// table. Each shell is a fullscreen-fragment-bound extra draw of
-    /// the table mesh, so this is the dominant felt-mode perf knob.
-    /// `Off` skips shells entirely (felt still renders, just flat).
-    pub fn felt_shell_count(self) -> usize {
-        match self {
-            Self::Off => 0,
-            Self::Low => 1,
-            Self::Medium => 3,
-            Self::High => 8,
-        }
-    }
-
     /// Procedural felt shader tier for `lit_mesh.wgsl` (`SsrGlobals.felt.x`).
     /// `0` = minimal baize tint (effects Off), `1` = reduced noise path
-    /// (Low), `2` = full detail (Medium/High). Complements [`Self::felt_shell_count`].
+    /// (Low), `2` = full detail (Medium/High).
     pub fn felt_shader_lod(self) -> f32 {
         match self {
             Self::Off => 0.0,

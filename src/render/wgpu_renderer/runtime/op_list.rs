@@ -38,6 +38,10 @@ pub(super) enum RenderOp {
         buf_idx: usize,
         count: u32,
     },
+    SquircleQuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
     FlameBatch {
         buf_idx: usize,
         count: u32,
@@ -47,10 +51,14 @@ pub(super) enum RenderOp {
     PromptIconQuad(usize),
     /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
+    /// Pick-blind hallway (`hallway.glb`).
+    HallwayEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].
     ClearSceneDepth,
+    /// Marker: next Pass A subpass uses full shop inspect `lit_mesh` HDR (see [`DrawCmd::ShopInspectLitMeshSubjectHdr`]).
+    ShopInspectLitMeshSubjectHdr,
     // Skeuomorphic gameplay HUD (phase 1).
     ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
     Object3dBatch {

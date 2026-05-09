@@ -10,7 +10,7 @@ mod shared;
 mod update;
 mod view;
 
-pub(crate) use self::view::render_shop_frame;
+pub(crate) use self::view::render_shop_inspect_isolated_frame;
 
 use crate::render::draw_cmd::CameraParams;
 
@@ -27,7 +27,7 @@ pub(crate) fn sync_item_inspect_orbit_target(
     run: &crate::game::run::RunState,
     w: f32,
     h: f32,
-    orbit: &mut crate::scenes::item_inspect::ItemInspectOrbitState,
+    orbit: &mut crate::scenes::object3d_inspect::ItemInspectOrbitState,
 ) {
     view::shop_sync_item_inspect_orbit_target(scene, run, w, h, orbit);
 }
@@ -37,7 +37,7 @@ use self::shared::*;
 
 pub(super) use self::pick_ids::{
     N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_RELIC_DISH,
-    PICK_REROLL_PROP, PICK_SELL_TRAY, PICK_TILE_PACK_BASE,
+    PICK_REROLL_PROP, PICK_TILE_PACK_BASE,
 };
 
 use rand::RngExt;
@@ -138,19 +138,10 @@ pub struct ShopScene {
     /// Normalized screen-relative positions for the shop scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::ShopPositions,
-    /// Controller/keyboard "hold A to grab" drag source. Set when the player
-    /// presses Confirm on an owned item; cleared on ConfirmRelease or Cancel.
-    /// If set and the player releases Confirm while `SellTray` is focused,
-    /// the item is sold. Also used to highlight the sell tray while held.
-    held_item_drag: Option<ShopDragSource>,
-    /// Mouse drag source. Set when the player presses the left mouse button
-    /// over an owned item; cleared when the button is released. If released
-    /// over the sell tray, the item is sold.
-    mouse_drag: Option<ShopDragSource>,
     /// Last `DrawCtx::shop_env_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
     drawn_env_height_scale: std::cell::Cell<f32>,
-    /// Gamepad North hold-to-sell: press time when a hold is in progress.
-    north_sell_hold_started: Option<std::time::Instant>,
+    /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
+    west_sell_hold_started: Option<std::time::Instant>,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -172,10 +163,6 @@ pub(super) const BUG_PARAMS: [(f32, f32, f32, f32); BUG_COUNT] = [
 /// Click id for the catch-all 3D-hit dispatcher. When clicked, the shop's
 /// update() routes the click based on `UpdateCtx::picked_shop_object`.
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;
-/// Click id injected by `main.rs` when a mouse-drag that started on an owned
-/// shop item is released over the sell tray. The shop's update() sells the
-/// item referenced by `mouse_drag` when this fires.
-pub const SHOP_DRAG_DROP_ID: u32 = 0x9700;
 /// Hold-to-sell duration (gamepad West / keyboard **Q**). Drives HUD ring + sell gate.
 pub(crate) const SHOP_SELL_HOLD_SECONDS: f32 = 0.5;
 /// Click id for the Leave / advance 2D button (kept for focus-nav compat).
@@ -207,13 +194,13 @@ const SHOP_RELIC_LEAN_INVENTORY: f32 = 138.0;
 impl ShopScene {
     #[inline]
     pub(crate) fn sell_hold_in_progress(&self) -> bool {
-        self.north_sell_hold_started.is_some()
+        self.west_sell_hold_started.is_some()
     }
 
     /// Normalized hold progress for rumble / HUD ring (0..=1).
     #[inline]
     pub(crate) fn sell_hold_progress(&self, now: std::time::Instant) -> Option<f32> {
-        self.north_sell_hold_started.map(|started| {
+        self.west_sell_hold_started.map(|started| {
             (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
                 .clamp(0.0, 1.0)
         })
@@ -237,7 +224,7 @@ impl ShopScene {
     /// `--shop-focus` flag so headless captures can preview hover-only
     /// chrome (focus rings, plaques, spotlights).
     ///
-    /// Slugs: `journal`, `bell`, `abacus`, `sell-tray`, `relic:N`,
+    /// Slugs: `journal`, `bell`, `abacus`, `relic:N`,
     /// `ribbon:N`, `talisman:N`, `pack:N`. Returns an error string for
     /// unknown slugs or out-of-range indices, so the CLI can bail
     /// rather than rendering with wrong focus.
@@ -260,10 +247,9 @@ impl ShopScene {
                 "journal" => ShopFocus::Dish(PICK_JOURNAL_BOOK),
                 "bell" | "leave" | "next-round" => ShopFocus::NextRound,
                 "abacus" | "reroll" => ShopFocus::Reroll,
-                "sell-tray" | "sell" => ShopFocus::SellTray,
                 other => {
                     return Err(format!(
-                        "--shop-focus '{other}' — supported: journal, bell, abacus, sell-tray, relic:N, ribbon:N, talisman:N, pack:N"
+                        "--shop-focus '{other}' — supported: journal, bell, abacus, relic:N, ribbon:N, talisman:N, pack:N"
                     ));
                 }
             }
@@ -309,7 +295,7 @@ impl ShopScene {
         w: f32,
         h: f32,
         run: &crate::game::run::RunState,
-    ) -> Option<crate::scenes::item_inspect::ItemInspectOrbitState> {
+    ) -> Option<crate::scenes::object3d_inspect::ItemInspectOrbitState> {
         let focus = self.focus?;
         if !shop_focus_inspectable(focus) {
             return None;
@@ -355,8 +341,13 @@ mod tests {
         let available_relics = vec![RelicId::PairPower];
         let mode = GameMode::standard();
 
-        let (items, _, _, _) =
-            actions::generate_shop_stock(&relics, &available_relics, 1, false, &mode);
+        let (items, _, _, _) = actions::generate_shop_stock(
+            &relics,
+            &available_relics,
+            1,
+            crate::game::run::RelicShopPoolExtinction::default(),
+            &mode,
+        );
 
         assert!(!items.is_empty());
         assert!(items.iter().all(|item| item.relic == RelicId::PairPower));
@@ -370,10 +361,20 @@ mod tests {
         let spring = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Spring);
         let winter = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
 
-        let (spring_items, _, _, _) =
-            actions::generate_shop_stock(&relics, &available, 1, false, &spring);
-        let (winter_items, _, _, _) =
-            actions::generate_shop_stock(&relics, &available, 1, false, &winter);
+        let (spring_items, _, _, _) = actions::generate_shop_stock(
+            &relics,
+            &available,
+            1,
+            crate::game::run::RelicShopPoolExtinction::default(),
+            &spring,
+        );
+        let (winter_items, _, _, _) = actions::generate_shop_stock(
+            &relics,
+            &available,
+            1,
+            crate::game::run::RelicShopPoolExtinction::default(),
+            &winter,
+        );
 
         let spring_price = spring_items[0].price;
         let winter_price = winter_items[0].price;

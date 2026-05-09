@@ -1016,12 +1016,13 @@ impl CameraDebugOverlay {
 
 // ── Shop environment + lighting debug (height scale + `shop_glb` tunables) ─
 
-const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 8] = [
+const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 9] = [
     ("Height scale", 0.001, 40.0, 0.005),
     ("glTF light intensity", 0.0, 40.0, 0.0025),
     ("Linear exposure", 0.001, 40.0, 0.0025),
     ("Ambient scale", 0.0, 10.0, 0.0025),
     ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
+    ("glTF emissive scale", 0.1, 48.0, 0.05),
     ("Candle tint R", 0.0, 15.0, 0.0025),
     ("Candle tint G", 0.0, 15.0, 0.0025),
     ("Candle tint B", 0.0, 15.0, 0.0025),
@@ -1126,9 +1127,10 @@ impl ShopEnvDebugOverlay {
             2 => self.lighting.linear_exposure,
             3 => self.lighting.ambient_scale,
             4 => self.lighting.lit_mesh_gltf_punctual_scale,
-            5 => self.lighting.candle_light_color_mul[0],
-            6 => self.lighting.candle_light_color_mul[1],
-            7 => self.lighting.candle_light_color_mul[2],
+            5 => self.lighting.gltf_emissive_scale,
+            6 => self.lighting.candle_light_color_mul[0],
+            7 => self.lighting.candle_light_color_mul[1],
+            8 => self.lighting.candle_light_color_mul[2],
             _ => 0.0,
         }
     }
@@ -1142,9 +1144,10 @@ impl ShopEnvDebugOverlay {
             2 => self.lighting.linear_exposure = v,
             3 => self.lighting.ambient_scale = v,
             4 => self.lighting.lit_mesh_gltf_punctual_scale = v,
-            5 => self.lighting.candle_light_color_mul[0] = v,
-            6 => self.lighting.candle_light_color_mul[1] = v,
-            7 => self.lighting.candle_light_color_mul[2] = v,
+            5 => self.lighting.gltf_emissive_scale = v,
+            6 => self.lighting.candle_light_color_mul[0] = v,
+            7 => self.lighting.candle_light_color_mul[1] = v,
+            8 => self.lighting.candle_light_color_mul[2] = v,
             _ => {}
         }
     }
@@ -1214,6 +1217,7 @@ impl ShopEnvDebugOverlay {
                 "pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = {:.6};\n",
                 "pub const SHOP_ENV_AMBIENT_SCALE: f32 = {:.6};\n",
                 "pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = {:.6};\n",
+                "pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = {:.6};\n",
                 "pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = ",
                 "[{:.6}, {:.6}, {:.6}];",
             ),
@@ -1223,6 +1227,7 @@ impl ShopEnvDebugOverlay {
             l.linear_exposure,
             l.ambient_scale,
             l.lit_mesh_gltf_punctual_scale,
+            l.gltf_emissive_scale,
             l.candle_light_color_mul[0],
             l.candle_light_color_mul[1],
             l.candle_light_color_mul[2],
@@ -1421,7 +1426,7 @@ impl ShopEnvDebugOverlay {
 
     fn format_row_display(row: usize, v: f32) -> String {
         match row {
-            5..=7 => format!("{:.3}", v),
+            6..=8 => format!("{:.3}", v),
             _ => format!("{:.4}", v),
         }
     }

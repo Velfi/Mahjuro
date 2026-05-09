@@ -208,6 +208,15 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
         }
     }
 
+    if flower_ids.is_empty()
+        && let Some(kokushi) = try_kokushi_musou(&regular)
+    {
+        let key = canonicalize(&kokushi);
+        if seen.insert(key) {
+            all.push(kokushi);
+        }
+    }
+
     all
 }
 
@@ -494,6 +503,51 @@ pub(super) fn try_chiitoitsu(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
         });
     }
     Some(pairs)
+}
+
+/// Kokushi Musō (thirteen orphans): one of each terminal and honor tile type,
+/// plus one duplicate of any of those thirteen faces. Decomposes as twelve
+/// [`SetKind::Single`] sets and one [`SetKind::Pair`]. Flowers cannot participate.
+pub(super) fn try_kokushi_musou(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
+    if tiles.len() != 14 {
+        return None;
+    }
+    let groups = face_groups(tiles);
+    if groups.len() != 13 {
+        return None;
+    }
+    let mut pair_faces = 0u32;
+    for (&(suit, rank), ids) in &groups {
+        if !Tile::is_kokushi_orphan_face(suit, rank) {
+            return None;
+        }
+        match ids.len() {
+            1 => {}
+            2 => pair_faces += 1,
+            _ => return None,
+        }
+    }
+    if pair_faces != 1 {
+        return None;
+    }
+    let mut keys: Vec<_> = groups.keys().copied().collect();
+    keys.sort();
+    let mut out = Vec::with_capacity(13);
+    for key in keys {
+        let ids = &groups[&key];
+        if ids.len() == 2 {
+            out.push(DetectedSet {
+                kind: SetKind::Pair,
+                tile_ids: vec![ids[0], ids[1]],
+            });
+        } else {
+            out.push(DetectedSet {
+                kind: SetKind::Single,
+                tile_ids: vec![ids[0]],
+            });
+        }
+    }
+    Some(out)
 }
 
 /// Generate all ways to partition flower tile ids into "flower melds" (pairs,

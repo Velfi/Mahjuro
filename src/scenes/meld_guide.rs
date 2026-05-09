@@ -135,7 +135,7 @@ impl SceneBehavior for MeldGuideScene {
         // Match the Yaku Journal: one soft, high, wide-radius fill. Multiple
         // overlapping lights at high intensity caused harsh specular streaks on
         // tile faces against this scene's black backdrop (same issue journal fixed).
-        frame.point_lights.push(PointLight {
+        frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * 0.38, h * 1.35],
             radius: h * 2.9,
             color: [1.0, 0.96, 0.88],
@@ -460,6 +460,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
     let seq_color: [f32; 4] = [0.35, 0.70, 0.85, 0.9];
     let trip_color: [f32; 4] = color::GOLD;
     let pair_color: [f32; 4] = color::CHAMPAGNE;
+    let single_color: [f32; 4] = [0.78, 0.74, 0.58, 0.9];
     let _kong_color: [f32; 4] = [0.85, 0.65, 0.20, 0.9];
 
     match yk {
@@ -772,6 +773,24 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 ("Pair", SetKind::Pair, Suit::Wind, &[1, 1], pair_color),
             ]),
         ),
+        YakuKind::KokushiMusou => (
+            "One of each terminal and honor (13 types), plus one duplicate \u{2014} twelve singles and one pair.",
+            meld_groups(&[
+                ("Pair", SetKind::Pair, Suit::Characters, &[1, 1], pair_color),
+                ("Single", SetKind::Single, Suit::Characters, &[9], single_color),
+                ("Single", SetKind::Single, Suit::Bamboos, &[1], single_color),
+                ("Single", SetKind::Single, Suit::Bamboos, &[9], single_color),
+                ("Single", SetKind::Single, Suit::Circles, &[1], single_color),
+                ("Single", SetKind::Single, Suit::Circles, &[9], single_color),
+                ("Single", SetKind::Single, Suit::Wind, &[1], single_color),
+                ("Single", SetKind::Single, Suit::Wind, &[2], single_color),
+                ("Single", SetKind::Single, Suit::Wind, &[3], single_color),
+                ("Single", SetKind::Single, Suit::Wind, &[4], single_color),
+                ("Single", SetKind::Single, Suit::Dragon, &[1], single_color),
+                ("Single", SetKind::Single, Suit::Dragon, &[2], single_color),
+                ("Single", SetKind::Single, Suit::Dragon, &[3], single_color),
+            ]),
+        ),
         YakuKind::ChickenHand => (
             "A valid hand that triggers no other yaku \u{2014} scores base chips \u{00d7} 1 mult.",
             meld_groups(&[
@@ -943,6 +962,9 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         }
         YakuKind::Chiitoitsu => {
             "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
+        }
+        YakuKind::KokushiMusou => {
+            "Thirteen orphans: one of each 1/9 and honor, plus one extra copy of any of those tiles"
         }
         YakuKind::ChickenHand => {
             "Valid hand with no yaku \u{2014} scores base chips \u{00d7} 1 mult"

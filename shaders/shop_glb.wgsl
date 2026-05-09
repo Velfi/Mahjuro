@@ -5,6 +5,7 @@
 // - `tile_seed`     = linear HDR exposure multiplier before tonemap
 // - `decal_atlas_uv.x` = ambient scale (0 = punctual-only interior)
 // - `decal_atlas_uv.y` = 1/world_scale — inverse-square uses document-space distance (glTF units)
+// - `decal_atlas_uv.z` = glTF emissive strength multiplier (see `SHOP_GLTF_EMISSIVE_SCALE`)
 //
 // Point / spot `pos.w` = max light distance in **world units** (`KHR_lights_punctual` range),
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
@@ -18,6 +19,10 @@ struct CameraUniform {
     cam_pos: vec3<f32>,
     tile_seed: f32,
     decal_atlas_uv: vec4<f32>,
+    /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh` felt row).
+    /// `w` — when > 0.5, fragment outputs **linear HDR** (`hdr` before ACES/γ) for a bloom pre-pass;
+    /// normal shop draws keep this at 0.
+    hdr_tonemap: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> cam: CameraUniform;
@@ -45,6 +50,7 @@ struct GltfPbrUniform {
 struct PointLight {
     pos: vec4<f32>,
     color: vec4<f32>,
+    params: vec4<f32>,
 };
 
 struct PointLights {
@@ -96,34 +102,6 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
         }
     }
     return sum / 9.0;
-}
-
-/// Khronos `KHR_lights_punctual` reference angular falloff (linear ramp in cosine, then squared).
-fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
-    let den = max(cos_inner - cos_outer, 1e-3);
-    let scale = 1.0 / den;
-    let offset = -cos_outer * scale;
-    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
-    return angular * angular;
-}
-
-/// `KHR_lights_punctual` distance attenuation (inverse square × smooth range window).
-fn punctual_attenuation(distance: f32, range_max: f32) -> f32 {
-    let d = max(distance, 1e-4);
-    var att = 1.0 / (d * d);
-    if range_max > 1e-5 {
-        let x = min(d / range_max, 1.0);
-        let window = max(1.0 - pow(x, 4.0), 0.0);
-        att = att * window;
-    }
-    return att;
-}
-
-fn punctual_attenuation_shop(dist_world: f32, range_world: f32) -> f32 {
-    let inv = cam.decal_atlas_uv.y;
-    let d = select(dist_world, dist_world * inv, inv > 1e-8);
-    let r = select(range_world, range_world * inv, inv > 1e-8);
-    return punctual_attenuation(d, r);
 }
 
 /// Stephen Hill / Narkowicz ACES fitted — stable across all scenes (shared with `tile_3d` / `lit_mesh`).
@@ -203,8 +181,18 @@ fn vs_main(
     return o;
 }
 
-@fragment
-fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+struct ShopShaded {
+    hdr: vec3<f32>,
+    emissive: vec3<f32>,
+    out_alpha: f32,
+}
+
+struct ShopHdrMrtOut {
+    @location(0) hdr: vec4<f32>,
+    @location(1) emissive: vec4<f32>,
+}
+
+fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
     let tex_a = base_s.a * in.v_color.a;
     if (pbr.alpha_mode == 1u) {
@@ -243,8 +231,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let B = normalize(in.b_w);
     let n_world = normalize(nm.x * T + nm.y * B + nm.z * Ngeom);
 
-    let emissive =
-        textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
+    let emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb
+        * pbr.emissive_factor.rgb
+        * cam.decal_atlas_uv.z;
 
     let V = normalize(cam.cam_pos - in.world_pos);
     let NdotV = max(dot(n_world, V), 1e-4);
@@ -266,7 +255,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let to_light = light_pos - in.world_pos;
         let dist = length(to_light);
         let L = to_light / max(dist, 1e-4);
-        let atten = punctual_attenuation_shop(dist, range_w);
+        let kind = pl.params.x;
+        let atten = select(
+            scene_smooth_point_atten(dist, range_w),
+            punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.decal_atlas_uv.y),
+            kind > 0.5,
+        );
         let radiance = pl.color.rgb * pl.color.a * atten;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0 || length(radiance) <= 0.0) {
@@ -296,7 +290,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let to_frag = in.world_pos - s.pos.xyz;
         let dist = length(to_frag);
         let range_spot = s.pos.w;
-        let atten_spot = punctual_attenuation_shop(dist, range_spot);
+        let atten_spot = punctual_attenuation_with_inv_doc_scale(dist, range_spot, cam.decal_atlas_uv.y);
         if (atten_spot <= 0.0) {
             continue;
         }
@@ -305,7 +299,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let cos_a = dot(frag_dir, s.dir.xyz);
         let cos_outer = s.dir.w;
         let cos_inner = s.params.x;
-        let spot_factor = khr_spot_angle_attenuation(cos_a, cos_inner, cos_outer);
+        let spot_factor = khr_spot_angle_attenuation_scene(cos_a, cos_inner, cos_outer);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -357,8 +351,10 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         dark_metal_face,
     );
 
-    var hdr = ambient + Lo + emissive + metal_hemi;
-    hdr = hdr * cam.tile_seed;
+    // `tile_seed` is scene exposure for punctual/ambient PBR (often ≪ 1). glTF emissive is
+    // already outgoing radiance; scaling it by the same crush makes lamps invisible.
+    var hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
+    hdr = hdr + emissive;
 
     // Gameplay shadow map is ortho-fit around the mahjong table near the origin.
     // Shop.glb uses the same Z-up frame but geometry is scaled by `window_h`, so
@@ -369,8 +365,29 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         clamp(gameplay_shadow + 1.0, 1.0, 2.0) - gameplay_shadow;
     hdr = hdr * shadow_neutral;
 
-    let mapped = aces_fitted(hdr);
+    return ShopShaded(hdr, emissive, out_alpha);
+}
+
+@fragment
+fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    let s = shop_shade(in, front_facing);
+    if (cam.hdr_tonemap.w > 0.5) {
+        return vec4<f32>(s.hdr, s.out_alpha);
+    }
+
+    let mapped = aces_fitted(s.hdr);
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     let out_rgb = pow(mapped, vec3<f32>(inv_g));
-    return vec4<f32>(out_rgb, out_alpha);
+    return vec4<f32>(out_rgb, s.out_alpha);
+}
+
+/// Linear-HDR MRT pass (shop/hallway bloom pre-pass): RT0 matches `fs_main` linear path;
+/// RT1 is **emissive only** (texture × factor × strength) for screen-space GI, not BRDF.
+@fragment
+fn fs_main_mrt(in: VsOut, @builtin(front_facing) front_facing: bool) -> ShopHdrMrtOut {
+    let s = shop_shade(in, front_facing);
+    return ShopHdrMrtOut(
+        vec4<f32>(s.hdr, s.out_alpha),
+        vec4<f32>(s.emissive, s.out_alpha),
+    );
 }

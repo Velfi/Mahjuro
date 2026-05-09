@@ -1,17 +1,8 @@
 //! Layered visual-effect toggles for isolating GPU cost and debugging look.
 //!
-//! Live builds start from [`EffectLayers::BASELINE`] (heavy effects off; game-over
-//! moonlit / sunlit water stays on). Turn individual fields on, or assign
-//! [`EffectLayers::FULL`], to restore visuals.
-//!
-//! Suggested re-enable order (roughly cheapest / core-first → polish):
-//! 1. `procedural_surface_quality` — felt shells + global effects-quality tier
-//! 2. `shadows` — directional shadow map
-//! 3. `ssr` — lacquered-table reflections
-//! 4. `starfield`, `golden_dust`, `ember_drift` — fullscreen particle backdrops
-//! 5. `fullscreen_water_backdrop` — game-over moonlit / sunlit water (enabled in [`BASELINE`])
-//! 6. `transition_fullscreen_fx` — dramatic scene transitions
-//! 7. `hdr` — HDR swapchain path (still respects Options when layers allow)
+//! Live builds start from [`EffectLayers::BASELINE`] (directional shadows + table
+//! SSR on; heavier effects off; game-over moonlit / sunlit water stays on). Turn
+//! individual fields on, or assign [`EffectLayers::FULL`], to restore visuals.
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
 use crate::persistence::EffectsQuality;
@@ -33,8 +24,8 @@ pub struct EffectLayers {
 
 impl EffectLayers {
     pub const BASELINE: Self = Self {
-        shadows: false,
-        ssr: false,
+        shadows: true,
+        ssr: true,
         procedural_surface_quality: false,
         starfield: false,
         golden_dust: false,

@@ -29,7 +29,7 @@ use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
-use crate::game::run::{FINAL_ANTE, RunState};
+use crate::game::run::{FINAL_ANTE, RunState, relic_eligible_for_shop_stock};
 
 mod reporting;
 mod stats;
@@ -1289,7 +1289,7 @@ mod tests {
     #[test]
     fn talisman_value_is_positive_when_it_buffs_a_scoring_hand() {
         let run = scoring_test_run();
-        assert!(talisman_marginal_value(&run, TalismanKind::Jade) > 0);
+        assert!(talisman_marginal_value(&run, TalismanKind::Pearl) > 0);
     }
 
     #[test]
@@ -1656,8 +1656,7 @@ fn best_selection_for_talisman_on_hand(
             Some((sel, after - base))
         }
         // Buff talismans should never reach this function.
-        TalismanKind::Jade
-        | TalismanKind::Pearl
+        TalismanKind::Pearl
         | TalismanKind::Gilded
         | TalismanKind::Polychrome => None,
     }
@@ -1735,15 +1734,10 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     if run.relics.has(RelicId::BrocadePouch) {
         return scale_long_term_value_for_ante(raw, run.ante);
     }
-    // Polychrome is uniquely multiplicative (×1.2 mult per meld, scales with
-    // the rest of the mult stack) rather than additive-per-tile like Jade/
-    // Pearl/Gilded. A single best-play delta dramatically understates it:
-    // the same stamped hand typically supports 2–3 plays in a round before
-    // draw-attrition thins out the stamped tiles, and the ×1.2 compounds
-    // against mult that grows through the round (Snowball, Momentum,
-    // sequence bonuses, etc.). Boost the raw delta to reflect that
-    // per-round payoff.
-    if matches!(talisman, TalismanKind::Polychrome) {
+    // Polychrome (×1.2 mult per meld) and Pearl (+flat chips per meld) both pay
+    // per scored meld, so a single best-play delta understates the same-hand
+    // multi-play round. Gilded is per-tile gold and needs no boost here.
+    if matches!(talisman, TalismanKind::Polychrome | TalismanKind::Pearl) {
         return raw.saturating_mul(2);
     }
     raw
@@ -1887,23 +1881,11 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
     run.tag_rich_stock = false;
 
     let defs = all_relic_defs();
-    let extinct = run.paper_lantern_extinct;
+    let pool_x = run.relic_shop_pool_extinction();
     let mut pool: Vec<RelicId> = defs
         .iter()
         .filter(|d| {
-            if !run.available_relics.contains(&d.id) || run.relics.owns(d.id) {
-                return false;
-            }
-            if d.id == RelicId::PhantomRelic {
-                return false;
-            }
-            if d.id == RelicId::PaperLantern && extinct {
-                return false;
-            }
-            if d.id == RelicId::SilverFiligreeLantern && !extinct {
-                return false;
-            }
-            true
+            relic_eligible_for_shop_stock(d.id, &run.relics, &run.available_relics, pool_x)
         })
         .map(|d| d.id)
         .collect();

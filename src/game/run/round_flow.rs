@@ -107,15 +107,24 @@ impl RunState {
         });
 
         // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
+        // Fortune's Favor doubles the weight of each payout vs. nothing → ⅓ / ⅓ / ⅓.
         if self.relics.has(crate::core::relic::RelicId::Sweepstakes) {
             use rand::RngExt;
 
             let mut rng = rand::rng();
-            let roll: u32 = rng.random_range(0..4);
-            let payout: i32 = match roll {
-                0 => 2,
-                1 => 4,
-                _ => 0,
+            let fortunes = self.relics.has(RelicId::FortunesFavor);
+            let payout: i32 = if fortunes {
+                match rng.random_range(0..6) {
+                    0 | 1 => 2,
+                    2 | 3 => 4,
+                    _ => 0,
+                }
+            } else {
+                match rng.random_range(0..4) {
+                    0 => 2,
+                    1 => 4,
+                    _ => 0,
+                }
             };
             if payout > 0 {
                 self.gold = self.gold.saturating_add(payout);
@@ -148,6 +157,9 @@ impl RunState {
                 self.relics.active.retain(|&r| r != RelicId::PaperLantern);
                 self.paper_lantern_extinct = true;
                 self.note_relic_destroyed();
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::SilverFiligreeLantern,
+                ));
             }
         }
         // Silver Filigree Lantern: 1-in-1000 chance to shatter at round end.

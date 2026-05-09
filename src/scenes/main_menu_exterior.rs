@@ -248,6 +248,29 @@ impl SceneBehavior for MainMenuExteriorScene {
         let ui_scale = ctx.ui_scale;
         let scale = metrics::scene_scale(w, h, ui_scale);
 
+        // App modals (level-up / relic unlock) append 3D hero staging after the
+        // scene, but all `Text` cmds share one post-tonemap overlay pass. Hub
+        // labels would composite with modal copy and read on top of the relic.
+        // Treat this like shop/collection inspect: backdrop only until the modal
+        // dismisses (see `SplashScene` and `DrawCtx::modal_active`).
+        if ctx.modal_active {
+            let mut frame = UiFrame::new();
+            frame.background(BackgroundId::MainMenuExterior);
+            if ctx.effect_layers.starfield {
+                frame.starfield();
+            }
+            frame.cursor_pos = Some(self.cursor_pos);
+            frame.window_title = format!(
+                "Mahjuro — {}",
+                if cfg!(debug_assertions) {
+                    "vNEXT"
+                } else {
+                    env!("CARGO_PKG_VERSION")
+                }
+            );
+            return frame;
+        }
+
         let in_progress = ctx.game_in_progress;
         let items = menu_items(in_progress);
         let focus_rects = Self::hub_layout_rects(w, h, &items);

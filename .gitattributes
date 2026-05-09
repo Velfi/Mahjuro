@@ -6,6 +6,7 @@
 *.mp3 filter=lfs diff=lfs merge=lfs -text
 assets/Noto_Emoji/* filter=lfs diff=lfs merge=lfs -text
 assets/Cormorant_Garamond/* filter=lfs diff=lfs merge=lfs -text
+assets/Instrument_Serif/* filter=lfs diff=lfs merge=lfs -text
 *.rlc filter=lfs diff=lfs merge=lfs -text
 *.msh filter=lfs diff=lfs merge=lfs -text
 *.zst filter=lfs diff=lfs merge=lfs -text

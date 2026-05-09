@@ -298,6 +298,9 @@ pub(super) fn default_metallic_roughness_map(
     upload_rgba_texture_linear(device, queue, "gltf-default-mr", &[255, 255, 0, 255], 1, 1)
 }
 
+/// glTF: with no `emissiveTexture`, the texture factor is **1** for RGB (not 0).
+/// A black 1×1 would zero `emissiveTexture × emissiveFactor` for factor-only materials
+/// (typical Blender lamps with emission strength, no emissive map).
 pub(super) fn default_emissive_map(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -306,7 +309,7 @@ pub(super) fn default_emissive_map(
         device,
         queue,
         "gltf-default-emissive",
-        &[0, 0, 0, 255],
+        &[255, 255, 255, 255],
         1,
         1,
     )

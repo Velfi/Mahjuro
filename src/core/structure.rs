@@ -33,6 +33,7 @@ pub fn banked_meld_chips(sets: &[DetectedSet]) -> i32 {
             SetKind::Sequence => 28,
             SetKind::Triplet => 50,
             SetKind::Kong => 80,
+            SetKind::Single => 0,
         })
         .sum()
 }

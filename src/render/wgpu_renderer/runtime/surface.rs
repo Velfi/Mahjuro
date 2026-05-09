@@ -208,6 +208,24 @@ impl WgpuRenderer {
         );
         self.scene_color_texture = sct;
         self.scene_color_view = scv;
+        self.shop_linear_bloom_texture.destroy();
+        let (slb_t, slb_v) = create_scene_color(
+            &self.device,
+            SCENE_HDR_FORMAT,
+            new_size.width,
+            new_size.height,
+        );
+        self.shop_linear_bloom_texture = slb_t;
+        self.shop_linear_bloom_view = slb_v;
+        self.room_emissive_texture.destroy();
+        let (re_t, re_v) = create_scene_color(
+            &self.device,
+            SCENE_HDR_FORMAT,
+            new_size.width,
+            new_size.height,
+        );
+        self.room_emissive_texture = re_t;
+        self.room_emissive_view = re_v;
         self.post_bloom_texture.destroy();
         let (pbt, pbv) = create_scene_color(
             &self.device,
@@ -259,8 +277,18 @@ impl WgpuRenderer {
             });
         self.bloom_ping_texture.destroy();
         self.bloom_pong_texture.destroy();
+        self.emissive_gi_texture.destroy();
         let bloom_w = (new_size.width.max(1) / 2).max(1);
         let bloom_h = (new_size.height.max(1) / 2).max(1);
+        let (egi_t, egi_v) = create_post_texture(
+            &self.device,
+            SCENE_HDR_FORMAT,
+            bloom_w,
+            bloom_h,
+            "emissive-gi",
+        );
+        self.emissive_gi_texture = egi_t;
+        self.emissive_gi_view = egi_v;
         let (bpt, bpv) = create_post_texture(
             &self.device,
             SCENE_HDR_FORMAT,
@@ -308,7 +336,7 @@ impl WgpuRenderer {
             });
         self.bloom_scene_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bloom-scene-bg"),
-            layout: &self.bloom_bind_group_layout,
+            layout: &self.bloom_extract_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -320,6 +348,10 @@ impl WgpuRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.shop_linear_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
                 },
             ],
@@ -379,6 +411,43 @@ impl WgpuRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                    },
+                ],
+            });
+        self.emissive_ssgi_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("emissive-ssgi-bg"),
+            layout: &self.emissive_ssgi_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.emissive_gi_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.room_emissive_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        self.emissive_gi_composite_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("emissive-gi-composite-bg"),
+                layout: &self.emissive_gi_composite_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.emissive_gi_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
                         resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
                     },
                 ],

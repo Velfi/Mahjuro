@@ -1,6 +1,6 @@
 //! Tile types for a standard mahjong set (numbered suits + honors).
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Suit {
@@ -25,11 +25,10 @@ pub enum Suit {
 /// (across plays, discards, refills, and new-round redeals). See
 /// [`crate::core::talisman`] for the consumables that stamp these onto every
 /// hand tile at once.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TileEnhancement {
-    /// +20 chips when this tile is part of a scored meld.
-    Jade,
-    /// +25 flat chips when this tile is scored, meld or pair.
+    /// Flat chips per scored meld that includes this stamp (see scoring pipeline; Polychrome’s chip twin).
     Pearl,
     /// +$1 when this tile is part of a scored meld.
     Gilded,
@@ -37,15 +36,29 @@ pub enum TileEnhancement {
     Polychrome,
 }
 
+impl<'de> Deserialize<'de> for TileEnhancement {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "pearl" | "jade" => Ok(Self::Pearl),
+            "gilded" => Ok(Self::Gilded),
+            "polychrome" => Ok(Self::Polychrome),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["pearl", "gilded", "polychrome"],
+            )),
+        }
+    }
+}
+
 impl TileEnhancement {
     /// Numeric ID passed to the tile_3d shader via `base_color_factor.z`.
-    /// 0 = no enhancement (used by `Option::map_or`), 1–4 = Jade/Pearl/Gilded/Polychrome.
+    /// 0 = none; 1 = pearl, 2 = gilded, 3 = polychrome.
     pub fn shader_id(self) -> f32 {
         match self {
-            TileEnhancement::Jade => 1.0,
-            TileEnhancement::Pearl => 2.0,
-            TileEnhancement::Gilded => 3.0,
-            TileEnhancement::Polychrome => 4.0,
+            TileEnhancement::Pearl => 1.0,
+            TileEnhancement::Gilded => 2.0,
+            TileEnhancement::Polychrome => 3.0,
         }
     }
 }
@@ -78,6 +91,21 @@ impl Tile {
             enhancement: None,
             debuffed_visual: false,
         }
+    }
+
+    /// True for the 13 terminal/honor faces used in Kokushi Musō (1/9 in each
+    /// number suit, four winds, three dragons). Flowers and seasons are never orphans.
+    pub fn is_kokushi_orphan_face(suit: Suit, rank: u8) -> bool {
+        match suit {
+            Suit::Characters | Suit::Bamboos | Suit::Circles => rank == 1 || rank == 9,
+            Suit::Wind => (1..=4).contains(&rank),
+            Suit::Dragon => (1..=3).contains(&rank),
+            Suit::Flower | Suit::Season => false,
+        }
+    }
+
+    pub fn is_kokushi_orphan(self) -> bool {
+        Self::is_kokushi_orphan_face(self.suit, self.rank)
     }
 
     pub fn is_number_tile(&self) -> bool {

@@ -105,6 +105,10 @@ pub enum GameEvent {
     /// Used for milestones the gameplay layer detects but cannot unlock
     /// directly (the `steam` module is owned by `main`, not `game`).
     AchievementUnlocked(crate::steam::Achievement),
+    /// A fragile relic burned — reveal its successor in Collection
+    /// (`PlayerProgress::discovered_transformation_successors`). Shops use
+    /// run burn flags only; successors are not added to meta `available_relics`.
+    TransformationSuccessorDiscovered(crate::core::relic::RelicId),
 }
 
 #[derive(Default)]

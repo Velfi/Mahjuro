@@ -85,8 +85,8 @@ impl TileOccludersBuf {
     }
 }
 
-/// CPU-side description of a point light. Scenes push these into
-/// [`crate::render::draw_cmd::UiFrame::point_lights`]; the renderer translates
+/// CPU-side description of a point light. Scenes add these via
+/// [`crate::render::draw_cmd::SceneLighting`]; the renderer translates
 /// them into [`PointLightGpu`] each frame.
 #[derive(Clone, Copy, Debug)]
 pub struct PointLight {
@@ -111,6 +111,8 @@ pub(crate) struct PointLightGpu {
     pub pos: [f32; 4],
     /// rgb = colour, a = intensity.
     pub color: [f32; 4],
+    /// x = attenuation kind (matches live renderer); rest reserved.
+    pub params: [f32; 4],
 }
 
 #[repr(C)]
@@ -125,8 +127,8 @@ pub(crate) struct PointLightsBuf {
     /// to scroll the river surface and animate foam crests).
     /// `extras.z` = candle flame height in world units (for the volumetric
     /// lightbake flame emission envelope).
-    /// `extras.w` = punctual intensity scale in **`lit_mesh.wgsl`**: gameplay lights (binding 0,
-    /// typically `1`), or shop glTF lights (binding 2; defaults to `1` so props match `shop_glb.wgsl`).
+    /// `extras.w` = punctual intensity scale in **`lit_mesh.wgsl`** when embedded glTF punctual is active
+    /// (typically `1` for gameplay-only lights).
     pub extras: [f32; 4],
     pub lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
@@ -146,6 +148,7 @@ impl PointLightsBuf {
         let mut lights = [PointLightGpu {
             pos: [0.0; 4],
             color: [0.0; 4],
+            params: [0.0; 4],
         }; MAX_POINT_LIGHTS];
         let n = src.len().min(MAX_POINT_LIGHTS);
         for (i, l) in src.iter().take(n).enumerate() {
@@ -153,6 +156,7 @@ impl PointLightsBuf {
             lights[i] = PointLightGpu {
                 pos: [p.x, p.y, p.z, l.radius],
                 color: [l.color[0], l.color[1], l.color[2], l.intensity],
+                params: [0.0; 4],
             };
         }
         Self {

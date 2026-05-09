@@ -32,7 +32,7 @@ const PASS_LABELS: [&str; NUM_PASSES] = ["shadow", "main", "main-table", "main-s
 pub enum PassSlot {
     Shadow = 0,
     Main = 1,
-    /// Pass A — table mesh (+ felt shells). Mutually exclusive timestamp with
+    /// Pass A — table mesh. Mutually exclusive timestamp with
     /// [`PassSlot::Main`] when the renderer splits Pass A for GPU profiling.
     MainTable = 2,
     /// Pass A — everything in Pass A except the table draw.

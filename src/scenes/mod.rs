@@ -5,7 +5,6 @@ pub mod celebration_overlay;
 pub mod collection;
 pub mod game_over;
 pub mod gameplay;
-pub mod item_inspect;
 pub mod journal_transition;
 pub mod main_menu_exterior;
 pub mod material_viewer;
@@ -17,46 +16,40 @@ pub mod pick_blind;
 pub mod profile_select;
 pub mod rumble_lab;
 pub mod shop;
+pub mod showcase;
+pub mod showcase_stage;
 pub mod splash;
 pub mod start_game_modal;
 pub mod tile_literacy;
-pub mod tile_pack_celebration;
 pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_overlay;
 pub mod tutorial_recap;
 pub mod tutorial_summary;
 pub mod yaku_journal;
-pub mod zodiac_celebration;
-
 pub use collection::CollectionScene;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
-pub use item_inspect::{ItemInspectHost, ItemInspectScene};
 pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
 pub use meld_guide::MeldGuideScene;
-#[allow(unused_imports)] // crate-root re-exports for inspect hosts
-pub use object3d_inspect::{
-    InspectFrameEnv, InspectLightPreset, InspectRig, ItemInspectOrbitState,
-    apply_inspect_view_to_frame, inspect_orbit_camera, inspect_point_lights,
-};
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
+pub use showcase::{
+    CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
+    ShowcaseScene, TilePackPresenter, ZodiacPresenter,
+};
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
 pub use tile_literacy::TileLiteracyScene;
-pub use tile_pack_celebration::TilePackCelebrationScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
-pub use zodiac_celebration::ZodiacCelebrationScene;
-
 use enum_dispatch::enum_dispatch;
 
 use crate::effect_layers::EffectLayers;
@@ -92,14 +85,8 @@ pub enum BackgroundId {
     /// Quad-based fills get reordered into the late HUD overlay pass and
     /// would paint over the smoke instead.
     Black,
-    /// Main menu: scattered tiles on dark wood.
-    Menu,
-    /// Score/results: golden radiant center burst.
-    Score,
     /// Diegetic main menu: waterfront gambling house façade at dusk.
     MainMenuExterior,
-    /// Storeroom shop layout (`THEME.md`): flat illustration + screen slots (fallback when `Shop.glb` is absent).
-    ShopStoreroom,
 }
 
 impl BackgroundId {
@@ -108,10 +95,7 @@ impl BackgroundId {
         match self {
             BackgroundId::None => None,
             BackgroundId::Black => None,
-            BackgroundId::Menu => Some("backgrounds/menu_bg.png"),
-            BackgroundId::Score => Some("backgrounds/score_bg.png"),
             BackgroundId::MainMenuExterior => Some("backgrounds/main_menu_exterior.png"),
-            BackgroundId::ShopStoreroom => Some("backgrounds/shop2_storeroom.png"),
         }
     }
 
@@ -209,14 +193,16 @@ pub struct UpdateCtx<'a> {
     pub headless: bool,
     /// Layer toggles (must match [`DrawCtx::effect_layers`] for the same frame).
     pub effect_layers: EffectLayers,
-    /// Gamepad right stick while shop item inspect is active (−1..1 each axis).
-    pub shop_inspect_orbit_stick: (f32, f32),
-    /// Shop inspect zoom: analog triggers (`RT − LT`) plus digital bumpers as ±1.
-    pub shop_inspect_zoom_triggers: f32,
+    /// Gamepad right stick while a showcase **orbit** presenter is active (−1..1 each axis).
+    pub item_inspect_orbit_stick: (f32, f32),
+    /// Showcase orbit zoom: analog triggers (`RT − LT`) plus digital bumpers as ±1.
+    pub item_inspect_zoom_triggers: f32,
     /// Queued by the rumble lab scene; drained into input state after `update()`.
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
-    /// [`ShopScene`] under shop [`Scene::ItemInspect`]: lets inspect sync orbit target to mesh anchors.
+    /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync to mesh anchors.
     pub suspended_shop: Option<&'a ShopScene>,
+    /// Same as [`DrawCtx::shop_env_height_scale`] — glTF room vertical scale vs window height.
+    pub shop_env_height_scale: f32,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
@@ -278,10 +264,12 @@ pub struct DrawCtx<'a> {
     pub gamepad_swap_xy: bool,
     /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
     pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
-    /// Frozen [`ShopScene`] under [`Scene::ItemInspect`] — fed to [`crate::scenes::shop::render_shop_frame`].
+    /// Frozen [`ShopScene`] under shop showcase inspect — fed to [`crate::scenes::shop::render_shop_inspect_isolated_frame`].
     pub suspended_shop: Option<&'a ShopScene>,
-    /// Suspended collection beneath [`Scene::ItemInspect`] for pedestal orbit.
+    /// Suspended collection beneath collection showcase inspect for pedestal orbit.
     pub suspended_collection: Option<&'a CollectionScene>,
+    /// Physical tile proportions for 3D layout (options / renderer settings).
+    pub tile_preset: crate::persistence::TilePreset,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -310,6 +298,7 @@ impl<'a> DrawCtx<'a> {
         gamepad_style: crate::ui::button_prompts::GamepadStyle,
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
+        tile_preset: crate::persistence::TilePreset,
     ) -> Self {
         Self {
             layout,
@@ -335,6 +324,7 @@ impl<'a> DrawCtx<'a> {
             gamepad_style,
             suspended_shop,
             suspended_collection,
+            tile_preset,
         }
     }
 }
@@ -459,7 +449,7 @@ pub enum Scene {
     TileSelect(TileSelectScene),
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
-    ItemInspect(ItemInspectScene),
+    Showcase(ShowcaseScene),
     PickBlind(PickBlindScene),
     Gameplay(GameplayScene),
     GameOver(GameOverScene),
@@ -474,15 +464,13 @@ pub enum Scene {
     TransitionPlayground(TransitionPlaygroundScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
-    ZodiacCelebration(ZodiacCelebrationScene),
-    TilePackCelebration(TilePackCelebrationScene),
 }
 
 /// Refresh cached layout structs after deleting override JSON on disk.
 pub fn reload_scene_layout_from_disk(scene: &mut Scene) {
     use crate::ui::scene_layout::{
         load_collection_positions, load_gameplay_positions, load_main_menu_exterior_positions,
-        load_shop_positions, load_tutorial_positions,
+        load_shop_positions, load_tile_select_positions, load_tutorial_positions,
     };
     match scene {
         Scene::MainMenuExterior(s) => s.positions = load_main_menu_exterior_positions(),
@@ -490,7 +478,8 @@ pub fn reload_scene_layout_from_disk(scene: &mut Scene) {
         Scene::Gameplay(s) => s.positions = load_gameplay_positions(),
         Scene::Collection(s) => s.positions = load_collection_positions(),
         Scene::TutorialCampaign(s) => s.positions = load_tutorial_positions(),
-        Scene::TilePackCelebration(s) => s.positions = load_shop_positions(),
+        Scene::Showcase(s) => s.reload_shop_positions_from_disk(),
+        Scene::TileSelect(s) => s.positions = load_tile_select_positions(),
         _ => {}
     }
 }

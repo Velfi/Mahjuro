@@ -1,5 +1,6 @@
 # Current TODO
 
+- **Audio:** Add `assets/audio/yaku_kokushi_musou.ogg` for the Kokushi Musō yaku stinger (wired in `src/audio.rs`; missing file no-ops today).
 - Revisit relic rearranging on the shop screen.
 - Investigate mirror- and shadow-hand interactions while touching shop relic order.
 - Investigate `SecondWind`; it appears to accumulate unexpectedly.

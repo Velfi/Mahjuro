@@ -315,10 +315,54 @@ impl Modal {
         !self.pages.is_empty()
     }
 
+    /// Lantern-mote radial quads (same encoding as [`ModalQueue::draw`]).
+    pub(crate) fn append_fireworks_gradient_quads(&self, out: &mut Vec<GradientQuadInstance>) {
+        if let Some(ref fw) = self.fireworks {
+            for (rect, color) in fw.instances() {
+                out.push(GradientQuadInstance {
+                    rect,
+                    color,
+                    feather: [1.0, 1.0, 0.0, 0.0],
+                });
+            }
+        }
+    }
+
     /// Current opacity based on fade-in progress (0.0 to 1.0).
     fn opacity(&self) -> f32 {
+        self.card_fade_alpha()
+    }
+
+    #[inline]
+    pub(crate) fn card_fade_alpha(&self) -> f32 {
         let elapsed = self.shown_at.elapsed().as_secs_f32();
         (elapsed / self.fade_in_secs).min(1.0)
+    }
+
+    pub(crate) fn advance_unlock_page(&mut self) -> bool {
+        if !self.has_pages() {
+            return false;
+        }
+        if self.current_page + 1 < self.pages.len() {
+            self.current_page += 1;
+            self.shown_at = Instant::now();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn navigate_unlock_page(&mut self, delta: i32) {
+        if !self.has_pages() {
+            return;
+        }
+        let new = (self.current_page as i32 + delta)
+            .max(0)
+            .min(self.pages.len() as i32 - 1) as usize;
+        if new != self.current_page {
+            self.current_page = new;
+            self.shown_at = Instant::now();
+        }
     }
 }
 
@@ -442,18 +486,18 @@ impl ModalQueue {
         });
 
         if modal.has_pages() {
-            self.draw_paginated(
+            let (pag_i, pag_l, pag_r, mut pag_g) = modal_paginated_unlock_layer_vecs(
                 modal,
                 alpha,
-                scale,
-                (window_w, window_h),
-                ModalDrawSink {
-                    instances: &mut instances,
-                    labels: &mut labels,
-                    relic_objects: &mut relic_objects,
-                    gradient_quads: &mut gradient_quads,
-                },
+                ui_scale,
+                window_w,
+                window_h,
             );
+            modal.append_fireworks_gradient_quads(&mut pag_g);
+            instances.extend(pag_i);
+            labels.extend(pag_l);
+            relic_objects.extend(pag_r);
+            gradient_quads.extend(pag_g);
         } else {
             self.draw_simple(
                 modal,
@@ -465,20 +509,9 @@ impl ModalQueue {
             );
         }
 
-        // Lantern-mote particles. Each mote emits one radial-gradient
-        // quad (soft circular glow with shader-side falloff) — a flat
-        // `GpuInstance` quad can't make a clean disc, so the older
-        // path's stacked-rect halo always read as a square.
-        if let Some(ref fw) = modal.fireworks {
-            for (rect, color) in fw.instances() {
-                gradient_quads.push(GradientQuadInstance {
-                    rect,
-                    color,
-                    // edge=1.0 → smoothstep covers the full radius;
-                    // mode=1.0 → radial falloff (full disc).
-                    feather: [1.0, 1.0, 0.0, 0.0],
-                });
-            }
+        // Paginated path already merged fireworks; simple modals may still need them.
+        if !modal.has_pages() {
+            modal.append_fireworks_gradient_quads(&mut gradient_quads);
         }
 
         // Full-screen dismiss button so clicking anywhere also works.
@@ -581,23 +614,19 @@ impl ModalQueue {
             ..Default::default()
         });
     }
+}
 
-    /// Draw a paginated unlock carousel page.
-    ///
-    /// Layout convention: there is no card. The relic mesh is the hero —
-    /// it sits centered on a small felt slab on an empty stage, with type
-    /// arranged around it like a museum placard, and a vignette darkens
-    /// the edges so the eye locks onto the relic. This matches the
-    /// game's pushdown-into-3D-felt grammar (yaku journal, collection,
-    /// etc.) and stays legible at TV viewing distance.
-    fn draw_paginated(
-        &self,
-        modal: &Modal,
-        alpha: f32,
-        scale: f32,
-        window: (f32, f32),
-        out: ModalDrawSink<'_>,
-    ) {
+/// Paginated unlock layout (museum placard + optional hero relic mesh).
+///
+/// Used by [`ModalQueue::draw`] and [`modal_paginated_unlock_layer_vecs`]. Does not include the
+/// modal queue's full-screen dimmer or dismiss hit target.
+fn draw_modal_paginated_unlock(
+    modal: &Modal,
+    alpha: f32,
+    scale: f32,
+    window: (f32, f32),
+    out: ModalDrawSink<'_>,
+) {
         let ModalDrawSink {
             instances,
             labels,
@@ -785,5 +814,37 @@ impl ModalQueue {
         // multi-modal interaction (arrows + enter) is the same on
         // gamepad, keyboard, and mouse via the Confirm action.
         let _ = scale; // kept on signature for parity with simple draw
-    }
+}
+
+/// Paginated unlock layers for full-screen showcase (no modal-queue dimmer).
+pub(crate) fn modal_paginated_unlock_layer_vecs(
+    modal: &Modal,
+    alpha: f32,
+    ui_scale: f32,
+    window_w: f32,
+    window_h: f32,
+) -> (
+    Vec<GpuInstance>,
+    Vec<TextLabel>,
+    Vec<Object3d>,
+    Vec<GradientQuadInstance>,
+) {
+    let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+    let mut instances = Vec::new();
+    let mut labels = Vec::new();
+    let mut relic_objects = Vec::new();
+    let mut gradient_quads = Vec::new();
+    draw_modal_paginated_unlock(
+        modal,
+        alpha,
+        scale,
+        (window_w, window_h),
+        ModalDrawSink {
+            instances: &mut instances,
+            labels: &mut labels,
+            relic_objects: &mut relic_objects,
+            gradient_quads: &mut gradient_quads,
+        },
+    );
+    (instances, labels, relic_objects, gradient_quads)
 }

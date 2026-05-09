@@ -37,6 +37,65 @@ pub struct CameraParams {
     pub fovy_deg: f32,
 }
 
+/// One punctual entry in [`SceneLighting`]. Smooth lights match legacy gameplay/candle
+/// falloff; inverse-square matches embedded `KHR_lights_punctual` from GLB rooms.
+#[derive(Clone, Debug)]
+pub enum ScenePunctualLight {
+    Smooth(PointLight),
+    InverseSquare(PointLight),
+}
+
+/// Unified per-frame lights for tiles, `lit_mesh`, and GLB room passes.
+#[derive(Clone, Debug)]
+pub struct SceneLighting {
+    pub punctual: Vec<ScenePunctualLight>,
+    pub spot_lights: Vec<SpotLight>,
+    /// Room environment mesh uses `shop_glb.wgsl` when true, else `tile_3d.wgsl`.
+    pub room_shop_glb_brdf: bool,
+    /// Embedded `KHR_lights_punctual` active for this room (inverse-square lights + exposure path).
+    pub embedded_gltf_punctual: bool,
+}
+
+impl Default for SceneLighting {
+    fn default() -> Self {
+        Self {
+            punctual: Vec::new(),
+            spot_lights: Vec::new(),
+            room_shop_glb_brdf: false,
+            embedded_gltf_punctual: false,
+        }
+    }
+}
+
+impl SceneLighting {
+    pub fn set_smooth_points(&mut self, v: Vec<PointLight>) {
+        self.punctual = v.into_iter().map(ScenePunctualLight::Smooth).collect();
+    }
+
+    pub fn push_smooth(&mut self, p: PointLight) {
+        self.punctual.push(ScenePunctualLight::Smooth(p));
+    }
+}
+
+/// GPU / layout hints when the renderer scene key is `showcase` (showcase overlay).
+/// The renderer uses these instead of branching on legacy per-flow scene keys.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ShowcaseRenderHints {
+    /// [`Object3d`] world placement uses [`crate::render::world_space::world_on_camera_ray_plane_z`]
+    /// when [`UiFrame::camera_override`] is set (tile-pack pack mesh).
+    pub object3d_use_camera_ray_plane_z: bool,
+    /// [`DrawCmd::ShowcaseTileBatch`] uses the same ray→plane mapping when `camera_override` is set.
+    pub showcase_tiles_use_camera_ray_plane_z: bool,
+    /// Suppress gameplay table shadow map (legacy `shop` / `tile_pack_celebration`).
+    pub suppress_table_shadows: bool,
+    /// [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`] pack-celebration path.
+    pub tile_pack_celebration_tonemap: bool,
+    /// Shop storeroom tonemap + lit_mesh inspect / glTF punctual branches.
+    pub shop_tonemap_and_lit_mesh_context: bool,
+    /// Collection corridor / table-like HDR (legacy `collection` key).
+    pub collection_tonemap_context: bool,
+}
+
 impl CameraParams {
     /// Returns the visible world-X range `(min_x, max_x)` at a given world
     /// position `(world_y, world_z)` by unprojecting the left and right NDC
@@ -403,7 +462,7 @@ pub enum Object3dKind {
     ZodiacRibbon {
         kind: Option<crate::core::zodiac::ZodiacKind>,
     },
-    /// Jade talisman tablet.
+    /// Talisman tablet (shop curio).
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
@@ -567,13 +626,9 @@ pub struct Object3d {
     /// tablets).  `0` means "no persistent state" — `hover_target` is used
     /// directly without easing.
     pub anim_id: u64,
-    /// Canonical arrange-mode path for this object (e.g.
-    /// `"shop.counter"`, `"gameplay.hand.strip"`). When set, the renderer
-    /// uses this name both for `apply_arrange_override` lookups and for
-    /// `last_debug_pickables` so click-to-select lands on the correct
-    /// scene placement without per-kind hard-coded name tables.
-    ///
-    /// `None` = object is not arrangeable via the debug picker.
+    /// Canonical arrange-mode path (e.g. `"shop.counter"`, `"gameplay.hand.strip"`).
+    /// When set, the renderer uses this for `apply_arrange_override` and
+    /// `last_debug_pickables`. `None` = not arrangeable via the debug picker.
     pub arrange_name: Option<&'static str>,
 }
 
@@ -627,7 +682,7 @@ pub enum DrawCmd {
     /// instanced from the renderer's pre-allocated ribbon slot pool. Used by
     /// the shop scene for both the wall-pinned for-sale ribbons and the
     /// owned-consumable inventory fan.
-    /// Batch of jade talisman tablets drawn via the lit-mesh pipeline,
+    /// Batch of talisman tablets drawn via the lit-mesh pipeline,
     /// instanced from the renderer's pre-allocated talisman slot pool. Used
     /// by the shop scene for the for-sale talismans pinned in the curio
     /// cabinet next to the zodiac ribbons.
@@ -637,11 +692,17 @@ pub enum DrawCmd {
     /// dish.
     /// Imported `Shop.glb` room mesh (tile-textured pipeline, world-space vertices).
     ShopEnvironment,
+    /// Imported `hallway.glb` pick-blind room (same GPU path as [`DrawCmd::ShopEnvironment`]).
+    HallwayEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
     /// the shop room without hiding the room in color.
     ClearSceneDepth,
+    /// After this marker, following `lit_mesh` draws use full shop inspect HDR on
+    /// [`SsrGlobals.felt`]; earlier draws use a dimmed row. Splits Pass A so the
+    /// GPU buffer can be updated between subpasses. See [`UiFrame::shop_inspect_lit_mesh_subject_hdr`].
+    ShopInspectLitMeshSubjectHdr,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
@@ -649,6 +710,9 @@ pub enum DrawCmd {
     TileFaceQuad(TileFaceQuad),
     /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
     Quad(GpuInstance),
+    /// 2D quad with a superellipse (squircle) silhouette — same `GpuInstance`
+    /// payload as [`DrawCmd::Quad`]. See `shaders/squircle_quad.wgsl`.
+    SquircleQuad(GpuInstance),
     /// Alpha-feathered 2D quad — solid `color` in the centre, falling off
     /// to full transparency toward the edges. Used as a soft dark backer
     /// behind HUD content so panels read against busy backgrounds without
@@ -700,16 +764,9 @@ pub struct UiFrame {
     /// Drawn back-to-front in order. Push earlier = renders under.
     pub cmds: Vec<DrawCmd>,
 
-    /// Gameplay / artist-tuned point lights (smooth radius falloff in `lit_mesh`).
-    pub point_lights: Vec<PointLight>,
-    /// Shop only: embedded `KHR_lights_punctual` points from `Shop.glb` — separate GPU buffer;
-    /// `lit_mesh` applies glTF inverse-square falloff. Empty outside shop glTF lighting.
-    pub shop_gltf_point_lights: Vec<PointLight>,
-    /// Active spotlights this frame. Sampled by the tile pipeline; not by
-    /// `lit_mesh`. Use for focused visual highlights
-    /// on specific tiles — e.g. hint indicators pooling green on a tile face.
-    pub spot_lights: Vec<SpotLight>,
-    /// How many of the leading entries in `point_lights` are candle lights
+    /// Scene lights: punctual (smooth + optional inverse-square) and spots — one GPU upload.
+    pub scene_lighting: SceneLighting,
+    /// How many of the leading entries in `scene_lighting.punctual` are candle lights
     /// (as opposed to hint lights, spot lights, etc.).
     pub candle_light_count: u32,
     /// Candle flame height in world units (derived from mm via `Layout::mm`).
@@ -768,17 +825,20 @@ pub struct UiFrame {
     /// window cut through the page mesh into a live render of the
     /// post-transition scene.
     pub journal_prepass_frame: Option<Box<UiFrame>>,
-    /// Draw `Shop.glb` with `shop_glb.wgsl` (glTF punctual + ACES) instead of `tile_3d.wgsl`.
-    pub shop_env_gltf_punctual: bool,
+    /// Shop [`ItemInspectScene`] uses synthetic point lights only (GLB punctual off). Those
+    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `Shop.glb`.
+    /// When set, [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`]
+    /// applies gameplay-style linear exposure for `lit_mesh` so shelf props stay visible.
+    pub shop_inspect_lit_mesh_hdr: bool,
+    /// Set by showcase overlay presenters; read by shadow / placement / tonemap paths.
+    pub showcase_render_hints: ShowcaseRenderHints,
 }
 
 impl UiFrame {
     pub fn new() -> Self {
         Self {
             cmds: Vec::new(),
-            point_lights: Vec::new(),
-            shop_gltf_point_lights: Vec::new(),
-            spot_lights: Vec::new(),
+            scene_lighting: SceneLighting::default(),
             candle_light_count: 0,
             flame_height_world: 0.0,
             cursor_pos: None,
@@ -794,8 +854,15 @@ impl UiFrame {
             journal_prepass_frame: None,
             gameplay_fog_wall_horizon_y: None,
             gameplay_fog_wall_center_x: None,
-            shop_env_gltf_punctual: false,
+            shop_inspect_lit_mesh_hdr: false,
+            showcase_render_hints: ShowcaseRenderHints::default(),
         }
+    }
+
+    /// `shop_glb.wgsl` for room meshes vs `tile_3d` (includes shop inspect storeroom path).
+    #[inline]
+    pub fn room_uses_shop_glb_shader(&self) -> bool {
+        self.scene_lighting.room_shop_glb_brdf || self.shop_inspect_lit_mesh_hdr
     }
 
     // ── Push helpers ────────────────────────────────────────────────────
@@ -806,9 +873,18 @@ impl UiFrame {
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }
+    /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/hallway.glb).
+    pub fn hallway_environment(&mut self) {
+        self.cmds.push(DrawCmd::HallwayEnvironment);
+    }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
         self.cmds.push(DrawCmd::ClearSceneDepth);
+    }
+    /// Dimmed vs full inspect HDR boundary for shop [`ItemInspectScene`] (see [`DrawCmd::ShopInspectLitMeshSubjectHdr`]).
+    pub fn shop_inspect_lit_mesh_subject_hdr(&mut self) {
+        self.cmds
+            .push(DrawCmd::ShopInspectLitMeshSubjectHdr);
     }
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
@@ -839,6 +915,10 @@ impl UiFrame {
     }
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
+    }
+
+    pub fn squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::SquircleQuad));
     }
 
     pub fn gradient_quads<
@@ -888,6 +968,7 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                DrawCmd::SquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
                 DrawCmd::PromptIconQuad(icon) => icon.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
@@ -904,7 +985,9 @@ impl UiFrame {
                 | DrawCmd::SunlitWater
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::ShopEnvironment
+                | DrawCmd::HallwayEnvironment
                 | DrawCmd::ClearSceneDepth
+                | DrawCmd::ShopInspectLitMeshSubjectHdr
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)
@@ -937,6 +1020,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::TileFaceQuad(_)
                 | DrawCmd::ShopEnvironment
+                | DrawCmd::HallwayEnvironment
                 | DrawCmd::Table
         )
     });
@@ -948,7 +1032,7 @@ pub fn apply_modal_relic_staging(
         up: [0.0, 0.0, 1.0],
         fovy_deg: 20.0,
     });
-    frame.point_lights = vec![
+    frame.scene_lighting.set_smooth_points(vec![
         PointLight {
             pos: [w * 0.5 + w * 0.18, h * 0.5 + h * 0.45, h * 0.45],
             radius: h * 1.6,
@@ -967,7 +1051,7 @@ pub fn apply_modal_relic_staging(
             color: [1.00, 0.78, 0.42],
             intensity: 1.0,
         },
-    ];
+    ]);
     frame.object3d_batch(modal_relic_objects);
 }
 

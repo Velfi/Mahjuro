@@ -70,6 +70,10 @@ pub struct PlayerProgress {
     /// computed from this on demand.
     #[serde(default)]
     pub run_history: Vec<RunRecord>,
+    /// Successor relics unlocked only after a fragile primary burns (Silk Moth,
+    /// Taotie, Geese, Silver Filigree). Shops, runs, and Collection consult this.
+    #[serde(default)]
+    pub discovered_transformation_successors: HashSet<RelicId>,
     /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
     /// for every material (never written to this map); higher stakes require
     /// a full victory on the previous tier *with that material*. So beating
@@ -80,6 +84,22 @@ pub struct PlayerProgress {
     /// unlocks for any victories already in the log.
     #[serde(default)]
     pub unlocked_stakes: BTreeMap<TileMaterial, BTreeSet<Stake>>,
+}
+
+/// Relics that never appear in meta level-up and stay out of Collection until a
+/// fragile primary burns (or legacy unlock — see [`PlayerProgress::transformation_successor_visible`]).
+pub fn transformation_successor_relic_ids() -> &'static [RelicId] {
+    &[
+        RelicId::SilkMoth,
+        RelicId::Taotie,
+        RelicId::Geese,
+        RelicId::SilverFiligreeLantern,
+    ]
+}
+
+#[inline]
+pub fn is_transformation_successor_relic(id: RelicId) -> bool {
+    transformation_successor_relic_ids().contains(&id)
 }
 
 /// Terminal outcome of a single run.
@@ -168,6 +188,7 @@ impl PlayerProgress {
             relic_times_activated: HashMap::new(),
             run_history: Vec::new(),
             unlocked_stakes: BTreeMap::new(),
+            discovered_transformation_successors: HashSet::new(),
         }
     }
 
@@ -266,6 +287,9 @@ impl PlayerProgress {
         let mut changed = false;
         let mut new_relics = Vec::new();
         for relic in unlocks.relics {
+            if is_transformation_successor_relic(relic) {
+                continue;
+            }
             if self.unlocked_relics.insert(relic) {
                 new_relics.push(relic);
                 changed = true;
@@ -296,14 +320,37 @@ impl PlayerProgress {
         }
     }
 
-    /// Relics available for this player's progression level.
+    /// Relics available for this player's progression level (shop / run stock).
+    /// Transformation successors (Silk Moth, Taotie, Geese, Silver Filigree)
+    /// are omitted — they only enter the shop after a primary burns on the
+    /// current run; see [`crate::game::run::relic_eligible_for_shop_stock`].
     pub fn available_relics(&self) -> Vec<RelicId> {
         let level = self.current_level();
         let mut available = Vec::new();
         for l in 1..=level {
-            available.extend(unlocks_for_level(l).relics);
+            for r in unlocks_for_level(l).relics {
+                if is_transformation_successor_relic(r) && !self.transformation_successor_visible(r) {
+                    continue;
+                }
+                available.push(r);
+            }
         }
         available
+    }
+
+    /// Collection / shop visibility for a relic id (successors stay hidden until discovered).
+    pub fn transformation_successor_visible(&self, id: RelicId) -> bool {
+        !is_transformation_successor_relic(id)
+            || self.discovered_transformation_successors.contains(&id)
+            || (id == RelicId::Geese && self.unlocked_relics.contains(&RelicId::Geese))
+    }
+
+    /// Record that the player has seen a successor (Collection reveal). Returns true if new.
+    pub fn note_transformation_successor_discovered(&mut self, id: RelicId) -> bool {
+        if !is_transformation_successor_relic(id) {
+            return false;
+        }
+        self.discovered_transformation_successors.insert(id)
     }
 
     /// Rules available for this player's progression level.
@@ -400,7 +447,9 @@ fn level_7_relics() -> Vec<RelicId> {
     crate::core::relic::all_relic_defs()
         .iter()
         .map(|d| d.id)
-        .filter(|id| !earlier.contains(id))
+        .filter(|id| {
+            !earlier.contains(id) && !is_transformation_successor_relic(*id)
+        })
         .collect()
 }
 
@@ -428,7 +477,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::MultiplierMaster,
                 RelicId::GreenLuck,
                 RelicId::QuickDraw,
-                RelicId::ShantenShove,
                 RelicId::BlueSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
@@ -473,7 +521,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::EdgeRunner,
                 RelicId::TurtleShell,
                 RelicId::Tourist,
-                RelicId::Geese,
                 RelicId::GhostHand,
                 RelicId::Humility,
                 RelicId::Bonfire,
@@ -575,19 +622,35 @@ mod tests {
     }
 
     #[test]
-    fn every_active_relic_is_reachable_by_level_7() {
+    fn transformation_successors_hidden_until_discovered() {
+        let mut p = PlayerProgress::new();
+        p.runs_completed = 20;
+        assert!(!p.available_relics().contains(&RelicId::SilkMoth));
+        assert!(!p.transformation_successor_visible(RelicId::SilkMoth));
+        assert!(p.note_transformation_successor_discovered(RelicId::SilkMoth));
+        assert!(
+            !p.available_relics().contains(&RelicId::SilkMoth),
+            "successors are not meta pool — only in-shop after a run-time burn",
+        );
+        assert!(p.transformation_successor_visible(RelicId::SilkMoth));
+        assert!(!p.note_transformation_successor_discovered(RelicId::SilkMoth));
+    }
+
+    #[test]
+    fn every_active_relic_is_level_or_transformation_successor() {
         use crate::core::relic::all_relic_defs;
         use std::collections::HashSet;
         let unlocked: HashSet<RelicId> =
             (1..=7).flat_map(|l| unlocks_for_level(l).relics).collect();
+        let successors: HashSet<RelicId> = transformation_successor_relic_ids().iter().copied().collect();
         let missing: Vec<RelicId> = all_relic_defs()
             .iter()
             .map(|d| d.id)
-            .filter(|id| !unlocked.contains(id))
+            .filter(|id| !unlocked.contains(id) && !successors.contains(id))
             .collect();
         assert!(
             missing.is_empty(),
-            "relics in assets/data/relics.json never unlocked at any level: {missing:?}",
+            "relics neither level-unlocked nor transformation-successor: {missing:?}",
         );
     }
 

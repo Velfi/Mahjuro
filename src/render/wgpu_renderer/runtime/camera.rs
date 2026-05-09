@@ -107,24 +107,46 @@ impl CameraFrame {
     }
 }
 
+/// Which [`SsrGlobals.felt`] row to upload for shop item inspect (`lit_mesh` physical HDR).
+#[derive(Clone, Copy)]
+pub(super) enum ShopInspectLitMeshFelt {
+    /// Matches storeroom proportion — shelf props + coins + journal before the hero mesh.
+    Dim,
+    /// Full inspect exposure for the focused prop.
+    Subject,
+}
+
 impl WgpuRenderer {
     /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
     /// and `lit_mesh` (`SsrGlobals.felt`). Same `ShopEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
         use crate::render::draw_cmd::DrawCmd;
         let k = self.active_scene_key;
+        let h = frame.showcase_render_hints;
         let table_like = matches!(
             k,
             Some("gameplay") | Some("tutorial") | Some("pick_blind") | Some("collection")
-        );
-        let shop_scene = k == Some("shop");
-        let tile_pack_celebration = k == Some("tile_pack_celebration");
+        ) || (k == Some("showcase") && h.collection_tonemap_context);
+        let shop_scene =
+            k == Some("shop") || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
+        let tile_pack_celebration = k == Some("tile_pack_celebration")
+            || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
+        if shop_scene && frame.shop_inspect_lit_mesh_hdr {
+            let linear_hdr = self.shop_env_linear_exposure
+                * crate::render::shop_glb::SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
+            let ambient = (self.shop_env_ambient_scale
+                + crate::render::shop_glb::SHOP_INSPECT_LIT_MESH_AMBIENT)
+                .min(0.30);
+            return [1.0, linear_hdr, ambient, 0.0];
+        }
         if tile_pack_celebration {
+            let ambient = (self.shop_env_ambient_scale * 0.45)
+                .max(crate::render::shop_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
             return [
                 1.0,
                 self.shop_env_linear_exposure
                     * crate::render::shop_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
-                self.shop_env_ambient_scale * 0.45,
+                ambient,
                 0.0,
             ];
         }
@@ -139,7 +161,7 @@ impl WgpuRenderer {
             && !frame
                 .cmds
                 .iter()
-                .any(|c| matches!(c, DrawCmd::ShopEnvironment));
+                .any(|c| matches!(c, DrawCmd::ShopEnvironment | DrawCmd::HallwayEnvironment));
         if shop_showcase_without_env {
             let linear_hdr = self.shop_env_linear_exposure;
             return [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0];
@@ -151,9 +173,75 @@ impl WgpuRenderer {
             * if shop_scene {
                 crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE
             } else {
-                1.0
+                crate::render::shop_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL
             };
-        [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0]
+        let ambient = if shop_scene {
+            self.shop_env_ambient_scale
+        } else {
+            self.shop_env_ambient_scale
+                .max(crate::render::shop_glb::GAMEPLAY_TABLE_AMBIENT_MIN)
+        };
+        [1.0, linear_hdr, ambient, 0.0]
+    }
+
+    fn lit_mesh_ssr_globals(
+        &self,
+        cam: &CameraFrame,
+        ssr_enabled: bool,
+        frame: &crate::render::draw_cmd::UiFrame,
+        shop_inspect_felt: Option<ShopInspectLitMeshFelt>,
+    ) -> SsrGlobals {
+        let tm = self.tile_hdr_tonemap(frame);
+        let felt_y = tm[0];
+        let mut felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
+        let mut felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+        let shop_like = self.active_scene_key == Some("shop")
+            || (self.active_scene_key == Some("showcase")
+                && frame
+                    .showcase_render_hints
+                    .shop_tonemap_and_lit_mesh_context);
+        if shop_like && frame.shop_inspect_lit_mesh_hdr {
+            if let Some(phase) = shop_inspect_felt {
+                match phase {
+                    ShopInspectLitMeshFelt::Dim => {
+                        felt_z = tm[1] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
+                        felt_w = tm[2] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
+                        if felt_y <= 0.5 {
+                            felt_z = 0.0;
+                            felt_w = 0.0;
+                        }
+                    }
+                    ShopInspectLitMeshFelt::Subject => {
+                        felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
+                        felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+                    }
+                }
+            }
+        }
+        let shop_lit_hdr = shop_like && frame.scene_lighting.embedded_gltf_punctual;
+        let shop_punctual_inv_doc = if shop_lit_hdr {
+            let s =
+                crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
+            1.0 / s.max(1e-6)
+        } else {
+            0.0
+        };
+        let ssr_max_distance = cam.h * 2.0;
+        let ssr_stride = cam.h * 0.04;
+        let ssr_max_steps = 24.0;
+        SsrGlobals {
+            inv_view_proj: cam.view_proj.inverse().to_cols_array(),
+            view_proj: cam.view_proj_arr,
+            view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
+            params: [
+                if ssr_enabled { 1.0 } else { 0.0 },
+                ssr_max_distance,
+                ssr_stride,
+                ssr_max_steps,
+            ],
+            felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
+            shop_punctual: [shop_punctual_inv_doc, 0.0, 0.0, 0.0],
+        }
     }
 
     pub(super) fn upload_camera_uniforms(
@@ -162,43 +250,20 @@ impl WgpuRenderer {
         ssr_enabled: bool,
         frame: &crate::render::draw_cmd::UiFrame,
     ) {
-        let tm = self.tile_hdr_tonemap(frame);
-        let felt_y = tm[0];
-        let felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
-        let felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
-        // Document-space punctual attenuation for shop glTF only.
-        let shop_lit_hdr = self.active_scene_key == Some("shop") && frame.shop_env_gltf_punctual;
-        let shop_punctual_inv_doc = if shop_lit_hdr {
-            let s =
-                crate::render::shop_glb::shop_env_world_scale(cam.h, self.shop_env_height_scale);
-            1.0 / s.max(1e-6)
+        let shop_like = self.active_scene_key == Some("shop")
+            || (self.active_scene_key == Some("showcase")
+                && frame
+                    .showcase_render_hints
+                    .shop_tonemap_and_lit_mesh_context);
+        let shop_inspect_felt = if shop_like && frame.shop_inspect_lit_mesh_hdr {
+            Some(ShopInspectLitMeshFelt::Dim)
         } else {
-            0.0
+            None
         };
-        // SSR globals — lit_mesh.wgsl unprojects screen-space depth taps and
-        // marches reflection rays in world space.
-        let ssr_max_distance = cam.h * 2.0;
-        let ssr_stride = cam.h * 0.04;
-        let ssr_max_steps = 24.0;
-        self.queue.write_buffer(
-            &self.lit_mesh_ssr_buffer,
-            0,
-            bytemuck::bytes_of(&SsrGlobals {
-                inv_view_proj: cam.view_proj.inverse().to_cols_array(),
-                view_proj: cam.view_proj_arr,
-                view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
-                params: [
-                    if ssr_enabled { 1.0 } else { 0.0 },
-                    ssr_max_distance,
-                    ssr_stride,
-                    ssr_max_steps,
-                ],
-                felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
-                shop_punctual: [shop_punctual_inv_doc, 0.0, 0.0, 0.0],
-            }),
-        );
+        let g = self.lit_mesh_ssr_globals(cam, ssr_enabled, frame, shop_inspect_felt);
+        self.queue
+            .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
 
-        // Matching upload for the flame pipeline's view uniform.
         self.queue.write_buffer(
             &self.flame_view_buffer,
             0,
@@ -207,5 +272,21 @@ impl WgpuRenderer {
                 view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
             }),
         );
+    }
+
+    pub(super) fn upload_shop_inspect_lit_mesh_subject_ssr(
+        &self,
+        cam: &CameraFrame,
+        ssr_enabled: bool,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) {
+        let g = self.lit_mesh_ssr_globals(
+            cam,
+            ssr_enabled,
+            frame,
+            Some(ShopInspectLitMeshFelt::Subject),
+        );
+        self.queue
+            .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
     }
 }
