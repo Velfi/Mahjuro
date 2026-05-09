@@ -288,3 +288,40 @@ pub fn hallway_embedded_spot_lights_runtime(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::load_hallway_glb_from_bytes;
+
+    /// Pick-blind room (`hallway.glb`) — documents how many environment primitives carry glTF
+    /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
+    #[test]
+    fn pick_blind_room_emissive_material_summary() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/hallway.glb");
+        let data = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("skip pick_blind_room_emissive_material_summary: {path:?}: {e}");
+                return;
+            }
+        };
+        let cpu = load_hallway_glb_from_bytes(&data).expect("hallway.glb decode");
+        let mut with_tex = 0usize;
+        let mut with_factor = 0usize;
+        for ep in &cpu.environment_primitives {
+            let m = &ep.mesh;
+            if m.emissive_rgba.is_some() {
+                with_tex += 1;
+            }
+            let f = m.emissive_factor;
+            if f[0] > 1e-5 || f[1] > 1e-5 || f[2] > 1e-5 {
+                with_factor += 1;
+            }
+        }
+        eprintln!(
+            "hallway.glb (pick-blind): {} env primitive(s), {} with emissive texture, {} with non-zero emissive factor",
+            cpu.environment_primitives.len(),
+            with_tex,
+            with_factor
+        );
+    }
+}
