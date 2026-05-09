@@ -34,7 +34,10 @@ use crate::core::structure::{
 };
 
 use crate::audio::SfxId;
-use crate::core::relic::{RelicId, RelicState, ScoreContext};
+use crate::core::relic::{
+    RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+    ScoreRoundBundle, ScoreTileBundle,
+};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
@@ -1733,24 +1736,34 @@ mod tests {
 
         let rw = Some(BlindKind::round_wind_for_ante(run.ante));
         let ctx = ScoreContext {
-            relics: &run.relics,
-            tile_debuffs: &[],
-            scored_last_turn: run.scored_last_turn,
-            dora_faces: run.wall.dora_faces(),
-            available_yaku: run.available_yaku.clone(),
-            round_wind: rw,
-            plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
-            yaku_levels: Some(run.yaku_levels.clone()),
-            played_yaku_this_round: run.played_yaku_this_round.clone(),
-            gold: run.gold,
-            total_score: run.total_score_earned,
-            is_final_play: run.plays_remaining == 0,
-            relic_counters: run.relic_counters.clone(),
-            hand_for_ghost: run.hand(),
+            relic: ScoreRelicBundle {
+                roster: &run.relics,
+                counters: run.relic_counters.clone(),
+            },
+            tiles: ScoreTileBundle {
+                debuffs: &[],
+                hand_for_ghost: run.hand(),
+            },
+            round: ScoreRoundBundle {
+                scored_last_turn: run.scored_last_turn,
+                plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
+                round_wind: rw,
+                played_yaku_this_round: run.played_yaku_this_round.clone(),
+                is_final_play: run.plays_remaining == 0,
+            },
+            pattern: ScorePatternBundle {
+                dora_faces: run.wall.dora_faces(),
+                available_yaku: run.available_yaku.clone(),
+                yaku_levels: Some(run.yaku_levels.clone()),
+            },
+            economy: ScoreEconomyBundle {
+                gold: run.gold,
+                total_score: run.total_score_earned,
+            },
             structure: None,
         };
 
-        assert_eq!(ctx.plays_used, 2);
+        assert_eq!(ctx.round.plays_used, 2);
     }
 
     #[test]

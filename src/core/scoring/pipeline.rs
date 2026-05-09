@@ -57,7 +57,7 @@ fn score_sets_inner(
         let mut meld_contrib = meld_chip_bonus(s.kind);
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
-                meld_contrib += if tile_is_debuffed(t, ctx.tile_debuffs) {
+                meld_contrib += if tile_is_debuffed(t, ctx.tiles.debuffs) {
                     0
                 } else {
                     t.point_value() as i32
@@ -82,7 +82,7 @@ fn score_sets_inner(
     }
     chips = base_chips;
 
-    let has_triplet_boost = eff.has(ctx.relics, RelicId::TripletBoost);
+    let has_triplet_boost = eff.has(ctx.relic.roster, RelicId::TripletBoost);
     super::pre_yaku_layer::apply_pre_yaku_scoring(
         ctx,
         tiles,

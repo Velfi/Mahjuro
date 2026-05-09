@@ -25,8 +25,8 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     mult: &mut f64,
     steps: &mut Vec<ScoreStep>,
 ) {
-    let has = |id: RelicId| eff.has(ctx.relics, id);
-    let count = |id: RelicId| eff.count(ctx.relics, id);
+    let has = |id: RelicId| eff.has(ctx.relic.roster, id);
+    let count = |id: RelicId| eff.count(ctx.relic.roster, id);
 
     if has(RelicId::RedDragonRage) {
         for s in sets {
@@ -105,7 +105,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::RoundCompass)
-        && let Some(wind) = ctx.round_wind
+        && let Some(wind) = ctx.round.round_wind
     {
         for s in sets {
             if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
@@ -148,7 +148,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .flat_map(|s| &s.tile_ids)
             .filter(|id| {
                 tile_by_id(tiles, **id).is_some_and(|t| {
-                    t.suit == Suit::Flower && !tile_is_debuffed(t, ctx.tile_debuffs)
+                    t.suit == Suit::Flower && !tile_is_debuffed(t, ctx.tiles.debuffs)
                 })
             })
             .count();
@@ -162,7 +162,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .iter()
             .flat_map(|s| &s.tile_ids)
             .filter_map(|id| tile_by_id(tiles, *id))
-            .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
+            .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
             .filter(|t| {
                 matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank == 7
             })
@@ -177,13 +177,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::MultiplierMaster) {
-        let bonus = 0.5 * ctx.relics.enabled_len() as f64;
+        let bonus = 0.5 * ctx.relic.roster.enabled_len() as f64;
         if bonus > 0.0 {
             push_mult(steps, *chips, mult, "Multiplier Master", bonus);
         }
     }
 
-    if has(RelicId::ChainReaction) && ctx.scored_last_turn {
+    if has(RelicId::ChainReaction) && ctx.round.scored_last_turn {
         push_mult(steps, *chips, mult, "Chain Reaction", 4.0);
     }
 
@@ -203,22 +203,21 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::GoldenEngine) {
-        let bonus = (ctx.gold.max(0) as f64 / 5.0).floor();
+        let bonus = (ctx.economy.gold.max(0) as f64 / 5.0).floor();
         if bonus > 0.0 {
             push_mult(steps, *chips, mult, "Golden Engine", bonus);
         }
     }
 
     if has(RelicId::Snowball) {
-        let bonus = ctx.total_score as f64 / 5000.0;
+        let bonus = ctx.economy.total_score as f64 / 5000.0;
         if bonus > 0.0 {
             push_mult(steps, *chips, mult, "Snowball", bonus);
         }
     }
 
     if has(RelicId::MonarchButterfly) {
-        let excess = ctx
-            .relic_counters
+        let excess = ctx.relic.counters
             .get(&RelicId::MonarchButterfly)
             .copied()
             .unwrap_or(0);
@@ -228,13 +227,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
-    if has(RelicId::Momentum) && ctx.plays_used > 0 {
+    if has(RelicId::Momentum) && ctx.round.plays_used > 0 {
         push_mult(
             steps,
             *chips,
             mult,
             "Momentum",
-            0.5 * ctx.plays_used as f64,
+            0.5 * ctx.round.plays_used as f64,
         );
     }
 
@@ -247,8 +246,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::SilkThread) {
-        let thread_mult = ctx
-            .relic_counters
+        let thread_mult = ctx.relic.counters
             .get(&RelicId::SilkThread)
             .copied()
             .unwrap_or(0);
@@ -282,8 +280,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Humility) {
-        let streak = ctx
-            .relic_counters
+        let streak = ctx.relic.counters
             .get(&RelicId::Humility)
             .copied()
             .unwrap_or(0);
@@ -293,8 +290,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Obsession) {
-        let rounds = ctx
-            .relic_counters
+        let rounds = ctx.relic.counters
             .get(&RelicId::Obsession)
             .copied()
             .unwrap_or(0);
@@ -304,8 +300,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Bonfire) {
-        let sold = ctx
-            .relic_counters
+        let sold = ctx.relic.counters
             .get(&RelicId::Bonfire)
             .copied()
             .unwrap_or(0);
@@ -315,8 +310,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Kintsugi) {
-        let broken = ctx
-            .relic_counters
+        let broken = ctx.relic.counters
             .get(&RelicId::Kintsugi)
             .copied()
             .unwrap_or(0);
@@ -341,7 +335,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::SolitarySage) {
-        let empty = ctx.relics.max_slots.saturating_sub(ctx.relics.active.len());
+        let empty = ctx.relic.roster.max_slots.saturating_sub(ctx.relic.roster.active.len());
         if empty > 0 {
             push_mult(steps, *chips, mult, "Solitary Sage", 1.5 * empty as f64);
         }
@@ -349,12 +343,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::CurioCabinet) {
         let bonus: u32 = ctx
-            .relics
+            .relic
+            .roster
             .active
             .iter()
             .copied()
             .filter(|&id| id != RelicId::CurioCabinet)
-            .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic_counters))
+            .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic.counters))
             .sum();
         if bonus > 0 {
             push_mult(steps, *chips, mult, "Curio Cabinet", bonus as f64);
@@ -362,8 +357,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::LotusBloom) {
-        let blooms = ctx
-            .relic_counters
+        let blooms = ctx.relic.counters
             .get(&RelicId::LotusBloom)
             .copied()
             .unwrap_or(0);
@@ -373,13 +367,12 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::WallWeaver) {
-        let overflow_extras = if eff.has(ctx.relics, RelicId::StrengthInNumbers) {
+        let overflow_extras = if eff.has(ctx.relic.roster, RelicId::StrengthInNumbers) {
             68
         } else {
             0
         };
-        let extra_added = ctx
-            .relic_counters
+        let extra_added = ctx.relic.counters
             .get(&RelicId::WallWeaver)
             .copied()
             .unwrap_or(0)
@@ -391,8 +384,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::Heirloom) {
-        let bosses = ctx
-            .relic_counters
+        let bosses = ctx.relic.counters
             .get(&RelicId::Heirloom)
             .copied()
             .unwrap_or(0)
@@ -409,7 +401,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
-                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                if tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
                 let idx = match t.suit {
@@ -446,8 +438,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::HungryGhost) {
-        let perm_mult = ctx
-            .relic_counters
+        let perm_mult = ctx.relic.counters
             .get(&RelicId::HungryGhost)
             .copied()
             .unwrap_or(0);

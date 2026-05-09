@@ -11,13 +11,13 @@ pub(crate) struct EffectiveRelics {
 
 impl EffectiveRelics {
     pub(crate) fn from_context(ctx: &ScoreContext<'_>) -> Self {
-        let mirrored = if ctx.relics.has(RelicId::MirrorTile) {
-            ctx.relics.relic_after(RelicId::MirrorTile)
+        let mirrored = if ctx.relic.roster.has(RelicId::MirrorTile) {
+            ctx.relic.roster.relic_after(RelicId::MirrorTile)
         } else {
             None
         };
-        let shadowed = if ctx.relics.has(RelicId::ShadowHand) {
-            ctx.relics
+        let shadowed = if ctx.relic.roster.has(RelicId::ShadowHand) {
+            ctx.relic.roster
                 .active
                 .first()
                 .filter(|&&id| id != RelicId::ShadowHand)

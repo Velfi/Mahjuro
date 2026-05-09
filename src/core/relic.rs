@@ -974,8 +974,8 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
 }
 
 /// True when Mirror Tile / Shadow Hand duplication routes through the scoring
-/// pipeline's `has` / `count` closure for this relic. Anything checked only with
-/// raw `ctx.relics.has` there (e.g. Strength in Numbers overflow) is excluded.
+/// pipeline's `EffectiveRelics::has` / `count` for this relic. Anything checked only with
+/// raw `ctx.relic.roster.has` there (e.g. Strength in Numbers overflow) is excluded.
 fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
     matches!(
         target,
@@ -1047,49 +1047,53 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
     )
 }
 
-/// Scoring context for relic hooks.
-pub struct ScoreContext<'a> {
-    pub relics: &'a RelicState,
-    pub tile_debuffs: &'a [crate::core::debuff::TileDebuff],
+/// Relic roster and counter map for scoring hooks.
+pub struct ScoreRelicBundle<'a> {
+    pub roster: &'a RelicState,
+    pub counters: std::collections::BTreeMap<RelicId, i32>,
+}
+
+/// Tile debuffs (boss/class) and unscored-hand snapshot for Ghost Hand.
+pub struct ScoreTileBundle<'a> {
+    pub debuffs: &'a [crate::core::debuff::TileDebuff],
+    pub hand_for_ghost: &'a [crate::core::tile::Tile],
+}
+
+/// Per-round timing, wind, and repeat-yaku state (e.g. Censor, Momentum, Chain Reaction).
+pub struct ScoreRoundBundle {
     /// Whether the player scored on their previous play (for ChainReaction).
     pub scored_last_turn: bool,
-    /// Dora tile faces (suit, rank) that grant bonus points.
-    pub dora_faces: Vec<(Suit, u8)>,
-    /// Yaku patterns available at the player's progression level.
-    pub available_yaku: Vec<crate::core::yaku::YakuKind>,
-    /// Current ante's round wind (1=East, 2=South, 3=West, 4=North) — drives
-    /// the round-wind branch of the Yakuhai yaku. `None` outside a run.
-    pub round_wind: Option<u8>,
-    /// Plays already consumed this round at the moment of scoring (so the
-    /// current play is `plays_used + 1`-th). Used by relics such as Momentum.
+    /// Plays already consumed this round at scoring (current play is `plays_used + 1`-th).
     pub plays_used: u32,
-    /// Per-yaku level (Zodiac-card-driven). `None` falls back to all level 1
-    /// — used by tests and the bot.
-    pub yaku_levels: Option<crate::core::zodiac::YakuLevels>,
-    /// Yaku detected on prior plays in the current round, used by The Censor
-    /// boss to halve repeat-yaku contributions. Empty in normal rounds.
+    /// Round wind (1=East … 4=North) for Yakuhai; `None` outside a run.
+    pub round_wind: Option<u8>,
+    /// Yaku already scored this round (The Censor halves repeats).
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
-    /// Player's current gold at the moment of scoring (for Golden Engine).
-    pub gold: i32,
-    /// Cumulative score earned across the entire run (for Snowball).
-    pub total_score: u64,
-    /// True when this is the player's last remaining play this round
-    /// (plays_remaining == 0 at scoring time). Powers Last Breath when
-    /// combined with a structure cash-in.
+    /// Last play of the round (`plays_remaining == 0`); powers Last Breath with structure.
     pub is_final_play: bool,
-    /// Per-relic mutable counters (humility, melting_ice chips,
-    /// tile_polisher accumulated bonus, river_runner accumulated bonus, etc.).
-    /// Keyed by RelicId, value meaning varies by relic.
-    pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
-    /// Player hand snapshot at scoring time (before `take_selected_tiles` in
-    /// classic mode; at structure cash-in this is tiles still in hand, disjoint
-    /// from structure). Used by Ghost Hand to sum point values of unscored tiles.
-    pub hand_for_ghost: &'a [crate::core::tile::Tile],
-    /// When set, this score is from **structure cash-in** (`trigger_structure`), not from a
-    /// direct hand play. Relic hooks attach either when melds **land**
-    /// (`commit_selection_to_structure`) or when the player **cashes in** — e.g. MeltingIce /
-    /// Tea / Humility on commit; TilePolisher / River Runner / Star Tile / KanDrum / scoring
-    /// cascades on trigger. New "per play" relics should hook the correct side.
+}
+
+/// Dora indicators, yaku unlock gating, and zodiac yaku levels.
+pub struct ScorePatternBundle {
+    pub dora_faces: Vec<(Suit, u8)>,
+    pub available_yaku: Vec<crate::core::yaku::YakuKind>,
+    pub yaku_levels: Option<crate::core::zodiac::YakuLevels>,
+}
+
+/// Run economy totals read during scoring (Golden Engine, Snowball).
+pub struct ScoreEconomyBundle {
+    pub gold: i32,
+    pub total_score: u64,
+}
+
+/// Scoring context for relic hooks, grouped for readability at call sites.
+pub struct ScoreContext<'a> {
+    pub relic: ScoreRelicBundle<'a>,
+    pub tiles: ScoreTileBundle<'a>,
+    pub round: ScoreRoundBundle,
+    pub pattern: ScorePatternBundle,
+    pub economy: ScoreEconomyBundle,
+    /// Structure cash-in metadata. Set when scoring from `trigger_structure`, not a direct play.
     pub structure: Option<crate::core::structure::StructureTriggerMeta>,
 }
 
