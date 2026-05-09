@@ -8,6 +8,14 @@ use crate::core::zodiac::YakuLevels;
 use crate::game::event_bus::GameOverReason;
 use crate::game::run::RunState;
 
+/// Shop visits with `run.ante <=` this value (after `advance_round`, before the
+/// next blind) count toward **early** relic timing stats; larger ante counts as **late**.
+/// Used only for bot reporting (selection-bias visibility), not gameplay.
+pub const RELIC_SHOP_TIMING_EARLY_ANTE_MAX: u32 = 3;
+
+/// Minimum shop purchases in **each** of early/late buckets to emit a timing-split row.
+pub const MIN_SHOP_TIMING_SPLIT_PER_BUCKET: u32 = 15;
+
 /// Categorize why a non-victory run ended, for balance-plot bucketing.
 /// Returns one of: "no-legal-hand", "only-unplayable", "only-no-score",
 /// "stuck-other", or "target-miss" (scoring failure without systemic block).
@@ -23,6 +31,26 @@ fn classify_run_death_cause(s: &RunStats) -> &'static str {
     } else {
         "target-miss"
     }
+}
+
+/// Snapshot when a headless bot run hits the wall-clock deadline (see `BotRunOptions::run_timeout`).
+#[derive(Debug, Clone, Serialize)]
+pub struct RunTimeoutSnapshot {
+    pub phase: String,
+    pub ante: u32,
+    pub blind: String,
+    /// Decision turns completed this blind when phase is `playing_blind`, else `None`.
+    pub blind_turn: Option<u32>,
+    /// Raw `RunState` fields at timeout. Meaning depends on [`Self::phase`]:
+    /// - `playing_blind`: cumulative score toward the **current** blind vs its `target_score`.
+    /// - `shop`: usually totals from the **just-cleared** blind (often ≫ target); `target_score`
+    ///   is not the upcoming fight’s goal — `apply_blind` has not run yet.
+    /// - `outer`: between high-level loop iterations; same fields, rarely hit.
+    pub round_score: u64,
+    pub target_score: u32,
+    pub plays_remaining: u32,
+    pub discards_remaining: u32,
+    pub elapsed_ms: u64,
 }
 
 pub(crate) fn aggregate_stats_slot_sort_key(slot: &str) -> (u32, u32) {
@@ -64,6 +92,10 @@ pub struct RunStats {
     pub peak_blind_score: u64,
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
+    /// Shop buys with `run.ante <= RELIC_SHOP_TIMING_EARLY_ANTE_MAX` at purchase.
+    pub relics_picked_shop_early: std::collections::BTreeMap<&'static str, u32>,
+    /// Shop buys with `run.ante > RELIC_SHOP_TIMING_EARLY_ANTE_MAX` at purchase.
+    pub relics_picked_shop_late: std::collections::BTreeMap<&'static str, u32>,
     pub talismans_picked: std::collections::BTreeMap<&'static str, u32>,
     pub zodiacs_picked: std::collections::BTreeMap<&'static str, u32>,
     pub packs_picked: std::collections::BTreeMap<&'static str, u32>,
@@ -108,6 +140,11 @@ pub struct RunStats {
     /// Remaining consumable labels at run end.
     pub final_consumables: Vec<String>,
     pub final_yaku_levels: YakuLevels,
+    /// Set when the run stopped because `run_timeout` elapsed (after all retries exhausted, or the single attempt).
+    #[serde(default)]
+    pub run_timed_out: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_detail: Option<RunTimeoutSnapshot>,
 }
 
 impl Default for RunStats {
@@ -138,6 +175,8 @@ impl Default for RunStats {
             peak_blind_score: 0,
             skipped_tags: std::collections::BTreeMap::new(),
             relics_picked: std::collections::BTreeMap::new(),
+            relics_picked_shop_early: std::collections::BTreeMap::new(),
+            relics_picked_shop_late: std::collections::BTreeMap::new(),
             talismans_picked: std::collections::BTreeMap::new(),
             zodiacs_picked: std::collections::BTreeMap::new(),
             packs_picked: std::collections::BTreeMap::new(),
@@ -175,6 +214,8 @@ impl Default for RunStats {
             final_relics: Vec::new(),
             final_consumables: Vec::new(),
             final_yaku_levels: YakuLevels::default(),
+            run_timed_out: false,
+            timeout_detail: None,
         }
     }
 }
@@ -215,6 +256,10 @@ pub struct AggregateStats {
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked_victories: std::collections::BTreeMap<&'static str, u32>,
+    pub relics_picked_shop_early: std::collections::BTreeMap<&'static str, u32>,
+    pub relics_picked_shop_early_victories: std::collections::BTreeMap<&'static str, u32>,
+    pub relics_picked_shop_late: std::collections::BTreeMap<&'static str, u32>,
+    pub relics_picked_shop_late_victories: std::collections::BTreeMap<&'static str, u32>,
     pub talismans_picked: std::collections::BTreeMap<&'static str, u32>,
     pub zodiacs_picked: std::collections::BTreeMap<&'static str, u32>,
     pub packs_picked: std::collections::BTreeMap<&'static str, u32>,
@@ -245,11 +290,16 @@ pub struct AggregateStats {
     pub relic_activations: std::collections::BTreeMap<&'static str, u64>,
     pub total_tiles_destroyed: u64,
     pub transformations_successor: std::collections::BTreeMap<&'static str, u64>,
+    /// Runs that ended with `RunStats::run_timed_out` after all timeout retries.
+    pub timed_out_runs: u32,
 }
 
 impl AggregateStats {
     pub(crate) fn record(&mut self, s: &RunStats) {
         self.runs += 1;
+        if s.run_timed_out {
+            self.timed_out_runs += 1;
+        }
         self.blinds_cleared_total += s.blinds_cleared as u64;
         self.antes_cleared_total += s.antes_cleared as u64;
         if s.victory {
@@ -287,7 +337,7 @@ impl AggregateStats {
         for (reason, count) in &s.bot_issues_by_reason {
             *self.bot_issues_by_reason.entry(reason.clone()).or_insert(0) += *count;
         }
-        if !s.victory {
+        if !s.victory && !s.run_timed_out {
             *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
             *self
                 .deaths_by_blind
@@ -306,6 +356,24 @@ impl AggregateStats {
             *self.relics_picked.entry(name).or_insert(0) += *count;
             if s.victory {
                 *self.relics_picked_victories.entry(name).or_insert(0) += *count;
+            }
+        }
+        for (name, count) in &s.relics_picked_shop_early {
+            *self.relics_picked_shop_early.entry(name).or_insert(0) += *count;
+            if s.victory {
+                *self
+                    .relics_picked_shop_early_victories
+                    .entry(name)
+                    .or_insert(0) += *count;
+            }
+        }
+        for (name, count) in &s.relics_picked_shop_late {
+            *self.relics_picked_shop_late.entry(name).or_insert(0) += *count;
+            if s.victory {
+                *self
+                    .relics_picked_shop_late_victories
+                    .entry(name)
+                    .or_insert(0) += *count;
             }
         }
         for (name, count) in &s.talismans_picked {
@@ -335,7 +403,7 @@ impl AggregateStats {
         for boss in s.boss_beaten.keys() {
             *self.boss_beaten.entry(boss.clone()).or_insert(0) += 1;
         }
-        if !s.victory {
+        if !s.victory && !s.run_timed_out {
             let cause = classify_run_death_cause(s);
             let key = format!("{}|{}", s.died_on_ante, cause);
             *self.deaths_by_ante_cause.entry(key).or_insert(0) += 1;
@@ -400,6 +468,18 @@ impl AggregateStats {
             "victories:           {} / {} ({:.1}%)",
             self.victories, self.runs, pr.win_rate_pct
         );
+        if let Some(ref w) = d.overall_win_rate_wilson_95 {
+            out!(
+                "  win rate 95% CI:   {:.1}% – {:.1}% (Wilson)",
+                w.lo, w.hi
+            );
+        }
+        if self.timed_out_runs > 0 {
+            out!(
+                "runs timed out:      {} (deadline hit after retries; see console dump if enabled)",
+                self.timed_out_runs
+            );
+        }
         out!("avg blinds cleared:  {:.2}", pr.blinds_cleared);
         out!("avg antes cleared:   {:.2}", pr.antes_cleared);
         out!("max ante reached:    {}", self.max_ante_reached);
@@ -471,13 +551,34 @@ impl AggregateStats {
             );
         }
 
-        out!("\ndeaths by ante:");
+        out!("\ndeaths by ante (Wilson 95% CI on % of all runs):");
         for row in &d.deaths_by_ante {
             let bar = "#".repeat(row.text_bar_hashes as usize);
             out!(
-                "  ante {:>2}: {:>4} ({:>5.1}%) {}",
-                row.ante, row.count, row.pct_of_runs, bar
+                "  ante {:>2}: {:>4} ({:>5.1}% [{:.1}–{:.1}]) {}",
+                row.ante,
+                row.count,
+                row.pct_of_runs,
+                row.pct_ci_lo,
+                row.pct_ci_hi,
+                bar
             );
+        }
+
+        if !d.deaths_by_ante_hazard.is_empty() {
+            out!("\ndeath hazard P(die on ante | reached ante), Wilson 95% CI:");
+            out!("  {:>4} {:>8} {:>8} {:>8} {:>14}", "ante", "reached", "deaths", "hazard", "95% CI");
+            for row in &d.deaths_by_ante_hazard {
+                out!(
+                    "  {:>4} {:>8} {:>8} {:>7.1}% [{:>5.1}–{:>5.1}]",
+                    row.ante,
+                    row.reached,
+                    row.deaths,
+                    row.hazard_pct,
+                    row.hazard_ci_lo,
+                    row.hazard_ci_hi
+                );
+            }
         }
 
         out!("\ndeaths by blind:");
@@ -554,12 +655,37 @@ impl AggregateStats {
         if !d.relics_bought.is_empty() {
             const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
             let overall_win_rate = pr.win_rate_pct;
-            out!("\nrelics bought (sorted by total purchases):");
-            out!("  {:<22} {:>7} {:>7} {:>8}", "relic", "bought", "won", "win%");
+            let ante_mx = d.relic_shop_timing_early_ante_max;
+            out!("\nrelics bought (sorted by total purchases; Wilson 95% CI on win% when bought ≥ 1):");
+            out!(
+                "  %late = share of buys when run.ante > {} at the shop visit.",
+                ante_mx
+            );
+            out!(
+                "  {:<22} {:>7} {:>7} {:>8} {:>16} {:>7} {:>8}",
+                "relic",
+                "bought",
+                "won",
+                "win%",
+                "95% CI",
+                "Δbase",
+                "%late"
+            );
             for row in &d.relics_bought {
+                let late_s = row
+                    .pct_shop_late
+                    .map(|p| format!("{:.0}%", p))
+                    .unwrap_or_else(|| "—".into());
                 out!(
-                    "  {:<22} {:>7} {:>7} {:>7.1}%",
-                    row.name, row.bought, row.won, row.win_pct
+                    "  {:<22} {:>7} {:>7} {:>7.1}% [{:>5.1}–{:>5.1}] {:>+7.1} {:>8}",
+                    row.name,
+                    row.bought,
+                    row.won,
+                    row.win_pct,
+                    row.win_pct_ci_lo,
+                    row.win_pct_ci_hi,
+                    row.delta_vs_baseline_pct,
+                    late_s
                 );
             }
             if !d.relics_by_win_rate.is_empty() {
@@ -568,13 +694,56 @@ impl AggregateStats {
                     MIN_SAMPLES_FOR_WIN_CORR, overall_win_rate
                 );
                 out!(
-                    "  {:<22} {:>7} {:>7} {:>8} {:>8}",
-                    "relic", "bought", "won", "win%", "Δ"
+                    "  {:<22} {:>7} {:>7} {:>8} {:>16} {:>8} {:>8}",
+                    "relic", "bought", "won", "win%", "95% CI", "Δ", "%late"
                 );
                 for row in &d.relics_by_win_rate {
+                    let late_s = row
+                        .pct_shop_late
+                        .map(|p| format!("{:.0}%", p))
+                        .unwrap_or_else(|| "—".into());
                     out!(
-                        "  {:<22} {:>7} {:>7} {:>7.1}% {:>+7.1}",
-                        row.name, row.bought, row.won, row.win_pct, row.delta_vs_baseline_pct
+                        "  {:<22} {:>7} {:>7} {:>7.1}% [{:>5.1}–{:>5.1}] {:>+7.1} {:>8}",
+                        row.name,
+                        row.bought,
+                        row.won,
+                        row.win_pct,
+                        row.win_pct_ci_lo,
+                        row.win_pct_ci_hi,
+                        row.delta_vs_baseline_pct,
+                        late_s
+                    );
+                }
+            }
+            if !d.relics_shop_timing_split.is_empty() {
+                out!(
+                    "\nrelic shop timing (≥{} buys in each bucket; early = ante≤{}, late = ante>{}):",
+                    MIN_SHOP_TIMING_SPLIT_PER_BUCKET,
+                    ante_mx,
+                    ante_mx
+                );
+                out!(
+                    "  {:<22} {:>5} {:>5} {:>8} {:>5} {:>5} {:>8} {:>8}",
+                    "relic",
+                    "eN",
+                    "eW",
+                    "eWin%",
+                    "lN",
+                    "lW",
+                    "lWin%",
+                    "late−early"
+                );
+                for row in &d.relics_shop_timing_split {
+                    out!(
+                        "  {:<22} {:>5} {:>5} {:>7.1}% {:>5} {:>5} {:>7.1}% {:>+7.1}",
+                        row.name,
+                        row.early_bought,
+                        row.early_won,
+                        row.early_win_pct,
+                        row.late_bought,
+                        row.late_won,
+                        row.late_win_pct,
+                        row.timing_gap_pct
                     );
                 }
             }

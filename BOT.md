@@ -45,6 +45,8 @@ each turn evaluates ~16k bitmasks; debug builds are 10–20× slower.
 | `--plays N` | u32 | 4 | `starting_plays` per blind. |
 | `--discards N` | u32 | 3 | `starting_discards` per blind. |
 | `--gold N` | u32 | 4 | `starting_gold`. |
+| `--bot-run-timeout-secs N` | u32 | 0 | Wall-clock cap per run **attempt** (seconds). `0` = off. |
+| `--timeout-retries N` | u32 | 1 | Extra attempts after a timeout (`1` ⇒ up to 2 tries per scheduled run). |
 
 Anything not overridden uses `GameMode::standard()`.
 
@@ -78,6 +80,23 @@ The two numbers worth tracking for tuning are **`antes_cleared`** (how far
 along the curve the bot makes it) and the **deaths-by-ante histogram** (where
 the wall sits). `victories` is binary — if you ever see >0%, the bot can win
 the game.
+
+### Wall-clock timeouts
+
+If `--bot-run-timeout-secs` is non-zero, a run attempt stops when the limit is
+hit. The summary lists **timed-out attempts** (not necessarily failed runs —
+retries may recover). You get a **`by phase:`** count (`shop`, `playing_blind`,
+`outer`, …) and one line per event.
+
+- **`playing_blind`**: `round_score` / `target_score` is progress on the **current** blind.
+- **`shop`**: those fields are from **`RunState` after the last clear** — often
+  total score ≫ that blind’s target (overscore). They are **not** the next
+  blind’s goal (`apply_blind` has not run yet).
+- **`outer`**: rare; main loop between steps.
+
+Shop timeouts are expensive because each purchase pass scores many hypothetical
+items via `best_play_in_hand`. The implementation reuses one batch of sample
+hands per pass and uses fewer samples on late antes (see below).
 
 ## Sweep output
 
@@ -130,13 +149,16 @@ Per blind, in `play_run`:
    (`best_play × plays_remaining`) ≥ 2× the target — banks `skip_reward()` gold
    without burning plays. Boss never skipped.
 2. **Apply blind, play it.** See above.
-3. **Smart relic pick.** Score each offered relic by adding it to a hypothetical
-   `RelicState` and re-evaluating best-play across the current hand + 4 synthetic
-   random hands (so hand-conditional relics like `TripletBoost` get fair credit).
-   Lex-sort by `(marginal_value, rarity_weight)` and pick the winner.
-4. **Shop visit.** Roll 3 random non-owned relics (mirroring `ShopScene::new`),
-   then loop buying the affordable item with the largest positive marginal
-   value until none remain.
+3. **Shop marginal values (relics / zodiacs / talismans / packs).** For each
+   candidate, estimate score lift vs a baseline: the bot’s current post-shop
+   hand plus **N** synthetic random hands. **N** scales down on later antes
+   (4 → 3 → 2 synthetic as ante rises) so late-game shop stays cheaper. **One**
+   shared hand batch + cached baselines is built per “pick the next buy”
+   iteration, then every affordable offering is scored against that same batch
+   (pack pricing still walks the wall separately but uses the same **N**).
+4. **Shop visit.** Stock mirrors `ShopScene::new` (relic pool, ribbons, packs).
+   Loop: among affordable items with positive weighted marginal value, buy the
+   best; repeat until nothing worthwhile remains.
 
 ## Limitations
 

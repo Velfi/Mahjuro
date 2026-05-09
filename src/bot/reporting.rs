@@ -1,9 +1,11 @@
 use super::*;
 
-use base64::Engine;
 use clap::ValueEnum;
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressIterator, ProgressStyle};
 
 use crate::bot::export_schema::{BotExportMeta, EXPORT_SCHEMA_VERSION};
+use crate::bot::stats::RunTimeoutSnapshot;
+use std::time::Duration;
 
 /// File format for `mahjuro bot --output-file`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -101,18 +103,45 @@ impl Default for BotStrategy {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct BotRunOptions {
     pub log: bool,
     pub output: Option<BotOutputTarget>,
     /// One JSON object per line (`RunStats`) for tooling / quant analysis.
     pub output_runs: Option<PathBuf>,
+    /// Wall-clock cap for a single bot run attempt. `None` disables timeouts.
+    pub run_timeout: Option<Duration>,
+    /// Extra attempts after a timed-out run (`total attempts = 1 + timeout_retries`).
+    pub timeout_retries: u32,
+}
+
+impl Default for BotRunOptions {
+    fn default() -> Self {
+        Self {
+            log: false,
+            output: None,
+            output_runs: None,
+            run_timeout: None,
+            timeout_retries: 1,
+        }
+    }
+}
+
+/// One timed-out attempt (before a retry or as the final failed attempt).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BotTimeoutDiag {
+    pub run_index: u32,
+    /// 0 = first attempt, 1 = first retry, …
+    pub attempt: u32,
+    #[serde(flatten)]
+    pub snapshot: RunTimeoutSnapshot,
 }
 
 #[derive(Debug)]
 pub struct HeadlessBotBatch {
     pub aggregate: AggregateStats,
     pub runs: Vec<RunStats>,
+    pub timeout_events: Vec<BotTimeoutDiag>,
 }
 
 #[derive(Serialize)]
@@ -181,9 +210,14 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn write_bot_html(path: &Path, json_b64: &str) -> anyhow::Result<()> {
+/// Escape `<` so embedded JSON cannot prematurely close a `<script>` tag.
+fn escape_json_for_html_script(json: &str) -> String {
+    json.replace('<', "\\u003c")
+}
+
+fn write_bot_html(path: &Path, json_embedded: &str) -> anyhow::Result<()> {
     const TEMPLATE: &str = include_str!("bot_report_template.html");
-    let html = TEMPLATE.replace("__BOT_JSON_B64__", json_b64);
+    let html = TEMPLATE.replace("__BOT_EXPORT_JSON__", json_embedded);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -216,8 +250,8 @@ fn write_bot_export(
         BotOutputFormat::Html => {
             let v = bot_export_value(runs, mode, agg)?;
             let json_compact = serde_json::to_string(&v)?;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(json_compact.as_bytes());
-            write_bot_html(&target.path, &b64)
+            let embedded = escape_json_for_html_script(&json_compact);
+            write_bot_html(&target.path, &embedded)
         }
     }
 }
@@ -254,19 +288,122 @@ pub fn play_run_with(config: BotConfig) -> RunStats {
     super::play_run_with_options(config, BotRunOptions::default(), None)
 }
 
-pub(crate) fn run_with_sequential(n: u32, config: BotConfig) -> AggregateStats {
+pub(crate) fn run_with_sequential(n: u32, config: BotConfig, options: BotRunOptions) -> AggregateStats {
     let mut agg = AggregateStats::default();
-    for _ in 0..n {
-        let s = play_run_with(config.clone());
+    for i in 0..n {
+        let (s, _) = run_scheduled_bot_slot(i + 1, config.clone(), options.clone());
         agg.record(&s);
     }
     agg
 }
 
+fn run_scheduled_bot_slot(
+    run_index: u32,
+    config: BotConfig,
+    options: BotRunOptions,
+) -> (RunStats, Vec<BotTimeoutDiag>) {
+    let max_attempts = options.timeout_retries.saturating_add(1);
+    let mut diags = Vec::new();
+    let mut last = RunStats::default();
+    for attempt in 0..max_attempts {
+        let s = super::play_run_with_options(config.clone(), options.clone(), Some(run_index));
+        if !s.run_timed_out {
+            return (s, diags);
+        }
+        if let Some(ref snap) = s.timeout_detail {
+            diags.push(BotTimeoutDiag {
+                run_index,
+                attempt,
+                snapshot: snap.clone(),
+            });
+        }
+        last = s;
+    }
+    (last, diags)
+}
+
+fn bot_runs_progress_bar(n: u32) -> ProgressBar {
+    let pb = ProgressBar::new(u64::from(n));
+    pb.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] \
+             {human_pos:>8}/{human_len:>8} ({percent:>3}%) | ETA {eta_precise}",
+        )
+        .expect("bot progress template")
+        .progress_chars("=>-"),
+    );
+    pb.set_message("bot runs");
+    pb
+}
+
+fn timeout_progress_line(snapshot: &RunTimeoutSnapshot) -> String {
+    match snapshot.phase.as_str() {
+        "playing_blind" => format!(
+            "blind score/target {}/{}",
+            snapshot.round_score, snapshot.target_score
+        ),
+        "shop" => format!(
+            "after last clear: scored {} vs that blind's target {} (not the next blind's goal)",
+            snapshot.round_score, snapshot.target_score
+        ),
+        "outer" => format!(
+            "between loop steps: round_score={} target_score={}",
+            snapshot.round_score, snapshot.target_score
+        ),
+        _ => format!(
+            "round_score/target_score {}/{}",
+            snapshot.round_score, snapshot.target_score
+        ),
+    }
+}
+
+fn print_bot_timeout_report(events: &[BotTimeoutDiag]) {
+    if events.is_empty() {
+        return;
+    }
+    use std::collections::BTreeMap;
+    let mut by_phase: BTreeMap<&str, u32> = BTreeMap::new();
+    for ev in events {
+        *by_phase
+            .entry(ev.snapshot.phase.as_str())
+            .or_insert(0) += 1;
+    }
+    let breakdown = by_phase
+        .iter()
+        .map(|(phase, n)| format!("{phase}={n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "\n=== Bot wall-clock timeouts: {} timed-out attempt(s) (retries may have followed) ===\n  by phase: {breakdown}",
+        events.len(),
+    );
+    for ev in events {
+        let s = &ev.snapshot;
+        let progress = timeout_progress_line(s);
+        println!(
+            "  run #{}, attempt {}: phase={} | ante {} | {} | blind_turn={:?} | {} | plays {} discards {} | {}ms",
+            ev.run_index,
+            ev.attempt.saturating_add(1),
+            s.phase,
+            s.ante,
+            s.blind,
+            s.blind_turn,
+            progress,
+            s.plays_remaining,
+            s.discards_remaining,
+            s.elapsed_ms,
+        );
+    }
+}
+
 pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions) -> HeadlessBotBatch {
     let mode = config.clone().into_mode();
+    let timeout_label = options
+        .run_timeout
+        .map(|d| format!("{d:?}"))
+        .unwrap_or_else(|| "off".to_string());
     println!(
-        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={})...",
+        "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={}, run_timeout={}, timeout_retries={})...",
         n,
         mode.base_target,
         mode.target_scaling,
@@ -274,24 +411,63 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
         mode.starting_discards,
         mode.starting_gold,
         options.log,
+        timeout_label,
+        options.timeout_retries,
     );
-    let runs: Vec<RunStats> = if options.log {
-        (0..n)
-            .map(|i| super::play_run_with_options(config.clone(), options.clone(), Some(i + 1)))
-            .collect()
+    let paired: Vec<(RunStats, Vec<BotTimeoutDiag>)> = if n == 0 {
+        Vec::new()
+    } else if options.log {
+        let pb = bot_runs_progress_bar(n);
+        let out = (0..n)
+            .progress_with(pb.clone())
+            .map(|i| {
+                run_scheduled_bot_slot(
+                    i + 1,
+                    config.clone(),
+                    options.clone(),
+                )
+            })
+            .collect();
+        pb.finish_and_clear();
+        out
     } else {
-        (0..n)
+        let pb = bot_runs_progress_bar(n);
+        let out = (0..n)
             .into_par_iter()
-            .map(|i| super::play_run_with_options(config.clone(), options.clone(), Some(i + 1)))
-            .collect()
+            .progress_with(pb.clone())
+            .map(|i| {
+                run_scheduled_bot_slot(
+                    i + 1,
+                    config.clone(),
+                    options.clone(),
+                )
+            })
+            .collect();
+        pb.finish_and_clear();
+        out
     };
+
+    let mut timeout_events = Vec::new();
+    let mut runs = Vec::with_capacity(paired.len());
+    for (s, mut diags) in paired {
+        timeout_events.append(&mut diags);
+        runs.push(s);
+    }
 
     let mut agg = AggregateStats::default();
     for (i, s) in runs.iter().enumerate() {
         agg.record(s);
         let run_number = i as u32 + 1;
         if run_number.is_multiple_of(25) || run_number == n {
-            let outcome = if s.victory {
+            let outcome = if s.run_timed_out {
+                format!(
+                    "TIMED OUT ({})",
+                    s.timeout_detail
+                        .as_ref()
+                        .map(|d| d.phase.as_str())
+                        .unwrap_or("?")
+                )
+            } else if s.victory {
                 format!("VICTORY (ante {})", s.died_on_ante)
             } else {
                 format!("died ante {} on {}", s.died_on_ante, s.died_on_blind.name())
@@ -306,7 +482,12 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
             );
         }
     }
-    HeadlessBotBatch { aggregate: agg, runs }
+    print_bot_timeout_report(&timeout_events);
+    HeadlessBotBatch {
+        aggregate: agg,
+        runs,
+        timeout_events,
+    }
 }
 
 pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
@@ -379,7 +560,7 @@ pub fn run_sweep(
                         starting_plays: Some(plays),
                         ..Default::default()
                     };
-                    let agg = run_with_sequential(runs_per_cell, cfg);
+                    let agg = run_with_sequential(runs_per_cell, cfg, BotRunOptions::default());
                     let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
                     let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
                     let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
@@ -497,16 +678,23 @@ pub fn run_strategy_sweep(
     strategies: Vec<(String, BotConfig)>,
     runs_per_strategy: u32,
     export_json: Option<&Path>,
+    run_options: BotRunOptions,
 ) {
     if strategies.is_empty() {
         println!("no strategies to run");
         return;
     }
+    let timeout_label = run_options
+        .run_timeout
+        .map(|d| format!("{d:?}"))
+        .unwrap_or_else(|| "off".to_string());
     println!(
-        "Strategy sweep: {} strategies × {} runs = {} total",
+        "Strategy sweep: {} strategies × {} runs = {} total (run_timeout={}, timeout_retries={})",
         strategies.len(),
         runs_per_strategy,
         strategies.len() * runs_per_strategy as usize,
+        timeout_label,
+        run_options.timeout_retries,
     );
 
     let total = strategies.len();
@@ -515,7 +703,7 @@ pub fn run_strategy_sweep(
     let results: Vec<(String, AggregateStats)> = strategies
         .into_par_iter()
         .map(|(name, cfg)| {
-            let agg = run_with_sequential(runs_per_strategy, cfg);
+            let agg = run_with_sequential(runs_per_strategy, cfg, run_options.clone());
             let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             let elapsed = start.elapsed().as_secs_f64();
             let win_pct = agg.victories as f64 * 100.0 / agg.runs.max(1) as f64;
@@ -626,7 +814,7 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
                 forced_relic: forced,
                 ..Default::default()
             };
-            let agg = run_with_sequential(runs_per_relic, cfg);
+            let agg = run_with_sequential(runs_per_relic, cfg, BotRunOptions::default());
             let finished = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             let elapsed = start.elapsed().as_secs_f64();
             let win_pct = agg.victories as f64 * 100.0 / agg.runs.max(1) as f64;

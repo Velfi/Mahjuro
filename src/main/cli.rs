@@ -147,6 +147,12 @@ pub struct BotCli {
     /// Write one `RunStats` JSON object per line (JSON Lines) for per-run analysis.
     #[arg(long)]
     pub output_runs: Option<PathBuf>,
+    /// Wall-clock limit per run attempt, in seconds. 0 disables timeouts.
+    #[arg(long, default_value_t = 0)]
+    pub bot_run_timeout_secs: u32,
+    /// After a timed-out attempt, retry this many extra times (`1` = up to 2 attempts total).
+    #[arg(long, default_value_t = 1)]
+    pub timeout_retries: u32,
 }
 
 #[derive(Debug, Args)]
@@ -164,6 +170,12 @@ pub struct StrategySweepCli {
     pub runs: u32,
     #[arg(long)]
     pub export_json: Option<PathBuf>,
+    /// Wall-clock limit per run attempt, in seconds. 0 disables timeouts.
+    #[arg(long, default_value_t = 0)]
+    pub bot_run_timeout_secs: u32,
+    /// After a timed-out attempt, retry this many extra times (`1` = up to 2 attempts total).
+    #[arg(long, default_value_t = 1)]
+    pub timeout_retries: u32,
 }
 
 #[derive(Debug, Args)]
@@ -197,6 +209,10 @@ pub struct BotGraphCli {
     pub stake: Option<crate::core::stake::Stake>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub bot_log: bool,
+    #[arg(long, default_value_t = 0)]
+    pub bot_run_timeout_secs: u32,
+    #[arg(long, default_value_t = 1)]
+    pub timeout_retries: u32,
 }
 
 impl BotCli {
@@ -212,6 +228,22 @@ impl BotCli {
         }
     }
 
+    pub fn bot_run_options(&self) -> bot::BotRunOptions {
+        bot::BotRunOptions {
+            log: self.bot_log,
+            output: self.bot_output_target(),
+            output_runs: self.output_runs.clone(),
+            run_timeout: if self.bot_run_timeout_secs == 0 {
+                None
+            } else {
+                Some(std::time::Duration::from_secs(
+                    self.bot_run_timeout_secs as u64,
+                ))
+            },
+            timeout_retries: self.timeout_retries,
+        }
+    }
+
     pub fn bot_output_target(&self) -> Option<bot::BotOutputTarget> {
         let path = self.output_file.as_ref()?;
         let format = self
@@ -221,6 +253,24 @@ impl BotCli {
             path: path.clone(),
             format,
         })
+    }
+}
+
+impl StrategySweepCli {
+    pub fn bot_run_options(&self) -> bot::BotRunOptions {
+        bot::BotRunOptions {
+            log: false,
+            output: None,
+            output_runs: None,
+            run_timeout: if self.bot_run_timeout_secs == 0 {
+                None
+            } else {
+                Some(std::time::Duration::from_secs(
+                    self.bot_run_timeout_secs as u64,
+                ))
+            },
+            timeout_retries: self.timeout_retries,
+        }
     }
 }
 
@@ -234,6 +284,22 @@ impl BotGraphCli {
             starting_gold: self.gold,
             stake: self.stake,
             ..Default::default()
+        }
+    }
+
+    pub fn bot_run_options(&self) -> bot::BotRunOptions {
+        bot::BotRunOptions {
+            log: self.bot_log,
+            output: None,
+            output_runs: None,
+            run_timeout: if self.bot_run_timeout_secs == 0 {
+                None
+            } else {
+                Some(std::time::Duration::from_secs(
+                    self.bot_run_timeout_secs as u64,
+                ))
+            },
+            timeout_retries: self.timeout_retries,
         }
     }
 }

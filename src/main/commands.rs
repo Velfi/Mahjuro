@@ -53,7 +53,12 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
                 .into_iter()
                 .map(|s| (s.name.clone(), s.to_bot_config()))
                 .collect();
-            bot::run_strategy_sweep(strategies, args.runs, args.export_json.as_deref());
+            bot::run_strategy_sweep(
+                strategies,
+                args.runs,
+                args.export_json.as_deref(),
+                args.bot_run_options(),
+            );
             Ok(true)
         }
         Some(Command::ForcedRelicSweep(args)) => {
@@ -64,11 +69,7 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             bot::run_headless(
                 bot_cli.runs,
                 bot_cli.bot_config(),
-                bot::BotRunOptions {
-                    log: bot_cli.bot_log,
-                    output: bot_cli.bot_output_target(),
-                    output_runs: bot_cli.output_runs.clone(),
-                },
+                bot_cli.bot_run_options(),
             );
             Ok(true)
         }
@@ -87,11 +88,7 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             let batch = bot::run_headless_aggregate(
                 bot_graph.runs,
                 config,
-                bot::BotRunOptions {
-                    log: bot_graph.bot_log,
-                    output: None,
-                    output_runs: None,
-                },
+                bot_graph.bot_run_options(),
             );
             batch.aggregate.print_summary();
 
