@@ -7,6 +7,17 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-3 — 2026-05-09
+
+### Added
+- Added a new Yaku: **Kokushi Musō** (thirteen orphans). It's one of every terminal and honor tile, plus a second copy of any one of those tiles. It scores as its own pattern bonus and does not stack the “all terminals and honors” pattern on top of it.
+- You can send full startup logs to a text file using an environment variable, which makes it easier to figure out why the game won’t start from Steam or another launcher when nothing shows on screen.
+
+### Changed
+- Tea Ceremony, Silk Thread, and Melting Ice now burn out like Paper Lantern: the slot empties, and their follow-up relic can appear in shops for the rest of that run only. Those follow-ups are no longer unlocked through leveling or kept in your permanent shop pool—you reveal them in the collection the first time you earn them, and each new run you need to burn the fragile relic again before the successor can show up for sale.
+- The jade talisman is removed. The pearl talisman now pays a flat chip bonus once per scored meld that includes a stamped tile (including pairs), in the same spirit as the polychrome stamp’s per-meld multiplier.
+- Several relics were moved to different rarity tiers so their shop price and sell value line up better with how strong they are.
+
 ## 0.5.0-2 — 2026-05-07
 
 ### Added
