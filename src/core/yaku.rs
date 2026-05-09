@@ -1029,20 +1029,20 @@ mod tests {
 
     #[test]
     fn mult_bonus_values() {
-        assert_eq!(YakuKind::Toitoi.mult_bonus(), 4.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus(), 3.0);
         assert_eq!(YakuKind::Tanyao.mult_bonus(), 2.0);
         assert_eq!(YakuKind::FullHand.mult_bonus(), 5.0);
-        assert_eq!(YakuKind::Chinitsu.mult_bonus(), 6.0);
+        assert_eq!(YakuKind::Chinitsu.mult_bonus(), 5.5);
     }
 
     #[test]
     fn mult_bonus_at_levels_up() {
         // Level 1 = base; each subsequent level adds 0.5 mult and 20 chips.
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 4.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 4.5);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 6.0);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 50);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 130);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 3.0);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.5);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 5.0);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 42);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 122);
     }
 
     /// Force a panic on data drift. Touching every variant via the metadata

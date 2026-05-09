@@ -1,6 +1,8 @@
 //! Headless bot runner used for tuning balance.
 //!
 //! The bot picks the highest-scoring valid play available in its current hand each turn.
+//! Candidate plays are meld-built subsets plus every 14-tile Kokushi Musō orphan combination
+//! (the meld enumerator never emits twelve singletons + one pair).
 //! Between turns it strategically discards isolated tiles via 1-step rollout when the
 //! best play falls below the pace needed to clear. Between blinds it values relics and
 //! consumables, visits the shop, buys the most useful affordable upgrade, and skips
@@ -14,6 +16,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
@@ -38,14 +41,15 @@ mod export_schema;
 mod reporting;
 mod stats;
 mod stats_derived;
+mod stats_wilson;
 
 pub use reporting::{
-    BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, HeadlessBotBatch,
-    StrategyFile, run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep,
-    run_sweep,
+    BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, BotTimeoutDiag,
+    HeadlessBotBatch, StrategyFile, run_forced_relic_sweep, run_headless, run_headless_aggregate,
+    run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
-pub use stats::{AggregateStats, RunStats};
+pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
 
 fn relic_display_name(id: RelicId) -> &'static str {
     all_relic_defs()
@@ -109,6 +113,36 @@ fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
         }
         _ => blind.name().to_string(),
     }
+}
+
+fn run_deadline_expired(deadline: Option<Instant>) -> bool {
+    deadline.is_some_and(|d| Instant::now() >= d)
+}
+
+fn record_timeout_snapshot(
+    stats: &mut RunStats,
+    run: &RunState,
+    phase: &str,
+    active_blind: BlindKind,
+    blind_turn: Option<u32>,
+    started: Instant,
+) {
+    stats.run_timed_out = true;
+    stats.victory = false;
+    stats.died_on_ante = run.ante;
+    stats.died_on_blind = active_blind;
+    stats.death_reason = None;
+    stats.timeout_detail = Some(stats::RunTimeoutSnapshot {
+        phase: phase.to_string(),
+        ante: run.ante,
+        blind: blind_log_label(run, active_blind),
+        blind_turn,
+        round_score: run.round_score,
+        target_score: run.target_score,
+        plays_remaining: run.plays_remaining,
+        discards_remaining: run.discards_remaining,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    });
 }
 
 fn fmt_indices(indices: &[usize]) -> impl fmt::Display + '_ {
@@ -515,9 +549,66 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
 
     let mut masks = std::collections::HashSet::new();
     enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
+    push_kokushi_play_masks(hand, rules, &mut masks);
     let mut out: Vec<u32> = masks.into_iter().collect();
     out.sort_unstable();
     out
+}
+
+/// Advance `pos` (length k, strictly increasing) to the next k-combination of indices `0..n`.
+/// Returns `false` when `pos` already was the last combination.
+fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
+    let k = pos.len();
+    if k == 0 || k > n {
+        return false;
+    }
+    for i in (0..k).rev() {
+        let upper = n - k + i;
+        if pos[i] < upper {
+            pos[i] += 1;
+            for j in i + 1..k {
+                pos[j] = pos[j - 1] + 1;
+            }
+            return true;
+        }
+    }
+    false
+}
+
+/// Kokushi Musō uses twelve [`SetKind::Single`]s and one pair — the meld-based enumerator
+/// never selects singletons, so it would miss every Kokushi win. Add every 14-tile orphan
+/// subset that [`validate_selection_with_rules`] accepts as Kokushi (or another valid hand).
+fn push_kokushi_play_masks(
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    out: &mut std::collections::HashSet<u32>,
+) {
+    if rules.contains(&RuleModifier::MustPlayFive) {
+        return;
+    }
+    let pool: Vec<usize> = hand
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| !t.is_flower() && t.is_kokushi_orphan())
+        .map(|(i, _)| i)
+        .collect();
+    let olen = pool.len();
+    if olen < 14 {
+        return;
+    }
+    let mut pos: Vec<usize> = (0..14).collect();
+    loop {
+        let mask: u32 = pos
+            .iter()
+            .fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
+        let tiles: Vec<Tile> = pos.iter().map(|&pi| hand[pool[pi]]).collect();
+        if validate_selection_with_rules(&tiles, rules).is_some() {
+            out.insert(mask);
+        }
+        if !next_combination_in_range(&mut pos, olen) {
+            break;
+        }
+    }
 }
 
 /// Active rule modifiers for `enumerate_regular_subsets`: captures the
@@ -925,6 +1016,24 @@ fn tile_meld_participation(hand: &[Tile]) -> Vec<u32> {
             }
         }
     }
+    // Orphan terminals/honors often sit outside standard meld detection until the hand is
+    // nearly Kokushi — bias discards toward non-orphans when many distinct orphans are present.
+    use std::collections::HashSet;
+    let mut orphan_faces: HashSet<(Suit, u8)> = HashSet::new();
+    for t in hand {
+        if !t.is_flower() && t.is_kokushi_orphan() {
+            orphan_faces.insert((t.suit, t.rank));
+        }
+    }
+    let d = orphan_faces.len() as u32;
+    if d >= 8 {
+        let bonus = d.saturating_sub(4).max(4);
+        for (i, t) in hand.iter().enumerate() {
+            if !t.is_flower() && t.is_kokushi_orphan() {
+                counts[i] = counts[i].saturating_add(bonus);
+            }
+        }
+    }
     counts
 }
 
@@ -974,6 +1083,13 @@ enum PlayBlindOutcome {
     Cleared,
     LostRun,
     SecondWindForfeit,
+    TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShopVisitOutcome {
+    Completed,
+    TimedOut,
 }
 
 /// Drains scoring / refill events. A `RoundComplete` with `reached_target: false` is Second
@@ -1028,7 +1144,12 @@ fn drain_post_action_bus(
 
 /// Play the current blind to completion. Returns outcome and the number of **decision
 /// turns** taken this blind (incremented once per loop iteration after failure checks).
-fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> (PlayBlindOutcome, u32) {
+fn play_blind(
+    run: &mut RunState,
+    stats: &mut RunStats,
+    log: bool,
+    deadline: Option<Instant>,
+) -> (PlayBlindOutcome, u32) {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
     let mut turn = 0u32;
@@ -1059,6 +1180,9 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> (PlayBlind
                 run.target_score
             );
             return (PlayBlindOutcome::LostRun, turn);
+        }
+        if run_deadline_expired(deadline) {
+            return (PlayBlindOutcome::TimedOut, turn);
         }
         turn += 1;
         let slot = blind_slot_key(run);
@@ -1254,7 +1378,7 @@ mod tests {
     use super::{
         best_play_in_hand, enumerate_candidate_play_masks, pick_best_play,
         remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
-        use_bot_consumables, zodiac_marginal_value, RunStats,
+        use_bot_consumables, zodiac_marginal_value_with_base, RunStats, ShopMarginalBase,
     };
     use crate::core::consumable::Consumable;
     use crate::core::hand::{DetectedSet, SetKind};
@@ -1405,6 +1529,33 @@ mod tests {
     }
 
     #[test]
+    fn bot_finds_kokushi_musou_on_complete_hand() {
+        let mut run = RunState::new_demo();
+        *run.hand_mut() = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 9, 1),
+            t(Suit::Bamboos, 1, 2),
+            t(Suit::Bamboos, 9, 3),
+            t(Suit::Circles, 1, 4),
+            t(Suit::Circles, 9, 5),
+            t(Suit::Wind, 1, 6),
+            t(Suit::Wind, 2, 7),
+            t(Suit::Wind, 3, 8),
+            t(Suit::Wind, 4, 9),
+            t(Suit::Dragon, 1, 10),
+            t(Suit::Dragon, 2, 11),
+            t(Suit::Dragon, 3, 12),
+            t(Suit::Characters, 1, 13),
+        ];
+        run.hand_mut().sort();
+        let best = pick_best_play(&run).expect("kokushi should score");
+        assert_eq!(best.1.len(), 14);
+        let mask: u32 = best.1.iter().fold(0u32, |acc, &i| acc | (1u32 << i));
+        assert!(enumerate_candidate_play_masks(run.hand(), &run.round_rules).contains(&mask));
+        assert_eq!(Some(best), brute_force_best_play_in_hand(&run));
+    }
+
+    #[test]
     fn enumerated_masks_match_bruteforce_best_play_with_flowers() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
@@ -1520,7 +1671,8 @@ mod tests {
     #[test]
     fn zodiac_value_is_positive_when_it_levels_a_relevant_yaku() {
         let run = scoring_test_run();
-        assert!(zodiac_marginal_value(&run, ZodiacKind::Ox) > 0);
+        let shop_base = ShopMarginalBase::new(&run);
+        assert!(zodiac_marginal_value_with_base(&run, ZodiacKind::Ox, &shop_base) > 0);
     }
 
     #[test]
@@ -1581,11 +1733,6 @@ mod tests {
         assert!(run.consumables.items.is_empty());
     }
 }
-
-/// Number of synthetic random hands sampled when evaluating a relic's value.
-/// Higher = more accurate signal but slower (each sample runs `best_play_in_hand`,
-/// which is the bot's hot loop).
-const RELIC_EVAL_SAMPLES: usize = 4;
 
 #[derive(Clone, Copy, Debug)]
 enum ShopOffer {
@@ -1654,6 +1801,41 @@ fn best_play_score_for_hand(
     .unwrap_or(0)
 }
 
+/// Synthetic random hands per shop valuation (plus the real current hand).
+/// Late antes use fewer samples — each one runs `best_play_in_hand`.
+fn relic_eval_sample_count(ante: u32) -> usize {
+    if ante >= FINAL_ANTE {
+        2
+    } else if ante >= 5 {
+        3
+    } else {
+        4
+    }
+}
+
+/// Cached hands and baseline best-play scores for one shop "next purchase" iteration.
+struct ShopMarginalBase {
+    hands: Vec<Vec<Tile>>,
+    baseline: Vec<u64>,
+}
+
+impl ShopMarginalBase {
+    fn new(run: &RunState) -> Self {
+        let n = relic_eval_sample_count(run.ante);
+        let size = crate::core::boss::effective_hand_size(run);
+        let mut hands = Vec::with_capacity(n + 1);
+        hands.push(run.hand().to_vec());
+        for _ in 0..n {
+            hands.push(sample_random_hand(size));
+        }
+        let baseline: Vec<u64> = hands
+            .iter()
+            .map(|h| best_play_score_for_hand(run, h, None, None))
+            .collect();
+        Self { hands, baseline }
+    }
+}
+
 /// Estimate the value of owning `candidate` by averaging the best-play score
 /// improvement across the current hand *and* several synthetic random hands.
 ///
@@ -1684,7 +1866,11 @@ fn scale_long_term_value_for_ante(raw_value: i32, ante: u32) -> i32 {
     scaled as i32
 }
 
-fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
+fn relic_marginal_value_with_base(
+    run: &RunState,
+    candidate: RelicId,
+    base: &ShopMarginalBase,
+) -> i32 {
     if run.relics.owns(candidate) {
         return -1;
     }
@@ -1695,39 +1881,29 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
     let mut hypothetical = run.relics.clone();
     hypothetical.active.push(candidate);
 
-    // Sample 1: the bot's actual current hand (weighted heavily).
-    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand(), Some(&hypothetical), None)
-        as i64
-        - best_play_score_for_hand(run, &run.hand(), None, None) as i64;
-    let mut sample_count: i64 = 1;
-
-    // Samples 2..N: synthetic random hands from fresh walls.
-    for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
-        delta_sum += best_play_score_for_hand(run, &hand, Some(&hypothetical), None) as i64
-            - best_play_score_for_hand(run, &hand, None, None) as i64;
-        sample_count += 1;
+    let mut delta_sum: i64 = 0;
+    for (h, hand) in base.hands.iter().enumerate() {
+        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None) as i64
+            - base.baseline[h] as i64;
     }
-
+    let sample_count = base.hands.len() as i64;
     scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
-fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
+fn zodiac_marginal_value_with_base(
+    run: &RunState,
+    zodiac: ZodiacKind,
+    base: &ShopMarginalBase,
+) -> i32 {
     let mut hypothetical = run.yaku_levels.clone();
     hypothetical.level_up(zodiac.yaku());
 
-    let mut delta_sum: i64 = best_play_score_for_hand(run, &run.hand(), None, Some(&hypothetical))
-        as i64
-        - best_play_score_for_hand(run, &run.hand(), None, None) as i64;
-    let mut sample_count: i64 = 1;
-
-    for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
-        delta_sum += best_play_score_for_hand(run, &hand, None, Some(&hypothetical)) as i64
-            - best_play_score_for_hand(run, &hand, None, None) as i64;
-        sample_count += 1;
+    let mut delta_sum: i64 = 0;
+    for (h, hand) in base.hands.iter().enumerate() {
+        delta_sum += best_play_score_for_hand(run, hand, None, Some(&hypothetical)) as i64
+            - base.baseline[h] as i64;
     }
-
+    let sample_count = base.hands.len() as i64;
     scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
@@ -1913,12 +2089,15 @@ fn best_selection_for_talisman(run: &RunState, kind: TalismanKind) -> Option<(Ve
 /// valuations comparable, we discount the raw delta by roughly the number
 /// of blinds still ahead — a talisman worth +X on one hand is only worth
 /// +X/blinds_remaining versus a relic worth +X/blind on every blind.
-fn sampled_selection_talisman_value(run: &RunState, kind: TalismanKind) -> i32 {
+fn sampled_selection_talisman_value_with_base(
+    run: &RunState,
+    kind: TalismanKind,
+    base: &ShopMarginalBase,
+) -> i32 {
     let mut delta_sum: i64 = 0;
     let mut count: i64 = 0;
-    for _ in 0..RELIC_EVAL_SAMPLES + 1 {
-        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
-        if let Some((_, delta)) = best_selection_for_talisman_on_hand(run, &hand, kind) {
+    for hand in &base.hands {
+        if let Some((_, delta)) = best_selection_for_talisman_on_hand(run, hand, kind) {
             delta_sum += delta;
             count += 1;
         }
@@ -1927,57 +2106,41 @@ fn sampled_selection_talisman_value(run: &RunState, kind: TalismanKind) -> i32 {
         return 0;
     }
     let avg = (delta_sum / count).max(0);
-    // Blinds remaining in the run (3 per ante, including current).
     let remaining_blinds = (remaining_antes_including_current(run.ante) as i64 * 3).max(1);
     (avg / remaining_blinds) as i32
 }
 
-fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
+fn talisman_marginal_value_with_base(
+    run: &RunState,
+    talisman: TalismanKind,
+    base: &ShopMarginalBase,
+) -> i32 {
     if talisman.acts_on_selection() {
-        return sampled_selection_talisman_value(run, talisman);
+        return sampled_selection_talisman_value_with_base(run, talisman, base);
     }
     if talisman.enhancement().is_none() {
         return 0;
     }
-    // Buff talismans stamp every tile in hand. Sample a few hands (like
-    // zodiacs) to avoid zero-variance on an unlucky current hand, then
-    // use the average single-play delta as a conservative one-shot value.
-    let mut delta_sum: i64 = {
-        let base = best_play_score_for_hand(run, &run.hand(), None, None) as i64;
-        let mut enhanced_hand = run.hand().to_vec();
-        crate::core::talisman::apply_to_hand(&mut enhanced_hand, talisman);
-        let buffed = best_play_score_for_hand(run, &enhanced_hand, None, None) as i64;
-        buffed - base
-    };
-    let mut sample_count: i64 = 1;
-    for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
-        let base = best_play_score_for_hand(run, &hand, None, None) as i64;
+    let mut delta_sum: i64 = 0;
+    for (h, hand) in base.hands.iter().enumerate() {
         let mut enhanced = hand.clone();
         crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
         let buffed = best_play_score_for_hand(run, &enhanced, None, None) as i64;
-        delta_sum += buffed - base;
-        sample_count += 1;
+        delta_sum += buffed - base.baseline[h] as i64;
     }
-    // One-shot: talisman only pays out this round (buffed tiles leave the
-    // hand as plays happen and are replaced by unbuffed draws). Use a
-    // single best-play delta as a conservative estimate — it's the score
-    // lift the bot would see on its next commit, which competes directly
-    // against relics/zodiacs that permanently affect all future rounds.
+    let sample_count = base.hands.len() as i64;
     let raw = (delta_sum / sample_count) as i32;
-    // Brocade Pouch promotes buff talismans from one-shot to run-long: the
-    // enhancement stamps every drawn tile for the rest of the run, so value
-    // compounds across antes the same way a relic does.
     if run.relics.has(RelicId::BrocadePouch) {
         return scale_long_term_value_for_ante(raw, run.ante);
     }
-    // Polychrome (×1.2 mult per meld) and Pearl (+flat chips per meld) both pay
-    // per scored meld, so a single best-play delta understates the same-hand
-    // multi-play round. Gilded is per-tile gold and needs no boost here.
     if matches!(talisman, TalismanKind::Polychrome | TalismanKind::Pearl) {
         return raw.saturating_mul(2);
     }
     raw
+}
+
+fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
+    talisman_marginal_value_with_base(run, talisman, &ShopMarginalBase::new(run))
 }
 
 /// Estimate the value of buying a booster pack. Pack tiles permanently
@@ -1991,7 +2154,8 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
     // packs mixed in); comparison samples the wall with the prospective
     // pack added. This captures diminishing returns — a second Flowers
     // Pack is worth much less than the first.
-    for _ in 0..RELIC_EVAL_SAMPLES + 1 {
+    let pack_iters = relic_eval_sample_count(run.ante).saturating_add(1);
+    for _ in 0..pack_iters {
         let base_wall = Wall::from_filtered_with_packs(
             &run.removed_tile_ids,
             &run.tile_packs,
@@ -2115,7 +2279,13 @@ fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> b
 /// Headless analogue of `ShopScene::new` + buy loop. Rolls relics plus
 /// consumables and buys the affordable offer with the largest positive
 /// marginal value.
-fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &BotStrategy) {
+fn visit_shop(
+    run: &mut RunState,
+    stats: &mut RunStats,
+    log: bool,
+    strategy: &BotStrategy,
+    deadline: Option<Instant>,
+) -> ShopVisitOutcome {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
     let patron_gift = run.tag_patron_gift;
@@ -2216,10 +2386,15 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
         }
     );
     loop {
+        if run_deadline_expired(deadline) {
+            bot_log!(log, "    shop: deadline hit mid-visit");
+            return ShopVisitOutcome::TimedOut;
+        }
         if shop.is_empty() {
             bot_log!(log, "    shop: leaving ({})", "no offerings left");
             break;
         }
+        let shop_base = ShopMarginalBase::new(run);
         // Find the best affordable offer with positive marginal value.
         let mut best: Option<(usize, i32)> = None;
         for (i, offer) in shop.iter().copied().enumerate() {
@@ -2239,8 +2414,10 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 continue;
             }
             let raw_mv = match offer {
-                ShopOffer::Relic(id) => relic_marginal_value(run, id),
-                ShopOffer::Zodiac(zodiac) => zodiac_marginal_value(run, zodiac),
+                ShopOffer::Relic(id) => relic_marginal_value_with_base(run, id, &shop_base),
+                ShopOffer::Zodiac(zodiac) => {
+                    zodiac_marginal_value_with_base(run, zodiac, &shop_base)
+                }
                 ShopOffer::Talisman(kind) => {
                     if run.consumables.is_full()
                         || run.consumables.items.iter().any(
@@ -2249,7 +2426,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                     {
                         0
                     } else {
-                        talisman_marginal_value(run, kind)
+                        talisman_marginal_value_with_base(run, kind, &shop_base)
                     }
                 }
                 ShopOffer::Pack(kind) => pack_marginal_value(run, kind),
@@ -2286,10 +2463,13 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
                 run.gold -= price as i32;
                 acquire_relic(run, id);
                 stats.relics_bought += 1;
-                *stats
-                    .relics_picked
-                    .entry(relic_display_name(id))
-                    .or_insert(0) += 1;
+                let rname = relic_display_name(id);
+                *stats.relics_picked.entry(rname).or_insert(0) += 1;
+                if run.ante <= crate::bot::stats::RELIC_SHOP_TIMING_EARLY_ANTE_MAX {
+                    *stats.relics_picked_shop_early.entry(rname).or_insert(0) += 1;
+                } else {
+                    *stats.relics_picked_shop_late.entry(rname).or_insert(0) += 1;
+                }
                 stats.gold_spent += price;
                 bot_log!(
                     log,
@@ -2360,6 +2540,7 @@ fn visit_shop(run: &mut RunState, stats: &mut RunStats, log: bool, strategy: &Bo
             }
         }
     }
+    ShopVisitOutcome::Completed
 }
 
 /// Decide whether to skip the upcoming non-Boss blind. We skip when the bot can
@@ -2398,6 +2579,11 @@ fn play_run_with_options(
     let mut stats = RunStats::default();
     let mut bus = EventBus::default();
     let log = options.log;
+    let started = Instant::now();
+    let deadline = options
+        .run_timeout
+        .filter(|d| !d.is_zero())
+        .map(|d| started + d);
 
     // Forced-relic injection (for causal sweeps): grant the relic for
     // free at run start so every run in the cell has the same build
@@ -2425,6 +2611,17 @@ fn play_run_with_options(
                 log,
                 "== bot run complete: victory at ante {} ==",
                 FINAL_ANTE
+            );
+            break;
+        }
+        if run_deadline_expired(deadline) {
+            record_timeout_snapshot(
+                &mut stats,
+                &run,
+                "outer",
+                run.upcoming_blind,
+                None,
+                started,
             );
             break;
         }
@@ -2461,6 +2658,11 @@ fn play_run_with_options(
             continue;
         }
 
+        if run_deadline_expired(deadline) {
+            record_timeout_snapshot(&mut stats, &run, "outer", blind, None, started);
+            break;
+        }
+
         stats.total_target_score += run.target_score as u64;
         run.apply_blind(blind);
         let boss_for_this_blind = if matches!(blind, BlindKind::Boss) {
@@ -2471,7 +2673,7 @@ fn play_run_with_options(
         if let Some(boss_name) = &boss_for_this_blind {
             stats.boss_faced.insert(boss_name.clone(), 1);
         }
-        let (outcome, blind_turns) = play_blind(&mut run, &mut stats, log);
+        let (outcome, blind_turns) = play_blind(&mut run, &mut stats, log, deadline);
         stats.total_score += run.round_score;
         stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
         stats.died_on_ante = run.ante;
@@ -2480,6 +2682,23 @@ fn play_run_with_options(
             && outcome == PlayBlindOutcome::Cleared
         {
             stats.boss_beaten.insert(boss_name.clone(), 1);
+        }
+        if outcome == PlayBlindOutcome::TimedOut {
+            record_timeout_snapshot(
+                &mut stats,
+                &run,
+                "playing_blind",
+                blind,
+                Some(blind_turns),
+                started,
+            );
+            stats.final_gold = run.gold;
+            bot_log!(
+                log,
+                "== bot run end: wall-clock timeout during {} ==",
+                blind_log_label(&run, blind)
+            );
+            break;
         }
         if outcome == PlayBlindOutcome::LostRun {
             stats.final_gold = run.gold;
@@ -2500,7 +2719,21 @@ fn play_run_with_options(
                 run.gold,
                 run.upcoming_blind
             );
-            visit_shop(&mut run, &mut stats, log, &strategy);
+            match visit_shop(&mut run, &mut stats, log, &strategy, deadline) {
+                ShopVisitOutcome::Completed => {}
+                ShopVisitOutcome::TimedOut => {
+                    record_timeout_snapshot(
+                        &mut stats,
+                        &run,
+                        "shop",
+                        run.upcoming_blind,
+                        None,
+                        started,
+                    );
+                    stats.final_gold = run.gold;
+                    break;
+                }
+            }
             continue;
         }
         stats.blinds_cleared += 1;
@@ -2539,7 +2772,21 @@ fn play_run_with_options(
 
         // Shop visit happens after advance_round (matching Shop → PickBlind scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
-        visit_shop(&mut run, &mut stats, log, &strategy);
+        match visit_shop(&mut run, &mut stats, log, &strategy, deadline) {
+            ShopVisitOutcome::Completed => {}
+            ShopVisitOutcome::TimedOut => {
+                record_timeout_snapshot(
+                    &mut stats,
+                    &run,
+                    "shop",
+                    run.upcoming_blind,
+                    None,
+                    started,
+                );
+                stats.final_gold = run.gold;
+                break;
+            }
+        }
     }
 
     stats.final_relics = run

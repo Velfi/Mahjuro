@@ -1,15 +1,34 @@
-//! Build v2 export views from [`AggregateStats`] (keeps `stats.rs` slimmer).
+//! Build export `derived` views from [`AggregateStats`] (schema v3+).
 
 use super::export_schema::{
     AggregateMaps, AggregateSums, AvgTurnsClearRow, BotAggregateV2, BotIssuesDerived, BotReportDerived,
-    DeathAnteRow, KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
-    PerRunAverages, RelicBuyRow, RelicWinRateRow, SurplusSlotRow, YakuDerived, YakuRow,
+    DeathAnteHazardRow, DeathAnteRow, KpiTile, LossBreakdownDerived, MapTable, NamedCount,
+    NamedCountPct, NamedPerRun, PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow,
+    SurplusSlotRow, WilsonCiPct, YakuDerived, YakuRow,
 };
 use super::reporting::human_readable_score;
-use super::stats::{aggregate_stats_slot_sort_key, AggregateStats};
+use super::stats::{
+    aggregate_stats_slot_sort_key, AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET,
+    RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
+};
+use super::stats_wilson::wilson_95_pct;
+use crate::core::relic::{all_relic_defs, Rarity};
 use crate::core::yaku::YakuKind;
 
 const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
+
+fn relic_rarity_slug(display_name: &str) -> Option<String> {
+    all_relic_defs()
+        .iter()
+        .find(|d| d.name == display_name)
+        .map(|d| match d.rarity {
+            Rarity::Common => "common",
+            Rarity::Uncommon => "uncommon",
+            Rarity::Rare => "rare",
+            Rarity::Legendary => "legendary",
+        }
+        .to_string())
+}
 
 fn top_string_u32(m: &std::collections::BTreeMap<String, u32>, n: usize) -> Vec<(String, u32)> {
     let mut v: Vec<_> = m.iter().map(|(a, b)| (a.clone(), *b)).collect();
@@ -61,6 +80,7 @@ pub fn aggregate_to_v2(a: &AggregateStats) -> BotAggregateV2 {
             total_turns: a.total_turns,
             sum_peak_hand_size: a.sum_peak_hand_size,
             total_tiles_destroyed: a.total_tiles_destroyed,
+            timed_out_runs: a.timed_out_runs,
         },
         maps: AggregateMaps {
             bot_issues_by_reason: a.bot_issues_by_reason.clone(),
@@ -87,6 +107,26 @@ pub fn aggregate_to_v2(a: &AggregateStats) -> BotAggregateV2 {
                 .collect(),
             relics_picked_victories: a
                 .relics_picked_victories
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), *v))
+                .collect(),
+            relics_picked_shop_early: a
+                .relics_picked_shop_early
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), *v))
+                .collect(),
+            relics_picked_shop_early_victories: a
+                .relics_picked_shop_early_victories
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), *v))
+                .collect(),
+            relics_picked_shop_late: a
+                .relics_picked_shop_late
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), *v))
+                .collect(),
+            relics_picked_shop_late_victories: a
+                .relics_picked_shop_late_victories
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), *v))
                 .collect(),
@@ -156,6 +196,9 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
     };
     let relic_act: u64 = a.relic_activations.values().sum();
 
+    let overall_win_rate_wilson_95 = wilson_95_pct(a.victories as u64, rn as u64)
+        .map(|(lo, hi)| WilsonCiPct { lo, hi });
+
     let per_run = PerRunAverages {
         win_rate_pct: a.victories as f64 * 100.0 / r,
         blinds_cleared: a.blinds_cleared_total as f64 / r,
@@ -192,12 +235,21 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         score_to_target_ratio: score_to_target,
     };
 
+    let win_hint = if let Some(ref w) = overall_win_rate_wilson_95 {
+        format!(
+            "{} wins / {} · 95% Wilson {:.1}–{:.1}%",
+            a.victories, a.runs, w.lo, w.hi
+        )
+    } else {
+        format!("{} wins / {}", a.victories, a.runs)
+    };
+
     let kpis = vec![
         KpiTile {
             id: "win_rate".into(),
             label: "Win rate".into(),
             value: format!("{:.1}%", per_run.win_rate_pct),
-            hint: format!("{} wins / {}", a.victories, a.runs),
+            hint: win_hint,
             highlight: true,
         },
         KpiTile {
@@ -269,15 +321,50 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
             } else {
                 0.0
             };
+            let (pct_ci_lo, pct_ci_hi) =
+                wilson_95_pct(count as u64, rn as u64).unwrap_or((pct, pct));
             Some(DeathAnteRow {
                 ante,
                 count,
                 pct_of_runs: pct,
+                pct_ci_lo,
+                pct_ci_hi,
                 text_bar_hashes: text_bar,
                 dashboard_bar_pct: dash_pct,
             })
         })
         .collect();
+
+    let deaths_by_ante_hazard: Vec<DeathAnteHazardRow> = a
+        .deaths_by_ante
+        .keys()
+        .max()
+        .copied()
+        .map(|max_ante| {
+            let mut remaining = rn;
+            let mut rows = Vec::new();
+            for ante in 1..=max_ante {
+                if remaining == 0 {
+                    break;
+                }
+                let deaths = *a.deaths_by_ante.get(&ante).unwrap_or(&0);
+                let reached = remaining;
+                let hazard_pct = deaths as f64 * 100.0 / reached as f64;
+                let (hazard_ci_lo, hazard_ci_hi) = wilson_95_pct(deaths as u64, reached as u64)
+                    .unwrap_or((hazard_pct, hazard_pct));
+                rows.push(DeathAnteHazardRow {
+                    ante,
+                    reached,
+                    deaths,
+                    hazard_pct,
+                    hazard_ci_lo,
+                    hazard_ci_hi,
+                });
+                remaining = remaining.saturating_sub(deaths);
+            }
+            rows
+        })
+        .unwrap_or_default();
 
     let mut blind_rows: Vec<NamedCountPct> = a
         .deaths_by_blind
@@ -396,11 +483,28 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
             } else {
                 0.0
             };
+            let (win_pct_ci_lo, win_pct_ci_hi) = if *bought > 0 {
+                wilson_95_pct(won as u64, *bought as u64).unwrap_or((win_pct, win_pct))
+            } else {
+                (win_pct, win_pct)
+            };
+            let early = a.relics_picked_shop_early.get(*name).copied().unwrap_or(0);
+            let late = a.relics_picked_shop_late.get(*name).copied().unwrap_or(0);
+            let pct_shop_late = if *bought > 0 && early + late > 0 {
+                Some(late as f64 * 100.0 / (early + late) as f64)
+            } else {
+                None
+            };
             RelicBuyRow {
                 name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
                 bought: *bought,
                 won,
                 win_pct,
+                win_pct_ci_lo,
+                win_pct_ci_hi,
+                delta_vs_baseline_pct: win_pct - overall_win,
+                pct_shop_late,
             }
         })
         .collect();
@@ -411,18 +515,82 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         .map(|(name, bought)| {
             let won = a.relics_picked_victories.get(*name).copied().unwrap_or(0);
             let win_pct = won as f64 * 100.0 / *bought as f64;
+            let (win_pct_ci_lo, win_pct_ci_hi) =
+                wilson_95_pct(won as u64, *bought as u64).unwrap_or((win_pct, win_pct));
+            let early = a.relics_picked_shop_early.get(*name).copied().unwrap_or(0);
+            let late = a.relics_picked_shop_late.get(*name).copied().unwrap_or(0);
+            let pct_shop_late = if *bought > 0 && early + late > 0 {
+                Some(late as f64 * 100.0 / (early + late) as f64)
+            } else {
+                None
+            };
             RelicWinRateRow {
                 name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
                 bought: *bought,
                 won,
                 win_pct,
+                win_pct_ci_lo,
+                win_pct_ci_hi,
                 delta_vs_baseline_pct: win_pct - overall_win,
+                pct_shop_late,
             }
         })
         .collect();
     relics_by_win_rate.sort_by(|a, b| {
         b.win_pct
             .partial_cmp(&a.win_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut relics_shop_timing_split: Vec<RelicShopTimingRow> = relic_pairs
+        .iter()
+        .filter_map(|(name, _)| {
+            let early_bought = a.relics_picked_shop_early.get(*name).copied().unwrap_or(0);
+            let late_bought = a.relics_picked_shop_late.get(*name).copied().unwrap_or(0);
+            if early_bought < MIN_SHOP_TIMING_SPLIT_PER_BUCKET
+                || late_bought < MIN_SHOP_TIMING_SPLIT_PER_BUCKET
+            {
+                return None;
+            }
+            let early_won = a
+                .relics_picked_shop_early_victories
+                .get(*name)
+                .copied()
+                .unwrap_or(0);
+            let late_won = a
+                .relics_picked_shop_late_victories
+                .get(*name)
+                .copied()
+                .unwrap_or(0);
+            let early_win_pct = early_won as f64 * 100.0 / early_bought as f64;
+            let late_win_pct = late_won as f64 * 100.0 / late_bought as f64;
+            let (early_win_pct_ci_lo, early_win_pct_ci_hi) =
+                wilson_95_pct(early_won as u64, early_bought as u64)
+                    .unwrap_or((early_win_pct, early_win_pct));
+            let (late_win_pct_ci_lo, late_win_pct_ci_hi) =
+                wilson_95_pct(late_won as u64, late_bought as u64)
+                    .unwrap_or((late_win_pct, late_win_pct));
+            Some(RelicShopTimingRow {
+                name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
+                early_bought,
+                early_won,
+                early_win_pct,
+                early_win_pct_ci_lo,
+                early_win_pct_ci_hi,
+                late_bought,
+                late_won,
+                late_win_pct,
+                late_win_pct_ci_lo,
+                late_win_pct_ci_hi,
+                timing_gap_pct: late_win_pct - early_win_pct,
+            })
+        })
+        .collect();
+    relics_shop_timing_split.sort_by(|a, b| {
+        b.timing_gap_pct
+            .partial_cmp(&a.timing_gap_pct)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
@@ -576,9 +744,13 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
 
     BotReportDerived {
         per_run,
+        overall_win_rate_wilson_95,
+        relic_shop_timing_early_ante_max: RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
+        relic_shop_timing_min_per_bucket: MIN_SHOP_TIMING_SPLIT_PER_BUCKET,
         kpis,
         loss_breakdown,
         deaths_by_ante,
+        deaths_by_ante_hazard,
         deaths_by_blind: blind_rows,
         surplus_by_slot,
         avg_turns_to_clear,
@@ -588,6 +760,7 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         transformations_top,
         relics_bought,
         relics_by_win_rate,
+        relics_shop_timing_split,
         talismans_shop,
         zodiacs_shop,
         packs_shop,

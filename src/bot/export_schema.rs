@@ -1,10 +1,10 @@
-//! Serializable shapes for `mahjuro bot -o report.json` (schema version 2).
+//! Serializable shapes for `mahjuro bot -o report.json` (schema version 3+).
 //! `aggregate` splits sums vs maps; `derived` holds precomputed dashboard / summary numbers.
 
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const EXPORT_SCHEMA_VERSION: u32 = 2;
+pub const EXPORT_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Serialize)]
 pub struct BotExportMeta {
@@ -54,6 +54,7 @@ pub struct AggregateSums {
     pub total_turns: u64,
     pub sum_peak_hand_size: u64,
     pub total_tiles_destroyed: u64,
+    pub timed_out_runs: u32,
 }
 
 #[derive(Serialize)]
@@ -65,6 +66,10 @@ pub struct AggregateMaps {
     pub skipped_tags: BTreeMap<String, u32>,
     pub relics_picked: BTreeMap<String, u32>,
     pub relics_picked_victories: BTreeMap<String, u32>,
+    pub relics_picked_shop_early: BTreeMap<String, u32>,
+    pub relics_picked_shop_early_victories: BTreeMap<String, u32>,
+    pub relics_picked_shop_late: BTreeMap<String, u32>,
+    pub relics_picked_shop_late_victories: BTreeMap<String, u32>,
     pub talismans_picked: BTreeMap<String, u32>,
     pub zodiacs_picked: BTreeMap<String, u32>,
     pub packs_picked: BTreeMap<String, u32>,
@@ -145,15 +150,37 @@ pub struct LossBreakdownDerived {
     pub no_actions_pct_of_losses: f64,
 }
 
+/// Wilson 95% interval endpoints on percent scale (0–100).
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct WilsonCiPct {
+    pub lo: f64,
+    pub hi: f64,
+}
+
 #[derive(Serialize)]
 pub struct DeathAnteRow {
     pub ante: u32,
     pub count: u32,
     pub pct_of_runs: f64,
+    /// Wilson 95% CI for `count / runs` (percent scale).
+    pub pct_ci_lo: f64,
+    pub pct_ci_hi: f64,
     /// ASCII bar length (CLI), up to 50.
     pub text_bar_hashes: u32,
     /// 0–100 width vs largest ante bucket (dashboard).
     pub dashboard_bar_pct: f64,
+}
+
+/// P(die on this ante | reached this ante) with Wilson 95% CI on hazard (percent scale).
+#[derive(Serialize)]
+pub struct DeathAnteHazardRow {
+    pub ante: u32,
+    /// Runs that started this ante (denominator).
+    pub reached: u32,
+    pub deaths: u32,
+    pub hazard_pct: f64,
+    pub hazard_ci_lo: f64,
+    pub hazard_ci_hi: f64,
 }
 
 #[derive(Serialize)]
@@ -181,18 +208,55 @@ pub struct AvgTurnsClearRow {
 #[derive(Serialize)]
 pub struct RelicBuyRow {
     pub name: String,
+    /// Shop tier from `relics.json` (`common` / `uncommon` / `rare` / `legendary`), if known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
     pub bought: u32,
     pub won: u32,
     pub win_pct: f64,
+    /// Wilson 95% for `won / bought` when `bought > 0`; else equals `win_pct`.
+    pub win_pct_ci_lo: f64,
+    pub win_pct_ci_hi: f64,
+    /// `win_pct` minus overall batch win rate (percent points); not causal for shop picks.
+    pub delta_vs_baseline_pct: f64,
+    /// Percent of this relic's shop purchases made when `run.ante > relic_shop_timing_early_ante_max`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pct_shop_late: Option<f64>,
+}
+
+/// Early vs late shop timing for one relic (both buckets need enough samples to be listed).
+#[derive(Serialize)]
+pub struct RelicShopTimingRow {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
+    pub early_bought: u32,
+    pub early_won: u32,
+    pub early_win_pct: f64,
+    pub early_win_pct_ci_lo: f64,
+    pub early_win_pct_ci_hi: f64,
+    pub late_bought: u32,
+    pub late_won: u32,
+    pub late_win_pct: f64,
+    pub late_win_pct_ci_lo: f64,
+    pub late_win_pct_ci_hi: f64,
+    /// `late_win_pct - early_win_pct` (percent points).
+    pub timing_gap_pct: f64,
 }
 
 #[derive(Serialize)]
 pub struct RelicWinRateRow {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
     pub bought: u32,
     pub won: u32,
     pub win_pct: f64,
+    pub win_pct_ci_lo: f64,
+    pub win_pct_ci_hi: f64,
     pub delta_vs_baseline_pct: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pct_shop_late: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -249,9 +313,17 @@ pub struct MapTable {
 #[derive(Serialize)]
 pub struct BotReportDerived {
     pub per_run: PerRunAverages,
+    /// Wilson 95% CI for overall win rate (percent scale).
+    pub overall_win_rate_wilson_95: Option<WilsonCiPct>,
+    /// `RELIC_SHOP_TIMING_EARLY_ANTE_MAX` used for [`RelicBuyRow::pct_shop_late`] and timing splits.
+    pub relic_shop_timing_early_ante_max: u32,
+    /// Minimum buys per early/late bucket to include a [`RelicShopTimingRow`].
+    pub relic_shop_timing_min_per_bucket: u32,
     pub kpis: Vec<KpiTile>,
     pub loss_breakdown: Option<LossBreakdownDerived>,
     pub deaths_by_ante: Vec<DeathAnteRow>,
+    /// Conditional death hazard: P(die on ante a | reached ante a).
+    pub deaths_by_ante_hazard: Vec<DeathAnteHazardRow>,
     pub deaths_by_blind: Vec<NamedCountPct>,
     pub surplus_by_slot: Vec<SurplusSlotRow>,
     pub avg_turns_to_clear: Vec<AvgTurnsClearRow>,
@@ -261,6 +333,8 @@ pub struct BotReportDerived {
     pub transformations_top: Vec<NamedCount>,
     pub relics_bought: Vec<RelicBuyRow>,
     pub relics_by_win_rate: Vec<RelicWinRateRow>,
+    /// Relics with enough early **and** late shop buys to compare win rates (selection-bias probe).
+    pub relics_shop_timing_split: Vec<RelicShopTimingRow>,
     pub talismans_shop: Vec<NamedPerRun>,
     pub zodiacs_shop: Vec<NamedPerRun>,
     pub packs_shop: Vec<NamedPerRun>,
@@ -273,9 +347,13 @@ impl Default for BotReportDerived {
     fn default() -> Self {
         Self {
             per_run: PerRunAverages::default(),
+            overall_win_rate_wilson_95: None,
+            relic_shop_timing_early_ante_max: 3,
+            relic_shop_timing_min_per_bucket: 15,
             kpis: Vec::new(),
             loss_breakdown: None,
             deaths_by_ante: Vec::new(),
+            deaths_by_ante_hazard: Vec::new(),
             deaths_by_blind: Vec::new(),
             surplus_by_slot: Vec::new(),
             avg_turns_to_clear: Vec::new(),
@@ -285,6 +363,7 @@ impl Default for BotReportDerived {
             transformations_top: Vec::new(),
             relics_bought: Vec::new(),
             relics_by_win_rate: Vec::new(),
+            relics_shop_timing_split: Vec::new(),
             talismans_shop: Vec::new(),
             zodiacs_shop: Vec::new(),
             packs_shop: Vec::new(),

@@ -2108,6 +2108,7 @@ dependencies = [
  "console",
  "number_prefix",
  "portable-atomic",
+ "rayon",
  "unicode-width",
  "web-time",
 ]
@@ -2466,7 +2467,6 @@ version = "0.5.0-4"
 dependencies = [
  "anyhow",
  "arboard",
- "base64 0.22.1",
  "bytemuck",
  "cassowary",
  "chrono",
@@ -2480,6 +2480,7 @@ dependencies = [
  "gltf",
  "human_format",
  "image",
+ "indicatif",
  "log",
  "lyon_path",
  "lyon_tessellation",

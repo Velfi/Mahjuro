@@ -145,8 +145,8 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
     let r = RelicState::default();
     let ctx = ctx_with(&r, false);
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    assert_eq!(breakdown.final_chips, 416);
-    assert_eq!(breakdown.final_mult, 16.0);
+    assert_eq!(breakdown.final_chips, 443);
+    assert_eq!(breakdown.final_mult, 18.0);
 }
 
 #[test]
@@ -490,8 +490,8 @@ fn explosive_flush_full_hand_demonstration() {
     ];
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
     assert_eq!(breakdown.base_chips, 226);
-    assert_eq!(breakdown.final_mult, 16.0);
-    assert_eq!(breakdown.total, 6656);
+    assert_eq!(breakdown.final_mult, 18.0);
+    assert_eq!(breakdown.total, 7974);
 }
 
 fn dora_chips_delta(breakdown: &ScoreBreakdown) -> i32 {

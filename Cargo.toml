@@ -9,7 +9,6 @@ debug = true
 
 [dependencies]
 anyhow = "1.0.102"
-base64 = "0.22"
 bytemuck = { version = "1.23", features = ["derive"] }
 cassowary = "0.3.0"
 clap = { version = "4.5", features = ["derive"] }
@@ -48,6 +47,7 @@ self_update = { version = "0.42", features = [
     "compression-flate2",
 ] }
 rayon = "1.11.0"
+indicatif = { version = "0.17", features = ["rayon"] }
 human_format = "1.2.1"
 steamworks = "0.13"
 resvg = "0.44"
