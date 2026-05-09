@@ -7,6 +7,19 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-4 — 2026-05-09
+
+### Added
+- New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather enough absorbed score and it hatches into **Monarch Butterfly**, which adds bonus chips each hand based on tiers that grow from total absorbed excess (with diminishing tier gains as excess climbs).
+- New rare relic **Euler's Number** adds a flat mult bonus equal to the constant *e* (about 2.718) every time you score a hand.
+- New relic **I Got A Guy**: three times per run you can restock the shop without paying gold (normal restock price increases still apply after each restock).
+
+### Changed
+- Ghost Hand now adds chips equal to the **point value** of hand tiles that are not part of what you scored (your full remaining hand when you cash in the structure bank). The relic shows a live chip preview on the tray and in tooltips.
+- Glass Cannon now gives a huge one-time ×4 mult on your next scored hand, then breaks. It no longer costs you a play each round, and it shows up as a cheap common relic in the shop.
+- Second Wind no longer gives an extra play each round. The first time you would lose a blind, it destroys itself instead: you forfeit that blind with no coin payout, but the run continues and your other relics can still react as the round ends.
+- **Tea Ceremony** now gives a different principle bonus on each of the next four scored hands, then becomes **Rakuware** in the same relic slot. **Rakuware** now grants every one of those principle bonuses on each score when you meet their conditions (instead of scaling with other relics being destroyed).
+
 ## 0.5.0-3 — 2026-05-09
 
 ### Added
