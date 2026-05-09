@@ -34,10 +34,7 @@ use crate::core::structure::{
 };
 
 use crate::audio::SfxId;
-use crate::core::relic::{
-    RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
-    ScoreRoundBundle, ScoreTileBundle,
-};
+use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{ScoreBreakdown, score_sets_with_original};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
@@ -1206,7 +1203,7 @@ mod tests {
     use super::*;
     use crate::core::deck::build_wall;
     use crate::core::hand::DetectedSet;
-    use crate::core::relic::RelicId;
+    use crate::core::relic::{RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle};
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
