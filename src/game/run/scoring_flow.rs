@@ -93,7 +93,7 @@ impl RunState {
             if *v <= 0 {
                 self.relic_counters.remove(&RelicId::RustlingGooseEgg);
                 self.relics.active.retain(|&r| r != RelicId::RustlingGooseEgg);
-                self.rustling_goose_egg_extinct = true;
+                self.xxxl_egg_extinct = true;
                 self.note_relic_destroyed();
                 bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
                 bus.push(GameEvent::AchievementUnlocked(

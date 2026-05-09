@@ -1,0 +1,192 @@
+name: Release build (Windows)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    name: Release Windows
+    runs-on: windows-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag }}
+          lfs: true
+
+      - name: Compute version (strip leading v)
+        id: version
+        shell: bash
+        run: |
+          TAG="${RELEASE_TAG}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install AzureSignTool (Windows code signing)
+        shell: bash
+        run: |
+          dotnet tool install --global AzureSignTool --version 7.0.1
+
+      - name: Install NSIS (Windows)
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          # Make sure makensis is on PATH for subsequent steps.
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
+      - name: Verify Azure Key Vault signing cert (Windows)
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          az login --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none
+          az keyvault certificate show \
+            --vault-name mahjuro \
+            --name Mahjuro \
+            --query '{enabled:attributes.enabled,expires:attributes.expires}' \
+            --output table
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-x86_64-pc-windows-msvc-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-x86_64-pc-windows-msvc-cargo-
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          NAME="mahjuro-${RELEASE_TAG}-windows-x86_64-setup"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "filename=${NAME}.exe" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────── Windows: NSIS .exe ────────────────────────────
+      - name: Sign binary (Windows)
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # Use a CLI-issued Key Vault token for AzureSignTool (-kva). The client-secret
+          # credential path inside Azure.Identity sometimes hits AKV10046 against Key Vault;
+          # az + get-access-token is a reliable alternative in CI.
+          az login --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none
+          KV_TOKEN="$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)"
+          AzureSignTool sign \
+            -kvu https://mahjuro.vault.azure.net \
+            -kvc Mahjuro \
+            -kva "$KV_TOKEN" \
+            -tr http://timestamp.digicert.com \
+            -td sha256 \
+            "target/x86_64-pc-windows-msvc/release/mahjuro.exe"
+
+      - name: Stage installer source (Windows)
+        shell: pwsh
+        run: |
+          $stage = "installer-src"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "target\x86_64-pc-windows-msvc\release\mahjuro.exe" "$stage\"
+          Copy-Item "packaging\steam_input\game_actions_4636490.vdf" "$stage\"
+          # Generate multi-resolution icon.ico from icon.png. ImageMagick is
+          # preinstalled on windows-latest runners as `magick`.
+          magick icon.png -define icon:auto-resize=256,128,64,48,32,16 "$stage\icon.ico"
+
+      - name: Build NSIS installer (Windows)
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $out = "${{ steps.artifact.outputs.filename }}"
+          # VIProductVersion must be four integers; strip semver pre-release (e.g. 0.5.0-0 → 0.5.0.0).
+          $core = $env:VERSION -replace '-.*$', ''
+          $viProduct = "${core}.0"
+          makensis `
+            "/DVERSION=$env:VERSION" `
+            "/DVI_PRODUCT_VERSION=$viProduct" `
+            "/DSOURCE_DIR=$PWD\installer-src" `
+            "/DOUTFILE=$PWD\$out" `
+            packaging\installer.nsi
+
+      - name: Sign installer (Windows)
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          az login --service-principal \
+            --username "$AZURE_CLIENT_ID" \
+            --password "$AZURE_CLIENT_SECRET" \
+            --tenant "$AZURE_TENANT_ID" \
+            --output none
+          KV_TOKEN="$(az account get-access-token --resource https://vault.azure.net --query accessToken -o tsv)"
+          AzureSignTool sign \
+            -kvu https://mahjuro.vault.azure.net \
+            -kvc Mahjuro \
+            -kva "$KV_TOKEN" \
+            -tr http://timestamp.digicert.com \
+            -td sha256 \
+            "${{ steps.artifact.outputs.filename }}"
+
+      - name: Create update archive (Windows)
+        id: update_archive
+        shell: bash
+        run: |
+          ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
+          cd "target/x86_64-pc-windows-msvc/release"
+          7z a "../../../${ARCHIVE}" "mahjuro.exe" game_actions_4636490.vdf
+          cd ../../..
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.update_archive.outputs.filename }}
+          path: ${{ steps.update_archive.outputs.filename }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.filename }}
+          path: ${{ steps.artifact.outputs.filename }}

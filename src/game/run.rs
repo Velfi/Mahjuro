@@ -105,7 +105,7 @@ pub struct RelicShopPoolExtinction {
     pub paper_lantern: bool,
     pub silk_thread: bool,
     pub melting_ice: bool,
-    pub rustling_goose_egg: bool,
+    pub xxxl_egg: bool,
     pub tea_ceremony: bool,
     pub chrysalis: bool,
 }
@@ -124,7 +124,7 @@ fn transformation_successor_shop_eligible(
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
         RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
         RelicId::Geese => {
-            available_relics.contains(&RelicId::RustlingGooseEgg) && ex.rustling_goose_egg
+            available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg
         }
         RelicId::Rakuware => {
             available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony
@@ -163,7 +163,7 @@ pub(crate) fn relic_eligible_for_shop_stock(
     if id == RelicId::MeltingIce && ex.melting_ice {
         return false;
     }
-    if id == RelicId::RustlingGooseEgg && ex.rustling_goose_egg {
+    if id == RelicId::RustlingGooseEgg && ex.xxxl_egg {
         return false;
     }
     if id == RelicId::TeaCeremony && ex.tea_ceremony {
@@ -686,7 +686,7 @@ pub struct RunState {
     pub melting_ice_extinct: bool,
     /// XXXL Egg burned this run — Geese returns to the shop pool (when the egg is meta-unlocked).
     #[serde(default)]
-    pub rustling_goose_egg_extinct: bool,
+    pub xxxl_egg_extinct: bool,
     /// Tea Ceremony completed this run (became Rakuware) — Rakuware can appear in shops.
     #[serde(default, rename = "tea_to_raku_extinct")]
     pub tea_ceremony_extinct: bool,
@@ -785,7 +785,7 @@ pub struct RunState {
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
     ///   SilkThread   → remaining mult ×10 (starts 40, -3 per discard)
     ///   NestEgg      → rounds held (sell value grows)
-    ///   RustlingGooseEgg (XXXL Egg) → plays remaining before burning (Geese shop unlock)
+    ///   XXXL Egg → plays remaining before burning (Geese shop unlock)
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
     ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
@@ -929,7 +929,7 @@ impl RunState {
             paper_lantern: self.paper_lantern_extinct,
             silk_thread: self.silk_thread_extinct,
             melting_ice: self.melting_ice_extinct,
-            rustling_goose_egg: self.rustling_goose_egg_extinct,
+            xxxl_egg: self.xxxl_egg_extinct,
             tea_ceremony: self.tea_ceremony_extinct,
             chrysalis: self.chrysalis_extinct,
         }
@@ -1066,7 +1066,7 @@ impl RunState {
             paper_lantern_extinct: false,
             silk_thread_extinct: false,
             melting_ice_extinct: false,
-            rustling_goose_egg_extinct: false,
+            xxxl_egg_extinct: false,
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
             yaku_times_played: std::collections::HashMap::new(),
@@ -1278,7 +1278,7 @@ mod tests {
             paper_lantern_extinct: false,
             silk_thread_extinct: false,
             melting_ice_extinct: false,
-            rustling_goose_egg_extinct: false,
+            xxxl_egg_extinct: false,
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
             small_blind_tag: None,

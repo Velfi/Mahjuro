@@ -11,8 +11,24 @@
 //!
 //! The cascade UI walks the `steps` in order, updating both running totals.
 //! The last visible beat is the multiplication itself.
+//!
+//! ## Layout
+//!
+//! * [`pipeline`] — thin orchestration: base melds, then each layer in order.
+//! * [`pre_yaku_layer`] — meld-linked chips/mults and early relic effects before Dora/yaku.
+//! * [`dora_yaku_layer`] — Dora, yaku lines, structure depth mult.
+//! * [`relic_mult_layer`] — post-yaku relic mults and late relic chips (one audit surface).
+//! * [`effective_relic`] — Mirror Tile / Shadow Hand resolved once per score.
+//! * [`presentation`] — optional regrouping of steps for the cascade (chips before mults).
 
+mod dora_yaku_layer;
+mod effective_relic;
 mod pipeline;
+mod pre_yaku_layer;
+mod presentation;
+mod push_steps;
+mod relic_mult_layer;
+mod tea_bonus;
 #[cfg(test)]
 mod tests;
 

@@ -9,6 +9,7 @@ debug = true
 
 [dependencies]
 anyhow = "1.0.102"
+base64 = "0.22"
 bytemuck = { version = "1.23", features = ["derive"] }
 cassowary = "0.3.0"
 clap = { version = "4.5", features = ["derive"] }
@@ -65,4 +66,9 @@ objc2-foundation = { version = "0.3", features = [
 ] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.6"
+
+[[bench]]
+name = "bot"
+harness = false

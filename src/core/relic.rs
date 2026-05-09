@@ -84,7 +84,7 @@ pub enum RelicId {
     Snowball,
     /// +1 play per round.
     SecondWind,
-    /// ×4 final mult on the next scored hand, then destroyed (destruction).
+    /// ×3 final mult on the next scored hand, then destroyed (destruction).
     GlassCannon,
     // ── Retrigger starters, mirrors, suit purity ───────────────────────
     /// On your final play of the round, retrigger all scored tiles (they
@@ -115,6 +115,7 @@ pub enum RelicId {
     VoiceOfTheElite,
     /// Retrigger all scored tiles for 3 plays, then burns (slot empties);
     /// XXXL Egg cannot shop-roll again and Geese returns to the pool this run.
+    #[serde(rename = "xxxl_egg")]
     RustlingGooseEgg,
     /// Four scored hands — Harmony → Respect → Purity → Tranquility — then this
     /// slot becomes Rakuware (all four beats together on future scores).
@@ -344,7 +345,7 @@ impl RelicId {
             RelicId::Geese => "geese.png",
             RelicId::VoiceOfThePeople => "voice_of_the_people.png",
             RelicId::VoiceOfTheElite => "voice_of_the_elite.png",
-            RelicId::RustlingGooseEgg => "rustling_goose_egg.png",
+            RelicId::RustlingGooseEgg => "xxxl_egg.png",
             RelicId::TeaCeremony => "tea_ceremony.png",
             RelicId::Rakuware => "rakuware.png",
             RelicId::GhostHand => "ghost_hand.png",
