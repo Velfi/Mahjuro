@@ -220,7 +220,7 @@ fn analyze_hand_options(
         merged_sets.extend(sets.iter().cloned());
         let mut merged_tiles = run.structure_tiles().to_vec();
         merged_tiles.extend(scoring_tiles.iter().copied());
-        let ctx = ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
+        let ctx = ctx_for_merged_commit(run, &run.relics, &merged_sets, None);
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
         if breakdown.total > 0 {
             analysis.positive_score_count += 1;
@@ -284,7 +284,6 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
 fn ctx_for_merged_commit<'a>(
     run: &'a RunState,
     relics: &'a RelicState,
-    merged_tiles: &[Tile],
     merged_sets: &[crate::core::hand::DetectedSet],
     yaku_levels: Option<&YakuLevels>,
 ) -> ScoreContext<'a> {
@@ -366,13 +365,7 @@ fn best_play_in_hand(
         merged_sets.extend(sets.iter().cloned());
         let mut merged_tiles = run.structure_tiles().to_vec();
         merged_tiles.extend(tiles.iter().copied());
-        let ctx = ctx_for_merged_commit(
-            run,
-            relics,
-            &merged_tiles,
-            &merged_sets,
-            yaku_levels_override,
-        );
+        let ctx = ctx_for_merged_commit(run, relics, &merged_sets, yaku_levels_override);
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
         if breakdown.total == 0 {
             continue;
@@ -1121,8 +1114,7 @@ mod tests {
             merged_sets.extend(sets.iter().cloned());
             let mut merged_tiles = run.structure_tiles().to_vec();
             merged_tiles.extend(tiles.iter().copied());
-            let ctx =
-                super::ctx_for_merged_commit(run, &run.relics, &merged_tiles, &merged_sets, None);
+            let ctx = super::ctx_for_merged_commit(run, &run.relics, &merged_sets, None);
             let total = crate::core::scoring::score_sets_with_original(
                 &merged_tiles,
                 &merged_sets,
