@@ -1342,6 +1342,39 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = ctx.proj.mirror_rect {
                 push_centered(&mut hud_text, rect, "Score hand");
             }
+            {
+                use crate::core::relic::RelicId;
+                let ids = GameEngine::active_relics(run);
+                let preview = run.ghost_hand_preview_chips();
+                for (i, &rid) in ids.iter().enumerate() {
+                    if rid != RelicId::GhostHand {
+                        continue;
+                    }
+                    let Some(rect) = ctx.proj.relic_rects.get(i).copied() else {
+                        continue;
+                    };
+                    if rect[2] <= 1.0 || rect[3] <= 1.0 {
+                        continue;
+                    }
+                    let fs = body_px.min(rect[3] * 0.22).min(rect[2] * 0.35).max(9.0);
+                    let label_h = (fs * 1.25).min(rect[3] * 0.45);
+                    let chip_rect = [
+                        rect[0],
+                        rect[1] + rect[3] - label_h * 0.95,
+                        rect[2],
+                        label_h,
+                    ];
+                    hud_text.push(TextLabel {
+                        rect: chip_rect,
+                        text: format!("+{preview}"),
+                        color: color::CHAMPAGNE,
+                        font_px: Some(fs),
+                        align: crate::render::wgpu_renderer::TextAlign::Center,
+                        no_glossary: true,
+                        ..Default::default()
+                    });
+                }
+            }
             let undo_bottom_y = discard_undo_rect.map(|r| r[1] + r[3]);
             let settings = crate::persistence::load_settings();
             let show_discard_legend = super::action_prompts::gameplay_west_north_legend_active(
@@ -1470,6 +1503,7 @@ impl SceneBehavior for GameplayScene {
                                     &run.relic_counters,
                                     run.total_score_earned,
                                     Some((&run.relics, i)),
+                                    Some(run.ghost_hand_preview_chips()),
                                 );
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,

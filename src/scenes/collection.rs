@@ -1613,6 +1613,7 @@ fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
             &run.relic_counters,
             run.total_score_earned,
             None,
+            Some(run.ghost_hand_preview_chips()),
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::Zodiac(kind) => format!(

@@ -35,6 +35,8 @@ pub enum Achievement {
     /// Melting Ice thawed into Taotie — same fragile-cluster milestone
     /// as `SilkMothEmerged`, but for the chips half of the pair.
     TaotieAwakened,
+    /// XXXL Egg burned out into Geese — fragile retrigger cluster.
+    GeeseTakeFlight,
 }
 
 impl Achievement {
@@ -51,6 +53,7 @@ impl Achievement {
             Self::AllBossesSeen => "ALL_BOSSES_SEEN",
             Self::SilkMothEmerged => "SILK_MOTH_EMERGED",
             Self::TaotieAwakened => "TAOTIE_AWAKENED",
+            Self::GeeseTakeFlight => "GEESE_TAKE_FLIGHT",
         }
     }
 }

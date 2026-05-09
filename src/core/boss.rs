@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::debuff::{TileDebuff, TileDebuffClass};
 use crate::core::json_asset::load_json_asset;
-use crate::core::relic::RelicId;
+use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::RuleModifier;
 use crate::game::run::RunState;
 
@@ -504,12 +504,37 @@ fn hex_reveal(run: &mut RunState) -> ResolvedBossEffect {
     }
 }
 
-/// Effective hand size after applying any per-round bonus_hand_size delta.
-/// Clamped to a sane minimum so a stacked debuff can't reduce the hand to 0.
-pub fn effective_hand_size(run: &RunState) -> usize {
-    let base = crate::game::run::HAND_SIZE as i32;
-    let adjusted = base + run.boss.bonus_hand_size;
+fn relic_hand_size_delta(relics: &RelicState) -> i32 {
+    let mut d = 0i32;
+    if relics.has(RelicId::BigHands) {
+        d += 2;
+    }
+    if relics.has(RelicId::TinyHands) {
+        d -= 2;
+    }
+    d
+}
+
+/// Hand fill target at round start / after refill: mode hand size (tutorial
+/// may differ from [`crate::game::run::HAND_SIZE`]), boss wide/shrink bonus,
+/// and Big Hands / Tiny Hands. Clamped to a sane minimum.
+pub fn effective_hand_size_components(
+    mode_hand_size: usize,
+    bonus_hand_size: i32,
+    relics: &RelicState,
+) -> usize {
+    let base = mode_hand_size as i32;
+    let adjusted = base + bonus_hand_size + relic_hand_size_delta(relics);
     adjusted.max(8) as usize
+}
+
+/// Effective hand size for `run` (see [`effective_hand_size_components`]).
+pub fn effective_hand_size(run: &RunState) -> usize {
+    effective_hand_size_components(
+        run.mode.hand_size,
+        run.boss.bonus_hand_size,
+        &run.relics,
+    )
 }
 
 // ── Boss catalog ─────────────────────────────────────────────────────────

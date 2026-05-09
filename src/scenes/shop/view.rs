@@ -1453,8 +1453,18 @@ fn hover_tooltip_content(
     let n_for_sale_zodiacs = scene.zodiac_items.len();
     let n_for_sale_talismans = scene.talisman_items.len();
     let n_for_sale_relics = scene.items.len();
-    let reroll_affordable =
-        matches!(scene.mode, ShopMode::Standard) && shop.gold >= scene.reroll_cost as i32;
+    let i_got_a_guy_charges = if shop.relic_state.has(RelicId::IGotAGuy) {
+        shop.relic_counters
+            .get(&RelicId::IGotAGuy)
+            .copied()
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let reroll_affordable = matches!(scene.mode, ShopMode::Standard)
+        && (scene.reroll_cost == 0
+            || shop.gold >= scene.reroll_cost as i32
+            || i_got_a_guy_charges > 0);
 
     let tuple_opt = match hit {
         ShopHit::Relic(i) if i < n_for_sale_relics => {
@@ -1498,6 +1508,7 @@ fn hover_tooltip_content(
                 &shop.relic_counters,
                 shop.total_score_earned,
                 Some((&shop.relic_state, oi)),
+                None,
             );
             let sell = relic_sell_price_live(rid, &shop.relic_counters);
             Some((name, desc, format!("Sell {}g", sell), color::CHAMPAGNE))
@@ -1617,14 +1628,17 @@ fn hover_tooltip_content(
                     color::GOLD,
                 )
             } else {
+                let cta = if shop.gold >= scene.reroll_cost as i32 {
+                    format!("{}g", scene.reroll_cost)
+                } else if i_got_a_guy_charges > 0 {
+                    format!("FREE ({} left)", i_got_a_guy_charges)
+                } else {
+                    format!("${} (have {}g)", scene.reroll_cost, shop.display_gold)
+                };
                 (
                     "Restock".to_string(),
                     format!("Refresh shop for {}g", scene.reroll_cost),
-                    if reroll_affordable {
-                        format!("{}g", scene.reroll_cost)
-                    } else {
-                        format!("${} (have {}g)", scene.reroll_cost, shop.display_gold)
-                    },
+                    cta,
                     if reroll_affordable {
                         color::GOLD
                     } else {

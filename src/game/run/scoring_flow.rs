@@ -87,15 +87,18 @@ impl RunState {
                 ));
             }
         }
-        if self.relics.has(RelicId::TeaCeremony) {
-            let v = self.relic_counters.entry(RelicId::TeaCeremony).or_insert(3);
+        if self.relics.has(RelicId::RustlingGooseEgg) {
+            let v = self.relic_counters.entry(RelicId::RustlingGooseEgg).or_insert(3);
             *v -= 1;
             if *v <= 0 {
-                self.relic_counters.remove(&RelicId::TeaCeremony);
-                self.relics.active.retain(|&r| r != RelicId::TeaCeremony);
-                self.tea_ceremony_extinct = true;
+                self.relic_counters.remove(&RelicId::RustlingGooseEgg);
+                self.relics.active.retain(|&r| r != RelicId::RustlingGooseEgg);
+                self.rustling_goose_egg_extinct = true;
                 self.note_relic_destroyed();
                 bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
+                bus.push(GameEvent::AchievementUnlocked(
+                    crate::steam::Achievement::GeeseTakeFlight,
+                ));
             }
         }
         if self.relics.has(RelicId::Humility) {
@@ -204,6 +207,7 @@ impl RunState {
         structure_meta: Option<StructureTriggerMeta>,
         bus: &mut EventBus,
     ) -> u64 {
+        let destroy_glass_cannon = self.relics.has(RelicId::GlassCannon);
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let ctx = ScoreContext {
@@ -220,7 +224,7 @@ impl RunState {
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
             relic_counters: self.relic_counters.clone(),
-            unscored_hand_tiles: self.hand.len(),
+            hand_for_ghost: &self.hand,
             structure: structure_meta,
         };
         let breakdown = score_sets_with_original(
@@ -230,12 +234,65 @@ impl RunState {
             &self.round_rules,
             &original_for_wildcard,
         );
-        let earned = breakdown.total;
-        self.round_score = self.round_score.saturating_add(earned);
-        self.total_score_earned = self.total_score_earned.saturating_add(earned);
-        if earned > self.best_structure_score {
-            self.best_structure_score = earned;
+        let breakdown_total = breakdown.total;
+        let pre_round = self.round_score;
+        let absorb_excess = (self.relics.has(crate::core::relic::RelicId::Chrysalis)
+            || self.relics.has(crate::core::relic::RelicId::MonarchButterfly))
+            && pre_round >= self.target_score as u64;
+        let applied = if absorb_excess {
+            0u64
+        } else {
+            breakdown_total
+        };
+
+        self.round_score = self.round_score.saturating_add(applied);
+        self.total_score_earned = self.total_score_earned.saturating_add(applied);
+        if applied > self.best_structure_score {
+            self.best_structure_score = applied;
             self.best_structure_name = structure_label_from_yaku(&breakdown.detected_yaku);
+        }
+
+        if absorb_excess && breakdown_total > 0 {
+            let cur = self
+                .relic_counters
+                .entry(crate::core::relic::RelicId::MonarchButterfly)
+                .or_insert(0);
+            let room = i64::from(i32::MAX) - i64::from(*cur);
+            let add = (breakdown_total.min(room.max(0) as u64)) as i32;
+            *cur = cur.saturating_add(add);
+            if self.relics.has(crate::core::relic::RelicId::Chrysalis) {
+                self.relic_activations
+                    .push(crate::core::relic::RelicId::Chrysalis);
+            }
+            if self.relics.has(crate::core::relic::RelicId::MonarchButterfly) {
+                self.relic_activations
+                    .push(crate::core::relic::RelicId::MonarchButterfly);
+            }
+
+            let excess = self
+                .relic_counters
+                .get(&crate::core::relic::RelicId::MonarchButterfly)
+                .copied()
+                .unwrap_or(0);
+            if self.relics.has(crate::core::relic::RelicId::Chrysalis)
+                && excess >= crate::core::relic::CHRYSALIS_HATCH_EXCESS_THRESHOLD
+            {
+                if let Some(pos) = self
+                    .relics
+                    .active
+                    .iter()
+                    .position(|&r| r == crate::core::relic::RelicId::Chrysalis)
+                {
+                    self.relics.active[pos] = crate::core::relic::RelicId::MonarchButterfly;
+                }
+                self.chrysalis_extinct = true;
+                self.note_relic_destroyed();
+                self.relic_activations
+                    .push(crate::core::relic::RelicId::MonarchButterfly);
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    crate::core::relic::RelicId::MonarchButterfly,
+                ));
+            }
         }
 
         if self.relics.has(RelicId::TilePolisher) {
@@ -324,7 +381,7 @@ impl RunState {
             bus.push(GameEvent::YakuScored(y));
         }
         self.last_breakdown = Some(breakdown);
-        self.scored_last_turn = earned > 0;
+        self.scored_last_turn = breakdown_total > 0;
 
         if !self.honors_scored_this_round
             && scoring_tiles
@@ -346,7 +403,43 @@ impl RunState {
             }
         }
 
-        earned
+        if breakdown_total > 0 && self.relics.has(RelicId::TeaCeremony) {
+            self.relic_activations.push(RelicId::TeaCeremony);
+            let phase = self
+                .relic_counters
+                .get(&RelicId::TeaCeremony)
+                .copied()
+                .unwrap_or(0)
+                .clamp(0, 3);
+            if phase >= 3 {
+                if let Some(pos) = self
+                    .relics
+                    .active
+                    .iter()
+                    .position(|&r| r == RelicId::TeaCeremony)
+                {
+                    self.relics.active[pos] = RelicId::Rakuware;
+                }
+                self.relic_counters.remove(&RelicId::TeaCeremony);
+                self.relic_counters.remove(&RelicId::Rakuware);
+                self.tea_ceremony_extinct = true;
+                self.note_relic_destroyed();
+                self.relic_activations.push(RelicId::Rakuware);
+                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Rakuware));
+            } else {
+                self.relic_counters.insert(RelicId::TeaCeremony, phase + 1);
+            }
+        }
+
+        if destroy_glass_cannon {
+            self.relics.active.retain(|&r| r != RelicId::GlassCannon);
+            self.relics.debuffed.remove(&RelicId::GlassCannon);
+            self.note_relic_destroyed();
+            self.relic_activations.push(RelicId::GlassCannon);
+            bus.push(GameEvent::RelicActivated(RelicId::GlassCannon));
+        }
+
+        applied
     }
 
     fn scoring_tile_debuffs(&self, scoring_tiles: &[Tile]) -> Vec<TileDebuff> {
@@ -525,8 +618,28 @@ impl RunState {
                 bus.push(GameEvent::BossDefeated(bk));
             }
         } else if let Some(reason) = self.round_failure_reason() {
-            bus.push(GameEvent::GameOver { reason });
+            if !self.try_second_wind_salvage(reason, bus) {
+                bus.push(GameEvent::GameOver { reason });
+            }
         }
+    }
+
+    /// When a round would end in defeat, Second Wind is destroyed and the blind
+    /// is forfeited (no gold payout); [`RunState::forfeit_current_blind_second_wind`]
+    /// runs when the UI drains the deferred `RoundComplete`.
+    fn try_second_wind_salvage(&mut self, _reason: GameOverReason, bus: &mut EventBus) -> bool {
+        if !self.relics.has(RelicId::SecondWind) {
+            return false;
+        }
+        self.relics.active.retain(|&r| r != RelicId::SecondWind);
+        self.note_relic_destroyed();
+        self.relic_activations.push(RelicId::SecondWind);
+        bus.push(GameEvent::RelicActivated(RelicId::SecondWind));
+        bus.push(GameEvent::RoundComplete {
+            reached_target: false,
+            payout: crate::game::event_bus::RoundPayout::default(),
+        });
+        true
     }
 
     /// Banked meld chips in structure (for HUD tiers).
@@ -587,7 +700,7 @@ impl RunState {
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
             relic_counters: self.relic_counters.clone(),
-            unscored_hand_tiles: self.hand.len(),
+            hand_for_ghost: &self.hand,
             structure: Some(meta),
         };
         Some(score_sets_with_original(
@@ -677,7 +790,7 @@ impl RunState {
             total_score: self.total_score_earned,
             is_final_play: self.plays_remaining == 0,
             relic_counters: self.relic_counters.clone(),
-            unscored_hand_tiles: self.hand.len(),
+            hand_for_ghost: &self.hand,
             structure: None,
         };
         let mut best = default_sets;

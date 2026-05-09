@@ -23,7 +23,7 @@ impl RunState {
         self.sync_round_resource_caps();
 
         // Adjust hand size: grow by drawing more tiles if needed.
-        let target_hand_size = self.mode.hand_size;
+        let target_hand_size = crate::core::boss::effective_hand_size(self);
         while self.hand.len() < target_hand_size {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
@@ -76,7 +76,7 @@ impl RunState {
             self.wall.reveal_extra_dora_indicator();
         }
         self.hand.clear();
-        let draw_count = self.mode.hand_size;
+        let draw_count = crate::core::boss::effective_hand_size(self);
         for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);

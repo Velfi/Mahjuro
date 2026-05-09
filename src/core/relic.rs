@@ -64,6 +64,8 @@ pub enum RelicId {
     HighTide,
     /// Relics cost 25% less in the shop, rounded down (minimum $1).
     MerchantsEye,
+    /// Three shop restocks this run cost no gold (escalating restock prices still apply).
+    IGotAGuy,
     /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
     EdgeRunner,
     /// Rank-7 tiles in scored sets: +1.5 mult each.
@@ -82,7 +84,7 @@ pub enum RelicId {
     Snowball,
     /// +1 play per round.
     SecondWind,
-    /// ×2 final mult, but 1 fewer play per round.
+    /// ×4 final mult on the next scored hand, then destroyed (destruction).
     GlassCannon,
     // ── Retrigger starters, mirrors, suit purity ───────────────────────
     /// On your final play of the round, retrigger all scored tiles (they
@@ -105,16 +107,23 @@ pub enum RelicId {
     // ── Broad relic pool ───────────────────────────────────────────────
     // Retrigger
     /// Retrigger the first 5 scored tiles in the hand. Hidden from Collection
-    /// and shops until Tea Ceremony burns once (profile unlock).
+    /// and shops until XXXL Egg burns once (profile unlock).
     Geese,
     /// Retrigger tiles ranked 1–4 in scored sets.
     VoiceOfThePeople,
     /// Retrigger tiles ranked 6–9 in scored sets.
     VoiceOfTheElite,
     /// Retrigger all scored tiles for 3 plays, then burns (slot empties);
-    /// Tea cannot shop-roll again and Geese returns to the pool this run.
+    /// XXXL Egg cannot shop-roll again and Geese returns to the pool this run.
+    RustlingGooseEgg,
+    /// Four scored hands — Harmony → Respect → Purity → Tranquility — then this
+    /// slot becomes Rakuware (all four beats together on future scores).
     TeaCeremony,
-    /// Tiles NOT in scored sets each grant +2 chips.
+    /// Raku chawan. Each score, applies every Tea Ceremony beat (Harmony, Respect,
+    /// Purity, Tranquility) when its condition is met. Shop-only until Tea completes this run.
+    Rakuware,
+    /// Chips equal to the sum of **point values** of hand tiles that are not in
+    /// the scored melds (structure cash-in: all tiles still in hand). HUD shows a live preview.
     GhostHand,
     // Scaling
     /// +0.5 mult per consecutive play without honor tiles. Resets when
@@ -225,6 +234,60 @@ pub enum RelicId {
     /// to every tile drawn for the rest of the run, not just the 14 currently
     /// in hand. Also grants +1 consumable inventory slot.
     BrocadePouch,
+    /// Flat +e mult each scored hand (`e` is [`std::f64::consts::E`]).
+    EulersNumber,
+    /// Flat +π mult each scored hand (`π` is [`std::f64::consts::PI`]).
+    PiConstant,
+    /// +2 hand tiles per round, −1 discard per round.
+    BigHands,
+    /// −2 hand tiles per round, +2 discards per round.
+    TinyHands,
+    /// After the blind target is met, further scoring this round is absorbed
+    /// into `relic_counters[MonarchButterfly]`; at threshold excess, hatches
+    /// into Monarch Butterfly in-slot.
+    Chrysalis,
+    /// Shop-only until Chrysalis hatches this run. +chips per score from a
+    /// log tier derived from absorbed excess (`relic_counters[MonarchButterfly]`).
+    MonarchButterfly,
+}
+
+/// Total absorbed excess (post-target score) needed for Chrysalis to transform.
+pub const CHRYSALIS_HATCH_EXCESS_THRESHOLD: i32 = 2000;
+
+/// Chips per log-tier from [`monarch_butterfly_tier`].
+pub const MONARCH_CHIPS_PER_TIER: i32 = 12;
+
+/// Max tier for Monarch Butterfly chip bonus.
+pub const MONARCH_TIER_CAP: i32 = 24;
+
+/// Tier from cumulative absorbed excess: `ilog2(excess + 1)`, capped (log-spaced tiers).
+#[inline]
+pub fn monarch_butterfly_tier(excess: i32) -> i32 {
+    let e = excess.max(0) as u32;
+    if e == 0 {
+        return 0;
+    }
+    let t = e.saturating_add(1).ilog2() as i32;
+    t.min(MONARCH_TIER_CAP)
+}
+
+#[inline]
+pub fn monarch_butterfly_bonus_chips(excess: i32) -> i32 {
+    monarch_butterfly_tier(excess).saturating_mul(MONARCH_CHIPS_PER_TIER)
+}
+
+/// Smallest excess value at which the tier would exceed the current tier (hint for tooltips).
+#[inline]
+pub fn monarch_next_tier_excess_floor(current_excess: i32) -> Option<i32> {
+    let t = monarch_butterfly_tier(current_excess);
+    if t >= MONARCH_TIER_CAP {
+        return None;
+    }
+    let k = (t + 1) as u32;
+    if k >= 31 {
+        return None;
+    }
+    Some(((1i64 << k) - 1).clamp(0, i32::MAX as i64) as i32)
 }
 
 impl RelicId {
@@ -261,6 +324,7 @@ impl RelicId {
             RelicId::LowTide => "low_tide.png",
             RelicId::HighTide => "high_tide.png",
             RelicId::MerchantsEye => "merchants_eye.png",
+            RelicId::IGotAGuy => "i_got_a_guy.png",
             RelicId::EdgeRunner => "edge_runner.png",
             RelicId::LuckySeven => "lucky_seven.png",
             RelicId::Momentum => "momentum.png",
@@ -280,7 +344,9 @@ impl RelicId {
             RelicId::Geese => "geese.png",
             RelicId::VoiceOfThePeople => "voice_of_the_people.png",
             RelicId::VoiceOfTheElite => "voice_of_the_elite.png",
+            RelicId::RustlingGooseEgg => "rustling_goose_egg.png",
             RelicId::TeaCeremony => "tea_ceremony.png",
+            RelicId::Rakuware => "rakuware.png",
             RelicId::GhostHand => "ghost_hand.png",
             RelicId::Humility => "humility.png",
             RelicId::Obsession => "obsession.png",
@@ -319,6 +385,12 @@ impl RelicId {
             RelicId::Kintsugi => "kintsugi.png",
             RelicId::AntTrail => "ant_trail.png",
             RelicId::BrocadePouch => "brocade_pouch.png",
+            RelicId::EulersNumber => "eulers_number.png",
+            RelicId::PiConstant => "pi_constant.png",
+            RelicId::BigHands => "big_hands.png",
+            RelicId::TinyHands => "tiny_hands.png",
+            RelicId::Chrysalis => "chrysalis.png",
+            RelicId::MonarchButterfly => "monarch_butterfly.png",
         }
     }
 }
@@ -498,6 +570,7 @@ pub fn relic_description_live(
     counters: &std::collections::BTreeMap<RelicId, i32>,
     total_score: u64,
     inventory_focus: Option<(&RelicState, usize)>,
+    ghost_hand_chips_preview: Option<i32>,
 ) -> String {
     let base = all_relic_defs()
         .iter()
@@ -525,12 +598,52 @@ pub fn relic_description_live(
             let paid = counters.get(&RelicId::SilkMoth).copied().unwrap_or(0);
             format!("{base} [${paid} produced]")
         }
-        RelicId::TeaCeremony => {
-            let charges = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(3);
+        RelicId::RustlingGooseEgg => {
+            let charges = counters.get(&RelicId::RustlingGooseEgg).copied().unwrap_or(3);
             format!(
                 "{base} [{charges} charge{} left]",
                 if charges == 1 { "" } else { "s" }
             )
+        }
+        RelicId::IGotAGuy => {
+            let n = counters.get(&RelicId::IGotAGuy).copied().unwrap_or(0);
+            format!(
+                "{base} [{n} free restock{} left]",
+                if n == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::TeaCeremony => {
+            let phase = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(0).clamp(0, 3);
+            let names = ["Harmony", "Respect", "Purity", "Tranquility"];
+            let label = names[phase as usize];
+            let remain = 4 - phase as i32;
+            format!(
+                "{base} [next: {label}, {remain} hand{}]",
+                if remain == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::Rakuware => {
+            format!("{base} [Harmony · Respect · Purity · Tranquility]")
+        }
+        RelicId::Chrysalis => {
+            let excess = counters
+                .get(&RelicId::MonarchButterfly)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let need = CHRYSALIS_HATCH_EXCESS_THRESHOLD.max(1);
+            format!("{base} [{excess}/{need} absorbed toward hatch]")
+        }
+        RelicId::MonarchButterfly => {
+            let excess = counters
+                .get(&RelicId::MonarchButterfly)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let tier = monarch_butterfly_tier(excess);
+            let chips = monarch_butterfly_bonus_chips(excess);
+            let next = monarch_next_tier_excess_floor(excess).map(|n| format!("next tier ≥{n}")).unwrap_or_else(|| "max tier".to_string());
+            format!("{base} [tier {tier}, +{chips} chips, {excess} excess, {next}]")
         }
         RelicId::Humility => {
             let streak = counters.get(&RelicId::Humility).copied().unwrap_or(0);
@@ -582,6 +695,13 @@ pub fn relic_description_live(
         RelicId::RiverRunner => {
             let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);
             format!("{base} [+{chips} chips]")
+        }
+        RelicId::GhostHand => {
+            if let Some(n) = ghost_hand_chips_preview {
+                format!("{base} [+{n} chips]")
+            } else {
+                base.to_string()
+            }
         }
         RelicId::LotusBloom => {
             let blooms = counters.get(&RelicId::LotusBloom).copied().unwrap_or(0);
@@ -874,7 +994,9 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::Geese
             | RelicId::VoiceOfThePeople
             | RelicId::VoiceOfTheElite
+            | RelicId::RustlingGooseEgg
             | RelicId::TeaCeremony
+            | RelicId::Rakuware
             | RelicId::GhostHand
             | RelicId::RiverRunner
             | RelicId::MeltingIce
@@ -918,6 +1040,9 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::WayOfSequences
             | RelicId::SilverFiligreeLantern
             | RelicId::GlassCannon
+            | RelicId::EulersNumber
+            | RelicId::PiConstant
+            | RelicId::MonarchButterfly
     )
 }
 
@@ -955,8 +1080,10 @@ pub struct ScoreContext<'a> {
     /// tile_polisher accumulated bonus, river_runner accumulated bonus, etc.).
     /// Keyed by RelicId, value meaning varies by relic.
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
-    /// Number of hand tiles NOT in the scored sets (for Ghost Hand).
-    pub unscored_hand_tiles: usize,
+    /// Player hand snapshot at scoring time (before `take_selected_tiles` in
+    /// classic mode; at structure cash-in this is tiles still in hand, disjoint
+    /// from structure). Used by Ghost Hand to sum point values of unscored tiles.
+    pub hand_for_ghost: &'a [crate::core::tile::Tile],
     /// When set, this score is from **structure cash-in** (`trigger_structure`), not from a
     /// direct hand play. Relic hooks attach either when melds **land**
     /// (`commit_selection_to_structure`) or when the player **cashes in** — e.g. MeltingIce /
@@ -1039,6 +1166,7 @@ mod tests {
                     | RelicId::LowTide
                     | RelicId::HighTide
                     | RelicId::MerchantsEye
+                    | RelicId::IGotAGuy
                     | RelicId::EdgeRunner
                     | RelicId::LuckySeven
                     | RelicId::Momentum
@@ -1058,7 +1186,9 @@ mod tests {
                     | RelicId::Geese
                     | RelicId::VoiceOfThePeople
                     | RelicId::VoiceOfTheElite
+                    | RelicId::RustlingGooseEgg
                     | RelicId::TeaCeremony
+                    | RelicId::Rakuware
                     | RelicId::GhostHand
                     | RelicId::Humility
                     | RelicId::Obsession
@@ -1096,7 +1226,13 @@ mod tests {
                     | RelicId::Tourist
                     | RelicId::Kintsugi
                     | RelicId::AntTrail
-                    | RelicId::BrocadePouch => {}
+                    | RelicId::BrocadePouch
+                    | RelicId::EulersNumber
+                    | RelicId::PiConstant
+                    | RelicId::BigHands
+                    | RelicId::TinyHands
+                    | RelicId::Chrysalis
+                    | RelicId::MonarchButterfly => {}
                 }
             }
             &[
@@ -1129,6 +1265,7 @@ mod tests {
                 RelicId::LowTide,
                 RelicId::HighTide,
                 RelicId::MerchantsEye,
+                RelicId::IGotAGuy,
                 RelicId::EdgeRunner,
                 RelicId::LuckySeven,
                 RelicId::Momentum,
@@ -1148,7 +1285,9 @@ mod tests {
                 RelicId::Geese,
                 RelicId::VoiceOfThePeople,
                 RelicId::VoiceOfTheElite,
+                RelicId::RustlingGooseEgg,
                 RelicId::TeaCeremony,
+                RelicId::Rakuware,
                 RelicId::GhostHand,
                 RelicId::Humility,
                 RelicId::Obsession,
@@ -1187,6 +1326,12 @@ mod tests {
                 RelicId::Kintsugi,
                 RelicId::AntTrail,
                 RelicId::BrocadePouch,
+                RelicId::EulersNumber,
+                RelicId::PiConstant,
+                RelicId::BigHands,
+                RelicId::TinyHands,
+                RelicId::Chrysalis,
+                RelicId::MonarchButterfly,
             ]
         };
 

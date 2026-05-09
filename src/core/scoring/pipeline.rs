@@ -10,6 +10,44 @@ use super::{
     tile_by_id, tile_is_debuffed,
 };
 
+fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
+    use std::collections::HashSet;
+    let suits: HashSet<Suit> = tiles
+        .iter()
+        .filter(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles))
+        .map(|t| t.suit)
+        .collect();
+    (suits.len() >= 2).then_some(40)
+}
+
+fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
+    let honors = tiles
+        .iter()
+        .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
+        .count() as i32;
+    (honors > 0).then_some(10 * honors)
+}
+
+fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
+    let numbered_suits: Vec<Suit> = tiles
+        .iter()
+        .filter(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles))
+        .map(|t| t.suit)
+        .collect();
+    if !numbered_suits.is_empty() && numbered_suits.iter().all(|&s| s == numbered_suits[0]) {
+        Some(1.5)
+    } else {
+        None
+    }
+}
+
+fn tea_tranquility_chips(sets: &[DetectedSet]) -> Option<i32> {
+    sets
+        .iter()
+        .any(|s| s.kind == SetKind::Pair)
+        .then_some(35)
+}
+
 pub fn score_sets_with_original(
     tiles: &[Tile],
     sets: &[DetectedSet],
@@ -319,10 +357,10 @@ fn score_sets_inner(
         }
     }
 
-    if has(RelicId::TeaCeremony) {
+    if has(RelicId::RustlingGooseEgg) {
         let charges = ctx
             .relic_counters
-            .get(&RelicId::TeaCeremony)
+            .get(&RelicId::RustlingGooseEgg)
             .copied()
             .unwrap_or(0);
         if charges > 0 {
@@ -335,13 +373,59 @@ fn score_sets_inner(
                 }
             }
             if retrigger > 0 {
-                push_chips!("Tea Ceremony", retrigger);
+                push_chips!("XXXL Egg", retrigger);
             }
         }
     }
 
-    if has(RelicId::GhostHand) && ctx.unscored_hand_tiles > 0 {
-        push_chips!("Ghost Hand", 2 * ctx.unscored_hand_tiles as i32);
+    if has(RelicId::TeaCeremony) {
+        let phase = ctx
+            .relic_counters
+            .get(&RelicId::TeaCeremony)
+            .copied()
+            .unwrap_or(0)
+            .clamp(0, 3);
+        match phase {
+            0 => {
+                if let Some(c) = tea_harmony_chips(tiles) {
+                    push_chips!("Tea Ceremony · Harmony", c);
+                }
+            }
+            1 => {
+                if let Some(c) = tea_respect_chips(tiles) {
+                    push_chips!("Tea Ceremony · Respect", c);
+                }
+            }
+            2 => {
+                if let Some(m) = tea_purity_mult(tiles) {
+                    push_mult!("Tea Ceremony · Purity", m);
+                }
+            }
+            3 => {
+                if let Some(c) = tea_tranquility_chips(sets) {
+                    push_chips!("Tea Ceremony · Tranquility", c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if has(RelicId::GhostHand) && !ctx.hand_for_ghost.is_empty() {
+        use std::collections::HashSet;
+        let scored_ids: HashSet<u32> = sets
+            .iter()
+            .flat_map(|s| s.tile_ids.iter().copied())
+            .collect();
+        let mut ghost_chips = 0i32;
+        for t in ctx.hand_for_ghost {
+            if scored_ids.contains(&t.id) {
+                continue;
+            }
+            ghost_chips += effective_point_value(t);
+        }
+        if ghost_chips > 0 {
+            push_chips!("Ghost Hand", ghost_chips);
+        }
     }
 
     if has(RelicId::RiverRunner) {
@@ -753,6 +837,18 @@ fn score_sets_inner(
         }
     }
 
+    if has(RelicId::MonarchButterfly) {
+        let excess = ctx
+            .relic_counters
+            .get(&RelicId::MonarchButterfly)
+            .copied()
+            .unwrap_or(0);
+        let bonus = crate::core::relic::monarch_butterfly_bonus_chips(excess);
+        if bonus > 0 {
+            push_chips!("Monarch Butterfly", bonus);
+        }
+    }
+
     if has(RelicId::Momentum) && ctx.plays_used > 0 {
         push_mult!("Momentum", 0.5 * ctx.plays_used as f64);
     }
@@ -778,6 +874,14 @@ fn score_sets_inner(
 
     if has(RelicId::SilkMoth) {
         push_mult!("Silk Moth", 2.0);
+    }
+
+    for _ in 0..count(RelicId::EulersNumber) {
+        push_mult!("Euler's Number", std::f64::consts::E);
+    }
+
+    for _ in 0..count(RelicId::PiConstant) {
+        push_mult!("Pi", std::f64::consts::PI);
     }
 
     if has(RelicId::Humility) {
@@ -821,6 +925,21 @@ fn score_sets_inner(
             .unwrap_or(0);
         if broken > 0 {
             push_mult!("Kintsugi", broken as f64);
+        }
+    }
+
+    if has(RelicId::Rakuware) {
+        if let Some(c) = tea_harmony_chips(tiles) {
+            push_chips!("Rakuware · Harmony", c);
+        }
+        if let Some(c) = tea_respect_chips(tiles) {
+            push_chips!("Rakuware · Respect", c);
+        }
+        if let Some(m) = tea_purity_mult(tiles) {
+            push_mult!("Rakuware · Purity", m);
+        }
+        if let Some(c) = tea_tranquility_chips(sets) {
+            push_chips!("Rakuware · Tranquility", c);
         }
     }
 
@@ -987,7 +1106,7 @@ fn score_sets_inner(
     }
 
     for _ in 0..count(RelicId::GlassCannon) {
-        let delta = mult;
+        let delta = mult * 3.0;
         push_mult!("Glass Cannon", delta);
     }
 
