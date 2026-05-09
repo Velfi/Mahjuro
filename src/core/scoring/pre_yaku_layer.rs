@@ -12,7 +12,7 @@ use super::{meld_chip_bonus, tile_by_id, tile_is_debuffed, ScoreStep};
 
 #[inline]
 fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
-    if tile_is_debuffed(t, ctx.tile_debuffs) {
+    if tile_is_debuffed(t, ctx.tiles.debuffs) {
         0
     } else {
         t.point_value() as i32
@@ -31,9 +31,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     steps: &mut Vec<ScoreStep>,
     flower_gold: &mut i32,
 ) {
-    let has_sequence_surge = eff.has(ctx.relics, RelicId::SequenceSurge);
-    let has_pair_power = eff.has(ctx.relics, RelicId::PairPower);
-    let has_honor_fury = eff.has(ctx.relics, RelicId::HonorFury);
+    let has_sequence_surge = eff.has(ctx.relic.roster, RelicId::SequenceSurge);
+    let has_pair_power = eff.has(ctx.relic.roster, RelicId::PairPower);
+    let has_honor_fury = eff.has(ctx.relic.roster, RelicId::HonorFury);
 
     for s in sets {
         match s.kind {
@@ -48,7 +48,7 @@ pub(crate) fn apply_pre_yaku_scoring(
             }
             _ => {}
         }
-        if matches!(s.kind, SetKind::Kong) && eff.has(ctx.relics, RelicId::KongsBlessing) {
+        if matches!(s.kind, SetKind::Kong) && eff.has(ctx.relic.roster, RelicId::KongsBlessing) {
             push_chips(steps, chips, *mult, "Kong's Blessing", 120);
         }
 
@@ -57,7 +57,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 .tile_ids
                 .iter()
                 .filter_map(|id| tile_by_id(tiles, *id))
-                .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
+                .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
                 .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
                 .count() as i32;
             if honor_count > 0 {
@@ -66,12 +66,12 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    let has_jade_serpent = eff.has(ctx.relics, RelicId::JadeSerpent);
-    let has_red_serpent = eff.has(ctx.relics, RelicId::RedSerpent);
-    let has_blue_serpent = eff.has(ctx.relics, RelicId::BlueSerpent);
-    let has_edge_runner = eff.has(ctx.relics, RelicId::EdgeRunner);
-    let has_low_tide = eff.has(ctx.relics, RelicId::LowTide);
-    let has_high_tide = eff.has(ctx.relics, RelicId::HighTide);
+    let has_jade_serpent = eff.has(ctx.relic.roster, RelicId::JadeSerpent);
+    let has_red_serpent = eff.has(ctx.relic.roster, RelicId::RedSerpent);
+    let has_blue_serpent = eff.has(ctx.relic.roster, RelicId::BlueSerpent);
+    let has_edge_runner = eff.has(ctx.relic.roster, RelicId::EdgeRunner);
+    let has_low_tide = eff.has(ctx.relic.roster, RelicId::LowTide);
+    let has_high_tide = eff.has(ctx.relic.roster, RelicId::HighTide);
     if has_jade_serpent
         || has_red_serpent
         || has_blue_serpent
@@ -84,7 +84,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
-                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                if tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
                 if has_jade_serpent && t.suit == Suit::Bamboos {
@@ -125,9 +125,8 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::TilePolisher) {
-        let bonus = ctx
-            .relic_counters
+    if eff.has(ctx.relic.roster, RelicId::TilePolisher) {
+        let bonus = ctx.relic.counters
             .get(&RelicId::TilePolisher)
             .copied()
             .unwrap_or(0);
@@ -136,7 +135,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::LastBreath) && ctx.is_final_play && ctx.structure.is_some() {
+    if eff.has(ctx.relic.roster, RelicId::LastBreath) && ctx.round.is_final_play && ctx.structure.is_some() {
         let mut retrigger_chips = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -150,7 +149,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::Geese) {
+    if eff.has(ctx.relic.roster, RelicId::Geese) {
         let mut retrigger = 0i32;
         let mut remaining = 5;
         'outer: for s in sets {
@@ -169,7 +168,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::VoiceOfThePeople) {
+    if eff.has(ctx.relic.roster, RelicId::VoiceOfThePeople) {
         let mut retrigger = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -186,7 +185,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::VoiceOfTheElite) {
+    if eff.has(ctx.relic.roster, RelicId::VoiceOfTheElite) {
         let mut retrigger = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -203,9 +202,8 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::RustlingGooseEgg) {
-        let charges = ctx
-            .relic_counters
+    if eff.has(ctx.relic.roster, RelicId::RustlingGooseEgg) {
+        let charges = ctx.relic.counters
             .get(&RelicId::RustlingGooseEgg)
             .copied()
             .unwrap_or(0);
@@ -224,9 +222,8 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::TeaCeremony) {
-        let phase = ctx
-            .relic_counters
+    if eff.has(ctx.relic.roster, RelicId::TeaCeremony) {
+        let phase = ctx.relic.counters
             .get(&RelicId::TeaCeremony)
             .copied()
             .unwrap_or(0)
@@ -256,14 +253,14 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::GhostHand) && !ctx.hand_for_ghost.is_empty() {
+    if eff.has(ctx.relic.roster, RelicId::GhostHand) && !ctx.tiles.hand_for_ghost.is_empty() {
         use std::collections::HashSet;
         let scored_ids: HashSet<u32> = sets
             .iter()
             .flat_map(|s| s.tile_ids.iter().copied())
             .collect();
         let mut ghost_chips = 0i32;
-        for t in ctx.hand_for_ghost {
+        for t in ctx.tiles.hand_for_ghost {
             if scored_ids.contains(&t.id) {
                 continue;
             }
@@ -274,9 +271,8 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::RiverRunner) {
-        let bonus = ctx
-            .relic_counters
+    if eff.has(ctx.relic.roster, RelicId::RiverRunner) {
+        let bonus = ctx.relic.counters
             .get(&RelicId::RiverRunner)
             .copied()
             .unwrap_or(0);
@@ -285,9 +281,8 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::MeltingIce) {
-        let ice_chips = ctx
-            .relic_counters
+    if eff.has(ctx.relic.roster, RelicId::MeltingIce) {
+        let ice_chips = ctx.relic.counters
             .get(&RelicId::MeltingIce)
             .copied()
             .unwrap_or(0);
@@ -296,14 +291,13 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::Taotie) {
+    if eff.has(ctx.relic.roster, RelicId::Taotie) {
         // Permanent +80 base, plus the accumulated chip bonus from every
         // honor the mask has devoured this run. The accumulator grows in
         // `apply_scored_melds` at cash-in time (each devoured honor adds
         // 20 chips and the tile is permanently removed from the wall).
         push_chips(steps, chips, *mult, "Taotie", 80);
-        let devoured_chips = ctx
-            .relic_counters
+        let devoured_chips = ctx.relic.counters
             .get(&RelicId::Taotie)
             .copied()
             .unwrap_or(0);
@@ -326,7 +320,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
-                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                if tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
                 let Some(enh) = t.enhancement else { continue };
@@ -361,14 +355,14 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     {
         let meld_count = sets.len() as i32;
-        let garden_keeper_passes = eff.count(ctx.relics, RelicId::GardenKeeper);
-        let hanami = eff.has(ctx.relics, RelicId::Hanami);
+        let garden_keeper_passes = eff.count(ctx.relic.roster, RelicId::GardenKeeper);
+        let hanami = eff.has(ctx.relic.roster, RelicId::Hanami);
         for s in sets {
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
                     continue;
                 };
-                if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tile_debuffs) {
+                if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
                 let mut score_flower = |suffix: &str| {
@@ -416,7 +410,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relics, RelicId::DragonEcho) {
+    if eff.has(ctx.relic.roster, RelicId::DragonEcho) {
         let set_bases: Vec<i32> = sets
             .iter()
             .map(|s| {

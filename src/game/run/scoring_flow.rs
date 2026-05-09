@@ -1,5 +1,10 @@
 use super::*;
 
+use crate::core::relic::{
+    ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle,
+    ScoreTileBundle,
+};
+
 impl RunState {
     /// Commit selected melds into structure (costs one play). Alias for the
     /// structure-system primary action — same as [`Self::commit_selection_to_structure`].
@@ -211,20 +216,30 @@ impl RunState {
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let ctx = ScoreContext {
-            relics: &self.relics,
-            tile_debuffs: &scoring_tile_debuffs,
-            scored_last_turn: self.scored_last_turn,
-            dora_faces: self.wall.dora_faces(),
-            available_yaku: self.available_yaku.clone(),
-            round_wind: rw,
-            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
-            yaku_levels: Some(self.yaku_levels.clone()),
-            played_yaku_this_round: self.played_yaku_this_round.clone(),
-            gold: self.gold,
-            total_score: self.total_score_earned,
-            is_final_play: self.plays_remaining == 0,
-            relic_counters: self.relic_counters.clone(),
-            hand_for_ghost: &self.hand,
+            relic: ScoreRelicBundle {
+                roster: &self.relics,
+                counters: self.relic_counters.clone(),
+            },
+            tiles: ScoreTileBundle {
+                debuffs: &scoring_tile_debuffs,
+                hand_for_ghost: &self.hand,
+            },
+            round: ScoreRoundBundle {
+                scored_last_turn: self.scored_last_turn,
+                plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
+                round_wind: rw,
+                played_yaku_this_round: self.played_yaku_this_round.clone(),
+                is_final_play: self.plays_remaining == 0,
+            },
+            pattern: ScorePatternBundle {
+                dora_faces: self.wall.dora_faces(),
+                available_yaku: self.available_yaku.clone(),
+                yaku_levels: Some(self.yaku_levels.clone()),
+            },
+            economy: ScoreEconomyBundle {
+                gold: self.gold,
+                total_score: self.total_score_earned,
+            },
             structure: structure_meta,
         };
         let breakdown = score_sets_with_original(
@@ -687,20 +702,30 @@ impl RunState {
             inject_chicken_if_no_yaku: true,
         };
         let ctx = ScoreContext {
-            relics: &self.relics,
-            tile_debuffs: &scoring_tile_debuffs,
-            scored_last_turn: self.scored_last_turn,
-            dora_faces: self.wall.dora_faces(),
-            available_yaku: self.available_yaku.clone(),
-            round_wind: rw,
-            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
-            yaku_levels: Some(self.yaku_levels.clone()),
-            played_yaku_this_round: self.played_yaku_this_round.clone(),
-            gold: self.gold,
-            total_score: self.total_score_earned,
-            is_final_play: self.plays_remaining == 0,
-            relic_counters: self.relic_counters.clone(),
-            hand_for_ghost: &self.hand,
+            relic: ScoreRelicBundle {
+                roster: &self.relics,
+                counters: self.relic_counters.clone(),
+            },
+            tiles: ScoreTileBundle {
+                debuffs: &scoring_tile_debuffs,
+                hand_for_ghost: &self.hand,
+            },
+            round: ScoreRoundBundle {
+                scored_last_turn: self.scored_last_turn,
+                plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
+                round_wind: rw,
+                played_yaku_this_round: self.played_yaku_this_round.clone(),
+                is_final_play: self.plays_remaining == 0,
+            },
+            pattern: ScorePatternBundle {
+                dora_faces: self.wall.dora_faces(),
+                available_yaku: self.available_yaku.clone(),
+                yaku_levels: Some(self.yaku_levels.clone()),
+            },
+            economy: ScoreEconomyBundle {
+                gold: self.gold,
+                total_score: self.total_score_earned,
+            },
             structure: Some(meta),
         };
         Some(score_sets_with_original(
@@ -777,20 +802,30 @@ impl RunState {
         let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
         let ctx = ScoreContext {
-            relics: &self.relics,
-            tile_debuffs: &scoring_tile_debuffs,
-            scored_last_turn: self.scored_last_turn,
-            dora_faces: self.wall.dora_faces(),
-            available_yaku: self.available_yaku.clone(),
-            round_wind: rw,
-            plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
-            yaku_levels: Some(self.yaku_levels.clone()),
-            played_yaku_this_round: self.played_yaku_this_round.clone(),
-            gold: self.gold,
-            total_score: self.total_score_earned,
-            is_final_play: self.plays_remaining == 0,
-            relic_counters: self.relic_counters.clone(),
-            hand_for_ghost: &self.hand,
+            relic: ScoreRelicBundle {
+                roster: &self.relics,
+                counters: self.relic_counters.clone(),
+            },
+            tiles: ScoreTileBundle {
+                debuffs: &scoring_tile_debuffs,
+                hand_for_ghost: &self.hand,
+            },
+            round: ScoreRoundBundle {
+                scored_last_turn: self.scored_last_turn,
+                plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
+                round_wind: rw,
+                played_yaku_this_round: self.played_yaku_this_round.clone(),
+                is_final_play: self.plays_remaining == 0,
+            },
+            pattern: ScorePatternBundle {
+                dora_faces: self.wall.dora_faces(),
+                available_yaku: self.available_yaku.clone(),
+                yaku_levels: Some(self.yaku_levels.clone()),
+            },
+            economy: ScoreEconomyBundle {
+                gold: self.gold,
+                total_score: self.total_score_earned,
+            },
             structure: None,
         };
         let mut best = default_sets;

@@ -24,11 +24,11 @@ pub(crate) fn apply_dora_yaku_and_structure(
     mult: &mut f64,
     steps: &mut Vec<ScoreStep>,
 ) -> Vec<YakuKind> {
-    if !ctx.dora_faces.is_empty() {
+    if !ctx.pattern.dora_faces.is_empty() {
         let dora_count = tiles
             .iter()
-            .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
-            .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
+            .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
+            .filter(|t| ctx.pattern.dora_faces.contains(&(t.suit, t.rank)))
             .count() as i32;
         if dora_count > 0 {
             let delta = 25 * dora_count;
@@ -38,15 +38,15 @@ pub(crate) fn apply_dora_yaku_and_structure(
                 kind: StepKind::Chips,
                 tile_ids: tiles
                     .iter()
-                    .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
-                    .filter(|t| ctx.dora_faces.contains(&(t.suit, t.rank)))
+                    .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
+                    .filter(|t| ctx.pattern.dora_faces.contains(&(t.suit, t.rank)))
                     .map(|t| t.id)
                     .collect(),
                 running_chips: *chips,
                 running_mult: *mult,
                 running_total: combine(*chips, *mult),
             });
-            for _ in 0..eff.count(ctx.relics, RelicId::DoraCrown) {
+            for _ in 0..eff.count(ctx.relic.roster, RelicId::DoraCrown) {
                 push_chips(
                     steps,
                     chips,
@@ -58,13 +58,13 @@ pub(crate) fn apply_dora_yaku_and_structure(
         }
     }
 
-    let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round_wind, original_tiles);
-    let mut detected_yaku: Vec<YakuKind> = if ctx.available_yaku.is_empty() {
+    let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round.round_wind, original_tiles);
+    let mut detected_yaku: Vec<YakuKind> = if ctx.pattern.available_yaku.is_empty() {
         all_yaku
     } else {
         all_yaku
             .into_iter()
-            .filter(|y| ctx.available_yaku.contains(y))
+            .filter(|y| ctx.pattern.available_yaku.contains(y))
             .collect()
     };
     if let Some(st) = &ctx.structure
@@ -74,12 +74,12 @@ pub(crate) fn apply_dora_yaku_and_structure(
         detected_yaku.push(YakuKind::ChickenHand);
     }
     let level_of =
-        |y: YakuKind| -> u32 { ctx.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
+        |y: YakuKind| -> u32 { ctx.pattern.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
     for yaku in &detected_yaku {
         let level = level_of(*yaku);
         let mut mult_bonus = yaku.mult_bonus_at(level);
         let mut chip_bonus = yaku.chip_bonus_at(level);
-        if censor_repeats && ctx.played_yaku_this_round.contains(yaku) {
+        if censor_repeats && ctx.round.played_yaku_this_round.contains(yaku) {
             chip_bonus = (chip_bonus as f64 * 0.5).floor() as i32;
             mult_bonus *= 0.5;
         }

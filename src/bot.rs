@@ -18,7 +18,10 @@ use std::path::{Path, PathBuf};
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
 use crate::core::hand::{SetKind, detect_all_sets, validate_selection_with_rules};
-use crate::core::relic::{RelicId, RelicState, ScoreContext, all_relic_defs, relic_shop_price};
+use crate::core::relic::{
+    RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, relic_shop_price,
+};
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
 use crate::core::structure::StructureTriggerMeta;
@@ -265,24 +268,34 @@ fn bot_score_context_base<'a>(
     let plays_rem_after = run.plays_remaining.saturating_sub(1);
     let plays_used_after = run.plays_max.saturating_sub(plays_rem_after);
     ScoreContext {
-        relics,
-        tile_debuffs: &run.tile_debuffs,
-        scored_last_turn: run.scored_last_turn,
-        dora_faces: run.wall.dora_faces(),
-        available_yaku: run.available_yaku.clone(),
-        round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
-        plays_used: plays_used_after,
-        yaku_levels: Some(
-            yaku_levels_override
-                .cloned()
-                .unwrap_or_else(|| run.yaku_levels.clone()),
-        ),
-        played_yaku_this_round: run.played_yaku_this_round.clone(),
-        gold: run.gold,
-        total_score: run.total_score_earned,
-        is_final_play: plays_rem_after == 0,
-        relic_counters: run.relic_counters.clone(),
-        hand_for_ghost: run.hand(),
+        relic: ScoreRelicBundle {
+            roster: relics,
+            counters: run.relic_counters.clone(),
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &run.tile_debuffs,
+            hand_for_ghost: run.hand(),
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn: run.scored_last_turn,
+            plays_used: plays_used_after,
+            round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
+            played_yaku_this_round: run.played_yaku_this_round.clone(),
+            is_final_play: plays_rem_after == 0,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: run.wall.dora_faces(),
+            available_yaku: run.available_yaku.clone(),
+            yaku_levels: Some(
+                yaku_levels_override
+                    .cloned()
+                    .unwrap_or_else(|| run.yaku_levels.clone()),
+            ),
+        },
+        economy: ScoreEconomyBundle {
+            gold: run.gold,
+            total_score: run.total_score_earned,
+        },
         structure: None,
     }
 }

@@ -1,25 +1,38 @@
 use super::*;
 use crate::core::hand::find_pairs_and_triplets;
-use crate::core::relic::{RelicId, RelicState, ScoreContext};
+use crate::core::relic::{
+    RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+    ScoreRoundBundle, ScoreTileBundle,
+};
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 
 fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
     ScoreContext {
-        relics,
-        tile_debuffs: &[],
-        scored_last_turn,
-        dora_faces: vec![],
-        available_yaku: vec![],
-        round_wind: None,
-        plays_used: 0,
-        yaku_levels: None,
-        played_yaku_this_round: vec![],
-        gold: 0,
-        total_score: 0,
-        is_final_play: false,
-        relic_counters: std::collections::BTreeMap::new(),
-        hand_for_ghost: &[],
+        relic: ScoreRelicBundle {
+            roster: relics,
+            counters: std::collections::BTreeMap::new(),
+        },
+        tiles: ScoreTileBundle {
+            debuffs: &[],
+            hand_for_ghost: &[],
+        },
+        round: ScoreRoundBundle {
+            scored_last_turn,
+            plays_used: 0,
+            round_wind: None,
+            played_yaku_this_round: vec![],
+            is_final_play: false,
+        },
+        pattern: ScorePatternBundle {
+            dora_faces: vec![],
+            available_yaku: vec![],
+            yaku_levels: None,
+        },
+        economy: ScoreEconomyBundle {
+            gold: 0,
+            total_score: 0,
+        },
         structure: None,
     }
 }
@@ -166,7 +179,7 @@ fn yaku_levels_scale_chip_and_mult() {
     let mut levels = crate::core::zodiac::YakuLevels::default();
     levels.levels.insert(crate::core::yaku::YakuKind::Toitoi, 3);
     let mut ctx = ctx_with(&r, false);
-    ctx.yaku_levels = Some(levels);
+    ctx.pattern.yaku_levels = Some(levels);
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     let toitoi_chip = breakdown
         .steps
@@ -198,7 +211,7 @@ fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
     let mut ctx = ctx_with(&r, false);
-    ctx.tile_debuffs = &[crate::core::debuff::TileDebuff::Class(
+    ctx.tiles.debuffs = &[crate::core::debuff::TileDebuff::Class(
         crate::core::debuff::TileDebuffClass::Terminals,
     )];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
@@ -418,7 +431,7 @@ fn dora_chips_per_matching_tile() {
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
     let mut ctx = ctx_with(&r, false);
-    ctx.dora_faces = vec![(Suit::Characters, 5)];
+    ctx.pattern.dora_faces = vec![(Suit::Characters, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     let (idx, _) = breakdown
         .steps
@@ -504,7 +517,7 @@ fn dora_crown_alone_adds_ten_per_dora() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DoraCrown]);
     let mut ctx = ctx_with(&r, false);
-    ctx.dora_faces = vec![(Suit::Characters, 5)];
+    ctx.pattern.dora_faces = vec![(Suit::Characters, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     // 3 dora * (25 base + 10 crown bonus) = 105
     assert_eq!(dora_chips_delta(&breakdown), 105);
@@ -520,7 +533,7 @@ fn mirror_tile_doubles_dora_crown_bonus() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::MirrorTile, RelicId::DoraCrown]);
     let mut ctx = ctx_with(&r, false);
-    ctx.dora_faces = vec![(Suit::Characters, 5)];
+    ctx.pattern.dora_faces = vec![(Suit::Characters, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
     // 3 dora * 25 base + (3 dora * 10 crown bonus) * 2 (mirror) = 75 + 60 = 135
     assert_eq!(dora_chips_delta(&breakdown), 135);
