@@ -77,7 +77,6 @@ use crate::render::table_transform::{
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
-use crate::render::texture_upload::{load_pack_textures, spawn_background_loader};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::world_space::pixel_to_world;
@@ -148,15 +147,21 @@ struct TonemapParams {
     _pad: [f32; 2],
 }
 
+/// Shared by `emissive_probe_update.wgsl` and `emissive_probe_apply.wgsl` (must match WGSL layout).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct EmissiveGiParams {
-    inv_view_proj: [f32; 16],
-    view_pos: [f32; 4],
-    /// Full-res width/height (pixels); zw unused.
-    screen: [f32; 4],
-    /// x = strength, y = depth edge weight, z = tap radius (px), w unused.
-    tuning: [f32; 4],
+pub(crate) struct ProbeGiFrameUniform {
+    pub inv_view_proj: [f32; 16],
+    pub view_proj: [f32; 16],
+    pub world_min: [f32; 4],
+    pub world_max: [f32; 4],
+    /// x = nx, y = ny, z = nz, w = probe_count (nx×ny×nz).
+    pub grid_dims: [u32; 4],
+    /// xy = full-res width/height; z = max march distance (world); w = indirect strength scale.
+    pub screen_march: [f32; 4],
+    pub cam_pos: [f32; 4],
+    /// x = sphere direction samples, y = march steps, zw unused.
+    pub sample_params: [u32; 4],
 }
 
 #[repr(C)]
@@ -1192,10 +1197,14 @@ pub struct WgpuRenderer {
     /// Half-res emissive indirect estimate (linear HDR).
     emissive_gi_texture: wgpu::Texture,
     emissive_gi_view: wgpu::TextureView,
-    emissive_ssgi_pipeline: wgpu::RenderPipeline,
-    emissive_ssgi_bind_group_layout: wgpu::BindGroupLayout,
-    emissive_ssgi_bind_group: wgpu::BindGroup,
-    emissive_gi_params_buffer: wgpu::Buffer,
+    emissive_probe_update_pipeline: wgpu::ComputePipeline,
+    emissive_probe_update_bind_group_layout: wgpu::BindGroupLayout,
+    emissive_probe_update_bind_group: wgpu::BindGroup,
+    emissive_probe_apply_pipeline: wgpu::RenderPipeline,
+    emissive_probe_apply_bind_group_layout: wgpu::BindGroupLayout,
+    emissive_probe_apply_bind_group: wgpu::BindGroup,
+    probe_gi_frame_uniform_buffer: wgpu::Buffer,
+    probe_sh_buffer: wgpu::Buffer,
     emissive_gi_composite_pipeline: wgpu::RenderPipeline,
     emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
     emissive_gi_composite_bind_group: wgpu::BindGroup,
@@ -1341,7 +1350,7 @@ pub struct WgpuRenderer {
     /// fallback is bound. Used to skip redundant bind-group rebuilds.
     ribbon_slot_zodiac: Vec<Option<(u8, u8)>>,
     /// Three-part zodiac silk textures (top/mid/bot per zodiac).
-    ribbon_zodiac_tex: crate::render::texture_upload::ZodiacRibbonTextures,
+    ribbon_zodiac_tex: ZodiacRibbonTextures,
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
     talisman_instances: Vec<LitMeshInstance>,

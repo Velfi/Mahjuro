@@ -104,19 +104,7 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
     return sum / 9.0;
 }
 
-/// Stephen Hill / Narkowicz ACES fitted — stable across all scenes (shared with `tile_3d` / `lit_mesh`).
-fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return clamp(
-        (color * (a * color + b)) / (color * (c * color + d) + e),
-        vec3<f32>(0.0),
-        vec3<f32>(1.0),
-    );
-}
+// `aces_fitted` — see `scene_hdr_tonemap.wgsl` (prepended at pipeline creation).
 
 fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (vec3<f32>(1.0) - F0) * pow(max(1.0 - cos_theta, 0.0), 5.0);

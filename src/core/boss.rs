@@ -27,6 +27,7 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 use crate::core::debuff::{TileDebuff, TileDebuffClass};
+use crate::core::json_asset::load_json_asset;
 use crate::core::relic::RelicId;
 use crate::core::rules::RuleModifier;
 use crate::game::run::RunState;
@@ -585,10 +586,7 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
 
 fn load_boss_defs() -> Vec<BossDef> {
     const PATH: &str = "data/bosses.json";
-    let bytes = crate::asset_path::get(PATH)
-        .unwrap_or_else(|| panic!("boss data file missing: assets/{PATH}"));
-    let raw: Vec<BossPresentationRaw> = serde_json::from_slice(&bytes.data)
-        .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+    let raw: Vec<BossPresentationRaw> = load_json_asset(PATH, "boss data");
     raw.into_iter()
         .map(|r| {
             let beh = boss_behavior(r.id);
@@ -611,29 +609,32 @@ fn load_boss_defs() -> Vec<BossDef> {
         .collect()
 }
 
+struct BossDefCaches {
+    regular: Vec<BossDef>,
+    final_: Vec<BossDef>,
+}
+
+static BOSS_DEF_CACHES: OnceLock<BossDefCaches> = OnceLock::new();
+
+fn boss_def_caches() -> &'static BossDefCaches {
+    BOSS_DEF_CACHES.get_or_init(|| {
+        let all = load_boss_defs();
+        let (regular, final_): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|d| d.tier != BossTier::Final);
+        BossDefCaches { regular, final_ }
+    })
+}
+
 /// Non-final bosses (everything in the regular ante pool).
 pub fn all_bosses() -> &'static [BossDef] {
-    static DEFS: OnceLock<Vec<BossDef>> = OnceLock::new();
-    DEFS.get_or_init(|| {
-        load_boss_defs()
-            .into_iter()
-            .filter(|d| d.tier != BossTier::Final)
-            .collect()
-    })
-    .as_slice()
+    boss_def_caches().regular.as_slice()
 }
 
 /// Final-tier bosses. Reserved for `FINAL_ANTE` and never drawn into the
 /// regular pool.
 pub fn final_bosses() -> &'static [BossDef] {
-    static DEFS: OnceLock<Vec<BossDef>> = OnceLock::new();
-    DEFS.get_or_init(|| {
-        load_boss_defs()
-            .into_iter()
-            .filter(|d| d.tier == BossTier::Final)
-            .collect()
-    })
-    .as_slice()
+    boss_def_caches().final_.as_slice()
 }
 
 /// All non-final bosses, used to seed the per-run pool.
@@ -648,18 +649,9 @@ pub fn regular_pool() -> Vec<BossKind> {
 /// boss in the remaining pool qualifies (player got unlucky on draws), we
 /// widen by ignoring `min_ante` rather than crashing — soft bosses on a late
 /// ante are still better than no boss at all.
-#[allow(dead_code)]
-pub fn pick_for_ante(
-    pool: &mut Vec<BossKind>,
-    ante: u32,
-    rng: &mut impl rand::Rng,
-) -> Option<BossKind> {
-    pick_for_ante_with_floor(pool, ante, 0, rng)
-}
-
-/// Stake-aware variant — `min_ante_floor` is subtracted from each boss's
-/// `min_ante` (saturating) so higher stakes can see harder bosses earlier.
-/// The `pick_for_ante` wrapper passes floor 0 for the Spring default.
+///
+/// `min_ante_floor`: subtracted from each boss's `min_ante` (saturating) so
+/// higher stakes can see harder bosses earlier. Use `0` for the Spring default.
 pub fn pick_for_ante_with_floor(
     pool: &mut Vec<BossKind>,
     ante: u32,

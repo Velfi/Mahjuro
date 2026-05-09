@@ -4,6 +4,7 @@ pub mod debuff;
 pub mod deck;
 pub mod hand;
 pub mod hand_intent;
+mod json_asset;
 pub mod progression;
 pub mod relic;
 pub mod rules;

@@ -1,4 +1,11 @@
+use std::collections::HashMap;
+use std::sync::mpsc;
+use std::time::Instant;
+
 use super::*;
+
+use crate::core::tile_pack::TilePackKind;
+use crate::render::gpu_types::RelicTextureGpu;
 
 /// Linear HDR color format for the main 3D scene, bloom chain, and journal
 /// GPU scene target — independent of swapchain (SDR vs HDR).
@@ -390,12 +397,180 @@ pub(super) fn load_metal_heightmap(
     }
 }
 
-/// Load the three-part zodiac silk ribbon textures (top/mid/bot per zodiac).
+/// Decoded three-part zodiac ribbon textures (top cap, tileable middle, bottom cap).
+/// One set of three textures per `ZodiacKind` in `ZodiacKind::all()` order.
+pub(super) struct ZodiacRibbonTextures {
+    /// Keeps GPU textures alive so the views remain valid.
+    #[allow(dead_code)]
+    pub textures: Vec<wgpu::Texture>,
+    pub top_views: Vec<wgpu::TextureView>,
+    pub mid_views: Vec<wgpu::TextureView>,
+    pub bot_views: Vec<wgpu::TextureView>,
+}
+
+/// Decode the zodiac silk ribbon PNGs (three parts each: `_top`, `_mid`, `_bot`)
+/// and upload them as sRGB textures. Each missing or undecodeable file falls
+/// back to a flat 1×1 white texture so the slot still renders (just untextured).
 pub(super) fn load_zodiac_ribbon_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> crate::render::texture_upload::ZodiacRibbonTextures {
-    crate::render::texture_upload::load_zodiac_ribbon_textures(device, queue)
+) -> ZodiacRibbonTextures {
+    use crate::core::zodiac::ZodiacKind;
+    let zodiacs = ZodiacKind::all();
+    let cap = zodiacs.len();
+    let mut textures = Vec::with_capacity(cap * 3);
+    let mut top_views = Vec::with_capacity(cap);
+    let mut mid_views = Vec::with_capacity(cap);
+    let mut bot_views = Vec::with_capacity(cap);
+
+    let load_one = |textures: &mut Vec<wgpu::Texture>, slug: &str, part: &str| -> wgpu::TextureView {
+        let path = format!("textures/zodiacs/zodiac_{}_{}.png", slug, part);
+        let label = format!("zodiac-ribbon-{}-{}", slug, part);
+        let (tex, view) = match crate::asset_path::get(&path) {
+            Some(file) => match image::load_from_memory(&file.data) {
+                Ok(img) => {
+                    let rgba = img.into_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    upload_rgba_texture(device, queue, &label, &rgba.into_raw(), w, h)
+                }
+                Err(e) => {
+                    log::warn!("failed to decode {label}: {e} — using flat white fallback");
+                    upload_rgba_texture(device, queue, &label, &[255, 255, 255, 255], 1, 1)
+                }
+            },
+            None => {
+                log::warn!("zodiac ribbon texture missing at {path} — using flat white fallback");
+                upload_rgba_texture(device, queue, &label, &[255, 255, 255, 255], 1, 1)
+            }
+        };
+        textures.push(tex);
+        view
+    };
+
+    for &z in zodiacs {
+        let slug = z.slug();
+        top_views.push(load_one(&mut textures, slug, "top"));
+        mid_views.push(load_one(&mut textures, slug, "mid"));
+        bot_views.push(load_one(&mut textures, slug, "bot"));
+    }
+    ZodiacRibbonTextures {
+        textures,
+        top_views,
+        mid_views,
+        bot_views,
+    }
+}
+
+/// Load tile-pack box art textures synchronously at init. There are at most 7
+/// packs and only a handful have art, so the blocking decode is trivial.
+pub(super) fn load_pack_textures(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    text_layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    default_relief_view: &wgpu::TextureView,
+) -> HashMap<TilePackKind, RelicTextureGpu> {
+    let mut map = HashMap::new();
+    for &kind in TilePackKind::all() {
+        let asset_path = format!("textures/packs/{}", kind.asset_filename());
+        let bytes = match crate::asset_path::get(&asset_path) {
+            Some(file) => file.data.to_vec(),
+            None => {
+                log::debug!("pack texture not found (optional): {asset_path}");
+                continue;
+            }
+        };
+        let img = match image::load_from_memory(&bytes) {
+            Ok(img) => img.into_rgba8(),
+            Err(e) => {
+                log::warn!("failed to decode pack texture {asset_path}: {e}");
+                continue;
+            }
+        };
+        let (w, h) = img.dimensions();
+        let (tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(kind.name()),
+            layout: text_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        map.insert(
+            kind,
+            RelicTextureGpu {
+                view,
+                texture: tex,
+                bind_group,
+                relief_texture: None,
+                relief_view: default_relief_view.clone(),
+            },
+        );
+    }
+    log::debug!("loaded {} pack textures synchronously", map.len());
+    map
+}
+
+/// Spawn a background thread that decodes all background PNGs and sends the RGBA
+/// data back over a channel.
+pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
+    let (tx, rx) = mpsc::channel();
+
+    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::MainMenuExterior]
+        .iter()
+        .filter_map(|id| id.asset_path().map(|p| (*id, p)))
+        .collect();
+
+    std::thread::Builder::new()
+        .name("bg-loader".into())
+        .spawn(move || {
+            let t_thread = Instant::now();
+            let mut decoded = 0usize;
+            let mut decode_time = std::time::Duration::ZERO;
+            for (id, asset_path) in backgrounds {
+                let bytes = match crate::asset_path::get(asset_path) {
+                    Some(file) => file.data.to_vec(),
+                    None => {
+                        log::warn!("background image not found: {asset_path}");
+                        continue;
+                    }
+                };
+                let t_decode = Instant::now();
+                let img = match image::load_from_memory(&bytes) {
+                    Ok(img) => img.into_rgba8(),
+                    Err(e) => {
+                        log::warn!("failed to decode background {asset_path}: {e}");
+                        continue;
+                    }
+                };
+                decode_time += t_decode.elapsed();
+                decoded += 1;
+                let (w, h) = img.dimensions();
+                let msg = DecodedBackgroundImage {
+                    id,
+                    rgba: img.into_raw(),
+                    width: w,
+                    height: h,
+                };
+                if tx.send(msg).is_err() {
+                    break;
+                }
+            }
+            log::debug!(
+                "bg-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
+                t_thread.elapsed(),
+            );
+        })
+        .expect("failed to spawn bg-loader thread");
+
+    rx
 }
 
 pub(super) fn create_depth(

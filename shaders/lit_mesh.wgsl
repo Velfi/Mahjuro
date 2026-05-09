@@ -72,19 +72,7 @@ struct TileOccluders {
 };
 @group(1) @binding(1) var<uniform> occluders: TileOccluders;
 
-/// Same ACES fit as `shop_glb.wgsl` — physical HDR path (`ssr_globals.felt.y` = 1).
-fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return clamp(
-        (color * (a * color + b)) / (color * (c * color + d) + e),
-        vec3<f32>(0.0),
-        vec3<f32>(1.0),
-    );
-}
+// `aces_fitted` — see `scene_hdr_tonemap.wgsl` (prepended at pipeline creation).
 
 // Jorge Jimenez's interleaved gradient noise. Cheap, low-discrepancy,
 // stable in screen space — perfect for jittering shadow taps without

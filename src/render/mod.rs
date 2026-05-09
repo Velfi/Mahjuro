@@ -45,7 +45,6 @@ pub mod table_mesh;
 pub mod table_transform;
 pub mod talisman_mesh;
 pub mod tally_stick_mesh;
-pub mod texture_upload;
 pub mod theme;
 pub mod tile_body;
 pub mod tile_glb;

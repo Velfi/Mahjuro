@@ -85,7 +85,7 @@ use glam::{Mat4, Vec3};
 
 enum ShopGlbCache {
     Uninit,
-    Ready(Option<ShopGlbCpu>),
+    Ready(Option<RoomGlbCpu>),
 }
 
 static SHOP_GLB_CPU: RwLock<ShopGlbCache> = RwLock::new(ShopGlbCache::Uninit);
@@ -143,7 +143,7 @@ fn ensure_shop_glb_loaded() {
 
 /// Read-only access to decoded shop data (markers, lights, collision, …).  
 /// Do not call [`release_shop_environment_cpu_sources_after_gpu_upload`] from inside `f` (deadlock).
-pub fn with_shop_glb_cpu<R>(f: impl FnOnce(Option<&ShopGlbCpu>) -> R) -> R {
+pub fn with_shop_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_shop_glb_loaded();
     let g = SHOP_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
     match &*g {
@@ -155,13 +155,17 @@ pub fn with_shop_glb_cpu<R>(f: impl FnOnce(Option<&ShopGlbCpu>) -> R) -> R {
 
 /// Drops environment mesh + decoded texture RAM after [`crate::render::wgpu_renderer::WgpuRenderer`]
 /// has uploaded shop draws to the GPU. Safe to call once at init; no-op if shop failed to load.
+pub fn release_room_environment_primitives_cpu(cpu: &mut RoomGlbCpu) {
+    for env in &mut cpu.environment_primitives {
+        release_loaded_primitive_gpu_source_buffers(&mut env.mesh);
+    }
+    cpu.environment_primitives.shrink_to_fit();
+}
+
 pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
     let mut g = SHOP_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let ShopGlbCache::Ready(Some(cpu)) = &mut *g {
-        for env in &mut cpu.environment_primitives {
-            release_loaded_primitive_gpu_source_buffers(&mut env.mesh);
-        }
-        cpu.environment_primitives.shrink_to_fit();
+        release_room_environment_primitives_cpu(cpu);
     }
 }
 
@@ -181,9 +185,36 @@ pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 /// assets use emissive strength; raise only if authors omit the extension.
 pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = 1.0;
 
-/// Linear HDR strength for the half-res emissive screen-space gather on shop / hallway GLB
-/// (additive before tonemap; keys off [`SHOP_GLTF_EMISSIVE_SCALE`] via the emissive-only buffer).
+/// Linear HDR strength for emissive probe indirect on shop / hallway GLB (additive before tonemap).
 pub const SHOP_ROOM_EMISSIVE_GI_STRENGTH: f32 = 0.42;
+
+/// 3D probe grid resolution (world AABB from room corners). Product must be ≤ [`ROOM_EMISSIVE_PROBE_MAX`].
+pub const ROOM_EMISSIVE_PROBE_GRID: [u32; 3] = [7, 4, 6];
+
+pub const ROOM_EMISSIVE_PROBE_MAX: u32 = 256;
+
+pub const ROOM_EMISSIVE_PROBE_DIR_SAMPLES: u32 = 20;
+
+pub const ROOM_EMISSIVE_PROBE_MARCH_STEPS: u32 = 14;
+
+/// Max ray length in world units for probe → emissive screen-space march.
+pub const ROOM_EMISSIVE_PROBE_MARCH_WORLD: f32 = 28.0;
+
+/// Tighten or expand the room AABB used for probe placement (`pad_frac` of the box size per axis).
+pub fn room_probe_world_aabb(corners: &[Vec3], pad_frac: f32) -> Option<(Vec3, Vec3)> {
+    if corners.is_empty() {
+        return None;
+    }
+    let mut mn = corners[0];
+    let mut mx = corners[0];
+    for c in corners.iter().skip(1) {
+        mn = mn.min(*c);
+        mx = mx.max(*c);
+    }
+    let diag = mx - mn;
+    let pad = diag * pad_frac + Vec3::splat(1e-3);
+    Some((mn - pad, mx + pad))
+}
 
 /// Default **tuning** multiplier for linear HDR (debug overlay); shop applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]
 /// on top. Table scenes use this value alone (no shop base).
@@ -302,14 +333,14 @@ pub fn shop_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3)
 }
 
 #[inline]
-pub fn shop_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &ShopGlbCpu) -> Mat4 {
+pub fn shop_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &RoomGlbCpu) -> Mat4 {
     room_env_model_matrix_from_bounds_doc(window_h, height_scale, cpu.environment_bounds_doc)
 }
 
 pub fn shop_world_bounds_corners_centered(
     window_h: f32,
     env_height_scale: f32,
-    cpu: &ShopGlbCpu,
+    cpu: &RoomGlbCpu,
 ) -> Vec<Vec3> {
     let Some(bounds) = cpu.environment_bounds_doc else {
         return Vec::new();
@@ -327,7 +358,8 @@ pub fn shop_camera_fit_fovy_for_corners(
     room_camera_fit_fovy_for_corners(window_w, window_h, cam, corners_world, margin_ndc)
 }
 
-pub struct ShopGlbCpu {
+/// Decoded room GLB (shop, hallway, …): shared layout for [`shop_glb.wgsl`] and punctual uploads.
+pub struct RoomGlbCpu {
     pub markers: HashMap<String, Mat4>,
     pub environment_primitives: Vec<ShopEnvPrimitiveCpu>,
     pub environment_bounds_doc: Option<ShopEnvironmentBounds>,
@@ -337,6 +369,10 @@ pub struct ShopGlbCpu {
     pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
     pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
 }
+
+/// Back-compat name — shop and hallway both decode to [`RoomGlbCpu`].
+#[allow(dead_code)]
+pub type ShopGlbCpu = RoomGlbCpu;
 
 #[derive(Copy, Clone)]
 struct ShopRoomWalkHooks;
@@ -382,7 +418,7 @@ pub const PLAYER_GOLD_DISH_MARKER: &str = "player_gold_dish";
 
 /// Document-space offset for the gold dish empty, same basis as [`marker_translation`].
 #[inline]
-pub fn player_gold_dish_marker_translation(cpu: &ShopGlbCpu) -> Option<Vec3> {
+pub fn player_gold_dish_marker_translation(cpu: &RoomGlbCpu) -> Option<Vec3> {
     marker_translation(cpu, PLAYER_GOLD_DISH_MARKER)
         .or_else(|| marker_translation(cpu, "PlayerGoldDish"))
 }
@@ -422,7 +458,7 @@ pub fn screen_rect_for_marker_mesh_bounds(
     win_h: f32,
     cam: &crate::render::draw_cmd::CameraParams,
     env_height_scale: f32,
-    cpu: &ShopGlbCpu,
+    cpu: &RoomGlbCpu,
     node_name: &str,
     min_rw: f32,
     min_rh: f32,
@@ -452,14 +488,19 @@ pub fn screen_rect_for_marker_mesh_bounds(
     Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
 }
 
-pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
-    let (document, buffers_vec, images) =
-        gltf::import_slice(data).context("gltf::import_slice(Shop.glb)")?;
+/// Shared glTF room walk used by [`load_shop_glb_from_bytes`] and [`crate::render::hallway_glb`].
+pub fn load_room_glb_from_bytes(
+    data: &[u8],
+    import_err_ctx: &'static str,
+    scene_err_ctx: &'static str,
+    hooks: &impl RoomEnvWalkHooks,
+) -> anyhow::Result<RoomGlbCpu> {
+    let (document, buffers_vec, images) = gltf::import_slice(data).context(import_err_ctx)?;
 
     let scene = document
         .default_scene()
         .or_else(|| document.scenes().next())
-        .context("Shop.glb has no scenes")?;
+        .context(scene_err_ctx)?;
 
     let buffers: Vec<Vec<u8>> = buffers_vec.into_iter().map(|b| b.0).collect();
 
@@ -475,7 +516,7 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
         walk_room_env_node(
             node,
             Mat4::IDENTITY,
-            &ShopRoomWalkHooks,
+            hooks,
             SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
             &mut markers,
             &mut environment_primitives,
@@ -492,7 +533,7 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
     let embedded_perspective_camera = embedded_cameras.pick();
     let environment_bounds_doc = room_environment_bounds(&environment_primitives);
 
-    Ok(ShopGlbCpu {
+    Ok(RoomGlbCpu {
         markers,
         environment_primitives,
         environment_bounds_doc,
@@ -502,6 +543,15 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
         embedded_point_lights,
         embedded_spot_lights,
     })
+}
+
+pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
+    load_room_glb_from_bytes(
+        data,
+        "gltf::import_slice(Shop.glb)",
+        "Shop.glb has no scenes",
+        &ShopRoomWalkHooks,
+    )
 }
 
 /// Shop camera from embedded GLB perspective camera, scaled like marker geometry.
@@ -523,7 +573,7 @@ pub fn shop_camera_from_glb_if_present(
 
 /// Document-space marker origin minus environment AABB center (multiply by [`shop_env_world_scale`]
 /// for world space consistent with the centered shop model matrix).
-pub fn marker_translation(cpu: &ShopGlbCpu, name: &str) -> Option<Vec3> {
+pub fn marker_translation(cpu: &RoomGlbCpu, name: &str) -> Option<Vec3> {
     marker_translation_doc(&cpu.markers, cpu.environment_bounds_doc, name)
 }
 
