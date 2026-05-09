@@ -1572,28 +1572,124 @@ impl WgpuRenderer {
         }
 
         if glb_room_bloom_linear && !is_prepass {
+            let room_aabb =
+                if ops
+                    .iter()
+                    .any(|o| matches!(o, RenderOp::ShopEnvironment))
+                {
+                    crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners =
+                                crate::render::shop_glb::shop_world_bounds_corners_centered(
+                                    camera.h,
+                                    self.shop_env_height_scale,
+                                    c,
+                                );
+                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
+                    })
+                } else if ops
+                    .iter()
+                    .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+                {
+                    crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners =
+                                crate::render::shop_glb::shop_world_bounds_corners_centered(
+                                    camera.h,
+                                    self.shop_env_height_scale,
+                                    c,
+                                );
+                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
+                    })
+                } else {
+                    None
+                };
+
+            let [nx, ny, nz] = crate::render::shop_glb::ROOM_EMISSIVE_PROBE_GRID;
+            let probe_count = nx * ny * nz;
+            debug_assert!(probe_count <= crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX);
+
             let inv_vp = glam::Mat4::from_cols_array(&camera.view_proj_arr).inverse();
             let gw = self.size.width.max(1) as f32;
             let gh = self.size.height.max(1) as f32;
-            let gi = crate::render::wgpu_renderer::EmissiveGiParams {
+
+            let (mn, mx) = if let Some((a, b)) = room_aabb {
+                (a, b)
+            } else {
+                (glam::Vec3::ZERO, glam::Vec3::ZERO)
+            };
+            let gi = crate::render::wgpu_renderer::ProbeGiFrameUniform {
                 inv_view_proj: inv_vp.to_cols_array(),
-                view_pos: [camera.cam_pos.x, camera.cam_pos.y, camera.cam_pos.z, 1.0],
-                screen: [gw, gh, 0.0, 0.0],
-                tuning: [
+                view_proj: camera.view_proj_arr,
+                world_min: [mn.x, mn.y, mn.z, 0.0],
+                world_max: [mx.x, mx.y, mx.z, 0.0],
+                grid_dims: [
+                    nx,
+                    ny,
+                    nz,
+                    if room_aabb.is_some() {
+                        probe_count
+                    } else {
+                        0
+                    },
+                ],
+                screen_march: [
+                    gw,
+                    gh,
+                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MARCH_WORLD,
                     crate::render::shop_glb::SHOP_ROOM_EMISSIVE_GI_STRENGTH,
-                    140.0,
-                    32.0,
-                    0.0,
+                ],
+                cam_pos: [camera.cam_pos.x, camera.cam_pos.y, camera.cam_pos.z, 1.0],
+                sample_params: [
+                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES,
+                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS,
+                    0,
+                    0,
                 ],
             };
             self.queue.write_buffer(
-                &self.emissive_gi_params_buffer,
+                &self.probe_gi_frame_uniform_buffer,
                 0,
                 bytemuck::bytes_of(&gi),
             );
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("emissive-ssgi-pass"),
+
+            if room_aabb.is_some() && probe_count > 0 {
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("emissive-probe-update-pass"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&self.emissive_probe_update_pipeline);
+                    cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
+                    let wg = (probe_count + 63) / 64;
+                    cpass.dispatch_workgroups(wg, 1, 1);
+                }
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("emissive-probe-apply-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.emissive_gi_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_pipeline(&self.emissive_probe_apply_pipeline);
+                    pass.set_bind_group(0, &self.emissive_probe_apply_bind_group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+            } else {
+                let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("emissive-probe-clear-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &self.emissive_gi_view,
                         resolve_target: None,
@@ -1608,9 +1704,6 @@ impl WgpuRenderer {
                     timestamp_writes: None,
                     multiview_mask: None,
                 });
-                pass.set_pipeline(&self.emissive_ssgi_pipeline);
-                pass.set_bind_group(0, &self.emissive_ssgi_bind_group, &[]);
-                pass.draw(0..3, 0..1);
             }
         }
 

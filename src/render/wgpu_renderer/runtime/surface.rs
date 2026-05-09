@@ -415,28 +415,52 @@ impl WgpuRenderer {
                     },
                 ],
             });
-        self.emissive_ssgi_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("emissive-ssgi-bg"),
-            layout: &self.emissive_ssgi_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.emissive_gi_params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.room_emissive_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                },
-            ],
-        });
+        self.emissive_probe_update_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("emissive-probe-update-bg"),
+                layout: &self.emissive_probe_update_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.probe_gi_frame_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.room_emissive_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.probe_sh_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        self.emissive_probe_apply_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("emissive-probe-apply-bg"),
+                layout: &self.emissive_probe_apply_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.probe_gi_frame_uniform_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.probe_sh_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&self.depth_view),
+                    },
+                ],
+            });
         self.emissive_gi_composite_bind_group =
             self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("emissive-gi-composite-bg"),

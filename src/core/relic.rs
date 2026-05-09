@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::json_asset::load_json_asset;
 use crate::core::tile::Suit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -634,10 +635,7 @@ pub fn all_relic_defs() -> &'static [RelicDef] {
 
 fn load_relic_defs() -> Vec<RelicDef> {
     const PATH: &str = "data/relics.json";
-    let bytes = crate::asset_path::get(PATH)
-        .unwrap_or_else(|| panic!("relic data file missing: assets/{PATH}"));
-    let raw: Vec<RelicDefRaw> = serde_json::from_slice(&bytes.data)
-        .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+    let raw: Vec<RelicDefRaw> = load_json_asset(PATH, "relic data");
     raw.into_iter()
         .map(|r| RelicDef {
             id: r.id,
@@ -737,6 +735,37 @@ fn relic_display_name(id: RelicId) -> String {
         .unwrap_or_else(|| format!("{id:?}"))
 }
 
+const COPY_RELIC_COMPATIBLE_SCORING_LINE: &str =
+    "Compatible: hand scoring treats this relic as duplicated for chips and mult.";
+
+#[inline]
+fn push_debuffed_self_copy_relic_line(parts: &mut Vec<String>, relics: &RelicState, self_id: RelicId) {
+    if relics.is_debuffed(self_id) {
+        let name = relic_display_name(self_id);
+        parts.push(format!("Debuffed: {name} does nothing while suppressed."));
+    }
+}
+
+#[inline]
+fn push_copy_target_line_with_debuff_note(
+    parts: &mut Vec<String>,
+    relics: &RelicState,
+    target: RelicId,
+    line_body: String,
+    copy_source_display_name: &str,
+) {
+    let mut line = line_body;
+    if relics.is_debuffed(target) {
+        line.push_str(&format!(
+            " That relic is debuffed, but {copy_source_display_name} still duplicates its scoring bonuses."
+        ));
+    }
+    parts.push(line);
+    if relic_scoring_copy_dup_is_compatible(target) {
+        parts.push(COPY_RELIC_COMPATIBLE_SCORING_LINE.to_string());
+    }
+}
+
 /// Tooltip helper: explain Mirror Tile's neighbor, scoring driver slot,
 /// and rough compatibility with the copied relic.
 pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize) -> String {
@@ -746,30 +775,22 @@ pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize
     }
 
     let mut parts: Vec<String> = Vec::new();
-
-    if relics.is_debuffed(RelicId::MirrorTile) {
-        parts.push("Debuffed: Mirror Tile does nothing while suppressed.".to_string());
-    }
+    push_debuffed_self_copy_relic_line(&mut parts, relics, RelicId::MirrorTile);
 
     let first_mirror_slot = active.iter().position(|&r| r == RelicId::MirrorTile);
     let neighbor = active.get(mirror_slot + 1).copied();
+    let mirror_name = relic_display_name(RelicId::MirrorTile);
 
     match neighbor {
         Some(tid) => {
             let name = relic_display_name(tid);
-            let mut line = format!("Copying: {name}.");
-            if relics.is_debuffed(tid) {
-                line.push_str(
-                    " That relic is debuffed, but Mirror Tile still duplicates its scoring bonuses.",
-                );
-            }
-            parts.push(line);
-            if relic_scoring_copy_dup_is_compatible(tid) {
-                parts.push(
-                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
-                        .to_string(),
-                );
-            }
+            push_copy_target_line_with_debuff_note(
+                &mut parts,
+                relics,
+                tid,
+                format!("Copying: {name}."),
+                &mirror_name,
+            );
         }
         None => {
             parts.push(
@@ -804,10 +825,9 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
     }
 
     let mut parts: Vec<String> = Vec::new();
+    push_debuffed_self_copy_relic_line(&mut parts, relics, RelicId::ShadowHand);
 
-    if relics.is_debuffed(RelicId::ShadowHand) {
-        parts.push("Debuffed: Shadow Hand does nothing while suppressed.".to_string());
-    }
+    let shadow_name = relic_display_name(RelicId::ShadowHand);
 
     match active.first().copied() {
         None => parts.push("No relics to copy.".to_string()),
@@ -819,19 +839,13 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
         }
         Some(tid) => {
             let name = relic_display_name(tid);
-            let mut line = format!("Copying: {name} (leftmost relic).");
-            if relics.is_debuffed(tid) {
-                line.push_str(
-                    " That relic is debuffed, but Shadow Hand still duplicates its scoring bonuses.",
-                );
-            }
-            parts.push(line);
-            if relic_scoring_copy_dup_is_compatible(tid) {
-                parts.push(
-                    "Compatible: hand scoring treats this relic as duplicated for chips and mult."
-                        .to_string(),
-                );
-            }
+            push_copy_target_line_with_debuff_note(
+                &mut parts,
+                relics,
+                tid,
+                format!("Copying: {name} (leftmost relic)."),
+                &shadow_name,
+            );
         }
     }
 

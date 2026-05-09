@@ -122,7 +122,43 @@ impl WgpuRenderer {
         // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
         let scene_hdr_format = SCENE_HDR_FORMAT;
 
-        let limits = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
+        let mut limits = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
+        // `downlevel_webgl2_defaults` zeros storage-buffer counts for WebGL2-tier parity; the
+        // emissive probe GI compute pass needs at least one `storage` binding. Take the adapter
+        // ceiling so Metal/Vulkan/DX12 keep full capability (see crash: max_storage_buffers… = 0).
+        let al = adapter.limits();
+        limits.max_storage_buffers_per_shader_stage = limits
+            .max_storage_buffers_per_shader_stage
+            .max(al.max_storage_buffers_per_shader_stage)
+            .max(1);
+        limits.max_storage_buffer_binding_size = limits
+            .max_storage_buffer_binding_size
+            .max(al.max_storage_buffer_binding_size);
+        // Same downlevel preset disables compute (`max_compute_*` = 0); emissive probe update uses
+        // `@workgroup_size(64, 1, 1)` and `dispatch_workgroups` — restore adapter compute limits.
+        limits.max_compute_invocations_per_workgroup = limits
+            .max_compute_invocations_per_workgroup
+            .max(al.max_compute_invocations_per_workgroup)
+            .max(64);
+        limits.max_compute_workgroup_size_x = limits
+            .max_compute_workgroup_size_x
+            .max(al.max_compute_workgroup_size_x)
+            .max(64);
+        limits.max_compute_workgroup_size_y = limits
+            .max_compute_workgroup_size_y
+            .max(al.max_compute_workgroup_size_y)
+            .max(1);
+        limits.max_compute_workgroup_size_z = limits
+            .max_compute_workgroup_size_z
+            .max(al.max_compute_workgroup_size_z)
+            .max(1);
+        limits.max_compute_workgroup_storage_size = limits
+            .max_compute_workgroup_storage_size
+            .max(al.max_compute_workgroup_storage_size);
+        limits.max_compute_workgroups_per_dimension = limits
+            .max_compute_workgroups_per_dimension
+            .max(al.max_compute_workgroups_per_dimension)
+            .max(1);
 
         // Opt into TIMESTAMP_QUERY when the adapter supports it so the GPU
         // pass profiler (Debug menu → "Profile GPU…") can record start/end
@@ -217,11 +253,16 @@ impl WgpuRenderer {
         });
 
         let scene_pbr_lights_wgsl = include_str!("../../../shaders/scene_pbr_lights.wgsl");
+        let scene_hdr_tonemap_wgsl = include_str!("../../../shaders/scene_hdr_tonemap.wgsl");
         let tile_3d_wgsl = include_str!("../../../shaders/tile_3d.wgsl");
         let tile_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-3d-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                format!("{}\n{}", scene_pbr_lights_wgsl, tile_3d_wgsl).into(),
+                format!(
+                    "{}\n{}\n{}",
+                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, tile_3d_wgsl
+                )
+                .into(),
             ),
         });
 
@@ -229,7 +270,11 @@ impl WgpuRenderer {
         let shop_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shop-glb-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                format!("{}\n{}", scene_pbr_lights_wgsl, shop_glb_wgsl).into(),
+                format!(
+                    "{}\n{}\n{}",
+                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, shop_glb_wgsl
+                )
+                .into(),
             ),
         });
 
@@ -1557,10 +1602,11 @@ impl WgpuRenderer {
         );
 
         // ---- Gold outline shell pipeline (selected tiles) ----
+        let tile_outline_wgsl = include_str!("../../../shaders/tile_outline.wgsl");
         let tile_outline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-outline-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/tile_outline.wgsl").into(),
+                format!("{}\n{}", scene_hdr_tonemap_wgsl, tile_outline_wgsl).into(),
             ),
         });
         let tile_outline_instance_vertex_layout = wgpu::VertexBufferLayout {
@@ -1688,7 +1734,11 @@ impl WgpuRenderer {
         let lit_mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("lit-mesh-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                format!("{}\n{}", scene_pbr_lights_wgsl, lit_mesh_wgsl).into(),
+                format!(
+                    "{}\n{}\n{}",
+                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, lit_mesh_wgsl
+                )
+                .into(),
             ),
         });
         let lit_mesh_material_layout = create_lit_mesh_material_layout(&device);
@@ -2578,15 +2628,76 @@ impl WgpuRenderer {
             ],
         });
 
-        let emissive_gi_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("emissive-gi-params"),
-            size: std::mem::size_of::<super::EmissiveGiParams>() as wgpu::BufferAddress,
+        let probe_gi_frame_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("probe-gi-frame-uniform"),
+            size: std::mem::size_of::<super::ProbeGiFrameUniform>() as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let emissive_ssgi_bind_group_layout =
+        let probe_sh_stride = 9 * std::mem::size_of::<glam::Vec4>();
+        let probe_sh_bytes = (crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX as usize * probe_sh_stride)
+            as wgpu::BufferAddress;
+        let probe_sh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("emissive-probe-sh"),
+            size: probe_sh_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let emissive_probe_update_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("emissive-ssgi-bg-layout"),
+                label: Some("emissive-probe-update-bg-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Depth,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let emissive_probe_apply_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("emissive-probe-apply-bg-layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -2601,10 +2712,10 @@ impl WgpuRenderer {
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
                         count: None,
                     },
@@ -2618,57 +2729,72 @@ impl WgpuRenderer {
                         },
                         count: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
                 ],
             });
-        let emissive_ssgi_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-ssgi-shader"),
+        let emissive_probe_update_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("emissive-probe-update-shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/emissive_ssgi.wgsl").into(),
+                include_str!("../../../shaders/emissive_probe_update.wgsl").into(),
             ),
         });
-        let emissive_ssgi_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("emissive-ssgi-pl"),
-            bind_group_layouts: &[Some(&emissive_ssgi_bind_group_layout)],
+        let emissive_probe_apply_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("emissive-probe-apply-shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../shaders/emissive_probe_apply.wgsl").into(),
+            ),
+        });
+        let emissive_probe_update_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("emissive-probe-update-pl"),
+            bind_group_layouts: &[Some(&emissive_probe_update_bind_group_layout)],
             immediate_size: 0,
         });
-        let emissive_ssgi_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("emissive-ssgi-pipeline"),
-            layout: Some(&emissive_ssgi_pl),
-            vertex: wgpu::VertexState {
-                module: &emissive_ssgi_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &emissive_ssgi_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
+        let emissive_probe_apply_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("emissive-probe-apply-pl"),
+            bind_group_layouts: &[Some(&emissive_probe_apply_bind_group_layout)],
+            immediate_size: 0,
         });
-        let emissive_ssgi_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("emissive-ssgi-bg"),
-            layout: &emissive_ssgi_bind_group_layout,
+        let emissive_probe_update_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("emissive-probe-update-pipeline"),
+                layout: Some(&emissive_probe_update_pl),
+                module: &emissive_probe_update_shader,
+                entry_point: Some("update_probes"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            });
+        let emissive_probe_apply_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("emissive-probe-apply-pipeline"),
+                layout: Some(&emissive_probe_apply_pl),
+                vertex: wgpu::VertexState {
+                    module: &emissive_probe_apply_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &emissive_probe_apply_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: scene_hdr_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        let emissive_probe_update_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("emissive-probe-update-bg"),
+            layout: &emissive_probe_update_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: emissive_gi_params_buffer.as_entire_binding(),
+                    resource: probe_gi_frame_uniform_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -2681,6 +2807,28 @@ impl WgpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: probe_sh_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let emissive_probe_apply_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("emissive-probe-apply-bg"),
+            layout: &emissive_probe_apply_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: probe_gi_frame_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: probe_sh_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&depth_view),
                 },
             ],
         });
@@ -4116,10 +4264,14 @@ impl WgpuRenderer {
             room_emissive_view,
             emissive_gi_texture,
             emissive_gi_view,
-            emissive_ssgi_pipeline,
-            emissive_ssgi_bind_group_layout,
-            emissive_ssgi_bind_group,
-            emissive_gi_params_buffer,
+            emissive_probe_update_pipeline,
+            emissive_probe_update_bind_group_layout,
+            emissive_probe_update_bind_group,
+            emissive_probe_apply_pipeline,
+            emissive_probe_apply_bind_group_layout,
+            emissive_probe_apply_bind_group,
+            probe_gi_frame_uniform_buffer,
+            probe_sh_buffer,
             emissive_gi_composite_pipeline,
             emissive_gi_composite_bind_group_layout,
             emissive_gi_composite_bind_group,

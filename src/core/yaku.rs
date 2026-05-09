@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 use crate::core::hand::{DetectedSet, SetKind, validate_selection};
+use crate::core::json_asset::load_json_asset;
 use crate::core::tile::{Suit, Tile};
 
 #[derive(Deserialize)]
@@ -30,10 +31,7 @@ fn yaku_def(id: YakuKind) -> &'static YakuDef {
     static DEFS: OnceLock<std::collections::HashMap<YakuKind, YakuDef>> = OnceLock::new();
     let map = DEFS.get_or_init(|| {
         const PATH: &str = "data/yaku.json";
-        let bytes = crate::asset_path::get(PATH)
-            .unwrap_or_else(|| panic!("yaku data file missing: assets/{PATH}"));
-        let raw: Vec<YakuDefRaw> = serde_json::from_slice(&bytes.data)
-            .unwrap_or_else(|e| panic!("failed to parse assets/{PATH}: {e}"));
+        let raw: Vec<YakuDefRaw> = load_json_asset(PATH, "yaku data");
         raw.into_iter()
             .map(|r| {
                 (

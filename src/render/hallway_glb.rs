@@ -4,23 +4,18 @@
 //! - `btn_play_round` — commit to the upcoming blind (same as legacy Play altar).
 //! - `btn_skip_round` — skip for the tribute tag when allowed (non-boss).
 //!
-//! Decodes through [`crate::render::room_env_gltf`]; decoded layout matches [`crate::render::shop_glb::ShopGlbCpu`]
+//! Decodes through [`crate::render::room_env_gltf`]; decoded layout matches [`crate::render::shop_glb::RoomGlbCpu`]
 //! for the shared GPU path (`shop_glb.wgsl` / embedded lights).
 
 use std::sync::RwLock;
 
-use anyhow::Context;
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::room_env_gltf::{
-    EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
-    room_environment_bounds, walk_room_env_node,
-};
+use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload};
 use crate::render::shop_glb::{
-    self, ShopEnvLightingTune, ShopGlbCpu, SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
+    self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes,
 };
-use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use crate::render::world_space::surface_anchor_from_world_xyz;
 use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
 
@@ -37,7 +32,7 @@ pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.085;
 
 enum HallwayGlbCache {
     Uninit,
-    Ready(Option<ShopGlbCpu>),
+    Ready(Option<RoomGlbCpu>),
 }
 
 static HALLWAY_GLB_CPU: RwLock<HallwayGlbCache> = RwLock::new(HallwayGlbCache::Uninit);
@@ -70,7 +65,7 @@ fn ensure_hallway_glb_loaded() {
 }
 
 /// Read-only access to decoded hallway data.
-pub fn with_hallway_glb_cpu<R>(f: impl FnOnce(Option<&ShopGlbCpu>) -> R) -> R {
+pub fn with_hallway_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_hallway_glb_loaded();
     let g = HALLWAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
     match &*g {
@@ -84,10 +79,7 @@ pub fn with_hallway_glb_cpu<R>(f: impl FnOnce(Option<&ShopGlbCpu>) -> R) -> R {
 pub fn release_hallway_environment_cpu_sources_after_gpu_upload() {
     let mut g = HALLWAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let HallwayGlbCache::Ready(Some(cpu)) = &mut *g {
-        for env in &mut cpu.environment_primitives {
-            release_loaded_primitive_gpu_source_buffers(&mut env.mesh);
-        }
-        cpu.environment_primitives.shrink_to_fit();
+        shop_glb::release_room_environment_primitives_cpu(cpu);
     }
 }
 
@@ -113,63 +105,22 @@ impl RoomEnvWalkHooks for HallwayRoomWalkHooks {
     }
 }
 
-pub fn load_hallway_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
-    let (document, buffers_vec, images) =
-        gltf::import_slice(data).context("gltf::import_slice(hallway.glb)")?;
-
-    let scene = document
-        .default_scene()
-        .or_else(|| document.scenes().next())
-        .context("hallway.glb has no scenes")?;
-
-    let buffers: Vec<Vec<u8>> = buffers_vec.into_iter().map(|b| b.0).collect();
-
-    let mut markers = std::collections::HashMap::new();
-    let mut environment_primitives = Vec::new();
-    let mut marker_mesh_bounds_doc = std::collections::HashMap::new();
-    let mut collision_meshes = Vec::new();
-    let mut embedded_cameras = EmbeddedCameraHarvest::default();
-    let mut embedded_point_lights = Vec::new();
-    let mut embedded_spot_lights = Vec::new();
-
-    for node in scene.nodes() {
-        walk_room_env_node(
-            node,
-            Mat4::IDENTITY,
-            &HallwayRoomWalkHooks,
-            SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
-            &mut markers,
-            &mut environment_primitives,
-            &mut marker_mesh_bounds_doc,
-            &mut collision_meshes,
-            &mut embedded_cameras,
-            &mut embedded_point_lights,
-            &mut embedded_spot_lights,
-            &buffers,
-            &images,
-        )?;
-    }
-
-    let embedded_perspective_camera = embedded_cameras.pick();
-    let environment_bounds_doc = room_environment_bounds(&environment_primitives);
-
-    Ok(ShopGlbCpu {
-        markers,
-        environment_primitives,
-        environment_bounds_doc,
-        marker_mesh_bounds_doc,
-        collision_meshes: Vec::new(),
-        embedded_perspective_camera,
-        embedded_point_lights,
-        embedded_spot_lights,
-    })
+pub fn load_hallway_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
+    let mut cpu = load_room_glb_from_bytes(
+        data,
+        "gltf::import_slice(hallway.glb)",
+        "hallway.glb has no scenes",
+        &HallwayRoomWalkHooks,
+    )?;
+    cpu.collision_meshes.clear();
+    Ok(cpu)
 }
 
 /// World-space marker position (same centering + scale as uploaded hallway mesh).
 pub fn hallway_marker_world(
     window_h: f32,
     env_height_scale: f32,
-    cpu: &ShopGlbCpu,
+    cpu: &RoomGlbCpu,
     name: &str,
 ) -> Option<Vec3> {
     let t = shop_glb::marker_translation(cpu, name)?;
